@@ -1,7 +1,6 @@
 #include "audio_input.h"
 
 #include <QAudioSource>
-#include <QDebug>
 #include <QMediaDevices>
 
 // ---------------------------------------------------------------------------
@@ -53,9 +52,10 @@ protected:
 AudioInput::AudioInput(QObject *parent)
     : AudioInputBase(parent)
 {
-    m_preferredFormat.setChannelCount(1);
-    m_preferredFormat.setSampleRate(16000);
-    m_preferredFormat.setSampleFormat(QAudioFormat::Int16);
+    // Leave m_preferredFormat default (invalid) so start() uses the device's
+    // own preferred format and the FFmpeg backend does no conversion.
+    // Forced resampling (e.g. 44100 Float → 16000 Int16) in small chunks
+    // produces aliasing artefacts on the built-in MacBook microphone.
 }
 
 AudioInput::~AudioInput()
@@ -68,85 +68,37 @@ QList<QAudioDevice> AudioInput::availableDevices()
     return QMediaDevices::audioInputs();
 }
 
-static QString sampleFormatName(QAudioFormat::SampleFormat f)
-{
-    switch (f) {
-    case QAudioFormat::UInt8:  return QStringLiteral("UInt8");
-    case QAudioFormat::Int16:  return QStringLiteral("Int16");
-    case QAudioFormat::Int32:  return QStringLiteral("Int32");
-    case QAudioFormat::Float:  return QStringLiteral("Float");
-    default:                   return QStringLiteral("Unknown");
-    }
-}
-
 bool AudioInput::start(const QString &deviceName)
 {
     stop();
 
-    // ---- Enumerate devices ------------------------------------------------
+    // ---- Select device -------------------------------------------------------
     const QList<QAudioDevice> devices = QMediaDevices::audioInputs();
-    const QAudioDevice defaultDevice  = QMediaDevices::defaultAudioInput();
-
-    qDebug() << "[AudioInput] Available input devices:" << devices.size();
-    for (const QAudioDevice &dev : devices) {
-        const QAudioFormat pref = dev.preferredFormat();
-        qDebug() << "  " << (dev.id() == defaultDevice.id() ? "*" : " ")
-                 << dev.description()
-                 << "| id:" << dev.id()
-                 << "| preferred:" << pref.sampleRate() << "Hz"
-                 << pref.channelCount() << "ch"
-                 << sampleFormatName(pref.sampleFormat())
-                 << "| sampleRate range:" << dev.minimumSampleRate()
-                 << "-" << dev.maximumSampleRate()
-                 << "| channels range:" << dev.minimumChannelCount()
-                 << "-" << dev.maximumChannelCount();
-    }
-
     if (devices.isEmpty()) {
-        qDebug() << "[AudioInput] ERROR: no audio input devices found";
         emit errorOccurred(tr("No audio input devices available"));
         return false;
     }
 
-    // ---- Select device ----------------------------------------------------
-    m_activeDevice = defaultDevice;
+    m_activeDevice = QMediaDevices::defaultAudioInput();
     if (!deviceName.isEmpty()) {
-        bool found = false;
         for (const QAudioDevice &dev : devices) {
             if (dev.description() == deviceName) {
                 m_activeDevice = dev;
-                found = true;
                 break;
             }
         }
-        if (!found)
-            qDebug() << "[AudioInput] WARNING: requested device" << deviceName
-                     << "not found, falling back to default";
     }
-    qDebug() << "[AudioInput] Selected device:" << m_activeDevice.description()
-             << "(id:" << m_activeDevice.id() << ")";
 
-    // ---- Negotiate format -------------------------------------------------
-    QAudioFormat fmt = m_preferredFormat;
-    const bool preferred = m_activeDevice.isFormatSupported(fmt);
-    if (!preferred) {
+    // ---- Negotiate format ----------------------------------------------------
+    QAudioFormat fmt;
+    if (m_preferredFormat.isValid() && m_activeDevice.isFormatSupported(m_preferredFormat))
+        fmt = m_preferredFormat;
+    else
         fmt = m_activeDevice.preferredFormat();
-        qDebug() << "[AudioInput] Preferred format not supported — using device default";
-    }
-    qDebug() << "[AudioInput] Requested format:"
-             << m_preferredFormat.sampleRate() << "Hz,"
-             << m_preferredFormat.channelCount() << "ch,"
-             << sampleFormatName(m_preferredFormat.sampleFormat())
-             << (preferred ? "  [supported]" : "  [not supported]");
-    qDebug() << "[AudioInput] Negotiated format:"
-             << fmt.sampleRate() << "Hz,"
-             << fmt.channelCount() << "ch,"
-             << sampleFormatName(fmt.sampleFormat());
 
-    // ---- Open capture pipeline --------------------------------------------
+    // ---- Open capture pipeline -----------------------------------------------
     m_captureDevice = new AudioCaptureDevice(this);
     if (!m_captureDevice->open()) {
-        qDebug() << "[AudioInput] ERROR: failed to open internal capture device";
         emit errorOccurred(tr("Failed to open internal capture device"));
         delete m_captureDevice;
         m_captureDevice = nullptr;
@@ -159,20 +111,15 @@ bool AudioInput::start(const QString &deviceName)
     connect(m_source, &QAudioSource::stateChanged,
             this, &AudioInput::onSourceStateChanged);
 
-    qDebug() << "[AudioInput] Starting QAudioSource (buffer size:" << m_source->bufferSize() << "bytes)";
     m_source->start(m_captureDevice);
 
     if (m_source->error() != QAudio::NoError) {
-        qDebug() << "[AudioInput] ERROR: QAudioSource failed to start, error code:"
-                 << static_cast<int>(m_source->error());
         emit errorOccurred(tr("QAudioSource failed to start (error %1)")
                                .arg(static_cast<int>(m_source->error())));
         stop();
         return false;
     }
 
-    qDebug() << "[AudioInput] Capture started — buffer size after open:"
-             << m_source->bufferSize() << "bytes";
     return true;
 }
 
@@ -234,19 +181,6 @@ qreal AudioInput::volume() const
 
 void AudioInput::onSourceStateChanged(QAudio::State qtState)
 {
-    static const auto stateName = [](QAudio::State s) -> const char * {
-        switch (s) {
-        case QAudio::ActiveState:    return "Active";
-        case QAudio::SuspendedState: return "Suspended";
-        case QAudio::StoppedState:   return "Stopped";
-        case QAudio::IdleState:      return "Idle";
-        default:                     return "Unknown";
-        }
-    };
-
-    qDebug() << "[AudioInput] QAudioSource state ->" << stateName(qtState)
-             << "| error:" << (m_source ? static_cast<int>(m_source->error()) : -1);
-
     State next = m_state;
 
     switch (qtState) {
@@ -265,12 +199,9 @@ void AudioInput::onSourceStateChanged(QAudio::State qtState)
         return;
     }
 
-    if (next == State::Error) {
-        qDebug() << "[AudioInput] ERROR: audio source error code"
-                 << static_cast<int>(m_source->error());
+    if (next == State::Error)
         emit errorOccurred(tr("Audio source error %1")
                                .arg(static_cast<int>(m_source->error())));
-    }
 
     if (m_state != next) {
         m_state = next;

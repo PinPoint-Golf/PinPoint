@@ -1,7 +1,6 @@
 #include "whisper_processor.h"
 
 #include <QDataStream>
-#include <QDebug>
 #include <QHttpMultiPart>
 #include <cmath>
 #include <QJsonDocument>
@@ -61,9 +60,6 @@ void WhisperProcessor::onFlushTimer()
 void WhisperProcessor::sendChunk(const QByteArray &pcm)
 {
     const QByteArray wav = buildWav(pcm, m_format);
-    qDebug() << "[WhisperProcessor] Sending WAV:" << wav.size() << "bytes ("
-             << m_format.sampleRate() << "Hz,"
-             << m_format.channelCount() << "ch)";
 
     auto *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
@@ -91,28 +87,20 @@ void WhisperProcessor::onReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
-        qDebug() << "[WhisperProcessor] Network error:" << reply->errorString();
         emit errorOccurred(reply->errorString());
         return;
     }
 
     const QByteArray body = reply->readAll();
-    qDebug() << "[WhisperProcessor] Server response:" << body;
-
     const QJsonDocument doc = QJsonDocument::fromJson(body);
     if (!doc.isObject()) {
-        qDebug() << "[WhisperProcessor] Unexpected response (not JSON object)";
         emit errorOccurred(QStringLiteral("Unexpected response from whisper server"));
         return;
     }
 
     const QString text = doc.object().value(QStringLiteral("text")).toString().trimmed();
-    if (!text.isEmpty()) {
-        qDebug() << "[WhisperProcessor] Transcription:" << text;
+    if (!text.isEmpty())
         emit transcriptionReceived(text);
-    } else {
-        qDebug() << "[WhisperProcessor] Empty transcription in response";
-    }
 }
 
 // Returns RMS amplitude normalised to 0.0–1.0.  Supports Int16 and Float formats;
@@ -158,6 +146,8 @@ QByteArray WhisperProcessor::buildWav(const QByteArray &pcm, const QAudioFormat 
     const quint32 byteRate      = sampleRate * channels * (bitsPerSample / 8);
     const quint16 blockAlign    = static_cast<quint16>(channels * (bitsPerSample / 8));
     const quint32 dataSize      = static_cast<quint32>(pcm.size());
+    // 1 = PCM integer, 3 = IEEE 754 float
+    const quint16 audioFormat   = (fmt.sampleFormat() == QAudioFormat::Float) ? 3 : 1;
 
     QByteArray wav;
     wav.reserve(44 + static_cast<int>(dataSize));
@@ -165,12 +155,12 @@ QByteArray WhisperProcessor::buildWav(const QByteArray &pcm, const QAudioFormat 
     ds.setByteOrder(QDataStream::LittleEndian);
 
     ds.writeRawData("RIFF", 4);
-    ds << quint32(36 + dataSize);   // total file size minus the 8-byte RIFF preamble
+    ds << quint32(36 + dataSize);
     ds.writeRawData("WAVE", 4);
 
     ds.writeRawData("fmt ", 4);
-    ds << quint32(16);              // PCM fmt chunk is always 16 bytes
-    ds << quint16(1);               // audio format: PCM
+    ds << quint32(16);
+    ds << audioFormat;
     ds << channels;
     ds << sampleRate;
     ds << byteRate;

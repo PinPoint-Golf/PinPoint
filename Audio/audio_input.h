@@ -66,8 +66,8 @@ private slots:
     void onCapturedData(const QByteArray &data);
 
 private:
-    QAudioSource       *m_source          = nullptr;
-    AudioCaptureDevice *m_captureDevice   = nullptr;
+    QAudioSource       *m_source        = nullptr;
+    AudioCaptureDevice *m_captureDevice = nullptr;
     QAudioFormat        m_preferredFormat;
     QAudioDevice        m_activeDevice;
 };

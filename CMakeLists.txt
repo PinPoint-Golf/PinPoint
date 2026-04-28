@@ -11,12 +11,14 @@ qt_standard_project_setup(REQUIRES 6.10)
 qt_add_executable(PinPoint
     Gui/main.cpp
     Gui/transcription_controller.h Gui/transcription_controller.cpp
+    Gui/macos_permissions.h Gui/macos_permissions.mm
     IMU/wt9011dcl_base.h IMU/wt9011dcl_base.cpp
     IMU/wt9011dcl.h IMU/wt9011dcl.cpp
     IMU/wt9011dcl_ble.h IMU/wt9011dcl_ble.cpp
     Audio/audio_processor_base.h Audio/audio_processor_base.cpp
     Audio/audio_input_base.h Audio/audio_input_base.cpp
     Audio/audio_input.h Audio/audio_input.cpp
+    Audio/audio_stream_saver.h Audio/audio_stream_saver.cpp
     STT/whisper_processor.h STT/whisper_processor.cpp
 )
 
@@ -34,17 +36,33 @@ target_compile_definitions(PinPoint PRIVATE
 )
 
 set_target_properties(PinPoint PROPERTIES
-    MACOSX_BUNDLE_GUI_IDENTIFIER com.example.PinPoint
-    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
+)
+
+# Qt's CMake infrastructure ignores MACOSX_BUNDLE_INFO_PLIST in some
+# configurations.  Generate the plist at configure time and copy it into
+# the bundle with a POST_BUILD step so it always wins.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+    COPYONLY
+)
+
+add_custom_command(TARGET PinPoint POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+        "$<TARGET_BUNDLE_CONTENT_DIR:PinPoint>/Info.plist"
+    COMMENT "Installing Info.plist into bundle"
 )
 
 target_link_libraries(PinPoint
     PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::SerialPort Qt6::Bluetooth Qt6::Multimedia Qt6::Network
 )
+
+if(APPLE)
+    target_link_libraries(PinPoint PRIVATE "-framework AVFoundation")
+endif()
 
 install(TARGETS PinPoint
     BUNDLE DESTINATION .
