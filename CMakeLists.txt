@@ -10,10 +10,12 @@ qt_standard_project_setup(REQUIRES 6.10)
 
 qt_add_executable(PinPoint
     main.cpp
-    wt9011dcl_base.h wt9011dcl_base.cpp
-    wt9011dcl.h wt9011dcl.cpp
-    wt9011dcl_ble.h wt9011dcl_ble.cpp
+    IMU/wt9011dcl_base.h IMU/wt9011dcl_base.cpp
+    IMU/wt9011dcl.h IMU/wt9011dcl.cpp
+    IMU/wt9011dcl_ble.h IMU/wt9011dcl_ble.cpp
 )
+
+target_include_directories(PinPoint PRIVATE IMU)
 
 qt_add_qml_module(PinPoint
     URI PinPoint
