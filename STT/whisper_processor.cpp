@@ -1,7 +1,9 @@
 #include "whisper_processor.h"
 
 #include <QDataStream>
+#include <QDebug>
 #include <QHttpMultiPart>
+#include <cmath>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -16,12 +18,17 @@ WhisperProcessor::WhisperProcessor(QObject *parent)
 {
     m_flushTimer->setInterval(m_chunkDurationMs);
     connect(m_flushTimer, &QTimer::timeout, this, &WhisperProcessor::onFlushTimer);
-    m_flushTimer->start();
+    // Timer is started via start() after moveToThread().
 }
 
 WhisperProcessor::~WhisperProcessor()
 {
     m_flushTimer->stop();
+}
+
+void WhisperProcessor::start()
+{
+    m_flushTimer->start();
 }
 
 void WhisperProcessor::setChunkDurationMs(int ms)
@@ -41,6 +48,11 @@ void WhisperProcessor::onFlushTimer()
     if (m_buffer.isEmpty() || m_requestInFlight)
         return;
 
+    if (computeRms(m_buffer, m_format) < m_silenceThreshold) {
+        m_buffer.clear();
+        return;
+    }
+
     QByteArray chunk;
     chunk.swap(m_buffer);
     sendChunk(chunk);
@@ -49,6 +61,9 @@ void WhisperProcessor::onFlushTimer()
 void WhisperProcessor::sendChunk(const QByteArray &pcm)
 {
     const QByteArray wav = buildWav(pcm, m_format);
+    qDebug() << "[WhisperProcessor] Sending WAV:" << wav.size() << "bytes ("
+             << m_format.sampleRate() << "Hz,"
+             << m_format.channelCount() << "ch)";
 
     auto *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
@@ -60,7 +75,7 @@ void WhisperProcessor::sendChunk(const QByteArray &pcm)
     filePart.setBody(wav);
     multiPart->append(filePart);
 
-    QNetworkRequest request{QUrl(QStringLiteral("http://localhost:5001/inference"))};
+    QNetworkRequest request{QUrl(QStringLiteral("http://localhost:5001/transcribe"))};
     QNetworkReply *reply = m_network->post(request, multiPart);
     multiPart->setParent(reply);
 
@@ -76,19 +91,62 @@ void WhisperProcessor::onReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
+        qDebug() << "[WhisperProcessor] Network error:" << reply->errorString();
         emit errorOccurred(reply->errorString());
         return;
     }
 
-    const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+    const QByteArray body = reply->readAll();
+    qDebug() << "[WhisperProcessor] Server response:" << body;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(body);
     if (!doc.isObject()) {
+        qDebug() << "[WhisperProcessor] Unexpected response (not JSON object)";
         emit errorOccurred(QStringLiteral("Unexpected response from whisper server"));
         return;
     }
 
     const QString text = doc.object().value(QStringLiteral("text")).toString().trimmed();
-    if (!text.isEmpty())
+    if (!text.isEmpty()) {
+        qDebug() << "[WhisperProcessor] Transcription:" << text;
         emit transcriptionReceived(text);
+    } else {
+        qDebug() << "[WhisperProcessor] Empty transcription in response";
+    }
+}
+
+// Returns RMS amplitude normalised to 0.0–1.0.  Supports Int16 and Float formats;
+// returns 1.0 (always send) for any other format so unknown formats are never gated.
+double WhisperProcessor::computeRms(const QByteArray &pcm, const QAudioFormat &fmt) const
+{
+    if (pcm.isEmpty())
+        return 0.0;
+
+    double sum = 0.0;
+
+    if (fmt.sampleFormat() == QAudioFormat::Int16) {
+        const int count = pcm.size() / 2;
+        if (count == 0) return 0.0;
+        const auto *samples = reinterpret_cast<const int16_t *>(pcm.constData());
+        for (int i = 0; i < count; ++i) {
+            const double s = samples[i] / 32768.0;
+            sum += s * s;
+        }
+        return std::sqrt(sum / count);
+    }
+
+    if (fmt.sampleFormat() == QAudioFormat::Float) {
+        const int count = pcm.size() / 4;
+        if (count == 0) return 0.0;
+        const auto *samples = reinterpret_cast<const float *>(pcm.constData());
+        for (int i = 0; i < count; ++i) {
+            const double s = samples[i];
+            sum += s * s;
+        }
+        return std::sqrt(sum / count);
+    }
+
+    return 1.0;
 }
 
 // Wraps raw PCM bytes in a minimal RIFF/WAV envelope so whisper can decode it.

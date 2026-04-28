@@ -33,7 +33,14 @@ public:
     void setChunkDurationMs(int ms);
     int  chunkDurationMs() const { return m_chunkDurationMs; }
 
+    // Chunks whose RMS amplitude (normalised 0.0–1.0) falls below this value
+    // are discarded without being sent to the server (default: 0.01 ≈ -40 dBFS).
+    void   setSilenceThreshold(double threshold) { m_silenceThreshold = threshold; }
+    double silenceThreshold() const { return m_silenceThreshold; }
+
 public slots:
+    // Call after moveToThread() to start the flush timer in the correct thread.
+    void start();
     void processAudio(const QByteArray &data, const QAudioFormat &format) override;
 
 signals:
@@ -47,11 +54,13 @@ private slots:
 private:
     QByteArray buildWav(const QByteArray &pcm, const QAudioFormat &fmt) const;
     void       sendChunk(const QByteArray &pcm);
+    double     computeRms(const QByteArray &pcm, const QAudioFormat &fmt) const;
 
     QNetworkAccessManager *m_network;
     QTimer                *m_flushTimer;
     QByteArray             m_buffer;
     QAudioFormat           m_format;
-    int                    m_chunkDurationMs = 3000;
-    bool                   m_requestInFlight = false;
+    int                    m_chunkDurationMs  = 3000;
+    bool                   m_requestInFlight  = false;
+    double                 m_silenceThreshold = 0.01;
 };
