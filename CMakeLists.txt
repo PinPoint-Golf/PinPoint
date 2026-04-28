@@ -4,7 +4,7 @@ project(PinPoint VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick SerialPort Bluetooth)
+find_package(Qt6 REQUIRED COMPONENTS Quick SerialPort Bluetooth Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.10)
 
@@ -13,9 +13,12 @@ qt_add_executable(PinPoint
     IMU/wt9011dcl_base.h IMU/wt9011dcl_base.cpp
     IMU/wt9011dcl.h IMU/wt9011dcl.cpp
     IMU/wt9011dcl_ble.h IMU/wt9011dcl_ble.cpp
+    Audio/audio_processor_base.h Audio/audio_processor_base.cpp
+    Audio/audio_input_base.h Audio/audio_input_base.cpp
+    Audio/audio_input.h Audio/audio_input.cpp
 )
 
-target_include_directories(PinPoint PRIVATE IMU)
+target_include_directories(PinPoint PRIVATE IMU Audio)
 
 qt_add_qml_module(PinPoint
     URI PinPoint
@@ -39,7 +42,7 @@ set_target_properties(PinPoint PROPERTIES
 )
 
 target_link_libraries(PinPoint
-    PRIVATE Qt6::Quick Qt6::SerialPort Qt6::Bluetooth
+    PRIVATE Qt6::Quick Qt6::SerialPort Qt6::Bluetooth Qt6::Multimedia
 )
 
 install(TARGETS PinPoint
