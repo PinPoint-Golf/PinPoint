@@ -11,7 +11,6 @@ qt_standard_project_setup(REQUIRES 6.10)
 qt_add_executable(PinPoint
     Gui/main.cpp
     Gui/transcription_controller.h Gui/transcription_controller.cpp
-    Gui/macos_permissions.h Gui/macos_permissions.mm
     IMU/wt9011dcl_base.h IMU/wt9011dcl_base.cpp
     IMU/wt9011dcl.h IMU/wt9011dcl.cpp
     IMU/wt9011dcl_ble.h IMU/wt9011dcl_ble.cpp
@@ -49,18 +48,19 @@ configure_file(
     COPYONLY
 )
 
-add_custom_command(TARGET PinPoint POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-        "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
-        "$<TARGET_BUNDLE_CONTENT_DIR:PinPoint>/Info.plist"
-    COMMENT "Installing Info.plist into bundle"
-)
 
 target_link_libraries(PinPoint
     PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::SerialPort Qt6::Bluetooth Qt6::Multimedia Qt6::Network
 )
 
 if(APPLE)
+    target_sources(PinPoint PRIVATE Gui/macos_permissions.h Gui/macos_permissions.mm)
+    add_custom_command(TARGET PinPoint POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+            "$<TARGET_BUNDLE_CONTENT_DIR:PinPoint>/Info.plist"
+        COMMENT "Installing Info.plist into bundle"
+    )
     target_link_libraries(PinPoint PRIVATE "-framework AVFoundation")
 endif()
 
