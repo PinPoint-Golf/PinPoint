@@ -46,6 +46,8 @@ qt_add_executable(PinPoint
     src/Audio/audio_processor_base.h src/Audio/audio_processor_base.cpp
     src/Audio/audio_input_base.h src/Audio/audio_input_base.cpp
     src/Audio/audio_input.h src/Audio/audio_input.cpp
+    src/Audio/audio_output_base.h src/Audio/audio_output_base.cpp
+    src/Audio/audio_output.h src/Audio/audio_output.cpp
     src/Audio/audio_stream_saver.h src/Audio/audio_stream_saver.cpp
     src/STT/whisper_processor.h src/STT/whisper_processor.cpp
 )
