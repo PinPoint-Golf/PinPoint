@@ -44,6 +44,10 @@ build/
 Build/
 build-*/
 
+# Whisper GGML model files (large binaries — download separately, never commit)
+models/
+*.bin
+
 # CMake generated files
 CMakeFiles/
 CMakeCache.txt
