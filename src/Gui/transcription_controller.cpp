@@ -19,7 +19,7 @@ TranscriptionController::TranscriptionController(QObject *parent)
     , m_audioThread(new QThread(this))
     , m_processorThread(new QThread(this))
     , m_audioInput(new AudioInput)
-    , m_streamSaver(new AudioStreamSaver(this))
+    , m_streamSaver(nullptr)
     , m_whisper(new WhisperProcessor)
 {
     m_audioThread->setObjectName(QStringLiteral("AudioThread"));
@@ -30,10 +30,8 @@ TranscriptionController::TranscriptionController(QObject *parent)
 
     m_audioInput->connectProcessor(m_whisper);
 
-    // audioDataReady is emitted on m_audioThread; m_streamSaver lives on the
-    // main thread, so this becomes a queued connection automatically.
-    connect(m_audioInput, &AudioInputBase::audioDataReady,
-            m_streamSaver, &AudioStreamSaver::onAudioData);
+    // connect(m_audioInput, &AudioInputBase::audioDataReady,
+    //         m_streamSaver, &AudioStreamSaver::onAudioData);
 
     connect(m_whisper, &WhisperProcessor::transcriptionReceived,
             this, &TranscriptionController::onTranscriptionReceived);
@@ -82,8 +80,7 @@ TranscriptionController::~TranscriptionController()
     delete m_audioInput;
     m_audioInput = nullptr;
 
-    // Finalise the WAV file now that the audio thread has stopped producing data.
-    m_streamSaver->stopSaving();
+    // m_streamSaver->stopSaving();
 
     if (m_processorThread->isRunning()) {
         // Move m_whisper (and its child m_flushTimer) back to the main thread

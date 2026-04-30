@@ -3,15 +3,18 @@
 #include <QQmlContext>
 
 #include "transcription_controller.h"
+#include "tts_controller.h"
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
 
     TranscriptionController controller;
+    TtsController           ttsController;
 
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty(QStringLiteral("controller"), &controller);
+    engine.rootContext()->setContextProperty(QStringLiteral("controller"),    &controller);
+    engine.rootContext()->setContextProperty(QStringLiteral("ttsController"), &ttsController);
 
     QObject::connect(
         &engine,
