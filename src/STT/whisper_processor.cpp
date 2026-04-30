@@ -159,11 +159,11 @@ QStringList WhisperProcessor::modelCandidates(const QString &filename) const
     //                                   macOS: ~/Library/Application Support/PinPoint/models/
     //                                 Windows: %APPDATA%\PinPoint\models\)
     candidates << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-                  + QStringLiteral("/models/") + filename;
+                  + QStringLiteral("/models/whisper/") + filename;
 
     // 3. models/ subfolder next to the executable (dev builds and portable installs)
     candidates << QCoreApplication::applicationDirPath()
-                  + QStringLiteral("/models/") + filename;
+                  + QStringLiteral("/models/whisper/") + filename;
 
     return candidates;
 }
