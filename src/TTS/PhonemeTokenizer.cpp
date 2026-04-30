@@ -1,5 +1,6 @@
 #include "PhonemeTokenizer.h"
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QFile>
 #include <QJsonDocument>
@@ -65,8 +66,20 @@ bool PhonemeTokenizer::initialise(const QString &tokensJsonPath)
 
     // ---- Initialise espeak-ng -----------------------------------------------
 #ifdef HAVE_ESPEAK_NG
-    if (espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0, nullptr, 0) < 0) {
-        m_lastError = QStringLiteral("espeak_Initialize failed");
+    // On macOS the data directory is bundled in Contents/Resources.
+    // On Linux with a system espeak-ng, nullptr uses the compiled-in path.
+    // espeakINITIALIZE_DONT_EXIT prevents espeak-ng from calling exit(1) on
+    // failure (which would crash the whole app from a worker thread).
+#ifdef Q_OS_MACOS
+    const QByteArray espeakData =
+        (QCoreApplication::applicationDirPath() + "/../Resources").toLocal8Bit();
+    const char *espeakDataPath = espeakData.constData();
+#else
+    const char *espeakDataPath = nullptr;
+#endif
+    if (espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0,
+                          espeakDataPath, espeakINITIALIZE_DONT_EXIT) < 0) {
+        m_lastError = QStringLiteral("espeak_Initialize failed: data not found");
         return false;
     }
     espeak_SetVoiceByName("en-us");

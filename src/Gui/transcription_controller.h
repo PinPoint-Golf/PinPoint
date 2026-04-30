@@ -14,16 +14,23 @@ class WhisperProcessor;
 class TranscriptionController : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QString transcript READ transcript NOTIFY transcriptChanged)
+    Q_PROPERTY(QString transcript  READ transcript  NOTIFY transcriptChanged)
+    Q_PROPERTY(bool   isListening READ isListening NOTIFY isListeningChanged)
 
 public:
     explicit TranscriptionController(QObject *parent = nullptr);
     ~TranscriptionController() override;
 
-    QString transcript() const { return m_transcript; }
+    QString transcript()  const { return m_transcript; }
+    bool    isListening() const { return m_listening; }
+
+public slots:
+    void startListening();
+    void stopListening();
 
 signals:
     void transcriptChanged();
+    void isListeningChanged();
 
 private slots:
     void onTranscriptionReceived(const QString &text);
@@ -38,4 +45,5 @@ private:
     AudioStreamSaver *m_streamSaver;
     WhisperProcessor *m_whisper;
     QString           m_transcript;
+    bool              m_listening = false;
 };

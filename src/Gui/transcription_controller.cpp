@@ -42,8 +42,6 @@ TranscriptionController::TranscriptionController(QObject *parent)
 
     connect(m_processorThread, &QThread::started,
             m_whisper, &WhisperProcessor::start);
-    connect(m_audioThread, &QThread::started,
-            m_audioInput, [this]() { m_audioInput->start(); });
 
     m_processorThread->start();
 
@@ -113,6 +111,28 @@ void TranscriptionController::onAudioError(const QString &message)
 void TranscriptionController::onSTTError(const QString &message)
 {
     qWarning() << "[STT]" << message;
+}
+
+void TranscriptionController::startListening()
+{
+    if (m_listening || !m_audioThread->isRunning())
+        return;
+    QMetaObject::invokeMethod(m_audioInput, [this]() {
+        m_audioInput->start();
+    }, Qt::QueuedConnection);
+    m_listening = true;
+    emit isListeningChanged();
+}
+
+void TranscriptionController::stopListening()
+{
+    if (!m_listening)
+        return;
+    QMetaObject::invokeMethod(m_audioInput, [this]() {
+        m_audioInput->stop();
+    }, Qt::QueuedConnection);
+    m_listening = false;
+    emit isListeningChanged();
 }
 
 void TranscriptionController::startAudio()

@@ -119,6 +119,8 @@ elseif(APPLE)
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz")
     else()
+        # ONNX Runtime 1.21+ dropped Intel macOS (x86_64) prebuilts; pin to the last available.
+        set(ORT_VERSION "1.20.1")
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-x86_64-${ORT_VERSION}.tgz")
     endif()
 else()
@@ -157,6 +159,24 @@ if(PkgConfig_FOUND)
     pkg_check_modules(ESPEAK QUIET espeak-ng)
 endif()
 
+if(NOT ESPEAK_FOUND AND APPLE)
+    # pkg-config is often absent on macOS; probe the Homebrew prefix directly.
+    execute_process(
+        COMMAND brew --prefix espeak-ng
+        OUTPUT_VARIABLE _brew_espeak
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _brew_result
+    )
+    if(_brew_result EQUAL 0 AND EXISTS "${_brew_espeak}/lib/libespeak-ng.dylib")
+        set(ESPEAK_FOUND     TRUE)
+        set(ESPEAK_INCLUDE_DIRS "${_brew_espeak}/include")
+        set(ESPEAK_LIBRARY_DIRS "${_brew_espeak}/lib")
+        set(ESPEAK_LIBRARIES    "espeak-ng")
+        set(ESPEAK_VERSION      "Homebrew")
+    endif()
+endif()
+
 if(ESPEAK_FOUND)
     target_include_directories(PinPoint PRIVATE ${ESPEAK_INCLUDE_DIRS})
     target_link_libraries(PinPoint PRIVATE ${ESPEAK_LIBRARIES})
@@ -164,19 +184,50 @@ if(ESPEAK_FOUND)
     target_compile_definitions(PinPoint PRIVATE HAVE_ESPEAK_NG)
     message(STATUS "espeak-ng ${ESPEAK_VERSION}: system")
 else()
+    # 1.52.0 is the first espeak-ng release with a CMake build system.
+    # PATCH_COMMAND changes the espeak-include link from PUBLIC to PRIVATE so
+    # its compat/ shim directory does not leak into PinPoint's include path and
+    # shadow system <wctype.h> on macOS.
+    # EXCLUDE_FROM_ALL limits compilation to the library target only.
     FetchContent_Declare(
         espeak_ng
         GIT_REPOSITORY https://github.com/espeak-ng/espeak-ng.git
-        GIT_TAG        1.51.1
+        GIT_TAG        1.52.0
         GIT_SHALLOW    TRUE
+        PATCH_COMMAND
+            ${CMAKE_COMMAND}
+            "-DFILE1=${CMAKE_BINARY_DIR}/_deps/espeak_ng-src/src/CMakeLists.txt"
+            "-DFILE2=${CMAKE_BINARY_DIR}/_deps/espeak_ng-src/src/libespeak-ng/CMakeLists.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchEspeakNg.cmake"
     )
-    set(ESPEAK_NG_BUILD_TESTS         OFF CACHE BOOL "" FORCE)
-    set(ESPEAK_NG_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(espeak_ng)
+    set(ESPEAK_BUILD_MANPAGES OFF CACHE BOOL "" FORCE)
+    FetchContent_GetProperties(espeak_ng)
+    if(NOT espeak_ng_POPULATED)
+        FetchContent_Populate(espeak_ng)
+        add_subdirectory(${espeak_ng_SOURCE_DIR} ${espeak_ng_BINARY_DIR} EXCLUDE_FROM_ALL)
+    endif()
+    target_link_libraries(PinPoint PRIVATE espeak-ng)
     target_include_directories(PinPoint PRIVATE "${espeak_ng_SOURCE_DIR}/src/include")
     target_compile_definitions(PinPoint PRIVATE HAVE_ESPEAK_NG)
-    target_link_libraries(PinPoint PRIVATE espeak-ng)
-    message(STATUS "espeak-ng 1.51.1: built from source")
+
+    # espeak-ng's own `data` target (defined in cmake/data.cmake) compiles the
+    # phoneme tables and language dictionaries using espeak-ng-bin as a
+    # build-time tool.  Depending on it directly avoids cross-directory
+    # custom-command scoping issues.
+    add_dependencies(PinPoint data)
+
+    if(APPLE)
+        # Bundle the compiled data (+ lang/ and voices/ copied at configure time
+        # by data.cmake) into the macOS app so espeak_Initialize can find it.
+        add_custom_command(TARGET PinPoint POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${espeak_ng_BINARY_DIR}/espeak-ng-data"
+                "$<TARGET_BUNDLE_CONTENT_DIR:PinPoint>/Resources/espeak-ng-data"
+            COMMENT "Bundling espeak-ng data into app"
+        )
+    endif()
+
+    message(STATUS "espeak-ng 1.52.0: built from source")
 endif()
 
 if(APPLE)

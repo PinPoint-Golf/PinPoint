@@ -45,10 +45,52 @@ Item {
         RowLayout {
             spacing: 8
 
+            Button {
+                id: listenButton
+                text: qsTr("Listen ●")
+                enabled: !controller.isListening
+                onClicked: controller.startListening()
+                contentItem: Text {
+                    text: listenButton.text
+                    color: listenButton.enabled ? "#1e1e2e" : "#6c7086"
+                    font.pixelSize: 13
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: listenButton.enabled
+                           ? (listenButton.pressed ? "#a6e3a1" : "#40a02b")
+                           : "#313244"
+                    radius: 6
+                }
+            }
+
+            Button {
+                id: stopListenButton
+                text: qsTr("Stop ■")
+                enabled: controller.isListening
+                onClicked: controller.stopListening()
+                contentItem: Text {
+                    text: stopListenButton.text
+                    color: stopListenButton.enabled ? "#1e1e2e" : "#6c7086"
+                    font.pixelSize: 13
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: stopListenButton.enabled
+                           ? (stopListenButton.pressed ? "#f38ba8" : "#e64553")
+                           : "#313244"
+                    radius: 6
+                }
+            }
+
             Rectangle {
+                visible: controller.isListening
                 width: 10; height: 10; radius: 5
                 color: "#a6e3a1"
                 SequentialAnimation on opacity {
+                    running: controller.isListening
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.2; duration: 900; easing.type: Easing.InOutSine }
                     NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutSine }
@@ -56,7 +98,8 @@ Item {
             }
 
             Label {
-                text: "Listening…"
+                visible: controller.isListening
+                text: qsTr("Listening…")
                 color: "#a6e3a1"
                 font.pixelSize: 13
             }
@@ -182,7 +225,7 @@ Item {
             Rectangle {
                 width: 8; height: 8; radius: 4
                 color: ttsController.ttsReady ? "#a6e3a1" : "#f38ba8"
-                ToolTip.visible: ttsStatusHover.containsMouse
+                ToolTip.visible: ttsStatusHover.hovered
                 ToolTip.text: ttsController.ttsReady ? qsTr("TTS model ready")
                                                       : qsTr("TTS model not loaded")
                 HoverHandler { id: ttsStatusHover }
