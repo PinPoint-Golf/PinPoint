@@ -225,6 +225,12 @@ else()
                 "$<TARGET_BUNDLE_CONTENT_DIR:PinPoint>/Resources/espeak-ng-data"
             COMMENT "Bundling espeak-ng data into app"
         )
+    else()
+        # On Linux (and Windows) building from source, the compiled-in PKGDATADIR
+        # won't match the build tree.  Pass the actual build-dir path so
+        # espeak_Initialize can find the phoneme tables at runtime.
+        target_compile_definitions(PinPoint PRIVATE
+            ESPEAK_DATA_PATH="${espeak_ng_BINARY_DIR}")
     endif()
 
     message(STATUS "espeak-ng 1.52.0: built from source")

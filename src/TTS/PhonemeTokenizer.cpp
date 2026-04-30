@@ -74,6 +74,10 @@ bool PhonemeTokenizer::initialise(const QString &tokensJsonPath)
     const QByteArray espeakData =
         (QCoreApplication::applicationDirPath() + "/../Resources").toLocal8Bit();
     const char *espeakDataPath = espeakData.constData();
+#elif defined(ESPEAK_DATA_PATH)
+    // Set by CMake when espeak-ng is built from source; the system library
+    // (ESPEAK_FOUND) knows its own data path so nullptr is correct for that case.
+    const char *espeakDataPath = ESPEAK_DATA_PATH;
 #else
     const char *espeakDataPath = nullptr;
 #endif
