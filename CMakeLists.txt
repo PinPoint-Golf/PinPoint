@@ -66,6 +66,8 @@ qt_add_qml_module(PinPoint
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/PinPoint
     QML_FILES
         src/Gui/Main.qml
+        src/Gui/AudioPage.qml
+        src/Gui/CapturePage.qml
 )
 
 target_compile_definitions(PinPoint PRIVATE
