@@ -64,7 +64,7 @@ TtsController::TtsController(QObject *parent)
     m_audioOutput->start();
 
     connect(m_worker, &TtsWorker::audioReady,
-            m_audioOutput, &AudioOutput::writeAudio,
+            this, &TtsController::onAudioReady,
             Qt::QueuedConnection);
 
     // ---- Worker signals -----------------------------------------------------
@@ -159,7 +159,21 @@ void TtsController::stopSpeaking()
     }, Qt::QueuedConnection);
 }
 
+void TtsController::replayLastAudio()
+{
+    if (m_lastAudioCache.isEmpty() || m_ttsActive)
+        return;
+    m_audioOutput->writeAudio(m_lastAudioCache, m_lastAudioFormat);
+}
+
 // ── Worker slots ─────────────────────────────────────────────────────────────
+
+void TtsController::onAudioReady(const QByteArray &data, const QAudioFormat &format)
+{
+    m_lastAudioFormat = format;
+    m_lastAudioCache.append(data);
+    m_audioOutput->writeAudio(data, format);
+}
 
 void TtsController::onModelReady()
 {
@@ -176,14 +190,20 @@ void TtsController::onModelFailed(const QString &error)
 
 void TtsController::onSynthesisStarted()
 {
+    const bool hadCache = !m_lastAudioCache.isEmpty();
+    m_lastAudioCache.clear();
     m_ttsActive = true;
     emit ttsActiveChanged();
+    if (hadCache)
+        emit canReplayChanged();
 }
 
 void TtsController::onSynthesisFinished()
 {
     m_ttsActive = false;
     emit ttsActiveChanged();
+    if (!m_lastAudioCache.isEmpty())
+        emit canReplayChanged();
 }
 
 void TtsController::onTtsError(const QString &message)

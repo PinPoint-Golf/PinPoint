@@ -1,4 +1,5 @@
 #pragma once
+#include <QAudioFormat>
 #include <QObject>
 #include <QStringList>
 #include <QThread>
@@ -30,6 +31,7 @@ class TtsController : public QObject
     Q_OBJECT
     Q_PROPERTY(bool        ttsReady         READ ttsReady         NOTIFY ttsReadyChanged)
     Q_PROPERTY(bool        ttsActive        READ ttsActive        NOTIFY ttsActiveChanged)
+    Q_PROPERTY(bool        canReplay        READ canReplay        NOTIFY canReplayChanged)
     Q_PROPERTY(bool        downloading      READ downloading      NOTIFY downloadingChanged)
     Q_PROPERTY(qreal       downloadProgress READ downloadProgress NOTIFY downloadProgressChanged)
     Q_PROPERTY(QString     downloadStatus   READ downloadStatus   NOTIFY downloadStatusChanged)
@@ -42,6 +44,7 @@ public:
 
     bool        ttsReady()         const { return m_ttsReady; }
     bool        ttsActive()        const { return m_ttsActive; }
+    bool        canReplay()        const { return !m_lastAudioCache.isEmpty(); }
     bool        downloading()      const { return m_downloading; }
     qreal       downloadProgress() const { return m_downloadProgress; }
     QString     downloadStatus()   const { return m_downloadStatus; }
@@ -51,10 +54,12 @@ public:
 
     Q_INVOKABLE void speak(const QString &text);
     Q_INVOKABLE void stopSpeaking();
+    Q_INVOKABLE void replayLastAudio();
 
 signals:
     void ttsReadyChanged();
     void ttsActiveChanged();
+    void canReplayChanged();
     void downloadingChanged();
     void downloadProgressChanged();
     void downloadStatusChanged();
@@ -63,6 +68,7 @@ signals:
 private slots:
     void onModelReady();
     void onModelFailed(const QString &error);
+    void onAudioReady(const QByteArray &data, const QAudioFormat &format);
     void onSynthesisStarted();
     void onSynthesisFinished();
     void onTtsError(const QString &message);
@@ -89,10 +95,12 @@ private:
     AudioOutput     *m_audioOutput;
     ModelDownloader *m_downloader;
 
-    bool    m_ttsReady         = false;
-    bool    m_ttsActive        = false;
-    bool    m_downloading      = false;
-    qreal   m_downloadProgress = 0.0;
-    QString m_downloadStatus;
-    QString m_voice = QStringLiteral("af_sky");
+    bool         m_ttsReady         = false;
+    bool         m_ttsActive        = false;
+    bool         m_downloading      = false;
+    qreal        m_downloadProgress = 0.0;
+    QString      m_downloadStatus;
+    QString      m_voice = QStringLiteral("af_sky");
+    QByteArray   m_lastAudioCache;
+    QAudioFormat m_lastAudioFormat;
 };
