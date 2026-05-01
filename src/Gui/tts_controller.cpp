@@ -70,6 +70,7 @@ TtsController::TtsController(QObject *parent)
     // ---- Worker signals -----------------------------------------------------
     connect(m_worker, &TtsWorker::modelReady,         this, &TtsController::onModelReady);
     connect(m_worker, &TtsWorker::modelFailed,        this, &TtsController::onModelFailed);
+    connect(m_worker, &TtsWorker::backendChanged,     this, &TtsController::onBackendChanged);
     connect(m_worker, &TtsWorker::synthesisStarted,   this, &TtsController::onSynthesisStarted);
     connect(m_worker, &TtsWorker::synthesisFinished,  this, &TtsController::onSynthesisFinished);
     connect(m_worker, &TtsWorker::errorOccurred,      this, &TtsController::onTtsError);
@@ -186,6 +187,14 @@ void TtsController::onModelFailed(const QString &error)
     qWarning() << "[TTS] Model load failed:" << error;
     m_ttsReady = false;
     emit ttsReadyChanged();
+}
+
+void TtsController::onBackendChanged(const QString &backend)
+{
+    if (m_ttsBackend == backend)
+        return;
+    m_ttsBackend = backend;
+    emit ttsBackendChanged();
 }
 
 void TtsController::onSynthesisStarted()

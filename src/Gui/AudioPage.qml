@@ -285,6 +285,29 @@ Item {
                         color: ttsController.ttsReady ? "#a6e3a1" : "#f9e2af"
                         font.pixelSize: 12
                     }
+
+                    Rectangle {
+                        visible: ttsController.ttsReady
+                        radius: 3
+                        color: ttsController.ttsBackend !== "" ? "#1a3a2a" : "#2a2a3a"
+                        implicitWidth: backendBadge.implicitWidth + 10
+                        implicitHeight: backendBadge.implicitHeight + 4
+                        ToolTip.visible: backendHover.hovered
+                        ToolTip.text: ttsController.ttsBackend !== ""
+                            ? qsTr("GPU inference via %1").arg(ttsController.ttsBackend)
+                            : qsTr("CPU inference")
+                        HoverHandler { id: backendHover }
+
+                        Label {
+                            id: backendBadge
+                            anchors.centerIn: parent
+                            text: ttsController.ttsBackend !== "" ? ttsController.ttsBackend
+                                                                  : qsTr("CPU")
+                            color: ttsController.ttsBackend !== "" ? "#a6e3a1" : "#6c7086"
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+                    }
                 }
 
                 // Download progress — only visible while fetching model files

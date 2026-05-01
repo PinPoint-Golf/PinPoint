@@ -41,6 +41,9 @@ public:
 
     virtual bool isReady() const = 0;
 
+    // Returns the active GPU execution provider ("CoreML", "CUDA") or empty for CPU-only.
+    virtual QString gpuBackend() const { return {}; }
+
     // Playback speed multiplier (1.0 = normal). Applied on next synthesise().
     virtual void  setSpeed(float speed) { m_speed = speed; }
     virtual float speed()         const { return m_speed; }

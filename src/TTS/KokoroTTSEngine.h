@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include <QString>
 
 // Kokoro TTS engine backed by ONNX Runtime.
 //
@@ -39,6 +40,8 @@ public:
     void stop() override;
     bool isReady() const override;
 
+    QString gpuBackend() const override { return m_gpuBackend; }
+
 private:
     static QAudioFormat kokoroFormat();
 
@@ -46,6 +49,7 @@ private:
     std::vector<float> m_styleVec;          // 256-element packed float32 style vector
     bool               m_ready = false;
     std::atomic<bool>  m_stopFlag { false };
+    QString            m_gpuBackend;        // empty = CPU; "CoreML" or "CUDA" when GPU active
 
 #ifdef HAVE_ONNXRUNTIME
     struct OrtState;

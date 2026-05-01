@@ -18,8 +18,11 @@ void TtsWorker::loadModel(const QString &modelPath,
                            const QString &voicePath,
                            const QString &tokensPath)
 {
-    if (!m_engine->loadModel(modelPath, voicePath, tokensPath))
+    if (!m_engine->loadModel(modelPath, voicePath, tokensPath)) {
         emit modelFailed(QStringLiteral("loadModel failed — see errorOccurred for details"));
+        return;
+    }
+    emit backendChanged(m_engine->gpuBackend());
 }
 
 void TtsWorker::synthesise(const QString &text)

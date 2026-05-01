@@ -29,6 +29,7 @@ public slots:
 signals:
     void modelReady();
     void modelFailed(const QString &error);
+    void backendChanged(const QString &backend);  // emitted after model load; empty = CPU
     void synthesisStarted();
     void synthesisFinished();
     void audioReady(const QByteArray &pcmData, const QAudioFormat &format);

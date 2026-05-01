@@ -35,6 +35,7 @@ class TtsController : public QObject
     Q_PROPERTY(bool        downloading      READ downloading      NOTIFY downloadingChanged)
     Q_PROPERTY(qreal       downloadProgress READ downloadProgress NOTIFY downloadProgressChanged)
     Q_PROPERTY(QString     downloadStatus   READ downloadStatus   NOTIFY downloadStatusChanged)
+    Q_PROPERTY(QString     ttsBackend       READ ttsBackend       NOTIFY ttsBackendChanged)
     Q_PROPERTY(QStringList voices           READ voices           CONSTANT)
     Q_PROPERTY(QString     voice            READ voice            WRITE setVoice NOTIFY voiceChanged)
 
@@ -48,6 +49,7 @@ public:
     bool        downloading()      const { return m_downloading; }
     qreal       downloadProgress() const { return m_downloadProgress; }
     QString     downloadStatus()   const { return m_downloadStatus; }
+    QString     ttsBackend()       const { return m_ttsBackend; }
     QStringList voices()           const;
     QString     voice()            const { return m_voice; }
     void        setVoice(const QString &voice);
@@ -63,11 +65,13 @@ signals:
     void downloadingChanged();
     void downloadProgressChanged();
     void downloadStatusChanged();
+    void ttsBackendChanged();
     void voiceChanged();
 
 private slots:
     void onModelReady();
     void onModelFailed(const QString &error);
+    void onBackendChanged(const QString &backend);
     void onAudioReady(const QByteArray &data, const QAudioFormat &format);
     void onSynthesisStarted();
     void onSynthesisFinished();
@@ -100,6 +104,7 @@ private:
     bool         m_downloading      = false;
     qreal        m_downloadProgress = 0.0;
     QString      m_downloadStatus;
+    QString      m_ttsBackend;
     QString      m_voice = QStringLiteral("af_sky");
     QByteArray   m_lastAudioCache;
     QAudioFormat m_lastAudioFormat;

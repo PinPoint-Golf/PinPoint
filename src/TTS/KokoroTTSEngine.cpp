@@ -1,9 +1,13 @@
 #include "KokoroTTSEngine.h"
 
+#include <QDebug>
 #include <QFile>
 
 #ifdef HAVE_ONNXRUNTIME
 #  include <onnxruntime_cxx_api.h>
+#  ifdef ORT_COREML
+#    include <coreml_provider_factory.h>
+#  endif
 
 // All ONNX Runtime state is isolated in OrtState so its headers are only
 // pulled into this translation unit, not transitively via KokoroTTSEngine.h.
@@ -24,6 +28,40 @@ KokoroTTSEngine::KokoroTTSEngine(QObject *parent)
     m_ort = std::make_unique<OrtState>();
     m_ort->opts.SetIntraOpNumThreads(2);
     m_ort->opts.SetGraphOptimizationLevel(ORT_ENABLE_ALL);
+
+#if defined(ORT_COREML)
+    try {
+        // flags=0: let ORT decide which ops to offload to CoreML
+        Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(m_ort->opts, 0));
+        m_gpuBackend = QStringLiteral("CoreML");
+    } catch (const Ort::Exception &e) {
+        qDebug() << "KokoroTTS: CoreML unavailable:" << e.what() << "— using CPU";
+    }
+#elif defined(ORT_CUDA)
+    // On Linux, probe for the NVIDIA kernel driver before asking ORT to load
+    // the CUDA provider — avoids a verbose internal ORT error on machines with
+    // no NVIDIA GPU (where the provider library loads but its CUDA deps don't).
+#  ifdef Q_OS_LINUX
+    if (!QFile::exists(QStringLiteral("/proc/driver/nvidia/version"))) {
+        qDebug() << "KokoroTTS: No NVIDIA GPU detected — using CPU";
+    } else
+#  endif
+    {
+        try {
+            OrtCUDAProviderOptions cuda{};
+            cuda.device_id = 0;
+            m_ort->opts.AppendExecutionProvider_CUDA(cuda);
+            m_gpuBackend = QStringLiteral("CUDA");
+        } catch (const Ort::Exception &e) {
+            qDebug() << "KokoroTTS: CUDA unavailable:" << e.what() << "— using CPU";
+        }
+    }
+#endif
+
+    if (m_gpuBackend.isEmpty())
+        qDebug() << "KokoroTTS: using CPU execution provider";
+    else
+        qDebug() << "KokoroTTS: using" << m_gpuBackend << "execution provider";
 #endif
 }
 
