@@ -31,8 +31,10 @@ KokoroTTSEngine::KokoroTTSEngine(QObject *parent)
 
 #if defined(ORT_COREML)
     try {
-        // flags=0: let ORT decide which ops to offload to CoreML
-        Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(m_ort->opts, 0));
+        // flags=0: let ORT decide which ops to offload to CoreML.
+        // ORT_COREML is only defined on ARM64 macOS — the x86_64 prebuilt ships
+        // the CoreML dylib but Kokoro's fully-dynamic shapes make it unusable there.
+        Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(m_ort->opts, COREML_FLAG_USE_NONE));
         m_gpuBackend = QStringLiteral("CoreML");
     } catch (const Ort::Exception &e) {
         qDebug() << "KokoroTTS: CoreML unavailable:" << e.what() << "— using CPU";
@@ -152,7 +154,13 @@ void KokoroTTSEngine::synthesise(const QString &text)
             Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
         // tokens: [1, seq_len]
-        std::vector<int64_t> tokenData(tokens.cbegin(), tokens.cend());
+        // Kokoro requires a silence token (ID 0) at both ends of the sequence;
+        // without them the alignment doesn't reach the first and last phonemes.
+        std::vector<int64_t> tokenData;
+        tokenData.reserve(tokens.size() + 2);
+        tokenData.push_back(0);
+        tokenData.insert(tokenData.end(), tokens.cbegin(), tokens.cend());
+        tokenData.push_back(0);
         std::array<int64_t, 2> tokenShape { 1, static_cast<int64_t>(tokenData.size()) };
         auto tokenTensor = Ort::Value::CreateTensor<int64_t>(
             memInfo,
@@ -190,12 +198,36 @@ void KokoroTTSEngine::synthesise(const QString &text)
         if (m_stopFlag.load()) { emit synthesisFinished(); return; }
 
         // ---- Package PCM output ---------------------------------------------
-        const float   *samples    = outputs[0].GetTensorData<float>();
-        const int64_t  numSamples =
-            outputs[0].GetTensorTypeAndShapeInfo().GetShape().at(1);
+        const auto   shapeInfo  = outputs[0].GetTensorTypeAndShapeInfo();
+        const auto   dims       = shapeInfo.GetShape();
+        // Use element count rather than dims[1] — robust against [1,N], [1,1,N], [N], etc.
+        const int64_t numSamples = static_cast<int64_t>(shapeInfo.GetElementCount());
 
+        // Diagnostic: log shape and first few sample values.
+        {
+            QString shapeStr;
+            for (auto d : dims) shapeStr += QStringLiteral("[%1]").arg(d);
+            const float *s = outputs[0].GetTensorData<float>();
+            const int   nCheck = static_cast<int>(qMin(numSamples, (int64_t)8));
+            QString sampleStr;
+            for (int i = 0; i < nCheck; ++i)
+                sampleStr += QString::number(double(s[i]), 'f', 4) + QLatin1Char(' ');
+            qDebug() << "KokoroTTS: output shape" << shapeStr
+                     << "samples" << numSamples
+                     << "first values:" << sampleStr.trimmed();
+            if (numSamples > 0) {
+                bool allZero = true;
+                for (int64_t i = 0; i < qMin(numSamples, (int64_t)200); ++i)
+                    if (s[i] != 0.0f) { allZero = false; break; }
+                if (allZero)
+                    qWarning() << "KokoroTTS: output is all-zeros — possible CoreML/model incompatibility";
+            }
+        }
+
+        const float *samples = outputs[0].GetTensorData<float>();
         const QByteArray pcm(reinterpret_cast<const char *>(samples),
                              static_cast<int>(numSamples * sizeof(float)));
+        qDebug() << "KokoroTTS: emitting" << pcm.size() << "bytes of PCM";
         emit audioReady(pcm, kokoroFormat());
 
     } catch (const Ort::Exception &e) {

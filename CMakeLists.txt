@@ -115,6 +115,7 @@ target_include_directories(PinPoint PRIVATE
 # ORT_GPU=ON downloads the GPU-enabled binary:
 #   - Linux/Windows: CUDA execution provider (falls back to CPU at runtime if no GPU)
 #   - macOS ARM64:   CoreML is always available in the standard binary (no separate download)
+#   - macOS x86_64:  CoreML dylib present but unusable with Kokoro's dynamic shapes — CPU only
 option(ORT_GPU "Download GPU-enabled ONNX Runtime build (CUDA on Linux/Windows)" ON)
 
 set(ORT_VERSION "1.25.1")
@@ -136,6 +137,10 @@ elseif(APPLE)
         # ONNX Runtime 1.21+ dropped Intel macOS (x86_64) prebuilts; pin to the last available.
         set(ORT_VERSION "1.20.1")
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-x86_64-${ORT_VERSION}.tgz")
+        # CoreML is present in the x86_64 dylib but the Kokoro model has fully
+        # dynamic sequence lengths throughout — CoreML on Intel rejects virtually
+        # every subgraph ("unbounded dimension"), then hangs or fails to compile
+        # what remains. CPU is faster and more correct here.
     endif()
 else()
     if(ORT_GPU)

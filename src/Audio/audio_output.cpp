@@ -1,6 +1,7 @@
 #include "audio_output.h"
 
 #include <QAudioSink>
+#include <QDebug>
 #include <QMediaDevices>
 #include <QMutex>
 #include <QMutexLocker>
@@ -112,10 +113,20 @@ bool AudioOutput::start(const QString &deviceName)
 
     // ---- Negotiate format ----------------------------------------------------
     QAudioFormat fmt;
-    if (m_preferredFormat.isValid() && m_activeDevice.isFormatSupported(m_preferredFormat))
+    if (m_preferredFormat.isValid() && m_activeDevice.isFormatSupported(m_preferredFormat)) {
         fmt = m_preferredFormat;
-    else
+        qDebug() << "AudioOutput: using preferred format"
+                 << fmt.sampleRate() << "Hz"
+                 << fmt.channelCount() << "ch fmt="
+                 << static_cast<int>(fmt.sampleFormat());
+    } else {
         fmt = m_activeDevice.preferredFormat();
+        qWarning() << "AudioOutput: preferred format not supported, falling back to device format"
+                   << fmt.sampleRate() << "Hz"
+                   << fmt.channelCount() << "ch fmt="
+                   << static_cast<int>(fmt.sampleFormat())
+                   << "— TTS data (Float32 24kHz mono) will be misinterpreted";
+    }
 
     // ---- Open playback pipeline ----------------------------------------------
     m_playbackDevice = new AudioPlaybackDevice(this);
