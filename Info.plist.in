@@ -16,6 +16,8 @@
     <string>0.1</string>
     <key>CFBundleVersion</key>
     <string>0.1</string>
+    <key>NSCameraUsageDescription</key>
+    <string>PinPoint captures video from the camera to record and analyse your golf swing.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>PinPoint records audio through the microphone to transcribe speech in real time.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

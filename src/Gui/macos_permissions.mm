@@ -20,6 +20,23 @@ void requestMicrophonePermission(std::function<void(bool granted)> callback)
     }
 }
 
+void requestCameraPermission(std::function<void(bool granted)> callback)
+{
+    AVAuthorizationStatus status =
+        [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+
+    if (status == AVAuthorizationStatusAuthorized) {
+        callback(true);
+    } else if (status == AVAuthorizationStatusNotDetermined) {
+        [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
+                               completionHandler:^(BOOL granted) {
+            callback(granted);
+        }];
+    } else {
+        callback(false);
+    }
+}
+
 void requestSpeechRecognitionPermission(std::function<void(bool granted)> callback)
 {
     SFSpeechRecognizerAuthorizationStatus status = [SFSpeechRecognizer authorizationStatus];

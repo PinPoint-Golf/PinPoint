@@ -50,6 +50,11 @@ qt_add_executable(PinPoint
     src/Audio/audio_output_base.h    src/Audio/audio_output_base.cpp
     src/Audio/audio_output.h         src/Audio/audio_output.cpp
     src/Audio/audio_stream_saver.h   src/Audio/audio_stream_saver.cpp
+    src/Video/video_frame_processor_base.h src/Video/video_frame_processor_base.cpp
+    src/Video/video_input_base.h           src/Video/video_input_base.cpp
+    src/Video/video_input.h                src/Video/video_input.cpp
+    src/Video/video_frame_processor.h      src/Video/video_frame_processor.cpp
+    src/Gui/video_controller.h             src/Gui/video_controller.cpp
     src/STT/stt_processor.h          src/STT/stt_processor.cpp
     src/TTS/TTSEngine.h              src/TTS/TTSEngine.cpp
     src/TTS/TTSEngineFactory.h       src/TTS/TTSEngineFactory.cpp
@@ -59,7 +64,7 @@ qt_add_executable(PinPoint
     src/TTS/ModelDownloader.h        src/TTS/ModelDownloader.cpp
 )
 
-target_include_directories(PinPoint PRIVATE src/Gui src/IMU src/Audio src/STT src/TTS)
+target_include_directories(PinPoint PRIVATE src/Gui src/IMU src/Audio src/Video src/STT src/TTS)
 
 qt_add_qml_module(PinPoint
     URI PinPoint
@@ -68,6 +73,7 @@ qt_add_qml_module(PinPoint
         src/Gui/Main.qml
         src/Gui/AudioPage.qml
         src/Gui/CapturePage.qml
+        src/Gui/VideoPage.qml
 )
 
 target_compile_definitions(PinPoint PRIVATE
@@ -279,6 +285,8 @@ if(APPLE)
         src/Gui/macos_permissions.mm
         src/STT/STTBackendApple.h
         src/STT/STTBackendApple.mm
+        src/Video/VideoInputApple.h
+        src/Video/VideoInputApple.mm
     )
     add_custom_command(TARGET PinPoint POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
@@ -288,6 +296,8 @@ if(APPLE)
     )
     target_link_libraries(PinPoint PRIVATE
         "-framework AVFoundation"
+        "-framework CoreMedia"
+        "-framework CoreVideo"
         "-framework Accelerate"
         "-framework Speech"
     )
