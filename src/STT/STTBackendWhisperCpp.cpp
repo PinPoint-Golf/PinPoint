@@ -1,17 +1,17 @@
-#include "WhisperBackendWhisperCpp.h"
+#include "STTBackendWhisperCpp.h"
 #include <QDebug>
 
-WhisperBackendWhisperCpp::WhisperBackendWhisperCpp(QObject* parent)
-  : WhisperBackend(parent) {}
+STTBackendWhisperCpp::STTBackendWhisperCpp(QObject* parent)
+  : STTBackend(parent) {}
 
-WhisperBackendWhisperCpp::~WhisperBackendWhisperCpp() {
+STTBackendWhisperCpp::~STTBackendWhisperCpp() {
   if (m_ctx) {
     whisper_free(m_ctx);
     m_ctx = nullptr;
   }
 }
 
-bool WhisperBackendWhisperCpp::loadModel(const QString& modelPath) {
+bool STTBackendWhisperCpp::loadModel(const QString& modelPath) {
   if (m_ctx) { whisper_free(m_ctx); m_ctx = nullptr; }
   // toLocal8Bit() gives the correct narrow path string on all three platforms
   // for typical (ASCII/Latin) paths. For non-ASCII Windows paths, a future
@@ -19,13 +19,13 @@ bool WhisperBackendWhisperCpp::loadModel(const QString& modelPath) {
   whisper_context_params cparams = whisper_context_default_params();
   m_ctx = whisper_init_from_file_with_params(modelPath.toLocal8Bit().constData(), cparams);
   if (!m_ctx) {
-    qWarning() << "WhisperBackend: failed to load model from" << modelPath;
+    qWarning() << "[STTBackendWhisperCpp] Failed to load model from" << modelPath;
     return false;
   }
   return true;
 }
 
-void WhisperBackendWhisperCpp::transcribe(const std::vector<float>& pcmF32) {
+void STTBackendWhisperCpp::transcribe(const std::vector<float>& pcmF32) {
   if (!m_ctx) { emit transcriptionFailed("Model not loaded"); return; }
   if (pcmF32.empty()) { emit transcriptionFailed("Empty audio buffer"); return; }
 
@@ -55,4 +55,4 @@ void WhisperBackendWhisperCpp::transcribe(const std::vector<float>& pcmF32) {
   emit transcriptionReady(text.trimmed());
 }
 
-bool WhisperBackendWhisperCpp::isReady() const { return m_ctx != nullptr; }
+bool STTBackendWhisperCpp::isReady() const { return m_ctx != nullptr; }

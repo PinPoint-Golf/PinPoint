@@ -3,12 +3,12 @@
 #include <QString>
 #include <vector>
 
-class WhisperBackend;
+class STTBackend;
 
-class WhisperWorker : public QObject {
+class STTWorker : public QObject {
   Q_OBJECT
 public:
-  explicit WhisperWorker(WhisperBackend* backend, QObject* parent = nullptr);
+  explicit STTWorker(STTBackend* backend, QObject* parent = nullptr);
 
 public slots:
   void loadModel(const QString& modelPath);
@@ -21,5 +21,5 @@ signals:
   void transcriptionFailed(const QString& error);
 
 private:
-  WhisperBackend* m_backend;
+  STTBackend* m_backend;
 };

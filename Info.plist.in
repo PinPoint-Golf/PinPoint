@@ -18,6 +18,8 @@
     <string>0.1</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>PinPoint records audio through the microphone to transcribe speech in real time.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>PinPoint uses speech recognition to transcribe audio captured during your session.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>

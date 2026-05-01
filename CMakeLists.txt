@@ -50,7 +50,7 @@ qt_add_executable(PinPoint
     src/Audio/audio_output_base.h    src/Audio/audio_output_base.cpp
     src/Audio/audio_output.h         src/Audio/audio_output.cpp
     src/Audio/audio_stream_saver.h   src/Audio/audio_stream_saver.cpp
-    src/STT/whisper_processor.h      src/STT/whisper_processor.cpp
+    src/STT/stt_processor.h          src/STT/stt_processor.cpp
     src/TTS/TTSEngine.h              src/TTS/TTSEngine.cpp
     src/TTS/TTSEngineFactory.h       src/TTS/TTSEngineFactory.cpp
     src/TTS/KokoroTTSEngine.h        src/TTS/KokoroTTSEngine.cpp
@@ -96,13 +96,13 @@ target_link_libraries(PinPoint
 target_sources(PinPoint PRIVATE
     src/Audio/AudioConverter.h
     src/Audio/AudioConverter.cpp
-    src/STT/WhisperBackend.h
-    src/STT/WhisperBackendFactory.h
-    src/STT/WhisperBackendFactory.cpp
-    src/STT/WhisperBackendWhisperCpp.h
-    src/STT/WhisperBackendWhisperCpp.cpp
-    src/STT/WhisperWorker.h
-    src/STT/WhisperWorker.cpp
+    src/STT/STTBackend.h
+    src/STT/STTBackendFactory.h
+    src/STT/STTBackendFactory.cpp
+    src/STT/STTBackendWhisperCpp.h
+    src/STT/STTBackendWhisperCpp.cpp
+    src/STT/STTWorker.h
+    src/STT/STTWorker.cpp
 )
 
 target_link_libraries(PinPoint PRIVATE whisper samplerate)
@@ -237,14 +237,23 @@ else()
 endif()
 
 if(APPLE)
-    target_sources(PinPoint PRIVATE src/Gui/macos_permissions.h src/Gui/macos_permissions.mm)
+    target_sources(PinPoint PRIVATE
+        src/Gui/macos_permissions.h
+        src/Gui/macos_permissions.mm
+        src/STT/STTBackendApple.h
+        src/STT/STTBackendApple.mm
+    )
     add_custom_command(TARGET PinPoint POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
             "$<TARGET_BUNDLE_CONTENT_DIR:PinPoint>/Info.plist"
         COMMENT "Installing Info.plist into bundle"
     )
-    target_link_libraries(PinPoint PRIVATE "-framework AVFoundation" "-framework Accelerate")
+    target_link_libraries(PinPoint PRIVATE
+        "-framework AVFoundation"
+        "-framework Accelerate"
+        "-framework Speech"
+    )
 endif()
 
 if(UNIX AND NOT APPLE)

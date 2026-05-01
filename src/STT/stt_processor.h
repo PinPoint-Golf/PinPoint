@@ -6,28 +6,28 @@
 
 class QThread;
 class QTimer;
-class WhisperWorker;
+class STTWorker;
 
-// Buffers PCM audio from the capture pipeline and dispatches it to an in-process
-// whisper.cpp worker thread for transcription.  Audio is accumulated for
-// chunkDurationMs() milliseconds, silence-gated, converted to 16 kHz mono float32
-// via AudioConverter, then handed to WhisperWorker::transcribe() via a queued
-// invocation so the CPU-bound whisper_full() call never blocks this thread.
+// Buffers PCM audio from the capture pipeline and dispatches it to an STT
+// worker thread for transcription.  Audio is accumulated for chunkDurationMs()
+// milliseconds, silence-gated, converted to 16 kHz mono float32 via
+// AudioConverter, then handed to STTWorker::transcribe() via a queued
+// invocation so the backend's transcription call never blocks this thread.
 //
 // Typical wiring:
-//   auto *whisper = new WhisperProcessor(this);
-//   input->connectProcessor(whisper);
-//   connect(whisper, &WhisperProcessor::transcriptionReceived,
+//   auto *stt = new STTProcessor(this);
+//   input->connectProcessor(stt);
+//   connect(stt, &STTProcessor::transcriptionReceived,
 //           this, &MyClass::onText);
 //   input->start();
 
-class WhisperProcessor : public AudioProcessorBase
+class STTProcessor : public AudioProcessorBase
 {
     Q_OBJECT
 
 public:
-    explicit WhisperProcessor(QObject *parent = nullptr);
-    ~WhisperProcessor() override;
+    explicit STTProcessor(QObject *parent = nullptr);
+    ~STTProcessor() override;
 
     // Audio is dispatched to the worker in chunks of this duration (default: 3000 ms).
     void setChunkDurationMs(int ms);
@@ -58,13 +58,14 @@ private:
     QString     resolveModelPath(const QString &filename) const;
     double      computeRms(const QByteArray &pcm, const QAudioFormat &fmt) const;
 
-    QTimer        *m_flushTimer;
-    QThread       *m_workerThread     = nullptr;
-    WhisperWorker *m_worker           = nullptr;
-    QByteArray     m_buffer;
-    QAudioFormat   m_format;
-    QString        m_modelPath;        // resolved in ctor, used in start()
-    QStringList    m_searchedPaths;    // populated when model is not found
-    int            m_chunkDurationMs  = 3000;
-    double         m_silenceThreshold = 0.01;
+    QTimer      *m_flushTimer;
+    QThread     *m_workerThread     = nullptr;
+    STTWorker   *m_worker           = nullptr;
+    QByteArray   m_buffer;
+    QAudioFormat m_format;
+    QString      m_modelPath;        // resolved in ctor, used in start()
+    QStringList  m_searchedPaths;    // populated when model is not found
+    bool         m_needsModelFile   = true;  // false for OS-native backends
+    int          m_chunkDurationMs  = 3000;
+    double       m_silenceThreshold = 0.01;
 };

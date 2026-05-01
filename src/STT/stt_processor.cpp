@@ -1,7 +1,7 @@
-#include "whisper_processor.h"
+#include "stt_processor.h"
 #include "AudioConverter.h"
-#include "WhisperBackendFactory.h"
-#include "WhisperWorker.h"
+#include "STTBackendFactory.h"
+#include "STTWorker.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -15,42 +15,45 @@
 
 Q_DECLARE_METATYPE(std::vector<float>)
 
-WhisperProcessor::WhisperProcessor(QObject *parent)
+STTProcessor::STTProcessor(QObject *parent)
     : AudioProcessorBase(parent)
     , m_flushTimer(new QTimer(this))
 {
     qRegisterMetaType<std::vector<float>>();
 
     m_flushTimer->setInterval(m_chunkDurationMs);
-    connect(m_flushTimer, &QTimer::timeout, this, &WhisperProcessor::onFlushTimer);
+    connect(m_flushTimer, &QTimer::timeout, this, &STTProcessor::onFlushTimer);
 
-    auto backend = WhisperBackendFactory::create(WhisperBackendFactory::Backend::WhisperCpp);
-    m_worker = new WhisperWorker(backend.release());
+    auto backend = STTBackendFactory::createDefault();
+    m_needsModelFile = backend->requiresModelFile();
+    m_worker = new STTWorker(backend.release());
     m_workerThread = new QThread;  // no parent — QThread cannot survive moveToThread recursion
     m_worker->moveToThread(m_workerThread);
 
-    connect(m_worker, &WhisperWorker::transcriptionReady,
-            this,     &WhisperProcessor::transcriptionReceived);
-    connect(m_worker, &WhisperWorker::transcriptionFailed,
-            this,     &WhisperProcessor::errorOccurred);
-    connect(m_worker, &WhisperWorker::modelReady,
-            this,     &WhisperProcessor::modelReady);
-    connect(m_worker, &WhisperWorker::modelFailed,
-            this,     &WhisperProcessor::errorOccurred);
+    connect(m_worker, &STTWorker::transcriptionReady,
+            this,     &STTProcessor::transcriptionReceived);
+    connect(m_worker, &STTWorker::transcriptionFailed,
+            this,     &STTProcessor::errorOccurred);
+    connect(m_worker, &STTWorker::modelReady,
+            this,     &STTProcessor::modelReady);
+    connect(m_worker, &STTWorker::modelFailed,
+            this,     &STTProcessor::errorOccurred);
 
     connect(m_workerThread, &QThread::finished,
             m_worker,       &QObject::deleteLater);
 
     m_workerThread->start();
 
-    // Resolve the model path now (main thread), act on it in start() (processor thread).
-    m_modelPath = resolveModelPath(QStringLiteral("ggml-base.en.bin"));
-    if (m_modelPath.isEmpty())
-        m_searchedPaths = modelCandidates(QStringLiteral("ggml-base.en.bin"));
+    // Resolve the model path only for backends that require a local model file.
+    if (m_needsModelFile) {
+        m_modelPath = resolveModelPath(QStringLiteral("ggml-base.en.bin"));
+        if (m_modelPath.isEmpty())
+            m_searchedPaths = modelCandidates(QStringLiteral("ggml-base.en.bin"));
+    }
     // Timer and model loading are started via start() after moveToThread().
 }
 
-WhisperProcessor::~WhisperProcessor()
+STTProcessor::~STTProcessor()
 {
     m_flushTimer->stop();
     if (m_workerThread) {
@@ -62,9 +65,9 @@ WhisperProcessor::~WhisperProcessor()
     // m_worker is deleted via the QThread::finished -> QObject::deleteLater connection.
 }
 
-void WhisperProcessor::start()
+void STTProcessor::start()
 {
-    if (m_modelPath.isEmpty()) {
+    if (m_needsModelFile && m_modelPath.isEmpty()) {
         emit modelNotFound(m_searchedPaths);
     } else {
         QMetaObject::invokeMethod(m_worker, "loadModel",
@@ -74,19 +77,19 @@ void WhisperProcessor::start()
     m_flushTimer->start();
 }
 
-void WhisperProcessor::setChunkDurationMs(int ms)
+void STTProcessor::setChunkDurationMs(int ms)
 {
     m_chunkDurationMs = ms;
     m_flushTimer->setInterval(ms);
 }
 
-void WhisperProcessor::processAudio(const QByteArray &data, const QAudioFormat &format)
+void STTProcessor::processAudio(const QByteArray &data, const QAudioFormat &format)
 {
     m_format = format;
     m_buffer.append(data);
 }
 
-void WhisperProcessor::onFlushTimer()
+void STTProcessor::onFlushTimer()
 {
     if (m_buffer.isEmpty())
         return;
@@ -112,7 +115,7 @@ void WhisperProcessor::onFlushTimer()
 
 // Returns RMS amplitude normalised to 0.0–1.0.  Supports Int16 and Float formats;
 // returns 1.0 (always send) for any other format so unknown formats are never gated.
-double WhisperProcessor::computeRms(const QByteArray &pcm, const QAudioFormat &fmt) const
+double STTProcessor::computeRms(const QByteArray &pcm, const QAudioFormat &fmt) const
 {
     if (pcm.isEmpty())
         return 0.0;
@@ -145,7 +148,7 @@ double WhisperProcessor::computeRms(const QByteArray &pcm, const QAudioFormat &f
 }
 
 // Returns the ordered list of candidate paths checked by resolveModelPath().
-QStringList WhisperProcessor::modelCandidates(const QString &filename) const
+QStringList STTProcessor::modelCandidates(const QString &filename) const
 {
     QStringList candidates;
 
@@ -170,7 +173,7 @@ QStringList WhisperProcessor::modelCandidates(const QString &filename) const
 
 // Tries each candidate from modelCandidates() and returns the first path that
 // exists as a file, or an empty string if none do.
-QString WhisperProcessor::resolveModelPath(const QString &filename) const
+QString STTProcessor::resolveModelPath(const QString &filename) const
 {
     for (const QString &path : modelCandidates(filename)) {
         if (QFileInfo::exists(path))

@@ -7,7 +7,7 @@
 class AudioInput;
 class AudioInputBase;
 class AudioStreamSaver;
-class WhisperProcessor;
+class STTProcessor;
 
 // Owns the audio-capture and STT-processor threads and exposes the growing
 // transcript as a Q_PROPERTY so QML can bind to it directly.
@@ -43,7 +43,7 @@ private:
     QThread          *m_processorThread;
     AudioInput       *m_audioInput;
     AudioStreamSaver *m_streamSaver;
-    WhisperProcessor *m_whisper;
+    STTProcessor     *m_stt;
     QString           m_transcript;
     bool              m_listening = false;
 };
