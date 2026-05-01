@@ -17,6 +17,7 @@ public slots:
 signals:
   void modelReady();
   void modelFailed(const QString& error);
+  void backendLabelReady(const QString& label);
   void transcriptionReady(const QString& text);
   void transcriptionFailed(const QString& error);
 

@@ -21,6 +21,29 @@ set(WHISPER_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS      OFF CACHE BOOL "" FORCE)
 
+# ── GPU acceleration for whisper.cpp (Linux / Windows) ─────────────────────
+# Vulkan works on NVIDIA, AMD, and Intel without proprietary drivers.
+# CUDA is tried as a fallback when Vulkan headers are not present.
+if(NOT APPLE)
+    find_package(Vulkan QUIET)
+    if(Vulkan_FOUND)
+        set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+        set(_whisper_gpu_backend "Vulkan")
+        message(STATUS "Whisper: Vulkan GPU acceleration enabled")
+    else()
+        include(CheckLanguage)
+        check_language(CUDA)
+        if(CMAKE_CUDA_COMPILER)
+            enable_language(CUDA)
+            set(GGML_CUDA ON CACHE BOOL "" FORCE)
+            set(_whisper_gpu_backend "CUDA")
+            message(STATUS "Whisper: CUDA GPU acceleration enabled")
+        else()
+            message(STATUS "Whisper: CPU only (Vulkan and CUDA not found)")
+        endif()
+    endif()
+endif()
+
 FetchContent_MakeAvailable(whisper)
 
 FetchContent_Declare(
@@ -114,6 +137,7 @@ target_sources(PinPoint PRIVATE
 target_link_libraries(PinPoint PRIVATE whisper samplerate)
 target_include_directories(PinPoint PRIVATE
     ${whisper_SOURCE_DIR}/include
+    ${whisper_SOURCE_DIR}/ggml/include
     ${libsamplerate_SOURCE_DIR}/include
 )
 

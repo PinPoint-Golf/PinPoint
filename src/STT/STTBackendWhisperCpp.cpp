@@ -1,5 +1,7 @@
 #include "STTBackendWhisperCpp.h"
+#include "ggml-backend.h"
 #include <QDebug>
+#include <cstring>
 
 STTBackendWhisperCpp::STTBackendWhisperCpp(QObject* parent)
   : STTBackend(parent) {}
@@ -56,3 +58,20 @@ void STTBackendWhisperCpp::transcribe(const std::vector<float>& pcmF32) {
 }
 
 bool STTBackendWhisperCpp::isReady() const { return m_ctx != nullptr; }
+
+QString STTBackendWhisperCpp::backendLabel() const {
+    // Walk every ggml backend registered at library load time.
+    // GPU backends (Vulkan, CUDA, …) report zero devices when no suitable
+    // hardware or driver is present, which is how we detect a silent CPU fallback.
+    QStringList gpu;
+    const size_t n = ggml_backend_reg_count();
+    for (size_t i = 0; i < n; ++i) {
+        ggml_backend_reg_t reg = ggml_backend_reg_get(i);
+        const char *name = ggml_backend_reg_name(reg);
+        if (strcmp(name, "CPU") == 0 || strcmp(name, "BLAS") == 0)
+            continue;
+        if (ggml_backend_reg_dev_count(reg) > 0)
+            gpu << QString::fromUtf8(name);
+    }
+    return gpu.isEmpty() ? QStringLiteral("CPU") : gpu.join('+');
+}

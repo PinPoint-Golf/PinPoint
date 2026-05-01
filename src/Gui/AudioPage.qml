@@ -125,6 +125,29 @@ Item {
                         color: "#a6e3a1"
                         font.pixelSize: 13
                     }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        radius: 3
+                        color: controller.sttBackend !== "CPU" ? "#1a3a2a" : "#2a2a3a"
+                        implicitWidth: sttBackendBadge.implicitWidth + 10
+                        implicitHeight: sttBackendBadge.implicitHeight + 4
+                        ToolTip.visible: sttBackendHover.hovered
+                        ToolTip.text: controller.sttBackend !== "CPU"
+                            ? qsTr("GPU transcription via %1").arg(controller.sttBackend)
+                            : qsTr("CPU transcription")
+                        HoverHandler { id: sttBackendHover }
+
+                        Label {
+                            id: sttBackendBadge
+                            anchors.centerIn: parent
+                            text: controller.sttBackend
+                            color: controller.sttBackend !== "CPU" ? "#a6e3a1" : "#6c7086"
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+                    }
                 }
             }
         }

@@ -15,8 +15,9 @@ public:
     // Requests speech recognition authorization from the user on first call.
     bool loadModel(const QString& modelPath) override;
     void transcribe(const std::vector<float>& pcmF32) override;
-    bool isReady() const override;
-    bool requiresModelFile() const override { return false; }
+    bool    isReady() const override;
+    bool    requiresModelFile() const override { return false; }
+    QString backendLabel() const override { return QStringLiteral("Apple"); }
 
 private:
     struct Private;

@@ -22,6 +22,9 @@ public:
   // Backends that use OS-provided models (e.g. Apple Speech) return false.
   virtual bool requiresModelFile() const { return true; }
 
+  // Short label describing the compute backend, e.g. "CPU", "Vulkan", "CUDA", "Apple".
+  virtual QString backendLabel() const { return QStringLiteral("CPU"); }
+
 signals:
   void transcriptionReady(const QString& text);
   void transcriptionFailed(const QString& error);

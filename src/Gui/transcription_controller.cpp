@@ -14,6 +14,7 @@
 #include "macos_permissions.h"
 #endif
 
+
 TranscriptionController::TranscriptionController(QObject *parent)
     : QObject(parent)
     , m_audioThread(new QThread(this))
@@ -35,6 +36,8 @@ TranscriptionController::TranscriptionController(QObject *parent)
 
     connect(m_stt, &STTProcessor::transcriptionReceived,
             this, &TranscriptionController::onTranscriptionReceived);
+    connect(m_stt, &STTProcessor::backendLabelReady,
+            this, &TranscriptionController::onBackendLabelReady);
     connect(m_stt, &STTProcessor::errorOccurred,
             this, &TranscriptionController::onSTTError);
     connect(m_audioInput, &AudioInputBase::errorOccurred,
@@ -108,6 +111,12 @@ TranscriptionController::~TranscriptionController()
     }
     delete m_stt;
     m_stt = nullptr;
+}
+
+void TranscriptionController::onBackendLabelReady(const QString &label)
+{
+    m_sttBackend = label;
+    emit sttBackendChanged();
 }
 
 void TranscriptionController::onTranscriptionReceived(const QString &text)

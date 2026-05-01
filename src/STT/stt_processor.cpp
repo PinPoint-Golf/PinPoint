@@ -38,6 +38,8 @@ STTProcessor::STTProcessor(QObject *parent)
             this,     &STTProcessor::modelReady);
     connect(m_worker, &STTWorker::modelFailed,
             this,     &STTProcessor::errorOccurred);
+    connect(m_worker, &STTWorker::backendLabelReady,
+            this,     &STTProcessor::backendLabelReady);
 
     connect(m_workerThread, &QThread::finished,
             m_worker,       &QObject::deleteLater);

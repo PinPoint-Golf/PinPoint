@@ -48,6 +48,7 @@ signals:
     void errorOccurred(const QString &message);
     void modelReady();
     void modelNotFound(const QStringList &searchedPaths);
+    void backendLabelReady(const QString &label);
 
 private slots:
     void onFlushTimer();

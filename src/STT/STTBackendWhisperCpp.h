@@ -8,9 +8,10 @@ public:
   explicit STTBackendWhisperCpp(QObject* parent = nullptr);
   ~STTBackendWhisperCpp() override;
 
-  bool loadModel(const QString& modelPath) override;
-  void transcribe(const std::vector<float>& pcmF32) override;
-  bool isReady() const override;
+  bool    loadModel(const QString& modelPath) override;
+  void    transcribe(const std::vector<float>& pcmF32) override;
+  bool    isReady() const override;
+  QString backendLabel() const override;
 
 private:
   whisper_context* m_ctx = nullptr;

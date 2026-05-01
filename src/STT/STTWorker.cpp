@@ -17,10 +17,12 @@ STTWorker::STTWorker(STTBackend* backend, QObject* parent)
 
 void STTWorker::loadModel(const QString& modelPath)
 {
-    if (m_backend->loadModel(modelPath))
+    if (m_backend->loadModel(modelPath)) {
         emit modelReady();
-    else
+        emit backendLabelReady(m_backend->backendLabel());
+    } else {
         emit modelFailed(QStringLiteral("Failed to load model from: ") + modelPath);
+    }
 }
 
 void STTWorker::transcribe(const std::vector<float>& pcmF32)
