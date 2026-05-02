@@ -264,6 +264,7 @@ Item {
                     }
 
                     Label {
+                        visible: ttsController.ttsBackend !== "Cloud"
                         text: qsTr("Voice:")
                         color: "#cdd6f4"
                         font.pixelSize: 13
@@ -271,6 +272,7 @@ Item {
 
                     ComboBox {
                         id: voiceSelector
+                        visible: ttsController.ttsBackend !== "Cloud"
                         model: ttsController.voices
                         currentIndex: ttsController.voices.indexOf(ttsController.voice)
                         onActivated: ttsController.voice = currentText
@@ -316,13 +318,17 @@ Item {
                     Rectangle {
                         visible: ttsController.ttsReady
                         radius: 3
-                        color: ttsController.ttsBackend !== "" ? "#1a3a2a" : "#2a2a3a"
+                        color: ttsController.ttsBackend === "Cloud" ? "#1a2a3a"
+                             : ttsController.ttsBackend !== ""       ? "#1a3a2a"
+                             :                                          "#2a2a3a"
                         implicitWidth: backendBadge.implicitWidth + 10
                         implicitHeight: backendBadge.implicitHeight + 4
                         ToolTip.visible: backendHover.hovered
-                        ToolTip.text: ttsController.ttsBackend !== ""
-                            ? qsTr("GPU inference via %1").arg(ttsController.ttsBackend)
-                            : qsTr("CPU inference")
+                        ToolTip.text: ttsController.ttsBackend === "Cloud"
+                                    ? qsTr("Cloud synthesis via Azure Speech")
+                                    : ttsController.ttsBackend !== ""
+                                    ? qsTr("GPU inference via %1").arg(ttsController.ttsBackend)
+                                    : qsTr("CPU inference")
                         HoverHandler { id: backendHover }
 
                         Label {
@@ -330,7 +336,9 @@ Item {
                             anchors.centerIn: parent
                             text: ttsController.ttsBackend !== "" ? ttsController.ttsBackend
                                                                   : qsTr("CPU")
-                            color: ttsController.ttsBackend !== "" ? "#a6e3a1" : "#6c7086"
+                            color: ttsController.ttsBackend === "Cloud" ? "#89b4fa"
+                                 : ttsController.ttsBackend !== ""       ? "#a6e3a1"
+                                 :                                          "#6c7086"
                             font.pixelSize: 10
                             font.bold: true
                         }

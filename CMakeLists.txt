@@ -79,6 +79,7 @@ qt_add_executable(PinPoint
     src/STT/stt_processor.h          src/STT/stt_processor.cpp
     src/TTS/TTSEngine.h              src/TTS/TTSEngine.cpp
     src/TTS/TTSEngineFactory.h       src/TTS/TTSEngineFactory.cpp
+    src/TTS/AzureTTSEngine.h         src/TTS/AzureTTSEngine.cpp
     src/TTS/KokoroTTSEngine.h        src/TTS/KokoroTTSEngine.cpp
     src/TTS/PhonemeTokenizer.h       src/TTS/PhonemeTokenizer.cpp
     src/TTS/TtsWorker.h              src/TTS/TtsWorker.cpp

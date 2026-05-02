@@ -1,7 +1,9 @@
 #include "tts_controller.h"
 
 #include "audio_output.h"
+#include "AzureTTSEngine.h"
 #include "ModelDownloader.h"
+#include "SecretsManager.h"
 #include "TTSEngineFactory.h"
 #include "TtsWorker.h"
 
@@ -12,6 +14,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QThread>
+#include <QTimer>
 
 // ---------------------------------------------------------------------------
 // Kokoro model download URLs
@@ -63,17 +66,8 @@ TtsController::TtsController(QObject *parent)
     m_audioOutput->setPreferredFormat(ttsFormat);
     m_audioOutput->start();
 
-    connect(m_worker, &TtsWorker::audioReady,
-            this, &TtsController::onAudioReady,
-            Qt::QueuedConnection);
-
-    // ---- Worker signals -----------------------------------------------------
-    connect(m_worker, &TtsWorker::modelReady,         this, &TtsController::onModelReady);
-    connect(m_worker, &TtsWorker::modelFailed,        this, &TtsController::onModelFailed);
-    connect(m_worker, &TtsWorker::backendChanged,     this, &TtsController::onBackendChanged);
-    connect(m_worker, &TtsWorker::synthesisStarted,   this, &TtsController::onSynthesisStarted);
-    connect(m_worker, &TtsWorker::synthesisFinished,  this, &TtsController::onSynthesisFinished);
-    connect(m_worker, &TtsWorker::errorOccurred,      this, &TtsController::onTtsError);
+    // ---- Worker signals (also used when hot-swapping to Azure) --------------
+    connectWorkerSignals();
 
     // ---- Downloader signals -------------------------------------------------
     connect(m_downloader, &ModelDownloader::progress,
@@ -139,7 +133,7 @@ void TtsController::setVoice(const QString &voice)
     m_voice = voice;
     emit voiceChanged();
 
-    if (modelFilesExist())
+    if (!m_usingCloudTts && modelFilesExist())
         triggerModelLoad();
 }
 
@@ -178,6 +172,8 @@ void TtsController::onAudioReady(const QByteArray &data, const QAudioFormat &for
 
 void TtsController::onModelReady()
 {
+    if (m_switchingToAzure)
+        return;  // Kokoro loaded on CPU; Azure switch is pending — don't signal ready yet
     m_ttsReady = true;
     emit ttsReadyChanged();
 }
@@ -191,6 +187,20 @@ void TtsController::onModelFailed(const QString &error)
 
 void TtsController::onBackendChanged(const QString &backend)
 {
+    // Kokoro loaded on CPU — fall back to Azure cloud TTS if a key is available.
+    // backendChanged fires before modelReady (guaranteed by TtsWorker::loadModel
+    // signal order), so we can abort the "ready" transition before it happens.
+    if (!m_usingCloudTts && backend.isEmpty()) {
+        const QString azureKey = SecretsManager::read(QStringLiteral("azureTtsApiKey"));
+        if (!azureKey.isEmpty()) {
+            m_usingCloudTts    = true;
+            m_switchingToAzure = true;
+            QTimer::singleShot(0, this, [this, azureKey]() { switchToAzure(azureKey); });
+            return;
+        }
+    }
+    if (m_switchingToAzure)
+        m_switchingToAzure = false;
     if (m_ttsBackend == backend)
         return;
     m_ttsBackend = backend;
@@ -218,6 +228,45 @@ void TtsController::onSynthesisFinished()
 void TtsController::onTtsError(const QString &message)
 {
     qWarning() << "[TTS]" << message;
+}
+
+// ── Worker helpers ────────────────────────────────────────────────────────────
+
+void TtsController::connectWorkerSignals()
+{
+    connect(m_worker, &TtsWorker::audioReady,
+            this, &TtsController::onAudioReady,
+            Qt::QueuedConnection);
+    connect(m_worker, &TtsWorker::modelReady,        this, &TtsController::onModelReady);
+    connect(m_worker, &TtsWorker::modelFailed,       this, &TtsController::onModelFailed);
+    connect(m_worker, &TtsWorker::backendChanged,    this, &TtsController::onBackendChanged);
+    connect(m_worker, &TtsWorker::synthesisStarted,  this, &TtsController::onSynthesisStarted);
+    connect(m_worker, &TtsWorker::synthesisFinished, this, &TtsController::onSynthesisFinished);
+    connect(m_worker, &TtsWorker::errorOccurred,     this, &TtsController::onTtsError);
+}
+
+void TtsController::switchToAzure(const QString &apiKey)
+{
+    // Abort any in-progress Kokoro model download.
+    m_downloader->abort();
+    if (m_downloading) {
+        m_downloading = false;
+        emit downloadingChanged();
+    }
+
+    // Shut down the Kokoro worker thread.
+    m_workerThread->quit();
+    m_workerThread->wait();
+    delete m_worker;
+    m_worker = nullptr;
+
+    // Spin up an Azure TTS worker on the same thread.
+    auto engine = std::make_unique<AzureTTSEngine>(apiKey);
+    m_worker    = new TtsWorker(engine.release());
+    m_worker->moveToThread(m_workerThread);
+    connectWorkerSignals();
+    m_workerThread->start();
+    triggerModelLoad();
 }
 
 // ── Downloader slots ──────────────────────────────────────────────────────────

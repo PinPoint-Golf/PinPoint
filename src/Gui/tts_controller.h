@@ -88,6 +88,8 @@ private:
     void    startDownload();
     void    triggerModelLoad();
     void    setDownloadStatus(const QString &status);
+    void    connectWorkerSignals();
+    void    switchToAzure(const QString &apiKey);
 
     QString modelDataDir()    const;
     QString resolveModelPath()  const;
@@ -102,6 +104,8 @@ private:
     bool         m_ttsReady         = false;
     bool         m_ttsActive        = false;
     bool         m_downloading      = false;
+    bool         m_usingCloudTts    = false;
+    bool         m_switchingToAzure = false;
     qreal        m_downloadProgress = 0.0;
     QString      m_downloadStatus;
     QString      m_ttsBackend;
