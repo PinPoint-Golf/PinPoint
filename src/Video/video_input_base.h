@@ -3,8 +3,6 @@
 #include <QObject>
 #include <QVideoFrameFormat>
 
-class VideoFrameProcessorBase;
-
 // Abstract base for camera / video capture.
 //
 // Subclasses implement the transport (Qt6 QCamera, platform-specific, etc.)
@@ -12,7 +10,6 @@ class VideoFrameProcessorBase;
 //
 // Typical usage:
 //   VideoInput *in = new VideoInput(this);
-//   in->connectProcessor(myProcessor);
 //   in->start();                           // default camera
 //   in->start("Front Camera");             // named device
 
@@ -50,14 +47,6 @@ public:
     virtual bool              isActive()    const = 0;
     virtual QVideoFrameFormat frameFormat() const = 0;
     virtual State             state()       const;
-
-    // -----------------------------------------------------------------------
-    // Processor wiring
-    // -----------------------------------------------------------------------
-
-    // Connects videoFrameReady → processor->processFrame via a queued connection
-    // so the processor runs on its own thread if moved there.
-    void connectProcessor(VideoFrameProcessorBase *processor);
 
 signals:
     // Emitted for every decoded camera frame.

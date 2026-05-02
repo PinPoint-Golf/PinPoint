@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
+import QtMultimedia
 
 Item {
 
@@ -24,18 +25,12 @@ Item {
             color: "#181825"
             radius: 6
 
-            Image {
-                id: cameraFrame
+            VideoOutput {
+                id: videoOut
                 anchors.fill: parent
                 anchors.margins: 2
-                // Appending frameId to the URL forces QML to re-request the
-                // image from the provider on every new frame.
-                source: videoController.isRecording
-                        ? "image://videoframe/frame?t=" + videoController.frameId
-                        : ""
-                cache: false
-                asynchronous: true
-                fillMode: Image.PreserveAspectFit
+                fillMode: VideoOutput.PreserveAspectFit
+                Component.onCompleted: videoController.setVideoSink(videoOut.videoSink)
             }
 
             Label {

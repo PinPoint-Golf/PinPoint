@@ -15,7 +15,6 @@ int main(int argc, char *argv[])
     VideoController         videoController;
 
     QQmlApplicationEngine engine;
-    engine.addImageProvider(QStringLiteral("videoframe"), videoController.imageProvider());
     engine.rootContext()->setContextProperty(QStringLiteral("controller"),       &controller);
     engine.rootContext()->setContextProperty(QStringLiteral("ttsController"),    &ttsController);
     engine.rootContext()->setContextProperty(QStringLiteral("videoController"),  &videoController);

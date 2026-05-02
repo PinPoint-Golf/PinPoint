@@ -73,10 +73,8 @@ qt_add_executable(PinPoint
     src/Audio/audio_output_base.h    src/Audio/audio_output_base.cpp
     src/Audio/audio_output.h         src/Audio/audio_output.cpp
     src/Audio/audio_stream_saver.h   src/Audio/audio_stream_saver.cpp
-    src/Video/video_frame_processor_base.h src/Video/video_frame_processor_base.cpp
     src/Video/video_input_base.h           src/Video/video_input_base.cpp
     src/Video/video_input.h                src/Video/video_input.cpp
-    src/Video/video_frame_processor.h      src/Video/video_frame_processor.cpp
     src/Gui/video_controller.h             src/Gui/video_controller.cpp
     src/STT/stt_processor.h          src/STT/stt_processor.cpp
     src/TTS/TTSEngine.h              src/TTS/TTSEngine.cpp
