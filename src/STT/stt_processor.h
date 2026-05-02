@@ -42,6 +42,7 @@ public slots:
     // Call after moveToThread() to start the flush timer in the correct thread.
     void start();
     void processAudio(const QByteArray &data, const QAudioFormat &format) override;
+    void stopStreaming();
 
 signals:
     void transcriptionReceived(const QString &text);
@@ -66,7 +67,8 @@ private:
     QAudioFormat m_format;
     QString      m_modelPath;        // resolved in ctor, used in start()
     QStringList  m_searchedPaths;    // populated when model is not found
-    bool         m_needsModelFile   = true;  // false for OS-native backends
+    bool         m_needsModelFile    = true;  // false for OS-native backends
+    bool         m_silenceGating    = true;  // false for cloud backends (need silence for end-of-turn)
     int          m_chunkDurationMs  = 3000;
     double       m_silenceThreshold = 0.01;
 };

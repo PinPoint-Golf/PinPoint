@@ -1,7 +1,9 @@
 #include "stt_processor.h"
 #include "AudioConverter.h"
+#include "STTBackendAssemblyAI.h"
 #include "STTBackendFactory.h"
 #include "STTWorker.h"
+#include "SecretsManager.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -25,7 +27,17 @@ STTProcessor::STTProcessor(QObject *parent)
     connect(m_flushTimer, &QTimer::timeout, this, &STTProcessor::onFlushTimer);
 
     auto backend = STTBackendFactory::createDefault();
+
+    // If the best local backend can only use CPU, switch to cloud transcription
+    // when an AssemblyAI API key is available.
+    if (backend->backendLabel() == QLatin1String("CPU")) {
+        const QString apiKey = SecretsManager::read(QStringLiteral("assemblyaiApiKey"));
+        if (!apiKey.isEmpty())
+            backend = std::make_unique<STTBackendAssemblyAI>(apiKey);
+    }
+
     m_needsModelFile = backend->requiresModelFile();
+    m_silenceGating  = backend->requiresSilenceGating();
     m_worker = new STTWorker(backend.release());
     m_workerThread = new QThread;  // no parent — QThread cannot survive moveToThread recursion
     m_worker->moveToThread(m_workerThread);
@@ -79,6 +91,14 @@ void STTProcessor::start()
     m_flushTimer->start();
 }
 
+void STTProcessor::stopStreaming()
+{
+    // Discard any buffered audio so the flush timer cannot fire after this point
+    // and call transcribe() on a closed socket, which would reopen the connection.
+    m_buffer.clear();
+    QMetaObject::invokeMethod(m_worker, "stopStreaming", Qt::QueuedConnection);
+}
+
 void STTProcessor::setChunkDurationMs(int ms)
 {
     m_chunkDurationMs = ms;
@@ -96,7 +116,7 @@ void STTProcessor::onFlushTimer()
     if (m_buffer.isEmpty())
         return;
 
-    if (computeRms(m_buffer, m_format) < m_silenceThreshold) {
+    if (m_silenceGating && computeRms(m_buffer, m_format) < m_silenceThreshold) {
         m_buffer.clear();
         return;
     }

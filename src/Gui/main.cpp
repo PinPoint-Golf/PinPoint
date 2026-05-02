@@ -2,6 +2,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 
+#include "SecretsManager.h"
 #include "transcription_controller.h"
 #include "tts_controller.h"
 #include "video_controller.h"
@@ -9,6 +10,7 @@
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    SecretsManager::initializeDefaults();
 
     TranscriptionController controller;
     TtsController           ttsController;

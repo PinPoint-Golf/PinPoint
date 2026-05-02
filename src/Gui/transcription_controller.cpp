@@ -155,6 +155,7 @@ void TranscriptionController::stopListening()
     QMetaObject::invokeMethod(m_audioInput, [this]() {
         m_audioInput->stop();
     }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(m_stt, "stopStreaming", Qt::QueuedConnection);
     m_listening = false;
     emit isListeningChanged();
 }

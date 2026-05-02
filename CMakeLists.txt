@@ -4,7 +4,7 @@ project(PinPoint VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 SerialPort Bluetooth Multimedia Network)
+find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 SerialPort Bluetooth Multimedia Network WebSockets)
 
 qt_standard_project_setup(REQUIRES 6.10)
 
@@ -85,7 +85,7 @@ qt_add_executable(PinPoint
     src/TTS/ModelDownloader.h        src/TTS/ModelDownloader.cpp
 )
 
-target_include_directories(PinPoint PRIVATE src/Gui src/IMU src/Audio src/Video src/STT src/TTS)
+target_include_directories(PinPoint PRIVATE src/Gui src/IMU src/Audio src/Video src/STT src/TTS src/Secrets)
 
 qt_add_qml_module(PinPoint
     URI PinPoint
@@ -117,7 +117,7 @@ configure_file(
 
 
 target_link_libraries(PinPoint
-    PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::SerialPort Qt6::Bluetooth Qt6::Multimedia Qt6::Network
+    PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::SerialPort Qt6::Bluetooth Qt6::Multimedia Qt6::Network Qt6::WebSockets
 )
 
 target_sources(PinPoint PRIVATE
@@ -128,9 +128,31 @@ target_sources(PinPoint PRIVATE
     src/STT/STTBackendFactory.cpp
     src/STT/STTBackendWhisperCpp.h
     src/STT/STTBackendWhisperCpp.cpp
+    src/STT/STTBackendAssemblyAI.h
+    src/STT/STTBackendAssemblyAI.cpp
     src/STT/STTWorker.h
     src/STT/STTWorker.cpp
 )
+
+target_sources(PinPoint PRIVATE
+    src/Secrets/SecretsManager.h
+    src/Secrets/SecretsManager.cpp
+)
+
+# ── AssemblyAI cloud STT fallback ────────────────────────────────────────────
+# Pass -DASSEMBLYAI_API_KEY=<key> at cmake configure time to seed the key into
+# QSettings on first run. After that the key is read from QSettings and this
+# flag is no longer needed. The key can also be supplied at any time via the
+# ASSEMBLYAI_API_KEY environment variable (takes priority over QSettings).
+set(ASSEMBLYAI_API_KEY "" CACHE STRING
+    "AssemblyAI API key — written to QSettings on first run, not needed after that")
+if(ASSEMBLYAI_API_KEY)
+    target_compile_definitions(PinPoint PRIVATE
+        ASSEMBLYAI_API_KEY_DEFAULT="${ASSEMBLYAI_API_KEY}")
+    message(STATUS "AssemblyAI: API key provided (will be seeded to QSettings on first run)")
+else()
+    message(STATUS "AssemblyAI: no API key — cloud STT fallback disabled until key is set")
+endif()
 
 target_link_libraries(PinPoint PRIVATE whisper samplerate)
 target_include_directories(PinPoint PRIVATE

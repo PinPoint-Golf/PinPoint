@@ -13,6 +13,7 @@ public:
 public slots:
   void loadModel(const QString& modelPath);
   void transcribe(const std::vector<float>& pcmF32);
+  void stopStreaming();
 
 signals:
   void modelReady();

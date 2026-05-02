@@ -29,3 +29,8 @@ void STTWorker::transcribe(const std::vector<float>& pcmF32)
 {
     m_backend->transcribe(pcmF32);
 }
+
+void STTWorker::stopStreaming()
+{
+    m_backend->stopStreaming();
+}

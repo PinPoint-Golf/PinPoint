@@ -22,8 +22,18 @@ public:
   // Backends that use OS-provided models (e.g. Apple Speech) return false.
   virtual bool requiresModelFile() const { return true; }
 
+  // Returns true if silent chunks should be dropped before calling transcribe().
+  // Local backends (whisper.cpp) benefit from this — no wasted inference on silence.
+  // Cloud backends (AssemblyAI) need silence delivered so the server can detect
+  // end-of-turn and emit formatted utterances without waiting for Terminate.
+  virtual bool requiresSilenceGating() const { return true; }
+
   // Short label describing the compute backend, e.g. "CPU", "Vulkan", "CUDA", "Apple".
   virtual QString backendLabel() const { return QStringLiteral("CPU"); }
+
+  // Called when the user stops listening. Cloud backends should close their
+  // connection here; local backends can ignore it.
+  virtual void stopStreaming() {}
 
 signals:
   void transcriptionReady(const QString& text);

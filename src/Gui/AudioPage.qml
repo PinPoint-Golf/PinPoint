@@ -130,20 +130,24 @@ Item {
 
                     Rectangle {
                         radius: 3
-                        color: controller.sttBackend !== "CPU" ? "#1a3a2a" : "#2a2a3a"
+                        color: controller.sttBackend === "CPU"   ? "#2a2a3a"
+                             : controller.sttBackend === "Cloud" ? "#1a2a3a"
+                             : "#1a3a2a"
                         implicitWidth: sttBackendBadge.implicitWidth + 10
                         implicitHeight: sttBackendBadge.implicitHeight + 4
                         ToolTip.visible: sttBackendHover.hovered
-                        ToolTip.text: controller.sttBackend !== "CPU"
-                            ? qsTr("GPU transcription via %1").arg(controller.sttBackend)
-                            : qsTr("CPU transcription")
+                        ToolTip.text: controller.sttBackend === "CPU"   ? qsTr("CPU transcription")
+                                    : controller.sttBackend === "Cloud" ? qsTr("Cloud transcription via AssemblyAI")
+                                    : qsTr("GPU transcription via %1").arg(controller.sttBackend)
                         HoverHandler { id: sttBackendHover }
 
                         Label {
                             id: sttBackendBadge
                             anchors.centerIn: parent
                             text: controller.sttBackend
-                            color: controller.sttBackend !== "CPU" ? "#a6e3a1" : "#6c7086"
+                            color: controller.sttBackend === "CPU"   ? "#6c7086"
+                                 : controller.sttBackend === "Cloud" ? "#89b4fa"
+                                 : "#a6e3a1"
                             font.pixelSize: 10
                             font.bold: true
                         }
