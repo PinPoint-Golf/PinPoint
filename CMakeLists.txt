@@ -261,6 +261,7 @@ else()
         GIT_REPOSITORY https://github.com/espeak-ng/espeak-ng.git
         GIT_TAG        1.52.0
         GIT_SHALLOW    TRUE
+        EXCLUDE_FROM_ALL
         PATCH_COMMAND
             ${CMAKE_COMMAND}
             "-DFILE1=${CMAKE_BINARY_DIR}/_deps/espeak_ng-src/src/CMakeLists.txt"
@@ -268,11 +269,7 @@ else()
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchEspeakNg.cmake"
     )
     set(ESPEAK_BUILD_MANPAGES OFF CACHE BOOL "" FORCE)
-    FetchContent_GetProperties(espeak_ng)
-    if(NOT espeak_ng_POPULATED)
-        FetchContent_Populate(espeak_ng)
-        add_subdirectory(${espeak_ng_SOURCE_DIR} ${espeak_ng_BINARY_DIR} EXCLUDE_FROM_ALL)
-    endif()
+    FetchContent_MakeAvailable(espeak_ng)
     target_link_libraries(PinPoint PRIVATE espeak-ng)
     target_include_directories(PinPoint PRIVATE "${espeak_ng_SOURCE_DIR}/src/include")
     target_compile_definitions(PinPoint PRIVATE HAVE_ESPEAK_NG)
