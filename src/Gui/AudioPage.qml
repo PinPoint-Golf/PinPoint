@@ -128,6 +128,15 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
+                    Label {
+                        visible: controller.lastSttLatencyMs > 0
+                        text: controller.lastSttLatencyMs < 1000
+                              ? controller.lastSttLatencyMs + "ms"
+                              : (controller.lastSttLatencyMs / 1000).toFixed(1) + "s"
+                        color: "#6c7086"
+                        font.pixelSize: 10
+                    }
+
                     Rectangle {
                         radius: 3
                         color: controller.sttBackend === "CPU"   ? "#2a2a3a"
@@ -309,6 +318,15 @@ Item {
                     }
 
                     Item { Layout.fillWidth: true }
+
+                    Label {
+                        visible: ttsController.lastTtsLatencyMs > 0
+                        text: ttsController.lastTtsLatencyMs < 1000
+                              ? ttsController.lastTtsLatencyMs + "ms"
+                              : (ttsController.lastTtsLatencyMs / 1000).toFixed(1) + "s"
+                        color: "#6c7086"
+                        font.pixelSize: 10
+                    }
 
                     Rectangle {
                         width: 8; height: 8; radius: 4

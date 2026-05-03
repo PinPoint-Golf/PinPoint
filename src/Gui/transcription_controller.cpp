@@ -36,6 +36,8 @@ TranscriptionController::TranscriptionController(QObject *parent)
 
     connect(m_stt, &STTProcessor::transcriptionReceived,
             this, &TranscriptionController::onTranscriptionReceived);
+    connect(m_stt, &STTProcessor::transcriptionDispatched,
+            this, &TranscriptionController::onTranscriptionDispatched);
     connect(m_stt, &STTProcessor::backendLabelReady,
             this, &TranscriptionController::onBackendLabelReady);
     connect(m_stt, &STTProcessor::errorOccurred,
@@ -135,8 +137,18 @@ void TranscriptionController::toggleSttBackend()
     }, Qt::QueuedConnection);
 }
 
+void TranscriptionController::onTranscriptionDispatched()
+{
+    m_sttDispatchTimer.restart();
+}
+
 void TranscriptionController::onTranscriptionReceived(const QString &text)
 {
+    if (m_sttDispatchTimer.isValid()) {
+        m_lastSttLatencyMs = m_sttDispatchTimer.elapsed();
+        m_sttDispatchTimer.invalidate();
+        emit lastSttLatencyMsChanged();
+    }
     if (!m_transcript.isEmpty())
         m_transcript += QLatin1Char('\n');
     m_transcript += text;

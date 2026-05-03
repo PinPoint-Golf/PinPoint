@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QThread>
+#include <QElapsedTimer>
 
 class AudioInput;
 class AudioInputBase;
@@ -18,6 +19,7 @@ class TranscriptionController : public QObject
     Q_PROPERTY(bool   isListening             READ isListening             NOTIFY isListeningChanged)
     Q_PROPERTY(QString sttBackend             READ sttBackend              NOTIFY sttBackendChanged)
     Q_PROPERTY(bool   cloudSttFallbackAvailable READ cloudSttFallbackAvailable NOTIFY cloudSttFallbackAvailableChanged)
+    Q_PROPERTY(qint64 lastSttLatencyMs        READ lastSttLatencyMs        NOTIFY lastSttLatencyMsChanged)
 
 public:
     explicit TranscriptionController(QObject *parent = nullptr);
@@ -27,6 +29,7 @@ public:
     bool    isListening()             const { return m_listening; }
     QString sttBackend()              const { return m_sttBackend; }
     bool    cloudSttFallbackAvailable() const { return m_sttCloudToggleAvailable; }
+    qint64  lastSttLatencyMs()        const { return m_lastSttLatencyMs; }
 
 public slots:
     void startListening();
@@ -39,9 +42,11 @@ signals:
     void isListeningChanged();
     void sttBackendChanged();
     void cloudSttFallbackAvailableChanged();
+    void lastSttLatencyMsChanged();
 
 private slots:
     void onTranscriptionReceived(const QString &text);
+    void onTranscriptionDispatched();
     void onBackendLabelReady(const QString &label);
     void onAudioError(const QString &message);
     void onSTTError(const QString &message);
@@ -58,4 +63,6 @@ private:
     bool              m_listening               = false;
     bool              m_sttUsingCloud           = false;
     bool              m_sttCloudToggleAvailable = false;
+    QElapsedTimer     m_sttDispatchTimer;
+    qint64            m_lastSttLatencyMs        = 0;
 };

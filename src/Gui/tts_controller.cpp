@@ -232,6 +232,7 @@ void TtsController::onSynthesisStarted()
 {
     const bool hadCache = !m_lastAudioCache.isEmpty();
     m_lastAudioCache.clear();
+    m_ttsStartTimer.restart();
     m_ttsActive = true;
     emit ttsActiveChanged();
     if (hadCache)
@@ -240,6 +241,11 @@ void TtsController::onSynthesisStarted()
 
 void TtsController::onSynthesisFinished()
 {
+    if (m_ttsStartTimer.isValid()) {
+        m_lastTtsLatencyMs = m_ttsStartTimer.elapsed();
+        m_ttsStartTimer.invalidate();
+        emit lastTtsLatencyMsChanged();
+    }
     m_ttsActive = false;
     emit ttsActiveChanged();
     if (!m_lastAudioCache.isEmpty())

@@ -194,10 +194,12 @@ void STTProcessor::onFlushTimer()
         m_format.sampleRate(),
         m_format.channelCount(),
         m_format.sampleFormat());
-    if (!pcmF32.empty())
+    if (!pcmF32.empty()) {
+        emit transcriptionDispatched();
         QMetaObject::invokeMethod(m_worker, "transcribe",
                                   Qt::QueuedConnection,
                                   Q_ARG(std::vector<float>, pcmF32));
+    }
 }
 
 // Returns RMS amplitude normalised to 0.0–1.0.  Supports Int16 and Float formats;

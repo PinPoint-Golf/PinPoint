@@ -1,5 +1,6 @@
 #pragma once
 #include <QAudioFormat>
+#include <QElapsedTimer>
 #include <QObject>
 #include <QStringList>
 #include <QThread>
@@ -39,6 +40,7 @@ class TtsController : public QObject
     Q_PROPERTY(bool        cloudTtsFallbackAvailable READ cloudTtsFallbackAvailable NOTIFY cloudTtsFallbackAvailableChanged)
     Q_PROPERTY(QStringList voices                    READ voices                    CONSTANT)
     Q_PROPERTY(QString     voice                     READ voice                     WRITE setVoice NOTIFY voiceChanged)
+    Q_PROPERTY(qint64      lastTtsLatencyMs          READ lastTtsLatencyMs          NOTIFY lastTtsLatencyMsChanged)
 
 public:
     explicit TtsController(QObject *parent = nullptr);
@@ -55,6 +57,7 @@ public:
     QStringList voices()                    const;
     QString     voice()                     const { return m_voice; }
     void        setVoice(const QString &voice);
+    qint64      lastTtsLatencyMs()          const { return m_lastTtsLatencyMs; }
 
     Q_INVOKABLE void speak(const QString &text);
     Q_INVOKABLE void stopSpeaking();
@@ -71,6 +74,7 @@ signals:
     void ttsBackendChanged();
     void cloudTtsFallbackAvailableChanged();
     void voiceChanged();
+    void lastTtsLatencyMsChanged();
 
 private slots:
     void onModelReady();
@@ -106,17 +110,19 @@ private:
     AudioOutput     *m_audioOutput;
     ModelDownloader *m_downloader;
 
-    bool         m_ttsReady             = false;
-    bool         m_ttsActive            = false;
-    bool         m_downloading          = false;
-    bool         m_usingCloudTts        = false;
-    bool         m_switchingToAzure     = false;
-    bool         m_forceLocalTts        = false;
-    bool         m_cloudToggleAvailable = false;
-    qreal        m_downloadProgress = 0.0;
-    QString      m_downloadStatus;
-    QString      m_ttsBackend;
-    QString      m_voice = QStringLiteral("af_sky");
-    QByteArray   m_lastAudioCache;
-    QAudioFormat m_lastAudioFormat;
+    bool          m_ttsReady             = false;
+    bool          m_ttsActive            = false;
+    bool          m_downloading          = false;
+    bool          m_usingCloudTts        = false;
+    bool          m_switchingToAzure     = false;
+    bool          m_forceLocalTts        = false;
+    bool          m_cloudToggleAvailable = false;
+    qreal         m_downloadProgress = 0.0;
+    QString       m_downloadStatus;
+    QString       m_ttsBackend;
+    QString       m_voice = QStringLiteral("af_sky");
+    QByteArray    m_lastAudioCache;
+    QAudioFormat  m_lastAudioFormat;
+    QElapsedTimer m_ttsStartTimer;
+    qint64        m_lastTtsLatencyMs = 0;
 };

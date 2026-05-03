@@ -49,6 +49,7 @@ public slots:
 
 signals:
     void transcriptionReceived(const QString &text);
+    void transcriptionDispatched();
     void errorOccurred(const QString &message);
     void modelReady();
     void modelNotFound(const QStringList &searchedPaths);
