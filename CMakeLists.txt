@@ -171,27 +171,26 @@ target_include_directories(PinPoint PRIVATE
 )
 
 # ── ONNX Runtime (auto-fetched prebuilt) ─────────────────────────────────────
-# ORT_GPU=ON downloads the GPU-enabled binary:
-#   - Linux/Windows: CUDA execution provider (falls back to CPU at runtime if no GPU)
-#   - macOS ARM64:   CoreML is always available in the standard binary (no separate download)
-#   - macOS x86_64:  CoreML dylib present but unusable with Kokoro's dynamic shapes — CPU only
-option(ORT_GPU "Download GPU-enabled ONNX Runtime build (CUDA on Linux/Windows)" ON)
+# Three independent EP flags — each defaults ON; platform guards below control
+# which ones are actually wired up and which GPU binary is downloaded.
+# CPU EP is always the implicit fallback at runtime regardless of these flags.
+option(WITH_CUDA     "Enable CUDA execution provider (Linux/Windows)"    ON)
+option(WITH_DIRECTML "Enable DirectML execution provider (Windows only)" ON)
+option(WITH_COREML   "Enable CoreML execution provider (macOS ARM64)"    ON)
 
 set(ORT_VERSION "1.25.1")
-set(_ort_coreml FALSE)
-set(_ort_cuda   FALSE)
 
+# Select prebuilt binary. GPU binary is required when CUDA or DirectML is enabled.
 if(WIN32)
-    if(ORT_GPU)
+    if(WITH_CUDA OR WITH_DIRECTML)
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-win-x64-gpu-${ORT_VERSION}.zip")
-        set(_ort_cuda TRUE)
     else()
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-win-x64-${ORT_VERSION}.zip")
     endif()
 elseif(APPLE)
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz")
-        set(_ort_coreml TRUE)  # CoreML is included in every macOS ARM64 prebuilt
+        # CoreML is included in every macOS ARM64 prebuilt — no separate download needed.
     else()
         # ONNX Runtime 1.21+ dropped Intel macOS (x86_64) prebuilts; pin to the last available.
         set(ORT_VERSION "1.20.1")
@@ -201,10 +200,9 @@ elseif(APPLE)
         # every subgraph ("unbounded dimension"), then hangs or fails to compile
         # what remains. CPU is faster and more correct here.
     endif()
-else()
-    if(ORT_GPU)
+else()  # Linux
+    if(WITH_CUDA)
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz")
-        set(_ort_cuda TRUE)
     else()
         set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz")
     endif()
@@ -224,17 +222,23 @@ endif()
 
 target_include_directories(PinPoint PRIVATE "${_ort_root}/include")
 target_compile_definitions(PinPoint PRIVATE HAVE_ONNXRUNTIME)
-if(_ort_coreml)
-    target_compile_definitions(PinPoint PRIVATE ORT_COREML)
+
+# Propagate each EP flag to C++ only on platforms where it is supported.
+if(WITH_COREML AND APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    target_compile_definitions(PinPoint PRIVATE WITH_COREML)
 endif()
-if(_ort_cuda)
-    target_compile_definitions(PinPoint PRIVATE ORT_CUDA)
+if(WITH_CUDA AND NOT APPLE)
+    target_compile_definitions(PinPoint PRIVATE WITH_CUDA)
 endif()
+if(WITH_DIRECTML AND WIN32)
+    target_compile_definitions(PinPoint PRIVATE WITH_DIRECTML)
+endif()
+
 if(WIN32)
     target_link_libraries(PinPoint PRIVATE "${_ort_root}/lib/onnxruntime.lib")
     install(FILES "${_ort_root}/lib/onnxruntime.dll" DESTINATION bin)
-    if(_ort_cuda)
-        # Provider shared libraries needed at runtime for CUDA
+    if(WITH_CUDA OR WITH_DIRECTML)
+        # Provider shared libraries needed at runtime for CUDA / DirectML.
         file(GLOB _ort_provider_dlls "${_ort_root}/lib/onnxruntime_providers*.dll")
         foreach(_dll ${_ort_provider_dlls})
             install(FILES "${_dll}" DESTINATION bin)
@@ -247,7 +251,19 @@ elseif(APPLE)
 else()
     target_link_libraries(PinPoint PRIVATE "${_ort_root}/lib/libonnxruntime.so")
 endif()
-message(STATUS "ONNX Runtime ${ORT_VERSION}: ${_ort_root} [CoreML=${_ort_coreml}, CUDA=${_ort_cuda}]")
+
+set(_ort_ep_list "CPU(fallback)")
+if(WITH_COREML AND APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    list(PREPEND _ort_ep_list "CoreML")
+endif()
+if(WITH_CUDA AND NOT APPLE)
+    list(PREPEND _ort_ep_list "CUDA")
+endif()
+if(WITH_DIRECTML AND WIN32)
+    list(PREPEND _ort_ep_list "DirectML")
+endif()
+list(JOIN _ort_ep_list "+" _ort_ep_str)
+message(STATUS "ONNX Runtime ${ORT_VERSION}: ${_ort_root} [EP=${_ort_ep_str}]")
 
 # ── espeak-ng ────────────────────────────────────────────────────────────────
 find_package(PkgConfig QUIET)

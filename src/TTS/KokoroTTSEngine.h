@@ -49,7 +49,7 @@ private:
     std::vector<float> m_styleVec;          // 256-element packed float32 style vector
     bool               m_ready = false;
     std::atomic<bool>  m_stopFlag { false };
-    QString            m_gpuBackend;        // empty = CPU; "CoreML" or "CUDA" when GPU active
+    QString            m_gpuBackend;        // empty = CPU; "CoreML", "CUDA", or "DirectML" when GPU active
 
 #ifdef HAVE_ONNXRUNTIME
     struct OrtState;

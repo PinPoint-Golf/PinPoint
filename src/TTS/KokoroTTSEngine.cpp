@@ -5,8 +5,11 @@
 
 #ifdef HAVE_ONNXRUNTIME
 #  include <onnxruntime_cxx_api.h>
-#  ifdef ORT_COREML
+#  ifdef WITH_COREML
 #    include <coreml_provider_factory.h>
+#  endif
+#  ifdef WITH_DIRECTML
+#    include <dml_provider_factory.h>
 #  endif
 
 // All ONNX Runtime state is isolated in OrtState so its headers are only
@@ -29,33 +32,44 @@ KokoroTTSEngine::KokoroTTSEngine(QObject *parent)
     m_ort->opts.SetIntraOpNumThreads(2);
     m_ort->opts.SetGraphOptimizationLevel(ORT_ENABLE_ALL);
 
-#if defined(ORT_COREML)
+#ifdef WITH_COREML
     try {
-        // flags=0: let ORT decide which ops to offload to CoreML.
-        // ORT_COREML is only defined on ARM64 macOS — the x86_64 prebuilt ships
-        // the CoreML dylib but Kokoro's fully-dynamic shapes make it unusable there.
         Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(m_ort->opts, COREML_FLAG_USE_NONE));
         m_gpuBackend = QStringLiteral("CoreML");
     } catch (const Ort::Exception &e) {
-        qDebug() << "KokoroTTS: CoreML unavailable:" << e.what() << "— using CPU";
+        qDebug() << "KokoroTTS: CoreML unavailable:" << e.what() << "— falling back";
     }
-#elif defined(ORT_CUDA)
-    // On Linux, probe for the NVIDIA kernel driver before asking ORT to load
-    // the CUDA provider — avoids a verbose internal ORT error on machines with
-    // no NVIDIA GPU (where the provider library loads but its CUDA deps don't).
+#endif
+
+#ifdef WITH_CUDA
+    if (m_gpuBackend.isEmpty()) {
+        // Probe for the NVIDIA kernel driver before asking ORT to load the CUDA
+        // provider — avoids verbose internal ORT errors on machines with no NVIDIA GPU.
 #  ifdef Q_OS_LINUX
-    if (!QFile::exists(QStringLiteral("/proc/driver/nvidia/version"))) {
-        qDebug() << "KokoroTTS: No NVIDIA GPU detected — using CPU";
-    } else
+        if (!QFile::exists(QStringLiteral("/proc/driver/nvidia/version"))) {
+            qDebug() << "KokoroTTS: No NVIDIA GPU detected — skipping CUDA EP";
+        } else
 #  endif
-    {
+        {
+            try {
+                OrtCUDAProviderOptions cuda{};
+                cuda.device_id = 0;
+                m_ort->opts.AppendExecutionProvider_CUDA(cuda);
+                m_gpuBackend = QStringLiteral("CUDA");
+            } catch (const Ort::Exception &e) {
+                qDebug() << "KokoroTTS: CUDA unavailable:" << e.what() << "— falling back";
+            }
+        }
+    }
+#endif
+
+#ifdef WITH_DIRECTML
+    if (m_gpuBackend.isEmpty()) {
         try {
-            OrtCUDAProviderOptions cuda{};
-            cuda.device_id = 0;
-            m_ort->opts.AppendExecutionProvider_CUDA(cuda);
-            m_gpuBackend = QStringLiteral("CUDA");
+            Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_DML(m_ort->opts, 0));
+            m_gpuBackend = QStringLiteral("DirectML");
         } catch (const Ort::Exception &e) {
-            qDebug() << "KokoroTTS: CUDA unavailable:" << e.what() << "— using CPU";
+            qDebug() << "KokoroTTS: DirectML unavailable:" << e.what() << "— falling back";
         }
     }
 #endif
