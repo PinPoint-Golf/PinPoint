@@ -102,6 +102,68 @@ void STTProcessor::stopStreaming()
     QMetaObject::invokeMethod(m_worker, "stopStreaming", Qt::QueuedConnection);
 }
 
+void STTProcessor::swapBackend(bool forceCloud)
+{
+    m_flushTimer->stop();
+    m_buffer.clear();
+
+    if (m_workerThread) {
+        m_workerThread->quit();
+        m_workerThread->wait();
+        delete m_workerThread;
+        m_workerThread = nullptr;
+        m_worker = nullptr;  // deleted via QThread::finished -> QObject::deleteLater
+    }
+
+    std::unique_ptr<STTBackend> backend;
+    if (forceCloud) {
+        QString apiKey = SecretsManager::read(QStringLiteral("azureSttApiKey"));
+        if (apiKey.isEmpty())
+            apiKey = SecretsManager::read(QStringLiteral("azureTtsApiKey"));
+        backend = std::make_unique<STTBackendAzure>(apiKey);
+    } else {
+        backend = STTBackendFactory::createDefault();
+    }
+
+    m_needsModelFile = backend->requiresModelFile();
+    m_silenceGating  = backend->requiresSilenceGating();
+    m_worker = new STTWorker(backend.release());
+    m_workerThread = new QThread;
+    m_worker->moveToThread(m_workerThread);
+
+    connect(m_worker, &STTWorker::transcriptionReady,
+            this,     &STTProcessor::transcriptionReceived);
+    connect(m_worker, &STTWorker::transcriptionFailed,
+            this,     &STTProcessor::errorOccurred);
+    connect(m_worker, &STTWorker::modelReady,
+            this,     &STTProcessor::modelReady);
+    connect(m_worker, &STTWorker::modelFailed,
+            this,     &STTProcessor::errorOccurred);
+    connect(m_worker, &STTWorker::backendLabelReady,
+            this,     &STTProcessor::backendLabelReady);
+    connect(m_workerThread, &QThread::finished,
+            m_worker,       &QObject::deleteLater);
+
+    m_workerThread->start();
+
+    if (m_needsModelFile) {
+        m_modelPath = resolveModelPath(QStringLiteral("ggml-base.en.bin"));
+        if (m_modelPath.isEmpty())
+            m_searchedPaths = modelCandidates(QStringLiteral("ggml-base.en.bin"));
+    } else {
+        m_modelPath.clear();
+    }
+
+    if (m_needsModelFile && m_modelPath.isEmpty()) {
+        emit modelNotFound(m_searchedPaths);
+    } else {
+        QMetaObject::invokeMethod(m_worker, "loadModel",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(QString, m_modelPath));
+    }
+    m_flushTimer->start();
+}
+
 void STTProcessor::setChunkDurationMs(int ms)
 {
     m_chunkDurationMs = ms;

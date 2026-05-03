@@ -115,8 +115,24 @@ TranscriptionController::~TranscriptionController()
 
 void TranscriptionController::onBackendLabelReady(const QString &label)
 {
+    m_sttUsingCloud = (label == QLatin1String("Cloud"));
+    if (m_sttUsingCloud && !m_sttCloudToggleAvailable) {
+        m_sttCloudToggleAvailable = true;
+        emit cloudSttFallbackAvailableChanged();
+    }
     m_sttBackend = label;
     emit sttBackendChanged();
+}
+
+void TranscriptionController::toggleSttBackend()
+{
+    if (!m_sttCloudToggleAvailable)
+        return;
+    const bool toCloud = !m_sttUsingCloud;
+    STTProcessor *stt = m_stt;
+    QMetaObject::invokeMethod(stt, [stt, toCloud]() {
+        stt->swapBackend(toCloud);
+    }, Qt::QueuedConnection);
 }
 
 void TranscriptionController::onTranscriptionReceived(const QString &text)

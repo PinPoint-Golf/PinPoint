@@ -29,34 +29,37 @@ class TtsWorker;
 class TtsController : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(bool        ttsReady         READ ttsReady         NOTIFY ttsReadyChanged)
-    Q_PROPERTY(bool        ttsActive        READ ttsActive        NOTIFY ttsActiveChanged)
-    Q_PROPERTY(bool        canReplay        READ canReplay        NOTIFY canReplayChanged)
-    Q_PROPERTY(bool        downloading      READ downloading      NOTIFY downloadingChanged)
-    Q_PROPERTY(qreal       downloadProgress READ downloadProgress NOTIFY downloadProgressChanged)
-    Q_PROPERTY(QString     downloadStatus   READ downloadStatus   NOTIFY downloadStatusChanged)
-    Q_PROPERTY(QString     ttsBackend       READ ttsBackend       NOTIFY ttsBackendChanged)
-    Q_PROPERTY(QStringList voices           READ voices           CONSTANT)
-    Q_PROPERTY(QString     voice            READ voice            WRITE setVoice NOTIFY voiceChanged)
+    Q_PROPERTY(bool        ttsReady                  READ ttsReady                  NOTIFY ttsReadyChanged)
+    Q_PROPERTY(bool        ttsActive                 READ ttsActive                 NOTIFY ttsActiveChanged)
+    Q_PROPERTY(bool        canReplay                 READ canReplay                 NOTIFY canReplayChanged)
+    Q_PROPERTY(bool        downloading               READ downloading               NOTIFY downloadingChanged)
+    Q_PROPERTY(qreal       downloadProgress          READ downloadProgress          NOTIFY downloadProgressChanged)
+    Q_PROPERTY(QString     downloadStatus            READ downloadStatus            NOTIFY downloadStatusChanged)
+    Q_PROPERTY(QString     ttsBackend                READ ttsBackend                NOTIFY ttsBackendChanged)
+    Q_PROPERTY(bool        cloudTtsFallbackAvailable READ cloudTtsFallbackAvailable NOTIFY cloudTtsFallbackAvailableChanged)
+    Q_PROPERTY(QStringList voices                    READ voices                    CONSTANT)
+    Q_PROPERTY(QString     voice                     READ voice                     WRITE setVoice NOTIFY voiceChanged)
 
 public:
     explicit TtsController(QObject *parent = nullptr);
     ~TtsController() override;
 
-    bool        ttsReady()         const { return m_ttsReady; }
-    bool        ttsActive()        const { return m_ttsActive; }
-    bool        canReplay()        const { return !m_lastAudioCache.isEmpty(); }
-    bool        downloading()      const { return m_downloading; }
-    qreal       downloadProgress() const { return m_downloadProgress; }
-    QString     downloadStatus()   const { return m_downloadStatus; }
-    QString     ttsBackend()       const { return m_ttsBackend; }
-    QStringList voices()           const;
-    QString     voice()            const { return m_voice; }
+    bool        ttsReady()                  const { return m_ttsReady; }
+    bool        ttsActive()                 const { return m_ttsActive; }
+    bool        canReplay()                 const { return !m_lastAudioCache.isEmpty(); }
+    bool        downloading()               const { return m_downloading; }
+    qreal       downloadProgress()          const { return m_downloadProgress; }
+    QString     downloadStatus()            const { return m_downloadStatus; }
+    QString     ttsBackend()               const { return m_ttsBackend; }
+    bool        cloudTtsFallbackAvailable() const { return m_cloudToggleAvailable; }
+    QStringList voices()                    const;
+    QString     voice()                     const { return m_voice; }
     void        setVoice(const QString &voice);
 
     Q_INVOKABLE void speak(const QString &text);
     Q_INVOKABLE void stopSpeaking();
     Q_INVOKABLE void replayLastAudio();
+    Q_INVOKABLE void toggleTtsBackend();
 
 signals:
     void ttsReadyChanged();
@@ -66,6 +69,7 @@ signals:
     void downloadProgressChanged();
     void downloadStatusChanged();
     void ttsBackendChanged();
+    void cloudTtsFallbackAvailableChanged();
     void voiceChanged();
 
 private slots:
@@ -90,6 +94,7 @@ private:
     void    setDownloadStatus(const QString &status);
     void    connectWorkerSignals();
     void    switchToAzure(const QString &apiKey);
+    void    switchToKokoro();
 
     QString modelDataDir()    const;
     QString resolveModelPath()  const;
@@ -101,11 +106,13 @@ private:
     AudioOutput     *m_audioOutput;
     ModelDownloader *m_downloader;
 
-    bool         m_ttsReady         = false;
-    bool         m_ttsActive        = false;
-    bool         m_downloading      = false;
-    bool         m_usingCloudTts    = false;
-    bool         m_switchingToAzure = false;
+    bool         m_ttsReady             = false;
+    bool         m_ttsActive            = false;
+    bool         m_downloading          = false;
+    bool         m_usingCloudTts        = false;
+    bool         m_switchingToAzure     = false;
+    bool         m_forceLocalTts        = false;
+    bool         m_cloudToggleAvailable = false;
     qreal        m_downloadProgress = 0.0;
     QString      m_downloadStatus;
     QString      m_ttsBackend;

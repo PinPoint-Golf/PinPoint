@@ -136,10 +136,22 @@ Item {
                         implicitWidth: sttBackendBadge.implicitWidth + 10
                         implicitHeight: sttBackendBadge.implicitHeight + 4
                         ToolTip.visible: sttBackendHover.hovered
-                        ToolTip.text: controller.sttBackend === "CPU"   ? qsTr("CPU transcription")
-                                    : controller.sttBackend === "Cloud" ? qsTr("Cloud transcription via AssemblyAI")
-                                    : qsTr("GPU transcription via %1").arg(controller.sttBackend)
-                        HoverHandler { id: sttBackendHover }
+                        ToolTip.text: controller.cloudSttFallbackAvailable
+                            ? (controller.sttBackend === "Cloud"
+                               ? qsTr("Cloud STT (Azure) — click to switch to CPU")
+                               : qsTr("CPU transcription — click to switch to Cloud"))
+                            : (controller.sttBackend === "CPU"   ? qsTr("CPU transcription")
+                             : controller.sttBackend === "Cloud" ? qsTr("Cloud transcription via Azure")
+                             : qsTr("GPU transcription via %1").arg(controller.sttBackend))
+                        HoverHandler {
+                            id: sttBackendHover
+                            cursorShape: controller.cloudSttFallbackAvailable
+                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
+                        TapHandler {
+                            enabled: controller.cloudSttFallbackAvailable
+                            onTapped: controller.toggleSttBackend()
+                        }
 
                         Label {
                             id: sttBackendBadge
@@ -324,12 +336,24 @@ Item {
                         implicitWidth: backendBadge.implicitWidth + 10
                         implicitHeight: backendBadge.implicitHeight + 4
                         ToolTip.visible: backendHover.hovered
-                        ToolTip.text: ttsController.ttsBackend === "Cloud"
-                                    ? qsTr("Cloud synthesis via Azure Speech")
-                                    : ttsController.ttsBackend !== ""
-                                    ? qsTr("GPU inference via %1").arg(ttsController.ttsBackend)
-                                    : qsTr("CPU inference")
-                        HoverHandler { id: backendHover }
+                        ToolTip.text: ttsController.cloudTtsFallbackAvailable
+                            ? (ttsController.ttsBackend === "Cloud"
+                               ? qsTr("Cloud TTS (Azure) — click to switch to CPU")
+                               : qsTr("CPU inference — click to switch to Cloud"))
+                            : (ttsController.ttsBackend === "Cloud"
+                               ? qsTr("Cloud synthesis via Azure Speech")
+                               : ttsController.ttsBackend !== ""
+                               ? qsTr("GPU inference via %1").arg(ttsController.ttsBackend)
+                               : qsTr("CPU inference"))
+                        HoverHandler {
+                            id: backendHover
+                            cursorShape: ttsController.cloudTtsFallbackAvailable
+                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
+                        TapHandler {
+                            enabled: ttsController.cloudTtsFallbackAvailable
+                            onTapped: ttsController.toggleTtsBackend()
+                        }
 
                         Label {
                             id: backendBadge

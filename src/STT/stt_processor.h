@@ -43,6 +43,9 @@ public slots:
     void start();
     void processAudio(const QByteArray &data, const QAudioFormat &format) override;
     void stopStreaming();
+    // Tear down the current backend and restart with a cloud or local backend.
+    // forceCloud=true → Azure STT; false → platform default (e.g. whisper.cpp).
+    void swapBackend(bool forceCloud);
 
 signals:
     void transcriptionReceived(const QString &text);

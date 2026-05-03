@@ -154,6 +154,22 @@ void TtsController::stopSpeaking()
     }, Qt::QueuedConnection);
 }
 
+void TtsController::toggleTtsBackend()
+{
+    if (!m_cloudToggleAvailable)
+        return;
+    if (m_usingCloudTts) {
+        m_forceLocalTts = true;
+        switchToKokoro();
+    } else {
+        m_forceLocalTts = false;
+        const QString apiKey = SecretsManager::read(QStringLiteral("azureTtsApiKey"));
+        m_usingCloudTts    = true;
+        m_switchingToAzure = true;
+        QTimer::singleShot(0, this, [this, apiKey]() { switchToAzure(apiKey); });
+    }
+}
+
 void TtsController::replayLastAudio()
 {
     if (m_lastAudioCache.isEmpty() || m_ttsActive)
@@ -187,12 +203,17 @@ void TtsController::onModelFailed(const QString &error)
 
 void TtsController::onBackendChanged(const QString &backend)
 {
-    // Kokoro loaded on CPU — fall back to Azure cloud TTS if a key is available.
+    // Kokoro loaded on CPU — fall back to Azure cloud TTS if a key is available,
+    // unless the user explicitly chose to use local (CPU) by toggling.
     // backendChanged fires before modelReady (guaranteed by TtsWorker::loadModel
     // signal order), so we can abort the "ready" transition before it happens.
-    if (!m_usingCloudTts && backend.isEmpty()) {
+    if (!m_usingCloudTts && !m_forceLocalTts && backend.isEmpty()) {
         const QString azureKey = SecretsManager::read(QStringLiteral("azureTtsApiKey"));
         if (!azureKey.isEmpty()) {
+            if (!m_cloudToggleAvailable) {
+                m_cloudToggleAvailable = true;
+                emit cloudTtsFallbackAvailableChanged();
+            }
             m_usingCloudTts    = true;
             m_switchingToAzure = true;
             QTimer::singleShot(0, this, [this, azureKey]() { switchToAzure(azureKey); });
@@ -262,6 +283,25 @@ void TtsController::switchToAzure(const QString &apiKey)
 
     // Spin up an Azure TTS worker on the same thread.
     auto engine = std::make_unique<AzureTTSEngine>(apiKey);
+    m_worker    = new TtsWorker(engine.release());
+    m_worker->moveToThread(m_workerThread);
+    connectWorkerSignals();
+    m_workerThread->start();
+    triggerModelLoad();
+}
+
+void TtsController::switchToKokoro()
+{
+    m_usingCloudTts = false;
+    m_ttsReady = false;
+    emit ttsReadyChanged();
+
+    m_workerThread->quit();
+    m_workerThread->wait();
+    delete m_worker;
+    m_worker = nullptr;
+
+    auto engine = TTSEngineFactory::create(TTSEngineFactory::Backend::Kokoro);
     m_worker    = new TtsWorker(engine.release());
     m_worker->moveToThread(m_workerThread);
     connectWorkerSignals();
