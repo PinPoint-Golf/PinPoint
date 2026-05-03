@@ -23,9 +23,9 @@ public:
   virtual bool requiresModelFile() const { return true; }
 
   // Returns true if silent chunks should be dropped before calling transcribe().
-  // Local backends (whisper.cpp) benefit from this — no wasted inference on silence.
-  // Cloud backends (AssemblyAI) need silence delivered so the server can detect
-  // end-of-turn and emit formatted utterances without waiting for Terminate.
+  // Local backends (whisper.cpp) and REST cloud backends (Azure) benefit from this.
+  // WebSocket streaming backends that rely on silence for server-side end-of-turn
+  // detection (AssemblyAI) return false so all audio is delivered.
   virtual bool requiresSilenceGating() const { return true; }
 
   // Short label describing the compute backend, e.g. "CPU", "Vulkan", "CUDA", "Apple".

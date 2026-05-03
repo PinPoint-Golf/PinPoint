@@ -52,7 +52,7 @@ void SecretsManager::initializeDefaults()
 #endif
 
     // Keys whose values come from runtime env vars rather than compile-time defines.
-    static const char * const kRuntimeEnvKeys[] = { "azureTtsApiKey" };
+    static const char * const kRuntimeEnvKeys[] = { "azureTtsApiKey", "azureSttApiKey" };
     const auto env = QProcessEnvironment::systemEnvironment();
     for (const char *key : kRuntimeEnvKeys) {
         const QString qkey       = QString::fromLatin1(key);

@@ -131,6 +131,8 @@ target_sources(PinPoint PRIVATE
     src/STT/STTBackendWhisperCpp.cpp
     src/STT/STTBackendAssemblyAI.h
     src/STT/STTBackendAssemblyAI.cpp
+    src/STT/STTBackendAzure.h
+    src/STT/STTBackendAzure.cpp
     src/STT/STTWorker.h
     src/STT/STTWorker.cpp
 )
@@ -140,10 +142,16 @@ target_sources(PinPoint PRIVATE
     src/Secrets/SecretsManager.cpp
 )
 
-# ── AssemblyAI cloud STT fallback ────────────────────────────────────────────
+# ── Azure cloud STT fallback ──────────────────────────────────────────────────
+# The Azure STT backend uses the same Cognitive Services Speech resource as the
+# TTS backend, so AZURE_TTS_API_KEY is checked automatically as a fallback when
+# AZURE_STT_API_KEY is not set.  Set either env var before the first launch and
+# the value is saved to QSettings so the env var is not required on future runs.
+message(STATUS "Azure STT: key supplied via AZURE_STT_API_KEY env var or shared AZURE_TTS_API_KEY")
+
+# ── AssemblyAI cloud STT (kept for reference, not used as fallback) ───────────
 # Pass -DASSEMBLYAI_API_KEY=<key> at cmake configure time to seed the key into
-# QSettings on first run. After that the key is read from QSettings and this
-# flag is no longer needed. The key can also be supplied at any time via the
+# QSettings on first run. The key can also be supplied via the
 # ASSEMBLYAI_API_KEY environment variable (takes priority over QSettings).
 set(ASSEMBLYAI_API_KEY "" CACHE STRING
     "AssemblyAI API key — written to QSettings on first run, not needed after that")
@@ -152,7 +160,7 @@ if(ASSEMBLYAI_API_KEY)
         ASSEMBLYAI_API_KEY_DEFAULT="${ASSEMBLYAI_API_KEY}")
     message(STATUS "AssemblyAI: API key provided (will be seeded to QSettings on first run)")
 else()
-    message(STATUS "AssemblyAI: no API key — cloud STT fallback disabled until key is set")
+    message(STATUS "AssemblyAI: no API key configured")
 endif()
 
 target_link_libraries(PinPoint PRIVATE whisper samplerate)

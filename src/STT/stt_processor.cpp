@@ -1,6 +1,6 @@
 #include "stt_processor.h"
 #include "AudioConverter.h"
-#include "STTBackendAssemblyAI.h"
+#include "STTBackendAzure.h"
 #include "STTBackendFactory.h"
 #include "STTWorker.h"
 #include "SecretsManager.h"
@@ -28,12 +28,15 @@ STTProcessor::STTProcessor(QObject *parent)
 
     auto backend = STTBackendFactory::createDefault();
 
-    // If the best local backend can only use CPU, switch to cloud transcription
-    // when an AssemblyAI API key is available.
+    // If the best local backend can only use CPU, switch to Azure cloud transcription.
+    // Check azureSttApiKey first; fall back to azureTtsApiKey so a single Azure
+    // Cognitive Services resource covers both STT and TTS with one configured key.
     if (backend->backendLabel() == QLatin1String("CPU")) {
-        const QString apiKey = SecretsManager::read(QStringLiteral("assemblyaiApiKey"));
+        QString apiKey = SecretsManager::read(QStringLiteral("azureSttApiKey"));
+        if (apiKey.isEmpty())
+            apiKey = SecretsManager::read(QStringLiteral("azureTtsApiKey"));
         if (!apiKey.isEmpty())
-            backend = std::make_unique<STTBackendAssemblyAI>(apiKey);
+            backend = std::make_unique<STTBackendAzure>(apiKey);
     }
 
     m_needsModelFile = backend->requiresModelFile();
