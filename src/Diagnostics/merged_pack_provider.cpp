@@ -20,6 +20,8 @@
 
 #include <QSet>
 
+#include <algorithm>
+
 namespace pinpoint::analysis {
 
 namespace {
@@ -46,7 +48,7 @@ public:
         for (const auto &up : m_user) {
             if (!up) continue;
             for (const ValidationIssue &i : up->report().issues) m_report.issues.push_back(i);
-            mergeOne(up->pack());
+            mergeOne(up->pack(), up->origin());
         }
 
         // Re-validate the assembled library: cross-pack edges can create cycles that neither pack
@@ -58,6 +60,7 @@ public:
     const CharacteristicPack &pack() const override { return m_pack; }
     const ValidationReport   &report() const override { return m_report; }
     QString                   label() const override { return QStringLiteral("merged"); }
+    PackOrigin                origin() const override { return PackOrigin::Core; }
 
 private:
     QString qualify(const QString &packId, const QString &id) const
@@ -66,9 +69,20 @@ private:
         return packId + QLatin1Char(':') + id;
     }
 
-    void mergeOne(const CharacteristicPack &src)
+    // Replace an existing entity in place, preserving pack order so the library does not reshuffle
+    // when a user overrides one shipped characteristic.
+    template <typename T>
+    static bool replaceById(std::vector<T> &v, const T &item)
+    {
+        for (T &existing : v)
+            if (existing.id == item.id) { existing = item; return true; }
+        return false;
+    }
+
+    void mergeOne(const CharacteristicPack &src, PackOrigin origin)
     {
         if (src.id.isEmpty()) return;
+        const bool isLocal = (origin == PackOrigin::LocalUser);
 
         QSet<QString> measureIds, signalIds, conditionIds;
         for (const Measure &m : m_pack.measures)     measureIds.insert(m.id);
@@ -78,38 +92,65 @@ private:
         auto collide = [this](const QString &id, const QString &kind) {
             m_report.issues.push_back(ValidationIssue{
                 IssueSeverity::Warning, QStringLiteral("duplicateId"), id,
-                QStringLiteral("A user pack redefines %1 '%2'; the shipped definition wins.")
+                QStringLiteral("A community pack redefines %1 '%2'; the shipped definition wins.")
                     .arg(kind, id) });
         };
 
+        // LocalUser ids are kept verbatim so an override can match a core id. Community ids are
+        // namespaced so they cannot collide with core in the first place.
+        auto id_ = [&](const QString &id) { return isLocal ? id : qualify(src.id, id); };
+
         for (Measure m : src.measures) {
-            m.id = qualify(src.id, m.id);
-            if (measureIds.contains(m.id)) { collide(m.id, QStringLiteral("measure")); continue; }
+            m.id = id_(m.id);
+            if (measureIds.contains(m.id)) {
+                if (isLocal) { replaceById(m_pack.measures, m); continue; }
+                collide(m.id, QStringLiteral("measure"));
+                continue;
+            }
             m_pack.measures.push_back(std::move(m));
         }
 
         for (Signal s : src.signalDefs) {
-            s.id = qualify(src.id, s.id);
-            for (QString &mid : s.measures) mid = qualify(src.id, mid);
-            if (signalIds.contains(s.id)) { collide(s.id, QStringLiteral("signal")); continue; }
+            s.id = id_(s.id);
+            for (QString &mid : s.measures) mid = id_(mid);
+            if (signalIds.contains(s.id)) {
+                if (isLocal) { replaceById(m_pack.signalDefs, s); continue; }
+                collide(s.id, QStringLiteral("signal"));
+                continue;
+            }
             m_pack.signalDefs.push_back(std::move(s));
         }
 
         for (Condition c : src.conditions) {
-            c.id = qualify(src.id, c.id);
-            for (QString &sid : c.detectedBy) sid = qualify(src.id, sid);
-            if (!c.axis.isEmpty())      c.axis = qualify(src.id, c.axis);
-            if (!c.supersededBy.isEmpty()) c.supersededBy = qualify(src.id, c.supersededBy);
-            if (conditionIds.contains(c.id)) { collide(c.id, QStringLiteral("condition")); continue; }
+            c.id = id_(c.id);
+            for (QString &sid : c.detectedBy) sid = id_(sid);
+            if (!c.axis.isEmpty())         c.axis = id_(c.axis);
+            if (!c.supersededBy.isEmpty()) c.supersededBy = id_(c.supersededBy);
+            if (conditionIds.contains(c.id)) {
+                if (isLocal) { replaceById(m_pack.conditions, c); continue; }
+                collide(c.id, QStringLiteral("condition"));
+                continue;
+            }
             m_pack.conditions.push_back(std::move(c));
         }
 
-        // Edges may legitimately point at CORE conditions — a community pack adding a cause for a
-        // shipped characteristic is the main thing community packs are for. So an endpoint is
-        // qualified only when the unqualified id is not already a core condition.
+        // Edges may legitimately point at CORE conditions — a user or community pack adding a cause
+        // for a shipped characteristic is the main thing extra packs are for. So an endpoint is
+        // qualified only when the unqualified id is not already a known condition.
+        //
+        // A LocalUser pack REPLACES the edge set for any condition it names as an effect: otherwise
+        // removing a cause in the editor could never take effect, because the core edge would
+        // survive alongside the user's edited list.
+        if (isLocal) {
+            QSet<QString> rewritten;
+            for (const Edge &e : src.edges) rewritten.insert(e.to);
+            m_pack.edges.erase(std::remove_if(m_pack.edges.begin(), m_pack.edges.end(),
+                                              [&](const Edge &e) { return rewritten.contains(e.to); }),
+                               m_pack.edges.end());
+        }
         for (Edge e : src.edges) {
-            e.from = conditionIds.contains(e.from) ? e.from : qualify(src.id, e.from);
-            e.to   = conditionIds.contains(e.to) ? e.to : qualify(src.id, e.to);
+            e.from = conditionIds.contains(e.from) ? e.from : id_(e.from);
+            e.to   = conditionIds.contains(e.to) ? e.to : id_(e.to);
             m_pack.edges.push_back(std::move(e));
         }
     }

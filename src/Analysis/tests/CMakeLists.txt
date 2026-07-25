@@ -446,3 +446,22 @@ pp_add_test(characteristic_engine_test
     SOURCES ${DIAG}/tests/characteristic_engine_test.cpp
             ${DIAG}/relation_resolver.cpp ${DIAG}/characteristic_engine.cpp ${DIAG_PACK}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+
+# Authoring round-trip (src/Gui/characteristics/characteristic_editor_model.*): the faceted picker,
+# stub minting, save/reload, and the two ways an edit could quietly be lost — an override touching
+# the shipped pack, or a removed cause surviving underneath in core. Needs Qt Qml for QML_ELEMENT
+# and the core pack via PINPOINT_CORE_PACK (the Qt resource exists only inside the app binary).
+# AUTOMOC for the editor model (it is a QObject with Q_PROPERTY/Q_INVOKABLE).
+find_package(Qt6 REQUIRED COMPONENTS Qml)
+set(CMAKE_AUTOMOC ON)
+
+pp_add_test(characteristic_editor_test
+    SOURCES ${DIAG}/tests/characteristic_editor_test.cpp
+            ${SRC}/Gui/characteristics/characteristic_editor_model.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp ${DIAG_PACK}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
+    LINK    Qt6::Qml
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")
+set_tests_properties(characteristic_editor_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Diagnostics/packs/core.json")

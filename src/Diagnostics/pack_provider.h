@@ -31,6 +31,19 @@
 
 namespace pinpoint::analysis {
 
+// Where a pack came from. This decides who may override whom, and the distinction is load-bearing:
+//
+//   Core        — shipped, read-only.
+//   LocalUser   — this user's own library. Their deliberate edits, so they OVERRIDE core.
+//   Community   — imported from someone else. Namespaced, and core always wins.
+//
+// The brief's rule is "core wins on collision", aimed at stopping a community pack silently
+// redefining a shipped characteristic — a user reading the detail page would have no way to tell
+// which definition they were looking at. That rationale does not apply to the user editing their
+// own library: refusing their edit would make the editor useless for every shipped characteristic.
+// So the protection is kept exactly where it was aimed, and no wider.
+enum class PackOrigin { Core, LocalUser, Community };
+
 class ICharacteristicPackProvider {
 public:
     virtual ~ICharacteristicPackProvider() = default;
@@ -44,7 +57,16 @@ public:
     virtual const ValidationReport &report() const = 0;
 
     virtual QString label() const = 0;
+    virtual PackOrigin origin() const = 0;
 };
+
+// Where the user's own pack lives. Exposed so the editor writes to the same file the provider
+// reads, rather than each guessing the path.
+QString userPackPath();
+
+// Persist the user's pack. Returns false (with `whyNot` set) rather than throwing, so a failed save
+// surfaces in the UI instead of silently losing an edit.
+bool saveUserPack(const CharacteristicPack &pack, QString *whyNot = nullptr);
 
 // The shipped core pack, read from the Qt resource. Read-only.
 std::unique_ptr<ICharacteristicPackProvider> makeResourcePackProvider(
@@ -52,13 +74,14 @@ std::unique_ptr<ICharacteristicPackProvider> makeResourcePackProvider(
 
 // User packs from a directory (QStandardPaths::AppDataLocation/diagnostics by default). Every
 // *.json in the directory is a pack; an unreadable one is reported, not fatal.
-std::unique_ptr<ICharacteristicPackProvider> makeFilePackProvider(const QString &directory = QString());
+std::unique_ptr<ICharacteristicPackProvider> makeFilePackProvider(
+    const QString &directory = QString(), PackOrigin origin = PackOrigin::LocalUser);
 
-// Core + user, in that order. Namespacing and collision policy:
-//   * A user pack's entities are prefixed with "<packId>:" UNLESS they already carry a prefix.
-//   * On an id collision after prefixing, CORE WINS and the loser is reported as a warning.
-// Core winning is deliberate: a community pack must not be able to silently redefine a shipped
-// characteristic, because the user would have no way to tell which definition they were reading.
+// Core + user, in that order. Collision policy depends on origin (see PackOrigin):
+//   * LocalUser entities keep their ids and REPLACE a core entity with the same id — an override.
+//     They are not prefixed, because a prefix would make overriding impossible.
+//   * Community entities are prefixed with "<packId>:", and on a surviving collision CORE WINS,
+//     with the loser reported as a warning.
 std::unique_ptr<ICharacteristicPackProvider> makeMergedPackProvider(
     std::unique_ptr<ICharacteristicPackProvider> core,
     std::vector<std::unique_ptr<ICharacteristicPackProvider>> user);

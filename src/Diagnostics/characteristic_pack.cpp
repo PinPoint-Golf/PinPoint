@@ -689,6 +689,8 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         out.pack.edges.push_back(std::move(e));
     }
 
+    out.parsed = true;
+
     const ValidationReport structural = validatePack(out.pack);
     r.issues.insert(r.issues.end(), structural.issues.begin(), structural.issues.end());
 

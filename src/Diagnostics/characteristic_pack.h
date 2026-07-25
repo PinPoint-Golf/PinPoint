@@ -99,7 +99,12 @@ ValidationReport validatePack(const CharacteristicPack &pack);
 struct PackLoadResult {
     CharacteristicPack pack;
     ValidationReport   report;
-    bool               loaded = false;   // false => `pack` is meaningless
+    bool               loaded = false;   // parsed AND validated clean
+    // Parsed successfully, whatever validation said. An overlay pack (user or community) routinely
+    // fails standalone referential integrity — its edges point at CORE conditions it does not
+    // itself contain — so referential checks are only meaningful on the ASSEMBLED library. A caller
+    // merging packs must key off `parsed`; keying off `loaded` silently discards every overlay.
+    bool               parsed = false;
 };
 
 // Parse + validate. Parse failures land in `report` as errors rather than being thrown or logged,

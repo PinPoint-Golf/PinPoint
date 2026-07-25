@@ -29,11 +29,22 @@ Item {
     id: root
 
     CharacteristicLibraryModel { id: library }
+    CharacteristicEditorModel  { id: editor }
+
+    // Bumped whenever a save lands, so every query() binding re-evaluates. The façade is read-only
+    // by design, so an explicit nudge is cheaper and clearer than making it observable.
+    property int _revision: 0
+
+    Connections {
+        target: editor
+        function onLibraryChanged() { root._revision++ }
+    }
 
     // ── view state ────────────────────────────────────────────────────────────
     property string _groupFilter: ""    // "" = all groups
     property string _reachFilter: ""    // "" = all reaches
     property string _selectedId:  ""    // "" = directory (master)
+    property bool   _editing:     false // the authoring sheet is open
 
     // Settings-search hook (ScreenSettings.navigateToResult): return to the directory and report
     // success so the retry loop stops.
@@ -52,6 +63,7 @@ Item {
     }
 
     function _filters() {
+        var _ = root._revision            // re-query after a save
         var f = { observableOnly: true }
         if (root._groupFilter.length > 0) f.group = root._groupFilter
         if (root._reachFilter.length > 0) f.reach = root._reachFilter
@@ -109,7 +121,17 @@ Item {
                 color:               Theme.colorText3
             }
 
-            PpDisplayText { text: qsTr("Swing diagnostics") }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(12)
+
+                PpDisplayText { text: qsTr("Swing diagnostics") }
+                Item { Layout.fillWidth: true }
+                PpButton {
+                    label: qsTr("New characteristic")
+                    onClicked: { editor.beginNew(); root._editing = true }
+                }
+            }
 
             Text {
                 Layout.fillWidth: true
@@ -239,11 +261,30 @@ Item {
     // ══ Detail ════════════════════════════════════════════════════════════════
     CharacteristicDetail {
         anchors.fill: parent
-        visible: root._selectedId !== ""
-        detail:  root._selectedId !== "" ? library.detail(root._selectedId) : ({})
+        visible: root._selectedId !== "" && !root._editing
+        detail:  (root._selectedId !== "" && root._revision >= 0)
+                 ? library.detail(root._selectedId) : ({})
 
         onBack: root._selectedId = ""
         // Causes are conditions, so following one is just another detail page.
         onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }
+        onEdit: {
+            if (editor.beginEdit(root._selectedId)) root._editing = true
+        }
+    }
+
+    // ══ Editor ════════════════════════════════════════════════════════════════
+    CharacteristicEditor {
+        anchors.fill: parent
+        visible: root._editing
+        editor:  editor
+
+        onClosed: root._editing = false
+        onSaved: {
+            root._revision++
+            // A new characteristic lands on its own detail page rather than dumping the author
+            // back at the top of the directory.
+            if (editor.draft.id) root._selectedId = editor.draft.id
+        }
     }
 }

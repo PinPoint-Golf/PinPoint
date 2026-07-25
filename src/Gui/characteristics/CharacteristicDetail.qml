@@ -32,6 +32,7 @@ Item {
     property string locale: "en"
 
     signal back()
+    signal edit()
     signal openCondition(string conditionId)
 
     readonly property var _causes:   detail.causes   || []
@@ -65,7 +66,14 @@ Item {
             }
 
             // ── Title ────────────────────────────────────────────────────────
-            PpDisplayText { text: root.detail.label || "" }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(12)
+
+                PpDisplayText { text: root.detail.label || "" }
+                Item { Layout.fillWidth: true }
+                PpButton { label: qsTr("Edit"); onClicked: root.edit() }
+            }
 
             RowLayout {
                 spacing: Theme.sp(8)

@@ -32,17 +32,23 @@ class ResourcePackProvider final : public ICharacteristicPackProvider {
 public:
     explicit ResourcePackProvider(const QString &resourcePath)
     {
-        m_label = resourcePath;
+        // Tooling/test seam: the Qt resource only exists inside the app binary, so a standalone
+        // test or an offline tool has no way to reach the shipped pack. PINPOINT_CORE_PACK points
+        // at the reviewable JSON in the repo instead. Unset in every normal run.
+        const QByteArray override = qgetenv("PINPOINT_CORE_PACK");
+        const QString    path     = override.isEmpty() ? resourcePath
+                                                       : QString::fromLocal8Bit(override);
+        m_label = path;
 
-        QFile f(resourcePath);
+        QFile f(path);
         if (!f.open(QIODevice::ReadOnly)) {
             m_report.issues.push_back(ValidationIssue{
-                IssueSeverity::Error, QStringLiteral("parse"), resourcePath,
-                QStringLiteral("Could not open the core pack at '%1'.").arg(resourcePath) });
+                IssueSeverity::Error, QStringLiteral("parse"), path,
+                QStringLiteral("Could not open the core pack at '%1'.").arg(path) });
             return;
         }
 
-        PackLoadResult res = loadPack(f.readAll(), resourcePath);
+        PackLoadResult res = loadPack(f.readAll(), path);
         m_pack             = std::move(res.pack);
         m_report           = std::move(res.report);
         m_pack.readOnly    = true;   // the shipped pack is never edited in place
@@ -51,6 +57,7 @@ public:
     const CharacteristicPack &pack() const override { return m_pack; }
     const ValidationReport   &report() const override { return m_report; }
     QString                   label() const override { return m_label; }
+    PackOrigin                origin() const override { return PackOrigin::Core; }
 
 private:
     CharacteristicPack m_pack;

@@ -20,6 +20,8 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
 #include <QStandardPaths>
 
 namespace pinpoint::analysis {
@@ -30,7 +32,7 @@ namespace {
 // single malformed community pack must not take the whole library down with it.
 class FilePackProvider final : public ICharacteristicPackProvider {
 public:
-    explicit FilePackProvider(const QString &directory)
+    FilePackProvider(const QString &directory, PackOrigin origin) : m_origin(origin)
     {
         m_dir = directory.isEmpty() ? defaultDirectory() : directory;
         m_label = m_dir;
@@ -50,8 +52,24 @@ public:
             }
 
             PackLoadResult res = loadPack(f.readAll(), path);
-            for (ValidationIssue &i : res.report.issues) m_report.issues.push_back(std::move(i));
-            if (!res.loaded) continue;
+
+            // Keep every issue for the health list, but drop only the REFERENTIAL ones: an overlay
+            // pack's edges point at core conditions it does not contain, so standalone referential
+            // integrity is meaningless here. The merged provider re-validates the assembled
+            // library, and that is the authoritative check.
+            for (ValidationIssue &i : res.report.issues) {
+                const bool crossPack = (i.code == QLatin1String("unknownCondition")
+                                        || i.code == QLatin1String("unknownSignal")
+                                        || i.code == QLatin1String("unknownMeasure")
+                                        || i.code == QLatin1String("noCause")
+                                        || i.code == QLatin1String("orphanCause")
+                                        || i.code == QLatin1String("observableNoSignal"));
+                if (!crossPack) m_report.issues.push_back(std::move(i));
+            }
+
+            // `parsed`, not `loaded` — see PackLoadResult. Keying off `loaded` here would discard
+            // every user pack that references a shipped characteristic, which is most of them.
+            if (!res.parsed) continue;
 
             // First readable pack becomes this provider's pack; a directory holding several is
             // represented by several providers, which is what the merger expects.
@@ -68,19 +86,58 @@ public:
     const CharacteristicPack &pack() const override { return m_pack; }
     const ValidationReport   &report() const override { return m_report; }
     QString                   label() const override { return m_label; }
+    PackOrigin                origin() const override { return m_origin; }
 
 private:
     CharacteristicPack m_pack;
     ValidationReport   m_report;
     QString            m_dir;
     QString            m_label;
+    PackOrigin         m_origin = PackOrigin::LocalUser;
 };
 
 } // namespace
 
-std::unique_ptr<ICharacteristicPackProvider> makeFilePackProvider(const QString &directory)
+std::unique_ptr<ICharacteristicPackProvider> makeFilePackProvider(const QString &directory,
+                                                                  PackOrigin     origin)
 {
-    return std::make_unique<FilePackProvider>(directory);
+    return std::make_unique<FilePackProvider>(directory, origin);
+}
+
+QString userPackPath()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (base.isEmpty()) return QString();
+    return base + QStringLiteral("/diagnostics/user.json");
+}
+
+bool saveUserPack(const CharacteristicPack &pack, QString *whyNot)
+{
+    const QString path = userPackPath();
+    if (path.isEmpty()) {
+        if (whyNot) *whyNot = QStringLiteral("No writable application data location.");
+        return false;
+    }
+
+    QDir().mkpath(QFileInfo(path).absolutePath());
+
+    // Write to a temporary and rename, so an interrupted save cannot truncate a library the user
+    // has spent time building.
+    const QString tmpPath = path + QStringLiteral(".tmp");
+    QFile         tmp(tmpPath);
+    if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (whyNot) *whyNot = QStringLiteral("Could not write to %1.").arg(tmpPath);
+        return false;
+    }
+    tmp.write(QJsonDocument(savePack(pack)).toJson(QJsonDocument::Indented));
+    tmp.close();
+
+    QFile::remove(path);
+    if (!QFile::rename(tmpPath, path)) {
+        if (whyNot) *whyNot = QStringLiteral("Could not replace %1.").arg(path);
+        return false;
+    }
+    return true;
 }
 
 } // namespace pinpoint::analysis

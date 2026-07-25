@@ -415,6 +415,8 @@ qt_add_qml_module(PinPointStudio
         src/Gui/characteristics/CharacteristicLibrary.qml
         src/Gui/characteristics/CharacteristicRow.qml
         src/Gui/characteristics/CharacteristicDetail.qml
+        src/Gui/characteristics/CharacteristicEditor.qml
+        src/Gui/characteristics/MeasurePicker.qml
         src/Gui/diagnostics/WristDiagnostics.qml
         src/Gui/diagnostics/DofTrajectoryStrip.qml
         src/Gui/diagnostics/PositionAngleGrid.qml
@@ -448,6 +450,8 @@ qt_add_qml_module(PinPointStudio
         src/Gui/review/metric_catalog.cpp
         src/Gui/characteristics/characteristic_library_model.h
         src/Gui/characteristics/characteristic_library_model.cpp
+        src/Gui/characteristics/characteristic_editor_model.h
+        src/Gui/characteristics/characteristic_editor_model.cpp
         src/Diagnostics/anatomy_vocabulary.h
         src/Diagnostics/anatomy_vocabulary.cpp
         src/Diagnostics/measure_facets.h
