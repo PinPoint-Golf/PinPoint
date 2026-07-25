@@ -45,6 +45,79 @@ picks up. Keep it factual — this is the handoff, not a summary.
 
 ---
 
+## ▶ Resuming at stage 5 — read this first
+
+**Prompt to start with:**
+
+> Start stage 5 of the diagnostics norms plan — read
+> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 5".
+
+Everything through stage 4 is committed and pushed (`d7cf345`). Analyzer suite **74/74**; app and
+`swinglab_run` build clean. Do not re-verify any of it — the Progress table is authoritative.
+
+### Read before writing any QML
+
+1. `docs/design/pinpoint_qml_design_system.md` — **mandatory** per CLAUDE.md. Theme tokens only:
+   never hardcode a colour, font size or spacing, and every component must work in all three
+   aesthetic directions.
+2. `docs/design/pinpoint_sign_conventions.md` — the two-clause rule; stage 5 renders `highMeans`,
+   which is where it surfaces to the user.
+3. `src/Gui/characteristics/CharacteristicLibrary.qml` — the panel being extended.
+
+### Facts already established (do not re-derive)
+
+- **The Diagnostics settings panel IS `CharacteristicLibrary.qml`.** `ScreenSettings.qml:447`
+  instantiates it as panel 10. There is no `DiagnosticsPanel.qml` and no settings form.
+- The view switcher is `property string _view` (~line 51), chip row ~line 130. Add `"measures"` as
+  a fourth chip — **extend, do not restructure**.
+- `CharacteristicLibraryModel::usageOfMeasure()` and `usersOfMeasure()` already exist. Reuse them.
+- `MeasurePicker.qml` already does mint mode. **New measure** opens it; do not write a second picker.
+- Norms are reached through `makeNormProvider()` / `sharedNormProvider()`
+  (`src/Diagnostics/norm_provider.h`). `INormProvider::resolve()` already returns
+  `{norm, contextId, inherited}` — the inheritance line the UI needs is there, not to be recomputed.
+- Standalone tests reach shipped content via `PINPOINT_CORE_NORMS` / `PINPOINT_CORE_CONTEXTS` /
+  `PINPOINT_CORE_PACK`; in CMake use the existing `pp_norm_env(<target>)` helper.
+
+### Carried forward — owed from earlier stages, easy to lose
+
+- **`ragOf(Grade)` shared helper.** The 4-band grade collapses to the legacy 3-band `PpRag` as
+  *Green iff `Ideal`, Red iff `Action`, Amber otherwise*. That rule currently exists **only inside
+  `reference_bands_parity_test`**. Promote it to a real function next to `grade()` in
+  `src/Diagnostics/norm.h` and have the parity test call it, so the wrist grid and the dashboard
+  cannot drift from each other. Note the consequence: for migrated rows `Good` and `Watch` both sit
+  inside the old amber, so **any surface showing a grade and a RAG chip together will look
+  inconsistent — show one or the other.**
+- **`measureForMetricAtPhase(metricKey, phase)`** on `NormModel`. Stage 5 needs it; **stage 9
+  depends on it** to re-point `metric_catalog.cpp`. Build it now, with tests.
+- **Grade policy + norm-set selector** go in the Diagnostics settings header strip (Mark's call),
+  shown in the `measures` view where they apply.
+
+### The first three things to do
+
+1. `src/Gui/characteristics/norm_model.{h,cpp}` — QML façade over measures, norms and contexts,
+   mirroring `characteristic_library_model.h`'s shape (`Q_PROPERTY QVariantList` + `Q_INVOKABLE`
+   returning `QVariantMap`). **All logic in C++**; QML renders shapes and holds no rules.
+2. `MeasureCatalogue.qml` — the fourth view. Grouped by measure group; filter chips for status /
+   has-norm / layer; row shows label · unit · status dot · *"used by N"* · a norm glyph, hollow when
+   unset.
+3. `MeasureDetail.qml` — header; what it is; the **`highMeans`** line; **norms by context** in tree
+   order with children indented, each row showing the resolved corridor in the measure's own units
+   and either *inherited from &lt;parent&gt;* or *overridden*; used-by; availability.
+
+**Read-only in stage 5.** No editing — the corridor editor is stage 6. Weak provenance is called out
+**on the norm row only**, never on a finding, chip or chart band elsewhere.
+
+### Two things to be honest about
+
+- **Nothing has been run against a real swing.** The pack can fire, but the seed corridors are
+  unvalidated against actual golfers, so the first live shot may over- or under-fire. Worth a
+  sanity-check before trusting any finding; the corridor editor's live histogram (stage 6) is the
+  real fix.
+- **A literature review of every normative value is planned** before any corridor is treated as more
+  than a starting heuristic. `m_lagAngleDown` is the weakest and the first candidate.
+
+---
+
 ## Context
 
 The Diagnostics module shipped in Phases 1–8 (`..79bb347`) with a working pack stack,
