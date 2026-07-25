@@ -561,6 +561,15 @@ pp_add_test(norm_pack_test
 set_tests_properties(norm_pack_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
+# Every corridor signal points the way its own condition claims. An inverted signal does not fail
+# loudly — it fires on the wrong swings with correct-sounding text attached — so the fixture states
+# the expected direction and the catalogue quote that decides it. A new signal with no fixture row
+# fails, which is what stops the audit needing to be re-run by hand.
+pp_add_test(axis_direction_test
+    SOURCES ${DIAG}/tests/axis_direction_test.cpp ${DIAG_PACK}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+
 # The join that lights the pack up: values + norms -> a graded reading, and the engine's corridor
 # test on top of it. Asserts the three silent failures — firing on ordinary variation, grading an
 # unknown context against the default, and an absent norm reading as a pass.

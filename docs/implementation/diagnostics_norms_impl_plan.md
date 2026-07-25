@@ -16,7 +16,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 | 1 | Types, tree, pack, providers | ☑ complete | 2026-07-25 · 287f3ea |
 | 2 | Migrate `reference_bands.cpp` — parity gate | ☑ complete | 2026-07-25 · 287f3ea |
 | 3 | Wire into the engine — **the pack lights up** | ◐ mechanism done, **content owed** | 2026-07-25 · 287f3ea |
-| 4 | Fix the direction inversion + `highMeans` | ☐ not started | |
+| 4 | Direction audit (all 30 signals) + `highMeans` | ◐ **audit done, 3 fixed, 4 owed** | 2026-07-25 |
 | — | **review gate · expect context clear here** | | |
 | 5 | `NormModel` + read-only norm UI | ☐ not started | |
 | — | **review gate** | | |
@@ -371,6 +371,61 @@ Extend `CharacteristicLibraryModel::health()`:
 - Overridden items where core has since changed (diff + **Take theirs**).
 - **Must not fire:** the unread edge of a single-tail axis (`s_posture` reads one edge of
   `lumbar_curve`; the norm is still two-sided).
+
+---
+
+## Stage 4 — the direction audit, in full
+
+All **30** corridor signals across 26 measures (four measures are two-tailed). The question for each
+was one thing: *does a HIGH value of this measure mean this condition is present?* — answered from
+the condition's own consequence text against the metric's documented sign convention. Pinned by
+`axis_direction_test`, whose fixture carries the catalogue quote that decides each row, so a new
+signal cannot be added unaudited.
+
+**23 correct. 3 fixed. 2 wrong in a way direction cannot express. 5 unverifiable.**
+
+### Fixed (each contradicted by its own metric's documented convention)
+
+| signal | was | now | why |
+|---|---|---|---|
+| `sig_ballForward` | high | **low** | `ballPosition`: *"0 % is level with the lead heel"* — forward is the low end |
+| `sig_ballBack` | low | **high** | *"100 % level with the trail heel"* |
+| `sig_scooping` | high | **low** | `leadWristFlexExt`: *"+ is bowed/flexed, − is cupped/extended"*; scooping *adds loft*, so cupped |
+
+### Wrong in a way a direction cannot express — need a decision
+
+- **`sig_insufficientSet` reads the wrong DOF.** It claims *"too little wrist angle by the top …
+  less stored angle to release"*, which is the **hinge** — `leadWristRadUln`, labelled "Lead wrist —
+  hinge". `m_leadWristAtTop` reads `leadWristFlexExt` (bow/cup). Needs a new measure on the hinge at
+  P4; the `low` direction is already right for it.
+- **`sig_lossOfPosture` reads the wrong end.** `m_spineBendLoss` is `extremum MAX` of
+  (value − address) over P4→P7, which finds the most *added* forward bend — what the catalogue
+  calls *"a dip"*. Losing posture is standing up: the *minimum*. As authored it detects the opposite
+  fault. Needs `sense: min` + `direction: low`, or a measure defined as the loss magnitude.
+
+### Unverifiable — the metric states no sign convention anywhere
+
+All five ride `planned` metrics, so the convention is still free to choose and must be written into
+the descriptor **when the producer is**, not after.
+
+- `sig_alignmentOpen` / `sig_alignmentClosed` — `shoulderAlignment` never says which sign is open.
+  The two tails are at least opposite each other, so they are internally consistent whichever way
+  it lands.
+- `sig_sway` / `sig_slide` / `sig_hangingBack` — `pelvisSway` says only *"toward or away from the
+  target"*. **These three are mutually contradictory and at least one is wrong regardless of the
+  convention:** `sig_sway` fires HIGH for movement *away* from the target and `sig_slide` fires HIGH
+  for movement *toward* it, on the same metric with the same `extremum max` reducer. One metric
+  cannot have both as its high end.
+  **Recommendation:** adopt *positive = toward the target*, matching the explicitly-documented
+  counterpart `thoraxLateralDrift` (*"positive means toward the target"*), which the catalogue
+  describes as *"the chest's counterpart to pelvis sway"*. That keeps `sig_slide` as authored and
+  makes `sig_sway` (`min`, `low`) and `sig_hangingBack` (`low`) the ones to change.
+
+### Also noticed, not acted on
+
+`m_axisTiltAtTop` reads `secondaryAxisTilt` **at P4**, but that metric's `howToRead` says *"read at
+Impact"* and quotes its figures there. The reverse-spine reading may want P4 anyway — worth a look
+when its producer lands.
 
 ---
 

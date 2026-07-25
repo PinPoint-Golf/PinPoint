@@ -1069,7 +1069,7 @@
       "measures": [
         "m_ballPosition"
       ],
-      "direction": "high"
+      "direction": "low"
     },
     {
       "id": "sig_ballBack",
@@ -1077,7 +1077,7 @@
       "measures": [
         "m_ballPosition"
       ],
-      "direction": "low"
+      "direction": "high"
     },
     {
       "id": "sig_stanceWide",
@@ -1237,7 +1237,7 @@
       "measures": [
         "m_leadWristAtImpact"
       ],
-      "direction": "high"
+      "direction": "low"
     },
     {
       "id": "sig_insufficientSet",
