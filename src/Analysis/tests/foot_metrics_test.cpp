@@ -47,11 +47,17 @@ static bool near(double a, double b, double tol) { return std::fabs(a - b) <= to
 // COCO-WholeBody foot keypoint indices (mirrors foot_metrics.cpp's local constants).
 constexpr int kLBigToe = 17, kLHeel = 19;
 constexpr int kRBigToe = 20, kRHeel = 22;
+constexpr int kLShoulder = 5, kRShoulder = 6;   // COCO-17 body
+
+// Shoulders for the fixture. stanceWidth is now a percentage OF SHOULDER WIDTH, so a frame with
+// feet but no shoulders has no denominator and the metric is legitimately absent — every fixture
+// that expects a stance reading has to carry them.
+static constexpr double kLShoulderX = 0.44, kRShoulderX = 0.56, kShoulderY = 0.35;
 
 // Build one feet frame: left heel/bigtoe + right heel/bigtoe at given normalized
-// points, with independent per-foot confidences.
+// points, with independent per-foot confidences, plus a shoulder pair.
 static PoseFrame2D makeFeet(int64_t t, QPointF lHeel, QPointF lToe, QPointF rHeel, QPointF rToe,
-                           float lConf, float rConf)
+                           float lConf, float rConf, float shoulderConf = 0.9f)
 {
     PoseFrame2D f;
     f.t_us = t;
@@ -59,6 +65,8 @@ static PoseFrame2D makeFeet(int64_t t, QPointF lHeel, QPointF lToe, QPointF rHee
     f.kp[kLBigToe] = lToe;  f.conf[kLBigToe] = lConf;
     f.kp[kRHeel] = rHeel;   f.conf[kRHeel] = rConf;
     f.kp[kRBigToe] = rToe;  f.conf[kRBigToe] = rConf;
+    f.kp[kLShoulder] = QPointF(kLShoulderX, kShoulderY); f.conf[kLShoulder] = shoulderConf;
+    f.kp[kRShoulder] = QPointF(kRShoulderX, kShoulderY); f.conf[kRShoulder] = shoulderConf;
     return f;
 }
 
@@ -122,22 +130,43 @@ int main()
                               res.setup.trailHeelPxAddr.y() - res.setup.leadHeelPxAddr.y()) / W,
                    res.setup.stanceWidthXFrame, 1e-9));
 
-        // ── units: mm when the ball ruler resolved, ×frame when it did not ──
-        // mmPerPx <= 0 must be byte-identical to the pre-ruler build; that is
-        // the OFF-parity path for the whole stance-width change.
+        // ── units: stanceWidth is ALWAYS % shoulder width ───────────────────
+        // The unit used to switch between "mm" and "×frame" per swing depending on whether the
+        // ball ruler resolved. A metric whose unit changes per swing cannot carry a norm — the
+        // norm declares one unit and the loader rejects a mismatch — so the unit is now invariant
+        // and the metric is ABSENT when its denominator is missing.
         const std::vector<MetricSeries> off = buildFootSeries(res, {}, /*mmPerPx*/ -1.0);
         const MetricSeries *swOff = findSeries(off, "stanceWidth");
-        CHECK("no ruler -> unit stays ×frame", swOff && swOff->unit == QStringLiteral("×frame"));
-        CHECK("no ruler -> value stays the ×frame measurement",
-              swOff && near(swOff->phaseSamples[0].value, res.setup.stanceWidthXFrame, 1e-12));
+        CHECK("no ruler -> stanceWidth is still emitted (it does not need the ruler)",
+              swOff != nullptr);
+        CHECK("no ruler -> unit is still % shoulder width",
+              swOff && swOff->unit == QStringLiteral("% shoulder width"));
+        CHECK("no ruler -> no absolute reading at all, rather than a different unit",
+              findSeries(off, "stanceWidthMm") == nullptr);
 
         const double mmPerPx = 2.0;
         const std::vector<MetricSeries> on = buildFootSeries(res, {}, mmPerPx);
         const MetricSeries *swOn = findSeries(on, "stanceWidth");
-        CHECK("ruler -> unit becomes mm", swOn && swOn->unit == QStringLiteral("mm"));
-        CHECK("ruler -> value is real millimetres",
-              swOn && near(swOn->phaseSamples[0].value,
+        CHECK("ruler -> stanceWidth unit is UNCHANGED by the ruler",
+              swOn && swOn->unit == QStringLiteral("% shoulder width"));
+        CHECK("ruler -> the percentage itself is unchanged by the ruler",
+              swOn && swOff && near(swOn->phaseSamples[0].value, swOff->phaseSamples[0].value, 1e-12));
+
+        // The millimetre reading moved to its own metric, so both units stay invariant.
+        const MetricSeries *mmOn = findSeries(on, "stanceWidthMm");
+        CHECK("ruler -> the absolute reading appears as its own metric", mmOn != nullptr);
+        CHECK("ruler -> and it is real millimetres",
+              mmOn && mmOn->unit == QStringLiteral("mm")
+                   && near(mmOn->phaseSamples[0].value,
                            res.setup.stanceWidthXFrame * W * mmPerPx, 1e-9));
+
+        // The percentage is the stance over the shoulders, both in the same px space.
+        CHECK("shoulder width resolved from the address frames", res.setup.shoulderWidthValid);
+        CHECK("stanceWidth == stance / shoulders x 100",
+              swOn && res.setup.shoulderWidthPx > 0.0
+                   && near(swOn->phaseSamples[0].value,
+                           res.setup.stanceWidthXFrame * W / res.setup.shoulderWidthPx * 100.0,
+                           1e-9));
 
         // leadHeelLift shares the ruler and the depth plane but is deliberately
         // NOT converted — it is a separately-shipped metric with its own gate.

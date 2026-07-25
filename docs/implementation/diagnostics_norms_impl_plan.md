@@ -38,6 +38,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 |---|---|---|
 | 2026-07-25 | — | Plan written and verified against the tree. Brief copied to `docs/design/diagnostics_norms.md`. Nothing built yet. |
 | 2026-07-25 | 1 | **Stage 1 complete.** `norm.h`, `context_tree.{h,cpp}`, `norm_pack.{h,cpp}`, `norm_provider.h` + the three providers. Assets moved to `src/Resources/diagnostics/` (core.json via `git mv`, plus new norms.json — empty — and contexts.json). `:/diagnostics` prefix preserved by qrc alias, so `pack_provider.h:73` is unchanged. New suites `norm_test` / `context_tree_test` / `norm_pack_test` green; **full analyzer suite 70/70**; app builds clean and starts headless. Next: stage 2. |
+| 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
 | 2026-07-25 | 3 | **Stage 3 mechanism complete; content OWED — the pack is still dark.** `NormMeasureSource` joins values to norms; `MeasureReading` gained `grade`, `normContextId`, `contextInferred` and a `fromCorridor()` factory. Engine now fires on a **deviation (Watch/Action)**, not on leaving Ideal — see the decision below. `norm_measure_source_test` green (26 assertions incl. unknown-context, inferred-context demotion, both tails on one norm). Analyzer suite **73/73**; app + `swinglab_run` build. **BUT: all 26 corridor-signal measures still have no norm** (norms.json holds only the 39 wrist-grid rows), so no seed characteristic can fire yet. Authoring those 26 is the remaining work and needs Mark's numbers. Next: author the seed norms, then stage 4. |
 | 2026-07-25 | 2 | **Stage 2 complete.** 39 cell-measures minted into core.json (28 → 67); 55 norm rows (39 full_swing + 16 archetype) in norms.json. `NormBandProvider` added; `BandContext` gained `contextId`; all 4 app call sites switched to `BandProviderKind::Norm` (now the factory default). **`reference_bands_parity_test` green: 117 cells bit-identical, 77,337 classified deltas identical.** `wrist_render_parity_test` green: 2,688 cells and 67 findings identical, and its empty-norm-set guard verified to actually fail without the content. Analyzer suite **72/72**; app, `swinglab_run` and `swing_window_parity_test` all build. Next: stage 3. |
 
@@ -474,5 +475,22 @@ corpus-scale work and a separate exercise — a single swing never judges it.
   silently grey the entire wrist grid — no error, no findings.
 
 ## Open, to raise when reached
+
+- **Two more direction/measure errors found while preparing the seed norms**, both on
+  SINGLE-tail signals, which the planned "audit the two-tailed axes" pass would not have reached:
+  `sig_scooping` carries `direction: high` but its own consequence text is *"adding loft through
+  impact"* — cupping, which is negative on `leadWristFlexExt`; and `sig_insufficientSet` reads
+  `leadWristFlexExt` (bow/cup) when *"too little wrist angle by the top… less stored angle to
+  release"* is the **hinge** (`leadWristRadUln`). Stage 4 must therefore audit **all 26** corridor
+  signals, not the four two-tailed ones.
+
+- **Two sign conventions are undocumented, so their signals cannot be audited at all:**
+  `pelvisSway` (is positive toward the target? decides whether `sig_hangingBack: high` is right)
+  and `shoulderAlignment`. This is the argument for `highMeans` being authored WITH each producer.
+
+- **A literature review of every normative corridor** is planned before the numbers are treated as
+  anything but starting heuristics. The tempo band re-cut waits for it: migrating its explicit
+  1.8–3.6 monitor leaves the low-side Watch band empty (the lower amber edge sits at exactly −2σ),
+  so a rushed transition jumps Good → Action at 1.8. Deliberate, and revisited with the review.
 - `shoulderAlignment`'s sign convention (fact 7) — needs deciding at stage 4, alongside
   whoever writes its producer.

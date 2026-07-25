@@ -303,17 +303,30 @@ int main()
         check(!res.loaded && hasError(res.report, "parse"), "unparseable JSON is reported, not thrown");
     }
 
-    // ── Capture gaps are classified by the loader, not trusted to the author ────
+    // ── Spinal roles are classified by the loader, not trusted to the author ────
+    // They cannot come from the pose SKELETON (no keypoint between the shoulders and the hips), but
+    // the back contour of a down-the-line silhouette shows them — so the loader corrects an
+    // OVER-claim down to NoProducer and leaves a weaker authored status alone.
     {
         CharacteristicPack p = goodPack();
         p.measures.front().series = Series{ AnatomyRole::ThoracicSegment, Quantity::Angle, AnatomyRole::Ground };
-        p.measures.front().status = MeasureStatus::NoProducer;    // author said "roadmap"
+        p.measures.front().status = MeasureStatus::Live;          // author over-claimed
 
         const PackLoadResult res = loadPack(savePack(p), QStringLiteral("gap"));
         const Measure       *m   = res.pack.measure(QStringLiteral("stanceWidth"));
-        check(m && m->status == MeasureStatus::NotCapturable,
-              "a series on an unresolvable role is reclassified as a capture gap");
-        check(m && !m->gapReason.isEmpty(), "the capture gap carries a reason for the UI");
+        check(m && m->status == MeasureStatus::NoProducer,
+              "an over-claimed spinal series is corrected to a roadmap item, not a capture gap");
+        check(m && !m->gapReason.isEmpty(), "and it carries the reason for the UI");
+
+        // A weaker authored status is respected: NotCapturable is a judgement the author may
+        // legitimately make about a measure the loader knows nothing else about.
+        CharacteristicPack q = goodPack();
+        q.measures.front().series = Series{ AnatomyRole::LumbarSegment, Quantity::Angle, AnatomyRole::Ground };
+        q.measures.front().status = MeasureStatus::NotCapturable;
+        const PackLoadResult qres = loadPack(savePack(q), QStringLiteral("gap2"));
+        const Measure       *qm   = qres.pack.measure(QStringLiteral("stanceWidth"));
+        check(qm && qm->status == MeasureStatus::NotCapturable,
+              "an author's weaker status is not overridden upward");
     }
 
     // ── Health warnings (these ARE the health list) ─────────────────────────────

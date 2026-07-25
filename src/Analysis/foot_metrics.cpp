@@ -31,6 +31,10 @@ namespace {
 constexpr int kLBigToe = 17, kLHeel = 19;
 constexpr int kRBigToe = 20, kRHeel = 22;
 
+// COCO-17 body: 5 L-shoulder, 6 R-shoulder. Handedness-invariant — the distance between them is
+// the same measurement whichever side leads.
+constexpr int kLShoulder = 5, kRShoulder = 6;
+
 // Euclidean pixel distance between two already-de-normalized px points.
 double distPx(const QPointF &a, const QPointF &b)
 {
@@ -50,6 +54,30 @@ double medianOf(std::vector<double> v)
     std::sort(v.begin(), v.end());
     const size_t n = v.size();
     return (n & 1u) ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
+}
+
+// Shoulder-to-shoulder distance (px) on the pose frame nearest `t_us`, or 0 when either shoulder
+// is below confidence. Measured in the same px space as the feet, so the two are directly
+// comparable; 0 rather than a guess, because a fabricated denominator would silently rescale every
+// stance reading rather than making the gap visible.
+double shoulderWidthPxAt(const PoseTrack2D &pose, int64_t t_us, int frameW, int frameH,
+                         double confMin)
+{
+    const PoseFrame2D *best = nullptr;
+    int64_t bestDt = 0;
+    for (const PoseFrame2D &f : pose.frames) {
+        const int64_t dt = f.t_us > t_us ? f.t_us - t_us : t_us - f.t_us;
+        if (best == nullptr || dt < bestDt) { best = &f; bestDt = dt; }
+    }
+    if (best == nullptr
+        || int(best->kp.size()) <= kRShoulder || int(best->conf.size()) <= kRShoulder)
+        return 0.0;
+    if (best->conf[kLShoulder] < confMin || best->conf[kRShoulder] < confMin)
+        return 0.0;
+
+    const QPointF l(best->kp[kLShoulder].x() * frameW, best->kp[kLShoulder].y() * frameH);
+    const QPointF r(best->kp[kRShoulder].x() * frameW, best->kp[kRShoulder].y() * frameH);
+    return distPx(l, r);
 }
 
 // Per-frame foot state from the heel + bigtoe keypoints of each foot.
@@ -159,7 +187,18 @@ FootMetricsResult trackFeet(const PoseTrack2D &pose, int frameW, int frameH, boo
 
     std::vector<double> widths, leadFlares, trailFlares, toeLines, addrElev;
     std::vector<double> leadHeelX, leadHeelY, trailHeelX, trailHeelY;
+    std::vector<double> shoulderWidths;
     for (const FootState *s : ref) {
+        // Shoulder width over the SAME reference frames the stance is measured on, so the ratio
+        // shares its denominator by construction rather than by luck — the same reason the heel
+        // pair is captured here. It is what makes stance width a body-relative reading instead of
+        // a reading about how tall the golfer is: a 190 cm player and a 160 cm player take
+        // genuinely different stances and neither is wrong, so millimetres cannot carry a
+        // population norm. It is also how the stance is actually described out loud.
+        if (const double sw = shoulderWidthPxAt(pose, s->t_us, frameW, frameH, cfg.confMin);
+            sw > 0.0)
+            shoulderWidths.push_back(sw);
+
         // stanceWidth / toeLine need BOTH feet valid on this reference frame.
         if (s->leadValid && s->trailValid) {
             widths.push_back(distPx(s->leadHeelPx, s->trailHeelPx));
@@ -180,6 +219,10 @@ FootMetricsResult trackFeet(const PoseTrack2D &pose, int frameW, int frameH, boo
     res.setup.stanceWidthValid = !widths.empty();
     if (res.setup.stanceWidthValid)
         res.setup.stanceWidthXFrame = medianOf(widths) / frameW;   // isotropic ×frame (single ref dim)
+
+    res.setup.shoulderWidthValid = !shoulderWidths.empty();
+    if (res.setup.shoulderWidthValid)
+        res.setup.shoulderWidthPx = medianOf(shoulderWidths);
     // Component-wise median, matching every other robust reference here — it is
     // order-independent, so one bad reference frame cannot drag the heel line.
     res.setup.heelsValid = !leadHeelX.empty();
@@ -243,16 +286,32 @@ std::vector<MetricSeries> buildFootSeries(const FootMetricsResult &res,
         m.phaseSamples.push_back({ Phase::Address, addrT, value, QString() });
         out.push_back(std::move(m));
     };
-    // Stance width in REAL mm when the ball-diameter ruler resolved, else the
-    // frame-relative fallback with an honest unit string (head_track.cpp's
-    // convention verbatim). mmPerPx <= 0 ⇒ byte-identical to the pre-ruler build.
-    // stanceWidthXFrame is px/frameW, so × frameW recovers px before scaling.
-    const bool    swMm   = mmPerPx > 0.0;
-    const double  swVal  = swMm ? res.setup.stanceWidthXFrame * res.frameW * mmPerPx
-                                : res.setup.stanceWidthXFrame;
-    const QString swUnit = swMm ? QStringLiteral("mm") : QStringLiteral("×frame");
-    pushScalar(res.setup.stanceWidthValid, QStringLiteral("stanceWidth"),
-              QStringLiteral("Stance width"), swUnit, swVal);
+    // Stance width as a PERCENTAGE OF SHOULDER WIDTH.
+    //
+    // The unit is invariant, which is the point. It used to switch between "mm" and "×frame" at
+    // runtime depending on whether the ball-diameter ruler resolved, and a metric whose unit
+    // changes per swing cannot carry a norm — the norm declares one unit and the loader rejects a
+    // mismatch. So when the shoulders are not resolvable the metric is ABSENT rather than present
+    // in some other unit: unavailable is a fact worth reporting, a silently different scale is not.
+    //
+    // It is also the better reading. Millimetres are a norm on the golfer's height, whereas
+    // "a shoulder-width stance" is both body-relative and exactly how the stance is described.
+    // stanceWidthXFrame is px/frameW, so × frameW recovers px.
+    const bool   swPctOk = res.setup.stanceWidthValid && res.setup.shoulderWidthValid
+                           && res.setup.shoulderWidthPx > 0.0;
+    const double swPct   = swPctOk ? (res.setup.stanceWidthXFrame * res.frameW)
+                                         / res.setup.shoulderWidthPx * 100.0
+                                   : 0.0;
+    pushScalar(swPctOk, QStringLiteral("stanceWidth"),
+               QStringLiteral("Stance width"), QStringLiteral("% shoulder width"), swPct);
+
+    // The millimetre reading is kept as its own metric rather than dropped: it is real, it comes
+    // from the ball-diameter ruler, and a coach asking "how wide, in the room?" is asking a
+    // different question from "how wide, for this golfer?". Invariant unit here too — emitted only
+    // when the ruler actually resolved.
+    pushScalar(res.setup.stanceWidthValid && mmPerPx > 0.0, QStringLiteral("stanceWidthMm"),
+               QStringLiteral("Stance width (absolute)"), QStringLiteral("mm"),
+               res.setup.stanceWidthXFrame * res.frameW * mmPerPx);
     pushScalar(res.setup.leadFlareValid, QStringLiteral("leadFootFlare"),
               QStringLiteral("Lead foot flare"), QStringLiteral("°"), res.setup.leadFlareDeg);
     pushScalar(res.setup.trailFlareValid, QStringLiteral("trailFootFlare"),

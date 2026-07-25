@@ -158,9 +158,10 @@ ViewNeeded deriveViewNeeded(const Series &s);
 // fixed unit string.
 QString quantityUnitHint(Quantity q);
 
-// True when the series can never be resolved from pose, because a role it names has no keypoint in
-// any layout. Such a measure is a CAPTURE GAP, not a roadmap item: no producer will ever satisfy
-// it, and listing it as missing pipeline work would corrupt the roadmap for every other row.
+// True when the series cannot be resolved from the pose SKELETON, because a role it names has no
+// keypoint in any layout. This is NOT a capture gap: the spinal roles it covers are readable from
+// the back contour of a down-the-line silhouette, so such a measure is a roadmap item whose
+// producer is simply not written yet. Do not use this to decide that something is unreachable.
 bool seriesNeedsNonPoseSensor(const Series &s);
 
 } // namespace pinpoint::analysis

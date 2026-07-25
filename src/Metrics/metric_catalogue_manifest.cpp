@@ -859,27 +859,47 @@ void installMetricManifest(MetricCatalogue &cat)
         .type = MetricType::PointInTime,
         .label = QStringLiteral("Stance width"),
         .shortLabel = QStringLiteral("Stance"),
-        .unit = QStringLiteral("mm"),
+        .unit = QStringLiteral("% shoulder width"),
         .group = QStringLiteral("Feet & stance"),
         .description = QStringLiteral(
-            "How wide the feet are set at address, measured heel-to-heel from the whole-body pose. "
-            "Stance width is a foundation of balance and turn: too narrow costs stability, too wide "
-            "restricts the hips."),
+            "How wide the feet are set at address, measured heel-to-heel from the whole-body pose "
+            "and expressed against the golfer's own shoulder width. Stance width is a foundation of "
+            "balance and turn: too narrow costs stability, too wide restricts the hips."),
         .howToRead = QStringLiteral(
-            "This is a single setup measurement, taken at address, with wider stances suiting the "
-            "longer clubs and narrower ones the wedges. Real-world millimetres come from the golf "
-            "ball itself, whose diameter is fixed by the rules — so the reading depends on the ball "
-            "being detected at address. Without it the metric falls back to a fraction of the frame "
-            "width, which is only comparable within one camera setup; check the unit before "
-            "comparing two swings. Needs a face-on whole-body camera."),
+            "100 % means the heels are exactly shoulder-width apart; higher is wider. Read at "
+            "address, against the club in hand — the longer clubs want a wider base and the wedges "
+            "a narrower one. It is deliberately relative to the golfer's own frame rather than in "
+            "millimetres, because a tall player and a short player take genuinely different stances "
+            "and neither is wrong; it also happens to be how a stance is described out loud. Needs "
+            "a face-on whole-body camera with both shoulders visible at address."),
         .phases = { P::Address },
-        // No corridor yet: the metric only just gained real-world units, so there
-        // is no measured distribution to draw a defensible band from.
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review"),
                     QStringLiteral("characteristic:stance_narrow"),
                     QStringLiteral("characteristic:stance_wide") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("stanceWidthMm"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Stance width (absolute)"),
+        .shortLabel = QStringLiteral("Stance mm"),
+        .unit = QStringLiteral("mm"),
+        .group = QStringLiteral("Feet & stance"),
+        .description = QStringLiteral(
+            "The same heel-to-heel measurement in real-world millimetres, scaled by the golf ball's "
+            "own diameter, which the rules fix. It answers a different question from the shoulder-"
+            "width reading: how wide in the room, rather than how wide for this golfer."),
+        .howToRead = QStringLiteral(
+            "Read at address. Useful for tracking one golfer over time or setting up a mat, but not "
+            "comparable between golfers of different heights — use the shoulder-width reading for "
+            "that, and for any normative judgement. Present only when the ball was detected at "
+            "address, since the ball IS the ruler."),
+        .phases = { P::Address },
+        .normative = { .heuristic = true },
+        .requirement = { .faceOnCamera = true, .ballTrack = true },
+        .usedBy = { QStringLiteral("chart:review") },
     });
 
     cat.addDescriptor({
@@ -1190,10 +1210,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read at address, from down the line. Higher means more rounded. It is distinct from "
             "spine forward bend, which is the hinge from the hips, and from lumbar extension, which "
             "is the low-back arch — three different regions that a single neck-to-pelvis line "
-            "cannot tell apart. NOT MEASURABLE TODAY: neither pose layout carries a keypoint "
-            "between the shoulders and the hips, so this needs instrumentation the product does not "
-            "have. It is catalogued because the characteristic that depends on it is real and its "
-            "absence is a capture gap worth seeing, not a producer waiting to be written."),
+            "cannot tell apart. Planned: neither pose layout carries a keypoint between the "
+            "shoulders and the hips, so this cannot come from the skeleton — but upper-back "
+            "rounding is plainly visible in the BACK CONTOUR of a down-the-line silhouette. That "
+            "makes it a producer worth building rather than a gap that can never close."),
         .phases = { P::Address },
         .planned = true,
         .normative = { .heuristic = true },
@@ -1212,9 +1232,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "neutral. This is the S-posture axis. An exaggerated arch pre-tensions the lower back "
             "and makes it harder to turn the pelvis without the spine taking the load."),
         .howToRead = QStringLiteral(
-            "Read at address, from down the line. Higher means more arched. NOT MEASURABLE TODAY, "
-            "for the same reason as thoracic flexion: there is no spinal keypoint in either pose "
-            "layout. Catalogued so the gap is visible rather than silently absent."),
+            "Read at address, from down the line. Higher means more arched. Planned, for the same "
+            "reason as thoracic flexion: no pose layout carries a keypoint between the shoulders "
+            "and the hips, but the low-back arch is plainly visible in the BACK CONTOUR of a "
+            "down-the-line silhouette."),
         .phases = { P::Address },
         .planned = true,
         .normative = { .heuristic = true },

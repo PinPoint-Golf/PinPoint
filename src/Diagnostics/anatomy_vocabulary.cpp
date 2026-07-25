@@ -217,7 +217,12 @@ bool roleNeedsNonPoseSensor(AnatomyRole r)
 {
     // The spinal regions. Neither layout carries a keypoint between the shoulders and the hips, so
     // a straight neck→pelvis line is the same line whether the thorax is flexed or the lumbar
-    // arched. These describe real, well-understood conditions that this product cannot see.
+    // arched. They cannot come from the SKELETON.
+    //
+    // That is a statement about pose, not about the product: upper-back rounding and low-back arch
+    // are plainly visible in the BACK CONTOUR of a down-the-line silhouette, which needs no sensor
+    // this product does not already have. So a measure on these roles is a ROADMAP item — a
+    // producer worth building — and not a capture gap. Callers must not treat this as "never".
     return r == AnatomyRole::ThoracicSegment || r == AnatomyRole::LumbarSegment;
 }
 

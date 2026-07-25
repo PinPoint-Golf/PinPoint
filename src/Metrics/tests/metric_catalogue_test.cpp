@@ -59,7 +59,7 @@ int main()
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 53, "descriptor count == 53");
+        checkEqI(static_cast<int>(cat.all().size()), 54, "descriptor count == 54");
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -81,7 +81,7 @@ int main()
     // 2. Type / group / scored filtering.
     {
         checkEqI(countType(cat, MetricType::TimeSeries),  31, "TimeSeries count");
-        checkEqI(countType(cat, MetricType::PointInTime), 16, "PointInTime count");
+        checkEqI(countType(cat, MetricType::PointInTime), 17, "PointInTime count");
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 

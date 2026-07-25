@@ -287,7 +287,14 @@ int main()
             if (v.toMap().value(QStringLiteral("status")) == QStringLiteral("notCapturable"))
                 gapInRoadmap = true;
         check(!gapInRoadmap, "capture gaps never appear as roadmap work");
-        check(!model.captureGaps().isEmpty(), "...they appear under their own heading instead");
+        // The seed pack currently has NO capture gaps: the two spinal measures were reclassified as
+        // roadmap items once it was clear a down-the-line back-contour producer would resolve them.
+        // The separation still has to hold — this asserts the rule, not a non-empty list.
+        for (const QVariant &v : model.captureGaps())
+            check(v.toMap().value(QStringLiteral("status")) == QStringLiteral("notCapturable"),
+                  "anything under the capture-gap heading really is one");
+        check(model.captureGaps().isEmpty(),
+              "the seed pack has no capture gaps left — both spinal measures are roadmap items");
 
         // Every roadmap row names a metric that really exists, so the export is actionable.
         bool allNamed = true;
@@ -297,9 +304,13 @@ int main()
         }
         check(allNamed, "every roadmap row names a real catalogue metric");
 
+        // The export must still SEPARATE the two, but with no capture gaps left there is no
+        // section to emit — asserting its presence would pin content, not behaviour.
         const QString md = model.roadmapMarkdown();
-        check(md.contains(QStringLiteral("Not resolvable from current capture")),
-              "the export separates capture gaps from the work queue");
+        check(!md.isEmpty(), "the roadmap export is generated");
+        check(model.captureGaps().isEmpty()
+                  || md.contains(QStringLiteral("Not resolvable from current capture")),
+              "a capture gap, if one exists, is exported under its own heading");
         check(md.contains(QStringLiteral("Causes, by how much they explain")),
               "the export carries the screen list alongside");
     }

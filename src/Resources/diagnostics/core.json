@@ -23,7 +23,8 @@
         "anchor": "p1"
       },
       "status": "live",
-      "label": "Stance width, at P1"
+      "label": "Stance width, at P1",
+      "unit": "% shoulder width"
     },
     {
       "id": "m_lagAngleDown",
@@ -272,7 +273,7 @@
         "kind": "at",
         "anchor": "p1"
       },
-      "status": "notCapturable",
+      "status": "noProducer",
       "label": "",
       "metricKey": "thoracicFlexion"
     },
@@ -288,7 +289,7 @@
         "kind": "at",
         "anchor": "p1"
       },
-      "status": "notCapturable",
+      "status": "noProducer",
       "label": "",
       "metricKey": "lumbarExtension"
     },

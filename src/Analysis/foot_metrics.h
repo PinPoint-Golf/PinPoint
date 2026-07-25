@@ -118,6 +118,12 @@ struct FootState {
 struct FootSetup {
     bool   stanceWidthValid = false;
     double stanceWidthXFrame = 0.0;    // heel-to-heel, isotropic px / frameW ("×frame")
+    // Shoulder-to-shoulder distance in px, over the SAME address reference frames the stance is
+    // measured on. This is the denominator that turns stance width into a body-relative reading:
+    // a norm in millimetres is a norm on the golfer's height, and "a shoulder-width stance" is
+    // both scale-free and how the stance is actually described.
+    bool   shoulderWidthValid = false;
+    double shoulderWidthPx = 0.0;
     // The address heel pair itself (px), component-wise median over the SAME
     // reference frames stanceWidth is measured from — so anything built on it
     // shares stanceWidth's denominator by construction rather than by luck.

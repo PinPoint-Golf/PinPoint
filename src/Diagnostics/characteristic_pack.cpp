@@ -592,14 +592,24 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         if (o.contains(QStringLiteral("status")))
             measureStatusFromName(o.value(QStringLiteral("status")).toString(), m.status);
 
-        // A composed measure naming a role no sensor can resolve is a CAPTURE GAP, and the loader
-        // fixes that up rather than trusting the author to remember — a mislabelled gap would enter
-        // the roadmap as work nobody can ever do.
+        // A composed measure naming a spinal role cannot come from the pose SKELETON, and the
+        // loader stamps that rather than trusting the author to remember — a measure claiming to
+        // be live on a role with no keypoint would silently never produce a value.
+        //
+        // It is NoProducer, not NotCapturable: the back contour of a down-the-line silhouette shows
+        // both the thoracic round and the lumbar arch, so this is a producer worth building rather
+        // than a gap that can never close. An author's own weaker status is respected; only an
+        // over-claim is corrected.
         if (m.kind == MeasureKind::Composed && seriesNeedsNonPoseSensor(m.series)) {
-            m.status = MeasureStatus::NotCapturable;
+            // The reason is attached whatever the authored status says — it explains a permanent
+            // property of the series, not the correction. Only an OVER-claim is corrected.
             if (m.gapReason.isEmpty())
                 m.gapReason = QStringLiteral("No keypoint exists between the shoulders and the hips "
-                                             "in any pose layout, so this cannot be derived from pose.");
+                                             "in any pose layout, so this cannot come from the "
+                                             "skeleton — it needs a back-contour producer on the "
+                                             "down-the-line view.");
+            if (m.status == MeasureStatus::Live || m.status == MeasureStatus::Planned)
+                m.status = MeasureStatus::NoProducer;
         }
 
         if (m.label.isEmpty() && m.kind == MeasureKind::Composed)

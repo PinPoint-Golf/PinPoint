@@ -169,15 +169,19 @@ int main()
         check(onPelvisSway == 3, "three characteristics sit on one pelvis-sway series (one producer)");
     }
 
-    // ── Capture gaps are gaps, not roadmap items ────────────────────────────────
+    // ── The spinal measures are roadmap items, not capture gaps ─────────────────
+    // They have no pose keypoint, but the back contour of a down-the-line silhouette carries both
+    // the thoracic round and the lumbar arch — so the honest classification is "producer not
+    // written" rather than "this product can never see it".
     {
         const Measure *thoracic = p.measure(QStringLiteral("m_thoracicCurve"));
         const Measure *lumbar   = p.measure(QStringLiteral("m_lumbarCurve"));
-        check(thoracic && thoracic->status == MeasureStatus::NotCapturable,
-              "C-posture's measure is a capture gap (no spinal keypoint exists)");
-        check(lumbar && lumbar->status == MeasureStatus::NotCapturable,
-              "S-posture's measure is a capture gap");
-        check(thoracic && !thoracic->gapReason.isEmpty(), "the gap carries a reason for the UI");
+        check(thoracic && thoracic->status == MeasureStatus::NoProducer,
+              "C-posture's measure is a roadmap item (DTL back contour would produce it)");
+        check(lumbar && lumbar->status == MeasureStatus::NoProducer,
+              "S-posture's measure likewise");
+        check(thoracic && !thoracic->gapReason.isEmpty(),
+              "and it still explains why the skeleton cannot supply it");
 
         // Carried deliberately despite being unmeasurable: four conditions cite C-posture as a
         // cause, so dropping it would cost them their strongest explanation.
