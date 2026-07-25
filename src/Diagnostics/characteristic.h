@@ -87,6 +87,17 @@ struct Measure {
     ViewNeeded    viewNeeded = ViewNeeded::Any;
     MeasureStatus status     = MeasureStatus::NoProducer;
     QString       gapReason;                            // NotCapturable: why, in one line, for the UI
+
+    // What a HIGH value of this measure means, in the measure's own words — "further back, toward
+    // the trail foot". Rendered wherever a signal's direction is chosen, INSTEAD of High/Low.
+    //
+    // This is a correctness mechanism, not decoration. Three signals shipped inverted because an
+    // author picked High or Low against a sign convention that was either unstated or the opposite
+    // of what they assumed; an inverted signal then fires happily on the wrong swings with
+    // correct-sounding consequence text attached. An author who reads "further back, toward the
+    // trail foot" cannot make that mistake in the same way. See
+    // docs/design/pinpoint_sign_conventions.md.
+    QString       highMeans;
 };
 
 // ── Signal ──────────────────────────────────────────────────────────────────

@@ -153,7 +153,6 @@ void installMetricManifest(MetricCatalogue &cat)
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
         .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
                     QStringLiteral("assessment:wrist"),
-                    QStringLiteral("characteristic:insufficient_set"),
                     QStringLiteral("characteristic:scooping") },
     });
 
@@ -182,7 +181,8 @@ void installMetricManifest(MetricCatalogue &cat)
                        .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
         .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
-                    QStringLiteral("assessment:wrist") },
+                    QStringLiteral("assessment:wrist"),
+                    QStringLiteral("characteristic:insufficient_set") },
     });
 
     cat.addDescriptor({

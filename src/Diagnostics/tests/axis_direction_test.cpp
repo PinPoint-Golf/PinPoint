@@ -87,6 +87,10 @@ static const Expect kExpected[] = {
     // ── impact / follow-through ─────────────────────────────────────────────
     { "sig_scooping",         Direction::Low,
       "leadWristFlexExt: '+ is bowed/flexed, - is cupped/extended'; scooping ADDS loft, so cupped" },
+    { "sig_insufficientSet",  Direction::Low,
+      "leadWristRadUln is the HINGE; less set is less of it" },
+    { "sig_lossOfPosture",    Direction::Low,
+      "spineForwardBend: losing posture is standing UP, the negative deviation from address" },
     { "sig_chickenWing",      Direction::High,
       "leadArmToTorso: 'a rising angle there means the arm is separating from the body'" },
     { "sig_lateBuckle",       Direction::High,  "leadKneeFlexion: 'higher means more bend'" },
@@ -101,16 +105,10 @@ static const Expect kExpected[] = {
 // three inversions got in.
 static const char *kUndefinedConvention[] = { nullptr };
 
-// Signals known to be wrong in a way a DIRECTION cannot express, so they are excluded from the
-// direction check and tracked here instead. Removing a row means the defect is fixed.
-static const char *kKnownDefective[] = {
-    // Reads leadWristFlexExt (bow/cup) but claims "too little wrist angle by the top ... less
-    // stored angle to release" — wrist SET is the hinge, leadWristRadUln.
-    "sig_insufficientSet",
-    // extremum MAX of (value - address) over p4->p7 finds the most ADDED forward bend, which the
-    // catalogue calls "a dip". Loss of posture is the opposite end.
-    "sig_lossOfPosture",
-};
+// Signals wrong in a way a DIRECTION cannot express. Both original entries are fixed:
+// sig_insufficientSet now reads the hinge (leadWristRadUln) rather than bow/cup, and
+// m_spineBendLoss takes the minimum rather than the maximum. Empty, and it should stay that way.
+static const char *kKnownDefective[] = { nullptr };
 
 static bool listed(const char *const *arr, size_t n, const QString &id)
 {
@@ -142,7 +140,8 @@ int main()
 
             if ((kUndefinedConvention[0] != nullptr
                  && listed(kUndefinedConvention, std::size(kUndefinedConvention), s.id))
-                || listed(kKnownDefective, std::size(kKnownDefective), s.id))
+                || (kKnownDefective[0] != nullptr
+                    && listed(kKnownDefective, std::size(kKnownDefective), s.id)))
                 continue;
 
             const auto it = expect.find(s.id);
@@ -206,12 +205,36 @@ int main()
             if (s.test != SignalTest::OutsideCorridor) continue;
             if ((kUndefinedConvention[0] != nullptr
                  && listed(kUndefinedConvention, std::size(kUndefinedConvention), s.id))) ++undefined;
-            if (listed(kKnownDefective, std::size(kKnownDefective), s.id))           ++defective;
+            if (kKnownDefective[0] != nullptr
+                && listed(kKnownDefective, std::size(kKnownDefective), s.id))            ++defective;
         }
         check(undefined == 0,
               "every signal's metric states which way is positive (must stay at zero)");
-        check(defective == 2,
-              "2 signals are wrong in a way direction cannot express (must only go down)");
+        check(defective == 0,
+              "no signal is left wrong in a way direction cannot express (must stay at zero)");
+    }
+
+    std::printf("=== every signal-bearing measure says what HIGH means ===\n");
+    {
+        // The words an author reads instead of "High"/"Low". Without them the direction choice is
+        // made against a convention the author has to remember correctly, which is how the three
+        // inversions got in — so a measure carrying a corridor signal must carry these too.
+        int measures = 0, silent = 0;
+        for (const Signal &s : p.signalDefs) {
+            if (s.test != SignalTest::OutsideCorridor) continue;
+            for (const QString &mid : s.measures) {
+                const Measure *m = p.measure(mid);
+                if (m == nullptr) continue;
+                ++measures;
+                if (m->highMeans.isEmpty()) {
+                    ++silent;
+                    std::printf("        '%s' does not say what a high value means\n",
+                                qPrintable(mid));
+                }
+            }
+        }
+        std::printf("      %d signal-bearing measure references\n", measures);
+        check(silent == 0, "every measure a corridor signal reads says what HIGH means");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

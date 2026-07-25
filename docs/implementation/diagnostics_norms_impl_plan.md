@@ -16,7 +16,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 | 1 | Types, tree, pack, providers | ☑ complete | 2026-07-25 · 287f3ea |
 | 2 | Migrate `reference_bands.cpp` — parity gate | ☑ complete | 2026-07-25 · 287f3ea |
 | 3 | Wire into the engine — **the pack lights up** | ◐ mechanism done, **content owed** | 2026-07-25 · 287f3ea |
-| 4 | Direction audit (all 30 signals) + `highMeans` | ◐ **28/30 audited, 2 owed + `highMeans`** | 2026-07-25 |
+| 4 | Direction audit (all 30 signals) + `highMeans` | ☑ complete — **30/30, nothing exempt** | 2026-07-25 |
 | — | **review gate · expect context clear here** | | |
 | 5 | `NormModel` + read-only norm UI | ☐ not started | |
 | — | **review gate** | | |
@@ -382,7 +382,8 @@ the condition's own consequence text against the metric's documented sign conven
 `axis_direction_test`, whose fixture carries the catalogue quote that decides each row, so a new
 signal cannot be added unaudited.
 
-**28 of 30 audited and correct. 2 wrong in a way direction cannot express. 0 unverifiable.**
+**All 30 audited and correct. Nothing exempt, nothing unverifiable.** Both exemption lists in
+`axis_direction_test` are empty and asserted to stay that way.
 
 Mark then set the conventions that resolved all seven unverifiable signals, now written down in
 `docs/design/pinpoint_sign_conventions.md`. There are **two families**:
@@ -412,16 +413,30 @@ expects — and the doc says so explicitly, so nobody "fixes" it later.
 | `sig_slide` | unchanged (high) | toward the lead side — the one of the three that was right |
 | `thoraxLateralDrift` | reworded | *"toward the target"* → *"toward the lead side"*, matching its counterpart |
 
-### Wrong in a way a direction cannot express — need a decision
+### Wrong in a way a direction cannot express — both fixed
 
-- **`sig_insufficientSet` reads the wrong DOF.** It claims *"too little wrist angle by the top …
-  less stored angle to release"*, which is the **hinge** — `leadWristRadUln`, labelled "Lead wrist —
-  hinge". `m_leadWristAtTop` reads `leadWristFlexExt` (bow/cup). Needs a new measure on the hinge at
-  P4; the `low` direction is already right for it.
-- **`sig_lossOfPosture` reads the wrong end.** `m_spineBendLoss` is `extremum MAX` of
-  (value − address) over P4→P7, which finds the most *added* forward bend — what the catalogue
-  calls *"a dip"*. Losing posture is standing up: the *minimum*. As authored it detects the opposite
-  fault. Needs `sense: min` + `direction: low`, or a measure defined as the loss magnitude.
+- **`sig_insufficientSet` read the wrong DOF.** It claims *"too little wrist angle by the top …
+  less stored angle to release"* — the **hinge**, `leadWristRadUln`, which the catalogue labels
+  "Lead wrist — hinge". It read `leadWristFlexExt` (bow/cup), a different axis entirely. Minted
+  **`m_leadWristSetAtTop`** (`leadWristRadUln` at P4, live) and repointed the signal; `low` was
+  already right once it was on the right axis. The catalogue's `usedBy` reverse index moved with it,
+  which `diagnostics_catalogue_integrity_test` caught immediately.
+  ⚠ `m_leadWristAtTop` (bow/cup at the top) is now read by no signal and will show in the health
+  list as unused. Kept deliberately: it is a real live measure and it is the axis the archetype
+  contexts are about — a cupped-at-the-top condition would ride it.
+- **`sig_lossOfPosture` read the wrong end.** `m_spineBendLoss` took `extremum MAX` of
+  (value − address) over P4→P7 — the most *added* forward bend, which the catalogue calls *"a dip"*,
+  a different fault. Now `sense: min` + `direction: low`.
+
+### `highMeans` authored and enforced
+
+Every measure a corridor signal reads now says what a HIGH value means in its own words —
+*"further forward, toward the lead foot"*, *"a more closed shoulder line, aimed further right of the
+target for a right-handed golfer"*. 27 measures. `Measure::highMeans` is a new field on the pack
+type, round-tripped through JSON, and `axis_direction_test` fails if a signal-bearing measure is
+silent. This is what an author reads **instead of High/Low** when choosing a direction, and it is
+the mechanism that stops the next inversion — all three that shipped came from choosing a direction
+against a convention the author had to remember correctly.
 
 ### Alignment, resolved by the aim-family rule
 

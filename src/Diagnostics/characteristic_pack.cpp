@@ -583,6 +583,7 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         m.aliases   = readStringList(o.value(QStringLiteral("aliases")));
         m.unit      = o.value(QStringLiteral("unit")).toString();
         m.gapReason = o.value(QStringLiteral("gapReason")).toString();
+        m.highMeans = o.value(QStringLiteral("highMeans")).toString();
 
         if (o.contains(QStringLiteral("viewNeeded")))
             viewNeededFromName(o.value(QStringLiteral("viewNeeded")).toString(), m.viewNeeded);
@@ -741,6 +742,7 @@ QJsonObject savePack(const CharacteristicPack &pack)
         if (!m.aliases.isEmpty())   o.insert(QStringLiteral("aliases"), writeStringList(m.aliases));
         if (!m.unit.isEmpty())      o.insert(QStringLiteral("unit"), m.unit);
         if (!m.gapReason.isEmpty()) o.insert(QStringLiteral("gapReason"), m.gapReason);
+        if (!m.highMeans.isEmpty()) o.insert(QStringLiteral("highMeans"), m.highMeans);
         o.insert(QStringLiteral("viewNeeded"), viewNeededName(m.viewNeeded));
         o.insert(QStringLiteral("status"), measureStatusName(m.status));
         measures.append(o);
