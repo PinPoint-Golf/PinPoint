@@ -1054,7 +1054,7 @@
       "measures": [
         "m_shoulderAlignment"
       ],
-      "direction": "high"
+      "direction": "low"
     },
     {
       "id": "sig_alignmentClosed",
@@ -1062,7 +1062,7 @@
       "measures": [
         "m_shoulderAlignment"
       ],
-      "direction": "low"
+      "direction": "high"
     },
     {
       "id": "sig_ballForward",

@@ -1,10 +1,29 @@
 # Sign conventions
 
-**Every directional metric in PinPoint is positive toward the lead side.**
+There are **two** families, and which one a metric belongs to depends on what kind of thing it
+measures. Both are stated here; a metric belongs to exactly one.
 
-That is the whole rule. Lateral displacement, ball position along the stance, and anything else
-whose value carries a direction rather than only a magnitude: **positive is toward the lead arm and
-lead foot; negative is away from them.**
+## 1. Displacement — positive toward the lead side
+
+**Where something has MOVED.** Lateral displacement, ball position along the stance, and anything
+else whose value is a signed distance: **positive is toward the lead arm and lead foot; negative is
+away from them.**
+
+## 2. Aim and path — positive is closed / in-to-out
+
+**Where something POINTS or TRAVELS.** Club path, face angle, shoulder line, toe line:
+**out-to-in and open are NEGATIVE; in-to-out and closed are POSITIVE.**
+
+This is the launch-monitor convention every golfer and every device already uses, and it keeps
+`face − path` carrying the sign the shot shape implies. Consistency with the outside world wins on
+this axis, because the numbers get read alongside numbers we did not produce.
+
+### They look opposed, and that is correct
+
+For a right-handed golfer, "closed" points right — toward the *trail* side — so the aim family's
+positive runs opposite to the displacement family's. That is not an inconsistency to be tidied up
+later: the two measure different things (a translation versus a rotation), and each follows the
+convention its own readership expects. **Do not "fix" one to match the other.**
 
 ## Why this rule, and why it is written down
 
@@ -13,13 +32,14 @@ inverted signal fires happily on the wrong swings with correct-sounding conseque
 and looks exactly like a detector that works. The direction audit
 (`src/Diagnostics/tests/axis_direction_test.cpp`) found them by comparing each condition's own words
 against its metric's stated convention — which only worked where a convention had actually been
-stated. Five signals could not be checked at all, because their metric never said which way was
-positive.
+stated. Seven signals could not be checked at all on the first pass, because their metric never said
+which way was positive. Writing these two families down is what closed that gap; the audit now
+covers 28 of 30.
 
 So the convention is not documentation-after-the-fact. It is the thing that makes a direction
 auditable, and a metric that does not state it cannot carry a signal safely.
 
-## Lead-relative, not left/right, and not "target"
+## Family 1 is lead-relative, not left/right, and not "target"
 
 The rest of the vocabulary is already handedness-invariant — lead/trail, never left/right — and this
 follows it. "Positive is toward the lead side" means the same thing for a right-handed and a
@@ -31,16 +51,27 @@ a deliberately manipulated setup. The vocabulary should key on the golfer.
 
 ## What this means in practice
 
+**Displacement family**
+
 | metric | positive means |
 |---|---|
 | `ballPosition` | toward the lead foot. `0 %` is the middle of the stance; a driver sits around `+50 %` (the lead heel), a wedge around `0 %`. Unclamped — forward of the lead heel reads above `+50 %`. |
 | `pelvisSway` | the pelvis has moved toward the lead side. Sway *away* in the backswing is therefore **negative**, and a slide toward the lead side in the downswing is **positive**. |
 | `thoraxLateralDrift` | the chest has moved toward the lead side. The counterpart to pelvis sway, and read with it. |
 
-Depth and rotation axes are a separate question and are **not** covered by this rule — `pelvisThrust`
-is toward the ball, which is neither lead nor trail, and it states its own convention. Where an axis
-is not lead-relative, say what positive means in the descriptor rather than assuming a reader can
-infer it.
+**Aim family**
+
+| metric | positive means |
+|---|---|
+| `clubPath` | in-to-out. Out-to-in — the over-the-top delivery — is negative. |
+| `faceAngle` | closed. Open is negative. |
+| `shoulderAlignment` | closed. An open shoulder line at address is negative. |
+| `toeLineAngle` | closed stance. An open stance is negative. |
+
+A metric on neither axis belongs to neither family and **must state its own convention**:
+`pelvisThrust` is toward the ball, which is neither lead nor trail nor an aim; turn metrics like
+`pelvisRotation` are magnitudes of rotation, not directions of aim. Say what positive means in the
+descriptor rather than assuming a reader can infer it.
 
 ## The obligation on a new metric
 
@@ -57,10 +88,9 @@ Two consequences follow, both enforced:
   words ("further back, toward the trail foot"), so an author choosing a signal direction reads the
   meaning rather than guessing at High/Low.
 
-## Still undefined
+## Nothing undefined
 
-`shoulderAlignment` does not state which sign is open. It is a `planned` metric, so the convention
-is free to choose, and the natural reading under this rule is **positive = open** — an open shoulder
-line for a right-handed golfer points left, which is the lead side. That has not been decided, and
-`sig_alignmentOpen` / `sig_alignmentClosed` remain unauditable until it is. Decide it when the
-producer is written, not after.
+Every directional metric that carries a corridor signal now states its convention, and
+`axis_direction_test` audits all 30 of them against it. The two counts it tracks — signals with no
+stated convention, and signals broken in a way a direction cannot express — are asserted so they can
+only go down.

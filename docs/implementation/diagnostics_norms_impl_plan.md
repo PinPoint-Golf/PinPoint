@@ -16,7 +16,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 | 1 | Types, tree, pack, providers | ☑ complete | 2026-07-25 · 287f3ea |
 | 2 | Migrate `reference_bands.cpp` — parity gate | ☑ complete | 2026-07-25 · 287f3ea |
 | 3 | Wire into the engine — **the pack lights up** | ◐ mechanism done, **content owed** | 2026-07-25 · 287f3ea |
-| 4 | Direction audit (all 30 signals) + `highMeans` | ◐ **26/30 audited, 2 owed + `highMeans`** | 2026-07-25 |
+| 4 | Direction audit (all 30 signals) + `highMeans` | ◐ **28/30 audited, 2 owed + `highMeans`** | 2026-07-25 |
 | — | **review gate · expect context clear here** | | |
 | 5 | `NormModel` + read-only norm UI | ☐ not started | |
 | — | **review gate** | | |
@@ -382,13 +382,21 @@ the condition's own consequence text against the metric's documented sign conven
 `axis_direction_test`, whose fixture carries the catalogue quote that decides each row, so a new
 signal cannot be added unaudited.
 
-**26 of 30 audited and correct. 2 wrong in a way direction cannot express. 2 unverifiable.**
+**28 of 30 audited and correct. 2 wrong in a way direction cannot express. 0 unverifiable.**
 
-Mark then set a project-wide rule that resolved five of them at once — **positive is toward the
-lead side, in every context** — now written down in `docs/design/pinpoint_sign_conventions.md`. It
-is lead-relative rather than left/right or "toward the target", matching the rest of the vocabulary:
-the same statement holds for a right- and a left-handed golfer, and the lead side is a property of
-the golfer where the target is a property of the shot.
+Mark then set the conventions that resolved all seven unverifiable signals, now written down in
+`docs/design/pinpoint_sign_conventions.md`. There are **two families**:
+
+- **Displacement — positive toward the lead side.** Lead-relative rather than left/right or "toward
+  the target", matching the rest of the vocabulary: the same statement holds for a right- and a
+  left-handed golfer, and the lead side is a property of the golfer where the target is a property
+  of the shot.
+- **Aim and path — positive is closed / in-to-out**, the launch-monitor convention, so `face − path`
+  carries the sign the shot shape implies.
+
+Their positives run opposite for a right-hander (closed points to the trail side). That is correct
+and deliberate — a translation and a rotation, each following the convention its own readership
+expects — and the doc says so explicitly, so nobody "fixes" it later.
 
 ### Fixed
 
@@ -415,13 +423,16 @@ the golfer where the target is a property of the shot.
   calls *"a dip"*. Losing posture is standing up: the *minimum*. As authored it detects the opposite
   fault. Needs `sense: min` + `direction: low`, or a measure defined as the loss magnitude.
 
-### Still unverifiable — 2 left
+### Alignment, resolved by the aim-family rule
 
-`sig_alignmentOpen` / `sig_alignmentClosed`: `shoulderAlignment` never says which sign is open. It
-is a `planned` metric, so the convention is free to choose, and the natural reading under the rule
-is **positive = open** (an open line for a right-hander points left, the lead side). Not decided —
-decide it when the producer is written. The two tails are at least opposite each other, so they are
-internally consistent whichever way it lands.
+`sig_alignmentOpen` → **low**, `sig_alignmentClosed` → **high** (both flipped): open is negative.
+`shoulderAlignment`, `toeLineAngle` and `faceAngle` all now state it — the latter two carry no
+corridor signal yet, so they were latent rather than broken, and stating it now means the signal
+that eventually rides them cannot guess wrong.
+
+**Nothing is unverifiable any more.** `axis_direction_test` asserts the no-stated-convention count
+is **zero** and must stay there — a new entry is a metric that shipped without saying which way is
+positive, which is exactly how the three inversions got in.
 
 ### Also noticed, not acted on
 

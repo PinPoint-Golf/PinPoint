@@ -43,6 +43,9 @@ static const Expect kExpected[] = {
       "spineForwardBend is 'the forward tilt of the trunk'; upright is less of it" },
     { "sig_ballTooClose",     Direction::Low,   "ballBodyDistance: 'higher means further away'" },
     { "sig_ballTooFar",       Direction::High,  "ballBodyDistance: 'higher means further away'" },
+    { "sig_alignmentOpen",    Direction::Low,
+      "shoulderAlignment: 'open is negative and closed is positive' — the club-path convention" },
+    { "sig_alignmentClosed",  Direction::High,  "shoulderAlignment: closed is the positive end" },
     { "sig_ballForward",      Direction::High,
       "ballPosition: 'positive is toward the lead foot'; forward IS the lead side" },
     { "sig_ballBack",         Direction::Low,
@@ -93,10 +96,10 @@ static const Expect kExpected[] = {
 // against anything. These are not passes — they are a standing debt, and the count is asserted so
 // it can only go down. Every one is on a `planned` metric, so the convention is still free to be
 // chosen; it must be written into the descriptor when the producer is.
-static const char *kUndefinedConvention[] = {
-    "sig_alignmentOpen",      // shoulderAlignment never says which sign is open
-    "sig_alignmentClosed",
-};
+// Empty, and it must stay that way: every metric carrying a corridor signal now states which way
+// is positive. A new entry here is a metric that shipped without saying, which is exactly how the
+// three inversions got in.
+static const char *kUndefinedConvention[] = { nullptr };
 
 // Signals known to be wrong in a way a DIRECTION cannot express, so they are excluded from the
 // direction check and tracked here instead. Removing a row means the defect is fixed.
@@ -137,7 +140,8 @@ int main()
         for (const Signal &s : p.signalDefs) {
             if (s.test != SignalTest::OutsideCorridor) continue;
 
-            if (listed(kUndefinedConvention, std::size(kUndefinedConvention), s.id)
+            if ((kUndefinedConvention[0] != nullptr
+                 && listed(kUndefinedConvention, std::size(kUndefinedConvention), s.id))
                 || listed(kKnownDefective, std::size(kKnownDefective), s.id))
                 continue;
 
@@ -200,11 +204,12 @@ int main()
         int undefined = 0, defective = 0;
         for (const Signal &s : p.signalDefs) {
             if (s.test != SignalTest::OutsideCorridor) continue;
-            if (listed(kUndefinedConvention, std::size(kUndefinedConvention), s.id)) ++undefined;
+            if ((kUndefinedConvention[0] != nullptr
+                 && listed(kUndefinedConvention, std::size(kUndefinedConvention), s.id))) ++undefined;
             if (listed(kKnownDefective, std::size(kKnownDefective), s.id))           ++defective;
         }
-        check(undefined == 2,
-              "2 signals still ride metrics that state no sign convention (must only go down)");
+        check(undefined == 0,
+              "every signal's metric states which way is positive (must stay at zero)");
         check(defective == 2,
               "2 signals are wrong in a way direction cannot express (must only go down)");
     }

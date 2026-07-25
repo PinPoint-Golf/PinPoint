@@ -720,8 +720,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .description = QStringLiteral(
             "Where the clubface is pointing at impact relative to the target line — the primary "
             "control on where the ball starts, since start direction is dominated by face angle. "
-            "Small open/closed differences here are the difference between a fairway and a penalty "
-            "area."),
+            "OPEN IS NEGATIVE AND CLOSED IS POSITIVE, the same convention as club path, so face-"
+            "minus-path carries the sign the shot shape implies. Small open/closed differences here "
+            "are the difference between a fairway and a penalty area."),
         .howToRead = QStringLiteral(
             "Read at Impact; you want small, repeatable open/closed values matched to the intended "
             "path. Face angle really needs a club-mounted device or full club tracking to measure "
@@ -985,7 +986,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .description = QStringLiteral(
             "The alignment of the stance at address, taken as the angle of the line joining the two "
             "big toes relative to the image horizontal. It is a quick read on whether the feet are "
-            "set open, square or closed to the intended line."),
+            "set open, square or closed to the intended line. OPEN IS NEGATIVE AND CLOSED IS "
+            "POSITIVE, the same convention as club path and shoulder alignment."),
         .howToRead = QStringLiteral(
             "A single address measurement of stance alignment (open / square / closed) in the image "
             "plane. Because it is measured face-on it reads the apparent line rather than true "
@@ -1031,9 +1033,11 @@ void installMetricManifest(MetricCatalogue &cat)
         .group = QStringLiteral("Alignment"),
         .description = QStringLiteral(
             "Which way the shoulder line points — the angle of the line joining the lead and trail "
-            "shoulders in the image plane — read at address and again at impact. The shoulders are "
-            "the most influential alignment line for a player's start direction, and how they "
-            "return at impact tells a different story from how they were set."),
+            "shoulders in the image plane — read at address and again at impact. OPEN IS NEGATIVE "
+            "AND CLOSED IS POSITIVE, the same convention as club path, which an open line and an "
+            "out-to-in path share. The shoulders are the most influential alignment line for a "
+            "player's start direction, and how they return at impact tells a different story from "
+            "how they were set."),
         .howToRead = QStringLiteral(
             "Read at Address and Impact. A common pattern is close to square at address and a touch "
             "open by impact as the upper body clears; shoulders open at address, or slammed wide "
