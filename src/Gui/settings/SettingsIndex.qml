@@ -326,6 +326,19 @@ QtObject {
           actions: "metric catalogue directory reference normative corridor tour wrist bow cup hinge roll elbow clubhead hand speed lag stance foot flare toe heel",
           itemId: "" }
 
+        ,
+        // ── Diagnostics (panelIndex: 10) ──────────────────────────────────────
+
+        { panelIndex: 10, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
+          label: qsTr("Swing diagnostics"),                subtitle: qsTr("Named faults and their causes — what each costs the golfer"),
+          actions: "diagnostics characteristics faults causes diagnosis library swing early extension loss of posture over the top casting scooping sway slide hanging back chicken wing flying elbow reverse spine s-posture c-posture ball position stance width alignment tempo sequence x-factor",
+          itemId: "" },
+
+        { panelIndex: 10, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
+          label: qsTr("Physical screens"),                 subtitle: qsTr("Causes the app cannot measure — which screens would explain the most"),
+          actions: "screen screening physical mobility hip internal rotation thoracic rotation pelvic disassociation core stability balance ankle dorsiflexion shoulder flexion wrist mobility",
+          itemId: "" }
+
         // TODO: add entries when Launch Monitor panel is implemented (panelIndex: 6)
         // TODO: add entries when Archiving panel is implemented (panelIndex: 8)
     ]

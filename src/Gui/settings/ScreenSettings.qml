@@ -59,7 +59,7 @@ Item {
             var panels = [
                 generalPanel, appearancePanel, displaysPanel,
                 camerasPanel, imusPanel, microphonesPanel,
-                null, storagePanel, null, metricLibraryPanel
+                null, storagePanel, null, metricLibraryPanel, characteristicPanel
             ]
             var panel = panels[entry.panelIndex]
             if (panel) scrollWithRetry(panel, entry.itemId, 0)
@@ -74,6 +74,15 @@ Item {
         root.searchQuery = ""
         root.activeNavIndex = 9                       // Metrics
         Qt.callLater(function() { metricLibraryPanel.showMetric(key) })
+    }
+
+    // Deep link straight to one characteristic's detail page. Same callLater shape as
+    // showMetricDetail: the panel Loader must have instantiated before we can address it.
+    function showCharacteristicDetail(conditionId) {
+        searchInput.text = ""
+        root.searchQuery = ""
+        root.activeNavIndex = 10                      // Diagnostics
+        Qt.callLater(function() { characteristicPanel.showCharacteristic(conditionId) })
     }
 
     function scrollWithRetry(panel, itemId, retries) {
@@ -198,9 +207,14 @@ Item {
                                 { navIdx: 7, icon: "▥", label: qsTr("Storage"),        sectionHead: qsTr("Data"),     hasBadge: false },
                                 { navIdx: 8, icon: "▤", label: qsTr("Archiving"),      sectionHead: "",               hasBadge: false },
                                 { navIdx: 9, icon: "≣", label: qsTr("Metrics"),        sectionHead: qsTr("Reference"), hasBadge: false },
+                                { navIdx: 10, icon: "◇", label: qsTr("Diagnostics"),    sectionHead: "",               hasBadge: false },
                                 // Not a panel: emits resourceMonitorRequested() (its
                                 // own screen) rather than switching activeNavIndex.
-                                { navIdx: 10, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
+                                // NB: this row moved 10 -> 11 when Characteristics was
+                                // added. It is an ACTION row, so its navIdx never
+                                // indexes the StackLayout — but it must not collide
+                                // with a panel index either.
+                                { navIdx: 11, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
                             ]
 
                             delegate: Column {
@@ -430,6 +444,7 @@ Item {
                 StoragePanel {    id: storagePanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 7
                 ScreenPlaceholder { titleText: "Archiving" }                                               // 8
                 MetricLibrary {   id: metricLibraryPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 9
+                CharacteristicLibrary { id: characteristicPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 10
             }
         }
     }

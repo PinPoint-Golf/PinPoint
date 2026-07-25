@@ -276,8 +276,9 @@ target_include_directories(PinPointStudio PRIVATE
     src/Gui/app src/Gui/shell src/Gui/athlete src/Gui/monitor src/Gui/cameras
     src/Gui/imu src/Gui/viz src/Gui/session src/Gui/shot src/Gui/review
     src/Gui/media src/Gui/calibration src/Gui/diagnostics src/Gui/markup
+    src/Gui/characteristics
     src/IMU src/Audio src/Video src/Pose src/STT src/TTS src/LLM src/Secrets src/Core src/Buffer
-    src/Analysis src/Metrics
+    src/Analysis src/Metrics src/Diagnostics
     src/Update
     "${CMAKE_BINARY_DIR}/generated")
 
@@ -411,6 +412,9 @@ qt_add_qml_module(PinPointStudio
         src/Gui/review/MetricDetail.qml
         src/Gui/review/MetricLibrary.qml
         src/Gui/review/MetricRoute.qml
+        src/Gui/characteristics/CharacteristicLibrary.qml
+        src/Gui/characteristics/CharacteristicRow.qml
+        src/Gui/characteristics/CharacteristicDetail.qml
         src/Gui/diagnostics/WristDiagnostics.qml
         src/Gui/diagnostics/DofTrajectoryStrip.qml
         src/Gui/diagnostics/PositionAngleGrid.qml
@@ -442,6 +446,24 @@ qt_add_qml_module(PinPointStudio
         src/Gui/review/chart_metrics.cpp
         src/Gui/review/metric_catalog.h
         src/Gui/review/metric_catalog.cpp
+        src/Gui/characteristics/characteristic_library_model.h
+        src/Gui/characteristics/characteristic_library_model.cpp
+        src/Diagnostics/anatomy_vocabulary.h
+        src/Diagnostics/anatomy_vocabulary.cpp
+        src/Diagnostics/measure_facets.h
+        src/Diagnostics/measure_facets.cpp
+        src/Diagnostics/characteristic.h
+        src/Diagnostics/characteristic.cpp
+        src/Diagnostics/characteristic_pack.h
+        src/Diagnostics/characteristic_pack.cpp
+        src/Diagnostics/pack_provider.h
+        src/Diagnostics/resource_pack_provider.cpp
+        src/Diagnostics/file_pack_provider.cpp
+        src/Diagnostics/merged_pack_provider.cpp
+        src/Diagnostics/characteristic_engine.h
+        src/Diagnostics/characteristic_engine.cpp
+        src/Diagnostics/relation_resolver.h
+        src/Diagnostics/relation_resolver.cpp
         src/Gui/diagnostics/wrist_diagnostics_model.h
         src/Gui/diagnostics/wrist_diagnostics_model.cpp
         src/Analysis/reference_bands.h
@@ -582,6 +604,16 @@ configure_file(
     @ONLY
 )
 
+
+# The shipped swing-characteristics pack. src/Diagnostics/packs/core.json is the reviewable source
+# of truth committed to the repo; this embeds it for runtime. Keep the two in step — there is no
+# generation step, the file IS the content.
+qt_add_resources(PinPointStudio "app_diagnostics"
+    PREFIX "/diagnostics"
+    BASE   "src/Diagnostics/packs"
+    FILES
+        src/Diagnostics/packs/core.json
+)
 
 qt_add_resources(PinPointStudio "app_icons"
     PREFIX "/icons"

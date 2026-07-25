@@ -1,0 +1,1872 @@
+{
+  "id": "core",
+  "version": "1.0.0",
+  "schemaVersion": 1,
+  "measures": [
+    {
+      "id": "m_ballPosition",
+      "kind": "provided",
+      "metricKey": "ballPosition",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Ball position in the stance, at P1"
+    },
+    {
+      "id": "m_stanceWidth",
+      "kind": "provided",
+      "metricKey": "stanceWidth",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Stance width, at P1"
+    },
+    {
+      "id": "m_lagAngleDown",
+      "kind": "provided",
+      "metricKey": "lagAngle",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p5",
+          "p6"
+        ],
+        "sense": "min"
+      },
+      "status": "live",
+      "label": "Lag angle, lowest P5 to P6"
+    },
+    {
+      "id": "m_leadWristAtTop",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "live",
+      "label": "Lead wrist flexion/extension, at P4"
+    },
+    {
+      "id": "m_leadWristAtImpact",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist flexion/extension, change P1 to P7"
+    },
+    {
+      "id": "m_tempoRatio",
+      "kind": "provided",
+      "metricKey": "tempoRatio",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "live",
+      "label": "Tempo ratio"
+    },
+    {
+      "id": "m_shoulderAlignment",
+      "kind": "provided",
+      "metricKey": "shoulderAlignment",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Shoulder alignment to the target line, at P1"
+    },
+    {
+      "id": "m_spineBendAtAddress",
+      "kind": "provided",
+      "metricKey": "spineForwardBend",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Spine forward bend, at P1"
+    },
+    {
+      "id": "m_spineBendLoss",
+      "kind": "provided",
+      "metricKey": "spineForwardBend",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p4",
+          "p7"
+        ],
+        "sense": "max",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Spine forward bend, peak P4 to P7 from P1"
+    },
+    {
+      "id": "m_axisTiltAtTop",
+      "kind": "provided",
+      "metricKey": "secondaryAxisTilt",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "planned",
+      "label": "Secondary axis tilt, at P4"
+    },
+    {
+      "id": "m_pelvisThrustDown",
+      "kind": "provided",
+      "metricKey": "pelvisThrust",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p5",
+          "p7"
+        ],
+        "sense": "max",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Pelvis thrust toward the ball, peak P5 to P7 from P1"
+    },
+    {
+      "id": "m_pelvisLiftTop",
+      "kind": "provided",
+      "metricKey": "pelvisLift",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "planned",
+      "label": "Pelvis lift, change P1 to P4"
+    },
+    {
+      "id": "m_pelvisSwayBack",
+      "kind": "provided",
+      "metricKey": "pelvisSway",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p1",
+          "p4"
+        ],
+        "sense": "max",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Pelvis lateral sway, peak P1 to P4 from P1"
+    },
+    {
+      "id": "m_pelvisSwayDown",
+      "kind": "provided",
+      "metricKey": "pelvisSway",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p5",
+          "p7"
+        ],
+        "sense": "max",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Pelvis lateral sway, peak P5 to P7 from P1"
+    },
+    {
+      "id": "m_pelvisSwayImpact",
+      "kind": "provided",
+      "metricKey": "pelvisSway",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "planned",
+      "label": "Pelvis lateral sway, change P1 to P7"
+    },
+    {
+      "id": "m_clubPathAtImpact",
+      "kind": "provided",
+      "metricKey": "clubPath",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Club path, at P7"
+    },
+    {
+      "id": "m_xFactorStretch",
+      "kind": "provided",
+      "metricKey": "xFactorStretch",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p4",
+          "p5"
+        ],
+        "sense": "max"
+      },
+      "status": "planned",
+      "label": "X-factor stretch, peak P4 to P5"
+    },
+    {
+      "id": "m_pelvisRotPeak",
+      "kind": "provided",
+      "metricKey": "pelvisRotation",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p4",
+          "p7"
+        ],
+        "sense": "max"
+      },
+      "status": "planned",
+      "label": "Pelvis rotation, peak P4 to P7"
+    },
+    {
+      "id": "m_thoraxRotPeak",
+      "kind": "provided",
+      "metricKey": "thoraxRotation",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p4",
+          "p7"
+        ],
+        "sense": "max"
+      },
+      "status": "planned",
+      "label": "Thorax rotation, peak P4 to P7"
+    },
+    {
+      "id": "m_thoracicCurve",
+      "kind": "composed",
+      "series": {
+        "what": "thoracicSegment",
+        "quantity": "angle",
+        "reference": "ground"
+      },
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_lumbarCurve",
+      "kind": "composed",
+      "series": {
+        "what": "lumbarSegment",
+        "quantity": "angle",
+        "reference": "ground"
+      },
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_shoulderPlane",
+      "kind": "composed",
+      "series": {
+        "what": "shoulderLine",
+        "quantity": "angle",
+        "reference": "ground"
+      },
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_ballBodyGap",
+      "kind": "composed",
+      "series": {
+        "what": "ball",
+        "quantity": "distance",
+        "reference": "stanceLine"
+      },
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_thoraxDrift",
+      "kind": "composed",
+      "series": {
+        "what": "thoraxCentre",
+        "quantity": "distance",
+        "reference": "trailAnkle"
+      },
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p5"
+        ]
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_leadKneeFlex",
+      "kind": "composed",
+      "series": {
+        "what": "leadShin",
+        "quantity": "angle",
+        "reference": "leadThigh"
+      },
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p7",
+          "p8"
+        ],
+        "sense": "max"
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_trailElbowRise",
+      "kind": "composed",
+      "series": {
+        "what": "trailElbow",
+        "quantity": "height",
+        "reference": "shoulderLine"
+      },
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_leadArmToTorso",
+      "kind": "composed",
+      "series": {
+        "what": "leadUpperArm",
+        "quantity": "angle",
+        "reference": "spine"
+      },
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p7",
+        "window": [
+          "p7",
+          "p8"
+        ]
+      },
+      "status": "noProducer",
+      "label": ""
+    },
+    {
+      "id": "m_leadHandWidth",
+      "kind": "composed",
+      "series": {
+        "what": "leadHand",
+        "quantity": "distance",
+        "reference": "thoraxCentre"
+      },
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "noProducer",
+      "label": ""
+    }
+  ],
+  "signals": [
+    {
+      "id": "sig_sPosture",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_lumbarCurve"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_cPosture",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_thoracicCurve"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_postureUpright",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spineBendAtAddress"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_alignmentOpen",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shoulderAlignment"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_alignmentClosed",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shoulderAlignment"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_ballForward",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_ballPosition"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_ballBack",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_ballPosition"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_stanceWide",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_stanceWidth"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_stanceNarrow",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_stanceWidth"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_ballTooClose",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_ballBodyGap"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_ballTooFar",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_ballBodyGap"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_lossOfPosture",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spineBendLoss"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_earlyExtension",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisThrustDown"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_reverseSpine",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_axisTiltAtTop"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_flatShoulderPlane",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shoulderPlane"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_trailHipHike",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisLiftTop"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_sway",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayBack"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_slide",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayDown"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_hangingBack",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayImpact"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_forwardLunge",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_thoraxDrift"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_lateBuckle",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadKneeFlex"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_flyingElbow",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_trailElbowRise"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_chickenWing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadArmToTorso"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_overTheTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_clubPathAtImpact"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_lossOfWidth",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadHandWidth"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_casting",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_lagAngleDown"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_scooping",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadWristAtImpact"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_insufficientSet",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadWristAtTop"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_xfactorDeficit",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_xFactorStretch"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_transitionRush",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_tempoRatio"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_sequenceOrder",
+      "test": "order",
+      "measures": [
+        "m_pelvisRotPeak",
+        "m_thoraxRotPeak"
+      ]
+    }
+  ],
+  "conditions": [
+    {
+      "id": "s_posture",
+      "label": "S-posture",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_sPosture"
+      ],
+      "state": "active",
+      "consequence": "An exaggerated low-back arch at address pre-tensions the lower back and makes it harder to turn the pelvis without the spine taking the load.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "lumbar_curve",
+      "injuryNote": "A sustained end-range low-back arch under rotational load is associated with lower back discomfort. Worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "c_posture",
+      "label": "C-posture",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_cPosture"
+      ],
+      "state": "active",
+      "consequence": "A rounded upper back at address reduces the thoracic rotation available, so the backswing turn is shorter and is usually made up for elsewhere.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "thoracic_curve"
+    },
+    {
+      "id": "posture_too_upright",
+      "label": "Standing too upright",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_postureUpright"
+      ],
+      "state": "active",
+      "consequence": "Too little forward bend from the hips leaves the arms no room to hang, so the swing tends to become flatter and more around the body.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "address_hip_hinge"
+    },
+    {
+      "id": "alignment_open",
+      "label": "Shoulders open at address",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_alignmentOpen"
+      ],
+      "state": "active",
+      "consequence": "An open shoulder line at address points the swing left of the target line before the club has moved.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "alignment"
+    },
+    {
+      "id": "alignment_closed",
+      "label": "Shoulders closed at address",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_alignmentClosed"
+      ],
+      "state": "active",
+      "consequence": "A closed shoulder line at address points the swing right of the target line before the club has moved.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "alignment"
+    },
+    {
+      "id": "ball_forward",
+      "label": "Ball too far forward",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_ballForward"
+      ],
+      "state": "active",
+      "consequence": "A ball played too far toward the lead foot is met after the low point, which tends to open the shoulders at address to compensate.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "ball_position"
+    },
+    {
+      "id": "ball_back",
+      "label": "Ball too far back",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_ballBack"
+      ],
+      "state": "active",
+      "consequence": "A ball played too far toward the trail foot is met early and steeply, which tends to close the shoulders at address to compensate.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "ball_position"
+    },
+    {
+      "id": "stance_wide",
+      "label": "Stance too wide",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_stanceWide"
+      ],
+      "state": "active",
+      "consequence": "A wide base resists rotation, so the body tends to move laterally instead of turning.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "stance_width"
+    },
+    {
+      "id": "stance_narrow",
+      "label": "Stance too narrow",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_stanceNarrow"
+      ],
+      "state": "active",
+      "consequence": "A narrow base turns easily but gives less to push against and less lateral stability through impact.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "stance_width"
+    },
+    {
+      "id": "ball_too_close",
+      "label": "Ball too close to the body",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_ballTooClose"
+      ],
+      "state": "active",
+      "consequence": "Standing too close crowds the arms and steepens the swing.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "ball_body_distance"
+    },
+    {
+      "id": "ball_too_far",
+      "label": "Ball too far from the body",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_ballTooFar"
+      ],
+      "state": "active",
+      "consequence": "Reaching for the ball pulls the shoulders forward and rounds the upper back, even in someone whose standing posture is fine.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "axis": "ball_body_distance"
+    },
+    {
+      "id": "loss_of_posture",
+      "label": "Loss of posture",
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_lossOfPosture"
+      ],
+      "state": "active",
+      "consequence": "Losing the address spine angle during the swing changes the distance to the ball mid-swing, so the low point has to be found by compensation rather than by repetition.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "early_extension",
+      "label": "Early extension",
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_earlyExtension"
+      ],
+      "state": "active",
+      "consequence": "The pelvis moving toward the ball in the downswing takes away the room the arms need, leaving the hands to rescue the strike.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "reverse_spine",
+      "label": "Reverse spine angle",
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_reverseSpine"
+      ],
+      "state": "active",
+      "consequence": "Leaning toward the target at the top loads the trail side of the lower back and makes a sequenced downswing hard to start from the ground.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "injuryNote": "Combined end-range extension and rotation is the loading pattern most often linked with lower back pain in golfers. Worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "flat_shoulder_plane",
+      "label": "Flat shoulder plane",
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_flatShoulderPlane"
+      ],
+      "state": "active",
+      "consequence": "Shoulders turning too horizontally at the top set the club behind the body, which is commonly recovered by throwing the upper body out at the start of the downswing.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "trail_hip_hike",
+      "label": "Trail hip hike",
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_trailHipHike"
+      ],
+      "state": "active",
+      "consequence": "The trail hip rising rather than rotating substitutes a vertical move for a turn and shortens the effective backswing.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "sway",
+      "label": "Sway",
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_sway"
+      ],
+      "state": "active",
+      "consequence": "Sliding away from the target in the backswing moves the low point behind the ball and has to be reversed exactly to strike it.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "slide",
+      "label": "Slide",
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_slide"
+      ],
+      "state": "active",
+      "consequence": "Excess lateral movement toward the target in the downswing outruns the rotation and leaves the face open at impact.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "hanging_back",
+      "label": "Hanging back",
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hangingBack"
+      ],
+      "state": "active",
+      "consequence": "Weight left on the trail side at impact moves the low point behind the ball, costing compression and adding loft.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "forward_lunge",
+      "label": "Forward lunge",
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_forwardLunge"
+      ],
+      "state": "active",
+      "consequence": "The upper body moving toward the target ahead of the sequence steepens the attack and narrows the margin for a clean strike.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "late_buckle",
+      "label": "Late lead-knee buckle",
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_lateBuckle"
+      ],
+      "state": "active",
+      "consequence": "A lead knee collapsing through impact drops the whole body and makes the strike depend on timing.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "flying_elbow",
+      "label": "Flying trail elbow",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_flyingElbow"
+      ],
+      "state": "active",
+      "consequence": "A trail elbow lifted away from the body at the top disconnects the arms from the turn and requires a re-route to deliver the club.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "chicken_wing",
+      "label": "Chicken wing",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_chickenWing"
+      ],
+      "state": "active",
+      "consequence": "The lead arm folding through impact shortens the radius exactly where it should be longest, costing speed and consistency of face angle.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "over_the_top",
+      "label": "Over the top",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_overTheTop"
+      ],
+      "state": "active",
+      "consequence": "The club moving outside the ideal path at the start of the downswing produces an out-to-in strike — a pull or a slice depending on the face.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "loss_of_width",
+      "label": "Loss of width",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_lossOfWidth"
+      ],
+      "state": "active",
+      "consequence": "The hands collapsing toward the chest in the backswing shortens the arc and removes the space the downswing needs to build speed.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "casting",
+      "label": "Casting",
+      "group": "release",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_casting"
+      ],
+      "state": "active",
+      "consequence": "Releasing the wrist angle early spends the stored angle before it can be used, so speed peaks before the ball rather than at it.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "scooping",
+      "label": "Scooping",
+      "group": "release",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_scooping"
+      ],
+      "state": "active",
+      "consequence": "Adding loft through impact with the lead wrist means the club is rising at the ball, costing compression and distance control.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "insufficient_set",
+      "label": "Insufficient wrist set",
+      "group": "release",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_insufficientSet"
+      ],
+      "state": "active",
+      "consequence": "Too little wrist angle by the top leaves less stored angle to release, so speed has to come from the body alone.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "sequence_order",
+      "label": "Out-of-order sequence",
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_sequenceOrder"
+      ],
+      "state": "active",
+      "consequence": "When the chest leads the pelvis, the chain that multiplies speed from the ground up never forms and speed has to be made by the arms.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "xfactor_deficit",
+      "label": "Low separation",
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_xfactorDeficit"
+      ],
+      "state": "active",
+      "consequence": "Little separation between the chest and the pelvis at the top means little elastic load to release, so the downswing starts from a standstill.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "transition_rush",
+      "label": "Rushed transition",
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_transitionRush"
+      ],
+      "state": "active",
+      "consequence": "Starting down too quickly relative to the backswing leaves the sequence no time to form from the ground up.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_trail_hip_ir",
+      "label": "Limited trail-hip internal rotation",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.trailHipInternalRotation",
+      "state": "active",
+      "consequence": "The pelvis turns away from the target over a planted trail foot, which requires the trail femur to rotate internally. When it cannot, the turn has to be found elsewhere.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "injuryNote": "Rotation that the hips cannot supply is usually taken from the lower back, which has very little rotation available. Worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "limited_lead_hip_ir",
+      "label": "Limited lead-hip internal rotation",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.leadHipInternalRotation",
+      "state": "active",
+      "consequence": "The downswing turns the pelvis toward the target over the lead foot, to end range and quickly. A restriction here is the more common and more consequential of the two sides, and forces the pelvis to move rather than turn.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "injuryNote": "Rotation that the hips cannot supply is usually taken from the lower back, which has very little rotation available. Worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "poor_pelvic_disassociation",
+      "label": "Poor pelvic disassociation",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.pelvicDisassociation",
+      "state": "active",
+      "consequence": "When the pelvis cannot move independently of the chest, the two turn together and no separation can be built or released.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_thoracic_rotation",
+      "label": "Limited thoracic rotation",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.thoracicRotation",
+      "state": "active",
+      "consequence": "The upper back supplies most of the turn. When it is restricted the shoulders find their range by tilting or by taking it from the lower back.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_thoracic_extension",
+      "label": "Limited thoracic extension",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.thoracicExtension",
+      "state": "active",
+      "consequence": "An upper back that cannot straighten holds the golfer in flexion at address.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "thoracic_kyphosis",
+      "label": "Fixed thoracic kyphosis",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.thoracicKyphosis",
+      "state": "active",
+      "consequence": "A structurally rounded upper back with tight chest and lat tissue and weak scapular retractors. Present standing upright, not only over the ball — which is what distinguishes it from a setup that merely reaches for the ball.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_shoulder_flexion",
+      "label": "Limited shoulder flexion",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.shoulderFlexion",
+      "state": "active",
+      "consequence": "Restricted overhead reach limits how wide the arms can travel.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_shoulder_external_rotation",
+      "label": "Limited trail-shoulder external rotation",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.trailShoulderExternalRotation",
+      "state": "active",
+      "consequence": "The trail arm needs external rotation to fold under the club at the top; without it the elbow lifts away instead.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_ankle_dorsiflexion",
+      "label": "Limited ankle dorsiflexion",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.ankleDorsiflexion",
+      "state": "active",
+      "consequence": "Restricted ankles reduce how much the golfer can stay in their posture while the pelvis rotates.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_hip_extension",
+      "label": "Limited hip extension",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.hipExtension",
+      "state": "active",
+      "consequence": "Short hip flexors hold the pelvis in a forward tilt, which sets the low-back arch at address before the golfer has done anything.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "limited_wrist_mobility",
+      "label": "Limited wrist mobility",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.wristMobility",
+      "state": "active",
+      "consequence": "Restricted wrists limit how much angle can be set and held.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "poor_core_stability",
+      "label": "Poor core stability",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.coreStability",
+      "state": "active",
+      "consequence": "Without a stable middle, the posture set at address is not held under the loads of the swing.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "poor_single_leg_balance",
+      "label": "Poor single-leg balance",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.singleLegBalance",
+      "state": "active",
+      "consequence": "The downswing is balanced over one leg. When that is difficult, the golfer widens the base or avoids moving onto the lead side at all.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "club_too_short",
+      "label": "Club too short for the golfer",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "active",
+      "consequence": "A club that is short for the golfer makes them reach down and forward for the ball. Club length is measured; fitting it to the golfer needs a reference this product does not capture.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "trying_to_lift_the_ball",
+      "label": "Trying to lift the ball",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "active",
+      "consequence": "An intent to help the ball into the air produces the opposite of the motion that does.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "aim_bias_open",
+      "label": "Aims left of the target",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "active",
+      "consequence": "A perceptual bias that sets the body left of where the golfer believes it is.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "aim_bias_closed",
+      "label": "Aims right of the target",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "active",
+      "consequence": "A perceptual bias that sets the body right of where the golfer believes it is.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "tempo_habit",
+      "label": "Settled tempo habit",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "active",
+      "consequence": "A habitual rhythm carried between shots and clubs.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "stance_habit",
+      "label": "Settled setup preference",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "active",
+      "consequence": "A stance width the golfer has settled on and repeats without thinking about it.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "limited_hip_extension",
+      "to": "s_posture",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "s_posture",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "thoracic_kyphosis",
+      "to": "c_posture",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_extension",
+      "to": "c_posture",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "ball_too_far",
+      "to": "c_posture",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "club_too_short",
+      "to": "c_posture",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "aim_bias_open",
+      "to": "alignment_open",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_forward",
+      "to": "alignment_open",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "aim_bias_closed",
+      "to": "alignment_closed",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_back",
+      "to": "alignment_closed",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "aim_bias_open",
+      "to": "ball_forward",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "aim_bias_closed",
+      "to": "ball_back",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "stance_wide",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "stance_narrow",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "stance_habit",
+      "to": "stance_narrow",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "early_extension",
+      "to": "loss_of_posture",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "loss_of_posture",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "loss_of_posture",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "loss_of_posture",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_ankle_dorsiflexion",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_too_close",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "posture_too_upright",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "s_posture",
+      "to": "reverse_spine",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "reverse_spine",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "reverse_spine",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "reverse_spine",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "c_posture",
+      "to": "flat_shoulder_plane",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "flat_shoulder_plane",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "posture_too_upright",
+      "to": "flat_shoulder_plane",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "trail_hip_hike",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "trail_hip_hike",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "trail_hip_hike",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "sway",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "sway",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "sway",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "slide",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "slide",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "sway",
+      "to": "slide",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "sway",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "trying_to_lift_the_ball",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "forward_lunge",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "transition_rush",
+      "to": "forward_lunge",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "late_buckle",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "slide",
+      "to": "late_buckle",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "late_buckle",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_shoulder_external_rotation",
+      "to": "flying_elbow",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "flying_elbow",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "c_posture",
+      "to": "flying_elbow",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "over_the_top",
+      "to": "chicken_wing",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "early_extension",
+      "to": "chicken_wing",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "chicken_wing",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "flat_shoulder_plane",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "transition_rush",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "alignment_open",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_shoulder_flexion",
+      "to": "loss_of_width",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "casting",
+      "to": "loss_of_width",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "over_the_top",
+      "to": "loss_of_width",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "transition_rush",
+      "to": "casting",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "casting",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "insufficient_set",
+      "to": "casting",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_wrist_mobility",
+      "to": "casting",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "casting",
+      "to": "scooping",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "trying_to_lift_the_ball",
+      "to": "scooping",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "hanging_back",
+      "to": "scooping",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_wrist_mobility",
+      "to": "insufficient_set",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_shoulder_flexion",
+      "to": "insufficient_set",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "sequence_order",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "transition_rush",
+      "to": "sequence_order",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "sequence_order",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "xfactor_deficit",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "xfactor_deficit",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "c_posture",
+      "to": "xfactor_deficit",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "tempo_habit",
+      "to": "transition_rush",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "transition_rush",
+      "type": "causes",
+      "strength": "weak"
+    }
+  ]
+}

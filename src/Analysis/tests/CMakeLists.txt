@@ -389,3 +389,60 @@ pp_add_test(shaft_onset_test
 # 2026-07-09: the C++ tracker is the development reference and has diverged
 # (onset v2). Parity was the port-time acceptance gate only; regression
 # baselines are now C++-vs-C++ (SwingLab runs on recorded corpora).
+
+# ── Diagnostics: swing-characteristics pack (src/Diagnostics) ─────────────────
+# Authoring/maintenance surface for the diagnostic rule library. Pure C++, no
+# Qt-GUI, and deliberately NOT wired into the live analysis path — the engine
+# runs against synthetic input only (see docs/design/swing_characteristics_impl_plan.md).
+set(DIAG ${SRC}/Diagnostics)
+
+# Anatomy vocabulary: role metadata, handedness resolution both ways, derived
+# midpoints, both pose layouts (17-kp live / 133-kp wholebody), and the hard
+# guarantee that no admitted role reaches the face (23-90) or finger (91-132)
+# ranges. Qt-only (QPointF), no fixture.
+pp_add_test(anatomy_vocabulary_test
+    SOURCES ${DIAG}/tests/anatomy_vocabulary_test.cpp ${DIAG}/anatomy_vocabulary.cpp
+    INCLUDE ${DIAG})
+
+# Vocabulary <-> skeleton-overlay parity. Pins the shared resolver to what
+# video_overlay_pose.cpp draws today (neck/pelvis midpoint formulas, the 0.25
+# admission threshold, min-of-parents confidence, and the bone topology that is
+# hand-duplicated in PpCameraFrame.qml's kBlueprintBones), so re-pointing the
+# overlay at the resolver is provably a no-op and drift on either side fails.
+pp_add_test(anatomy_overlay_parity_test
+    SOURCES ${DIAG}/tests/anatomy_overlay_parity_test.cpp ${DIAG}/anatomy_vocabulary.cpp
+    INCLUDE ${DIAG})
+
+# Measure facets: the validity table indexed on (what-class, quantity,
+# reference-class), deterministic canonical naming across series AND reducer,
+# and structural duplicate / near-duplicate detection on the series tuple.
+pp_add_test(measure_facets_test
+    SOURCES ${DIAG}/tests/measure_facets_test.cpp ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+
+# Pack schema, loader and validator. Every rejection path is exercised: a validator whose
+# negative cases are untested is a validator that passes everything.
+set(DIAG_PACK ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
+              ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp)
+
+pp_add_test(characteristic_pack_test
+    SOURCES ${DIAG}/tests/characteristic_pack_test.cpp ${DIAG_PACK}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+
+# The SHIPPED seed pack (packs/core.json). Asserts the cause-coverage concentration, the
+# structural edge-orientation check (which a coverage count cannot make — totals are identical
+# under edge reversal), the capture-gap classification, and that no commercial brand has leaked
+# into the content.
+pp_add_test(core_pack_test
+    SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")
+
+# Detection + explanation passes, DARK: synthetic measure source only, never invoked on a real
+# swing. Asserts the rule the whole library depends on — an absent measure resolves Unavailable and
+# never as a pass — plus greedy explanation ranking, the "a leaf is never a root" rule, and that
+# Behavioural causes are offered but never concluded.
+pp_add_test(characteristic_engine_test
+    SOURCES ${DIAG}/tests/characteristic_engine_test.cpp
+            ${DIAG}/relation_resolver.cpp ${DIAG}/characteristic_engine.cpp ${DIAG_PACK}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
