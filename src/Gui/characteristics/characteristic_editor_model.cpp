@@ -813,6 +813,19 @@ QVariantMap CharacteristicEditorModel::draft() const
                   m ? (m->label.isEmpty() ? canonicalMeasureLabel(m->series, m->reducer) : m->label)
                     : mid);
         sm.insert(QStringLiteral("status"), m ? measureStatusName(m->status) : QString());
+
+        // Blast radius: how many OTHER characteristics ride on this same measure. Editing a shared
+        // measure changes all of them, and the author has to see that before they do it — a count
+        // shown afterwards is not a warning, it is an explanation.
+        int sharedWith = 0;
+        for (const Condition &oc : p.conditions) {
+            if (oc.id == m_draft.id) continue;
+            for (const QString &osid : oc.detectedBy) {
+                const Signal *os = p.signal(osid);
+                if (os && os->measures.contains(mid)) { ++sharedWith; break; }
+            }
+        }
+        sm.insert(QStringLiteral("sharedWith"), sharedWith);
         sigs.append(sm);
     }
     out.insert(QStringLiteral("signals"), sigs);

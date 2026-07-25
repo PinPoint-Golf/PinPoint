@@ -13,6 +13,7 @@
 
 #include "../characteristic_pack.h"
 
+#include "characteristic_library_model.h"
 #include "metric_catalogue.h"
 
 #include <QFile>
@@ -249,6 +250,58 @@ int main()
                 }
         }
         check(hits == 0, "no commercial brand is named in the metrics the pack depends on");
+    }
+
+    // ── The roadmap ranks by SERIES, not by reduced measure ────────────────────
+    // One producer unblocks every reducer over its series. Pelvis lateral sway carries sway, slide
+    // and hanging back at three phases, so it is ONE piece of work worth three characteristics —
+    // and it must rank as such. Listing the three samples separately spreads it across three rows
+    // of "unblocks 1" and buries the item that should lead, which is exactly what happened before
+    // this was fixed.
+    {
+        CharacteristicLibraryModel model;
+        const QVariantList         rows = model.roadmap();
+
+        check(!rows.isEmpty(), "the roadmap has rows");
+
+        int  pelvisSwayRows = 0, pelvisSwayBlocks = 0, pelvisSwaySamples = 0;
+        for (const QVariant &v : rows) {
+            const QVariantMap r = v.toMap();
+            if (r.value(QStringLiteral("metricKey")).toString() != QStringLiteral("pelvisSway"))
+                continue;
+            ++pelvisSwayRows;
+            pelvisSwayBlocks  = r.value(QStringLiteral("blocks")).toInt();
+            pelvisSwaySamples = r.value(QStringLiteral("samples")).toInt();
+        }
+        check(pelvisSwayRows == 1, "a series with several reducers is ONE roadmap row");
+        check(pelvisSwaySamples == 3, "that row knows it carries three reducers");
+        check(pelvisSwayBlocks == 3, "and that it unblocks three characteristics");
+
+        check(!rows.isEmpty()
+                  && rows.first().toMap().value(QStringLiteral("blocks")).toInt() >= pelvisSwayBlocks,
+              "rows are ranked by how much they unblock");
+
+        // A capture gap must never appear as roadmap work, however many characteristics it blocks.
+        bool gapInRoadmap = false;
+        for (const QVariant &v : rows)
+            if (v.toMap().value(QStringLiteral("status")) == QStringLiteral("notCapturable"))
+                gapInRoadmap = true;
+        check(!gapInRoadmap, "capture gaps never appear as roadmap work");
+        check(!model.captureGaps().isEmpty(), "...they appear under their own heading instead");
+
+        // Every roadmap row names a metric that really exists, so the export is actionable.
+        bool allNamed = true;
+        for (const QVariant &v : rows) {
+            const QString k = v.toMap().value(QStringLiteral("metricKey")).toString();
+            if (k.isEmpty() || cat.descriptor(k) == nullptr) allNamed = false;
+        }
+        check(allNamed, "every roadmap row names a real catalogue metric");
+
+        const QString md = model.roadmapMarkdown();
+        check(md.contains(QStringLiteral("Not resolvable from current capture")),
+              "the export separates capture gaps from the work queue");
+        check(md.contains(QStringLiteral("Causes, by how much they explain")),
+              "the export carries the screen list alongside");
     }
 
     // ── Census ─────────────────────────────────────────────────────────────────

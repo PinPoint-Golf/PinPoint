@@ -213,6 +213,19 @@ Item {
                                     font.pixelSize: Theme.fontSzMicro
                                     color:          Theme.colorText3
                                 }
+
+                                // Blast radius, shown BEFORE the edit rather than explained after.
+                                Text {
+                                    visible:        (modelData.sharedWith || 0) > 0
+                                    text: qsTr("shared with %n other characteristic(s) — changing "
+                                               + "this measure changes them too", "",
+                                               modelData.sharedWith || 0)
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorRagWatch
+                                    wrapMode:       Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
                             }
 
                             Text {

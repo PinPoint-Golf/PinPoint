@@ -95,6 +95,23 @@ public:
     // "Used by N characteristics", for the blast-radius affordance before an edit.
     Q_INVOKABLE int usageOfMeasure(const QString &measureId) const;
 
+    // Which characteristics a measure carries — the blast radius itself, not just its size. Shown
+    // before editing a shared measure, because the count alone does not tell an author WHAT they
+    // are about to change.
+    Q_INVOKABLE QVariantList usersOfMeasure(const QString &measureId) const;
+
+    // The roadmap as shareable markdown. This artefact is meant to leave the app — it is what
+    // prioritises pipeline work — so it is generated whole rather than scraped off the view.
+    Q_INVOKABLE QString roadmapMarkdown() const;
+
+    // Write that markdown to the user's Documents folder. Returns { ok, path, message }; a failed
+    // write reports rather than throwing, so it reaches the user instead of a log.
+    Q_INVOKABLE QVariantMap exportRoadmap() const;
+
 private:
+    // The characteristics riding on one measure. Shared by usageOfMeasure (the count) and roadmap
+    // (which must union them across a series' reducers without double-counting).
+    QStringList usersOfMeasureIds(const QString &measureId) const;
+
     std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_provider;
 };

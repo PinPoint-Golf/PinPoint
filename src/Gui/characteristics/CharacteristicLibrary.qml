@@ -23,8 +23,11 @@ import PinPointStudio
 
 // Settings → Reference → Diagnostics. Master (library) → detail, mirroring MetricLibrary.qml.
 //
-// Read-only in this pass. The authoring surface (MeasurePicker, the sentence editor) and the
-// roadmap/health views land separately; the model already exposes their data.
+// Three views behind one switcher, answering three different questions:
+//   Characteristics — what does the library know?
+//   Roadmap         — what does it need that we have not built?
+//   Causes & health — what should a coach do, and what is wrong with the content?
+// Detail and the authoring sheet overlay whichever view is active.
 Item {
     id: root
 
@@ -45,6 +48,7 @@ Item {
     property string _reachFilter: ""    // "" = all reaches
     property string _selectedId:  ""    // "" = directory (master)
     property bool   _editing:     false // the authoring sheet is open
+    property string _view:        "library"   // "library" | "roadmap" | "health"
 
     // Settings-search hook (ScreenSettings.navigateToResult): return to the directory and report
     // success so the retry loop stops.
@@ -103,16 +107,68 @@ Item {
 
     readonly property int _totalCount: library.query(root._filters()).length
 
+    // ══ View switcher — persistent, outside every view ════════════════════════
+    // Deliberately not inside any of the three views: a control that lives in the view it
+    // switches away from vanishes on first use and strands the user wherever they landed.
+    Item {
+        id: switcherBar
+        anchors.top:   parent.top
+        anchors.left:  parent.left
+        anchors.right: parent.right
+        height:  visible ? Theme.sp(58) : 0
+        // Detail and the editor are full-page and carry their own way back, so the bar steps aside.
+        visible: root._selectedId === "" && !root._editing
+
+        Flow {
+            x:       Theme.sp(32)
+            y:       Theme.sp(24)
+            width:   parent.width - Theme.sp(64)
+            spacing: Theme.sp(6)
+
+            Repeater {
+                model: [{ name: "library", label: qsTr("Characteristics") },
+                        { name: "roadmap", label: qsTr("Roadmap") },
+                        { name: "health",  label: qsTr("Causes & health") }]
+                delegate: Rectangle {
+                    required property var modelData
+                    readonly property bool active: root._view === modelData.name
+
+                    implicitWidth:  vsText.implicitWidth + Theme.sp(22)
+                    implicitHeight: Theme.sp(28)
+                    radius: height / 2
+                    color:  active ? Theme.colorAccent : Theme.colorBg2
+
+                    Text {
+                        id: vsText
+                        anchors.centerIn: parent
+                        text:           modelData.label
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          parent.active ? Theme.colorBg : Theme.colorText2
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root._view = modelData.name
+                    }
+                }
+            }
+        }
+    }
+
     // ══ Directory (master) ════════════════════════════════════════════════════
     ScrollView {
         id: scrollView
-        anchors.fill: parent
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
         contentWidth: availableWidth
-        visible: root._selectedId === ""
+        visible: root._selectedId === "" && root._view === "library"
 
         ColumnLayout {
             x:       Theme.sp(32)
-            y:       Theme.sp(28)
+            y:       Theme.sp(12)
             width:   scrollView.availableWidth - Theme.sp(64)
             spacing: Theme.sp(20)
 
@@ -261,6 +317,30 @@ Item {
 
             Item { Layout.fillWidth: true; implicitHeight: Theme.sp(24) }
         }
+    }
+
+    // ══ Roadmap ═══════════════════════════════════════════════════════════════
+    RoadmapView {
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
+        visible: root._view === "roadmap" && root._selectedId === "" && !root._editing
+        library: library
+    }
+
+    // ══ Causes & health ═══════════════════════════════════════════════════════
+    HealthView {
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
+        visible: root._view === "health" && root._selectedId === "" && !root._editing
+        library: library
+
+        // A health row names a subject; following it opens that characteristic, which is the only
+        // useful thing to do with the name.
+        onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }
     }
 
     // ══ Detail ════════════════════════════════════════════════════════════════

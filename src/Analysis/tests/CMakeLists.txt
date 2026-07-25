@@ -472,10 +472,18 @@ set_tests_properties(characteristic_editor_test PROPERTIES
 # producer the catalogue does not have.
 pp_add_test(diagnostics_catalogue_integrity_test
     SOURCES ${DIAG}/tests/diagnostics_catalogue_integrity_test.cpp ${DIAG_PACK}
+            ${SRC}/Gui/characteristics/characteristic_library_model.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
             ${SRC}/Metrics/metric_catalogue.cpp
             ${SRC}/Metrics/metric_resolver.cpp
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
             ${ANALYSIS}/reference_bands.cpp
-    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
+    LINK    Qt6::Qml
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")
+# CharacteristicLibraryModel assembles the pack through the provider, which normally reads the Qt
+# resource — absent from a standalone binary. Point it at the reviewable JSON instead.
+set_tests_properties(diagnostics_catalogue_integrity_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Diagnostics/packs/core.json")

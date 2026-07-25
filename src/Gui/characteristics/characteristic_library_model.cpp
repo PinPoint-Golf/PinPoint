@@ -18,7 +18,12 @@
 
 #include "characteristic_library_model.h"
 
+#include "metric_catalogue.h"
+
+#include <QFile>
 #include <QHash>
+#include <QSet>
+#include <QStandardPaths>
 
 #include <algorithm>
 
@@ -264,6 +269,21 @@ QVariantMap CharacteristicLibraryModel::detail(const QString &conditionId) const
     return out;
 }
 
+QStringList CharacteristicLibraryModel::usersOfMeasureIds(const QString &measureId) const
+{
+    const CharacteristicPack &p = m_provider->pack();
+
+    QStringList signalsUsing;
+    for (const Signal &s : p.signalDefs)
+        if (s.measures.contains(measureId)) signalsUsing << s.id;
+
+    QStringList out;
+    for (const Condition &c : p.conditions)
+        for (const QString &sid : c.detectedBy)
+            if (signalsUsing.contains(sid)) { out << c.id; break; }
+    return out;
+}
+
 int CharacteristicLibraryModel::usageOfMeasure(const QString &measureId) const
 {
     const CharacteristicPack &p = m_provider->pack();
@@ -281,31 +301,71 @@ int CharacteristicLibraryModel::usageOfMeasure(const QString &measureId) const
 
 QVariantList CharacteristicLibraryModel::roadmap() const
 {
-    const CharacteristicPack &p = m_provider->pack();
+    const CharacteristicPack &p   = m_provider->pack();
+    const MetricCatalogue     cat = makeMetricCatalogue();
 
-    QVariantList out;
+    // Ranked by SERIES, not by reduced measure. One producer unblocks every reducer over its
+    // series: pelvis lateral sway carries sway, slide and hanging back at three different phases,
+    // so it is ONE piece of pipeline work worth three characteristics. Listing the three samples
+    // separately would spread that across three rows of "unblocks 1" and bury the very item that
+    // should rank top — which is the whole reason series and reducer are modelled apart.
+    struct Group {
+        QString       label;
+        QString       metricKey;
+        MeasureStatus status = MeasureStatus::NoProducer;
+        ViewNeeded    view   = ViewNeeded::Any;
+        int           samples = 0;          // how many reducers sit on this series
+        QSet<QString> blocked;              // DISTINCT characteristics, never double-counted
+    };
+    QHash<QString, Group> groups;
+
     for (const Measure &m : p.measures) {
         if (m.status == MeasureStatus::Live) continue;
         // Capture gaps are NOT roadmap items. One row implying a producer that will never be built
         // corrupts the artefact's meaning for every other row.
         if (m.status == MeasureStatus::NotCapturable) continue;
 
-        QVariantMap r;
-        r.insert(QStringLiteral("id"), m.id);
-        r.insert(QStringLiteral("label"), m.label.isEmpty()
-                                              ? canonicalMeasureLabel(m.series, m.reducer)
-                                              : m.label);
-        r.insert(QStringLiteral("metricKey"), m.metricKey);
-        r.insert(QStringLiteral("kind"), measureKindName(m.kind));
-        r.insert(QStringLiteral("status"), measureStatusName(m.status));
-        r.insert(QStringLiteral("statusLabel"), resolvabilityLabel(m.status));
-        r.insert(QStringLiteral("viewNeeded"), viewNeededName(m.viewNeeded));
-        r.insert(QStringLiteral("blocks"), usageOfMeasure(m.id));
+        const QString key = m.metricKey.isEmpty() ? canonicalSeriesId(m.series) : m.metricKey;
+        Group        &g   = groups[key];
+
+        if (g.samples == 0) {
+            g.metricKey = m.metricKey;
+            g.status    = m.status;
+            g.view      = m.viewNeeded;
+            // Prefer the catalogue's own name and view requirement: a Provided measure has no
+            // facets to generate a series label from, and the requirement is the catalogue's to
+            // state, not ours to guess.
+            if (const MetricDescriptor *d = cat.descriptor(key)) {
+                g.label = d->label;
+                if (d->requirement.faceOnCamera && g.view == ViewNeeded::Any) g.view = ViewNeeded::FaceOn;
+            }
+            if (g.label.isEmpty())
+                g.label = (m.kind == MeasureKind::Composed) ? canonicalSeriesLabel(m.series) : m.id;
+        }
+        ++g.samples;
+        for (const QString &cid : usersOfMeasureIds(m.id)) g.blocked.insert(cid);
+    }
+
+    QVariantList out;
+    for (auto it = groups.constBegin(); it != groups.constEnd(); ++it) {
+        const Group &g = it.value();
+        QVariantMap  r;
+        r.insert(QStringLiteral("id"), it.key());
+        r.insert(QStringLiteral("label"), g.label);
+        r.insert(QStringLiteral("metricKey"), g.metricKey);
+        r.insert(QStringLiteral("status"), measureStatusName(g.status));
+        r.insert(QStringLiteral("statusLabel"), resolvabilityLabel(g.status));
+        r.insert(QStringLiteral("viewNeeded"), viewNeededName(g.view));
+        r.insert(QStringLiteral("blocks"), g.blocked.size());
+        r.insert(QStringLiteral("samples"), g.samples);
         out.append(r);
     }
     std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
-        return a.toMap().value(QStringLiteral("blocks")).toInt()
-             > b.toMap().value(QStringLiteral("blocks")).toInt();
+        const int ba = a.toMap().value(QStringLiteral("blocks")).toInt();
+        const int bb = b.toMap().value(QStringLiteral("blocks")).toInt();
+        if (ba != bb) return ba > bb;
+        return a.toMap().value(QStringLiteral("label")).toString()
+             < b.toMap().value(QStringLiteral("label")).toString();
     });
     return out;
 }
@@ -372,4 +432,118 @@ QVariantList CharacteristicLibraryModel::health() const
         out.append(r);
     }
     return out;
+}
+
+QVariantList CharacteristicLibraryModel::usersOfMeasure(const QString &measureId) const
+{
+    const CharacteristicPack &p = m_provider->pack();
+
+    QStringList signalsUsing;
+    for (const Signal &s : p.signalDefs)
+        if (s.measures.contains(measureId)) signalsUsing << s.id;
+
+    QVariantList out;
+    for (const Condition &c : p.conditions) {
+        bool uses = false;
+        for (const QString &sid : c.detectedBy)
+            if (signalsUsing.contains(sid)) uses = true;
+        if (!uses) continue;
+
+        QVariantMap r;
+        r.insert(QStringLiteral("id"), c.id);
+        r.insert(QStringLiteral("label"), c.label);
+        r.insert(QStringLiteral("groupLabel"), conditionGroupLabel(c.group));
+        out.append(r);
+    }
+    return out;
+}
+
+QString CharacteristicLibraryModel::roadmapMarkdown() const
+{
+    const CharacteristicPack &p = m_provider->pack();
+
+    QString md;
+    md += QStringLiteral("# Swing diagnostics — measure roadmap\n\n");
+    md += QStringLiteral("Generated from the diagnostics pack. Every row is work that could be "
+                         "picked up: a measure some characteristic needs and nothing yet produces. "
+                         "Ranked by how many characteristics it unblocks.\n\n");
+
+    const QVariantList rows = roadmap();
+    if (rows.isEmpty()) {
+        md += QStringLiteral("_Nothing outstanding._\n\n");
+    } else {
+        md += QStringLiteral("| Measure | Unblocks | Status | View | Metric key |\n");
+        md += QStringLiteral("|---|---:|---|---|---|\n");
+        for (const QVariant &v : rows) {
+            const QVariantMap r = v.toMap();
+            md += QStringLiteral("| %1 | %2 | %3 | %4 | `%5` |\n")
+                      .arg(r.value(QStringLiteral("label")).toString())
+                      .arg(r.value(QStringLiteral("blocks")).toInt())
+                      .arg(r.value(QStringLiteral("statusLabel")).toString(),
+                           r.value(QStringLiteral("viewNeeded")).toString(),
+                           r.value(QStringLiteral("metricKey")).toString());
+        }
+        md += QLatin1Char('\n');
+    }
+
+    // Capture gaps are deliberately a SEPARATE section, never roadmap rows. A reader has to be able
+    // to take the table above at face value as a work queue; one row nobody could ever pick up
+    // would corrupt that reading for every other row.
+    const QVariantList gaps = captureGaps();
+    if (!gaps.isEmpty()) {
+        md += QStringLiteral("## Not resolvable from current capture\n\n");
+        md += QStringLiteral("These are not roadmap items. No sensor this product has can resolve "
+                             "them, so they need a different modality rather than a producer.\n\n");
+        for (const QVariant &v : gaps) {
+            const QVariantMap r = v.toMap();
+            md += QStringLiteral("- **%1** — blocks %2. %3\n")
+                      .arg(r.value(QStringLiteral("label")).toString())
+                      .arg(r.value(QStringLiteral("blocks")).toInt())
+                      .arg(r.value(QStringLiteral("reason")).toString());
+        }
+        md += QLatin1Char('\n');
+    }
+
+    // The screen list ships alongside, because it is the half of the picture that needs no
+    // engineering at all: a handful of physical tests explain most of the library.
+    md += QStringLiteral("## Causes, by how much they explain\n\n");
+    md += QStringLiteral("| Cause | Explains | Reach |\n|---|---:|---|\n");
+    for (const QVariant &v : causeCoverage()) {
+        const QVariantMap r = v.toMap();
+        md += QStringLiteral("| %1 | %2 | %3 |\n")
+                  .arg(r.value(QStringLiteral("label")).toString())
+                  .arg(r.value(QStringLiteral("coverage")).toInt())
+                  .arg(r.value(QStringLiteral("reachLabel")).toString());
+    }
+
+    md += QStringLiteral("\n---\n\nPack `%1`, %2 characteristics, %3 causal links.\n")
+              .arg(p.id).arg(characteristicCount()).arg(edgeCount());
+    return md;
+}
+
+QVariantMap CharacteristicLibraryModel::exportRoadmap() const
+{
+    QVariantMap r;
+
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir.isEmpty()) {
+        r.insert(QStringLiteral("ok"), false);
+        r.insert(QStringLiteral("message"), tr("No Documents folder to write to."));
+        return r;
+    }
+
+    const QString path = dir + QStringLiteral("/pinpoint-diagnostics-roadmap.md");
+    QFile         f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        r.insert(QStringLiteral("ok"), false);
+        r.insert(QStringLiteral("message"), tr("Could not write to %1.").arg(path));
+        return r;
+    }
+    f.write(roadmapMarkdown().toUtf8());
+    f.close();
+
+    r.insert(QStringLiteral("ok"), true);
+    r.insert(QStringLiteral("path"), path);
+    r.insert(QStringLiteral("message"), tr("Exported to %1").arg(path));
+    return r;
 }

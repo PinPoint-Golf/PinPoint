@@ -417,6 +417,8 @@ qt_add_qml_module(PinPointStudio
         src/Gui/characteristics/CharacteristicDetail.qml
         src/Gui/characteristics/CharacteristicEditor.qml
         src/Gui/characteristics/MeasurePicker.qml
+        src/Gui/characteristics/RoadmapView.qml
+        src/Gui/characteristics/HealthView.qml
         src/Gui/diagnostics/WristDiagnostics.qml
         src/Gui/diagnostics/DofTrajectoryStrip.qml
         src/Gui/diagnostics/PositionAngleGrid.qml

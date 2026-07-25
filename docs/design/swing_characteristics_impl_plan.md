@@ -263,6 +263,9 @@ Phases 1–5 complete and green; nothing committed. 65/65 CTest pass in `build/a
 | 3 `core.json` | **Done** | 31 characteristics, 19 causes, 81 edges, 28 measures |
 | 4 Engine + resolver (dark) | **Done** | Synthetic input only; no call site outside tests |
 | 5 Settings panel (read-only) | **Done** | Panel index 10, System renumbered to 11 |
+| 6 MeasurePicker + sentence editor | **Done** | Edits write to the user pack and override core |
+| 7 Roadmap view + export | **Done** | Ranked by SERIES; markdown export to Documents |
+| 8 Health list, cause coverage, blast radius | **Done** | Three views behind one switcher |
 
 New tests: `anatomy_vocabulary_test`, `anatomy_overlay_parity_test`, `measure_facets_test`,
 `characteristic_pack_test`, `core_pack_test`, `characteristic_engine_test`.
@@ -290,6 +293,37 @@ swing. The two hand-synced copies still exist.
   as NoProducer".
 - **`CharacteristicPack::signals` had to become `signalDefs`** — Qt's moc keyword macro expands
   `signals` to an access specifier, breaking every TU that includes both this header and QObject.
+
+### Phases 6–8 notes
+
+- The panel is labelled **Diagnostics** (Mark's call); the folder and class names stay
+  `Characteristic*`, which names the object rather than the panel's purpose.
+- **The roadmap ranks by series, not by reduced measure.** The first implementation ranked reduced
+  measures, so pelvis lateral sway appeared three times at "unblocks 1" instead of once at
+  "unblocks 3" — burying the very item that should lead. That is the whole payoff of modelling
+  series and reducer apart, and it is now asserted in
+  `diagnostics_catalogue_integrity_test`.
+- Capture gaps are a separate section in both the view and the export, never roadmap rows. A reader
+  has to be able to take the queue at face value as work someone could pick up.
+- Blast radius is shown BEFORE an edit ("shared with N other characteristics"), not explained after.
+
+### 🔴 Open: corridors cannot express club-dependence
+
+`inlineCorridors` match on **phase only** (`metric_catalogue.cpp:131`). The only club-aware path is
+`.dof` → `reference_bands` with `BandContext`, which is wrist-DOF-only. Ball position is inherently
+club-dependent — a wedge sits near 50% of stance width, a driver near 0% — so a single inline
+corridor is right for one club and misleading-red for the rest, which is exactly the case brief §6
+warns about. Options, recommendation first:
+
+1. Add a club field to `NormativeCorridor` and match on phase + club. The `BandContext` already
+   reaches the resolver; it just is not consulted on that branch. ~20 lines.
+2. Route ball position through the band provider like the wrist DOFs. More machinery, more
+   consistent long-term.
+3. One club-agnostic corridor. Cheap, bakes in the error.
+
+Separately: **corridors are C++ only**, so every change is a rebuild and only a developer can make
+one. That may be right — they are population numbers, not user preferences — but if a coach should
+tune them it is far cheaper to decide now than to retrofit.
 
 ### Owed before this ships
 
