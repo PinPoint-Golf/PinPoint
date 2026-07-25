@@ -26,7 +26,19 @@
 //
 // 0 = at the lead heel, 1 = at the trail heel. DELIBERATELY UNCLAMPED: a ball
 // forward of the lead heel (frac < 0) is a real, coachable driver setup, not an
-// error to be squashed. Reported as a percentage.
+// error to be squashed.
+//
+// `fracOfStance` IS THE RAW GEOMETRY, NOT THE PUBLISHED METRIC. It runs lead->trail
+// from an origin at the lead heel, which is the opposite of the project sign
+// convention (positive toward the lead side — docs/design/pinpoint_sign_conventions.md).
+// The `ballPosition` metric is re-centred on the middle of the stance and flipped at
+// the point of emission in wrist_analyzer.cpp:
+//
+//     published = (0.5 - fracOfStance) * 100     // +50 % lead heel, 0 % centre, -50 % trail heel
+//
+// The conversion lives there rather than here on purpose: the plausibility gate
+// (cfg.fracLo/fracHi) and every test below are written against the raw fraction, and
+// re-signing at source would silently invert that band.
 //
 // WHY THIS IS THE SCALE-FREE METRIC. The denominator is exactly foot_metrics'
 // stanceWidth measurement — the same Euclidean heel-to-heel distance over the

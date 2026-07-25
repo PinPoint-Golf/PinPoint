@@ -43,10 +43,10 @@ static const Expect kExpected[] = {
       "spineForwardBend is 'the forward tilt of the trunk'; upright is less of it" },
     { "sig_ballTooClose",     Direction::Low,   "ballBodyDistance: 'higher means further away'" },
     { "sig_ballTooFar",       Direction::High,  "ballBodyDistance: 'higher means further away'" },
-    { "sig_ballForward",      Direction::Low,
-      "ballPosition: '0 % is level with the lead heel' — forward is the LOW end" },
-    { "sig_ballBack",         Direction::High,
-      "ballPosition: '100 % level with the trail heel' — back is the HIGH end" },
+    { "sig_ballForward",      Direction::High,
+      "ballPosition: 'positive is toward the lead foot'; forward IS the lead side" },
+    { "sig_ballBack",         Direction::Low,
+      "ballPosition: '-50 % level with the trail heel'" },
     { "sig_stanceWide",       Direction::High,  "stanceWidth: 'higher is wider'" },
     { "sig_stanceNarrow",     Direction::Low,   "stanceWidth: 'higher is wider'" },
     { "sig_sPosture",         Direction::High,  "lumbarExtension: 'higher means more arched'" },
@@ -73,7 +73,13 @@ static const Expect kExpected[] = {
     { "sig_overTheTop",       Direction::Low,
       "clubPath: 'in-to-out (+) or out-to-in (-)'; over the top delivers out-to-in" },
     { "sig_forwardLunge",     Direction::High,
-      "thoraxLateralDrift: 'positive means toward the target'" },
+      "thoraxLateralDrift: 'positive is toward the lead side'" },
+    { "sig_sway",             Direction::Low,
+      "pelvisSway: 'positive is toward the lead side'; sway goes AWAY from it, so negative" },
+    { "sig_slide",            Direction::High,
+      "pelvisSway: a slide runs toward the lead side in the downswing" },
+    { "sig_hangingBack",      Direction::Low,
+      "pelvisSway: hanging back is NOT having moved to the lead side by impact" },
 
     // ── impact / follow-through ─────────────────────────────────────────────
     { "sig_scooping",         Direction::Low,
@@ -90,9 +96,6 @@ static const Expect kExpected[] = {
 static const char *kUndefinedConvention[] = {
     "sig_alignmentOpen",      // shoulderAlignment never says which sign is open
     "sig_alignmentClosed",
-    "sig_sway",               // pelvisSway never says whether positive is toward or away
-    "sig_slide",
-    "sig_hangingBack",
 };
 
 // Signals known to be wrong in a way a DIRECTION cannot express, so they are excluded from the
@@ -200,8 +203,8 @@ int main()
             if (listed(kUndefinedConvention, std::size(kUndefinedConvention), s.id)) ++undefined;
             if (listed(kKnownDefective, std::size(kKnownDefective), s.id))           ++defective;
         }
-        check(undefined == 5,
-              "5 signals still ride metrics that state no sign convention (must only go down)");
+        check(undefined == 2,
+              "2 signals still ride metrics that state no sign convention (must only go down)");
         check(defective == 2,
               "2 signals are wrong in a way direction cannot express (must only go down)");
     }

@@ -16,7 +16,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 | 1 | Types, tree, pack, providers | ☑ complete | 2026-07-25 · 287f3ea |
 | 2 | Migrate `reference_bands.cpp` — parity gate | ☑ complete | 2026-07-25 · 287f3ea |
 | 3 | Wire into the engine — **the pack lights up** | ◐ mechanism done, **content owed** | 2026-07-25 · 287f3ea |
-| 4 | Direction audit (all 30 signals) + `highMeans` | ◐ **audit done, 3 fixed, 4 owed** | 2026-07-25 |
+| 4 | Direction audit (all 30 signals) + `highMeans` | ◐ **26/30 audited, 2 owed + `highMeans`** | 2026-07-25 |
 | — | **review gate · expect context clear here** | | |
 | 5 | `NormModel` + read-only norm UI | ☐ not started | |
 | — | **review gate** | | |
@@ -382,15 +382,27 @@ the condition's own consequence text against the metric's documented sign conven
 `axis_direction_test`, whose fixture carries the catalogue quote that decides each row, so a new
 signal cannot be added unaudited.
 
-**23 correct. 3 fixed. 2 wrong in a way direction cannot express. 5 unverifiable.**
+**26 of 30 audited and correct. 2 wrong in a way direction cannot express. 2 unverifiable.**
 
-### Fixed (each contradicted by its own metric's documented convention)
+Mark then set a project-wide rule that resolved five of them at once — **positive is toward the
+lead side, in every context** — now written down in `docs/design/pinpoint_sign_conventions.md`. It
+is lead-relative rather than left/right or "toward the target", matching the rest of the vocabulary:
+the same statement holds for a right- and a left-handed golfer, and the lead side is a property of
+the golfer where the target is a property of the shot.
 
-| signal | was | now | why |
-|---|---|---|---|
-| `sig_ballForward` | high | **low** | `ballPosition`: *"0 % is level with the lead heel"* — forward is the low end |
-| `sig_ballBack` | low | **high** | *"100 % level with the trail heel"* |
-| `sig_scooping` | high | **low** | `leadWristFlexExt`: *"+ is bowed/flexed, − is cupped/extended"*; scooping *adds loft*, so cupped |
+### Fixed
+
+| what | change | why |
+|---|---|---|
+| `sig_scooping` | high → **low** | `leadWristFlexExt`: *"+ is bowed/flexed, − is cupped/extended"*; scooping *adds loft*, so cupped |
+| **`ballPosition` metric** | re-origined and re-signed | was `0 %` at the lead heel running to `100 %` at the trail heel — backwards under the rule. Now signed from the **middle of the stance**: `+50 %` lead heel, `0 %` centre, `−50 %` trail heel. A driver sits near `+50 %`, a wedge near `0 %`. Converted at emission (`wrist_analyzer.cpp`); `fracOfStance` stays raw so the plausibility gate and its tests are untouched. |
+| `sig_ballForward` / `sig_ballBack` | high / low | unchanged in *meaning* — the metric moved under them, not the signal |
+| `pelvisSway` descriptor | states the convention | positive = toward the lead side |
+| `m_pelvisSwayBack` | `max` → **`min`** | sway is the negative extreme, so the reducer was looking at the wrong end |
+| `sig_sway` | high → **low** | movement away from the lead side |
+| `sig_hangingBack` | high → **low** | not having moved to the lead side by impact |
+| `sig_slide` | unchanged (high) | toward the lead side — the one of the three that was right |
+| `thoraxLateralDrift` | reworded | *"toward the target"* → *"toward the lead side"*, matching its counterpart |
 
 ### Wrong in a way a direction cannot express — need a decision
 
@@ -403,23 +415,13 @@ signal cannot be added unaudited.
   calls *"a dip"*. Losing posture is standing up: the *minimum*. As authored it detects the opposite
   fault. Needs `sense: min` + `direction: low`, or a measure defined as the loss magnitude.
 
-### Unverifiable — the metric states no sign convention anywhere
+### Still unverifiable — 2 left
 
-All five ride `planned` metrics, so the convention is still free to choose and must be written into
-the descriptor **when the producer is**, not after.
-
-- `sig_alignmentOpen` / `sig_alignmentClosed` — `shoulderAlignment` never says which sign is open.
-  The two tails are at least opposite each other, so they are internally consistent whichever way
-  it lands.
-- `sig_sway` / `sig_slide` / `sig_hangingBack` — `pelvisSway` says only *"toward or away from the
-  target"*. **These three are mutually contradictory and at least one is wrong regardless of the
-  convention:** `sig_sway` fires HIGH for movement *away* from the target and `sig_slide` fires HIGH
-  for movement *toward* it, on the same metric with the same `extremum max` reducer. One metric
-  cannot have both as its high end.
-  **Recommendation:** adopt *positive = toward the target*, matching the explicitly-documented
-  counterpart `thoraxLateralDrift` (*"positive means toward the target"*), which the catalogue
-  describes as *"the chest's counterpart to pelvis sway"*. That keeps `sig_slide` as authored and
-  makes `sig_sway` (`min`, `low`) and `sig_hangingBack` (`low`) the ones to change.
+`sig_alignmentOpen` / `sig_alignmentClosed`: `shoulderAlignment` never says which sign is open. It
+is a `planned` metric, so the convention is free to choose, and the natural reading under the rule
+is **positive = open** (an open line for a right-hander points left, the lead side). Not decided —
+decide it when the producer is written. The two tails are at least opposite each other, so they are
+internally consistent whichever way it lands.
 
 ### Also noticed, not acted on
 

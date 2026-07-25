@@ -12,7 +12,8 @@
         "anchor": "p1"
       },
       "status": "live",
-      "label": "Ball position in the stance, at P1"
+      "label": "Ball position in the stance, at P1",
+      "unit": "% stance width"
     },
     {
       "id": "m_stanceWidth",
@@ -168,7 +169,7 @@
           "p1",
           "p4"
         ],
-        "sense": "max",
+        "sense": "min",
         "anchor": "p1"
       },
       "status": "planned",
@@ -1069,7 +1070,7 @@
       "measures": [
         "m_ballPosition"
       ],
-      "direction": "low"
+      "direction": "high"
     },
     {
       "id": "sig_ballBack",
@@ -1077,7 +1078,7 @@
       "measures": [
         "m_ballPosition"
       ],
-      "direction": "high"
+      "direction": "low"
     },
     {
       "id": "sig_stanceWide",
@@ -1157,7 +1158,7 @@
       "measures": [
         "m_pelvisSwayBack"
       ],
-      "direction": "high"
+      "direction": "low"
     },
     {
       "id": "sig_slide",
@@ -1173,7 +1174,7 @@
       "measures": [
         "m_pelvisSwayImpact"
       ],
-      "direction": "high"
+      "direction": "low"
     },
     {
       "id": "sig_forwardLunge",

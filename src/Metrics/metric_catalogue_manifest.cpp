@@ -478,14 +478,15 @@ void installMetricManifest(MetricCatalogue &cat)
         .unit = QStringLiteral("cm"),
         .group = QStringLiteral("Spine & pelvis"),
         .description = QStringLiteral(
-            "How far the pelvis slides laterally along the target line, toward or away from the "
-            "target, relative to address — the linear partner to pelvis rotation. A little pressure "
-            "shift is powerful; too much slide replaces rotation and hurts consistency."),
+            "How far the pelvis slides laterally relative to address — the linear partner to "
+            "pelvis rotation. POSITIVE IS TOWARD THE LEAD SIDE, negative away from it. A little "
+            "pressure shift is powerful; too much slide replaces rotation and hurts consistency."),
         .howToRead = QStringLiteral(
-            "Read near the top and at Impact. A good pattern moves slightly away from the target in "
-            "the backswing and then toward it in the downswing (a pressure shift), returning near "
-            "or just ahead of address by impact. Excessive sway away going back usually costs turn "
-            "and centredness of strike. Planned: needs a face-on camera and a calibrated ground plane."),
+            "Read near the top and at Impact. A good pattern goes slightly NEGATIVE in the "
+            "backswing, away from the lead side, then positive through the downswing — a pressure "
+            "shift — returning near or just past zero by impact. A large negative peak going back "
+            "is sway and usually costs turn and centredness of strike; still negative at impact is "
+            "hanging back. Planned: needs a face-on camera and a calibrated ground plane."),
         .phases = { P::Top, P::Impact },
         .planned = true,
         .normative = { .heuristic = true },
@@ -907,17 +908,19 @@ void installMetricManifest(MetricCatalogue &cat)
         .type = MetricType::PointInTime,
         .label = QStringLiteral("Ball position"),
         .shortLabel = QStringLiteral("Ball pos"),
-        .unit = QStringLiteral("%"),
+        .unit = QStringLiteral("% stance width"),
         .group = QStringLiteral("Feet & stance"),
         .description = QStringLiteral(
-            "Where the ball sits along the stance at address, as a percentage of stance width: 0 % "
-            "is level with the lead heel, 100 % level with the trail heel. Ball position sets the "
-            "low point of the swing arc relative to the ball, which is why the same swing produces "
-            "very different strikes as it moves."),
+            "Where the ball sits along the stance at address, as a signed percentage of stance "
+            "width measured from the MIDDLE of the stance. POSITIVE IS TOWARD THE LEAD FOOT: 0 % is "
+            "the centre of the stance, +50 % is level with the lead heel, -50 % level with the "
+            "trail heel. Ball position sets the low point of the swing arc relative to the ball, "
+            "which is why the same swing produces very different strikes as it moves."),
         .howToRead = QStringLiteral(
-            "Read it against the club in hand rather than against a single ideal: the driver wants "
-            "the ball forward, off the lead heel, while the wedges want it closer to the middle of "
-            "the stance. Values below 0 % are normal and mean the ball is forward of the lead heel. "
+            "Read it against the club in hand rather than against a single ideal: a driver wants "
+            "the ball forward, around +50 % off the lead heel, while a wedge wants it near the "
+            "middle at about 0 %. Values above +50 % are normal and mean the ball is forward of "
+            "the lead heel. "
             "Because this is a ratio of two distances in the same plane it is directly comparable "
             "between swings and cameras, unlike stance width itself. Needs a face-on camera and a "
             "detected ball at address."),
@@ -1352,9 +1355,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "sequence steepens the attack and narrows the margin for a clean strike."),
         .howToRead = QStringLiteral(
             "A per-frame curve of displacement from address; the change into the early downswing is "
-            "the reading that matters. Positive means toward the target. It is the chest's "
-            "counterpart to pelvis sway, and the two are read together — the same absolute movement "
-            "means something different depending on whether the pelvis went with it. Normalised by "
+            "the reading that matters. POSITIVE IS TOWARD THE LEAD SIDE, the same convention as "
+            "pelvis sway, of which this is the chest's counterpart — the two are read together, "
+            "because the same absolute movement means something different depending on whether the "
+            "pelvis went with it. Normalised by "
             "stance width so it compares across golfers and camera distances. Needs a face-on "
             "camera."),
         .phases = { P::Address, P::ArmParallelDown },

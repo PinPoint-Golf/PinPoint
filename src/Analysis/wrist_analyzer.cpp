@@ -681,9 +681,19 @@ struct FootMetricsStage : AnalysisStage {
                 MetricSeries m;
                 m.key   = QStringLiteral("ballPosition");
                 m.label = QStringLiteral("Ball position");
-                m.unit  = QStringLiteral("%");
+                m.unit  = QStringLiteral("% stance width");
+                // SIGN CONVENTION: positive is toward the LEAD side (see
+                // docs/design/pinpoint_sign_conventions.md). fracOfStance is the raw geometry —
+                // 0 at the lead heel, 1 at the trail heel — so it runs the wrong way and is
+                // measured from the wrong origin. Re-centre on the middle of the stance and flip:
+                //
+                //     lead heel  frac 0.0  ->  +50 %       (a driver sits about here)
+                //     centre     frac 0.5  ->    0 %       (a wedge sits about here)
+                //     trail heel frac 1.0  ->  -50 %
+                //
+                // Still unclamped: forward of the lead heel is a real setup and reads above +50 %.
                 m.phaseSamples.push_back({ Phase::Address, addrT,
-                                           bp.fracOfStance * 100.0, QString() });
+                                           (0.5 - bp.fracOfStance) * 100.0, QString() });
                 ctx.detail->series.push_back(std::move(m));
             }
         }
