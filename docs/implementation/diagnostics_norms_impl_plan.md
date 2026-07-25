@@ -15,7 +15,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 |---|---|---|---|
 | 1 | Types, tree, pack, providers | ☑ complete | 2026-07-25 · 287f3ea |
 | 2 | Migrate `reference_bands.cpp` — parity gate | ☑ complete | 2026-07-25 · 287f3ea |
-| 3 | Wire into the engine — **the pack lights up** | ◐ mechanism done, **content owed** | 2026-07-25 · 287f3ea |
+| 3 | Wire into the engine — **the pack lights up** | ☑ complete — 8 live signals can fire | 2026-07-25 |
 | 4 | Direction audit (all 30 signals) + `highMeans` | ☑ complete — **30/30, nothing exempt** | 2026-07-25 |
 | — | **review gate · expect context clear here** | | |
 | 5 | `NormModel` + read-only norm UI | ☐ not started | |
@@ -40,6 +40,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-25 | 1 | **Stage 1 complete.** `norm.h`, `context_tree.{h,cpp}`, `norm_pack.{h,cpp}`, `norm_provider.h` + the three providers. Assets moved to `src/Resources/diagnostics/` (core.json via `git mv`, plus new norms.json — empty — and contexts.json). `:/diagnostics` prefix preserved by qrc alias, so `pack_provider.h:73` is unchanged. New suites `norm_test` / `context_tree_test` / `norm_pack_test` green; **full analyzer suite 70/70**; app builds clean and starts headless. Next: stage 2. |
 | 2026-07-25 | 2 | **Stage 2 complete.** 39 cell-measures minted into core.json (28 → 67); 55 norm rows (39 full_swing + 16 archetype) in norms.json. `NormBandProvider` added; `BandContext` gained `contextId`; all 4 app call sites switched to `BandProviderKind::Norm` (now the factory default). **`reference_bands_parity_test` green: 117 cells bit-identical, 77,337 classified deltas identical.** `wrist_render_parity_test` green: 2,688 cells and 67 findings identical, and its empty-norm-set guard verified to actually fail without the content. Analyzer suite **72/72**; app, `swinglab_run` and `swing_window_parity_test` all build. Next: stage 3. |
 | 2026-07-25 | 3 | **Stage 3 mechanism complete; content OWED — the pack is still dark.** `NormMeasureSource` joins values to norms; `MeasureReading` gained `grade`, `normContextId`, `contextInferred` and a `fromCorridor()` factory. Engine now fires on a **deviation (Watch/Action)**, not on leaving Ideal — see the decision below. `norm_measure_source_test` green (26 assertions incl. unknown-context, inferred-context demotion, both tails on one norm). Analyzer suite **73/73**; app + `swinglab_run` build. **BUT: all 26 corridor-signal measures still have no norm** (norms.json holds only the 39 wrist-grid rows), so no seed characteristic can fire yet. Authoring those 26 is the remaining work and needs Mark's numbers. Next: author the seed norms, then stage 4. |
+| 2026-07-25 | 3 (closed) + 4 | **THE PACK LIGHTS UP.** Direction audit of all 30 signals (3 inversions + 2 structural defects fixed); sign conventions settled and documented; `highMeans` on every signal-bearing measure; 13 seed norms authored. **8 live corridor signals can now fire, 0 left dark** — `core_pack_test` asserts it. `ballPosition` reverted to the interoperable 0 %-lead-heel scale on Mark's call. Analyzer suite 74/74. Next: stage 5. |
 | 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
 
 ---
@@ -454,6 +455,36 @@ positive, which is exactly how the three inversions got in.
 `m_axisTiltAtTop` reads `secondaryAxisTilt` **at P4**, but that metric's `howToRead` says *"read at
 Impact"* and quotes its figures there. The reverse-spine reading may want P4 anyway — worth a look
 when its producer lands.
+
+---
+
+## Stage 3 — the seed norms
+
+13 rows, and every LIVE corridor signal now resolves one. **8 signals can fire; 0 are dark.**
+`core_pack_test` asserts that, scoped to live measures — a signal on a producer-less measure cannot
+fire whatever norms exist, so requiring one there would assert nothing.
+
+| measure | corridor | grounding |
+|---|---|---|
+| `m_tempoRatio` | 2.2–3.0, monitor 1.8–3.6 | the catalogue's own inline corridor, migrated verbatim |
+| `m_leadWristAtImpact` | 15–30° more flexed than address | stated outright in the metric's `howToRead` |
+| `m_stanceWidth` | driver 115 %, wood 110 %, iron 100 %, wedge 88 %, unknown 102 % | ordinary coaching guidance, per club |
+| `m_ballPosition` | driver 5 %, wood 18 %, iron 33 %, wedge 50 %, unknown 30 % | Mark's numbers, on the interoperable scale |
+| `m_lagAngleDown` | 48–92°, deliberately wide | **weakest of the set** — an estimate, flagged in its own citation |
+
+All are `source: heuristic, n = 0`, which is the schema saying exactly what they are; the health
+list and the corridor editor both read it. A **literature review of every normative value** is
+planned before any of them is treated as more.
+
+**`sig_insufficientSet` needed no new norm.** It was repointed at `m_leadWristRadUln_p4` — already
+"lead wrist hinge, change from address at P4", which *is* wrist set, and already carrying a migrated
+norm. The measure minted for it a commit earlier was a duplicate on a worse quantity (the absolute
+angle depends on the grip; how much a golfer hinged is the change from address) and was removed.
+Reuse over minting is the whole point of the facet model's duplicate detection.
+
+**Two club-dependent measures now have per-club rows** — stance width and ball position — which is
+the context tree doing the job it was built for. One corridor would have been right for one club and
+misleading-red for every other.
 
 ---
 

@@ -28,17 +28,12 @@
 // forward of the lead heel (frac < 0) is a real, coachable driver setup, not an
 // error to be squashed.
 //
-// `fracOfStance` IS THE RAW GEOMETRY, NOT THE PUBLISHED METRIC. It runs lead->trail
-// from an origin at the lead heel, which is the opposite of the project sign
-// convention (positive toward the lead side — docs/design/pinpoint_sign_conventions.md).
-// The `ballPosition` metric is re-centred on the middle of the stance and flipped at
-// the point of emission in wrist_analyzer.cpp:
-//
-//     published = (0.5 - fracOfStance) * 100     // +50 % lead heel, 0 % centre, -50 % trail heel
-//
-// The conversion lives there rather than here on purpose: the plausibility gate
-// (cfg.fracLo/fracHi) and every test below are written against the raw fraction, and
-// re-signing at source would silently invert that band.
+// This IS the published scale, x100: `ballPosition` is 0 % at the lead heel and
+// 100 % at the trail heel, because that is the scale other golf software uses.
+// It therefore does NOT follow the lead-positive convention the displacement
+// metrics do — see docs/design/pinpoint_sign_conventions.md, which explains why
+// interoperability wins wherever a number is read next to numbers we did not
+// produce. A HIGH value means the ball is further BACK, toward the trail foot.
 //
 // WHY THIS IS THE SCALE-FREE METRIC. The denominator is exactly foot_metrics'
 // stanceWidth measurement — the same Euclidean heel-to-heel distance over the

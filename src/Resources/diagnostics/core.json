@@ -14,7 +14,7 @@
       "status": "live",
       "label": "Ball position in the stance, at P1",
       "unit": "% stance width",
-      "highMeans": "further forward, toward the lead foot"
+      "highMeans": "further back, toward the trail foot"
     },
     {
       "id": "m_stanceWidth",
@@ -56,19 +56,6 @@
       "status": "live",
       "label": "Lead wrist flexion/extension, at P4",
       "highMeans": "a more bowed lead wrist at the top, less cupped"
-    },
-    {
-      "id": "m_leadWristSetAtTop",
-      "kind": "provided",
-      "metricKey": "leadWristRadUln",
-      "reducer": {
-        "kind": "at",
-        "anchor": "p4"
-      },
-      "status": "live",
-      "label": "Lead wrist set (hinge), at P4",
-      "unit": "°",
-      "highMeans": "more wrist set at the top, the club hinged further up"
     },
     {
       "id": "m_leadWristAtImpact",
@@ -639,7 +626,8 @@
       },
       "status": "live",
       "label": "Lead wrist hinge — change from address at P4",
-      "unit": "°"
+      "unit": "°",
+      "highMeans": "more wrist set at the top, the club hinged further up from address"
     },
     {
       "id": "m_leadWristRadUln_p5",
@@ -1109,7 +1097,7 @@
       "measures": [
         "m_ballPosition"
       ],
-      "direction": "high"
+      "direction": "low"
     },
     {
       "id": "sig_ballBack",
@@ -1117,7 +1105,7 @@
       "measures": [
         "m_ballPosition"
       ],
-      "direction": "low"
+      "direction": "high"
     },
     {
       "id": "sig_stanceWide",
@@ -1283,7 +1271,7 @@
       "id": "sig_insufficientSet",
       "test": "outsideCorridor",
       "measures": [
-        "m_leadWristSetAtTop"
+        "m_leadWristRadUln_p4"
       ],
       "direction": "low"
     },

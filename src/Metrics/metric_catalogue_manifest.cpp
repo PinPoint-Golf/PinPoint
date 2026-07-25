@@ -912,16 +912,17 @@ void installMetricManifest(MetricCatalogue &cat)
         .unit = QStringLiteral("% stance width"),
         .group = QStringLiteral("Feet & stance"),
         .description = QStringLiteral(
-            "Where the ball sits along the stance at address, as a signed percentage of stance "
-            "width measured from the MIDDLE of the stance. POSITIVE IS TOWARD THE LEAD FOOT: 0 % is "
-            "the centre of the stance, +50 % is level with the lead heel, -50 % level with the "
-            "trail heel. Ball position sets the low point of the swing arc relative to the ball, "
-            "which is why the same swing produces very different strikes as it moves."),
+            "Where the ball sits along the stance at address, as a percentage of stance width: "
+            "0 % IS LEVEL WITH THE LEAD HEEL and 100 % with the trail heel, so a HIGHER value means "
+            "the ball is further BACK. That is the scale other golf software uses, which is why it "
+            "does not follow the lead-positive convention the displacement metrics do. Ball "
+            "position sets the low point of the swing arc relative to the ball, which is why the "
+            "same swing produces very different strikes as it moves."),
         .howToRead = QStringLiteral(
             "Read it against the club in hand rather than against a single ideal: a driver wants "
-            "the ball forward, around +50 % off the lead heel, while a wedge wants it near the "
-            "middle at about 0 %. Values above +50 % are normal and mean the ball is forward of "
-            "the lead heel. "
+            "the ball forward, near 0 % off the lead heel, while a wedge wants it around 50 %, "
+            "closer to the middle of the stance. Values below 0 % are normal and mean the ball is "
+            "forward of the lead heel. "
             "Because this is a ratio of two distances in the same plane it is directly comparable "
             "between swings and cameras, unlike stance width itself. Needs a face-on camera and a "
             "detected ball at address."),

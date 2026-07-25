@@ -585,6 +585,119 @@
       "monitorHi": 7.0,
       "unit": "°",
       "source": "heuristic"
+    },
+    {
+      "measure": "m_tempoRatio",
+      "context": "full_swing",
+      "mu": 2.6,
+      "sigmaLo": 0.4,
+      "unit": "",
+      "source": "heuristic",
+      "monitorLo": 1.8,
+      "monitorHi": 3.6,
+      "citation": "Published tour figures, measured Takeaway->Top where this metric is Address->Top, so the band sits slightly low for this basis by the (small, structurally bounded, so far UNMEASURED) Address->Takeaway gap. Provisional until re-centred on a corpus. NB the low-side Watch band is empty: 1.8 is exactly -2 sigma, so a rushed transition goes Good -> Action at 1.8. Deliberate for now; revisit with the literature review."
+    },
+    {
+      "measure": "m_leadWristAtImpact",
+      "context": "full_swing",
+      "mu": 22.5,
+      "sigmaLo": 7.5,
+      "unit": "",
+      "source": "heuristic",
+      "citation": "From the metric's own howToRead: impact sits roughly 15-30 deg more flexed than address. Scooping fires below about +7.5 deg, i.e. a wrist that has added almost no flexion from address."
+    },
+    {
+      "measure": "m_stanceWidth",
+      "context": "full_swing",
+      "mu": 102.0,
+      "sigmaLo": 12.0,
+      "unit": "% shoulder width",
+      "source": "heuristic",
+      "citation": "Club unknown, so a wider tolerance than any single club would take. The per-club rows below are the ones that should normally resolve."
+    },
+    {
+      "measure": "m_stanceWidth",
+      "context": "driver",
+      "mu": 115.0,
+      "sigmaLo": 10.0,
+      "unit": "% shoulder width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_stanceWidth",
+      "context": "fairway_wood",
+      "mu": 110.0,
+      "sigmaLo": 10.0,
+      "unit": "% shoulder width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_stanceWidth",
+      "context": "iron",
+      "mu": 100.0,
+      "sigmaLo": 9.0,
+      "unit": "% shoulder width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_stanceWidth",
+      "context": "wedge",
+      "mu": 88.0,
+      "sigmaLo": 8.0,
+      "unit": "% shoulder width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_ballPosition",
+      "context": "full_swing",
+      "mu": 30.0,
+      "sigmaLo": 14.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "Club unknown, so a deliberately wide corridor spanning driver-to-wedge territory. The per-club rows below are the ones that should normally resolve."
+    },
+    {
+      "measure": "m_ballPosition",
+      "context": "driver",
+      "mu": 5.0,
+      "sigmaLo": 8.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "Off the lead heel. Negative values are normal and legal here — forward of the lead heel is a real driver setup."
+    },
+    {
+      "measure": "m_ballPosition",
+      "context": "fairway_wood",
+      "mu": 18.0,
+      "sigmaLo": 9.0,
+      "unit": "% stance width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_ballPosition",
+      "context": "iron",
+      "mu": 33.0,
+      "sigmaLo": 10.0,
+      "unit": "% stance width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_ballPosition",
+      "context": "wedge",
+      "mu": 50.0,
+      "sigmaLo": 10.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "The middle of the stance."
+    },
+    {
+      "measure": "m_lagAngleDown",
+      "context": "full_swing",
+      "mu": 70.0,
+      "sigmaLo": 22.0,
+      "unit": "",
+      "source": "heuristic",
+      "citation": "ESTIMATE, not a published figure - the catalogue states a direction but no number. The corridor is deliberately wide so it under-fires rather than over-fires. First candidate for the literature review, and for re-seating from a corpus."
     }
   ]
 }

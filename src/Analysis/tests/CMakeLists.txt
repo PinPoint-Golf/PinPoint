@@ -471,9 +471,10 @@ pp_add_test(characteristic_pack_test
 # under edge reversal), the capture-gap classification, and that no commercial brand has leaked
 # into the content.
 pp_add_test(core_pack_test
-    SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK}
+    SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK} ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
-    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json"
+                    -DPP_CORE_NORMS_PATH="${DIAGRES}/norms.json")
 
 # Detection + explanation passes, DARK: synthetic measure source only, never invoked on a real
 # swing. Asserts the rule the whole library depends on — an absent measure resolves Unavailable and

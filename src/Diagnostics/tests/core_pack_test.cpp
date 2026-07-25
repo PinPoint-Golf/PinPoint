@@ -8,6 +8,7 @@
 //   ctest --test-dir build/analyzer-tests -R core_pack --output-on-failure
 
 #include "../characteristic_pack.h"
+#include "../norm_pack.h"
 
 #include <QFile>
 
@@ -285,6 +286,37 @@ int main()
         check(warnings > 0, "the health list has content (uncited tiers, single-tail axes)");
         check(res.report.errorCount() == 0, "nothing in the health list is an error");
         std::printf("        (%d health-list warnings)\n", warnings);
+    }
+
+    // ── No LIVE corridor signal is left without a norm ─────────────────────────
+    // "The pack is dark" was the state this whole exercise existed to end: 30 corridor signals and
+    // not one norm to grade against, so the engine correctly reported Unavailable for every single
+    // characteristic and the library detected nothing at all. It looked like a working library.
+    //
+    // Scoped to LIVE measures on purpose. A signal on a measure with no producer cannot fire
+    // whatever norms exist, so requiring norms there would assert something that changes nothing;
+    // a signal on a live measure with no norm is a real hole, and this is what makes it loud.
+    {
+        QFile nf(QStringLiteral(PP_CORE_NORMS_PATH));
+        check(nf.open(QIODevice::ReadOnly), "the shipped norm set is readable");
+        const NormPackLoadResult nres = loadNormPack(nf.readAll(), QStringLiteral("norms.json"));
+        check(nres.loaded, "the shipped norm set loads and validates clean");
+
+        int live = 0, dark = 0;
+        for (const Signal &sig : p.signalDefs) {
+            if (sig.test != SignalTest::OutsideCorridor || sig.measures.isEmpty()) continue;
+            const Measure *m = p.measure(sig.measures.first());
+            if (m == nullptr || m->status != MeasureStatus::Live) continue;
+            ++live;
+            if (nres.pack.contextsFor(m->id).isEmpty()) {
+                ++dark;
+                std::printf("        '%s' is live but has no norm in any context\n",
+                            qPrintable(m->id));
+            }
+        }
+        std::printf("        (%d live corridor signals, %d without a norm)\n", live, dark);
+        check(live > 0, "there are live corridor signals to check");
+        check(dark == 0, "every LIVE corridor signal resolves a norm — the pack cannot go dark");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
