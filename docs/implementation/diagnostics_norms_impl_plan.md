@@ -13,9 +13,9 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 
 | # | Stage | State | Landed |
 |---|---|---|---|
-| 1 | Types, tree, pack, providers | ☑ complete | 2026-07-25 · uncommitted |
-| 2 | Migrate `reference_bands.cpp` — parity gate | ☑ complete | 2026-07-25 · uncommitted |
-| 3 | Wire into the engine — **the pack lights up** | ◐ mechanism done, **content owed** | 2026-07-25 · uncommitted |
+| 1 | Types, tree, pack, providers | ☑ complete | 2026-07-25 · 287f3ea |
+| 2 | Migrate `reference_bands.cpp` — parity gate | ☑ complete | 2026-07-25 · 287f3ea |
+| 3 | Wire into the engine — **the pack lights up** | ◐ mechanism done, **content owed** | 2026-07-25 · 287f3ea |
 | 4 | Fix the direction inversion + `highMeans` | ☐ not started | |
 | — | **review gate · expect context clear here** | | |
 | 5 | `NormModel` + read-only norm UI | ☐ not started | |
