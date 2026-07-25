@@ -67,17 +67,6 @@ public:
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// wrist_analyzer.cpp SwingRefStage (T1-T5) — the "Swing plane" group, the idealised P1-P8
-// swing-reference model compared against the measured 2D shaft track. Session-type agnostic
-// like KinematicSeriesProvider (D "the pipeline is session-type agnostic" — SwingRefStage is
-// inserted into BOTH wristProfile() and cameraKinematicsProfile()), NOT gated like
-// ShaftLeanProvider/WristMetricProvider: every key here needs the face-on club track only.
-class SwingRefMetricProvider : public IMetricProvider {
-public:
-    std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
-};
-
 // tempo_metrics.cpp — Wrist Motion session only today. Needs NO devices beyond whatever produced
 // a confident phase ladder: an IMU-only swing and a camera-only swing both qualify, which is a
 // disjunction MetricRequirement cannot express — hence the empty requirement plus the note that

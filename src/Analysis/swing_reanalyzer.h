@@ -67,14 +67,6 @@ public:
 
 struct ReanalyzeOptions {
     QVariantMap tuningOverrides;            // "<area>.<field>" → numeric (SwingLab)
-    // Per-athlete "swingref.*" dotted-key overrides (AthleteController::
-    // swingRefOverridesFor(uuid)), threaded onto ls.job.swingRefOverrides —
-    // the same field the live path (ShotProcessor::buildAnalysisJob) fills.
-    // The in-app ReanalysisController resolves this on the UI thread (current
-    // athlete lookup) before dispatching to the worker; SwingLab/offline
-    // callers leave it empty (default), so swingRefMergedOverrides() falls
-    // through to job.tuningOverrides alone, same as today.
-    QVariantMap swingRefOverrides;
     int         sessionTypeOverride = -1;   // -1 → use swing.json capture.sessionType
     QString     poseTrackPath;              // inject pose JSON, skip ViTPose (tests / --pose)
     // Forwarded to ShotAnalysisJob::fullWindow — disables the swing-span heavy-

@@ -277,7 +277,7 @@ target_include_directories(PinPointStudio PRIVATE
     src/Gui/imu src/Gui/viz src/Gui/session src/Gui/shot src/Gui/review
     src/Gui/media src/Gui/calibration src/Gui/diagnostics src/Gui/markup
     src/IMU src/Audio src/Video src/Pose src/STT src/TTS src/LLM src/Secrets src/Core src/Buffer
-    src/Analysis src/Metrics src/Models
+    src/Analysis src/Metrics
     src/Update
     "${CMAKE_BINARY_DIR}/generated")
 
@@ -303,7 +303,6 @@ qt_add_qml_module(PinPointStudio
         src/Gui/viz/ImuVizView.qml
         src/Gui/viz/ArmVizView.qml
         src/Gui/viz/BodyVizView.qml
-        src/Gui/viz/SwingRefOverlay.qml
         src/Gui/media/FilmPage.qml
         src/Gui/cameras/VideoPage.qml
         src/Gui/cameras/PpCameraFrame.qml
@@ -383,7 +382,6 @@ qt_add_qml_module(PinPointStudio
         src/Gui/shot/PpDashboardSetupZone.qml
         src/Gui/shot/PpDashboardMotionZone.qml
         src/Gui/shot/PpDashboardSequenceZone.qml
-        src/Gui/shot/PpDashboardSwingPlaneZone.qml
         src/Gui/shot/PpDashboardPresetEditor.qml
         src/Gui/shot/PpDashboardWindow.qml
         # Dashboard paint primitives — every metric renders as one of these
@@ -430,12 +428,6 @@ qt_add_qml_module(PinPointStudio
         src/Video/bayer_video_item.cpp
         src/Gui/viz/body_pose_adapter.h
         src/Gui/viz/body_pose_adapter.cpp
-        src/Gui/viz/ruled_surface_geometry.h
-        src/Gui/viz/ruled_surface_geometry.cpp
-        src/Gui/viz/polyline_geometry.h
-        src/Gui/viz/polyline_geometry.cpp
-        src/Gui/viz/swing_ref_overlay_model.h
-        src/Gui/viz/swing_ref_overlay_model.cpp
         src/Gui/shot/shot_filter_proxy_model.h
         src/Gui/shot/shot_filter_proxy_model.cpp
         src/Gui/review/swing_data_source.h
@@ -2091,12 +2083,7 @@ elseif(TARGET opencv_core AND TARGET opencv_imgproc AND TARGET opencv_imgcodecs)
     # in swing_reanalyzer.cpp) when a swing has no raw sidecar. It pulls FFmpeg backends,
     # NOT VTK (that's opencv_viz, still omitted), so the macOS-bundle bloat concern that
     # drove the modular link does not apply. No-op on monolithic opencv_world.
-    # opencv_calib3d backs the WP4a camera-projection layer's cv::solvePnP /
-    # cv::Rodrigues (src/Analysis/camera_projection.cpp). It transitively pulls
-    # opencv_flann (calib3d's feature-matching dep); both ship in the standard
-    # OpenCV binary and are present on Linux/macOS. No-op on monolithic opencv_world.
     set(PP_OPENCV_LIBS opencv_core opencv_imgproc opencv_imgcodecs
-        $<TARGET_NAME_IF_EXISTS:opencv_calib3d>
         $<TARGET_NAME_IF_EXISTS:opencv_videoio>)
 else()
     set(PP_OPENCV_LIBS ${OpenCV_LIBS})
@@ -2271,23 +2258,6 @@ target_sources(PinPointStudio PRIVATE
     src/Analysis/shot_analyzer.cpp
     src/Analysis/swing_reanalyzer.h
     src/Analysis/swing_reanalyzer.cpp
-    # Idealised swing-reference model, Phase A — WP4a camera projection + anthro
-    # estimation + WP2a comparator (dark by default, swingref.enabled=false; the
-    # SwingRefStage that consumes these lands in a later task). Needs
-    # opencv_calib3d (PP_OPENCV_LIBS, ~line 2086).
-    src/Analysis/camera_projection.h
-    src/Analysis/camera_projection.cpp
-    src/Analysis/swing_ref_anthro.h
-    src/Analysis/swing_ref_anthro.cpp
-    src/Analysis/swing_ref_fit.h
-    src/Analysis/swing_ref_fit.cpp
-    src/Analysis/swing_comparator.h
-    src/Analysis/swing_comparator.cpp
-    # Idealised swing-reference model core, Phase A WP1 (dark by default via the
-    # same swingref.enabled flag; src/Models/ is the model-core module seam,
-    # precedent src/Metrics/ below).
-    src/Models/swing_reference.h
-    src/Models/swing_reference.cpp
     src/Metrics/metric_type.h
     src/Metrics/metric_descriptor.h
     src/Metrics/metric_provider.h
@@ -2542,13 +2512,6 @@ if(PINPOINT_BUILD_TOOLS)
         src/Analysis/shaft_tracker.cpp
         src/Analysis/ball_anchor.cpp
         src/Analysis/event_refine.cpp
-        # Idealised swing-reference model, Phase A (dark by default) — kept in
-        # lockstep with the app target so swinglab_run/re-analyse never diverge.
-        src/Analysis/camera_projection.cpp
-        src/Analysis/swing_ref_anthro.cpp
-        src/Analysis/swing_ref_fit.cpp
-        src/Analysis/swing_comparator.cpp
-        src/Models/swing_reference.cpp
         src/Analysis/shaft_tracker_math.cpp
         src/Analysis/shaft_track_assembly.cpp
         src/Analysis/clubhead_track.cpp
@@ -2578,7 +2541,7 @@ if(PINPOINT_BUILD_TOOLS)
     # Common include/define/link wiring for an offline tool target.
     function(pinpoint_configure_offline_target tgt)
         target_include_directories(${tgt} PRIVATE
-            src/Buffer src/Analysis src/Metrics src/Models src/Export src/Pose src/Core src/IMU
+            src/Buffer src/Analysis src/Metrics src/Export src/Pose src/Core src/IMU
             "${_ort_root}/include"
             ${OpenCV_INCLUDE_DIRS}
             ${whisper_SOURCE_DIR}/include

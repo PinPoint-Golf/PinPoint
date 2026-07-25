@@ -99,50 +99,6 @@ Item {
              : root._plotH / 2
     }
     function _inDom(t) { return t >= domStartUs && t <= domEndUs }
-
-    // ── Gap-aware trace splitting ──────────────────────────────────────────────
-    // PathPolyline connects every point in `path` in order, so a series with a
-    // genuine hole in t_us (e.g. refShaftDelta's masked spans — D6: dropped
-    // samples, not zeros) would otherwise draw a straight line bridging the gap,
-    // reading as an interpolated value that was never measured. Most series are
-    // uniformly sampled (ratio ≈ 1, never trips the factor below), so this is a
-    // no-op for them — one run, identical to the previous single-PathPolyline
-    // behaviour. Only a series with a genuine multi-sample hole gets split.
-    readonly property real _gapBreakFactor: 3   // break when a step exceeds N× the median step
-    function _traceRuns(tArr, vArr) {
-        var t = tArr || [], v = vArr || []
-        if (t.length < 2) return [{ t: t, v: v }]
-        var steps = []
-        for (var i = 1; i < t.length; ++i) steps.push(t[i] - t[i - 1])
-        var sorted = steps.slice().sort(function (a, b) { return a - b })
-        var med = sorted[sorted.length >> 1]
-        if (!(med > 0)) med = 1
-        var thresh = med * root._gapBreakFactor
-        var runs = [], curT = [t[0]], curV = [v[0]]
-        for (var j = 1; j < t.length; ++j) {
-            if (t[j] - t[j - 1] > thresh) {
-                runs.push({ t: curT, v: curV })
-                curT = []; curV = []
-            }
-            curT.push(t[j]); curV.push(v[j])
-        }
-        runs.push({ t: curT, v: curV })
-        return runs
-    }
-    // Flattened (series × gap-run) list — one entry per contiguous run, each
-    // still carrying its parent series' colour. The Repeater below draws one
-    // Shape per entry, so a gap becomes two separate polylines with nothing
-    // drawn between them instead of one polyline bridging the hole.
-    readonly property var _traceSegments: {
-        var out = []
-        for (var i = 0; i < root.series.length; ++i) {
-            var s = root.series[i]
-            var runs = root._traceRuns(s.t_us, s.value)
-            for (var r = 0; r < runs.length; ++r)
-                out.push({ color: s.color, t_us: runs[r].t, value: runs[r].v })
-        }
-        return out
-    }
     function _bandColor(b) {
         return b === "warn"      ? Theme.colorWarn
              : b === "attention" ? Theme.colorAttention
@@ -263,9 +219,9 @@ Item {
         width: root._plotW; height: root._plotH
         clip: true
 
-        // Traces — one Shape per series PER contiguous (gap-broken) run.
+        // Traces — one Shape per series.
         Repeater {
-            model: root._traceSegments
+            model: root.series
             delegate: Shape {
                 id: curve
                 required property var modelData

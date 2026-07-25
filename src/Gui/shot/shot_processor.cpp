@@ -36,7 +36,6 @@
 #include "../Export/swing_doc.h"
 #include "../Core/pp_debug.h"
 #include "../Core/pp_os_metrics.h"
-#include "../Core/pp_settings.h"
 #include "pp_version.h"
 
 #include <QSysInfo>
@@ -44,7 +43,6 @@
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QSettings>
 #include <QSet>
 #include <QTime>
 #include <QUrl>
@@ -374,73 +372,6 @@ QVariantMap toAnalysisDetail(const pinpoint::analysis::SwingAnalysis &a)
                           { QStringLiteral("valid"),     true },
                           { QStringLiteral("launchTUs"), static_cast<qlonglong>(a.ball.launchTUs) },
                           { QStringLiteral("samples"),   samples } });
-    }
-    // Swing-reference block (SwingRefStage, T5 — dark by default). Same shape
-    // as the swing.json/disk-reload analysisDetail.reference (swing_doc.cpp /
-    // disk_replay_source.cpp), so a live just-captured shot's overlay has the
-    // data available immediately, before any reload. t_us stays ABSOLUTE here
-    // (this function's convention throughout, e.g. club/ball above) — only the
-    // disk path re-times into the window-relative domain.
-    if (a.reference.valid) {
-        const SwingRefAnthro &refAnthro = a.reference.anthro;
-        const QVariantMap refAnthroMap{
-            { QStringLiteral("hubX"), refAnthro.hubX }, { QStringLiteral("hubY"), refAnthro.hubY },
-            { QStringLiteral("hubZ"), refAnthro.hubZ },
-            { QStringLiteral("armLengthM"),  refAnthro.armLengthM },
-            { QStringLiteral("rightHanded"), refAnthro.rightHanded },
-            { QStringLiteral("ballOffsetX"), refAnthro.ballOffsetX },
-            { QStringLiteral("pxPerM"), refAnthro.pxPerM },
-            { QStringLiteral("conf"),   double(refAnthro.conf) },
-            { QStringLiteral("flags"),  int(refAnthro.flags) } };
-        const SwingRefClub &refClub = a.reference.club;
-        const QVariantMap refClubMap{
-            { QStringLiteral("name"),             refClub.clubName },
-            { QStringLiteral("lengthM"),          refClub.lengthM },
-            { QStringLiteral("lieDeg"),           refClub.lieDeg },
-            { QStringLiteral("forwardLeanP7Deg"), refClub.forwardLeanP7Deg } };
-        const SwingRefProjection &refProj = a.reference.projection;
-        const QVariantMap refProjMap{
-            { QStringLiteral("kind"),       refProj.kind },
-            { QStringLiteral("residualPx"), refProj.residualPx },
-            { QStringLiteral("fx"), refProj.fx }, { QStringLiteral("fy"), refProj.fy },
-            { QStringLiteral("cx"), refProj.cx }, { QStringLiteral("cy"), refProj.cy },
-            { QStringLiteral("width"), refProj.width }, { QStringLiteral("height"), refProj.height },
-            { QStringLiteral("rvec"), QVariantList{ refProj.rvec[0], refProj.rvec[1], refProj.rvec[2] } },
-            { QStringLiteral("tvec"), QVariantList{ refProj.tvec[0], refProj.tvec[1], refProj.tvec[2] } } };
-        QVariantList refProjected;
-        for (const SwingRefPolyline &pl : a.reference.projected) {
-            QVariantList pts;
-            for (const SwingRefPolyPoint &pt : pl.points)
-                pts.append(QVariantMap{
-                    { QStringLiteral("s"), pt.s },
-                    { QStringLiteral("buttX"), pt.buttX }, { QStringLiteral("buttY"), pt.buttY },
-                    { QStringLiteral("headX"), pt.headX }, { QStringLiteral("headY"), pt.headY } });
-            refProjected.append(QVariantMap{
-                { QStringLiteral("camera"),  int(pl.camera) },
-                { QStringLiteral("segment"), pl.segment },
-                { QStringLiteral("points"),  pts } });
-        }
-        QVariantList refMaskSpans;
-        for (const SwingRefMaskSpan &sp : a.reference.maskSpans)
-            refMaskSpans.append(QVariantMap{
-                { QStringLiteral("diagnosticId"), sp.diagnosticId },
-                { QStringLiteral("view"), sp.view },
-                { QStringLiteral("sLo"), sp.sLo }, { QStringLiteral("sHi"), sp.sHi } });
-        QVariantList refCallouts;
-        for (const SwingRefCallout &co : a.reference.callouts)
-            refCallouts.append(QVariantMap{
-                { QStringLiteral("p"),        co.p },
-                { QStringLiteral("t_us"),     static_cast<qlonglong>(co.t_us) },
-                { QStringLiteral("key"),      co.key },
-                { QStringLiteral("valueDeg"), co.valueDeg } });
-        detail.insert(QStringLiteral("reference"), QVariantMap{
-            { QStringLiteral("anthro"),            refAnthroMap },
-            { QStringLiteral("club"),              refClubMap },
-            { QStringLiteral("fspInclinationDeg"), a.reference.fspInclinationDeg },
-            { QStringLiteral("projection"),        refProjMap },
-            { QStringLiteral("projected"),         refProjected },
-            { QStringLiteral("maskSpans"),         refMaskSpans },
-            { QStringLiteral("callouts"),          refCallouts } });
     }
     return detail;
 }
@@ -793,32 +724,6 @@ ShotAnalysisJob ShotProcessor::buildAnalysisJob()
         }
     }
 
-    // Face-on camera intrinsics for the SwingRefStage's PoseFit projection
-    // (optional import; Phase A has no calibration UI, so cameras/<serial>/
-    // intrinsics is never actually populated today — this key read is inert
-    // until such a UI lands). Read directly via ppSettings() rather than a
-    // formal AppSettings property: nothing here needs a live QML-bound cache,
-    // only a one-off resolve at job-build time.
-    for (const ReplayTrack &track : m_replayTracks) {
-        if (track.ctrl && track.ctrl->perspective() == CameraInstance::FaceOn) {
-            QSettings s = ppSettings();
-            const QVariantMap intr =
-                s.value(QStringLiteral("cameras/%1/intrinsics").arg(track.ctrl->cameraKey()),
-                       QVariantMap{}).toMap();
-            if (!intr.isEmpty()) {
-                job.cameraIntrinsics.valid = true;
-                job.cameraIntrinsics.fx = intr.value(QStringLiteral("fx")).toDouble();
-                job.cameraIntrinsics.fy = intr.value(QStringLiteral("fy")).toDouble();
-                job.cameraIntrinsics.cx = intr.value(QStringLiteral("cx")).toDouble();
-                job.cameraIntrinsics.cy = intr.value(QStringLiteral("cy")).toDouble();
-                const QVariantList dist = intr.value(QStringLiteral("dist")).toList();
-                for (int i = 0; i < 5 && i < dist.size(); ++i)
-                    job.cameraIntrinsics.dist[std::size_t(i)] = dist.at(i).toDouble();
-            }
-            break;
-        }
-    }
-
     // Athlete handedness (lead-arm sign) and IMU -> segment bindings, resolved
     // here on the UI thread — the worker can read neither the athlete controller
     // nor the live ImuInstance calibration (alignA/mountM are session-lifetime).
@@ -845,14 +750,6 @@ ShotAnalysisJob ShotProcessor::buildAnalysisJob()
             const double hoselMm = rec.value(QStringLiteral("hoselFromButtMm")).toDouble();
             if (hoselMm > 0)
                 job.hoselFromButtMm = hoselMm;
-            // Idealised swing-reference geometry (SwingRefStage, dark). The
-            // club record doesn't carry these fields yet — absent keys read as
-            // 0 (lieDeg) / the explicit -1 default (forwardLeanP7Deg), both of
-            // which are the job's own "use lieLeanDefaultsFor(clubName)"
-            // sentinels (src/Models/swing_reference.h), so no schema change is
-            // needed here to get a sane per-club fallback.
-            job.lieDeg           = rec.value(QStringLiteral("lieDeg")).toDouble();
-            job.forwardLeanP7Deg = rec.value(QStringLiteral("forwardLeanP7Deg"), -1.0).toDouble();
 
             // Persistent club-length prior (club_length_fusion.h / plan: robust
             // club length — starry-shimmying-wind). Keyed athleteUuid|clubName|
@@ -903,15 +800,6 @@ ShotAnalysisJob ShotProcessor::buildAnalysisJob()
             }
         }
     }
-
-    // Per-athlete "swingref.*" overrides (AthleteController::
-    // swingRefOverridesFor — athletes/<uuid>/swingref QSettings map). Merged
-    // onto tuningOverrides AT THE STAGE, not here — tuningOverrides keeps its
-    // SwingLab-only "production == empty map" contract; this is a separate,
-    // deliberately additive map (empty until a future Settings panel writes
-    // one, since there is no UI for it yet).
-    if (m_athlete && m_athlete->hasCurrentAthlete())
-        job.swingRefOverrides = m_athlete->swingRefOverridesFor(m_athlete->currentUuid());
 
     if (m_imuManager) {
         const QVariantMap placement = m_appSettings ? m_appSettings->imuPlacement() : QVariantMap{};

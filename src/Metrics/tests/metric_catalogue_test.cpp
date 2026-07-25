@@ -53,9 +53,9 @@ int main()
     std::printf("=== metric catalogue ===\n");
     const MetricCatalogue cat = makeMetricCatalogue();
 
-    // 1. Manifest completeness — the full design catalogue (31 live + 26 planned), each resolvable.
+    // 1. Manifest completeness — the full design catalogue (21 live + 22 planned), each resolvable.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 57, "descriptor count == 57");
+        checkEqI(static_cast<int>(cat.all().size()), 43, "descriptor count == 43");
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -63,16 +63,12 @@ int main()
                                "ballPosition",
                                "headSway",        "headLift",        "headTilt",
                                "tempoBackswing",  "tempoRatio",
-                               "wristScore",      "wristResemblance",
-                               "refShaftDelta",   "refLagDelta",     "refHubShift",
-                               "refRmsBackswing", "refRmsDownswing", "refExitDelta",
-                               "refLagRetention", "refLeanDeltaP7",  "refTempoDelta",
-                               "refProjResidual" };
+                               "wristScore",      "wristResemblance" };
         bool allPresent = true;
         for (const char *k : live)
             if (!cat.descriptor(QString::fromLatin1(k))) { allPresent = false;
                 std::printf("    missing live descriptor: %s\n", k); }
-        check(allPresent, "all 31 live keys have a descriptor");
+        check(allPresent, "all 21 live keys have a descriptor");
         check(cat.descriptor(QStringLiteral("tempo")) == nullptr, "tempo absent (use tempoBackswing)");
         // ballPosition used to be asserted ABSENT here; it now has a producer
         // (ball_position.cpp via FootMetricsStage), so it is in the live list above.
@@ -80,9 +76,9 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  28, "TimeSeries count");
-        checkEqI(countType(cat, MetricType::PointInTime), 17, "PointInTime count");
-        checkEqI(countType(cat, MetricType::Summary),     11, "Summary count");
+        checkEqI(countType(cat, MetricType::TimeSeries),  24, "TimeSeries count");
+        checkEqI(countType(cat, MetricType::PointInTime), 13, "PointInTime count");
+        checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
         MetricQuery gq; gq.group = QStringLiteral("Wrist & forearm");
@@ -99,9 +95,6 @@ int main()
 
         MetricQuery alq; alq.group = QStringLiteral("Alignment");
         checkEqI(static_cast<int>(cat.query(alq).size()), 4, "group 'Alignment' == 4");
-
-        MetricQuery spq; spq.group = QStringLiteral("Swing plane");
-        checkEqI(static_cast<int>(cat.query(spq).size()), 14, "group 'Swing plane' == 14");
 
         MetricQuery sq; sq.scored = true;
         checkEqI(static_cast<int>(cat.query(sq).size()), 4, "scored == true → 4 (wrist DOFs)");
@@ -164,29 +157,6 @@ int main()
         check(cat.descriptor(QStringLiteral("headSway"))->planned == false, "headSway not planned");
     }
 
-    // 3d0. resolve() — the new SwingRefMetricProvider ("Swing plane" live group): needs
-    //      face-on + club track only, NO session gating (the pipeline-is-session-type-
-    //      agnostic rule — SwingRefStage is inserted into both wristProfile() and
-    //      cameraKinematicsProfile(), unlike the Wrist-only ShaftLeanProvider).
-    {
-        const ShotContext capable = wristShot({}, /*faceOn*/ true, /*club*/ true);
-        check(cat.resolve(QStringLiteral("refShaftDelta"), capable).state == MetricAvailability::Measured,
-              "refShaftDelta Measured with face-on + club track");
-        check(cat.resolve(QStringLiteral("refProjResidual"), capable).state == MetricAvailability::Measured,
-              "refProjResidual Measured with face-on + club track");
-
-        const ShotContext noClub = wristShot({}, /*faceOn*/ true, /*club*/ false);
-        check(cat.resolve(QStringLiteral("refShaftDelta"), noClub).state == MetricAvailability::Unavailable,
-              "refShaftDelta Unavailable without club track");
-
-        // Session-agnostic: a Swing (non-Wrist) session with the same devices still resolves.
-        ShotContext swingSession = capable; swingSession.sessionType = 0;
-        check(cat.resolve(QStringLiteral("refTempoDelta"), swingSession).state == MetricAvailability::Measured,
-              "refTempoDelta Measured in a Swing session too (session-type agnostic)");
-        check(cat.descriptor(QStringLiteral("refShaftDelta"))->planned == false, "refShaftDelta not planned");
-        check(cat.descriptor(QStringLiteral("refShaftDeltaDtl"))->planned == true, "refShaftDeltaDtl is planned");
-    }
-
     // 3d. Planned placeholders — declared, flagged, and always resolving 'planned'.
     {
         const char *planned[] = { "pelvisRotation", "thoraxRotation", "xFactor", "xFactorStretch",
@@ -196,9 +166,7 @@ int main()
                                   "lowPointAhead",
                                   "kinematicSequence", "swingScore",
                                   "shoulderAlignment", "elbowAlignment", "hipAlignment",
-                                  "feetAlignment",
-                                  "refShaftDeltaDtl", "refPlaneShift", "refP4LaidOff",
-                                  "refButtDeviation" };
+                                  "feetAlignment" };
         int flagged = 0, unavailable = 0;
         // Use a fully-capable context to prove these are gated by "no producer", not missing sensors.
         ShotContext capable = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax,
@@ -213,12 +181,10 @@ int main()
             const MetricAvailability a = cat.resolve(QString::fromLatin1(k), capable);
             if (a.state == MetricAvailability::Unavailable) ++unavailable;
         }
-        checkEqI(flagged, 26, "all 26 planned metrics carry .planned == true");
-        checkEqI(unavailable, 26, "all 26 planned metrics resolve Unavailable even fully-equipped");
+        checkEqI(flagged, 22, "all 22 planned metrics carry .planned == true");
+        checkEqI(unavailable, 22, "all 22 planned metrics resolve Unavailable even fully-equipped");
         check(cat.resolve(QStringLiteral("pelvisRotation"), capable).reason.contains(QStringLiteral("planned")),
               "planned reason says 'planned'");
-        check(cat.resolve(QStringLiteral("refPlaneShift"), capable).reason.contains(QStringLiteral("planned")),
-              "Swing plane DTL placeholder reason also says 'planned' (not a sensor gap)");
     }
 
     // 4. resolve() — club-track / face-on gating (kinematics + foot).

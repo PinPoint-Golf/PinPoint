@@ -45,28 +45,11 @@ Popup {
     // Live (producible) metric keys of a zone's pool — the DEFAULT set shown when the
     // zone has no explicit pins. Swing-agnostic (config applies to any swing).
     function _liveKeys(zoneKey) {
-        var rows = _poolRows(zoneKey)
-        var out = []
-        for (var i = 0; i < rows.length; ++i) if (!rows[i].planned) out.push(rows[i].key)
-        return out
-    }
-    // The zone's full pinnable pool. Every zone but "swingplane" is a straight
-    // catalog.query() pass-through; "swingplane" mixes Summary + PointInTime (no
-    // single `type` filter covers both) and must additionally exclude the "Swing
-    // plane" group's own TimeSeries trio (Motion's) and the dark DTL-only planned
-    // rows (no usedBy at all) — the same usedBy=scorecard:swingplane filter the
-    // zone itself applies, so the editor can never offer a metric the card won't
-    // actually render.
-    function _poolRows(zoneKey) {
         var q = _poolQuery(zoneKey)
         if (!q || !catalog) return []
         var rows = catalog.query(q, {})
-        if (zoneKey !== "swingplane") return rows
         var out = []
-        for (var i = 0; i < rows.length; ++i) {
-            var d = catalog.descriptor(rows[i].key, {})
-            if (d && d.usedBy && d.usedBy.indexOf("scorecard:swingplane") >= 0) out.push(rows[i])
-        }
+        for (var i = 0; i < rows.length; ++i) if (!rows[i].planned) out.push(rows[i].key)
         return out
     }
     // The metrics this zone actually displays: the explicit pinned list, else the
@@ -104,12 +87,9 @@ Popup {
     // handSpeed) and the geometry reads (lagAngle, impactShaftLean) are live and
     // rendered as one-sided / plain band rails, they simply carry no band score.
     function _poolQuery(zoneKey) {
-        if (zoneKey === "setup")      return { type: "pointInTime" }
-        if (zoneKey === "motion")     return { type: "timeSeries" }
-        if (zoneKey === "sequence")   return { type: "sequence" }
-        // No single `type` covers this zone's mix (Summary + PointInTime); the
-        // group-only query is post-filtered by _poolRows() to the usedBy pool.
-        if (zoneKey === "swingplane") return { group: "Swing plane" }
+        if (zoneKey === "setup")    return { type: "pointInTime" }
+        if (zoneKey === "motion")   return { type: "timeSeries" }
+        if (zoneKey === "sequence") return { type: "sequence" }
         return null   // verdict has no metric pool (fixed content)
     }
     contentItem: ColumnLayout {
@@ -245,7 +225,7 @@ Popup {
                             spacing: Theme.sp(5)
                             Repeater {
                                 model: (zrow.expanded && zrow.hasPool && editor.catalog)
-                                       ? editor._poolRows(zrow.modelData.key) : []
+                                       ? editor.catalog.query(editor._poolQuery(zrow.modelData.key), {}) : []
                                 delegate: Chip {
                                     required property var modelData
                                     readonly property bool _shown: editor._effectiveKeys(zrow.modelData.key).indexOf(modelData.key) >= 0

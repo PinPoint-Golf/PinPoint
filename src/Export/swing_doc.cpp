@@ -447,103 +447,6 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
             { QStringLiteral("launchTUs"), rel(a.ball.launchTUs) },
             { QStringLiteral("samples"),   samples } };
     }
-    // Additive swing-reference block (SwingRefStage, T5 — dark by default
-    // behind swingref.enabled). Written ONLY when the stage actually ran and
-    // produced a valid comparison (optional-absence contract, pipeline dev
-    // guide §6.5); the reader tolerates its absence and the overlay simply has
-    // nothing to draw. `projected`/`maskSpans` carry a phase `s` (not a
-    // timestamp) so only `callouts[].t_us` needs rel() — everything else here
-    // is a pure scalar or an already phase-domain value.
-    if (a.reference.valid) {
-        const SwingRefAnthro &refAnthro = a.reference.anthro;
-        const QJsonObject refAnthroObj{
-            { QStringLiteral("hubX"), refAnthro.hubX }, { QStringLiteral("hubY"), refAnthro.hubY },
-            { QStringLiteral("hubZ"), refAnthro.hubZ },
-            { QStringLiteral("armLengthM"),  refAnthro.armLengthM },
-            { QStringLiteral("rightHanded"), refAnthro.rightHanded },
-            { QStringLiteral("ballOffsetX"), refAnthro.ballOffsetX },
-            { QStringLiteral("pxPerM"), refAnthro.pxPerM },
-            { QStringLiteral("conf"),   double(refAnthro.conf) },
-            { QStringLiteral("flags"),  int(refAnthro.flags) } };
-
-        const SwingRefClub &refClub = a.reference.club;
-        const QJsonObject refClubObj{
-            { QStringLiteral("name"),             refClub.clubName },
-            { QStringLiteral("lengthM"),          refClub.lengthM },
-            { QStringLiteral("lieDeg"),           refClub.lieDeg },
-            { QStringLiteral("forwardLeanP7Deg"), refClub.forwardLeanP7Deg } };
-
-        const SwingRefProjection &refProj = a.reference.projection;
-        const QJsonObject refProjObj{
-            { QStringLiteral("kind"),       refProj.kind },
-            { QStringLiteral("residualPx"), refProj.residualPx },
-            { QStringLiteral("fx"), refProj.fx }, { QStringLiteral("fy"), refProj.fy },
-            { QStringLiteral("cx"), refProj.cx }, { QStringLiteral("cy"), refProj.cy },
-            { QStringLiteral("width"), refProj.width }, { QStringLiteral("height"), refProj.height },
-            { QStringLiteral("rvec"), QJsonArray{ refProj.rvec[0], refProj.rvec[1], refProj.rvec[2] } },
-            { QStringLiteral("tvec"), QJsonArray{ refProj.tvec[0], refProj.tvec[1], refProj.tvec[2] } },
-            // Orthographic anchor params (kind=="Ortho" only; harmless zeros
-            // otherwise — see swing_analysis.h SwingRefProjection doc).
-            { QStringLiteral("sPxPerM"), refProj.sPxPerM },
-            { QStringLiteral("originX"), refProj.originX },
-            { QStringLiteral("originY"), refProj.originY },
-            { QStringLiteral("xSign"),   refProj.xSign } };
-
-        QJsonArray refProjected;
-        for (const SwingRefPolyline &pl : a.reference.projected) {
-            QJsonArray pts;
-            for (const SwingRefPolyPoint &pt : pl.points)
-                pts.append(QJsonObject{
-                    { QStringLiteral("s"), pt.s },
-                    { QStringLiteral("buttX"), pt.buttX }, { QStringLiteral("buttY"), pt.buttY },
-                    { QStringLiteral("headX"), pt.headX }, { QStringLiteral("headY"), pt.headY } });
-            refProjected.append(QJsonObject{
-                { QStringLiteral("camera"),  int(pl.camera) },
-                { QStringLiteral("segment"), pl.segment },
-                { QStringLiteral("points"),  pts } });
-        }
-
-        QJsonArray refMaskSpans;
-        for (const SwingRefMaskSpan &sp : a.reference.maskSpans)
-            refMaskSpans.append(QJsonObject{
-                { QStringLiteral("diagnosticId"), sp.diagnosticId },
-                { QStringLiteral("view"), sp.view },
-                { QStringLiteral("sLo"), sp.sLo }, { QStringLiteral("sHi"), sp.sHi } });
-
-        QJsonArray refCallouts;
-        for (const SwingRefCallout &co : a.reference.callouts)
-            refCallouts.append(QJsonObject{
-                { QStringLiteral("p"),        co.p },
-                { QStringLiteral("t_us"),     rel(co.t_us) },
-                { QStringLiteral("key"),      co.key },
-                { QStringLiteral("valueDeg"), co.valueDeg } });
-
-        // Additive P-position fit block (swingref.fit.*): the effective fitted
-        // hub/arm/club/plane that the projected ghost was built from. `anthro`
-        // above documents the SEED estimate; this carries the fitted values.
-        const SwingRefFit &refFit = a.reference.fit;
-        const QJsonObject refFitObj{
-            { QStringLiteral("fitted"),        refFit.fitted },
-            { QStringLiteral("anchorsUsed"),   refFit.anchorsUsed },
-            { QStringLiteral("rmsBeforePx"),   refFit.rmsBeforePx },
-            { QStringLiteral("rmsAfterPx"),    refFit.rmsAfterPx },
-            { QStringLiteral("armLengthM"),    refFit.armLengthM },
-            { QStringLiteral("clubLengthM"),   refFit.clubLengthM },
-            { QStringLiteral("hubX"),          refFit.hubX },
-            { QStringLiteral("hubY"),          refFit.hubY },
-            { QStringLiteral("hubZ"),          refFit.hubZ },
-            { QStringLiteral("planeOffsetDeg"), refFit.planeOffsetDeg } };
-
-        o[QStringLiteral("reference")] = QJsonObject{
-            { QStringLiteral("anthro"),            refAnthroObj },
-            { QStringLiteral("club"),              refClubObj },
-            { QStringLiteral("fit"),               refFitObj },
-            { QStringLiteral("fspInclinationDeg"), a.reference.fspInclinationDeg },
-            { QStringLiteral("projection"),        refProjObj },
-            { QStringLiteral("projected"),         refProjected },
-            { QStringLiteral("maskSpans"),         refMaskSpans },
-            { QStringLiteral("callouts"),          refCallouts } };
-    }
     return o;
 }
 
@@ -832,12 +735,6 @@ PersistedShot SwingDocReader::readSwingJson(const QString &swingDir)
         if (an.contains(QStringLiteral("ball")))
             ps.analysisDetail.insert(QStringLiteral("ball"),
                                      an[QStringLiteral("ball")].toObject().toVariantMap());
-        // Swing-reference block (SwingRefStage, T5) — generic passthrough like
-        // pose2d/club/ball above; absent on every swing analysed with the
-        // (dark) stage off, or predating T5 entirely.
-        if (an.contains(QStringLiteral("reference")))
-            ps.analysisDetail.insert(QStringLiteral("reference"),
-                                     an[QStringLiteral("reference")].toObject().toVariantMap());
         if (an.contains(QStringLiteral("segmentation")))
             ps.analysisDetail.insert(QStringLiteral("segmentation"),
                                      an[QStringLiteral("segmentation")].toObject().toVariantMap());

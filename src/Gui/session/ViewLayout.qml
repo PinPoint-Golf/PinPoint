@@ -38,10 +38,6 @@
 //           modes:       { arms, spine, shoulders, hips, legs, shaft, shaftGrip,
 //                          ball, hands:
 //                          "off"|"frame"|"fan"|"trace" },   // hands (WB4) default off
-//                        reference: "off"|"frame"           // WP5a idealised-swing
-//                                                            // ghost composite; no
-//                                                            // fan/trace (see the
-//                                                            // "reference" preset)
 //           traceTarget: string                        // optional — only present
 //                                                       // when the preset/edit
 //                                                       // overrides an element's
@@ -103,33 +99,22 @@ QtObject {
     // = the club's GRIP-end trace, companion to shaft = the CLUBHEAD-end trace).
     readonly property var _presets: [
         { id: "clean", label: "Clean", hint: "frame · body + club",
-          modes: { arms: "frame", spine: "frame", shoulders: "frame", hips: "frame", legs: "off", shaft: "frame", shaftGrip: "off", ball: "off", hands: "off", reference: "off" } },
+          modes: { arms: "frame", spine: "frame", shoulders: "frame", hips: "frame", legs: "off", shaft: "frame", shaftGrip: "off", ball: "off", hands: "off" } },
         { id: "ballOnly", label: "Ball only", hint: "frame · ball",
-          modes: { arms: "off", spine: "off", shoulders: "off", hips: "off", legs: "off", shaft: "off", shaftGrip: "off", ball: "frame", hands: "off", reference: "off" } },
+          modes: { arms: "off", spine: "off", shoulders: "off", hips: "off", legs: "off", shaft: "off", shaftGrip: "off", ball: "frame", hands: "off" } },
         { id: "clubLeadArm", label: "Club + lead arm", hint: "fan · club + lead arm",
-          modes: { arms: "fan", spine: "off", shoulders: "off", hips: "off", legs: "off", shaft: "fan", shaftGrip: "off", ball: "off", hands: "off", reference: "off" } },
+          modes: { arms: "fan", spine: "off", shoulders: "off", hips: "off", legs: "off", shaft: "fan", shaftGrip: "off", ball: "off", hands: "off" } },
         { id: "clubTrack", label: "Club track", hint: "trace · club grip + head",
-          modes: { arms: "off", spine: "off", shoulders: "off", hips: "off", legs: "off", shaft: "trace", shaftGrip: "trace", ball: "off", hands: "off", reference: "off" } },
+          modes: { arms: "off", spine: "off", shoulders: "off", hips: "off", legs: "off", shaft: "trace", shaftGrip: "trace", ball: "off", hands: "off" } },
         { id: "core", label: "Core", hint: "frame · spine + hips + shoulders",
-          modes: { arms: "off", spine: "frame", shoulders: "frame", hips: "frame", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off", reference: "off" } },
+          modes: { arms: "off", spine: "frame", shoulders: "frame", hips: "frame", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off" } },
         { id: "tracePelvis", label: "Trace pelvis", hint: "trace · pelvis",
-          modes: { arms: "off", spine: "off", shoulders: "off", hips: "trace", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off", reference: "off" } },
+          modes: { arms: "off", spine: "off", shoulders: "off", hips: "trace", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off" } },
         { id: "traceHead", label: "Trace head", hint: "trace · head",
-          modes: { arms: "off", spine: "off", shoulders: "trace", hips: "off", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off", reference: "off" },
+          modes: { arms: "off", spine: "off", shoulders: "trace", hips: "off", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off" },
           traceTarget: "head" },
         { id: "traceLeadSh", label: "Trace lead shoulder", hint: "trace · lead shoulder",
-          modes: { arms: "off", spine: "off", shoulders: "trace", hips: "off", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off", reference: "off" } },
-        // Reference swing (WP5a/T8): the idealised P1-P8 ghost + swept-plane
-        // surface + colour-mapped measured-trace comparison, needs an analysed
-        // swing (SwingRefStage output) — meaningless in Capture (ViewLayout's
-        // Capture guard in motionFor() forces it off there regardless). Only
-        // "off"/"frame" are meaningful modes for this element (see _fillModes
-        // note + PpMotionPanel's ElementSegmented._available gating) — the
-        // overlay is a whole composite (ghost/surface/trace/chips) rendered
-        // as one unit, not a per-frame anchor point that fan/trace could
-        // sensibly trail.
-        { id: "reference", label: "Reference swing", hint: "frame · idealised P1-P8 ghost",
-          modes: { arms: "off", spine: "off", shoulders: "off", hips: "off", legs: "off", shaft: "frame", shaftGrip: "off", ball: "frame", hands: "off", reference: "frame" } }
+          modes: { arms: "off", spine: "off", shoulders: "trace", hips: "off", legs: "off", shaft: "off", shaftGrip: "off", ball: "off", hands: "off" } }
     ]
 
     // Fresh copies only — callers must not be able to mutate the catalogue
@@ -173,7 +158,7 @@ QtObject {
         var mo = _rawMotion(mode)
         if (mode !== SessionMode.capture) return mo
 
-        var keys = ["arms", "spine", "shoulders", "hips", "legs", "shaft", "shaftGrip", "ball", "hands", "reference"]
+        var keys = ["arms", "spine", "shoulders", "hips", "legs", "shaft", "shaftGrip", "ball", "hands"]
         var modes = {}
         for (var i = 0; i < keys.length; i++)
             modes[keys[i]] = (keys[i] === "ball") ? mo.modes[keys[i]] : "off"
@@ -318,7 +303,7 @@ QtObject {
     }
 
     function _fillModes(modes, fallback) {
-        var keys = ["arms", "spine", "shoulders", "hips", "legs", "shaft", "shaftGrip", "ball", "hands", "reference"]
+        var keys = ["arms", "spine", "shoulders", "hips", "legs", "shaft", "shaftGrip", "ball", "hands"]
         var out = {}
         for (var i = 0; i < keys.length; i++) {
             var key = keys[i]
@@ -349,26 +334,18 @@ QtObject {
     //   }
 
     // Built-in preset catalogue — read-only. Full lists every zone (each auto).
-    // "swingplane" is appended LAST to "full" only (never inserted earlier — the
-    // existing four zones' relative order is never disturbed) so "Full" keeps its
-    // own invariant of listing every zone; it stays out of "verdict"/"focus" like
-    // "setup"/"sequence" already do. The card itself is a no-op today (the T1-T8
-    // swing-reference comparator is dark behind swingref.enabled=false), so this
-    // is effectively off until that feature is turned on — no separate "default
-    // off" mechanism is needed.
     readonly property var _dashboardPresets: [
-        { id: "full",    label: "Full",    zones: ["verdict", "setup", "motion", "sequence", "swingplane"] },
+        { id: "full",    label: "Full",    zones: ["verdict", "setup", "motion", "sequence"] },
         { id: "verdict", label: "Verdict", zones: ["verdict"] },
         { id: "focus",   label: "Focus",   zones: ["verdict", "motion"] }
     ]
 
     // Zone catalogue — canonical order + display labels for the editor.
     readonly property var _dashboardZoneDefs: [
-        { key: "verdict",    label: "Verdict" },
-        { key: "setup",      label: "Setup" },
-        { key: "motion",     label: "Motion" },
-        { key: "sequence",   label: "Sequence" },
-        { key: "swingplane", label: "Swing plane" }
+        { key: "verdict",  label: "Verdict" },
+        { key: "setup",    label: "Setup" },
+        { key: "motion",   label: "Motion" },
+        { key: "sequence", label: "Sequence" }
     ]
 
     function dashboardPresetCatalog() {

@@ -333,7 +333,7 @@ int main(int argc, char *argv[])
     // (streaming SwingDiskLoader), re-runs the analyzer on a worker, writes the
     // result back, and emits reanalysed(dir) so the carousel refreshes the row in
     // whichever model is active (live or review). Owns no live shot state.
-    ReanalysisController      reanalysisController(&athleteController);
+    ReanalysisController      reanalysisController;
 
     // Markup Lab — in-app ground-truth labelling of recorded swings; reads its own
     // swing.json/MP4 from disk (no buffer/SessionMode coupling), writes a

@@ -14,12 +14,9 @@
 #include "../event_refine.h"
 #include "../kinematic_series.h"
 #include "../tempo_metrics.h"
-#include "../swing_ref_anthro.h"
 #include "../../Core/pp_tuned_constants.h"
-#include "../../Models/swing_reference.h"
 
 #include <QVariantMap>
-#include <cmath>
 #include <cstdio>
 
 using namespace pinpoint::analysis;
@@ -347,58 +344,6 @@ int main()
         check(c.enabled == false && c.addrWindowUs == 500000 && c.minSamples == 7
               && c.maxJumpPx == 12.5 && c.fracLo == -0.25 && c.fracHi == 1.25,
               "ballpos.* overrides (incl. enabled dark-out) reach BallPositionConfig::fromOverrides");
-    }
-
-    std::printf("--- swingref.* idealised swing-reference model (Phase A, DARK) ---\n");
-
-    // 14. Every swingref.* key maps onto its owning config — RefConfig
-    //     (src/Models/swing_reference.h) and AnthroConfig (swing_ref_anthro.h).
-    //     Empty map ⇒ the unvalidated Phase A defaults from pp_tuned_constants.h
-    //     swingref::, including enabled=false (the whole feature stays dark until
-    //     a later task's stage gate flips it). "swingref.samplesPerSegment" is
-    //     deliberately the SAME key ComparatorConfig::sGridPerSegment also
-    //     consumes (one tuning knob, two consumers) — that half of the seam is
-    //     asserted in swing_comparator_test.cpp instead, which already links
-    //     camera_projection.cpp/OpenCV (kept OUT of this OpenCV-free core suite).
-    {
-        const pinpoint::swingref::RefConfig def =
-            pinpoint::swingref::RefConfig::fromOverrides(QVariantMap{});
-        check(def.enabled == false && def.backswingPlaneOffsetDeg == 4.0
-              && def.samplesPerSegment == 200 && def.nominalFovDeg == 50.0
-              && def.residualWarnPx == 8.0 && def.referenceTempoRatio == 3.0,
-              "empty map → RefConfig swingref.* frozen Phase A defaults (dark)");
-
-        QVariantMap ov;
-        ov["swingref.enabled"]             = true;
-        ov["swingref.planeOffsetDeg"]      = 6.5;
-        ov["swingref.samplesPerSegment"]   = 64;
-        ov["swingref.proj.nominalFovDeg"]  = 42.0;
-        ov["swingref.proj.residualWarnPx"] = 12.0;
-        ov["swingref.referenceTempoRatio"] = 2.8;
-        const pinpoint::swingref::RefConfig c = pinpoint::swingref::RefConfig::fromOverrides(ov);
-        check(c.enabled == true && c.backswingPlaneOffsetDeg == 6.5 && c.samplesPerSegment == 64
-              && c.nominalFovDeg == 42.0 && c.residualWarnPx == 12.0 && c.referenceTempoRatio == 2.8,
-              "swingref.* overrides (incl. enabled) reach RefConfig::fromOverrides");
-
-        const pinpoint::swingref::AnthroConfig adef =
-            pinpoint::swingref::AnthroConfig::fromOverrides(QVariantMap{});
-        check(adef.addrWindowUs == 300000 && adef.gripOffsetM == 0.04 && adef.hubDepthOffsetM == 0.0
-              && adef.kpConfMin == 0.3 && std::isnan(adef.hubX) && std::isnan(adef.hubY)
-              && std::isnan(adef.hubZ) && std::isnan(adef.armLengthM),
-              "empty map → AnthroConfig swingref.anthro.* frozen defaults (manual overrides unset)");
-
-        QVariantMap aov;
-        aov["swingref.anthro.addrWindowUs"]    = qint64(200000);
-        aov["swingref.anthro.gripOffsetM"]     = 0.06;
-        aov["swingref.anthro.hubDepthOffsetM"] = 0.02;
-        aov["swingref.anthro.kpConfMin"]       = 0.5;
-        aov["swingref.anthro.hubX"] = 0.1; aov["swingref.anthro.hubY"] = -0.2; aov["swingref.anthro.hubZ"] = 1.3;
-        aov["swingref.anthro.armLengthM"] = 0.7;
-        const pinpoint::swingref::AnthroConfig a = pinpoint::swingref::AnthroConfig::fromOverrides(aov);
-        check(a.addrWindowUs == 200000 && a.gripOffsetM == 0.06 && a.hubDepthOffsetM == 0.02
-              && a.kpConfMin == 0.5 && a.hubX == 0.1 && a.hubY == -0.2 && a.hubZ == 1.3
-              && a.armLengthM == 0.7,
-              "swingref.anthro.* overrides (incl. manual hub/arm) reach AnthroConfig::fromOverrides");
     }
 
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);

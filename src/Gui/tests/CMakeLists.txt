@@ -53,8 +53,6 @@ pp_add_test(reanalysis_controller_test
     SOURCES reanalysis_controller_test.cpp
             reanalysis_stubs.cpp
             ${GUI}/shot/reanalysis_controller.cpp
-            ${GUI}/athlete/athlete_controller.cpp
-            ${SRC}/Core/pp_os_metrics.cpp
             ${SRC}/Core/tests/pp_log_stub.cpp
-    INCLUDE ${GUI} ${GUI}/review ${GUI}/athlete ${SRC} ${SRC}/Core
+    INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core
     LINK    Qt6::Qml Qt6::Concurrent  AUTOMOC)

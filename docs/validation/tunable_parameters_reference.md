@@ -58,7 +58,6 @@ visible in a scorecard check (§4).
 | `ball.clubActivity` / `ball.activity*` / `positions.p1ClubQuietSigma` / `ball.tk0AddressOverride` | `BallActivityConfig` (`ball_runner.cpp`) / `PositionsConfig` (`shaft_positions.h`) / `applyBallAnchor` (`ball_anchor.cpp`) | `pp_tuned_constants.h` `ball::activity`, `ball::`, `positions::` | C1 | `truth.p1_address`, Address→Top duration (camera-only club-bob fidget swings; activity **FROZEN ON 2026-07-18** with `refine.enabled` — `false` still darks it out, byte-identical; tk0 override **FROZEN OFF 2026-07-17**) |
 | `refine.*` | `EventRefineConfig` (`event_refine.h`) | `pp_tuned_constants.h` `refine::` | C1 | `truth.p1_address`, Takeaway vs truth (late-pipeline event refinement; **FROZEN ON 2026-07-18**, minConf 0.8 — `refine.enabled=false` restores the byte- and code-path-identical pre-refine ladder) |
 | `kinematics.enabled` | `KinematicSeriesConfig` (`kinematic_series.h`) | `pp_tuned_constants.h` `kinematics::` | display | review-chart clubhead/hand speed (mph) + lag (°) — unscored display series from the shaft/pose products, all session types (**DARK** by default; `true` runs `KinematicsStage` on Wrist and the camera-kinematics profile on Swing/GRF/Coach — freeze ON after the corpus gate) |
-| `swingref.*` | `RefConfig` (`src/Models/swing_reference.h`) / `AnthroConfig` (`swing_ref_anthro.h`) / `ComparatorConfig` (`swing_comparator.h`) | `pp_tuned_constants.h` `swingref::` | **dark — Phase A** | idealised P1→P8 swing-reference model vs measured 2D shaft track (`analysis.reference` / "Swing plane" metrics — a later task wires the stage); `swingref.enabled=false` keeps the whole feature byte- and code-path-identical to its absence |
 
 ### 2.1 `seg.*` — phase segmentation (≈25 keys)
 Envelope cut-off, top/takeaway/transition windows, vote-agreement, finish stillness gates
@@ -299,40 +298,6 @@ and reverts `stanceWidth` to `×frame` as well as dropping `ballPosition`.
 ground-plane depth (face-on, essentially the feet's depth — so it is the right ruler here), but it
 rests on a ~9.5 px radius measurement: ±1 px of radius is ~10 % of scale. No corridor has been set for
 `stanceWidth` because no measured distribution exists yet.
-
-### 2.15 `swingref.*` — idealised swing-reference model (Phase A, 2026-07-24, DARK)
-
-`RefConfig` (`src/Models/swing_reference.h`), `AnthroConfig` (`src/Analysis/swing_ref_anthro.h`),
-`ComparatorConfig` (`src/Analysis/swing_comparator.h`) — the WP1/WP4a/WP2a Phase A trio: a golfer-scaled
-geometric-parametric reference of the club shaft (P1→P4→P7→P8), projected through a per-camera model
-(`camera_projection.h`) and compared against the measured 2D shaft track in image space (the "Swing
-plane" metric group). **Every default below is an UNVALIDATED Phase A design-time seed** (from the
-brief), not yet corpus-tuned — this section registers the plumbing only; a later task wires the
-`SwingRefStage` that actually reads them.
-
-`swingref.enabled` (RefConfig, **false**) is the master dark flag: while false the stage never runs, so
-analysis output stays byte- and code-path-identical to its absence — the same "dark until the corpus
-gate" posture as every other stage in this table. Keys:
-
-- **RefConfig** (model core + camera-projection carry-through — there is no separate `ProjectionConfig`
-  struct, so `proj.*` lives here too): `enabled` (false) / `planeOffsetDeg` (4.0, Δθ_bs) /
-  `samplesPerSegment` (200) / `referenceTempoRatio` (3.0, classic 3:1 backswing:downswing reference —
-  the model is phase-parametric with no model-implied tempo, so `refTempoDelta` is the measured tempo
-  ratio minus this constant) / `proj.nominalFovDeg` (50.0, PoseFitProjection's nominal pinhole FOV) /
-  `proj.residualWarnPx` (8.0, overlay warning threshold on the PnP RMS residual).
-- **AnthroConfig** (`swingref.anthro.*`, GolferAnthro-from-2D estimation): `addrWindowUs` (300000, ±
-  half-window centred on Address) / `gripOffsetM` (0.04) / `hubDepthOffsetM` (0.0) / `kpConfMin` (0.3),
-  plus the manual-override NaN-default fields `hubX` / `hubY` / `hubZ` / `armLengthM` (unset ⇒
-  estimated from pose/shaft/ball tracks; fully-specified hub and/or arm length short-circuits the
-  estimate).
-- **ComparatorConfig** (`swing_comparator.h`): `samplesPerSegment` is the **same dotted key** as
-  `RefConfig.samplesPerSegment` — it also seeds `ComparatorConfig.sGridPerSegment` (one tuning knob,
-  two consumers: the model's own keyframe sampling density and the comparator's s-grid resolution).
-  `kpConfMin` / `shaftConfMin` / `pxPerM` have no tuned-constant/dotted-key seam yet (plain struct
-  defaults only).
-
-The keyframe `Track` tables in `RefConfig` (`alphaBack`/`betaBack`/…) are **not tunable** — C++ defaults
-only, per the Phase A plan; only the scalar fields above are dotted-key overridable.
 
 ## 3. The frozen-defaults header — the single freeze edit-point
 

@@ -40,7 +40,6 @@ static constexpr auto kCreatedAt     = "createdAt";
 static constexpr auto kLastSessionAt = "lastSessionAt";
 static constexpr auto kSessionCount  = "sessionCount";
 static constexpr auto kClubs         = "clubs";
-static constexpr auto kSwingRef      = "swingref";
 
 // Defined below clubsFor(): factory per-club defaults + the standard seeded bag.
 static QVariantMap defaultClubRecordFor(const QString &clubId);
@@ -412,24 +411,6 @@ bool AthleteController::removeClubRecord(const QString &uuid, const QString &clu
     if (clubs.remove(clubId) == 0)
         return false;
     return updateAthlete(uuid, QString::fromLatin1(kClubs), clubs);
-}
-
-QVariantMap AthleteController::swingRefOverridesFor(const QString &uuid) const
-{
-    QSettings s = ppSettings();
-    s.beginGroup(kGroup);
-    s.beginGroup(uuid);
-    const QVariantMap overrides = s.value(kSwingRef, QVariantMap{}).toMap();
-    s.endGroup();
-    s.endGroup();
-    return overrides;
-}
-
-bool AthleteController::setSwingRefOverrides(const QString &uuid, const QVariantMap &overrides)
-{
-    if (uuid.isEmpty())
-        return false;
-    return updateAthlete(uuid, QString::fromLatin1(kSwingRef), overrides);
 }
 
 bool AthleteController::deleteAthlete(const QString &uuid)

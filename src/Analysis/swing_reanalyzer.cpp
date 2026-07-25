@@ -623,34 +623,6 @@ LoadedSwing SwingDiskLoader::load(const QString& swingDir, const SwingLoadOption
         }
     }
 
-    // Idealised swing-reference geometry + resolved intrinsics (SwingRefStage,
-    // T5): re-fill from the swing's OWN recorded analysis.reference block —
-    // deterministic re-analysis, never AppSettings/AthleteController (mirrors
-    // the club block above). Absent (pre-T5 swing, or the stage never ran —
-    // dark by default) ⇒ job keeps its 0/-1 "use lieLeanDefaultsFor" defaults
-    // and cameraIntrinsics.valid stays false (nominal-FOV PoseFit). The
-    // recorded projection intrinsics (not the ORIGINAL input, which may have
-    // been dims-only) are replayed so re-analysis reuses the resolved focal
-    // length instead of re-running the golden-section search against
-    // possibly slightly different address-frame correspondences.
-    const QJsonObject refIn = analysisIn[QStringLiteral("reference")].toObject();
-    if (!refIn.isEmpty()) {
-        const QJsonObject clubRefIn = refIn[QStringLiteral("club")].toObject();
-        job.lieDeg           = clubRefIn[QStringLiteral("lieDeg")].toDouble(0.0);
-        job.forwardLeanP7Deg = clubRefIn[QStringLiteral("forwardLeanP7Deg")].toDouble(-1.0);
-
-        const QJsonObject projRefIn = refIn[QStringLiteral("projection")].toObject();
-        const double refFx = projRefIn[QStringLiteral("fx")].toDouble(0.0);
-        const double refFy = projRefIn[QStringLiteral("fy")].toDouble(0.0);
-        if (refFx > 0.0 && refFy > 0.0) {
-            job.cameraIntrinsics.valid = true;
-            job.cameraIntrinsics.fx = refFx;
-            job.cameraIntrinsics.fy = refFy;
-            job.cameraIntrinsics.cx = projRefIn[QStringLiteral("cx")].toDouble(0.0);
-            job.cameraIntrinsics.cy = projRefIn[QStringLiteral("cy")].toDouble(0.0);
-        }
-    }
-
     // IMU → segment bindings: the persisted session A/M calibration, serial-keyed.
     // Identity A/M is NOT synthesised — re-fusing without the recorded calibration
     // would be fabrication (mirrors swinglab_run).
@@ -697,13 +669,6 @@ ReanalyzeResult reanalyzeSwingDir(const QString& swingDir, const ReanalyzeOption
 
     if (!opts.tuningOverrides.isEmpty())
         ls.job.tuningOverrides = opts.tuningOverrides;
-    // Deliberate LIVE-preference injection, not a determinism leak: SwingDiskLoader
-    // already refilled lie/lean/intrinsics from the recorded block above, and this
-    // athlete's swingref overrides are applied on top exactly as they would be for
-    // a live shot (ShotProcessor::buildAnalysisJob) — in-app re-analysis is meant
-    // to reproduce what a live shot would score today, not what was true at capture.
-    if (!opts.swingRefOverrides.isEmpty())
-        ls.job.swingRefOverrides = opts.swingRefOverrides;
     if (opts.sessionTypeOverride >= 0)
         ls.job.sessionType = opts.sessionTypeOverride;
     if (!opts.poseTrackPath.isEmpty())

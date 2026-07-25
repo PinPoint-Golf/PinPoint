@@ -22,7 +22,6 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
-#include <array>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -138,39 +137,6 @@ struct ShotAnalysisJob {
     // already covers address→finish); explicit re-analysis sets it true
     // (correctness over speed — see ReanalyzeOptions::fullWindow).
     bool fullWindow = false;
-
-    // ── Idealised swing-reference model (SwingRefStage — dark behind
-    // swingref.enabled, RefConfig; src/Models/swing_reference.h /
-    // src/Analysis/{camera_projection,swing_ref_anthro,swing_comparator}.h) ──
-    // 0 / negative sentinels select the ClubSpec fallback
-    // (pinpoint::swingref::lieLeanDefaultsFor(clubName)) so a job that never
-    // resolves an athlete's club record still gets a sane per-club default.
-    double lieDeg           = 0.0;    // static club lie (deg); <= 0 ⇒ use lieLeanDefaultsFor
-    double forwardLeanP7Deg = -1.0;   // P7 forward lean (deg); < 0 ⇒ use lieLeanDefaultsFor
-
-    // Per-athlete "swingref.*" dotted-key overrides (AthleteController::
-    // swingRefOverridesFor(uuid) — athletes/<uuid>/swingref QSettings map,
-    // clubs-map pattern). Deliberately a SEPARATE map from tuningOverrides:
-    // the stage merges tuningOverrides first, then this on top, so
-    // tuningOverrides keeps its "production == empty map" SwingLab-only
-    // contract. Empty until an athlete opts in via the athlete panel's
-    // "Reference model (experimental)" toggle (ScreenAthleteForm.qml). Filled
-    // by both the live path (ShotProcessor::buildAnalysisJob) and in-app
-    // re-analysis (ReanalysisController → ReanalyzeOptions::swingRefOverrides).
-    QVariantMap swingRefOverrides;
-
-    // Face-on camera intrinsics for the SwingRefStage's PoseFit projection.
-    // Phase A has no calibration UI, so this stays default (valid=false) in
-    // practice — the stage then requests a nominal-FOV focal search over
-    // dims-only intrinsics. A plain value-type mirror of
-    // pinpoint::swingref::CameraIntrinsics (fx/fy/cx/cy/dist), kept field-for-
-    // field WITHOUT including that header — this file stays swingref-free.
-    struct RefCameraIntrinsics {
-        bool   valid = false;
-        double fx = 0.0, fy = 0.0, cx = 0.0, cy = 0.0;
-        std::array<double, 5> dist{};   // k1,k2,p1,p2,k3 (OpenCV order)
-    };
-    RefCameraIntrinsics cameraIntrinsics;
 };
 
 // Result shapes mirror the ShotListModel roles so the join can hand them to

@@ -104,9 +104,7 @@ pp_add_test(tuned_constants_parity_test SOURCES tuned_constants_parity_test.cpp)
 # WB1 person-crop geometry (pose_crop.h): union bbox → margin → 3:4 aspect → clamp
 # → integer pixels, the full-frame fallback guards, and fromOverrides plumbing.
 pp_add_test(pose_crop_test SOURCES pose_crop_test.cpp)
-pp_add_test(tuning_overrides_test SOURCES tuning_overrides_test.cpp ${ANALYSIS}/swing_scorer.cpp ${ANALYSIS}/reference_bands.cpp
-    ${SRC}/Models/swing_reference.cpp ${ANALYSIS}/swing_ref_anthro.cpp
-    INCLUDE ${SRC}/Models)
+pp_add_test(tuning_overrides_test SOURCES tuning_overrides_test.cpp ${ANALYSIS}/swing_scorer.cpp ${ANALYSIS}/reference_bands.cpp)
 
 # Capability-gated stage pipeline (analysis_stage.h): authored-order orchestration,
 # canRun/skipReason gating, the halted short-circuit, product gating between stages via
@@ -188,79 +186,6 @@ pp_add_test(hand_axis_test SOURCES hand_axis_test.cpp)
 # sampler headers), no OpenCV; synthetic pose track, no fixture.
 pp_add_test(pose_wrist_angle_source_test
     SOURCES pose_wrist_angle_source_test.cpp ${ANALYSIS}/pose_wrist_angle_source.cpp)
-
-# Parametric swing-reference model core (WP1, src/Models/swing_reference.{h,cpp}):
-# the 7 mandatory anchor tests (P1 lie/clubhead, P7 lean/FSP, keyframe horizontals,
-# fsp ordering, LH mirror, P8, C¹ join) + MonotoneCubic, sample(), Δθ_bs=0 degeneracy.
-# Qt-only (QVector3D/QQuaternion), no OpenCV, no fixture.
-pp_add_test(swing_reference_test
-    SOURCES ${SRC}/Models/tests/swing_reference_test.cpp ${SRC}/Models/swing_reference.cpp
-    INCLUDE ${SRC}/Models)
-
-# P-position fit (swing_ref_fit.{h,cpp}): deterministic bounded coordinate descent of
-# the model to measured P grip/head px. Synthetic-recovery (perturbed seed → truth
-# arc), determinism (two runs bit-identical), and the < 4-anchor degrade. Sources the
-# fit cpp + swing_reference.cpp; Qt-only (QPointF/QVector3D), no OpenCV.
-pp_add_test(swing_ref_fit_test
-    SOURCES swing_ref_fit_test.cpp ${ANALYSIS}/swing_ref_fit.cpp ${SRC}/Models/swing_reference.cpp
-    INCLUDE ${SRC}/Models)
-
-# WP5a overlay (T7) pure math: OpenCV-projection <-> Qt Quick3D camera
-# conversion + playhead(us) -> reference-model global-s phase mapping
-# (src/Gui/viz/swing_ref_overlay_math.h). Qt Core/Gui only, no OpenCV, no
-# QtQuick3D — same "Gui math header, Analysis-suite test via a relative
-# #include" pattern as viz_frame_test above.
-pp_add_test(swing_ref_overlay_math_test SOURCES swing_ref_overlay_math_test.cpp)
-
-# WP4a camera-projection layer (camera_projection.{h,cpp}): CalibratedProjection
-# exact round-trip, PoseFitProjection recovery from synthetic face-on AND DTL
-# cameras with pixel noise (residual < 5 px @ 1440×1080 — acceptance criterion 2),
-# projectShaftLine angle == ShaftTracker θ convention, and the nominal-FOV focal
-# search. Needs OpenCV calib3d (solvePnP/Rodrigues) — a dedicated find_package so
-# OpenCV_LIBS carries calib3d for the two WP4a suites. Guarded: if calib3d is
-# absent the suite skip-registers with a status message (rest of the suite still
-# configures). The camera_projection.cpp/swing_ref_anthro.cpp INCLUDE ${SRC}/Models
-# for swing_reference.h (ShaftPose/GolferAnthro).
-find_package(OpenCV QUIET COMPONENTS core imgproc calib3d)
-if(OpenCV_FOUND)
-    pp_add_test(camera_projection_test
-        SOURCES camera_projection_test.cpp
-                ${ANALYSIS}/camera_projection.cpp
-                ${SRC}/Models/swing_reference.cpp
-        INCLUDE ${OpenCV_INCLUDE_DIRS} ${SRC}/Models
-        LINK    ${OpenCV_LIBS}
-        COMPILE_OPTIONS -O2)
-
-    # GolferAnthro-from-2D estimation (swing_ref_anthro.{h,cpp}): synthetic golfer
-    # projected through a synthetic camera → recover hub / arm within 2 cm, pxPerM
-    # within 1 %; LH mirror; degrade cases (no ball / no P1 / low conf → nullopt);
-    # manual-override short-circuit. Qt-only estimator, but the test builds its
-    # fixture through camera_projection (OpenCV) so it links the same set.
-    pp_add_test(swing_ref_anthro_test
-        SOURCES swing_ref_anthro_test.cpp
-                ${ANALYSIS}/swing_ref_anthro.cpp
-                ${ANALYSIS}/camera_projection.cpp
-                ${SRC}/Models/swing_reference.cpp
-        INCLUDE ${OpenCV_INCLUDE_DIRS} ${SRC}/Models
-        LINK    ${OpenCV_LIBS})
-
-    # WP2a SwingComparator2D (swing_comparator.{h,cpp}): reference-vs-measured
-    # diagnostics in image space. Self-comparison ≡ 0 on face-on AND DTL; injected
-    # +3° plane rotation recovered with the pinned steep sign on the DTL (plane-pitch)
-    # view; time-warp (s-domain) invariance; masked spans absent from the emitted
-    # MetricSeries; PhaseMap monotonicity + missing-P Segmentation fallback; β-proxy
-    # vs synthetic keypoints; DTL diagnostics correct while weight 0 by default.
-    # Builds its fixture through camera_projection (OpenCV) so it links the same set.
-    pp_add_test(swing_comparator_test
-        SOURCES swing_comparator_test.cpp
-                ${ANALYSIS}/swing_comparator.cpp
-                ${ANALYSIS}/camera_projection.cpp
-                ${SRC}/Models/swing_reference.cpp
-        INCLUDE ${OpenCV_INCLUDE_DIRS} ${SRC}/Models ${ANALYSIS}
-        LINK    ${OpenCV_LIBS})
-else()
-    message(STATUS "OpenCV calib3d not found — skipping camera_projection_test / swing_ref_anthro_test")
-endif()
 
 # --- Header-only review/shot helpers -----------------------------------------
 pp_add_test(session_summary_test SOURCES session_summary_test.cpp)   # session_summary.h

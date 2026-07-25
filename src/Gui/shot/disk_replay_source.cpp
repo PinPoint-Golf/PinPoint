@@ -274,23 +274,6 @@ bool DiskReplaySource::load(const QString &swingDir, double speed, bool trimToSw
             ball[QStringLiteral("samples")] = samples;
             m_analysisDetail.insert(QStringLiteral("ball"), ball);
         }
-        // Swing-reference block (SwingRefStage, T5 — dark by default). Mostly
-        // scalar/phase-domain (anthro/club/projection/projected/maskSpans
-        // carry no timestamps), so a plain toVariantMap() passthrough covers
-        // everything except `callouts[].t_us`, which re-times exactly like
-        // club.samples/positions above so the overlay's window-relative
-        // playhead indexes the per-P chips correctly.
-        if (an.contains(QStringLiteral("reference"))) {
-            const QJsonObject rb = an[QStringLiteral("reference")].toObject();
-            QVariantMap reference = rb.toVariantMap();
-            if (rb.contains(QStringLiteral("callouts"))) {
-                QVariantList callouts;
-                for (const QJsonValue &cv : rb[QStringLiteral("callouts")].toArray())
-                    callouts.append(relTimedMap(cv.toObject(), t0));
-                reference[QStringLiteral("callouts")] = callouts;
-            }
-            m_analysisDetail.insert(QStringLiteral("reference"), reference);
-        }
     }
     if (m_impactUs < 0) {
         const QJsonObject thumb = root[QStringLiteral("thumbnail")].toObject();

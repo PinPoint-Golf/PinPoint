@@ -139,88 +139,6 @@ Item {
         return (m && m[key]) ? m[key] : "frame"
     }
 
-    // ── Reference-swing overlay (WP5a/T8) ───────────────────────────────────
-    // Whole-composite element ("reference"): the idealised P1-P8 ghost + swept
-    // reference-plane surface (SwingRefOverlay.qml, T7) + a colour-mapped pass
-    // on the MEASURED club trace (replayOverlay Canvas, below) + per-P coaching
-    // callout chips (both this file, T8). Independent of the "shaft" element's
-    // own off/frame/fan/trace state — turning "reference" on shows the
-    // comparison regardless of how the club itself is currently drawn. Gated
-    // to face-on + the swing window like every other replay overlay here.
-    readonly property var  _refBlock: (root._replayDetail && root._replayDetail.reference !== undefined)
-                                       ? root._replayDetail.reference : undefined
-    readonly property var  _refPositions: (root._replayDetail && root._replayDetail.club
-                                            && root._replayDetail.club.positions)
-                                           ? root._replayDetail.club.positions : []
-    readonly property bool _refOverlayActive: root.motionOn
-            && root._replayActive
-            && root._replayPerspective === 2
-            && root._inSwingWindow
-            && root._elemMode("reference") !== "off"
-            && root._refBlock !== undefined
-
-    // Per-P coaching callout chips (P4 planeShift / P6 lag / P7 lean) — each
-    // callout independently optional (swing_ref_overlay_model.h), so a P this
-    // swing's positions track lacks is silently skipped rather than mis-placed.
-    readonly property var _refChips: {
-        if (!root._refOverlayActive) return []
-        var cos = (root._refBlock && root._refBlock.callouts) ? root._refBlock.callouts : []
-        var positions = root._refPositions
-        var out = []
-        for (var i = 0; i < cos.length; ++i) {
-            var co = cos[i], pos = null
-            for (var j = 0; j < positions.length; ++j)
-                if (positions[j].p === co.p) { pos = positions[j]; break }
-            if (!pos || !pos.head) continue
-            out.push({ p: co.p, valueDeg: co.valueDeg, hx: pos.head[0], hy: pos.head[1] })
-        }
-        return out
-    }
-
-    // Diverging steep/shallow colour for a signed refShaftDelta sample (°,
-    // SwingComparator2D convention: positive = measured STEEPER than the
-    // idealised reference — a direction, not a good/bad verdict, so this
-    // deliberately does NOT reuse the status colours colorGood/colorWarn/
-    // colorError/colorAttention; per the dataviz skill, "diverging = two hues
-    // + a neutral gray midpoint", never a status hue). gradientWarm/
-    // gradientCool are Theme's own per-aesthetic warm/cool pair — already
-    // documented there as "the kinematic-sequence colours", the same domain
-    // as this comparison — with colorText3 as the neutral zero-delta ink.
-    // Clamped at ±_refDeltaRangeDeg for full saturation: a display-only
-    // range, not an analysis parameter.
-    readonly property real _refDeltaRangeDeg: 10.0
-    function _lerpColor(c0, c1, t) {
-        t = Math.max(0, Math.min(1, t))
-        return Qt.rgba(c0.r + (c1.r - c0.r) * t, c0.g + (c1.g - c0.g) * t,
-                       c0.b + (c1.b - c0.b) * t, c0.a + (c1.a - c0.a) * t)
-    }
-    function _deltaColor(deg) {
-        var t = Math.max(-1, Math.min(1, deg / root._refDeltaRangeDeg))
-        return t >= 0 ? root._lerpColor(Theme.colorText3, Theme.gradientWarm, t)
-                      : root._lerpColor(Theme.colorText3, Theme.gradientCool, -t)
-    }
-
-    // Nearest-sample lookup on a flat {t_us:[…], value:[…]} MetricSeries
-    // (ascending, possibly sparse — D6 masked spans are DROPPED, never
-    // zeroed), gated by a max-gap threshold so a genuine gap resolves to null
-    // (render nothing / fall back to the plain pen) instead of an invented
-    // value borrowed from a sample that is actually far away in time.
-    function _nearestSeriesValue(series, tUs, maxGapUs) {
-        if (!series || !series.t_us || series.t_us.length === 0) return null
-        var t = series.t_us, v = series.value
-        var lo = 0, hi = t.length - 1, nearI
-        if (tUs <= t[0]) nearI = 0
-        else if (tUs >= t[hi]) nearI = hi
-        else {
-            while (hi - lo > 1) {
-                var mid = (lo + hi) >> 1
-                if (t[mid] <= tUs) lo = mid; else hi = mid
-            }
-            nearI = (Math.abs(t[lo] - tUs) <= Math.abs(t[hi] - tUs)) ? lo : hi
-        }
-        return (Math.abs(t[nearI] - tUs) <= maxGapUs) ? v[nearI] : null
-    }
-
     // Normalized [x,y] anchor point for an element's trace at one smoothed frame,
     // or null to skip (tier Off / a missing derived-midpoint parent). `target` is
     // the explicit motionTraceTarget override, or "" for the element's default.
@@ -934,66 +852,6 @@ Item {
             }
         }
 
-        // ── Reference-swing overlay (WP5a/T8) ─────────────────────────────
-        // Quick3D View3D (SwingRefOverlay.qml, T7) — the idealised ghost shaft
-        // + swept reference-plane surface. Loader-gated so a non-reference
-        // session never pays for View3D scene-graph setup. Sized/positioned
-        // to contentRect per SwingRefOverlay's CONTENT RECT CONTRACT (mirrors
-        // this file's own aspect-locked video frame item). z sits above the
-        // video, below the analysed 2D Canvas (z:21 below) so the crisp
-        // skeleton/club/colour-mapped-trace pass always reads on top of the
-        // translucent 3D ghost/surface.
-        Loader {
-            id: refOverlayLoader
-            active: root._refOverlayActive
-            x: root.contentRect.x
-            y: root.contentRect.y
-            width:  root.contentRect.width
-            height: root.contentRect.height
-            z: 20
-            sourceComponent: SwingRefOverlay {
-                reference:  root._refBlock ? root._refBlock : ({})
-                positions:  root._refPositions
-                playheadUs: root._replayPlayheadUs
-            }
-        }
-
-        // ── Reference callout chips (P4 planeShift / P6 lag / P7 lean) ────
-        // Small Theme-styled badges at the measured positions[p] px location
-        // for each callout the block carries. Border tinted by the same
-        // diverging delta colour as the measured-trace pass below, so a
-        // coach reads one consistent colour language across the overlay; no
-        // animation, so nothing here needs a reduceMotion guard.
-        Repeater {
-            model: root._refChips
-            delegate: Rectangle {
-                id: refChip
-                required property var modelData
-                readonly property real px: root.contentRect.x + refChip.modelData.hx * root.contentRect.width
-                readonly property real py: root.contentRect.y + refChip.modelData.hy * root.contentRect.height
-                z: 23
-                radius: Theme.radius
-                color: Theme.colorBg2
-                border.width: Theme.sp(1.5)
-                border.color: root._deltaColor(refChip.modelData.valueDeg)
-                width:  refChipText.implicitWidth  + Theme.sp(10)
-                height: refChipText.implicitHeight + Theme.sp(4)
-                x: refChip.px - width / 2
-                y: refChip.py - height - Theme.sp(10)   // sits just above the P marker
-
-                Text {
-                    id: refChipText
-                    anchors.centerIn: parent
-                    text: "P" + refChip.modelData.p + " "
-                          + (refChip.modelData.valueDeg >= 0 ? "+" : "")
-                          + refChip.modelData.valueDeg.toFixed(1) + "°"
-                    font.family: Theme.fontData
-                    font.pixelSize: Theme.fontSzMicro
-                    color: Theme.colorText
-                }
-            }
-        }
-
         // ── Skeleton overlay ──────────────────────────────────────────────
         Canvas {
             id: skeletonCanvas
@@ -1151,32 +1009,6 @@ Item {
                 var d = root._replayDetail
                 return (d && d.club && d.club.positions) ? d.club.positions : []
             }
-            // refShaftDelta series (WP5a) — a normal analysisDetail.series entry,
-            // found the same way every other keyed series is found elsewhere in
-            // this codebase (PpDashboard*Zone._seriesFor). Sparse, ascending,
-            // masked samples DROPPED (D6) so a real gap in t_us is a real gap in
-            // the swing, never a zero.
-            readonly property var _refDelta: {
-                var d = root._replayDetail
-                var s = (d && d.series) ? d.series : []
-                for (var i = 0; i < s.length; ++i) if (s[i].key === "refShaftDelta") return s[i]
-                return null
-            }
-            // Gap threshold for the colour-mapped trace pass below: a genuine
-            // masked span leaves a hole many samples wide, so a factor over the
-            // series' own median step comfortably separates "normal cadence"
-            // from "a span got dropped here" without a hand-tuned absolute-ms
-            // constant that would drift if the comparator's sample rate changes.
-            readonly property real _refDeltaGapUs: {
-                var rd = _refDelta
-                if (!rd || !rd.t_us || rd.t_us.length < 2) return 0
-                var steps = []
-                for (var i = 1; i < rd.t_us.length; ++i) steps.push(rd.t_us[i] - rd.t_us[i - 1])
-                steps.sort(function (a, b) { return a - b })
-                var med = steps[steps.length >> 1]
-                if (!(med > 0)) med = 1
-                return med * 4
-            }
             readonly property int kTrail: 10
 
             // Greatest index with t_us <= t (−1 when empty).
@@ -1233,7 +1065,6 @@ Item {
             on_BallSamplesChanged: if (visible) requestPaint()
             on_ClubSynthChanged:     if (visible) requestPaint()
             on_ClubPositionsChanged: if (visible) requestPaint()
-            on_RefDeltaChanged:      if (visible) requestPaint()
 
             onPaint: {
                 var ctx = getContext("2d")
@@ -1530,40 +1361,6 @@ Item {
                         }
                         ctx.globalAlpha = 1.0
                     }
-                }
-
-                // ── Reference-model colour-mapped measured trace (WP5a/T8) ──────
-                // Independent of the shaft element's own off/frame/fan/trace state
-                // — "reference" is its own toggle covering the whole ghost+surface+
-                // trace+chip composite. Draws the measured clubhead path from the
-                // swing window's start to the playhead as short per-sample
-                // segments, each tinted by the time-matched refShaftDelta sample
-                // (SwingComparator2D's signed convention: +ve = measured STEEPER
-                // than the idealised reference). A segment whose nearest
-                // refShaftDelta sample falls outside the gap threshold — a masked
-                // span (D6: dropped, never a fabricated zero) — falls back to the
-                // plain club pen at reduced alpha, so the gap always reads as a
-                // gap and never as an invented "matches the reference" colour.
-                if (root._refOverlayActive && _refDelta && _refDelta.t_us && _refDelta.t_us.length > 0
-                        && _clubFan.length > 1) {
-                    var refWinStartUs = root._addressUs >= 0 ? root._addressUs : _clubFan[0].t_us
-                    var rk0 = _indexFor(_clubFan, refWinStartUs)
-                    if (rk0 < 0) rk0 = 0
-                    var rkEnd = _indexFor(_clubFan, t)
-                    ctx.lineCap = "round"
-                    for (var rk = rk0; rk < rkEnd; ++rk) {
-                        var rp0 = _clubFan[rk], rp1 = _clubFan[rk + 1]
-                        if (!rp0 || !rp1 || rp0.conf <= 0 || rp1.conf <= 0) continue
-                        var rgx = rp0.head[0] * cr.width + cr.x, rgy = rp0.head[1] * cr.height + cr.y
-                        var rhx = rp1.head[0] * cr.width + cr.x, rhy = rp1.head[1] * cr.height + cr.y
-                        var rMidT = (rp0.t_us + rp1.t_us) * 0.5
-                        var rdv = root._nearestSeriesValue(_refDelta, rMidT, _refDeltaGapUs)
-                        ctx.strokeStyle = (rdv === null) ? cClub : root._deltaColor(rdv)
-                        ctx.globalAlpha = (rdv === null) ? 0.25 : 0.85
-                        ctx.lineWidth   = Math.max(1.5, 0.030 * S)
-                        ctx.beginPath(); ctx.moveTo(rgx, rgy); ctx.lineTo(rhx, rhy); ctx.stroke()
-                    }
-                    ctx.globalAlpha = 1.0
                 }
 
                 // Ball: the detected circle at the current playhead — matches the

@@ -445,36 +445,4 @@ namespace kinematics {
 inline constexpr bool kEnabled = true;   // kinematics.enabled — master gate (ON 2026-07-18, display-only)
 } // namespace kinematics
 
-// --- Idealised swing-reference model — Phase A (src/Models/swing_reference.h,
-// src/Analysis/camera_projection.h, swing_ref_anthro.h, swing_comparator.h) -----
-// A golfer-scaled, geometric-parametric reference of the club shaft (P1→P4→P7→P8),
-// projected through a per-camera model and compared against the measured 2D shaft
-// track in image space — the "Swing plane" metric group (T5/T6, later tasks).
-// EVERY value below is an UNVALIDATED Phase-A design-time seed (from the brief),
-// not yet corpus-tuned. kEnabled=false darks the whole feature: the SwingRefStage
-// (wired by a later task) never runs, so analysis output is byte- and
-// code-path-identical to its absence. RefConfig (src/Models/swing_reference.h) is
-// the one settings surface that carries proj.*/anthro.* through to the stage —
-// camera_projection.h and swing_ref_anthro.h have no fromOverrides of their own
-// for these two, so their tuned defaults are seeded onto RefConfig fields instead.
-namespace swingref {
-inline constexpr bool   kEnabled                 = false; // swingref.enabled — master dark flag (RefConfig; stage gate wired later)
-// Model core (src/Models/swing_reference.h RefConfig).
-inline constexpr double kBackswingPlaneOffsetDeg = 4.0;    // swingref.planeOffsetDeg — Δθ_bs; 0 → one-plane reference
-inline constexpr int    kSamplesPerSegment       = 200;    // swingref.samplesPerSegment — ALSO reused by ComparatorConfig::sGridPerSegment (one key, two consumers)
-inline constexpr double kReferenceTempoRatio     = 3.0;    // swingref.referenceTempoRatio — classic 3:1 backswing:downswing reference, dark default
-inline constexpr bool   kFitEnabled              = true;   // swingref.fit.enabled — fit the model's hub/arm/club/plane to the measured P positions (swing_ref_fit.h); default ON, degrades to the seed model when <4 distinct P anchors
-// Camera projection (src/Analysis/camera_projection.h) — carried on RefConfig;
-// there is no ProjectionConfig struct, so the stage threads these straight into
-// makeCameraProjection()'s nominalFovDeg parameter and the overlay's residual
-// warning-chip comparison.
-inline constexpr double kNominalFovDeg           = 50.0;   // swingref.proj.nominalFovDeg — nominal pinhole FOV for PoseFitProjection
-inline constexpr double kResidualWarnPx          = 8.0;    // swingref.proj.residualWarnPx — overlay warning threshold on PnP RMS residual (px)
-// Anthro estimation (src/Analysis/swing_ref_anthro.h AnthroConfig).
-inline constexpr std::int64_t kAddrWindowUs      = 300000; // swingref.anthro.addrWindowUs — ± half-window centred on the Address event
-inline constexpr double kGripOffsetM             = 0.04;   // swingref.anthro.gripOffsetM — butt3D → mid-hands hub add-on (m)
-inline constexpr double kHubDepthOffsetM         = 0.0;    // swingref.anthro.hubDepthOffsetM — extra hub depth beyond butt depth (m)
-inline constexpr double kKpConfMin               = 0.3;    // swingref.anthro.kpConfMin — per-keypoint confidence gate
-} // namespace swingref
-
 } // namespace pinpoint::tuned

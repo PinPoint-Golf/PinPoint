@@ -97,16 +97,6 @@ public:
     Q_INVOKABLE bool setClubRecord(const QString &uuid, const QString &clubId,
                                    const QVariantMap &record);
     Q_INVOKABLE bool removeClubRecord(const QString &uuid, const QString &clubId);
-
-    // Per-athlete swing-reference-model overrides (Settings live under
-    // athletes/<uuid>/swingref as a flat QVariantMap of "swingref.*" dotted
-    // keys — same clubs-map pattern as clubsFor()/setClubRecord() above, one
-    // level flatter since these are not per-club). Merged onto
-    // ShotAnalysisJob::tuningOverrides at the SwingRefStage
-    // (src/Analysis/wrist_analyzer.cpp), tuning first, this second. No UI yet
-    // — a future Settings panel will populate this; empty in practice today.
-    Q_INVOKABLE QVariantMap swingRefOverridesFor(const QString &uuid) const;
-    Q_INVOKABLE bool setSwingRefOverrides(const QString &uuid, const QVariantMap &overrides);
     Q_INVOKABLE bool deleteAthlete(const QString &uuid);
     Q_INVOKABLE void selectAthlete(const QString &uuid);
     Q_INVOKABLE void clearCurrentAthlete();

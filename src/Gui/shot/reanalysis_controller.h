@@ -25,8 +25,6 @@
 
 #include "../Analysis/swing_reanalyzer.h"   // pinpoint::analysis::ReanalyzeResult
 
-class AthleteController;
-
 // ReanalysisController — the single funnel for "re-analyse this shot" from the
 // carousel's PpShotActionBar (focused shot) and the set-scope menu ("re-analyse
 // all shown"). It reloads each exported swing from disk via the STREAMING
@@ -52,12 +50,7 @@ class ReanalysisController : public QObject
     Q_PROPERTY(bool reanalysing READ reanalysing NOTIFY reanalysingChanged)
 
 public:
-    // athlete is optional (nullptr in the seam test, see reanalysis_stubs.cpp)
-    // — when set, startNext() reads its swingRefOverridesFor(currentUuid()) on
-    // the UI thread and threads it onto ReanalyzeOptions::swingRefOverrides,
-    // the same per-athlete injection ShotProcessor::buildAnalysisJob does for
-    // a live shot (see reanalysis_controller.cpp).
-    explicit ReanalysisController(AthleteController *athlete = nullptr, QObject *parent = nullptr);
+    explicit ReanalysisController(QObject *parent = nullptr);
 
     bool reanalysing() const { return m_reanalysing; }
 
@@ -101,8 +94,6 @@ private:
     bool        m_reanalysing  = false;
     bool        m_liveBusy     = false;   // a live shot is processing
     bool        m_startDeferred = false;  // a startNext() was held off for m_liveBusy
-
-    AthleteController *m_athlete = nullptr;   // not owned; may be nullptr (tests)
 
     QFutureWatcher<pinpoint::analysis::ReanalyzeResult> m_watcher;
 };

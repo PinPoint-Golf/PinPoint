@@ -133,7 +133,6 @@ Rectangle {
 
     // ── Overlays ─────────────────────────────────────────────────────────────
     Rectangle {   // ordinal chip, top-left
-        id: ordinalChip
         anchors { left: parent.left; top: parent.top; margins: Theme.sp(6) }
         width:  ordinalText.implicitWidth + Theme.sp(10)
         height: ordinalText.implicitHeight + Theme.sp(3)
@@ -143,28 +142,6 @@ Rectangle {
             id: ordinalText
             anchors.centerIn: parent
             text:           "#" + card.ordinal
-            font.family:    Theme.fontData
-            font.pixelSize: Theme.fontSzMicro
-            color:          "#FFFFFF"
-        }
-    }
-
-    // Swing-plane badge — this shot's analysisDetail carries a "reference" block
-    // (the T1-T8 idealised-swing comparator ran and fit successfully). Same scrim
-    // chip language as the ordinal badge beside it, kept subtle (a bare letter, no
-    // colour) since this is informational, not a verdict — the dashboard's Swing
-    // plane zone carries the actual numbers.
-    Rectangle {
-        visible: card.analysisDetail && card.analysisDetail.reference !== undefined
-        anchors { left: ordinalChip.right; leftMargin: Theme.sp(4); top: ordinalChip.top }
-        width:  planeText.implicitWidth + Theme.sp(10)
-        height: ordinalChip.height
-        radius: Theme.sp(4)
-        color:  card.scrimColor
-        Text {
-            id: planeText
-            anchors.centerIn: parent
-            text:           qsTr("P")
             font.family:    Theme.fontData
             font.pixelSize: Theme.fontSzMicro
             color:          "#FFFFFF"

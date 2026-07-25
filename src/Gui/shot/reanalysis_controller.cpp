@@ -26,11 +26,9 @@
 #include "../Export/swing_doc.h"
 #include "../Core/pp_debug.h"
 #include "../Core/pp_os_metrics.h"
-#include "../athlete/athlete_controller.h"
 
-ReanalysisController::ReanalysisController(AthleteController *athlete, QObject *parent)
+ReanalysisController::ReanalysisController(QObject *parent)
     : QObject(parent)
-    , m_athlete(athlete)
 {
     connect(&m_watcher, &QFutureWatcherBase::finished,
             this, &ReanalysisController::onWorkerFinished);
@@ -99,14 +97,9 @@ void ReanalysisController::startNext()
     // onset v2 fixed that at source, so re-analysis follows the same span-bounded
     // two-pass path as a live shot. ReanalyzeOptions::fullWindow remains as an
     // escape hatch for SwingLab/debugging only.
-    pinpoint::analysis::ReanalyzeOptions opts;
-    // Read on the UI thread — the worker stays settings-free (house rule). Mirrors
-    // ShotProcessor::buildAnalysisJob's live-shot injection of the same map.
-    if (m_athlete && m_athlete->hasCurrentAthlete())
-        opts.swingRefOverrides = m_athlete->swingRefOverridesFor(m_athlete->currentUuid());
-    m_watcher.setFuture(QtConcurrent::run([dir, opts] {
+    m_watcher.setFuture(QtConcurrent::run([dir] {
         pinpoint::osmetrics::ThreadScope _tscope("Analysis.Worker");
-        return pinpoint::analysis::reanalyzeSwingDir(dir, opts);
+        return pinpoint::analysis::reanalyzeSwingDir(dir, pinpoint::analysis::ReanalyzeOptions{});
     }));
 }
 
