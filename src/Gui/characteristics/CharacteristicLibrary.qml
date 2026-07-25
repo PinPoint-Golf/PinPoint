@@ -70,7 +70,12 @@ Item {
         return f
     }
 
+    // Rows for one group block. The directory renders a block per group and each asks for its own
+    // rows, so the active chip has to be honoured HERE — setting f.group below would otherwise
+    // overwrite the chip's selection and every block would render regardless of it.
     function _rowsFor(group) {
+        if (root._groupFilter.length > 0 && root._groupFilter !== group) return []
+
         var f = root._filters()
         f.group = group
         var rows = library.query(f)

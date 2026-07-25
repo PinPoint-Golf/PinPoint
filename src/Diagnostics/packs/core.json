@@ -272,8 +272,9 @@
         "kind": "at",
         "anchor": "p1"
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "notCapturable",
+      "label": "",
+      "metricKey": "thoracicFlexion"
     },
     {
       "id": "m_lumbarCurve",
@@ -287,8 +288,9 @@
         "kind": "at",
         "anchor": "p1"
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "notCapturable",
+      "label": "",
+      "metricKey": "lumbarExtension"
     },
     {
       "id": "m_shoulderPlane",
@@ -302,8 +304,9 @@
         "kind": "at",
         "anchor": "p4"
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "planned",
+      "label": "",
+      "metricKey": "shoulderPlaneAngle"
     },
     {
       "id": "m_ballBodyGap",
@@ -317,8 +320,9 @@
         "kind": "at",
         "anchor": "p1"
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "planned",
+      "label": "",
+      "metricKey": "ballBodyDistance"
     },
     {
       "id": "m_thoraxDrift",
@@ -336,8 +340,9 @@
           "p5"
         ]
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "planned",
+      "label": "",
+      "metricKey": "thoraxLateralDrift"
     },
     {
       "id": "m_leadKneeFlex",
@@ -355,8 +360,9 @@
         ],
         "sense": "max"
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "planned",
+      "label": "",
+      "metricKey": "leadKneeFlexion"
     },
     {
       "id": "m_trailElbowRise",
@@ -370,8 +376,9 @@
         "kind": "at",
         "anchor": "p4"
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "planned",
+      "label": "",
+      "metricKey": "trailElbowHeight"
     },
     {
       "id": "m_leadArmToTorso",
@@ -389,8 +396,9 @@
           "p8"
         ]
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "planned",
+      "label": "",
+      "metricKey": "leadArmToTorso"
     },
     {
       "id": "m_leadHandWidth",
@@ -404,8 +412,9 @@
         "kind": "at",
         "anchor": "p4"
       },
-      "status": "noProducer",
-      "label": ""
+      "status": "planned",
+      "label": "",
+      "metricKey": "leadHandWidth"
     }
   ],
   "signals": [

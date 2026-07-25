@@ -152,7 +152,9 @@ void installMetricManifest(MetricCatalogue &cat)
                        .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
         .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
-                    QStringLiteral("assessment:wrist") },
+                    QStringLiteral("assessment:wrist"),
+                    QStringLiteral("characteristic:insufficient_set"),
+                    QStringLiteral("characteristic:scooping") },
     });
 
     cat.addDescriptor({
@@ -263,6 +265,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis } },
+        .usedBy = { QStringLiteral("characteristic:sequence_order") },
     });
 
     cat.addDescriptor({
@@ -285,6 +288,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Thorax } },
+        .usedBy = { QStringLiteral("characteristic:sequence_order") },
     });
 
     cat.addDescriptor({
@@ -331,6 +335,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
+        .usedBy = { QStringLiteral("characteristic:xfactor_deficit") },
     });
 
     cat.addDescriptor({
@@ -379,6 +384,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
+        .usedBy = { QStringLiteral("characteristic:loss_of_posture"),
+                    QStringLiteral("characteristic:posture_too_upright") },
     });
 
     cat.addDescriptor({
@@ -425,6 +432,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:reverse_spine") },
     });
 
     cat.addDescriptor({
@@ -447,6 +455,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:hanging_back"),
+                    QStringLiteral("characteristic:slide"),
+                    QStringLiteral("characteristic:sway") },
     });
 
     cat.addDescriptor({
@@ -471,6 +482,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .minTier = ReconstructionTier::Stereo3D },
+        .usedBy = { QStringLiteral("characteristic:early_extension") },
     });
 
     cat.addDescriptor({
@@ -494,6 +506,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:trail_hip_hike") },
     });
 
     // ------------------------------------------------------- Club & speed (face-on club track, 2D)
@@ -564,7 +577,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Downswing, P::Impact },
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:casting") },
     });
 
     cat.addDescriptor({
@@ -635,6 +649,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
+        .usedBy = { QStringLiteral("characteristic:over_the_top") },
     });
 
     cat.addDescriptor({
@@ -775,6 +790,7 @@ void installMetricManifest(MetricCatalogue &cat)
                 "corpus."),
             .heuristic = true,
         },
+        .usedBy = { QStringLiteral("characteristic:transition_rush") },
     });
 
     cat.addDescriptor({
@@ -826,7 +842,9 @@ void installMetricManifest(MetricCatalogue &cat)
         // is no measured distribution to draw a defensible band from.
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:stance_narrow"),
+                    QStringLiteral("characteristic:stance_wide") },
     });
 
     cat.addDescriptor({
@@ -851,7 +869,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Address },
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .ballTrack = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:ball_back"),
+                    QStringLiteral("characteristic:ball_forward") },
     });
 
     cat.addDescriptor({
@@ -965,6 +985,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:alignment_closed"),
+                    QStringLiteral("characteristic:alignment_open") },
     });
 
     cat.addDescriptor({
@@ -1104,6 +1126,232 @@ void installMetricManifest(MetricCatalogue &cat)
         .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
+    });
+
+    // ------------------------------------------ Diagnostics-pack measures (src/Diagnostics/packs)
+    // Every characteristic in the shipped diagnostics pack resolves to a catalogue metric, so one
+    // coverage view spans both registries and there is no second parallel list of measures. These
+    // nine had no key before the pack was authored; each is PLANNED — the pack names what it needs,
+    // and this is where that need is recorded.
+    //
+    // The four length measures are expressed as a PERCENTAGE of a body dimension rather than in
+    // millimetres. A raw length is not comparable between a tall golfer and a short one, nor
+    // between two camera distances, so a corridor over it could never transfer. Naming the
+    // normaliser in the unit ("% shoulder width") keeps that visible at the point of reading.
+
+    cat.addDescriptor({
+        .key = QStringLiteral("thoracicFlexion"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Thoracic flexion at address"),
+        .shortLabel = QStringLiteral("Upper-back round"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Spine & pelvis"),
+        .description = QStringLiteral(
+            "How far the upper back is rounded forward at address, measured as the thoracic "
+            "segment's angle from vertical. This is the C-posture axis: the thoracic spine rotates "
+            "best near neutral, and in flexion it loses a meaningful share of the turn available, "
+            "which the swing then has to find somewhere else."),
+        .howToRead = QStringLiteral(
+            "Read at address, from down the line. Higher means more rounded. It is distinct from "
+            "spine forward bend, which is the hinge from the hips, and from lumbar extension, which "
+            "is the low-back arch — three different regions that a single neck-to-pelvis line "
+            "cannot tell apart. NOT MEASURABLE TODAY: neither pose layout carries a keypoint "
+            "between the shoulders and the hips, so this needs instrumentation the product does not "
+            "have. It is catalogued because the characteristic that depends on it is real and its "
+            "absence is a capture gap worth seeing, not a producer waiting to be written."),
+        .phases = { P::Address },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .usedBy = { QStringLiteral("characteristic:c_posture") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lumbarExtension"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Lumbar extension at address"),
+        .shortLabel = QStringLiteral("Low-back arch"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Spine & pelvis"),
+        .description = QStringLiteral(
+            "How far the low back is arched at address, measured as the lumbar segment's angle from "
+            "neutral. This is the S-posture axis. An exaggerated arch pre-tensions the lower back "
+            "and makes it harder to turn the pelvis without the spine taking the load."),
+        .howToRead = QStringLiteral(
+            "Read at address, from down the line. Higher means more arched. NOT MEASURABLE TODAY, "
+            "for the same reason as thoracic flexion: there is no spinal keypoint in either pose "
+            "layout. Catalogued so the gap is visible rather than silently absent."),
+        .phases = { P::Address },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .usedBy = { QStringLiteral("characteristic:s_posture") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("shoulderPlaneAngle"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Shoulder plane angle"),
+        .shortLabel = QStringLiteral("Shoulder plane"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Body rotation"),
+        .description = QStringLiteral(
+            "The angle the shoulder line makes with the ground, sampled through the swing. At the "
+            "top it describes how steeply or flatly the shoulders have turned. A flat plane sets "
+            "the club behind the body, which is commonly recovered by throwing the upper body out "
+            "at the start of the downswing."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the reading that matters is at the top. Lower means flatter, more "
+            "horizontal shoulders. It is a consequence of how the golfer is built and how they set "
+            "up as much as of what they did, so read it alongside address posture rather than on "
+            "its own. Needs a face-on camera."),
+        .phases = { P::Top },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:flat_shoulder_plane") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("leadKneeFlexion"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead knee flexion"),
+        .shortLabel = QStringLiteral("Lead knee"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Feet & stance"),
+        .description = QStringLiteral(
+            "The angle at the lead knee — the lead shin against the lead thigh — through the swing. "
+            "A knee that collapses through impact drops the whole body and makes the strike depend "
+            "on timing rather than on repeatable geometry."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the reading that matters is the peak from impact into the "
+            "follow-through. Higher means more bend. A knee angle is between two SEGMENTS, not a "
+            "property of the knee point itself — which is why the shin and thigh exist separately "
+            "in the anatomy vocabulary. Needs a face-on camera."),
+        .phases = { P::Impact, P::ShaftParallelThrough },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:late_buckle") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("leadArmToTorso"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead arm to torso angle"),
+        .shortLabel = QStringLiteral("Arm/torso"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Arms"),
+        .description = QStringLiteral(
+            "The angle between the lead upper arm and the torso, through the swing. It describes "
+            "how connected the lead arm stays to the body's turn. The lead arm folding through "
+            "impact shortens the radius exactly where it should be longest, costing speed and "
+            "consistency of face angle."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the change from impact into the follow-through is the reading that "
+            "matters. A rising angle there means the arm is separating from the body rather than "
+            "extending down the line. Needs a face-on camera."),
+        .phases = { P::Impact, P::ShaftParallelThrough },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:chicken_wing") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("ballBodyDistance"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Ball distance from the body"),
+        .shortLabel = QStringLiteral("Ball reach"),
+        .unit = QStringLiteral("% shoulder width"),
+        .group = QStringLiteral("Feet & stance"),
+        .description = QStringLiteral(
+            "How far the ball sits from the golfer, measured across the stance line and expressed "
+            "as a percentage of shoulder width so it is comparable between golfers. Standing too "
+            "close crowds the arms and steepens the swing; reaching for the ball pulls the "
+            "shoulders forward and rounds the upper back even in someone whose standing posture is "
+            "fine. It is a different axis from ball position, which runs ALONG the stance."),
+        .howToRead = QStringLiteral(
+            "A single setup measurement at address. Higher means further away. This is a depth "
+            "measurement across the stance line, so it needs the down-the-line view — face-on "
+            "cannot resolve it, because the distance runs along that camera's own axis. Normalised "
+            "by shoulder width: a raw millimetre reading is not comparable between a tall golfer "
+            "and a short one."),
+        .phases = { P::Address },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .requirement = { .ballTrack = true },
+        .usedBy = { QStringLiteral("characteristic:ball_too_close"),
+                    QStringLiteral("characteristic:ball_too_far") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("thoraxLateralDrift"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Thorax lateral drift"),
+        .shortLabel = QStringLiteral("Chest drift"),
+        .unit = QStringLiteral("% stance width"),
+        .group = QStringLiteral("Spine & pelvis"),
+        .description = QStringLiteral(
+            "How far the centre of the chest has moved sideways from its address position, as a "
+            "percentage of stance width. The upper body moving toward the target ahead of the "
+            "sequence steepens the attack and narrows the margin for a clean strike."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve of displacement from address; the change into the early downswing is "
+            "the reading that matters. Positive means toward the target. It is the chest's "
+            "counterpart to pelvis sway, and the two are read together — the same absolute movement "
+            "means something different depending on whether the pelvis went with it. Normalised by "
+            "stance width so it compares across golfers and camera distances. Needs a face-on "
+            "camera."),
+        .phases = { P::Address, P::ArmParallelDown },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:forward_lunge") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("trailElbowHeight"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Trail elbow height"),
+        .shortLabel = QStringLiteral("Trail elbow"),
+        .unit = QStringLiteral("% shoulder width"),
+        .group = QStringLiteral("Arms"),
+        .description = QStringLiteral(
+            "How high the trail elbow sits relative to the shoulder line, as a percentage of "
+            "shoulder width. A trail elbow lifted away from the body at the top disconnects the "
+            "arms from the turn and needs a re-route to deliver the club."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the reading that matters is at the top. Higher means the elbow has "
+            "risen further above the shoulder line. Normalised by shoulder width rather than left "
+            "in millimetres, so the same reading means the same thing for any golfer. Needs a "
+            "face-on camera."),
+        .phases = { P::Top },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:flying_elbow") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("leadHandWidth"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Swing width at the top"),
+        .shortLabel = QStringLiteral("Width"),
+        .unit = QStringLiteral("% arm length"),
+        .group = QStringLiteral("Arms"),
+        .description = QStringLiteral(
+            "How far the lead hand is from the centre of the chest, as a percentage of lead arm "
+            "length — the swing's width. The hands collapsing toward the chest in the backswing "
+            "shortens the arc and removes the space the downswing needs to build speed."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the reading that matters is at the top. Lower means narrower. "
+            "Expressed against the golfer's own arm length, so it reads as a fraction of the width "
+            "actually available to them rather than as an absolute distance. Needs a face-on "
+            "camera."),
+        .phases = { P::Top },
+        .planned = true,
+        .normative = { .heuristic = true },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:loss_of_width") },
     });
 }
 

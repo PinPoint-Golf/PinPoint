@@ -411,8 +411,16 @@ ViewNeeded deriveViewNeeded(const Series &s)
         && (s.reference == AnatomyRole::LeadThigh || s.reference == AnatomyRole::TrailThigh))
         return ViewNeeded::DownTheLine;
 
-    // Lateral displacement across the stance and address geometry read from face-on.
-    if (s.reference == AnatomyRole::StanceLine || s.reference == AnatomyRole::StanceCentre)
+    // The stance line runs target-parallel through the feet, so a PERPENDICULAR distance to it —
+    // how far the ball or the body sits from that line — is measured along the face-on camera's
+    // own axis and cannot be recovered from that view. It needs down-the-line. Distance to the
+    // stance CENTRE runs along the line and reads cleanly face-on. The two differ only in the
+    // reference, which is exactly why that facet is load-bearing.
+    if (s.reference == AnatomyRole::StanceLine && s.quantity == Quantity::Distance)
+        return ViewNeeded::DownTheLine;
+
+    // Lateral displacement and address geometry measured across the stance read from face-on.
+    if (s.reference == AnatomyRole::StanceCentre || s.reference == AnatomyRole::StanceLine)
         return ViewNeeded::FaceOn;
 
     return ViewNeeded::Any;

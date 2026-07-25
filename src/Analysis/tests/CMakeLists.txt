@@ -465,3 +465,17 @@ pp_add_test(characteristic_editor_test
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")
 set_tests_properties(characteristic_editor_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Diagnostics/packs/core.json")
+
+# Cross-registry integrity: the diagnostics pack vs the metric catalogue. The catalogue's `usedBy`
+# is hand-authored and will otherwise rot silently — a wrong reverse index is worse than an absent
+# one because it looks authoritative. Checked in BOTH directions, plus that no measure claims a
+# producer the catalogue does not have.
+pp_add_test(diagnostics_catalogue_integrity_test
+    SOURCES ${DIAG}/tests/diagnostics_catalogue_integrity_test.cpp ${DIAG_PACK}
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${ANALYSIS}/reference_bands.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")

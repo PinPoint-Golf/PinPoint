@@ -243,7 +243,12 @@ int main()
         check(deriveViewNeeded(ser(AnatomyRole::ThoracicSegment, Quantity::Angle, AnatomyRole::Ground))
                   == ViewNeeded::DownTheLine, "spinal curvature needs down-the-line");
         check(deriveViewNeeded(ser(AnatomyRole::Ball, Quantity::Distance, AnatomyRole::StanceCentre))
-                  == ViewNeeded::FaceOn, "stance-referenced measures read face-on");
+                  == ViewNeeded::FaceOn, "distance ALONG the stance reads face-on");
+        // The two ball measures differ only in the reference, and that one facet decides which
+        // camera can see them: distance ACROSS the stance line runs along the face-on camera's own
+        // axis, so it needs down-the-line.
+        check(deriveViewNeeded(ser(AnatomyRole::Ball, Quantity::Distance, AnatomyRole::StanceLine))
+                  == ViewNeeded::DownTheLine, "distance ACROSS the stance line needs down-the-line");
         check(deriveViewNeeded(ser(AnatomyRole::LeadHand, Quantity::Distance, AnatomyRole::ThoraxCentre))
                   == ViewNeeded::Any, "unclear cases claim nothing");
     }

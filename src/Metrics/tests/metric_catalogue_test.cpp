@@ -53,9 +53,13 @@ int main()
     std::printf("=== metric catalogue ===\n");
     const MetricCatalogue cat = makeMetricCatalogue();
 
-    // 1. Manifest completeness — the full design catalogue (21 live + 22 planned), each resolvable.
+    // 1. Manifest completeness — the full design catalogue (21 live + 31 planned), each resolvable.
+    // The nine additions are the measures the shipped diagnostics pack depends on: every
+    // characteristic must resolve to a catalogue metric, so the pack cannot become a second
+    // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
+    // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 43, "descriptor count == 43");
+        checkEqI(static_cast<int>(cat.all().size()), 52, "descriptor count == 52");
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -76,8 +80,8 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  24, "TimeSeries count");
-        checkEqI(countType(cat, MetricType::PointInTime), 13, "PointInTime count");
+        checkEqI(countType(cat, MetricType::TimeSeries),  30, "TimeSeries count");
+        checkEqI(countType(cat, MetricType::PointInTime), 16, "PointInTime count");
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
@@ -91,7 +95,12 @@ int main()
         checkEqI(static_cast<int>(cat.query(hq).size()), 3, "group 'Head' == 3");
 
         MetricQuery brq; brq.group = QStringLiteral("Body rotation");
-        checkEqI(static_cast<int>(cat.query(brq).size()), 5, "group 'Body rotation' == 5");
+        checkEqI(static_cast<int>(cat.query(brq).size()), 6, "group 'Body rotation' == 6");
+
+        // Arm geometry (trail elbow height, swing width, arm-to-torso) is its own group rather
+        // than being filed under wrist and forearm, which would mislabel it in the directory.
+        MetricQuery armq; armq.group = QStringLiteral("Arms");
+        checkEqI(static_cast<int>(cat.query(armq).size()), 3, "group 'Arms' == 3");
 
         MetricQuery alq; alq.group = QStringLiteral("Alignment");
         checkEqI(static_cast<int>(cat.query(alq).size()), 4, "group 'Alignment' == 4");
