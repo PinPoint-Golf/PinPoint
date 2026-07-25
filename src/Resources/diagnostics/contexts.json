@@ -1,0 +1,41 @@
+{
+  "id": "core",
+  "version": "1.0.0",
+  "schemaVersion": 1,
+
+  "_comment": [
+    "The context tree. A norm is keyed by (measure, context), and resolution WALKS UP this tree:",
+    "no norm for 'driver' falls back to 'full_swing', then to 'any', then to nothing. Authors write",
+    "a row only where the value genuinely differs from its parent, which is what keeps a norm set",
+    "readable — the contexts that carry their own row are exactly the ones somebody deliberately",
+    "distinguished.",
+    "",
+    "'full_swing' is the DEFAULT: a shot that declares no context resolves here and the finding is",
+    "marked inferred.",
+    "",
+    "The archetype nodes are not shot types. They carry the lead-wrist face corridor that used to be",
+    "a compiled +/-10 degree shift in reference_bands.cpp, so a valid bowed or cupped style is graded",
+    "against its own model rather than red-flagged. They sit under full_swing because that is what",
+    "they refine; a shot resolves to one of them only when the archetype has been detected."
+  ],
+
+  "contexts": [
+    { "id": "any",          "label": "Any shot" },
+
+    { "id": "full_swing",   "label": "Full swing",        "parent": "any" },
+    { "id": "driver",       "label": "Driver",            "parent": "full_swing" },
+    { "id": "fairway_wood", "label": "Fairway wood",      "parent": "full_swing" },
+    { "id": "iron",         "label": "Iron",              "parent": "full_swing" },
+    { "id": "wedge",        "label": "Wedge",             "parent": "full_swing" },
+
+    { "id": "archetype_bowed",  "label": "Bowed style",   "parent": "full_swing" },
+    { "id": "archetype_cupped", "label": "Cupped style",  "parent": "full_swing" },
+
+    { "id": "partial",      "label": "Partial swing",     "parent": "any" },
+    { "id": "pitch",        "label": "Pitch",             "parent": "partial" },
+    { "id": "chip",         "label": "Chip",              "parent": "partial" },
+
+    { "id": "bunker",       "label": "Bunker",            "parent": "any" },
+    { "id": "specialty",    "label": "Specialty shot",    "parent": "any" }
+  ]
+}

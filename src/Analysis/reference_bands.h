@@ -19,6 +19,9 @@
 #pragma once
 
 #include "wrist_assessment_types.h"
+#include "../Diagnostics/norm_provider.h"
+
+#include <QString>
 
 #include <memory>
 
@@ -54,13 +57,34 @@ struct BandTuning {
     }
 };
 
-// Context the bands are keyed by (design §6 "context parameterisation"). v1 hard-defaults to
-// neutral archetype / mid-iron / neutral shape and exposes the seam; the provider may ignore it.
+// Context the bands are keyed by (design §6 "context parameterisation").
+//
+// `contextId` is the node in the diagnostics context tree this shot belongs to, and it is now the
+// real key: archetype/club/shape all fold into it, and NormBandProvider resolves by walking the
+// tree upward from it. The three legacy ints remain ONLY so a caller that has not been migrated
+// still compiles and behaves; `resolvedContextId()` maps them across.
+//
+// Empty contextId + archetype 0 means "full swing, nothing more specific known", which is exactly
+// what the default context is for.
 struct BandContext {
-    int        archetype = 0;   // 0 = neutral (future: bowed-tour / cupped-tour …)
-    int        club      = 0;   // 0 = mid-iron
-    int        shape     = 0;   // 0 = neutral (future: draw / fade bias)
+    QString    contextId;       // diagnostics context tree node; empty => derive from `archetype`
+    int        archetype = 0;   // LEGACY: 0 = neutral, 1 = bowed, 2 = cupped
+    int        club      = 0;   // LEGACY: unused by the norm path
+    int        shape     = 0;   // LEGACY: unused by the norm path
     BandTuning tuning;          // SwingLab bands.* margin overrides (default = no-op)
+
+    // The context to resolve norms in. A caller that sets contextId wins outright; otherwise the
+    // legacy archetype int is translated, so detectArchetype()'s existing 0/1/2 keeps working
+    // without every call site changing at once.
+    QString resolvedContextId() const
+    {
+        if (!contextId.isEmpty()) return contextId;
+        switch (archetype) {
+        case 1:  return QStringLiteral("archetype_bowed");
+        case 2:  return QStringLiteral("archetype_cupped");
+        default: return QStringLiteral("full_swing");
+        }
+    }
 };
 
 // A resolved band for one cell. `valid == false` means "no band for this cell" (not in the table,
@@ -107,6 +131,11 @@ public:
 // style-dependent lead-wrist flex-ext axis) per `ctx.archetype` — so a valid bowed / cupped style is
 // scored against its own model rather than red-flagged. Archetype 0 (neutral) ≡ the config bands.
 // Other DOFs are archetype-invariant in v1.
+//
+// SUPERSEDED by NormBandProvider: the ±10° shift is now two ordinary norm rows under the
+// archetype_bowed / archetype_cupped contexts rather than a compiled special case for one DOF.
+// Retained only as the parity test's reference implementation — it is what NormBandProvider is
+// proved byte-identical against — and is not reachable from the app.
 class ArchetypeBandProvider : public IReferenceBandProvider {
 public:
     Band band(PpJointDof dof, PpSwingPosition pos, const BandContext &ctx = {}) const override;
@@ -114,8 +143,46 @@ private:
     ConfigReferenceBandProvider m_config;
 };
 
-enum class BandProviderKind { Config, Archetype };
+// Bands projected from the diagnostics norm set (src/Resources/diagnostics/norms.json).
+//
+// This is the provider the app uses. It exists as an IReferenceBandProvider rather than replacing
+// the seam because the wrist grid renders `Band::greenLo/greenHi` directly into PpRagCell — the
+// band SHAPE is user-visible, not just the resulting PpRag — so projecting a Norm back into a Band
+// makes the migration structurally exact instead of merely tested:
+//
+//     greenLo = mu - sigmaLo      greenHi = mu + sigmaHi        (the Ideal band)
+//     amberLo = monitorLo         amberHi = monitorHi           (the Watch/Action edge)
+//
+// With migrated content those four numbers are bit-for-bit the old table's, so classifyDelta() is
+// left completely untouched and reference_bands_parity_test can assert equality rather than
+// nearness. A norm with no explicit monitor band (anything authored in the corridor editor) has its
+// amber edges derived from the GradePolicy instead.
+//
+// Resolution walks the context tree from ctx.resolvedContextId(). A DOF/position with no norm in
+// any context yields an INVALID band, which is what the engine greys — same as the old table
+// returning nothing for trail wrist at P8.
+class NormBandProvider : public IReferenceBandProvider {
+public:
+    // Built on demand; the provider owns its norm source. Passing one in is the test seam.
+    NormBandProvider();
+    explicit NormBandProvider(std::shared_ptr<const INormProvider> norms,
+                              GradePolicy                         policy = {});
+    ~NormBandProvider() override;
 
-std::unique_ptr<IReferenceBandProvider> makeReferenceBandProvider(BandProviderKind kind = BandProviderKind::Config);
+    Band band(PpJointDof dof, PpSwingPosition pos, const BandContext &ctx = {}) const override;
+
+    // The measure id a (DOF, position) cell keys on: "m_<dofName>_p<N>". Exposed because the norm
+    // set, the pack's cell measures and this provider must agree on it, and a convention duplicated
+    // in three places is a convention that will drift.
+    static QString cellMeasureId(PpJointDof dof, PpSwingPosition pos);
+
+private:
+    std::shared_ptr<const INormProvider> m_norms;
+    GradePolicy                          m_policy;
+};
+
+enum class BandProviderKind { Config, Archetype, Norm };
+
+std::unique_ptr<IReferenceBandProvider> makeReferenceBandProvider(BandProviderKind kind = BandProviderKind::Norm);
 
 } // namespace pinpoint::analysis

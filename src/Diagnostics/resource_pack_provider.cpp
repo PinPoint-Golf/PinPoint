@@ -25,7 +25,7 @@ namespace pinpoint::analysis {
 namespace {
 
 // The shipped core pack. The runtime copy is a Qt resource; the SOURCE OF TRUTH is the reviewable
-// JSON committed at src/Diagnostics/packs/core.json, from which the resource is generated at build
+// JSON committed at src/Resources/diagnostics/core.json, from which the resource is built at build
 // time. That split is what lets a community contribution arrive as a pull request against readable
 // content rather than a binary blob.
 class ResourcePackProvider final : public ICharacteristicPackProvider {

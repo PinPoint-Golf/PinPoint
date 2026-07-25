@@ -19,6 +19,7 @@
 #pragma once
 
 #include "characteristic_pack.h"
+#include "norm.h"
 
 #include <QString>
 
@@ -44,9 +45,49 @@ namespace pinpoint::analysis {
 struct MeasureReading {
     double value       = 0.0;
     bool   hasCorridor = false;
-    double greenLo     = 0.0;
+    double greenLo     = 0.0;    // the Ideal band, in the measure's own units
     double greenHi     = 0.0;
     float  confidence  = 1.0f;   // 0..1; propagates into the finding
+
+    // The resolved grade. NotMeasured whenever hasCorridor is false, so the two can never disagree.
+    //
+    // A SIGNAL FIRES ON A DEVIATION — Watch or Action — not merely on leaving the Ideal band. Ideal
+    // is |z| <= 1, so firing there would trip roughly a third of any normal population on every
+    // characteristic in the library, and a detector that flags a third of everyone is noise wearing
+    // a diagnosis's clothes. Good (|z| <= 2) is ordinary variation and says so.
+    Grade grade = Grade::NotMeasured;
+
+    // Where the norm came from, for the UI's "inherited from full swing" line. Empty when none
+    // resolved.
+    QString normContextId;
+    // The shot did not declare a context, so it was graded against the default. The finding's
+    // confidence is demoted for this — see the engine.
+    bool    contextInferred = false;
+
+    // Build a graded reading from a bare corridor, for producers that have a band but no Norm.
+    //
+    // Use this rather than setting hasCorridor by hand: a reading with a corridor and a default
+    // NotMeasured grade silently never fires, which looks exactly like "nothing was wrong" and is
+    // the one failure mode this whole module exists to prevent. The band is read as +/-1 sigma
+    // about its midpoint — the same conversion the migrated corridors use — so a value inside the
+    // band grades Ideal and the numbers mean the same thing on both paths.
+    static MeasureReading fromCorridor(double value, double greenLo, double greenHi,
+                                       float confidence = 1.0f, const GradePolicy &policy = {})
+    {
+        MeasureReading r;
+        r.value       = value;
+        r.confidence  = confidence;
+        r.hasCorridor = true;
+        r.greenLo     = greenLo;
+        r.greenHi     = greenHi;
+
+        Norm n;
+        n.mu      = (greenLo + greenHi) / 2.0;
+        n.sigmaLo = n.sigmaHi = (greenHi - greenLo) / 2.0;
+        // Qualified: the `grade` MEMBER shadows the free grade() inside this scope.
+        r.grade   = ::pinpoint::analysis::grade(value, n, policy);
+        return r;
+    }
 };
 
 // Where readings come from. Deliberately abstract: the tests feed synthetic values, and the future

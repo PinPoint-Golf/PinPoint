@@ -242,6 +242,41 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("assessment:wrist") },
     });
 
+    cat.addDescriptor({
+        .key = QStringLiteral("trailWristFlexExt"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Trail wrist — bow / cup"),
+        .shortLabel = QStringLiteral("Trail bow/cup"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Wrist & forearm"),
+        .description = QStringLiteral(
+            "How much the trail wrist is bent back (extension / cup) or forward (flexion / bow), "
+            "the mirror of the lead-wrist face angle. The two wrists work as a pair: the trail "
+            "wrist's cup at the top is what the lead wrist's bow has to answer, so reading only one "
+            "side tells half the story of what the clubface is doing."),
+        .howToRead = QStringLiteral(
+            "Positive is flexion, negative is extension, read as a change from address. The trail "
+            "wrist typically cups going back and retains some of that cup deep into the downswing. "
+            "Planned: it needs a trail-side hand and forearm IMU, which the current rig does not "
+            "carry."),
+        .flexPositive = true,
+        .phases = { P::Top, P::Impact },
+        // PLANNED, not live: PpJointDof lists the trail side as reserved for a later instrumentation
+        // pass. The corridors have existed in the reference table since v1 with nothing producing a
+        // value for them, and the wrist grid greys those cells — this descriptor is what makes that
+        // state legible instead of leaving seven pack measures pointing at a metric key that does
+        // not exist.
+        .planned = true,
+        .normative = { .dof = PpJointDof::TrailWristFlexExt,
+                       .contextNote = QStringLiteral("mid-iron · neutral archetype"),
+                       .heuristic = true },
+        // No imuRoles: SegmentRole has no trail-side arm roles yet, and inventing them for a
+        // producer nobody has built would put model surface in the enum ahead of anything that
+        // uses it. The requirement is stated in howToRead until the instrumentation pass adds them.
+        .requirement = {},
+        .usedBy = { QStringLiteral("assessment:wrist") },
+    });
+
     // ---------------------------------------------------- Body rotation (PLANNED — body IMUs, no producer)
 
     cat.addDescriptor({
@@ -1128,7 +1163,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("chart:review") },
     });
 
-    // ------------------------------------------ Diagnostics-pack measures (src/Diagnostics/packs)
+    // ------------------------------------------ Diagnostics-pack measures (src/Resources/diagnostics)
     // Every characteristic in the shipped diagnostics pack resolves to a catalogue metric, so one
     // coverage view spans both registries and there is no second parallel list of measures. These
     // nine had no key before the pack was authored; each is PLANNED — the pack names what it needs,

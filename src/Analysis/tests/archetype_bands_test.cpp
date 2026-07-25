@@ -38,7 +38,7 @@ int main()
     // 1. Neutral archetype ≡ the config bands.
     {
         std::printf("-- 1. neutral ≡ config --\n");
-        const Band a = arch.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, { 0 });
+        const Band a = arch.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, BandContext{ .archetype = 0 });
         const Band c = config.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4);
         checkNear("neutral face greenLo", a.greenLo, c.greenLo);
         checkNear("neutral face greenHi", a.greenHi, c.greenHi);
@@ -48,14 +48,14 @@ int main()
     {
         std::printf("-- 2. archetype shifts the face corridor --\n");
         const Band c     = config.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4);
-        const Band bowed = arch.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, { 1 });
-        const Band cupped= arch.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, { 2 });
+        const Band bowed = arch.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, BandContext{ .archetype = 1 });
+        const Band cupped= arch.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, BandContext{ .archetype = 2 });
         checkNear("bowed face greenLo +10",  bowed.greenLo,  c.greenLo + 10.0);
         checkNear("bowed face greenHi +10",  bowed.greenHi,  c.greenHi + 10.0);
         checkNear("cupped face greenLo −10", cupped.greenLo, c.greenLo - 10.0);
 
         const Band ru  = config.band(PpJointDof::LeadWristRadUln, PpSwingPosition::P4);
-        const Band ruA = arch.band(PpJointDof::LeadWristRadUln, PpSwingPosition::P4, { 1 });
+        const Band ruA = arch.band(PpJointDof::LeadWristRadUln, PpSwingPosition::P4, BandContext{ .archetype = 1 });
         checkNear("radial-ulnar unchanged by archetype", ruA.greenLo, ru.greenLo);
     }
 

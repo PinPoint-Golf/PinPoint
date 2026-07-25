@@ -122,13 +122,78 @@ Band ArchetypeBandProvider::band(PpJointDof dof, PpSwingPosition pos, const Band
     return b;
 }
 
+// ── NormBandProvider ────────────────────────────────────────────────────────
+
+QString NormBandProvider::cellMeasureId(PpJointDof dof, PpSwingPosition pos)
+{
+    const int p = static_cast<int>(pos);
+    if (p < 0 || p >= kNumPos)
+        return QString();
+    return QStringLiteral("m_%1_p%2").arg(QLatin1String(dofName(dof))).arg(p + 1);
+}
+
+// The shared, cached set — NOT a fresh makeNormProvider(). MetricCatalogue::corridor() builds a
+// band provider per call, and the table this replaces was free; re-reading two JSON files per
+// corridor lookup would be a real regression.
+NormBandProvider::NormBandProvider() : m_norms(sharedNormProvider()) {}
+
+NormBandProvider::NormBandProvider(std::shared_ptr<const INormProvider> norms, GradePolicy policy)
+    : m_norms(std::move(norms)), m_policy(policy)
+{
+}
+
+NormBandProvider::~NormBandProvider() = default;
+
+Band NormBandProvider::band(PpJointDof dof, PpSwingPosition pos, const BandContext &ctx) const
+{
+    if (!m_norms)
+        return {};
+
+    const QString measureId = cellMeasureId(dof, pos);
+    if (measureId.isEmpty())
+        return {};
+
+    const NormResolution res = m_norms->resolve(measureId, ctx.resolvedContextId());
+    if (!res.found())
+        return {};                 // no norm anywhere on the chain — the engine greys the cell
+
+    const Norm &n = *res.norm;
+
+    Band b;
+    b.greenLo = n.idealLo();
+    b.greenHi = n.idealHi();
+    b.valid   = true;
+
+    // The amber edges. Migrated norms carry them explicitly, which is what makes the old corridors
+    // reproduce exactly; anything authored in the editor derives them from the grade policy, which
+    // is the behaviour a new corridor should have.
+    //
+    // The SwingLab bands.* override, when set, replaces the margin either way — it is a margin
+    // sweep, and sweeping a margin that half the norms do not store as a margin would silently do
+    // nothing on those.
+    const double ovMargin = ctx.tuning.marginFor(dof);
+    if (ovMargin >= 0.0) {
+        b.amberLo = b.greenLo - ovMargin;
+        b.amberHi = b.greenHi + ovMargin;
+    } else if (n.hasExplicitMonitor()) {
+        b.amberLo = *n.monitorLo;
+        b.amberHi = *n.monitorHi;
+    } else {
+        b.amberLo = n.mu - m_policy.watchMaxZ * n.sigmaLo;
+        b.amberHi = n.mu + m_policy.watchMaxZ * n.sigmaHi;
+    }
+
+    return b;
+}
+
 std::unique_ptr<IReferenceBandProvider> makeReferenceBandProvider(BandProviderKind kind)
 {
     switch (kind) {
     case BandProviderKind::Config:    return std::make_unique<ConfigReferenceBandProvider>();
     case BandProviderKind::Archetype: return std::make_unique<ArchetypeBandProvider>();
+    case BandProviderKind::Norm:      return std::make_unique<NormBandProvider>();
     }
-    return std::make_unique<ConfigReferenceBandProvider>();
+    return std::make_unique<NormBandProvider>();
 }
 
 } // namespace pinpoint::analysis

@@ -22,6 +22,12 @@
 
 namespace pinpoint::analysis {
 
+// Confidence multiplier applied when the shot declared no context and the norm was resolved against
+// the default. Chosen to land a full-confidence reading below assessment_rules' confidence floor,
+// so an inferred-context finding is kept and marked rather than dropped — the deviation is real,
+// what is uncertain is whether the right norm was used to judge it.
+constexpr float kInferredContextConfidence = 0.7f;
+
 QString findingStateName(FindingState s)
 {
     switch (s) {
@@ -107,7 +113,18 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
             return v;
         }
         const Direction d = sig.direction.value_or(Direction::High);
-        v.fired = (d == Direction::High) ? (r.value > r.greenHi) : (r.value < r.greenLo);
+        // Two conditions, both required. The GRADE decides whether this is a deviation at all
+        // (Watch or Action — see MeasureReading::grade for why not merely "outside Ideal"), and the
+        // SIDE decides whether it is this tail's deviation. An axis has two conditions on one norm,
+        // so without the side check both tails would fire on any deviation in either direction.
+        const bool deviated = isDeviation(r.grade);
+        const bool onTail   = (d == Direction::High) ? (r.value > r.greenHi) : (r.value < r.greenLo);
+        v.fired = deviated && onTail;
+
+        // A context the shot never declared is a weaker basis for a finding than one it did. Reuse
+        // the confidence channel rather than inventing a second signal for it — assessment_rules
+        // already demotes on low confidence, and a parallel mechanism would need its own UI.
+        if (r.contextInferred) v.confidence *= kInferredContextConfidence;
         break;
     }
     case SignalTest::Threshold: {
@@ -129,7 +146,10 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
         const MeasureReading &r = readings.front();
         if (!r.hasCorridor) { v.available = false; v.missing = sig.measures; return v; }
         const Direction d = sig.direction.value_or(Direction::High);
+        // The ratio is computed here, so the reading's own grade (which grades readings[0]'s value,
+        // not the ratio) does not apply. The corridor edges do.
         v.fired = (d == Direction::High) ? (ratio > r.greenHi) : (ratio < r.greenLo);
+        if (r.contextInferred) v.confidence *= kInferredContextConfidence;
         break;
     }
     }

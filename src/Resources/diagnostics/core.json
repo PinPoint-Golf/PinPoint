@@ -415,6 +415,610 @@
       "status": "planned",
       "label": "",
       "metricKey": "leadHandWidth"
+    },
+    {
+      "id": "m_leadWristFlexExt_p1",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup at P1",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristFlexExt_p2",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p2"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup — change from address at P2",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristFlexExt_p3",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p3"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup — change from address at P3",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristFlexExt_p4",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup — change from address at P4",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristFlexExt_p5",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p5"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup — change from address at P5",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristFlexExt_p6",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p6"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup — change from address at P6",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristFlexExt_p7",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup — change from address at P7",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristFlexExt_p8",
+      "kind": "provided",
+      "metricKey": "leadWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p8"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist bow / cup — change from address at P8",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p1",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Lead wrist hinge at P1",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p2",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p2"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist hinge — change from address at P2",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p3",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p3"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist hinge — change from address at P3",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p4",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist hinge — change from address at P4",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p5",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p5"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist hinge — change from address at P5",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p6",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p6"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist hinge — change from address at P6",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p7",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist hinge — change from address at P7",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadWristRadUln_p8",
+      "kind": "provided",
+      "metricKey": "leadWristRadUln",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p8"
+        ]
+      },
+      "status": "live",
+      "label": "Lead wrist hinge — change from address at P8",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p1",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Lead forearm roll at P1",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p2",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p2"
+        ]
+      },
+      "status": "live",
+      "label": "Lead forearm roll — change from address at P2",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p3",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p3"
+        ]
+      },
+      "status": "live",
+      "label": "Lead forearm roll — change from address at P3",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p4",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "live",
+      "label": "Lead forearm roll — change from address at P4",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p5",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p5"
+        ]
+      },
+      "status": "live",
+      "label": "Lead forearm roll — change from address at P5",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p6",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p6"
+        ]
+      },
+      "status": "live",
+      "label": "Lead forearm roll — change from address at P6",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p7",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Lead forearm roll — change from address at P7",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadForearmRot_p8",
+      "kind": "provided",
+      "metricKey": "forearmPronation",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p8"
+        ]
+      },
+      "status": "live",
+      "label": "Lead forearm roll — change from address at P8",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p1",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "live",
+      "label": "Lead elbow flexion at P1",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p2",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p2"
+        ]
+      },
+      "status": "live",
+      "label": "Lead elbow flexion — change from address at P2",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p3",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p3"
+        ]
+      },
+      "status": "live",
+      "label": "Lead elbow flexion — change from address at P3",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p4",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "live",
+      "label": "Lead elbow flexion — change from address at P4",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p5",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p5"
+        ]
+      },
+      "status": "live",
+      "label": "Lead elbow flexion — change from address at P5",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p6",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p6"
+        ]
+      },
+      "status": "live",
+      "label": "Lead elbow flexion — change from address at P6",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p7",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Lead elbow flexion — change from address at P7",
+      "unit": "°"
+    },
+    {
+      "id": "m_leadElbowFlex_p8",
+      "kind": "provided",
+      "metricKey": "leadArmFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p8"
+        ]
+      },
+      "status": "live",
+      "label": "Lead elbow flexion — change from address at P8",
+      "unit": "°"
+    },
+    {
+      "id": "m_trailWristFlexExt_p1",
+      "kind": "provided",
+      "metricKey": "trailWristFlexExt",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Trail wrist bow / cup at P1",
+      "unit": "°"
+    },
+    {
+      "id": "m_trailWristFlexExt_p2",
+      "kind": "provided",
+      "metricKey": "trailWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p2"
+        ]
+      },
+      "status": "planned",
+      "label": "Trail wrist bow / cup — change from address at P2",
+      "unit": "°"
+    },
+    {
+      "id": "m_trailWristFlexExt_p3",
+      "kind": "provided",
+      "metricKey": "trailWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p3"
+        ]
+      },
+      "status": "planned",
+      "label": "Trail wrist bow / cup — change from address at P3",
+      "unit": "°"
+    },
+    {
+      "id": "m_trailWristFlexExt_p4",
+      "kind": "provided",
+      "metricKey": "trailWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "planned",
+      "label": "Trail wrist bow / cup — change from address at P4",
+      "unit": "°"
+    },
+    {
+      "id": "m_trailWristFlexExt_p5",
+      "kind": "provided",
+      "metricKey": "trailWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p5"
+        ]
+      },
+      "status": "planned",
+      "label": "Trail wrist bow / cup — change from address at P5",
+      "unit": "°"
+    },
+    {
+      "id": "m_trailWristFlexExt_p6",
+      "kind": "provided",
+      "metricKey": "trailWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p6"
+        ]
+      },
+      "status": "planned",
+      "label": "Trail wrist bow / cup — change from address at P6",
+      "unit": "°"
+    },
+    {
+      "id": "m_trailWristFlexExt_p7",
+      "kind": "provided",
+      "metricKey": "trailWristFlexExt",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p7"
+        ]
+      },
+      "status": "planned",
+      "label": "Trail wrist bow / cup — change from address at P7",
+      "unit": "°"
     }
   ],
   "signals": [

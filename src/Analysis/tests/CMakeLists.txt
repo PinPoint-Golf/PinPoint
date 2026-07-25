@@ -37,20 +37,49 @@ pp_add_test(wrist_angle_sampling_test SOURCES wrist_angle_sampling_test.cpp)
 # --- Wrist Motion assessment engine ------------------------------------------
 # The engine .cpp pulls in the rule registry, so every engine-linked test
 # compiles both.
+# reference_bands.cpp now hosts NormBandProvider, so it pulls in the norm stack (the corridors it
+# used to compile in are content). Every test that links the wrist engine needs these, and needs
+# PINPOINT_CORE_NORMS / PINPOINT_CORE_CONTEXTS to find the shipped files — see pp_norm_env below.
+# reference_bands.h now pulls Diagnostics -> Metrics -> Analysis transitively (metric_reducer.h
+# includes swing_analysis.h non-relatively), so any test touching it needs all three on the path.
+set(NORM_INC ${SRC}/Diagnostics ${SRC}/Metrics ${ANALYSIS})
+set(NORM_SRC ${SRC}/Diagnostics/norm_pack.cpp ${SRC}/Diagnostics/context_tree.cpp
+             ${SRC}/Diagnostics/characteristic_pack.cpp ${SRC}/Diagnostics/characteristic.cpp
+             ${SRC}/Diagnostics/measure_facets.cpp ${SRC}/Diagnostics/anatomy_vocabulary.cpp
+             ${SRC}/Diagnostics/resource_norm_provider.cpp
+             ${SRC}/Diagnostics/file_norm_provider.cpp
+             ${SRC}/Diagnostics/merged_norm_provider.cpp)
+
+# The shipped norm set and context tree live in Qt resources, which exist only inside the app
+# binary. Every standalone test that can reach NormBandProvider is pointed at the reviewable JSON.
+function(pp_norm_env target)
+    set_tests_properties(${target} PROPERTIES
+        ENVIRONMENT "PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+endfunction()
+
 set(WRIST_ENGINE ${ANALYSIS}/reference_bands.cpp
                  ${ANALYSIS}/wrist_assessment_engine.cpp
-                 ${ANALYSIS}/assessment_rules.cpp)
+                 ${ANALYSIS}/assessment_rules.cpp
+                 ${NORM_SRC})
 
-pp_add_test(reference_bands_test    SOURCES reference_bands_test.cpp ${ANALYSIS}/reference_bands.cpp)
-pp_add_test(archetype_bands_test    SOURCES archetype_bands_test.cpp ${WRIST_ENGINE})
-pp_add_test(tier1_banding_test      SOURCES tier1_banding_test.cpp   ${WRIST_ENGINE})
+pp_add_test(reference_bands_test    SOURCES reference_bands_test.cpp ${ANALYSIS}/reference_bands.cpp ${NORM_SRC}
+    INCLUDE ${NORM_INC})
+pp_add_test(archetype_bands_test    SOURCES archetype_bands_test.cpp ${WRIST_ENGINE} INCLUDE ${NORM_INC})
+pp_add_test(tier1_banding_test      SOURCES tier1_banding_test.cpp   ${WRIST_ENGINE} INCLUDE ${NORM_INC})
 pp_add_test(wrist_analysis_adapter_test
-    SOURCES wrist_analysis_adapter_test.cpp ${ANALYSIS}/wrist_analysis_adapter.cpp ${WRIST_ENGINE})
-pp_add_test(fault_rules_test        SOURCES fault_rules_test.cpp        ${WRIST_ENGINE})
-pp_add_test(strengths_test          SOURCES strengths_test.cpp          ${WRIST_ENGINE})
-pp_add_test(relationship_rules_test SOURCES relationship_rules_test.cpp ${WRIST_ENGINE})
-pp_add_test(confidence_test         SOURCES confidence_test.cpp         ${WRIST_ENGINE})
-pp_add_test(composite_score_v2_test SOURCES composite_score_v2_test.cpp ${WRIST_ENGINE})
+    SOURCES wrist_analysis_adapter_test.cpp ${ANALYSIS}/wrist_analysis_adapter.cpp ${WRIST_ENGINE}
+    INCLUDE ${NORM_INC})
+pp_add_test(fault_rules_test        SOURCES fault_rules_test.cpp        ${WRIST_ENGINE} INCLUDE ${NORM_INC})
+pp_add_test(strengths_test          SOURCES strengths_test.cpp          ${WRIST_ENGINE} INCLUDE ${NORM_INC})
+pp_add_test(relationship_rules_test SOURCES relationship_rules_test.cpp ${WRIST_ENGINE} INCLUDE ${NORM_INC})
+pp_add_test(confidence_test         SOURCES confidence_test.cpp         ${WRIST_ENGINE} INCLUDE ${NORM_INC})
+pp_add_test(composite_score_v2_test SOURCES composite_score_v2_test.cpp ${WRIST_ENGINE} INCLUDE ${NORM_INC})
+
+foreach(t reference_bands_test archetype_bands_test tier1_banding_test wrist_analysis_adapter_test
+          fault_rules_test strengths_test relationship_rules_test confidence_test
+          composite_score_v2_test)
+    pp_norm_env(${t})
+endforeach()
 
 # --- Header-only math contracts ----------------------------------------------
 # Kinematic-sequence reduction (kinematic_sequence.h) — peak-of-largest-magnitude
@@ -104,7 +133,10 @@ pp_add_test(tuned_constants_parity_test SOURCES tuned_constants_parity_test.cpp)
 # WB1 person-crop geometry (pose_crop.h): union bbox → margin → 3:4 aspect → clamp
 # → integer pixels, the full-frame fallback guards, and fromOverrides plumbing.
 pp_add_test(pose_crop_test SOURCES pose_crop_test.cpp)
-pp_add_test(tuning_overrides_test SOURCES tuning_overrides_test.cpp ${ANALYSIS}/swing_scorer.cpp ${ANALYSIS}/reference_bands.cpp)
+pp_add_test(tuning_overrides_test SOURCES tuning_overrides_test.cpp ${ANALYSIS}/swing_scorer.cpp
+                                          ${ANALYSIS}/reference_bands.cpp ${NORM_SRC}
+                                  INCLUDE ${NORM_INC})
+pp_norm_env(tuning_overrides_test)
 
 # Capability-gated stage pipeline (analysis_stage.h): authored-order orchestration,
 # canRun/skipReason gating, the halted short-circuit, product gating between stages via
@@ -171,8 +203,9 @@ pp_add_test(metric_catalogue_test
             ${SRC}/Metrics/metric_resolver.cpp
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
-            ${ANALYSIS}/reference_bands.cpp
-    INCLUDE ${SRC}/Metrics ${ANALYSIS})
+            ${ANALYSIS}/reference_bands.cpp ${NORM_SRC}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+pp_norm_env(metric_catalogue_test)
 
 # WB4 shared hand geometry (hand_axis.h): handCentroid (byte-identical to the
 # pose_runner original), computeGripAnchors (the pose.gripFromSmoothedHands
@@ -395,6 +428,10 @@ pp_add_test(shaft_onset_test
 # Qt-GUI, and deliberately NOT wired into the live analysis path — the engine
 # runs against synthetic input only (see docs/design/swing_characteristics_impl_plan.md).
 set(DIAG ${SRC}/Diagnostics)
+# The shipped diagnostics content moved to src/Resources/diagnostics/ (alongside the icons
+# resource) when norms and the context tree joined the pack. Tests read the reviewable JSON
+# directly — the Qt resource exists only inside the app binary.
+set(DIAGRES ${SRC}/Resources/diagnostics)
 
 # Anatomy vocabulary: role metadata, handedness resolution both ways, derived
 # midpoints, both pose layouts (17-kp live / 133-kp wholebody), and the hard
@@ -436,7 +473,7 @@ pp_add_test(characteristic_pack_test
 pp_add_test(core_pack_test
     SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
-    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 
 # Detection + explanation passes, DARK: synthetic measure source only, never invoked on a real
 # swing. Asserts the rule the whole library depends on — an absent measure resolves Unavailable and
@@ -462,9 +499,9 @@ pp_add_test(characteristic_editor_test
             ${DIAG}/merged_pack_provider.cpp ${DIAG_PACK}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
     LINK    Qt6::Qml
-    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 set_tests_properties(characteristic_editor_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Diagnostics/packs/core.json")
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json")
 
 # Cross-registry integrity: the diagnostics pack vs the metric catalogue. The catalogue's `usedBy`
 # is hand-authored and will otherwise rot silently — a wrong reverse index is worse than an absent
@@ -479,11 +516,77 @@ pp_add_test(diagnostics_catalogue_integrity_test
             ${SRC}/Metrics/metric_resolver.cpp
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
-            ${ANALYSIS}/reference_bands.cpp
+            ${ANALYSIS}/reference_bands.cpp ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
     LINK    Qt6::Qml
-    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAG}/packs/core.json")
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 # CharacteristicLibraryModel assembles the pack through the provider, which normally reads the Qt
 # resource — absent from a standalone binary. Point it at the reviewable JSON instead.
 set_tests_properties(diagnostics_catalogue_integrity_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Diagnostics/packs/core.json")
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
+# ── Norms ───────────────────────────────────────────────────────────────────
+set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+              ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
+              ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp)
+
+# The grade rule. Asserts z is computed per side (an asymmetric norm grades asymmetrically) and
+# that an explicit monitor band dominates the z-derived outer edge in BOTH directions — the rule
+# that makes the corridors migrated out of reference_bands.cpp reproduce exactly.
+pp_add_test(norm_test
+    SOURCES ${DIAG}/tests/norm_test.cpp ${DIAG}/norm_pack.cpp ${DIAG}/characteristic_pack.cpp
+            ${DIAG}/characteristic.cpp ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp
+            ${DIAG}/context_tree.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+
+# Upward resolution through the context tree, plus the rule that an UNKNOWN context resolves to
+# nothing rather than silently falling back to full_swing. Also gates the shipped contexts.json.
+pp_add_test(context_tree_test
+    SOURCES ${DIAG}/tests/context_tree_test.cpp ${DIAG_NORM}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
+    COMPILE_OPTIONS -DPP_CONTEXTS_PATH="${DIAGRES}/contexts.json")
+
+# Norm persistence, validation and layering. The load-bearing assertion is that CONTEXT SPECIFICITY
+# BEATS LAYER PRECEDENCE: a user adjusting the general full-swing norm must not silently override
+# every club-specific shipped norm beneath it.
+pp_add_test(norm_pack_test
+    SOURCES ${DIAG}/tests/norm_pack_test.cpp ${DIAG_NORM}
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+# The shipped norm set and context tree live in Qt resources, absent from a standalone binary —
+# same seam as PINPOINT_CORE_PACK.
+set_tests_properties(norm_pack_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
+# The join that lights the pack up: values + norms -> a graded reading, and the engine's corridor
+# test on top of it. Asserts the three silent failures — firing on ordinary variation, grading an
+# unknown context against the default, and an absent norm reading as a pass.
+pp_add_test(norm_measure_source_test
+    SOURCES ${DIAG}/tests/norm_measure_source_test.cpp ${DIAG}/characteristic_engine.cpp
+            ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+    INCLUDE ${NORM_INC})
+
+# THE MIGRATION GATE. NormBandProvider (bands projected from norms.json) must reproduce
+# ArchetypeBandProvider (the compiled table) bit-for-bit, on every band edge and every classified
+# delta. This test is what licenses deleting that table; if it fails, the CONVERSION is wrong, not
+# the target.
+pp_add_test(reference_bands_parity_test
+    SOURCES ${DIAG}/tests/reference_bands_parity_test.cpp ${ANALYSIS}/reference_bands.cpp
+            ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+# The other half of the migration gate: nothing DOWNSTREAM of the bands moved either — every cell's
+# rag/band/delta and every finding's id/severity/confidence, over a fixture sweep that actually
+# reaches Green, Amber and Red. Also catches a silently empty norm set, which a band-level diff
+# would report as a clean pass.
+pp_add_test(wrist_render_parity_test
+    SOURCES ${DIAG}/tests/wrist_render_parity_test.cpp ${WRIST_ENGINE}
+    INCLUDE ${NORM_INC})
+pp_norm_env(wrist_render_parity_test)
+
+set_tests_properties(reference_bands_parity_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")

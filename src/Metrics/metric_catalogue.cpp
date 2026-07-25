@@ -113,7 +113,7 @@ std::optional<NormativeCorridor> MetricCatalogue::corridor(const QString &key, P
         if (!pos)
             return std::nullopt;
         const std::unique_ptr<IReferenceBandProvider> provider =
-            makeReferenceBandProvider(BandProviderKind::Archetype);
+            makeReferenceBandProvider(BandProviderKind::Norm);
         const Band b = provider->band(*n.dof, *pos, bc);
         if (!b.valid)
             return std::nullopt;

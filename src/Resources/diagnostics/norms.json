@@ -1,0 +1,590 @@
+{
+  "id": "core",
+  "version": "1.0.0",
+  "schemaVersion": 1,
+  "_comment": [
+    "The shipped norm set. A norm is the normative distribution a measured value is graded",
+    "against, keyed by (measure, context) — never by athlete. ALL NORMS HERE ARE POPULATION",
+    "NORMS.",
+    "",
+    "mu is the centre; sigmaLo/sigmaHi are the tolerances either side (sigmaHi defaults to",
+    "sigmaLo when omitted, so a symmetric norm is written once). Asymmetry is normal, not",
+    "exotic — ball position forward is tolerated far more than back.",
+    "",
+    "monitorLo/monitorHi are ABSOLUTE bounds on the Watch band and exist ONLY to reproduce",
+    "migrated content exactly: the old amber margin was a fixed number of degrees either",
+    "side of green, which is not a multiple of the green half-width and so cannot be",
+    "derived from the grade policy. Anything authored in the corridor editor omits them and",
+    "inherits the policy. If you are hand-writing a new norm you almost certainly do not",
+    "want them.",
+    "",
+    "'unit' MUST match the measure's unit — a mismatch is a load error naming both sides,",
+    "never a silent grade.",
+    "",
+    "The wrist-grid rows below were migrated from the compiled table that used to live in",
+    "src/Analysis/reference_bands.cpp, and are pinned by reference_bands_parity_test. That",
+    "table is gone: THIS FILE is now the only place those corridors exist. Edit them here.",
+    "",
+    "They are STARTING HEURISTICS (design §11) — every number is expected to move once it",
+    "is re-seated against a corpus. They carry no citation because there is nothing to",
+    "cite; 'source: heuristic' with no n says exactly that.",
+    "",
+    "The archetype_bowed / archetype_cupped rows are the face-corridor shift that used to",
+    "be a compiled ±10° offset inside ArchetypeBandProvider (kArchetypeFaceOffsetDeg).",
+    "Bowed styles tolerate more bow and cupped styles more cup, so grading a valid style",
+    "against the neutral corridor would red-flag it. They override full_swing on the",
+    "lead-wrist face axis ONLY; every other DOF is archetype-invariant and inherits."
+  ],
+  "norms": [
+    {
+      "measure": "m_leadWristFlexExt_p1",
+      "context": "full_swing",
+      "mu": 0.0,
+      "sigmaLo": 5.0,
+      "monitorLo": -10.0,
+      "monitorHi": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p2",
+      "context": "full_swing",
+      "mu": 1.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -11.0,
+      "monitorHi": 13.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p3",
+      "context": "full_swing",
+      "mu": 2.0,
+      "sigmaLo": 9.0,
+      "monitorLo": -12.0,
+      "monitorHi": 16.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p4",
+      "context": "full_swing",
+      "mu": 5.0,
+      "sigmaLo": 11.0,
+      "monitorLo": -11.0,
+      "monitorHi": 21.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p5",
+      "context": "full_swing",
+      "mu": 7.5,
+      "sigmaLo": 10.5,
+      "monitorLo": -8.0,
+      "monitorHi": 23.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p6",
+      "context": "full_swing",
+      "mu": 9.5,
+      "sigmaLo": 8.5,
+      "monitorLo": -4.0,
+      "monitorHi": 23.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p7",
+      "context": "full_swing",
+      "mu": 8.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -4.0,
+      "monitorHi": 20.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p8",
+      "context": "full_swing",
+      "mu": 4.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -9.0,
+      "monitorHi": 17.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p1",
+      "context": "full_swing",
+      "mu": 0.0,
+      "sigmaLo": 3.0,
+      "monitorLo": -8.0,
+      "monitorHi": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p2",
+      "context": "full_swing",
+      "mu": 10.0,
+      "sigmaLo": 10.0,
+      "monitorLo": -5.0,
+      "monitorHi": 25.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p3",
+      "context": "full_swing",
+      "mu": 28.0,
+      "sigmaLo": 10.0,
+      "monitorLo": 13.0,
+      "monitorHi": 43.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p4",
+      "context": "full_swing",
+      "mu": 38.0,
+      "sigmaLo": 12.0,
+      "monitorLo": 21.0,
+      "monitorHi": 55.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p5",
+      "context": "full_swing",
+      "mu": 38.0,
+      "sigmaLo": 12.0,
+      "monitorLo": 21.0,
+      "monitorHi": 55.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p6",
+      "context": "full_swing",
+      "mu": 30.0,
+      "sigmaLo": 10.0,
+      "monitorLo": 15.0,
+      "monitorHi": 45.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p7",
+      "context": "full_swing",
+      "mu": 8.0,
+      "sigmaLo": 10.0,
+      "monitorLo": -7.0,
+      "monitorHi": 23.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristRadUln_p8",
+      "context": "full_swing",
+      "mu": 0.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -13.0,
+      "monitorHi": 13.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p1",
+      "context": "full_swing",
+      "mu": 0.0,
+      "sigmaLo": 4.0,
+      "monitorLo": -9.0,
+      "monitorHi": 9.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p2",
+      "context": "full_swing",
+      "mu": -8.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -21.0,
+      "monitorHi": 5.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p3",
+      "context": "full_swing",
+      "mu": -16.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -29.0,
+      "monitorHi": -3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p4",
+      "context": "full_swing",
+      "mu": -20.0,
+      "sigmaLo": 9.0,
+      "monitorLo": -34.0,
+      "monitorHi": -6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p5",
+      "context": "full_swing",
+      "mu": -12.0,
+      "sigmaLo": 9.0,
+      "monitorLo": -26.0,
+      "monitorHi": 2.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p6",
+      "context": "full_swing",
+      "mu": -5.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -18.0,
+      "monitorHi": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p7",
+      "context": "full_swing",
+      "mu": 0.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -13.0,
+      "monitorHi": 13.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadForearmRot_p8",
+      "context": "full_swing",
+      "mu": 0.0,
+      "sigmaLo": 5.0,
+      "monitorLo": -10.0,
+      "monitorHi": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p1",
+      "context": "full_swing",
+      "mu": 1.5,
+      "sigmaLo": 4.5,
+      "monitorLo": -7.0,
+      "monitorHi": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p2",
+      "context": "full_swing",
+      "mu": 3.0,
+      "sigmaLo": 5.0,
+      "monitorLo": -6.0,
+      "monitorHi": 12.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p3",
+      "context": "full_swing",
+      "mu": 4.0,
+      "sigmaLo": 6.0,
+      "monitorLo": -6.0,
+      "monitorHi": 14.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p4",
+      "context": "full_swing",
+      "mu": 5.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -6.0,
+      "monitorHi": 16.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p5",
+      "context": "full_swing",
+      "mu": 4.0,
+      "sigmaLo": 6.0,
+      "monitorLo": -6.0,
+      "monitorHi": 14.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p6",
+      "context": "full_swing",
+      "mu": 4.0,
+      "sigmaLo": 6.0,
+      "monitorLo": -6.0,
+      "monitorHi": 14.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p7",
+      "context": "full_swing",
+      "mu": 5.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -6.0,
+      "monitorHi": 16.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadElbowFlex_p8",
+      "context": "full_swing",
+      "mu": 5.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -6.0,
+      "monitorHi": 16.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailWristFlexExt_p1",
+      "context": "full_swing",
+      "mu": 0.0,
+      "sigmaLo": 4.0,
+      "monitorLo": -10.0,
+      "monitorHi": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailWristFlexExt_p2",
+      "context": "full_swing",
+      "mu": 15.0,
+      "sigmaLo": 10.0,
+      "monitorLo": -1.0,
+      "monitorHi": 31.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailWristFlexExt_p3",
+      "context": "full_swing",
+      "mu": 32.0,
+      "sigmaLo": 10.0,
+      "monitorLo": 16.0,
+      "monitorHi": 48.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailWristFlexExt_p4",
+      "context": "full_swing",
+      "mu": 45.0,
+      "sigmaLo": 12.0,
+      "monitorLo": 27.0,
+      "monitorHi": 63.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailWristFlexExt_p5",
+      "context": "full_swing",
+      "mu": 40.0,
+      "sigmaLo": 12.0,
+      "monitorLo": 22.0,
+      "monitorHi": 58.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailWristFlexExt_p6",
+      "context": "full_swing",
+      "mu": 29.0,
+      "sigmaLo": 11.0,
+      "monitorLo": 12.0,
+      "monitorHi": 46.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailWristFlexExt_p7",
+      "context": "full_swing",
+      "mu": 12.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -2.0,
+      "monitorHi": 26.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p1",
+      "context": "archetype_bowed",
+      "mu": 10.0,
+      "sigmaLo": 5.0,
+      "monitorLo": 0.0,
+      "monitorHi": 20.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p2",
+      "context": "archetype_bowed",
+      "mu": 11.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -1.0,
+      "monitorHi": 23.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p3",
+      "context": "archetype_bowed",
+      "mu": 12.0,
+      "sigmaLo": 9.0,
+      "monitorLo": -2.0,
+      "monitorHi": 26.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p4",
+      "context": "archetype_bowed",
+      "mu": 15.0,
+      "sigmaLo": 11.0,
+      "monitorLo": -1.0,
+      "monitorHi": 31.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p5",
+      "context": "archetype_bowed",
+      "mu": 17.5,
+      "sigmaLo": 10.5,
+      "monitorLo": 2.0,
+      "monitorHi": 33.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p6",
+      "context": "archetype_bowed",
+      "mu": 19.5,
+      "sigmaLo": 8.5,
+      "monitorLo": 6.0,
+      "monitorHi": 33.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p7",
+      "context": "archetype_bowed",
+      "mu": 18.0,
+      "sigmaLo": 7.0,
+      "monitorLo": 6.0,
+      "monitorHi": 30.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p8",
+      "context": "archetype_bowed",
+      "mu": 14.0,
+      "sigmaLo": 8.0,
+      "monitorLo": 1.0,
+      "monitorHi": 27.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p1",
+      "context": "archetype_cupped",
+      "mu": -10.0,
+      "sigmaLo": 5.0,
+      "monitorLo": -20.0,
+      "monitorHi": 0.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p2",
+      "context": "archetype_cupped",
+      "mu": -9.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -21.0,
+      "monitorHi": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p3",
+      "context": "archetype_cupped",
+      "mu": -8.0,
+      "sigmaLo": 9.0,
+      "monitorLo": -22.0,
+      "monitorHi": 6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p4",
+      "context": "archetype_cupped",
+      "mu": -5.0,
+      "sigmaLo": 11.0,
+      "monitorLo": -21.0,
+      "monitorHi": 11.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p5",
+      "context": "archetype_cupped",
+      "mu": -2.5,
+      "sigmaLo": 10.5,
+      "monitorLo": -18.0,
+      "monitorHi": 13.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p6",
+      "context": "archetype_cupped",
+      "mu": -0.5,
+      "sigmaLo": 8.5,
+      "monitorLo": -14.0,
+      "monitorHi": 13.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p7",
+      "context": "archetype_cupped",
+      "mu": -2.0,
+      "sigmaLo": 7.0,
+      "monitorLo": -14.0,
+      "monitorHi": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadWristFlexExt_p8",
+      "context": "archetype_cupped",
+      "mu": -6.0,
+      "sigmaLo": 8.0,
+      "monitorLo": -19.0,
+      "monitorHi": 7.0,
+      "unit": "°",
+      "source": "heuristic"
+    }
+  ]
+}

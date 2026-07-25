@@ -470,6 +470,16 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/characteristic_engine.cpp
         src/Diagnostics/relation_resolver.h
         src/Diagnostics/relation_resolver.cpp
+        src/Diagnostics/norm.h
+        src/Diagnostics/context_tree.h
+        src/Diagnostics/context_tree.cpp
+        src/Diagnostics/norm_pack.h
+        src/Diagnostics/norm_pack.cpp
+        src/Diagnostics/norm_provider.h
+        src/Diagnostics/norm_measure_source.h
+        src/Diagnostics/resource_norm_provider.cpp
+        src/Diagnostics/file_norm_provider.cpp
+        src/Diagnostics/merged_norm_provider.cpp
         src/Gui/diagnostics/wrist_diagnostics_model.h
         src/Gui/diagnostics/wrist_diagnostics_model.cpp
         src/Analysis/reference_bands.h
@@ -611,14 +621,18 @@ configure_file(
 )
 
 
-# The shipped swing-characteristics pack. src/Diagnostics/packs/core.json is the reviewable source
-# of truth committed to the repo; this embeds it for runtime. Keep the two in step — there is no
-# generation step, the file IS the content.
+# The shipped diagnostics content — the swing-characteristics pack, the norm set and the context
+# tree. The files under src/Resources/diagnostics/ are the reviewable source of truth committed to
+# the repo; this embeds them for runtime. Keep the two in step — there is no generation step, the
+# files ARE the content, which is what lets a community contribution arrive as a pull request
+# against readable JSON rather than a binary blob.
 qt_add_resources(PinPointStudio "app_diagnostics"
     PREFIX "/diagnostics"
-    BASE   "src/Diagnostics/packs"
+    BASE   "src/Resources/diagnostics"
     FILES
-        src/Diagnostics/packs/core.json
+        src/Resources/diagnostics/core.json
+        src/Resources/diagnostics/norms.json
+        src/Resources/diagnostics/contexts.json
 )
 
 qt_add_resources(PinPointStudio "app_icons"
@@ -2545,6 +2559,18 @@ if(PINPOINT_BUILD_TOOLS)
         src/Analysis/wrist_assessment_engine.cpp
         src/Analysis/assessment_rules.cpp
         src/Analysis/reference_bands.cpp
+        # reference_bands.cpp hosts NormBandProvider — the corridors it used to compile in are now
+        # content in src/Resources/diagnostics/norms.json, so the offline stack needs the norm
+        # stack too. Omit these and swinglab_run / in-app re-analyse fail at link time.
+        src/Diagnostics/norm_pack.cpp
+        src/Diagnostics/context_tree.cpp
+        src/Diagnostics/characteristic_pack.cpp
+        src/Diagnostics/characteristic.cpp
+        src/Diagnostics/measure_facets.cpp
+        src/Diagnostics/anatomy_vocabulary.cpp
+        src/Diagnostics/resource_norm_provider.cpp
+        src/Diagnostics/file_norm_provider.cpp
+        src/Diagnostics/merged_norm_provider.cpp
         src/Analysis/pose_runner.cpp
         src/Analysis/ball_runner.cpp
         src/Analysis/shaft_tracker.cpp
@@ -2617,8 +2643,28 @@ if(PINPOINT_BUILD_TOOLS)
         endif()
     endfunction()
 
+    # The shipped diagnostics content, embedded in every offline target too.
+    #
+    # This is NOT optional and it is NOT shared with the app's copy: qt_add_resources attaches to
+    # ONE target, so an offline binary that omits it starts with an empty norm set. Since the wrist
+    # corridors are content now rather than a compiled table, that would leave every band absent —
+    # swinglab_run and in-app re-analyse would grey the whole wrist grid and produce no findings,
+    # silently, with no error to notice. wrist_render_parity_test guards the same failure in the
+    # test suite; this is the build-side half of it.
+    function(pinpoint_add_diagnostics_resources tgt)
+        qt_add_resources(${tgt} "${tgt}_diagnostics"
+            PREFIX "/diagnostics"
+            BASE   "src/Resources/diagnostics"
+            FILES
+                src/Resources/diagnostics/core.json
+                src/Resources/diagnostics/norms.json
+                src/Resources/diagnostics/contexts.json
+        )
+    endfunction()
+
     add_executable(swinglab_run tools/swinglab/src/swinglab_run.cpp ${_pinpoint_offline_sources})
     pinpoint_configure_offline_target(swinglab_run)
+    pinpoint_add_diagnostics_resources(swinglab_run)
     # The runner resolves the ViTPose model next to its own binary, same as the app.
     message(STATUS "SwingLab tools: swinglab_run enabled")
 
@@ -2631,6 +2677,7 @@ if(PINPOINT_BUILD_TOOLS)
         src/Export/video_encoder.cpp
     )
     pinpoint_configure_offline_target(swing_window_parity_test)
+    pinpoint_add_diagnostics_resources(swing_window_parity_test)
     if(FFMPEG_FOUND)
         target_sources(swing_window_parity_test PRIVATE src/Export/ffmpeg_video_encoder.cpp)
         target_compile_definitions(swing_window_parity_test PRIVATE HAVE_FFMPEG)

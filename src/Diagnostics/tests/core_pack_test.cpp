@@ -1,4 +1,4 @@
-// Acceptance tests for the SHIPPED seed pack (src/Diagnostics/packs/core.json).
+// Acceptance tests for the SHIPPED seed pack (src/Resources/diagnostics/core.json).
 //
 // The pack is not done when its characteristics load — it is done when the causal graph resolves in
 // the right direction, the dominant causes concentrate, and no brand name has leaked into the

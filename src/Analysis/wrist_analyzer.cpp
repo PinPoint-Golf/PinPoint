@@ -815,7 +815,7 @@ struct AssessmentStage : AnalysisStage {
     {
         const InMemoryWristAngleSource src = buildWristAngleSource(ctx.detail->series,
                                                                    ctx.detail->phases);
-        const auto provider = makeReferenceBandProvider(BandProviderKind::Archetype);
+        const auto provider = makeReferenceBandProvider(BandProviderKind::Norm);
         const WristAssessmentConfig acfg = wristAssessmentConfigFor(ctx.job.tuningOverrides);
         const PpWristAssessmentResult ar = WristAssessmentEngine::assess(src, *provider, acfg);
         ctx.detail->findings        = ar.findings;
@@ -853,7 +853,7 @@ struct PoseAssessmentStage : AnalysisStage {
             cfmt && cfmt->width > 0 && cfmt->height > 0) {
             const PoseWristAngleSource src(ctx.detail->pose2d, ctx.detail->phases, ctx.job.handedness,
                                            int(cfmt->width), int(cfmt->height), poseWristCfg);
-            const auto provider = makeReferenceBandProvider(BandProviderKind::Archetype);
+            const auto provider = makeReferenceBandProvider(BandProviderKind::Norm);
             const WristAssessmentConfig acfg = wristAssessmentConfigFor(ctx.job.tuningOverrides);
             const PpWristAssessmentResult ar = WristAssessmentEngine::assess(src, *provider, acfg);
             ctx.detail->findings        = ar.findings;

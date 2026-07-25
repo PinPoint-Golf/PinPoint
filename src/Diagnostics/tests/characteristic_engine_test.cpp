@@ -29,13 +29,9 @@ class FakeSource final : public IMeasureSource {
 public:
     void add(const QString &id, double value, double lo, double hi, float conf = 1.0f)
     {
-        MeasureReading r;
-        r.value       = value;
-        r.hasCorridor = true;
-        r.greenLo     = lo;
-        r.greenHi     = hi;
-        r.confidence  = conf;
-        m[id]         = r;
+        // fromCorridor, not hand-built: a corridor with an unset grade never fires, which reads as
+        // "nothing was wrong" and is precisely the false negative this engine exists to avoid.
+        m[id] = MeasureReading::fromCorridor(value, lo, hi, conf);
     }
     // Present, but with no corridor to grade against — must be Unavailable, not a pass.
     void addWithoutCorridor(const QString &id, double value)

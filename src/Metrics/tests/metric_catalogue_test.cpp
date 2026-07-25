@@ -59,7 +59,7 @@ int main()
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 52, "descriptor count == 52");
+        checkEqI(static_cast<int>(cat.all().size()), 53, "descriptor count == 53");
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -80,13 +80,13 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  30, "TimeSeries count");
+        checkEqI(countType(cat, MetricType::TimeSeries),  31, "TimeSeries count");
         checkEqI(countType(cat, MetricType::PointInTime), 16, "PointInTime count");
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
         MetricQuery gq; gq.group = QStringLiteral("Wrist & forearm");
-        checkEqI(static_cast<int>(cat.query(gq).size()), 4, "group 'Wrist & forearm' == 4");
+        checkEqI(static_cast<int>(cat.query(gq).size()), 5, "group 'Wrist & forearm' == 5");
 
         MetricQuery scq; scq.group = QStringLiteral("Score");
         checkEqI(static_cast<int>(cat.query(scq).size()), 3, "group 'Score' == 3");
