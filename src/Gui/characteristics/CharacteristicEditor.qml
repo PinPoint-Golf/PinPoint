@@ -99,13 +99,29 @@ Item {
             // change lives in their own file and can be undone.
             Text {
                 Layout.fillWidth: true
-                visible: root.editor.overridesCore && !root.editor.isNew
+                visible: root.editor.shippedExists && !root.editor.hasUserOverride
+                         && !root.editor.isNew
                 text: qsTr("This is a shipped characteristic. Your changes are saved to your own "
                            + "library and override the shipped version — the original is never "
                            + "modified, so you can restore it at any time.")
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3
+                wrapMode:       Text.WordWrap
+            }
+
+            // Already edited. Said in the accent because "is this still what we ship?" is the one
+            // thing about a characteristic you cannot tell by reading it.
+            Text {
+                Layout.fillWidth: true
+                visible: root.editor.hasUserOverride && !root.editor.isNew
+                text: root.editor.shippedExists
+                        ? qsTr("You have edited this shipped characteristic. The original is "
+                               + "untouched and can be restored below.")
+                        : qsTr("This characteristic is yours — nothing ships under this name.")
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorAccent
                 wrapMode:       Text.WordWrap
             }
 
@@ -438,9 +454,15 @@ Item {
                 Layout.fillWidth: true
                 spacing: Theme.sp(10)
 
+                // ONE operation, two very different outcomes — so two labels, and the destructive
+                // one is styled as destructive. Offering "Restore shipped version" for a
+                // characteristic that never shipped is how deleting somebody's work acquires a
+                // reassuring name.
                 PpButton {
-                    visible: root.editor.overridesCore === false && !root.editor.isNew
-                    label:   qsTr("Restore shipped version")
+                    visible:     root.editor.hasUserOverride && !root.editor.isNew
+                    label:       root.editor.shippedExists ? qsTr("Restore shipped version")
+                                                           : qsTr("Delete this characteristic")
+                    destructive: !root.editor.shippedExists
                     onClicked: {
                         var r = root.editor.revertToShipped()
                         root._show(r.message, r.ok)

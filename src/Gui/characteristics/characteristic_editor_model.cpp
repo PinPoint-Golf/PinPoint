@@ -129,14 +129,23 @@ const QuantityHint kQuantityHints[] = {
 } // namespace
 
 CharacteristicEditorModel::CharacteristicEditorModel(QObject *parent)
-    : QObject(parent), m_provider(makeCharacteristicPackProvider())
+    : QObject(parent), m_provider(makeCharacteristicPackProvider()),
+      m_core(makeResourcePackProvider())
 {
     // Load the user's override file separately from the merged view: saving must write back only
     // the user's own entries, never a flattened copy of the shipped pack.
+    //
+    // `parsed`, NOT `loaded` — the distinction is documented on PackLoadResult and getting it wrong
+    // here loses data. An overlay pack routinely fails STANDALONE referential validation, because
+    // its edges point at core conditions it does not itself contain; referential checks are only
+    // meaningful on the assembled library. Keying off `loaded` therefore started the editor with an
+    // EMPTY user pack whenever the user had an ordinary override on disk — and since save() upserts
+    // into m_userPack and writes the whole thing back, the next save silently erased every other
+    // override they had ever made.
     QFile f(userPackPath());
     if (f.open(QIODevice::ReadOnly)) {
         PackLoadResult res = loadPack(f.readAll(), userPackPath());
-        if (res.loaded) m_userPack = std::move(res.pack);
+        if (res.parsed) m_userPack = std::move(res.pack);
     }
     if (m_userPack.id.isEmpty()) {
         m_userPack.id            = QStringLiteral("user");
@@ -291,8 +300,14 @@ bool CharacteristicEditorModel::beginEdit(const QString &conditionId)
     m_editing = true;
     m_isNew   = false;
     m_dirty   = false;
-    // Already overriding, or about to: either way the shipped pack is untouched.
-    m_overridesCore = (m_userPack.condition(conditionId) == nullptr);
+
+    // Two INDEPENDENT facts, and the old single flag conflated them. "Does core ship this id?"
+    // decides whether dropping the user's row restores something or destroys it; "is there a user
+    // row?" decides whether there is anything to drop at all. A user's own characteristic has the
+    // second and not the first, which is exactly the case that used to be deleted behind a message
+    // saying it had been restored.
+    m_shippedExists   = m_core && m_core->pack().condition(conditionId) != nullptr;
+    m_hasUserOverride = m_userPack.condition(conditionId) != nullptr;
 
     emit draftChanged();
     return true;
@@ -308,10 +323,11 @@ void CharacteristicEditorModel::beginNew()
     m_draftMeasures.clear();
     m_draftEdges.clear();
 
-    m_editing       = true;
-    m_isNew         = true;
-    m_dirty         = false;
-    m_overridesCore = false;
+    m_editing         = true;
+    m_isNew           = true;
+    m_dirty           = false;
+    m_shippedExists   = false;
+    m_hasUserOverride = false;
     emit draftChanged();
 }
 
@@ -373,8 +389,13 @@ QVariantMap CharacteristicEditorModel::save()
 QVariantMap CharacteristicEditorModel::revertToShipped()
 {
     if (m_draft.id.isEmpty()) return failResult(tr("Nothing to revert."));
+    if (!m_hasUserOverride)
+        return failResult(tr("This is the shipped definition — there is nothing of yours to drop."));
 
-    const QString id = m_draft.id;
+    // Read before the drop: afterwards there is no way to tell which of the two things happened,
+    // and the message has to say the true one.
+    const bool    restores = m_shippedExists;
+    const QString id       = m_draft.id;
     auto dropById = [&id](auto &vec) {
         vec.erase(std::remove_if(vec.begin(), vec.end(),
                                  [&id](const auto &e) { return e.id == id; }),
@@ -393,7 +414,10 @@ QVariantMap CharacteristicEditorModel::revertToShipped()
     m_dirty   = false;
     reload();
     emit draftChanged();
-    return okResult(tr("Restored the shipped definition."));
+    return okResult(restores
+                        ? tr("Restored the shipped definition.")
+                        : tr("Deleted. This characteristic was yours — nothing ships under that "
+                             "name to fall back to."));
 }
 
 // ── Field edits ─────────────────────────────────────────────────────────────

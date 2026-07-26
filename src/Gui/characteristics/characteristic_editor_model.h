@@ -43,7 +43,14 @@ class CharacteristicEditorModel : public QObject
     Q_PROPERTY(bool    editing READ editing NOTIFY draftChanged)
     Q_PROPERTY(bool    dirty   READ dirty   NOTIFY draftChanged)
     Q_PROPERTY(bool    isNew   READ isNew   NOTIFY draftChanged)
-    Q_PROPERTY(bool    overridesCore READ overridesCore NOTIFY draftChanged)
+    // Does CORE ship a characteristic with this id? Not "is this an override" — the two came
+    // apart the moment a user could create a characteristic of their own, and conflating them made
+    // revertToShipped() DELETE such a characteristic while reporting that it had restored the
+    // shipped definition.
+    Q_PROPERTY(bool    shippedExists   READ shippedExists   NOTIFY draftChanged)
+    // Is a row of the USER's own in play for this id? True once they have saved an edit — whether
+    // it overrides a shipped characteristic or is one they wrote themselves.
+    Q_PROPERTY(bool    hasUserOverride READ hasUserOverride NOTIFY draftChanged)
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
 
     // Vocabulary for the picker chips — grouped so `what` is never a free text field.
@@ -59,7 +66,8 @@ public:
     bool        editing() const { return m_editing; }
     bool        dirty() const { return m_dirty; }
     bool        isNew() const { return m_isNew; }
-    bool        overridesCore() const { return m_overridesCore; }
+    bool        shippedExists() const { return m_shippedExists; }
+    bool        hasUserOverride() const { return m_hasUserOverride; }
     QVariantMap draft() const;
 
     QVariantList anatomyGroups() const;
@@ -73,8 +81,15 @@ public:
     Q_INVOKABLE void discard();
     // Returns { ok, message }. Never throws: a failed save has to reach the user, not a log.
     Q_INVOKABLE QVariantMap save();
-    // Remove this condition's override, restoring the shipped definition. Only meaningful when
-    // overridesCore is true — the shipped pack is never edited, so reverting is always possible.
+    // Drop this condition's row from the USER pack. The shipped pack is never edited, so what
+    // happens next depends on whether core ships this id at all:
+    //
+    //   shippedExists  -> the shipped definition is restored   (recoverable, reassuring)
+    //   !shippedExists -> the characteristic is DELETED         (destructive, and must say so)
+    //
+    // Both were previously labelled "Restore shipped version" and both reported "Restored the
+    // shipped definition", which meant deleting somebody's own characteristic behind a message
+    // promising the opposite.
     Q_INVOKABLE QVariantMap revertToShipped();
 
     // ── Field edits ─────────────────────────────────────────────────────────
@@ -129,6 +144,9 @@ private:
     QString mintConditionId(const QString &label) const;
 
     std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_provider;
+    // Core alone, so "does this ship?" can be answered without inferring it from the user pack.
+    // Assembled once: it is read-only and never changes for the life of the process.
+    std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_core;
     pinpoint::analysis::CharacteristicPack m_userPack;   // the override file, as loaded/edited
 
     pinpoint::analysis::Condition            m_draft;
@@ -139,5 +157,6 @@ private:
     bool m_editing       = false;
     bool m_dirty         = false;
     bool m_isNew         = false;
-    bool m_overridesCore = false;
+    bool m_shippedExists   = false;
+    bool m_hasUserOverride = false;
 };

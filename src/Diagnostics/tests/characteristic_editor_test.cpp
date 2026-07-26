@@ -209,11 +209,82 @@ int main(int argc, char **argv)
               "the removal survives a reload");
     }
 
+    // ── Two overrides must survive each other ───────────────────────────────────
+    //
+    // REGRESSION. The constructor keyed the user pack off PackLoadResult::loaded, where the type's
+    // own comment says a merging caller must key off `parsed`: an overlay routinely fails STANDALONE
+    // referential validation because its edges point at core conditions it does not contain. So the
+    // editor started with an EMPTY user pack whenever an ordinary override was on disk — and since
+    // save() upserts into that pack and writes the whole thing back, the next save erased every
+    // other override the user had ever made. Silently, and only visible on the NEXT launch.
+    {
+        CharacteristicEditorModel a;
+        check(a.beginEdit(QStringLiteral("early_extension")), "open the first shipped entry");
+        a.setConsequence(QStringLiteral("First override."));
+        check(a.save().value(QStringLiteral("ok")).toBool(), "the first override saves");
+    }
+    {
+        // A SECOND model, as a fresh launch would be, editing a DIFFERENT characteristic.
+        CharacteristicEditorModel b;
+        check(b.beginEdit(QStringLiteral("casting")), "open a second shipped entry");
+        b.setConsequence(QStringLiteral("Second override."));
+        check(b.save().value(QStringLiteral("ok")).toBool(), "the second override saves");
+    }
+    {
+        CharacteristicEditorModel c;
+        check(c.beginEdit(QStringLiteral("early_extension")), "the first is still there");
+        check(c.draft().value(QStringLiteral("consequence"))
+                  == QStringLiteral("First override."),
+              "saving the SECOND override did not erase the first");
+        check(c.hasUserOverride(), "…and it is still recognised as the user's");
+
+        check(c.beginEdit(QStringLiteral("casting")), "the second is there too");
+        check(c.draft().value(QStringLiteral("consequence"))
+                  == QStringLiteral("Second override."),
+              "…and holds its own text");
+    }
+    {
+        // Leave the library as we found it.
+        CharacteristicEditorModel d;
+        d.beginEdit(QStringLiteral("early_extension"));
+        d.revertToShipped();
+        CharacteristicEditorModel e;
+        e.beginEdit(QStringLiteral("casting"));
+        e.revertToShipped();
+    }
+
+    // ── Dropping a characteristic that never shipped ────────────────────────────
+    //
+    // The same operation as reverting an override, and for a long time the same label and the same
+    // message: "Restore shipped version" / "Restored the shipped definition". For a characteristic
+    // the user wrote themselves there is nothing to restore — the row is simply DELETED, and a
+    // destructive action wearing a reassuring name is how somebody loses work.
+    {
+        CharacteristicEditorModel ed;
+        check(ed.beginEdit(newId), "a user-created characteristic opens for edit");
+        check(!ed.shippedExists(), "nothing ships under this id");
+        check(ed.hasUserOverride(), "…but the user's own row is there");
+
+        const QVariantMap rev = ed.revertToShipped();
+        check(rev.value(QStringLiteral("ok")).toBool(), "dropping it succeeds");
+        check(!rev.value(QStringLiteral("message")).toString().contains(QStringLiteral("Restored")),
+              "…and does NOT claim to have restored anything");
+        check(rev.value(QStringLiteral("message")).toString().contains(QStringLiteral("Deleted")),
+              "…it says the characteristic was deleted, which is what happened");
+    }
+    {
+        CharacteristicEditorModel ed;
+        check(!ed.beginEdit(newId), "…and it is gone");
+    }
+
     // ── Overriding a SHIPPED characteristic ─────────────────────────────────────
     {
         CharacteristicEditorModel ed;
         check(ed.beginEdit(QStringLiteral("early_extension")), "a shipped characteristic opens for edit");
-        check(ed.overridesCore(), "editing a shipped entry is flagged as creating an override");
+        check(ed.shippedExists(), "core ships this id");
+        check(!ed.hasUserOverride(), "…and nothing of the user's stands on it yet");
+        check(!ed.revertToShipped().value(QStringLiteral("ok")).toBool(),
+              "…so there is nothing to revert, and it says so rather than deleting anything");
 
         ed.setConsequence(QStringLiteral("Edited consequence for the test."));
         check(ed.save().value(QStringLiteral("ok")).toBool(), "the override saves");
@@ -233,8 +304,14 @@ int main(int argc, char **argv)
         check(c && c->consequence.text() != QStringLiteral("Edited consequence for the test."),
               "the shipped definition is unchanged on disk");
 
+        check(ed.shippedExists() && ed.hasUserOverride(),
+              "an edited shipped characteristic is BOTH shipped and overridden");
+
         // Reverting removes the override and restores the shipped text.
-        check(ed.revertToShipped().value(QStringLiteral("ok")).toBool(), "the override can be reverted");
+        const QVariantMap rev = ed.revertToShipped();
+        check(rev.value(QStringLiteral("ok")).toBool(), "the override can be reverted");
+        check(rev.value(QStringLiteral("message")).toString().contains(QStringLiteral("Restored")),
+              "…and reports a RESTORE, because something does ship under this name");
     }
     {
         CharacteristicEditorModel ed;
