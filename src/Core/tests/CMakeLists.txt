@@ -75,6 +75,7 @@ pp_add_test(profiler_controller_test
     SOURCES profiler_controller_test.cpp
             ${MONITOR}/profiler_controller.cpp
             ${CORE}/pp_gpu_metrics.cpp   # profiler_controller.cpp calls gpumetrics::init/sample/reset
+            ${CORE}/AnalysisProfileLog.cpp  # pullAnalysisRuns() reads the analysis-run ring
             ${PROFILER_CORE}
     INCLUDE ${CORE} ${MONITOR}  LINK Threads::Threads
     DEFINES PINPOINT_PROFILE_BASELINE=1 PINPOINT_PROFILE=1  GTEST_NO_MAIN  AUTOMOC)
