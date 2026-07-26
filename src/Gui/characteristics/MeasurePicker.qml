@@ -49,6 +49,10 @@ Item {
     property string _windowEnd:   "p7"
     property string _direction:   "high"
 
+    // What a HIGH value of this measure means, in the author's own words. Typed here when the
+    // measure is being minted; taken from the measure when one already exists.
+    property string _highMeans:   ""
+
     readonly property var _facets: ({
         what:        root._what,
         quantity:    root._quantity,
@@ -59,6 +63,31 @@ Item {
         windowEnd:   root._windowEnd,
         sense:       "max"
     })
+
+    // The convention is deliberately NOT part of _facets: it names nothing about the series, and
+    // folding it in would re-run the preview on every keystroke of a sentence.
+    function _mintFacets() {
+        var f = {}
+        for (var k in root._facets) f[k] = root._facets[k]
+        f.highMeans = root._highMeans
+        return f
+    }
+
+    // A near-duplicate the author chose to reuse instead of minting. Selecting one does not commit:
+    // the tail is still chosen below, against THIS measure's convention.
+    property string _reuseId:        ""
+    property string _reuseLabel:     ""
+    property string _reuseHighMeans: ""
+
+    // An existing measure already says what a high value means; a new one says what the author
+    // types. Whichever it is, the direction control speaks THOSE words.
+    readonly property string _existingHighMeans:
+        root._reuseId.length > 0
+            ? root._reuseHighMeans
+            : ((root._preview.exactMatch && root._preview.exactMatch.highMeans) || "")
+    readonly property string _convention:
+        root._existingHighMeans.length > 0 ? root._existingHighMeans : root._highMeans
+    readonly property var _directions: root.editor.directionOptions(root._convention)
 
     readonly property var _preview: (root._what.length > 0 && root._quantity.length > 0
                                      && root._reference.length > 0)
@@ -555,7 +584,15 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape:  Qt.PointingHandCursor
-                                onClicked: root.measureChosen(modelData.id, root._direction)
+                                // SELECTS, it does not commit. This used to emit measureChosen on
+                                // the spot, which attached a signal at whatever tail the chips
+                                // happened to be showing — a default the author had not seen yet,
+                                // read against a different measure's convention.
+                                onClicked: {
+                                    root._reuseId        = modelData.id
+                                    root._reuseLabel     = modelData.label
+                                    root._reuseHighMeans = modelData.highMeans || ""
+                                }
                             }
                         }
                     }
@@ -566,7 +603,44 @@ Item {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.sp(6)
-                visible: root._preview.valid === true
+                // Also shown for a reused near-duplicate: reusing is still choosing a tail.
+                visible: root._preview.valid === true || root._reuseId.length > 0
+
+                // Which measure the tail below belongs to, when it is not the one being built.
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible:        root._reuseId.length > 0
+                    implicitHeight: Theme.sp(34)
+                    radius:         Theme.radius
+                    color:          Theme.colorBg2
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin:  Theme.sp(12)
+                        anchors.rightMargin: Theme.sp(10)
+                        spacing: Theme.sp(8)
+
+                        Text {
+                            Layout.fillWidth: true
+                            text:           qsTr("Reusing: %1").arg(root._reuseLabel)
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody2
+                            color:          Theme.colorText
+                            elide:          Text.ElideRight
+                        }
+                        Text {
+                            text:           "✕"
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody2
+                            color:          Theme.colorText3
+                            PpPressable {
+                                anchors.margins: -Theme.sp(6)
+                                onClicked: { root._reuseId = ""; root._reuseLabel = ""
+                                             root._reuseHighMeans = "" }
+                            }
+                        }
+                    }
+                }
 
                 Text {
                     text:                qsTr("FLAG WHEN IT IS")
@@ -588,12 +662,64 @@ Item {
                     wrapMode:       Text.WordWrap
                 }
 
+                // ── What a HIGH value means ───────────────────────────────────
+                //
+                // Asked BEFORE the tail is chosen, because the tail cannot be chosen correctly
+                // without it. Three shipped signals pointed the wrong way for exactly this reason:
+                // an author picked High or Low against a sign convention that was unstated, and an
+                // inverted signal then fires happily on the wrong swings with correct-sounding
+                // consequence text attached. See docs/design/pinpoint_sign_conventions.md.
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.sp(4)
+
+                    Text {
+                        text:                qsTr("A HIGHER VALUE MEANS")
+                        font.family:         Theme.fontBody
+                        font.pixelSize:      Theme.fontSzMicro
+                        font.letterSpacing:  Theme.trackingMicro
+                        font.capitalization: Font.AllUppercase
+                        color:               Theme.colorText3
+                    }
+
+                    // Already stated by the measure: quoted, not re-asked.
+                    Text {
+                        Layout.fillWidth: true
+                        visible:        root._existingHighMeans.length > 0
+                        text:           root._existingHighMeans
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzBody2
+                        color:          Theme.colorText
+                        wrapMode:       Text.WordWrap
+                    }
+
+                    PpTextField {
+                        Layout.fillWidth: true
+                        visible: root._existingHighMeans.length === 0
+                        text:    root._highMeans
+                        placeholderText: qsTr("e.g. “further back, toward the trail foot”")
+                        onEditingFinished: root._highMeans = text
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: root._existingHighMeans.length === 0
+                                 && root._highMeans.trim().length === 0
+                        text: qsTr("Say it the way a coach would, not as a sign. Where the outside "
+                                   + "world already has a convention, follow it; otherwise positive "
+                                   + "is toward the lead side.")
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                        wrapMode:       Text.WordWrap
+                    }
+                }
+
                 RowLayout {
                     spacing: Theme.sp(6)
 
                     Repeater {
-                        model: [{ name: "high", label: qsTr("Too much") },
-                                { name: "low",  label: qsTr("Too little") }]
+                        model: root._directions
                         delegate: Rectangle {
                             required property var modelData
                             readonly property bool active: root._direction === modelData.name
@@ -619,6 +745,33 @@ Item {
                         }
                     }
                 }
+
+                // The chosen tail, spelled out. Composed in C++ so which sentence belongs to which
+                // direction is testable rather than a delegate's opinion.
+                Text {
+                    Layout.fillWidth: true
+                    text: (root._direction === "low" ? root._directions[1] : root._directions[0])
+                              .sentence
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzBody2
+                    color:          Theme.colorText2
+                    wrapMode:       Text.WordWrap
+                }
+            }
+
+            // A missing sign convention is the one gap that cannot be caught later: an inverted
+            // signal fires happily, with correct-sounding text, on the wrong swings. So both
+            // actions below wait for it — but only for it. A measure with no PRODUCER still goes
+            // through, because that is a roadmap item, not a mistake.
+            Text {
+                Layout.fillWidth: true
+                visible: (root._preview.valid === true || root._reuseId.length > 0)
+                         && root._convention.trim().length === 0
+                text:    qsTr("Say what a higher value means before choosing which side fires.")
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorRagWatch
+                wrapMode:       Text.WordWrap
             }
 
             // ── 8. Actions ────────────────────────────────────────────────────
@@ -634,24 +787,50 @@ Item {
                 Item { Layout.fillWidth: true }
 
                 PpButton {
+                    // A near-duplicate the author chose to reuse. Takes precedence over both
+                    // buttons below: they act on the measure being BUILT, which is no longer what
+                    // is being attached.
+                    visible: root._reuseId.length > 0
+                    enabled: root._convention.trim().length > 0
+                    label:   qsTr("Use this measure")
+                    primary: true
+                    onClicked: {
+                        if (root._reuseHighMeans.length === 0)
+                            root.editor.setMeasureHighMeans(root._reuseId, root._highMeans)
+                        root.measureChosen(root._reuseId, root._direction)
+                    }
+                }
+
+                PpButton {
                     // Reuse first when the exact measure already exists.
-                    visible: root._preview.exactMatch !== undefined
+                    visible: root._reuseId.length === 0
+                             && root._preview.exactMatch !== undefined
                              && root._preview.exactMatch !== null
+                    enabled: root._convention.trim().length > 0
                     label:   qsTr("Use existing")
                     primary: true
-                    onClicked: root.measureChosen(root._preview.exactMatch.id, root._direction)
+                    onClicked: {
+                        // The author may have supplied the convention this existing measure lacked
+                        // — carry it back, or the next author faces the same blank.
+                        if (root._existingHighMeans.length === 0)
+                            root.editor.setMeasureHighMeans(root._preview.exactMatch.id,
+                                                            root._highMeans)
+                        root.measureChosen(root._preview.exactMatch.id, root._direction)
+                    }
                 }
 
                 PpButton {
                     // Never block the author: a measure with no producer is an expected outcome and
                     // is exactly what the roadmap is built from.
-                    visible: root._preview.valid === true
+                    visible: root._reuseId.length === 0
+                             && root._preview.valid === true
                              && (root._preview.exactMatch === undefined
                                  || root._preview.exactMatch === null)
+                    enabled: root._convention.trim().length > 0
                     label:   qsTr("Create this measure")
                     primary: true
                     onClicked: {
-                        var id = root.editor.mintMeasure(root._facets)
+                        var id = root.editor.mintMeasure(root._mintFacets())
                         if (id.length > 0) root.measureChosen(id, root._direction)
                     }
                 }

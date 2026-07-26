@@ -130,7 +130,7 @@ const QuantityHint kQuantityHints[] = {
 
 CharacteristicEditorModel::CharacteristicEditorModel(QObject *parent)
     : QObject(parent), m_provider(makeCharacteristicPackProvider()),
-      m_core(makeResourcePackProvider())
+      m_core(makeResourcePackProvider()), m_norms(sharedNormProvider())
 {
     // Load the user's override file separately from the merged view: saving must write back only
     // the user's own entries, never a flattened copy of the shipped pack.
@@ -169,6 +169,41 @@ void CharacteristicEditorModel::touch()
 }
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
+
+QVariantList CharacteristicEditorModel::contexts() const
+{
+    const ContextTree &tree = m_norms->contexts();
+
+    QVariantList out;
+    for (const QString &id : tree.inOrder()) {
+        const ContextNode *n = tree.node(id);
+        if (!n) continue;
+
+        const BindingResolution br = resolveContextBinding(m_draft, tree, id);
+        const bool              own = ownContextBinding(m_draft, id) != nullptr;
+
+        QVariantMap r;
+        r.insert(QStringLiteral("id"),         n->id);
+        r.insert(QStringLiteral("label"),      n->label);
+        r.insert(QStringLiteral("parentId"),   n->parentId);
+        r.insert(QStringLiteral("depth"),      tree.depth(id));
+        r.insert(QStringLiteral("isDefault"),  n->id == kDefaultContextId());
+        r.insert(QStringLiteral("applicable"), br.applicable);
+        r.insert(QStringLiteral("material"),   br.material);
+        r.insert(QStringLiteral("own"),        own);
+        r.insert(QStringLiteral("inherited"),  br.found && br.inherited);
+
+        // Name the ancestor a row was inherited FROM, not merely that it was. "Off, inherited" is
+        // an invitation to hunt for the row that says so; "Off, from Partial swing" is not.
+        QString fromLabel;
+        if (br.found && br.inherited)
+            if (const ContextNode *src = tree.node(br.contextId)) fromLabel = src->label;
+        r.insert(QStringLiteral("inheritedFrom"),      br.inherited ? br.contextId : QString());
+        r.insert(QStringLiteral("inheritedFromLabel"), fromLabel);
+        out.append(r);
+    }
+    return out;
+}
 
 QVariantList CharacteristicEditorModel::anatomyGroups() const
 {
@@ -300,6 +335,7 @@ bool CharacteristicEditorModel::beginEdit(const QString &conditionId)
     m_editing = true;
     m_isNew   = false;
     m_dirty   = false;
+    m_bindingUndoValid = false;   // an undo from a previous characteristic is not an undo
 
     // Two INDEPENDENT facts, and the old single flag conflated them. "Does core ship this id?"
     // decides whether dropping the user's row restores something or destroys it; "is there a user
@@ -323,11 +359,12 @@ void CharacteristicEditorModel::beginNew()
     m_draftMeasures.clear();
     m_draftEdges.clear();
 
-    m_editing         = true;
-    m_isNew           = true;
-    m_dirty           = false;
-    m_shippedExists   = false;
-    m_hasUserOverride = false;
+    m_editing          = true;
+    m_isNew            = true;
+    m_dirty            = false;
+    m_shippedExists    = false;
+    m_hasUserOverride  = false;
+    m_bindingUndoValid = false;
     emit draftChanged();
 }
 
@@ -339,6 +376,7 @@ void CharacteristicEditorModel::discard()
     m_draftSignals.clear();
     m_draftMeasures.clear();
     m_draftEdges.clear();
+    m_bindingUndoValid = false;
     emit draftChanged();
 }
 
@@ -470,7 +508,187 @@ void CharacteristicEditorModel::setState(const QString &stateName)
     touch();
 }
 
+// ── Where it applies ────────────────────────────────────────────────────────
+
+QVariantMap CharacteristicEditorModel::setBinding(const QString &contextId, bool applicable,
+                                                  bool material)
+{
+    if (!m_editing) return failResult(tr("Nothing is being edited."));
+
+    const ContextTree &tree = m_norms->contexts();
+    const ContextNode *node = tree.node(contextId);
+    // An id the tree does not carry is refused rather than written: a binding on a context nobody
+    // can resolve is a row that will never be read and can never be found again to remove.
+    if (!node) return failResult(tr("That is not a context this norm set knows about."));
+
+    m_bindingUndo      = m_draft.bindings;
+    m_bindingUndoValid = true;
+
+    bool changed = false;
+    auto upsert  = [&]() {
+        for (ContextBinding &b : m_draft.bindings)
+            if (b.context == contextId) {
+                changed = (b.applicable != applicable) || (b.material != material);
+                b.applicable = applicable;
+                b.material   = material;
+                return;
+            }
+        ContextBinding b;
+        b.context    = contextId;
+        b.applicable = applicable;
+        b.material   = material;
+        m_draft.bindings.push_back(std::move(b));
+        changed = true;
+    };
+    upsert();
+
+    // THE CASCADE. Switching a parent off has to clear any descendant row that says the opposite,
+    // or the untick silently does not take: resolution stops at the nearest row, so an explicit
+    // "applies" at `wedge` would survive an "does not apply" at `full_swing` and the author would
+    // see a box they had just cleared still behaving as though it were ticked. Rows that already
+    // agree are left alone — they are the author's own words about a context they thought about.
+    int cascaded = 0;
+    if (!applicable) {
+        auto it = std::remove_if(m_draft.bindings.begin(), m_draft.bindings.end(),
+                                 [&](const ContextBinding &b) {
+                                     return b.applicable && b.context != contextId
+                                            && tree.isDescendantOf(b.context, contextId);
+                                 });
+        cascaded = int(std::distance(it, m_draft.bindings.end()));
+        m_draft.bindings.erase(it, m_draft.bindings.end());
+    }
+
+    if (!changed && cascaded == 0) {
+        m_bindingUndoValid = false;
+        return okResult();
+    }
+
+    QString message = !applicable
+                          ? tr("Does not apply to %1.").arg(node->label)
+                      : !material
+                          ? tr("Applies to %1, but does not count when ranking.").arg(node->label)
+                          : tr("Applies to %1.").arg(node->label);
+    if (cascaded > 0)
+        message += QLatin1Char(' ')
+                   + tr("%n exception(s) beneath it cleared.", "", cascaded);
+
+    touch();
+
+    QVariantMap r = okResult(message);
+    r.insert(QStringLiteral("cascaded"), cascaded);
+    r.insert(QStringLiteral("canUndo"), true);
+    return r;
+}
+
+QVariantMap CharacteristicEditorModel::clearBinding(const QString &contextId)
+{
+    if (!m_editing) return failResult(tr("Nothing is being edited."));
+    if (ownContextBinding(m_draft, contextId) == nullptr)
+        return failResult(tr("Nothing is set here — it already inherits."));
+
+    m_bindingUndo      = m_draft.bindings;
+    m_bindingUndoValid = true;
+
+    m_draft.bindings.erase(std::remove_if(m_draft.bindings.begin(), m_draft.bindings.end(),
+                                          [&](const ContextBinding &b) { return b.context == contextId; }),
+                           m_draft.bindings.end());
+    touch();
+
+    // Say what it inherits NOW, resolved after the removal — the answer is the point of the action.
+    const ContextTree      &tree = m_norms->contexts();
+    const ContextNode      *node = tree.node(contextId);
+    const BindingResolution br   = resolveContextBinding(m_draft, tree, contextId);
+
+    QString fromLabel;
+    if (br.found)
+        if (const ContextNode *src = tree.node(br.contextId)) fromLabel = src->label;
+
+    const QString label = node ? node->label : contextId;
+    QVariantMap   r     = okResult(fromLabel.isEmpty()
+                                       ? tr("%1 applies again, like everywhere else.").arg(label)
+                                       : tr("%1 follows %2 again.").arg(label, fromLabel));
+    r.insert(QStringLiteral("cascaded"), 0);
+    r.insert(QStringLiteral("canUndo"), true);
+    return r;
+}
+
+bool CharacteristicEditorModel::undoBindingChange()
+{
+    if (!m_editing || !m_bindingUndoValid) return false;
+    m_draft.bindings   = m_bindingUndo;
+    m_bindingUndoValid = false;
+    m_bindingUndo.clear();
+    touch();
+    return true;
+}
+
 // ── Signals ─────────────────────────────────────────────────────────────────
+
+QVariantList CharacteristicEditorModel::directionOptions(const QString &highMeans) const
+{
+    const QString h = highMeans.trimmed();
+
+    QVariantMap high, low;
+    high.insert(QStringLiteral("name"), directionName(Direction::High));
+    low.insert(QStringLiteral("name"), directionName(Direction::Low));
+
+    if (h.isEmpty()) {
+        // The fallback that let three inverted signals ship. Kept because a measure without a
+        // stated convention still has to be authorable, but every caller shows the ask alongside.
+        high.insert(QStringLiteral("label"), tr("Too much"));
+        low.insert(QStringLiteral("label"), tr("Too little"));
+        high.insert(QStringLiteral("means"), QString());
+        low.insert(QStringLiteral("means"), QString());
+        high.insert(QStringLiteral("sentence"), tr("Flagged when the value is higher than the norm."));
+        low.insert(QStringLiteral("sentence"), tr("Flagged when the value is lower than the norm."));
+    } else {
+        high.insert(QStringLiteral("label"), tr("Too much"));
+        low.insert(QStringLiteral("label"), tr("Too little"));
+        high.insert(QStringLiteral("means"), h);
+        // No second phrase is authored and none is invented: the low tail is stated as the other
+        // end of the SAME range, quoting the one sentence that was written. A generated opposite
+        // ("less far back") reads like content and would be nobody's words.
+        low.insert(QStringLiteral("means"), tr("the other end of that range"));
+        high.insert(QStringLiteral("sentence"), tr("Flagged when there is more of it: %1.").arg(h));
+        low.insert(QStringLiteral("sentence"),
+                   tr("Flagged at the other end of the same range — the opposite of: %1.").arg(h));
+    }
+
+    return QVariantList{ high, low };
+}
+
+void CharacteristicEditorModel::setMeasureHighMeans(const QString &measureId, const QString &text)
+{
+    if (!m_editing || measureId.isEmpty()) return;
+
+    const QString v = text.trimmed();
+    for (Measure &m : m_draftMeasures)
+        if (m.id == measureId) {
+            if (m.highMeans == v) return;
+            m.highMeans = v;
+            touch();
+            return;
+        }
+
+    // Not in the draft yet: take the library's copy, so a save writes the whole measure and not a
+    // fragment. Editing a shared measure is exactly what this is, and the signal row says so.
+    const CharacteristicPack &merged = m_provider->pack();
+    if (const Measure *src = merged.measure(measureId)) {
+        Measure copy = *src;
+        if (copy.highMeans == v) return;
+        copy.highMeans = v;
+        m_draftMeasures.push_back(std::move(copy));
+        touch();
+    }
+}
+
+QString CharacteristicEditorModel::measureHighMeans(const QString &measureId) const
+{
+    for (const Measure &m : m_draftMeasures)
+        if (m.id == measureId) return m.highMeans;
+    if (const Measure *m = m_provider->pack().measure(measureId)) return m->highMeans;
+    return QString();
+}
 
 QString CharacteristicEditorModel::attachMeasure(const QString &measureId, const QString &direction)
 {
@@ -704,6 +922,9 @@ QVariantMap CharacteristicEditorModel::previewMeasure(const QVariantMap &facets)
             hit.insert(QStringLiteral("id"), m.id);
             hit.insert(QStringLiteral("label"), m.label);
             hit.insert(QStringLiteral("usedBy"), 0);
+            // Carried so the direction control can speak the existing measure's own words rather
+            // than asking for them a second time.
+            hit.insert(QStringLiteral("highMeans"), m.highMeans);
             out.insert(QStringLiteral("exactMatch"), hit);
             break;
         }
@@ -712,9 +933,13 @@ QVariantMap CharacteristicEditorModel::previewMeasure(const QVariantMap &facets)
     // This is the moment duplicates are cheap to prevent; afterwards nobody merges them.
     QVariantList near;
     for (const SeriesMatch &sm : findSimilarSeries(series, existing)) {
+        const QString nearId = seriesOwner.value(canonicalSeriesId(sm.series));
         QVariantMap n;
-        n.insert(QStringLiteral("id"), seriesOwner.value(canonicalSeriesId(sm.series)));
+        n.insert(QStringLiteral("id"), nearId);
         n.insert(QStringLiteral("label"), canonicalSeriesLabel(sm.series));
+        // Reusing one of these is choosing a DIFFERENT measure, and the tail has to be chosen
+        // against that measure's own convention rather than the one being typed for this draft.
+        n.insert(QStringLiteral("highMeans"), measureHighMeans(nearId));
         n.insert(QStringLiteral("distance"), sm.distance);
         n.insert(QStringLiteral("sameSeries"), sm.distance == 0);
         near.append(n);
@@ -739,6 +964,10 @@ QString CharacteristicEditorModel::mintMeasure(const QVariantMap &facets)
     m.label      = canonicalMeasureLabel(series, reducer);
     m.unit       = quantityUnitHint(series.quantity);
     m.viewNeeded = deriveViewNeeded(series);
+    // What a HIGH value means, authored in the picker beside the tail that fires. A minted measure
+    // exists to carry a signal on one of its tails, and the tail is chosen in the same breath — so
+    // this is the one moment the sign convention is cheap to state and free to get right.
+    m.highMeans  = facets.value(QStringLiteral("highMeans")).toString().trimmed();
 
     if (seriesNeedsNonPoseSensor(series)) {
         m.status    = MeasureStatus::NotCapturable;
@@ -837,6 +1066,18 @@ QVariantMap CharacteristicEditorModel::draft() const
                   m ? (m->label.isEmpty() ? canonicalMeasureLabel(m->series, m->reducer) : m->label)
                     : mid);
         sm.insert(QStringLiteral("status"), m ? measureStatusName(m->status) : QString());
+
+        // The tail, in the measure's own words. Composed here rather than in the delegate: which
+        // sentence belongs to which tail is a statement about sign conventions, and a statement
+        // about correctness written in QML is a statement nothing can test.
+        const QString      hm   = m ? m->highMeans : QString();
+        const QVariantList opts = directionOptions(hm);
+        const bool         isHigh =
+            !s.direction.has_value() || *s.direction == Direction::High;
+        const QVariantMap chosen = opts.value(isHigh ? 0 : 1).toMap();
+        sm.insert(QStringLiteral("highMeans"), hm);
+        sm.insert(QStringLiteral("directionLabel"), chosen.value(QStringLiteral("label")));
+        sm.insert(QStringLiteral("directionSentence"), chosen.value(QStringLiteral("sentence")));
 
         // Blast radius: how many OTHER characteristics ride on this same measure. Editing a shared
         // measure changes all of them, and the author has to see that before they do it — a count

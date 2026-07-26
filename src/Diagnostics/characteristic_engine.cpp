@@ -160,7 +160,8 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
 
 } // namespace
 
-DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &source)
+DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &source,
+                       const ContextTree *contexts, const QString &contextId)
 {
     DetectionResult out;
 
@@ -169,8 +170,18 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
         // pass from what they explain, not detected here.
         if (c.observability == Observability::Latent) continue;
 
+        // Does this condition apply to this kind of shot? Resolved through the context tree, so an
+        // author writes one row at `partial` rather than four beneath it.
+        bool material = true;
+        if (contexts != nullptr && !contextId.isEmpty()) {
+            const BindingResolution br = resolveContextBinding(c, *contexts, contextId);
+            if (!br.applicable) continue;
+            material = br.material;
+        }
+
         Finding f;
         f.conditionId = c.id;
+        f.material    = material;
 
         if (c.detectedBy.isEmpty()) {
             f.state = FindingState::Unavailable;

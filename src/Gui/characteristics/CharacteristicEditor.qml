@@ -70,6 +70,7 @@ Item {
         contentWidth: availableWidth
         visible: root._sheet === ""
 
+
         ColumnLayout {
             x:       Theme.sp(32)
             y:       Theme.sp(28)
@@ -201,19 +202,25 @@ Item {
                     delegate: Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
-                        implicitHeight: Theme.sp(44)
+                        // Content-driven: the direction sentence wraps, and the missing-convention
+                        // prompt adds a field, so a fixed 44 would clip both.
+                        implicitHeight: sigRow.implicitHeight + Theme.sp(16)
                         radius: Theme.radius
                         color:  Theme.colorBg2
 
                         RowLayout {
-                            anchors.fill: parent
+                            id: sigRow
+                            anchors.left:        parent.left
+                            anchors.right:       parent.right
+                            anchors.top:         parent.top
+                            anchors.topMargin:   Theme.sp(8)
                             anchors.leftMargin:  Theme.sp(12)
                             anchors.rightMargin: Theme.sp(10)
                             spacing: Theme.sp(8)
 
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 0
+                                spacing: Theme.sp(2)
 
                                 Text {
                                     Layout.fillWidth: true
@@ -223,9 +230,14 @@ Item {
                                     color:          Theme.colorText
                                     elide:          Text.ElideRight
                                 }
+                                // The tail in the MEASURE's own words — "flagged when there is more
+                                // of it: further back, toward the trail foot" — rather than "too
+                                // much", which is true of both tails of every measure ever written.
+                                // Composed in C++; the delegate must not decide which sentence
+                                // belongs to which direction.
                                 Text {
-                                    text: (modelData.direction === "high" ? qsTr("too much")
-                                                                          : qsTr("too little"))
+                                    Layout.fillWidth: true
+                                    text: (modelData.directionSentence || "")
                                           + (modelData.status === "notCapturable"
                                              ? " · " + qsTr("not measurable from capture")
                                              : modelData.status === "noProducer"
@@ -233,6 +245,34 @@ Item {
                                     font.family:    Theme.fontBody
                                     font.pixelSize: Theme.fontSzMicro
                                     color:          Theme.colorText3
+                                    wrapMode:       Text.WordWrap
+                                }
+
+                                // A measure with no stated sign convention is the exact condition
+                                // that let three signals ship inverted. Asked here, where the tail
+                                // was chosen, rather than reported later as a health-view warning.
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    visible: (modelData.highMeans || "").length === 0
+                                    spacing: Theme.sp(4)
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Nothing says what a HIGHER value of this "
+                                                   + "measure means, so nothing can check that this "
+                                                   + "tail is the right one.")
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzMicro
+                                        color:          Theme.colorRagWatch
+                                        wrapMode:       Text.WordWrap
+                                    }
+                                    PpTextField {
+                                        Layout.fillWidth: true
+                                        placeholderText: qsTr("A higher value means… e.g. “further "
+                                                              + "back, toward the trail foot”")
+                                        onEditingFinished:
+                                            root.editor.setMeasureHighMeans(modelData.measureId, text)
+                                    }
                                 }
 
                                 // Blast radius, shown BEFORE the edit rather than explained after.
@@ -416,6 +456,169 @@ Item {
                 }
             }
 
+            PpDivider { Layout.fillWidth: true }
+
+            // ── Where it applies ("…on this kind of shot") ────────────────────
+            //
+            // Every row is an EXCEPTION. A characteristic with nothing set here applies to every
+            // kind of shot, which is what all 50 shipped ones do — so this list is almost always
+            // read rather than written, and it has to make "nothing is set" look deliberate.
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(8)
+
+                Text {
+                    text:                qsTr("WHERE IT APPLIES")
+                    font.family:         Theme.fontBody
+                    font.pixelSize:      Theme.fontSzMicro
+                    font.letterSpacing:  Theme.trackingMicro
+                    font.capitalization: Font.AllUppercase
+                    color:               Theme.colorText3
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("It applies to every kind of shot unless you say otherwise, and a "
+                               + "setting here carries to everything beneath it — switch off "
+                               + "Partial swing and pitch and chip follow. Context never changes "
+                               + "whether something is good or bad; it only says whether the "
+                               + "question is worth asking.")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorText3
+                    wrapMode:       Text.WordWrap
+                }
+
+                Repeater {
+                    model: root.editor.contexts
+                    delegate: Item {
+                        id: ctxRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        implicitHeight: Theme.sp(30)
+
+                        // Almost every row in this list is the default repeated, so the default is
+                        // drawn quietly and only what somebody STATED is drawn firmly. A column of
+                        // thirteen identical accent boxes would say "thirteen decisions were made
+                        // here", which is the opposite of true.
+                        HoverHandler { id: ctxHover }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            // Indent off the model's own depth — the view never walks parents.
+                            anchors.leftMargin: Theme.sp(2) + modelData.depth * Theme.sp(18)
+                            spacing: Theme.sp(10)
+
+                            Rectangle {
+                                Layout.alignment: Qt.AlignVCenter
+                                implicitWidth:  Theme.sp(16)
+                                implicitHeight: Theme.sp(16)
+                                radius: Theme.sp(4)
+                                color:  (modelData.applicable && modelData.own) ? Theme.colorAccent
+                                                                                : "transparent"
+                                border.width: 1
+                                border.color: modelData.own ? Theme.colorAccent
+                                                            : Theme.colorBorderStrong
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible:        modelData.applicable
+                                    text:           "✓"
+                                    font.family:    Theme.fontSymbol
+                                    font.pixelSize: Theme.fontSzLabel
+                                    color:          modelData.own
+                                                      ? (Theme.dark ? Theme.colorBg : "#FFFFFF")
+                                                      : Theme.colorText3
+                                }
+
+                                PpPressable {
+                                    anchors.margins: -Theme.sp(8)   // 44pt-ish target
+                                    onClicked: {
+                                        var r = root.editor.setBinding(modelData.id,
+                                                                       !modelData.applicable,
+                                                                       modelData.material)
+                                        if (r.ok && r.message) bindingToast.show(r.message)
+                                        else if (!r.ok) root._show(r.message, false)
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text:           modelData.label
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzBody2
+                                color:          modelData.applicable ? Theme.colorText
+                                                                     : Theme.colorText3
+                            }
+
+                            Text {
+                                text: modelData.own
+                                        ? qsTr("set here")
+                                        : (modelData.inherited
+                                           ? qsTr("from %1").arg(modelData.inheritedFromLabel) : "")
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzMicro
+                                color:          Theme.colorText3
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            // Ranking weight, and never worded as a judgement about the shot.
+                            // Hidden while it is the default AND untouched: it is a rarely-used
+                            // control, and thirteen copies of "counts when ranking" would bury the
+                            // one row where it does not.
+                            Rectangle {
+                                visible: modelData.applicable
+                                         && (!modelData.material || ctxHover.hovered)
+                                implicitWidth:  matText.implicitWidth + Theme.sp(14)
+                                implicitHeight: Theme.sp(20)
+                                radius: height / 2
+                                color:  Theme.colorBg2
+
+                                Text {
+                                    id: matText
+                                    anchors.centerIn: parent
+                                    text: modelData.material ? qsTr("counts when ranking")
+                                                             : qsTr("not counted when ranking")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          modelData.material ? Theme.colorText2
+                                                                       : Theme.colorText3
+                                }
+                                PpPressable {
+                                    onClicked: {
+                                        var r = root.editor.setBinding(modelData.id, true,
+                                                                       !modelData.material)
+                                        if (r.ok && r.message) bindingToast.show(r.message)
+                                    }
+                                }
+                            }
+
+                            // Back to inheriting. Offered only where there is something of this
+                            // characteristic's own to drop — an action that can only fail is worse
+                            // than no action at all.
+                            Text {
+                                visible:        modelData.own
+                                text:           "✕"
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzBody2
+                                color:          Theme.colorText3
+
+                                PpPressable {
+                                    anchors.margins: -Theme.sp(6)
+                                    onClicked: {
+                                        var r = root.editor.clearBinding(modelData.id)
+                                        if (r.ok && r.message) bindingToast.show(r.message)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            PpDivider { Layout.fillWidth: true }
+
             // ── Provenance ────────────────────────────────────────────────────
             ColumnLayout {
                 Layout.fillWidth: true
@@ -500,6 +703,21 @@ Item {
 
             Item { Layout.fillWidth: true; implicitHeight: Theme.sp(24) }
         }
+    }
+
+    // ══ Binding toast ═════════════════════════════════════════════════════════
+    //
+    // Switching a context off can clear exception rows beneath it that the author never named, so
+    // the change has to say what it did AND be reversible in the same breath. One level of undo,
+    // held in the model: the toast is the affordance, not the mechanism.
+    PpToast {
+        id: bindingToast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom:           parent.bottom
+        anchors.bottomMargin:     Theme.sp(24)
+        z: 10
+        glyph: "◇"
+        onUndoClicked: root.editor.undoBindingChange()
     }
 
     // ══ Measure picker sheet ══════════════════════════════════════════════════

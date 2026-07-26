@@ -480,9 +480,13 @@ pp_add_test(core_pack_test
 # swing. Asserts the rule the whole library depends on — an absent measure resolves Unavailable and
 # never as a pass — plus greedy explanation ranking, the "a leaf is never a root" rule, and that
 # Behavioural causes are offered but never concluded.
+# context_tree.cpp joined the link line at stage 7: detect() resolves each condition's context
+# bindings, so a condition switched off for this kind of shot is never asked rather than reported
+# as absent.
 pp_add_test(characteristic_engine_test
     SOURCES ${DIAG}/tests/characteristic_engine_test.cpp
-            ${DIAG}/relation_resolver.cpp ${DIAG}/characteristic_engine.cpp ${DIAG_PACK}
+            ${DIAG}/relation_resolver.cpp ${DIAG}/characteristic_engine.cpp
+            ${DIAG}/context_tree.cpp ${DIAG_PACK}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 
 # Authoring round-trip (src/Gui/characteristics/characteristic_editor_model.*): the faceted picker,
@@ -496,16 +500,21 @@ find_package(Qt6 REQUIRED COMPONENTS Qml)
 find_package(Qt6 REQUIRED COMPONENTS Concurrent)
 set(CMAKE_AUTOMOC ON)
 
+# The norm stack joined the link line at stage 7: the editor renders a checkbox per CONTEXT, and
+# the context tree ships with the norms rather than with the pack.
 pp_add_test(characteristic_editor_test
     SOURCES ${DIAG}/tests/characteristic_editor_test.cpp
             ${SRC}/Gui/characteristics/characteristic_editor_model.cpp
             ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
             ${DIAG}/merged_pack_provider.cpp ${DIAG_PACK}
+            ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
     LINK    Qt6::Qml
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 set_tests_properties(characteristic_editor_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json")
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
 # Cross-registry integrity: the diagnostics pack vs the metric catalogue. The catalogue's `usedBy`
 # is hand-authored and will otherwise rot silently — a wrong reverse index is worse than an absent

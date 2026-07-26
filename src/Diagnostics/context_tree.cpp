@@ -127,6 +127,42 @@ bool ContextTree::isDescendantOf(const QString &id, const QString &ancestorId) c
     return false;
 }
 
+// ── Binding resolution ──────────────────────────────────────────────────────
+
+const ContextBinding *ownContextBinding(const Condition &c, const QString &contextId)
+{
+    if (contextId.isEmpty())
+        return nullptr;
+    for (const ContextBinding &b : c.bindings)
+        if (b.context == contextId) return &b;
+    return nullptr;
+}
+
+BindingResolution resolveContextBinding(const Condition &c, const ContextTree &tree,
+                                        const QString &contextId)
+{
+    BindingResolution out;
+
+    // An empty context is "the shot did not say". Unlike a norm, there is nothing to grade and
+    // nothing to demote, so it resolves to the default rather than to the default CONTEXT — a
+    // condition switched off for wedges must not be switched off for a shot that named no club.
+    const QStringList chain = tree.chain(contextId);
+    if (chain.isEmpty())
+        return out;
+
+    for (int i = 0; i < chain.size(); ++i) {
+        const ContextBinding *b = ownContextBinding(c, chain.at(i));
+        if (b == nullptr) continue;
+        out.applicable = b->applicable;
+        out.material   = b->material;
+        out.contextId  = b->context;
+        out.inherited  = i > 0;
+        out.found      = true;
+        return out;
+    }
+    return out;
+}
+
 // ── Validation ──────────────────────────────────────────────────────────────
 
 ValidationReport validateContextTree(const ContextTree &tree)

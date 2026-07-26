@@ -312,6 +312,83 @@ int main()
               "no findings means no explanation, no offers, no recommendations");
     }
 
+    // ── Context bindings: what does not apply here is never asked ───────────────
+    //
+    // The load-bearing distinction is that an inapplicable condition is ABSENT from the result, not
+    // NotFired (which would claim it was assessed and found absent) and not Unavailable (which
+    // would claim the app tried and could not). Both would be wrong in a way a coach could read.
+    {
+        const ContextTree tree(std::vector<ContextNode>{
+            { QStringLiteral("any"),        QStringLiteral("Any shot"),     QString() },
+            { QStringLiteral("full_swing"), QStringLiteral("Full swing"),   QStringLiteral("any") },
+            { QStringLiteral("partial"),    QStringLiteral("Partial"),      QStringLiteral("any") },
+            { QStringLiteral("chip"),       QStringLiteral("Chip"),         QStringLiteral("partial") },
+        });
+
+        FakeSource src;
+        src.add(QStringLiteral("mSway"), 50.0, 0.0, 10.0);    // fires
+        src.add(QStringLiteral("mSlide"), 50.0, 0.0, 10.0);   // fires
+
+        // Unbound: passing a context changes nothing for a pack with no binding rows, which is the
+        // shipped pack and therefore the case that must not move.
+        const DetectionResult base  = detect(pack, src);
+        const DetectionResult ctx   = detect(pack, src, &tree, QStringLiteral("chip"));
+        check(base.findings.size() == ctx.findings.size(),
+              "a pack with no bindings is unaffected by the shot's context");
+
+        CharacteristicPack narrowed = pack;
+        for (Condition &c : narrowed.conditions)
+            if (c.id == QLatin1String("sway"))
+                c.bindings.push_back(ContextBinding{ QStringLiteral("partial"), false, true, {} });
+
+        const DetectionResult onChip = detect(narrowed, src, &tree, QStringLiteral("chip"));
+        check(onChip.find(QStringLiteral("sway")) == nullptr,
+              "a condition switched off at a parent context is omitted, not reported as absent");
+        check(onChip.find(QStringLiteral("slide")) != nullptr,
+              "…and the rest of the pack is evaluated as usual");
+        check(!onChip.fired().contains(QStringLiteral("sway")),
+              "an omitted condition cannot fire");
+
+        const DetectionResult onFull = detect(narrowed, src, &tree, QStringLiteral("full_swing"));
+        check(onFull.find(QStringLiteral("sway")) != nullptr
+                  && onFull.find(QStringLiteral("sway"))->state == FindingState::Fired,
+              "the same condition still fires in a context it does apply to");
+        check(detect(narrowed, src).find(QStringLiteral("sway")) != nullptr,
+              "with no context given, nothing is filtered — bindings need a context to mean anything");
+    }
+
+    // ── Materiality is a ranking weight and nothing else ────────────────────────
+    {
+        const ContextTree tree(std::vector<ContextNode>{
+            { QStringLiteral("any"),     QStringLiteral("Any shot"), QString() },
+            { QStringLiteral("partial"), QStringLiteral("Partial"),  QStringLiteral("any") },
+        });
+
+        FakeSource src;
+        src.add(QStringLiteral("mSway"), 50.0, 0.0, 10.0);
+        src.add(QStringLiteral("mSlide"), 50.0, 0.0, 10.0);
+
+        CharacteristicPack immaterial = pack;
+        for (Condition &c : immaterial.conditions)
+            if (c.id == QLatin1String("sway"))
+                c.bindings.push_back(ContextBinding{ QStringLiteral("partial"), true, false, {} });
+
+        const DetectionResult d = detect(immaterial, src, &tree, QStringLiteral("partial"));
+        const Finding *f = d.find(QStringLiteral("sway"));
+        check(f && f->state == FindingState::Fired && !f->material,
+              "an immaterial condition still fires and is still reported — it is only unweighted");
+
+        // limitedHipIr causes BOTH sway and slide, so its coverage is unchanged while its score
+        // loses exactly the immaterial finding's edge.
+        const Explanation exM = explain(pack, detect(pack, src, &tree, QStringLiteral("partial")));
+        const Explanation exI = explain(immaterial, d);
+        check(!exM.roots.empty() && !exI.roots.empty(), "both rank something");
+        check(exI.roots.front().coverage == exM.roots.front().coverage,
+              "an immaterial finding is still explained and still counted in coverage");
+        check(exI.roots.front().score < exM.roots.front().score,
+              "…but it carries no weight in the ranking score");
+    }
+
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
 }

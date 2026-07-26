@@ -18,6 +18,7 @@
 
 #include "characteristic_library_model.h"
 
+#include "../../Diagnostics/norm_provider.h"   // the context tree, for binding labels
 #include "metric_catalogue.h"
 
 #include <QFile>
@@ -254,17 +255,43 @@ QVariantMap CharacteristicLibraryModel::detail(const QString &conditionId) const
     out.insert(QStringLiteral("causes"), edgeList(causesOf(p, conditionId), true));
     out.insert(QStringLiteral("effects"), edgeList(effectsOf(p, conditionId), false));
 
+    // Bindings are EXCEPTIONS, so the shipped pack carries none and this list is empty for every
+    // characteristic nobody has narrowed. `corridorRef` was marshalled here until stage 7 — the
+    // corridor is found by the (measureId, contextId) norm join, so the key named nothing.
+    const ContextTree &tree = sharedNormProvider()->contexts();
+
     QVariantList bindings;
+    QStringList  offLabels, immaterialLabels;
     for (const ContextBinding &b : c->bindings) {
+        const ContextNode *n     = tree.node(b.context);
+        const QString      label = n ? n->label : b.context;
+
         QVariantMap bm;
         bm.insert(QStringLiteral("context"), b.context);
+        bm.insert(QStringLiteral("contextLabel"), label);
         bm.insert(QStringLiteral("applicable"), b.applicable);
         bm.insert(QStringLiteral("material"), b.material);
-        bm.insert(QStringLiteral("corridorRef"), b.corridorRef);
         bm.insert(QStringLiteral("consequence"), b.consequence.text());
         bindings.append(bm);
+
+        // Naming the subtree matters: a row at `partial` covers pitch and chip, and a summary that
+        // said only "Partial swing" would read as one narrow exception rather than three.
+        const bool hasKids = !tree.children(b.context).isEmpty();
+        const QString phrase = hasKids ? tr("%1 and anything beneath it").arg(label) : label;
+        if (!b.applicable)     offLabels << phrase;
+        else if (!b.material)  immaterialLabels << phrase;
     }
     out.insert(QStringLiteral("bindings"), bindings);
+
+    // One sentence for the detail page, composed here: whether a narrowing is worth a line at all
+    // is a rule, and a rule assembled in a delegate is a rule nothing can test.
+    QStringList parts;
+    if (!offLabels.isEmpty())
+        parts << tr("Does not apply to %1.").arg(offLabels.join(QStringLiteral(", ")));
+    if (!immaterialLabels.isEmpty())
+        parts << tr("Reported but not counted when ranking for %1.")
+                     .arg(immaterialLabels.join(QStringLiteral(", ")));
+    out.insert(QStringLiteral("appliesSummary"), parts.join(QLatin1Char(' ')));
 
     return out;
 }

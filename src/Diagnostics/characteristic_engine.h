@@ -19,6 +19,7 @@
 #pragma once
 
 #include "characteristic_pack.h"
+#include "context_tree.h"
 #include "norm.h"
 
 #include <QString>
@@ -114,6 +115,12 @@ struct Finding {
     QStringList  firedSignals;
     QStringList  missingMeasures;   // Unavailable: exactly which measures were absent, for the UI
     Direction    direction  = Direction::High;   // which tail; meaningful when Fired
+
+    // Resolved from the condition's context bindings for the shot's context. RANKING ONLY: an
+    // immaterial finding is reported exactly like any other and is never softened, hidden or
+    // reworded — it simply carries no weight when the explanation pass ranks root causes. See
+    // ContextBinding::material, whose comment this implements.
+    bool         material   = true;
 };
 
 struct DetectionResult {
@@ -126,6 +133,14 @@ struct DetectionResult {
 
 // Evaluate every Observable condition in the pack. Latent conditions are not evaluated here — they
 // have no signals by definition and are resolved by the explanation pass from what they explain.
-DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &source);
+//
+// `contexts` + `contextId` say what KIND OF SHOT this was, and a condition whose bindings make it
+// inapplicable there is OMITTED from the result entirely — not reported as NotFired (which would
+// claim it was assessed and found absent) and not as Unavailable (which would claim the app tried
+// and could not). It was never asked. Pass nothing and every condition is evaluated, which is what
+// every caller did before bindings became editable and is what the shipped pack — which carries no
+// binding rows at all — means either way.
+DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &source,
+                       const ContextTree *contexts = nullptr, const QString &contextId = QString());
 
 } // namespace pinpoint::analysis

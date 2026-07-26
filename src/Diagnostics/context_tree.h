@@ -95,6 +95,35 @@ private:
     std::vector<ContextNode> m_nodes;
 };
 
+// ── Binding resolution ──────────────────────────────────────────────────────
+//
+// Where a CONDITION applies, resolved the same way a norm is: walk up the chain, nearest row wins.
+// One rule for both, because two rules would eventually disagree about what "inherited" means and
+// only one of them would be the one the UI drew.
+//
+// The default when nothing on the chain carries a row is APPLICABLE and MATERIAL. That is not a
+// convenience — it is what makes a binding an exception rather than a declaration, and it is why
+// the shipped pack carries no binding rows at all while every condition applies everywhere.
+//
+// An UNKNOWN context resolves to the default with `found == false`, matching ContextTree::chain()'s
+// refusal to guess. A shot whose context this tree does not recognise is not evidence that a
+// condition was deliberately switched off.
+struct BindingResolution {
+    bool    applicable = true;
+    bool    material   = true;
+    QString contextId;            // where the row was found; empty when nothing resolved
+    bool    inherited  = false;   // the row came from an ancestor, not the requested context
+    bool    found      = false;   // a row exists somewhere on the chain
+};
+
+BindingResolution resolveContextBinding(const Condition &c, const ContextTree &tree,
+                                        const QString &contextId);
+
+// The condition's OWN row at this exact context id, ignoring the chain. Null when it inherits.
+// This is the "is this yours or the parent's?" question the editor's checkboxes rest on, and it is
+// deliberately separate from resolution — they differ exactly where inheritance does.
+const ContextBinding *ownContextBinding(const Condition &c, const QString &contextId);
+
 // ── Validation ──────────────────────────────────────────────────────────────
 //
 // ERRORS:

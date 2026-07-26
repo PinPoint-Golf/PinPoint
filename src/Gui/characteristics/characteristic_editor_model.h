@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "../../Diagnostics/norm_provider.h"   // the context tree lives with the norms
 #include "../../Diagnostics/pack_provider.h"
 
 #include <QObject>
@@ -53,6 +54,16 @@ class CharacteristicEditorModel : public QObject
     Q_PROPERTY(bool    hasUserOverride READ hasUserOverride NOTIFY draftChanged)
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
 
+    // The context tree in render order, each row carrying its depth AND how this characteristic's
+    // bindings resolve there. NOTIFY draftChanged because the second half moves with every edit.
+    //
+    // Rows are { id, label, parentId, depth, isDefault, applicable, material, own, inherited,
+    //            inheritedFrom, inheritedFromLabel }. `own` and `inherited` are the same
+    //            distinction the norms-by-context list draws, and for the same reason: a checkbox
+    //            that cannot say whether it is stating something or repeating its parent teaches
+    //            the author that every row is an assertion, which is the opposite of the design.
+    Q_PROPERTY(QVariantList contexts READ contexts NOTIFY draftChanged)
+
     // Vocabulary for the picker chips — grouped so `what` is never a free text field.
     Q_PROPERTY(QVariantList anatomyGroups READ anatomyGroups CONSTANT)
     Q_PROPERTY(QVariantList phases        READ phases        CONSTANT)
@@ -70,6 +81,7 @@ public:
     bool        hasUserOverride() const { return m_hasUserOverride; }
     QVariantMap draft() const;
 
+    QVariantList contexts() const;
     QVariantList anatomyGroups() const;
     QVariantList phases() const;
     QVariantList reducerKinds() const;
@@ -100,10 +112,41 @@ public:
     Q_INVOKABLE void setCitation(const QString &v);
     Q_INVOKABLE void setState(const QString &stateName);
 
+    // ── Where it applies (context bindings) ─────────────────────────────────
+    //
+    // A binding is an EXCEPTION. Writing one at `partial` covers pitch and chip beneath it, and a
+    // context with no row anywhere on its chain applies — see resolveContextBinding().
+    //
+    // Both return { ok, message, cascaded, canUndo } rather than void: switching a parent off has
+    // to clear any descendant row that says otherwise, or the untick would silently not take, and
+    // an action that quietly changes rows the user cannot see needs to say so AND be undoable in
+    // the same breath. (The plan specified `void`; a result the toast can render is the same
+    // operation with the consequence attached.)
+    Q_INVOKABLE QVariantMap setBinding(const QString &contextId, bool applicable, bool material);
+    Q_INVOKABLE QVariantMap clearBinding(const QString &contextId);
+
+    // Restore the binding set as it stood before the last setBinding/clearBinding. One level deep
+    // and deliberately so: this backs the toast's UNDO, which is about the change just made.
+    Q_INVOKABLE bool undoBindingChange();
+
     // ── Signals (the "flag X when …" clause) ────────────────────────────────
     // Attaches a measure at a direction, minting the signal. Returns the signal id.
     Q_INVOKABLE QString attachMeasure(const QString &measureId, const QString &direction);
     Q_INVOKABLE void    detachSignal(const QString &signalId);
+
+    // The two tails, phrased in the MEASURE's own words rather than as High and Low. Rows are
+    // { name, label, means, sentence }. Three signals shipped inverted because an author chose a
+    // tail against a sign convention that was unstated or the opposite of what they assumed; the
+    // fix is that the control says "further back, toward the trail foot" where it used to say
+    // "Too much". With no `highMeans` to work from it falls back to Too much / Too little and the
+    // caller is expected to ask for the missing sentence — see setMeasureHighMeans().
+    Q_INVOKABLE QVariantList directionOptions(const QString &highMeans) const;
+
+    // What a HIGH value of this measure means, authored where the direction is chosen. Writes to
+    // the draft's copy of the measure, so a save carries it into the user pack as an override of a
+    // shared measure — which is exactly what it is.
+    Q_INVOKABLE void    setMeasureHighMeans(const QString &measureId, const QString &text);
+    Q_INVOKABLE QString measureHighMeans(const QString &measureId) const;
 
     // ── Causes (the "usually caused by …" clause) ───────────────────────────
     // Causes ARE conditions, so this is a reuse picker over the same library.
@@ -144,6 +187,10 @@ private:
     QString mintConditionId(const QString &label) const;
 
     std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_provider;
+    // Read-only, and only ever asked for its context tree. The shared instance because the corridor
+    // editor may reset it after a norm write and this view must then see the same tree, not the one
+    // it happened to assemble at construction.
+    std::shared_ptr<const pinpoint::analysis::INormProvider>         m_norms;
     // Core alone, so "does this ship?" can be answered without inferring it from the user pack.
     // Assembled once: it is read-only and never changes for the life of the process.
     std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_core;
@@ -153,6 +200,12 @@ private:
     std::vector<pinpoint::analysis::Signal>  m_draftSignals;
     std::vector<pinpoint::analysis::Measure> m_draftMeasures;
     std::vector<pinpoint::analysis::Edge>    m_draftEdges;   // causes of the draft
+
+    // One level of undo over the binding set, held as the whole vector rather than as a diff: the
+    // cascade touches rows the user never named, and restoring "what it was" is the only promise
+    // that stays true however many of them there were.
+    std::vector<pinpoint::analysis::ContextBinding> m_bindingUndo;
+    bool m_bindingUndoValid = false;
 
     bool m_editing       = false;
     bool m_dirty         = false;

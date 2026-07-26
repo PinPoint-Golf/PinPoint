@@ -193,6 +193,69 @@ int main()
               "a file with no contexts array reports badContextFile");
     }
 
+    std::printf("=== context tree: binding resolution ===\n");
+    {
+        const ContextTree t = sampleTree();
+
+        // A condition with NO bindings applies everywhere. This is the shipped case — all 50 core
+        // conditions carry no rows — and if it ever inverted, the whole library would go silent in
+        // every context at once rather than fail visibly in one.
+        Condition bare;
+        bare.id = QStringLiteral("bare");
+        for (const QString &id : { QStringLiteral("driver"), QStringLiteral("chip"),
+                                   QStringLiteral("any") }) {
+            const BindingResolution r = resolveContextBinding(bare, t, id);
+            check(r.applicable && r.material && !r.found,
+                  "with no bindings a condition applies, and says nothing was found");
+        }
+
+        // A row at a parent covers everything beneath it — the reason an author writes one row at
+        // `partial` rather than one at pitch and one at chip.
+        Condition narrowed = bare;
+        narrowed.bindings.push_back(ContextBinding{ QStringLiteral("partial"), false, true, {} });
+
+        const BindingResolution atPartial = resolveContextBinding(narrowed, t, QStringLiteral("partial"));
+        check(atPartial.found && !atPartial.applicable && !atPartial.inherited,
+              "the context that carries the row reports it as its own");
+
+        const BindingResolution atChip = resolveContextBinding(narrowed, t, QStringLiteral("chip"));
+        check(atChip.found && !atChip.applicable && atChip.inherited
+                  && atChip.contextId == QLatin1String("partial"),
+              "a child inherits the parent's row and names where it came from");
+
+        const BindingResolution atDriver = resolveContextBinding(narrowed, t, QStringLiteral("driver"));
+        check(atDriver.applicable && !atDriver.found,
+              "a sibling subtree is untouched by it");
+
+        // NEAREST WINS, so an explicit exception beneath a switched-off parent survives — which is
+        // exactly why the editor has to clear such rows when it switches the parent off, or the
+        // untick would not take.
+        narrowed.bindings.push_back(ContextBinding{ QStringLiteral("chip"), true, true, {} });
+        const BindingResolution chipAgain = resolveContextBinding(narrowed, t, QStringLiteral("chip"));
+        check(chipAgain.applicable && !chipAgain.inherited,
+              "a nearer row beats an ancestor's, both ways");
+
+        // Materiality resolves through the same walk and is INDEPENDENT of applicability: reported,
+        // but not counted when ranking.
+        Condition immaterial = bare;
+        immaterial.bindings.push_back(ContextBinding{ QStringLiteral("full_swing"), true, false, {} });
+        const BindingResolution ironR = resolveContextBinding(immaterial, t, QStringLiteral("iron"));
+        check(ironR.applicable && !ironR.material && ironR.inherited,
+              "materiality inherits too, and does not imply inapplicable");
+
+        // An unknown context is not evidence that anything was switched off.
+        const BindingResolution unknown = resolveContextBinding(narrowed, t, QStringLiteral("no_such"));
+        check(unknown.applicable && unknown.material && !unknown.found,
+              "an unknown context resolves to the default, never to a row");
+        const BindingResolution unstated = resolveContextBinding(narrowed, t, QString());
+        check(unstated.applicable && !unstated.found,
+              "a shot that named no context is not a shot the author excluded");
+
+        check(ownContextBinding(immaterial, QStringLiteral("full_swing")) != nullptr
+                  && ownContextBinding(immaterial, QStringLiteral("iron")) == nullptr,
+              "ownContextBinding answers 'is this yours', not 'does something resolve here'");
+    }
+
     std::printf("=== context tree: the SHIPPED tree ===\n");
     {
         // The shipped file has to be valid, and full_swing has to be reachable from it — the engine

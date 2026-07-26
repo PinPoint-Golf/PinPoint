@@ -161,11 +161,22 @@ struct Provenance {
 // Context binding. There is deliberately NO valence field and there must never be one: context
 // never inverts the sign of a finding. Over-the-top is over-the-top in a bunker; reporting it is
 // factual, calling it good or bad is a coaching judgement that belongs to the coach.
+//
+// A binding row is an EXCEPTION, not a declaration. Bindings resolve by walking UP the context
+// tree exactly as norms do (resolveContextBinding(), context_tree.h): the nearest row on the
+// chain wins, and a condition with no row anywhere on the chain applies everywhere and ranks
+// normally. That is why 50 shipped conditions carry no bindings at all rather than 50 x 13 rows
+// saying "yes" — an author writes a row only where the answer differs from the parent, and a
+// reader can then see at a glance which contexts somebody deliberately distinguished.
+//
+// There was a `corridorRef` field here until stage 7. It was redundant the moment norms keyed on
+// (measureId, contextId) — the corridor a signal grades against is found by that join, not named
+// by the binding — and nothing ever read it. Removed rather than left as a field a future author
+// might reasonably assume was load-bearing.
 struct ContextBinding {
     QString       context;                 // context id (see the context tree)
     bool          applicable = true;
     bool          material   = true;       // RANKING WEIGHT ONLY — never "beneficial here"
-    QString       corridorRef;             // which reference corridor to grade against; may be empty
     LocalisedText consequence;             // override only where the MECHANICS genuinely differ
 };
 

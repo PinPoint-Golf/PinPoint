@@ -139,6 +139,22 @@ Item {
                 }
             }
 
+            // ── Where it applies ─────────────────────────────────────────────
+            //
+            // Shown ONLY when somebody has narrowed it. A characteristic that applies everywhere —
+            // which is all 50 shipped ones — says nothing here, because a line reading "applies to
+            // every kind of shot" on every page would train the reader to skip the one page where
+            // it does not.
+            Text {
+                Layout.fillWidth: true
+                visible:        (root.detail.appliesSummary || "").length > 0
+                text:           root.detail.appliesSummary || ""
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzBody2
+                color:          Theme.colorText2
+                wrapMode:       Text.WordWrap
+            }
+
             // ── How it is detected ───────────────────────────────────────────
             ColumnLayout {
                 Layout.fillWidth: true

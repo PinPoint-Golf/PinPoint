@@ -71,6 +71,19 @@ Explanation explain(const CharacteristicPack &pack, const DetectionResult &detec
     const QSet<QString> fired(firedList.begin(), firedList.end());
     if (fired.isEmpty()) return ex;
 
+    // Findings the context marked immaterial. They are still findings — listed, counted in
+    // coverage, reported to the coach exactly as any other — but they carry NO weight when ranking
+    // which root cause to put first. That is the whole of what ContextBinding::material means, and
+    // the weight is zero rather than some fraction because a made-up fraction would be a number
+    // nobody could defend when asked why one cause outranked another.
+    QSet<QString> immaterial;
+    for (const Finding &f : detection.findings)
+        if (f.state == FindingState::Fired && !f.material) immaterial.insert(f.conditionId);
+
+    const auto rankWeight = [&pack, &immaterial](const QString &from, const QString &to) {
+        return immaterial.contains(to) ? 0.0 : edgeWeight(pack, from, to);
+    };
+
     // Every condition that explains at least one fired finding is a candidate — including other
     // fired characteristics, since a characteristic can be both symptom and cause.
     std::vector<RankedCause> candidates;
@@ -94,7 +107,7 @@ Explanation explain(const CharacteristicPack &pack, const DetectionResult &detec
         rc.unknown     = (c.confirmedBy == ConfirmedBy::Screened
                           && !knownScreenResults.contains(c.id));
 
-        for (const QString &e : covers) rc.score += edgeWeight(pack, c.id, e);
+        for (const QString &e : covers) rc.score += rankWeight(c.id, e);
         candidates.push_back(std::move(rc));
     }
 
@@ -132,7 +145,7 @@ Explanation explain(const CharacteristicPack &pack, const DetectionResult &detec
             for (const QString &e : rc.explains)
                 if (!covered.contains(e)) {
                     trimmed.explains << e;
-                    trimmed.score += edgeWeight(pack, rc.conditionId, e);
+                    trimmed.score += rankWeight(rc.conditionId, e);
                 }
             trimmed.coverage = int(trimmed.explains.size());
             if (trimmed.coverage > 0) remaining.push_back(std::move(trimmed));

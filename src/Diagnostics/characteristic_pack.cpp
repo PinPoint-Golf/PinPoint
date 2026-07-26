@@ -748,7 +748,10 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
             b.context     = bo.value(QStringLiteral("context")).toString();
             b.applicable  = bo.value(QStringLiteral("applicable")).toBool(true);
             b.material    = bo.value(QStringLiteral("material")).toBool(true);
-            b.corridorRef = bo.value(QStringLiteral("corridorRef")).toString();
+            // `corridorRef` was read here until stage 7. A pack that still carries the key loads
+            // cleanly and drops it on the next save: the corridor a signal grades against is
+            // resolved by the (measureId, contextId) norm join, so the key never meant anything a
+            // reader could act on.
             b.consequence = readLocalised(bo.value(QStringLiteral("consequence")));
             c.bindings.push_back(std::move(b));
         }
@@ -857,7 +860,6 @@ QJsonObject savePack(const CharacteristicPack &pack)
                 bo.insert(QStringLiteral("context"), b.context);
                 bo.insert(QStringLiteral("applicable"), b.applicable);
                 bo.insert(QStringLiteral("material"), b.material);
-                if (!b.corridorRef.isEmpty())  bo.insert(QStringLiteral("corridorRef"), b.corridorRef);
                 if (!b.consequence.isEmpty())  bo.insert(QStringLiteral("consequence"), writeLocalised(b.consequence));
                 bs.append(bo);
             }

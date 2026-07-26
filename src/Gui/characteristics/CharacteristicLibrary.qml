@@ -34,6 +34,7 @@ Item {
 
     CharacteristicLibraryModel { id: library }
     CharacteristicEditorModel  { id: editor }
+
     NormModel {
         id: norms
         // Persisted in Settings, applied pack-wide. Seeded here rather than in the model so the
@@ -227,7 +228,11 @@ Item {
         anchors.right:  parent.right
         anchors.bottom: parent.bottom
         contentWidth: availableWidth
-        visible: root._selectedId === "" && root._view === "library"
+        // `!_editing` matters on the NEW path and only there: opening the editor from a detail page
+        // sets _selectedId, which already hides this, but "New characteristic" leaves it empty — so
+        // the authoring sheet rendered straight over the still-visible list, both readable at once.
+        // The measures, roadmap and health views have always carried this guard.
+        visible: root._selectedId === "" && root._view === "library" && !root._editing
 
         ColumnLayout {
             x:       Theme.sp(32)

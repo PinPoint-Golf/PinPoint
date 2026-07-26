@@ -25,7 +25,7 @@ the ledger is not. A final sweep after stage 10 must find that table with nothin
 | 5 | `NormModel` + read-only norm UI | ☑ complete — the measures view ships | 2026-07-25 · 0dea02a |
 | — | **review gate** | | |
 | 6 | `CorridorEditor.qml` | ☑ complete — **the pack meets real swings** | 2026-07-26 |
-| 7 | Editable bindings + direction control | ☐ not started | |
+| 7 | Editable bindings + direction control | ☑ complete — bindings **resolve and are honoured**, not just stored | 2026-07-26 |
 | — | **review gate** | | |
 | 8 | The navigable DAG | ☐ not started | |
 | 9 | Deletions and rewiring | ☐ not started | |
@@ -50,11 +50,58 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-26 | 6 | **Stage 6 complete — the corridor editor ships, and the first thing it did was find bugs.** Stage 6 needed a piece the plan never scoped: `IMeasureValueSource` was implemented only by test fakes, so nothing could read a measure off a stored swing and the "not optional" histogram had nothing to draw. Built `src/Diagnostics/measure_sample.{h,cpp}` — a per-swing **phase grid** (windowed median per metric per segmented phase, using WristAngleSampler's own ±15 ms convention, plus adjacent-span extrema for the 9 `extremum` measures), cached in a `swing_phasegrid.json` sidecar guarded on swing.json size+mtime. Pack-independent by design, so minting a measure does not stale 72 sidecars. Then `NormEditorModel` (draft + background library scan + histogram + save), `CorridorEditor.qml` (three routes, two IDEAL-band handles at 44 pt, live histogram with running grade counts), the norm rows in `MeasureDetail` made tappable, and the norm-set strip turned into a real selector. **Ledger C2 and C4 both closed**; `AppSettings::diagnosticsNormSetsOff` added. New suites `measure_sample_test` (34 assertions) and `norm_editor_model_test` (56); analyzer suite **77/77**, and all seven suites green at **105/105** after fixing two PRE-EXISTING link failures (`profiler_controller_test` missing `AnalysisProfileLog.cpp`, `reanalysis_controller_test` missing `pp_os_metrics.cpp` — both "Not Run", neither related to this work). Verified in the running app against the real 72-swing library. **Four new ledger entries (C18–C21) came straight off that screen** — see below. Next: review gate, then stage 7. |
 | 2026-07-26 | 6 (follow-up) | **Reset-to-default and "edited from shipped", on Mark's ask — and it uncovered a data-loss bug.** The norm stack could not say WHICH LAYER a value came from, which both asks need, so `NormResolution` gained `overridden` and `INormProvider` gained `shippedNorm()` / `isOverridden()` (tracked at merge time, never derived by comparing numbers — a user row holding the shipped values is still a user row). The corridor editor now has **two distinct undos**: *Discard changes* (unsaved dragging, writes nothing) and *Reset to shipped* / *Remove your override* — one operation, two labels, because what you get back depends on whether core carries a row at that key. Edited-from-shipped markers land on the `MeasureDetail` norm rows (quoting the shipped band), the `MeasureCatalogue` rows, a new **Edited by me** filter chip, the census line, and the grade-policy / norm-set strip (each with its own reset). **Then the characteristic editor:** `revertToShipped()` DELETED a user-created characteristic while reporting *"Restored the shipped definition"* — the backwards `overridesCore` flag conflated "core ships this id" with "a user row exists", now split into `shippedExists` / `hasUserOverride` with the destructive case labelled and styled as destructive. **And underneath it, a silent data-loss defect:** the editor loaded its user pack keying off `PackLoadResult::loaded` where the type's own comment says a merging caller must key off `parsed` — an overlay routinely fails standalone referential validation, so the editor started with an EMPTY user pack and `save()` then wrote it back, **erasing every other override the user had ever made**. Fixed, with a regression test verified to go red against the old code. All seven suites **105/105**; verified in the running app. Next: review gate, then stage 7. |
 | 2026-07-26 | 6 (drag fix) | **Handle drag ran away to absurd values; the cause was a feedback loop, not a scale factor.** The axis is derived from `mu ± watchMaxZ·sigma`, so dragging a handle widened the corridor, which widened the axis, which made the SAME pixel map to a larger value, which widened it further — a gain of about 3 per mouse-move event at ~60 Hz. Measured: with the pointer PARKED, 20 events took the corridor from 37.4 to **10,860**. Fixed by latching the axis for the duration of a gesture (`beginHandleDrag()` / `endHandleDrag()`, rule in C++ and regression-tested — the test was verified red against the old code), and by dropping `drag.target` for an absolute plot-x mapping: `drag.target` assigns `x` imperatively, which permanently broke the `x: xOf(value)` binding, so after one drag the mark stopped tracking the model and typing in the numeric field moved the number but not the handle. Ledger C24. All seven suites **105/105**; verified in the running app (30 events at one pixel: first 124.968, final 124.968). |
+| 2026-07-26 | 7 | **Stage 7 complete — and the bindings it made editable now MEAN something.** The plan scoped a checkbox per context over a field nothing read; shipping that would have repeated `C3` (a control that says more than it does). So the rule was built first: `resolveContextBinding()` (`context_tree.h`) walks the chain exactly as a norm does — nearest row wins, nothing on the chain means applies-and-ranks — and `detect()` gained an optional `(ContextTree*, contextId)` that **OMITS** an inapplicable condition rather than reporting it NotFired (assessed and absent) or Unavailable (tried and failed); both would be wrong in a way a coach could read. `Finding::material` carries the second half into `explain()`, where an immaterial finding is still listed and still counted in coverage but contributes **zero** to the ranking score — zero rather than a fraction, because a fraction would be a number nobody could defend. `CharacteristicEditorModel` gained `contexts` (tree order + depth + own/inherited/from-where), `setBinding`/`clearBinding`/`undoBindingChange`, and **the cascade**: switching a parent off clears contradicting rows beneath it, reports how many, and is undoable in one tap — without it the untick silently would not take, because resolution stops at the nearest row. `C6` closed (`corridorRef` gone from all four sites). **Direction control:** High/Low is now the measure's own words everywhere it is chosen, composed in C++ (`directionOptions()`), and the picker **asks for the sentence when the measure has none** and gates minting on it — the one defect class that cannot be caught downstream, since an inverted signal fires happily with correct-sounding text. Two live defects found and fixed while verifying: the library list rendered *underneath* the authoring sheet on the "New characteristic" path (`C26`), and tapping a near-duplicate committed a tail the author had not seen yet, read against a different measure's convention (`C27`). Analyzer suite **77/77**; all seven suites **105/105**; verified in the running app headlessly. Next: review gate, then stage 8. |
 | 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
 
 ---
 
-## ▶ Resuming at stage 7 — read this first
+## ▶ Resuming at stage 8 — read this first
+
+**Prompt to start with:**
+
+> Start stage 8 of the diagnostics norms plan — read
+> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 8".
+
+Everything through stage 7 is complete. Analyzer suite **77/77**; all seven CTest suites
+**105/105**; app builds clean and was verified running. Do not re-verify — the Progress table is
+authoritative. **Uncommitted at time of writing.**
+
+Stage 8 is `dag_layout.{h,cpp}` + `DagView.qml` — see the stage section below. It is the only stage
+with no dependency on anything stage 7 built, so nothing here blocks it.
+
+### What stage 7 established, which stage 8 should not contradict
+
+- **A binding is an EXCEPTION, not a declaration.** `resolveContextBinding()` (`context_tree.h`)
+  walks the chain exactly as a norm does: nearest row wins, and a condition with no row anywhere on
+  the chain applies everywhere and ranks normally. All 50 shipped conditions carry no binding rows,
+  and the UI is built so that reads as deliberate rather than as unset.
+- **`detect()` OMITS an inapplicable condition.** Not NotFired (which claims it was assessed and
+  found absent), not Unavailable (which claims the app tried and could not). Any surface that lists
+  findings must not backfill the gap with either.
+- **Immaterial means unweighted, never softened.** `Finding::material` reaches `explain()`, where
+  such a finding is still listed and still counted in coverage but adds **zero** to the ranking
+  score. Do not render it as a lesser finding — context never changes whether something is good or
+  bad, only whether the question is worth asking.
+- **The cascade is load-bearing.** Switching a context off clears contradicting rows beneath it,
+  because resolution stops at the nearest row and an explicit "applies" at `wedge` would otherwise
+  survive a "does not apply" at `full_swing`. It reports the count and is undoable in one tap.
+- **High/Low is gone from every place a direction is chosen.** `directionOptions()` composes both
+  tails in the measure's own words, in C++. The low tail quotes the SAME authored sentence as *the
+  other end of that range* — no generated opposite, because a generated opposite would read like
+  content and be nobody's words.
+- **The picker will not mint a measure with no `highMeans`.** That gate is the whole reason stage 4
+  existed; three signals shipped inverted for want of one sentence.
+
+### Owed from stage 7
+
+In the **clean-up sweep** at the end of this document, as always. `C6` is closed. `C25` is new and
+is the real one: bindings now resolve and the engine honours them, **but nothing in the app
+constructs the engine yet** — same gate as `C3`, and when it is wired it must be handed the shot's
+context or every binding in the pack stays inert. `C26`/`C27` were live defects found while
+verifying and are fixed. `C28` records that 40 core measures still carry no `highMeans` (all wrist
+cell-measures with no signals; the new gate is a floor for new content only).
+
+## ▶ Stage 7 — read this first (superseded, kept for the record)
 
 **Prompt to start with:**
 
@@ -464,23 +511,39 @@ scope. Provenance block carries route, `n`, date, author and the inheritance lin
 never exposes `monitorLo`/`monitorHi` — authored norms inherit the policy. Not-capturable
 measures are refused with an explanation.
 
-### 7 — Editable bindings + direction control  ◄ **review gate**
+### 7 — Editable bindings + direction control  ☑ built  ◄ **review gate**
 
-On `CharacteristicEditorModel`:
+As specified, plus **the rule underneath it**, which this section did not scope. `applicable` and
+`material` were persisted, marshalled and read by nobody: an editor over them would have been a
+control that says more than it does, which is exactly the `C3` wart this plan already regrets. So:
 
-```cpp
-Q_PROPERTY(QVariantList contexts READ contexts NOTIFY draftChanged)   // tree order, with depth
-Q_INVOKABLE void setBinding(const QString &contextId, bool applicable, bool material);
-Q_INVOKABLE void clearBinding(const QString &contextId);
-```
+- **`resolveContextBinding()` / `ownContextBinding()`** (`context_tree.h`) — a binding is an
+  EXCEPTION, resolved by the same upward walk as a norm. Nearest row wins; nothing on the chain
+  means applies and ranks. That is why the shipped pack carries no binding rows at all.
+- **`detect(pack, source, contexts, contextId)`** — an inapplicable condition is **omitted**, not
+  NotFired (assessed and absent) and not Unavailable (tried and failed). Defaulted arguments, so
+  every existing caller is unchanged and a pack with no bindings cannot move.
+- **`Finding::material` → `explain()`** — an immaterial finding is listed, explained and counted in
+  coverage, and contributes **zero** to the ranking score. Zero, not a fraction: a fraction would be
+  a number nobody could defend when asked why one cause outranked another.
 
-Rendered in `CharacteristicEditor.qml` as a checkbox per context, children indented; unticking
-a parent unticks children with an undo toast. Where a signal's direction is chosen, High/Low is
-replaced by the measure's own `highMeans` words. `attachMeasure(measureId, direction)` keeps
-its signature.
+On `CharacteristicEditorModel`: `contexts` (tree order, depth, applicable/material, own/inherited
+and the ancestor it came from), plus `setBinding` / `clearBinding` / `undoBindingChange`. The two
+setters return `{ ok, message, cascaded, canUndo }` rather than `void` — **the cascade** made that
+necessary: switching a parent off must clear contradicting rows beneath it or the untick silently
+does not take, and an action that changes rows the user cannot see has to say so and be reversible
+in the same breath. `CharacteristicEditor.qml` renders a checkbox per context indented by the
+model's own depth, quiet where a row merely repeats its parent, with a `PpToast` UNDO.
 
-Remove `ContextBinding::corridorRef` (`characteristic.h:156`) — redundant once norms key on
-`(measureId, contextId)`, and currently unused.
+**Direction control.** `directionOptions(highMeans)` composes both tails in the measure's own words
+in C++ — the low tail is stated as *the other end of that range*, quoting the one authored sentence
+rather than inventing an opposite. Rendered in the signal rows and in the picker. `attachMeasure()`
+keeps its signature; `mintMeasure()` takes `highMeans` in its facets, and **the picker refuses to
+mint without it**, because an inverted signal is the one defect that cannot be caught downstream —
+it fires happily, on the wrong swings, with correct-sounding consequence text attached.
+
+`ContextBinding::corridorRef` removed at all four sites (`C6`). A pack still carrying the key loads
+clean and drops it on the next save.
 
 ### 8 — The navigable DAG
 
@@ -860,7 +923,7 @@ question that was answered and one that was never asked.
 | C3 | `AppSettings::diagnosticsGradePolicy` reaches the UI, not the engine | engine wiring | ☐ open |
 | C4 | `resetSharedNormProvider()` must be called after every user-norm write | 6 | ☑ closed |
 | C5 | Delete `reference_bands_parity_test` + `ConfigReferenceBandProvider` + `ArchetypeBandProvider` + the compiled table, together | 9 | ☐ open |
-| C6 | Remove `ContextBinding::corridorRef` — **four sites, not one** (see below) | 7 | ☐ open |
+| C6 | Remove `ContextBinding::corridorRef` — **four sites, not one** (see below) | 7 | ☑ closed |
 | C7 | Delete `MetricCatalogue::corridor()`; re-point `metric_catalog.cpp` at the norm join | 9 | ☐ open |
 | C8 | **Literature review of every normative corridor**; `m_lagAngleDown` is the weakest | before the numbers are trusted | ☐ open |
 | C9 | Tempo band re-cut (its low-side Watch band is empty — Good → Action at 1.8) | with C8 | ☐ open |
@@ -879,6 +942,10 @@ question that was answered and one that was never asked.
 | C22 | `CharacteristicEditorModel` keyed its user pack off `loaded`, not `parsed`, and `save()` then erased every other override — **fixed**, regression-tested | 6 follow-up | ☑ closed |
 | C23 | `revertToShipped()` DELETED a user-created characteristic while reporting a restore — **fixed** | 6 follow-up | ☑ closed |
 | C24 | Handle drag ran away (axis derived from the corridor fed back into the pixel→value map) — **fixed**, regression-tested | 6 drag fix | ☑ closed |
+| C25 | Bindings resolve and `detect()` honours them, but **nothing constructs the engine in the app** — same gate as `C3`, and the engine must be given the shot's context when it is wired | engine wiring | ☐ open |
+| C26 | The characteristic library list rendered UNDERNEATH the authoring sheet on the "New characteristic" path (`_editing` was not in its `visible`) — **fixed** | 7 | ☑ closed |
+| C27 | Tapping a near-duplicate in the measure picker COMMITTED a tail the author had not seen yet, read against a different measure's convention — now selects, and the tail is chosen after — **fixed** | 7 | ☑ closed |
+| C28 | 40 of 67 core measures carry no `highMeans`. The picker now refuses to mint without one, so this is a floor for NEW content only; the existing 40 are all wrist cell-measures with no signals, and `axis_direction_test` still gates every signal-bearing one | with C10 / per producer | ☐ open |
 
 ### C18–C21 — what happened the first time the pack met real swings
 
