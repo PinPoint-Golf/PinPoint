@@ -220,6 +220,19 @@ QVariantMap CharacteristicLibraryModel::detail(const QString &conditionId) const
             mm.insert(QStringLiteral("test"), signalTestName(s->test));
             mm.insert(QStringLiteral("direction"),
                       s->direction.has_value() ? directionName(*s->direction) : QString());
+
+            // WHICH SIDE FIRES, on the read-only page. `direction` was marshalled here from the
+            // start and rendered nowhere, so the one thing a reader has to check before deciding a
+            // characteristic is right — does it flag too much or too little of this? — could only
+            // be discovered by opening the editor. Same phrasing rule as the control that sets it
+            // (directionPhrase), so the two cannot drift.
+            if (s->direction.has_value()) {
+                const DirectionPhrase dp = directionPhrase(*s->direction, m->highMeans);
+                mm.insert(QStringLiteral("directionLabel"), dp.label);
+                mm.insert(QStringLiteral("directionSentence"), dp.sentence);
+            }
+            mm.insert(QStringLiteral("signalId"), s->id);
+            mm.insert(QStringLiteral("highMeans"), m->highMeans);
             mm.insert(QStringLiteral("usedBy"), usageOfMeasure(m->id));
             measures.append(mm);
         }

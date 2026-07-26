@@ -142,6 +142,13 @@ public:
     // caller is expected to ask for the missing sentence — see setMeasureHighMeans().
     Q_INVOKABLE QVariantList directionOptions(const QString &highMeans) const;
 
+    // Change which tail fires, after the fact. Attaching a measure was the only way to set this
+    // until 2026-07-26, which meant correcting an inverted signal required deleting it and adding
+    // it back — and adding it back at the other tail did not replace anything, because the minted
+    // id spells the direction out, so the characteristic quietly ended up flagging BOTH sides.
+    // Returns { ok, message } with the new tail stated in the measure's own words.
+    Q_INVOKABLE QVariantMap setSignalDirection(const QString &signalId, const QString &direction);
+
     // What a HIGH value of this measure means, authored where the direction is chosen. Writes to
     // the draft's copy of the measure, so a save carries it into the user pack as an override of a
     // shared measure — which is exactly what it is.
@@ -206,6 +213,11 @@ private:
     // that stays true however many of them there were.
     std::vector<pinpoint::analysis::ContextBinding> m_bindingUndo;
     bool m_bindingUndoValid = false;
+
+    // Signal ids this draft re-minted (a tail was flipped). Dropped from the user pack on save when
+    // nothing references them — otherwise every flip would leave a dead row behind, and the
+    // validator's unused-signal warning would fill up with the user's own history.
+    QStringList m_retiredSignalIds;
 
     bool m_editing       = false;
     bool m_dirty         = false;

@@ -64,6 +64,59 @@ Item {
         onTriggered: root._statusMessage = ""
     }
 
+    // Everything a delegate needs, as methods on the root.
+    //
+    // INSIDE A DELEGATE THE ONLY FILE-LEVEL ID THAT RESOLVES IS `root`. `bindingToast` and
+    // `statusTimer` are siblings of the ScrollView, and a handler in a Repeater delegate cannot see
+    // them — it throws ReferenceError the moment it is clicked, which no binding and no screenshot
+    // will show you. So the delegates call these, and these touch the ids from file scope.
+    function _flipTail(signalId, direction) {
+        var r = root.editor.setSignalDirection(signalId, direction)
+        root._show(r.message, r.ok)
+    }
+
+    function _applyBinding(contextId, applicable, material) {
+        var r = root.editor.setBinding(contextId, applicable, material)
+        if (r.ok && r.message) bindingToast.show(r.message)
+        else if (!r.ok)        root._show(r.message, false)
+    }
+
+    function _dropBinding(contextId) {
+        var r = root.editor.clearBinding(contextId)
+        if (r.ok && r.message) bindingToast.show(r.message)
+        else if (!r.ok)        root._show(r.message, false)
+    }
+
+    // One of the two tails, as a chip. Its click handler lives INSIDE the component and touches
+    // nothing but its own signal — a handler written on a composite type (PpPressable, which
+    // declares its own `id: root`) cannot see this file's `root` from inside a delegate, which is
+    // how the first version of this control threw ReferenceError the moment it was clicked.
+    component TailChip: Rectangle {
+        property string label:  ""
+        property bool   chosen: false
+        signal picked()
+
+        implicitWidth:  tcText.implicitWidth + Theme.sp(18)
+        implicitHeight: Theme.sp(22)
+        radius: height / 2
+        color:  chosen ? Theme.colorAccent : Theme.colorBg
+
+        Text {
+            id: tcText
+            anchors.centerIn: parent
+            text:           parent.label
+            font.family:    Theme.fontBody
+            font.pixelSize: Theme.fontSzMicro
+            color:          parent.chosen ? Theme.colorBg : Theme.colorText2
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled:      !parent.chosen
+            cursorShape:  enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked:    parent.picked()
+        }
+    }
+
     // ══ The sentence ══════════════════════════════════════════════════════════
     ScrollView {
         anchors.fill: parent
@@ -200,6 +253,7 @@ Item {
                 Repeater {
                     model: root._draft.signals || []
                     delegate: Rectangle {
+                        id: sigDelegate
                         required property var modelData
                         Layout.fillWidth: true
                         // Content-driven: the direction sentence wraps, and the missing-convention
@@ -272,6 +326,36 @@ Item {
                                                               + "back, toward the trail foot”")
                                         onEditingFinished:
                                             root.editor.setMeasureHighMeans(modelData.measureId, text)
+                                    }
+                                }
+
+                                // WHICH SIDE FIRES, changeable. Until 2026-07-26 the tail could
+                                // only be set while attaching the measure, so correcting an
+                                // inversion meant deleting the signal and adding it back — and
+                                // adding it back at the other tail did not replace anything,
+                                // because the minted id spells the direction out. The
+                                // characteristic quietly ended up flagging BOTH sides.
+                                //
+                                // Two chips rather than a Repeater over directionOptions():
+                                // `Direction` is High|Low and always will be, and a nested delegate
+                                // buys a second component boundary for nothing.
+                                RowLayout {
+                                    id: tailRow
+                                    Layout.topMargin: Theme.sp(4)
+                                    spacing: Theme.sp(6)
+
+                                    readonly property var tails:
+                                        root.editor.directionOptions(sigDelegate.modelData.highMeans || "")
+
+                                    TailChip {
+                                        label:  tailRow.tails[0].label
+                                        chosen: sigDelegate.modelData.direction === "high"
+                                        onPicked: root._flipTail(sigDelegate.modelData.id, "high")
+                                    }
+                                    TailChip {
+                                        label:  tailRow.tails[1].label
+                                        chosen: sigDelegate.modelData.direction === "low"
+                                        onPicked: root._flipTail(sigDelegate.modelData.id, "low")
                                     }
                                 }
 
@@ -531,15 +615,13 @@ Item {
                                                       : Theme.colorText3
                                 }
 
-                                PpPressable {
+                                MouseArea {
+                                    anchors.fill: parent
                                     anchors.margins: -Theme.sp(8)   // 44pt-ish target
-                                    onClicked: {
-                                        var r = root.editor.setBinding(modelData.id,
-                                                                       !modelData.applicable,
-                                                                       modelData.material)
-                                        if (r.ok && r.message) bindingToast.show(r.message)
-                                        else if (!r.ok) root._show(r.message, false)
-                                    }
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root._applyBinding(modelData.id,
+                                                                  !modelData.applicable,
+                                                                  modelData.material)
                                 }
                             }
 
@@ -585,12 +667,11 @@ Item {
                                     color:          modelData.material ? Theme.colorText2
                                                                        : Theme.colorText3
                                 }
-                                PpPressable {
-                                    onClicked: {
-                                        var r = root.editor.setBinding(modelData.id, true,
-                                                                       !modelData.material)
-                                        if (r.ok && r.message) bindingToast.show(r.message)
-                                    }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root._applyBinding(modelData.id, true,
+                                                                  !modelData.material)
                                 }
                             }
 
@@ -604,12 +685,11 @@ Item {
                                 font.pixelSize: Theme.fontSzBody2
                                 color:          Theme.colorText3
 
-                                PpPressable {
+                                MouseArea {
+                                    anchors.fill: parent
                                     anchors.margins: -Theme.sp(6)
-                                    onClicked: {
-                                        var r = root.editor.clearBinding(modelData.id)
-                                        if (r.ok && r.message) bindingToast.show(r.message)
-                                    }
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root._dropBinding(modelData.id)
                                 }
                             }
                         }

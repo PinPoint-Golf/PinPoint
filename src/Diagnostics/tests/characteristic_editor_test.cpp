@@ -501,6 +501,36 @@ int main(int argc, char **argv)
                   .value(QStringLiteral("directionSentence")).toString().contains(hm),
               "the signal row states the tail in the measure's own words");
 
+        // ── The tail can be changed AFTER it was set ────────────────────────
+        //
+        // It could not be until 2026-07-26: attaching was the only way to set it, so correcting an
+        // inversion meant detach + re-attach — and re-attaching at the other tail added a SECOND
+        // signal rather than replacing the first, because the minted id spells the direction out.
+        // A condition fires if any of its signals fires, so the characteristic silently ended up
+        // flagging both sides of the corridor.
+        const QVariantList before = ed.draft().value(QStringLiteral("signals")).toList();
+        const QString      sigId  = before.first().toMap().value(QStringLiteral("id")).toString();
+        check(sigId == QStringLiteral("sig_%1_low").arg(mid), "a minted id spells its tail out");
+
+        const QVariantMap flip = ed.setSignalDirection(sigId, QStringLiteral("high"));
+        check(flip.value(QStringLiteral("ok")).toBool(), "the tail can be flipped in place");
+        check(flip.value(QStringLiteral("message")).toString().contains(hm),
+              "…and the result states the new tail in the measure's own words");
+
+        const QVariantList after = ed.draft().value(QStringLiteral("signals")).toList();
+        check(after.size() == 1, "flipping REPLACES the tail — it does not add the other one");
+        check(after.first().toMap().value(QStringLiteral("direction")) == QStringLiteral("high"),
+              "the direction is the new one");
+        check(after.first().toMap().value(QStringLiteral("id")).toString()
+                  == QStringLiteral("sig_%1_high").arg(mid),
+              "an id WE minted is re-minted, so the file never spells the opposite of what it does");
+        check(ed.setSignalDirection(sigId, QStringLiteral("low"))
+                  .value(QStringLiteral("ok")).toBool() == false,
+              "the retired id is gone — nothing can be flipped through a stale handle");
+        check(ed.setSignalDirection(QStringLiteral("sig_%1_high").arg(mid), QStringLiteral("high"))
+                  .value(QStringLiteral("ok")).toBool(),
+              "setting the tail it already has is a no-op, not an error");
+
         // An existing measure with no stated convention can be given one, and it lands on the draft
         // so a save carries it.
         const QString bareId = ed.mintMeasure(facets("leadHand", "distance", "trailAnkle", "at", "p4"));
@@ -508,6 +538,50 @@ int main(int argc, char **argv)
         ed.setMeasureHighMeans(bareId, QStringLiteral("the hands further from the trail ankle"));
         check(ed.measureHighMeans(bareId) == QStringLiteral("the hands further from the trail ankle"),
               "a missing convention can be authored where the direction is chosen");
+    }
+
+    // ── A flipped tail survives the round-trip, and leaves no dead row ──────────
+    {
+        QString measureId, signalId;
+        {
+            CharacteristicEditorModel ed;
+            ed.beginEdit(QStringLiteral("early_extension"));
+
+            QVariantMap f = facets("leadHand", "distance", "leadHeel", "at", "p7");
+            f.insert(QStringLiteral("highMeans"), QStringLiteral("the hands further from the lead heel"));
+            measureId = ed.mintMeasure(f);
+            signalId  = ed.attachMeasure(measureId, QStringLiteral("high"));
+            check(!signalId.isEmpty(), "a signal is attached at the high tail");
+            check(ed.save().value(QStringLiteral("ok")).toBool(), "it saves");
+        }
+        {
+            CharacteristicEditorModel ed;
+            ed.beginEdit(QStringLiteral("early_extension"));
+            check(ed.setSignalDirection(signalId, QStringLiteral("low"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "a SAVED signal's tail can be flipped on reopening");
+            check(ed.save().value(QStringLiteral("ok")).toBool(), "the flip saves");
+        }
+
+        // The user pack must carry the new signal and NOT the retired one — otherwise every flip
+        // leaves a dead row behind and the unused-signal warning fills with the user's history.
+        QFile f(userPackPath());
+        check(f.open(QIODevice::ReadOnly), "the user pack is readable");
+        const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+        check(res.parsed, "it parses");
+        bool hasNew = false, hasOld = false;
+        for (const Signal &s : res.pack.signalDefs) {
+            if (s.id == QStringLiteral("sig_%1_low").arg(measureId))  hasNew = true;
+            if (s.id == QStringLiteral("sig_%1_high").arg(measureId)) hasOld = true;
+        }
+        check(hasNew, "the flipped signal round-trips");
+        check(!hasOld, "…and the id it retired is gone from the pack");
+
+        const Condition *c = res.pack.condition(QStringLiteral("early_extension"));
+        check(c && c->detectedBy.contains(QStringLiteral("sig_%1_low").arg(measureId)),
+              "the condition points at the new id, not the retired one");
+        check(c && !c->detectedBy.contains(QStringLiteral("sig_%1_high").arg(measureId)),
+              "…and not at both, which would fire either side of the corridor");
     }
 
     QFile::remove(userPackPath());

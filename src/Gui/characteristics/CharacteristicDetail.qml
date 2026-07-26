@@ -185,6 +185,30 @@ Item {
                             color:          Theme.colorText
                             wrapMode:       Text.WordWrap
                         }
+                        // WHICH SIDE FIRES. The first thing a reader has to check before deciding
+                        // a characteristic is right, and until now it could only be seen by opening
+                        // the editor. Composed in C++ by the same rule as the control that sets it.
+                        Text {
+                            Layout.fillWidth: true
+                            visible:        (modelData.directionSentence || "").length > 0
+                            text:           modelData.directionSentence || ""
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText2
+                            wrapMode:       Text.WordWrap
+                        }
+                        // No stated convention means nothing can check that tail is the right one.
+                        Text {
+                            Layout.fillWidth: true
+                            visible:        (modelData.direction || "").length > 0
+                                            && (modelData.highMeans || "").length === 0
+                            text: qsTr("Nothing says what a higher value of this measure means, so "
+                                       + "which side fires cannot be checked.")
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorRagWatch
+                            wrapMode:       Text.WordWrap
+                        }
                         Text {
                             Layout.fillWidth: true
                             text: {

@@ -633,8 +633,10 @@ Item {
                             font.family:    Theme.fontBody
                             font.pixelSize: Theme.fontSzBody2
                             color:          Theme.colorText3
-                            PpPressable {
+                            MouseArea {
+                                anchors.fill: parent
                                 anchors.margins: -Theme.sp(6)
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: { root._reuseId = ""; root._reuseLabel = ""
                                              root._reuseHighMeans = "" }
                             }

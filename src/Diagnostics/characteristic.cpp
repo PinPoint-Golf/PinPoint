@@ -18,6 +18,8 @@
 
 #include "characteristic.h"
 
+#include <QObject>   // tr() for the direction phrasing — the only user-facing strings in this file
+
 #include <algorithm>
 
 namespace pinpoint::analysis {
@@ -198,6 +200,27 @@ QString reachHint(ConfirmedBy c)
     case ConfirmedBy::Asserted: return QStringLiteral("ask the golfer");
     }
     return QString();
+}
+
+DirectionPhrase directionPhrase(Direction d, const QString &highMeans)
+{
+    const QString   h = highMeans.trimmed();
+    const bool      high = (d == Direction::High);
+    DirectionPhrase p;
+    p.label = high ? QObject::tr("Too much") : QObject::tr("Too little");
+
+    if (h.isEmpty()) {
+        p.sentence = high ? QObject::tr("Flagged when the value is higher than the norm.")
+                          : QObject::tr("Flagged when the value is lower than the norm.");
+        return p;
+    }
+
+    p.means    = high ? h : QObject::tr("the other end of that range");
+    p.sentence = high
+                     ? QObject::tr("Flagged when there is more of it: %1.").arg(h)
+                     : QObject::tr("Flagged at the other end of the same range — the opposite of: %1.")
+                           .arg(h);
+    return p;
 }
 
 } // namespace pinpoint::analysis

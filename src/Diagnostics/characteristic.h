@@ -278,6 +278,26 @@ bool    strengthFromName(const QString &s, Strength &out);
 QString reachLabel(ConfirmedBy c);
 QString reachHint(ConfirmedBy c);
 
+// ── Which tail fires, in the measure's own words ────────────────────────────
+//
+// ONE rule, here, because every surface that shows or sets a direction has to say the same thing:
+// the picker where it is chosen, the signal row where it is changed, and the read-only detail page
+// where a reader decides whether it is right. Three copies of this phrasing would eventually
+// disagree, and the disagreement would be about which side of a corridor fires.
+//
+// With no `highMeans` authored it degrades to Too much / Too little — authorable, but saying
+// nothing about the swing, which is the state that let three signals ship inverted.
+//
+// The LOW tail quotes the SAME authored sentence as "the other end of that range". No opposite is
+// generated: a generated opposite reads like content and would be nobody's words.
+struct DirectionPhrase {
+    QString label;      // "Too much" / "Too little" — the chip
+    QString means;      // this tail in the measure's own words; empty when none is authored
+    QString sentence;   // the whole statement, for a row or a detail page
+};
+
+DirectionPhrase directionPhrase(Direction d, const QString &highMeans);
+
 // True when this condition can never be established by capture, so it must not appear in the
 // measure roadmap however many characteristics it blocks.
 inline bool isOutsideCaptureReach(ConfirmedBy c)

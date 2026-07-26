@@ -336,6 +336,7 @@ bool CharacteristicEditorModel::beginEdit(const QString &conditionId)
     m_isNew   = false;
     m_dirty   = false;
     m_bindingUndoValid = false;   // an undo from a previous characteristic is not an undo
+    m_retiredSignalIds.clear();
 
     // Two INDEPENDENT facts, and the old single flag conflated them. "Does core ship this id?"
     // decides whether dropping the user's row restores something or destroys it; "is there a user
@@ -365,6 +366,7 @@ void CharacteristicEditorModel::beginNew()
     m_shippedExists    = false;
     m_hasUserOverride  = false;
     m_bindingUndoValid = false;
+    m_retiredSignalIds.clear();
     emit draftChanged();
 }
 
@@ -377,6 +379,7 @@ void CharacteristicEditorModel::discard()
     m_draftMeasures.clear();
     m_draftEdges.clear();
     m_bindingUndoValid = false;
+    m_retiredSignalIds.clear();
     emit draftChanged();
 }
 
@@ -411,6 +414,20 @@ QVariantMap CharacteristicEditorModel::save()
                                           [&](const Edge &e) { return e.to == m_draft.id; }),
                            m_userPack.edges.end());
     for (const Edge &e : m_draftEdges) m_userPack.edges.push_back(e);
+
+    // A flipped tail re-mints the signal id, so the old row is now dead weight — drop it, but only
+    // once nothing in the user pack still points at it.
+    for (const QString &retired : m_retiredSignalIds) {
+        bool referenced = false;
+        for (const Condition &c : m_userPack.conditions)
+            if (c.detectedBy.contains(retired)) referenced = true;
+        if (referenced) continue;
+        m_userPack.signalDefs.erase(
+            std::remove_if(m_userPack.signalDefs.begin(), m_userPack.signalDefs.end(),
+                           [&retired](const Signal &s) { return s.id == retired; }),
+            m_userPack.signalDefs.end());
+    }
+    m_retiredSignalIds.clear();
 
     QString whyNot;
     if (!saveUserPack(m_userPack, &whyNot))
@@ -626,35 +643,68 @@ bool CharacteristicEditorModel::undoBindingChange()
 
 QVariantList CharacteristicEditorModel::directionOptions(const QString &highMeans) const
 {
-    const QString h = highMeans.trimmed();
+    // The phrasing rule lives in the pack layer (directionPhrase, characteristic.h) because the
+    // read-only detail page has to say exactly the same words as the control that sets it.
+    QVariantList out;
+    for (Direction d : { Direction::High, Direction::Low }) {
+        const DirectionPhrase p = directionPhrase(d, highMeans);
+        QVariantMap           m;
+        m.insert(QStringLiteral("name"), directionName(d));
+        m.insert(QStringLiteral("label"), p.label);
+        m.insert(QStringLiteral("means"), p.means);
+        m.insert(QStringLiteral("sentence"), p.sentence);
+        out.append(m);
+    }
+    return out;
+}
 
-    QVariantMap high, low;
-    high.insert(QStringLiteral("name"), directionName(Direction::High));
-    low.insert(QStringLiteral("name"), directionName(Direction::Low));
+QVariantMap CharacteristicEditorModel::setSignalDirection(const QString &signalId,
+                                                          const QString &direction)
+{
+    if (!m_editing) return failResult(tr("Nothing is being edited."));
 
-    if (h.isEmpty()) {
-        // The fallback that let three inverted signals ship. Kept because a measure without a
-        // stated convention still has to be authorable, but every caller shows the ask alongside.
-        high.insert(QStringLiteral("label"), tr("Too much"));
-        low.insert(QStringLiteral("label"), tr("Too little"));
-        high.insert(QStringLiteral("means"), QString());
-        low.insert(QStringLiteral("means"), QString());
-        high.insert(QStringLiteral("sentence"), tr("Flagged when the value is higher than the norm."));
-        low.insert(QStringLiteral("sentence"), tr("Flagged when the value is lower than the norm."));
-    } else {
-        high.insert(QStringLiteral("label"), tr("Too much"));
-        low.insert(QStringLiteral("label"), tr("Too little"));
-        high.insert(QStringLiteral("means"), h);
-        // No second phrase is authored and none is invented: the low tail is stated as the other
-        // end of the SAME range, quoting the one sentence that was written. A generated opposite
-        // ("less far back") reads like content and would be nobody's words.
-        low.insert(QStringLiteral("means"), tr("the other end of that range"));
-        high.insert(QStringLiteral("sentence"), tr("Flagged when there is more of it: %1.").arg(h));
-        low.insert(QStringLiteral("sentence"),
-                   tr("Flagged at the other end of the same range — the opposite of: %1.").arg(h));
+    Direction d{};
+    if (!directionFromName(direction, d)) return failResult(tr("That is not a direction."));
+
+    Signal *sig = nullptr;
+    for (Signal &s : m_draftSignals)
+        if (s.id == signalId) sig = &s;
+    if (!sig) return failResult(tr("That signal is not on this characteristic."));
+
+    if (sig->direction.has_value() && *sig->direction == d) return okResult();
+
+    const QString measureId = sig->measures.value(0);
+
+    // The id is an OPAQUE stable key — the shipped pack proves it, since `sig_ballForward` names
+    // the tail rather than deriving from it. But an id WE minted spells the direction out
+    // (`sig_<measure>_<direction>`), and leaving that spelling behind after a flip would leave the
+    // file saying the opposite of what the row does. So re-mint exactly that case, and only when
+    // nothing else is pointing at the old id.
+    const QString mintedOld = QStringLiteral("sig_%1_%2")
+                                  .arg(measureId, directionName(sig->direction.value_or(Direction::High)));
+    const QString mintedNew = QStringLiteral("sig_%1_%2").arg(measureId, directionName(d));
+
+    bool shared = false;
+    for (const Condition &oc : m_provider->pack().conditions)
+        if (oc.id != m_draft.id && oc.detectedBy.contains(signalId)) shared = true;
+
+    if (signalId == mintedOld && !shared && mintedNew != signalId) {
+        // Refuse rather than merge: two signals with the same id would collapse, and a
+        // characteristic carrying BOTH tails of one measure fires either way round, which is the
+        // one shape the picker's own guidance tells an author not to build.
+        for (const Signal &s : m_draftSignals)
+            if (s.id == mintedNew)
+                return failResult(tr("This characteristic already flags the other side of that "
+                                     "measure. Remove that one first."));
+        m_retiredSignalIds << signalId;
+        sig->id = mintedNew;
     }
 
-    return QVariantList{ high, low };
+    sig->direction = d;
+    touch();
+
+    const DirectionPhrase p = directionPhrase(d, measureHighMeans(measureId));
+    return okResult(p.sentence);
 }
 
 void CharacteristicEditorModel::setMeasureHighMeans(const QString &measureId, const QString &text)
