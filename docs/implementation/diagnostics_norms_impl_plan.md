@@ -418,8 +418,13 @@ Add `QString highMeans` to `Measure` and author it for every measure that has a 
 Works in the measure's own units. The words `mu`, `sigma` and `z` never appear. Segmented
 control over three routes:
 
-- **Set by hand** — two draggable handles bound the Good band; centre → `mu`, each half-width →
+- **Set by hand** — two draggable handles bound the **Ideal** band; centre → `mu`, each half-width →
   `sigmaLo`/`sigmaHi`. 44 pt touch targets plus a numeric readout beside each handle.
+  ⚠ This said "the Good band" until 2026-07-26, which contradicted its own next clause: `mu ± sigma`
+  is `|z| ≤ 1`, which the grade rule calls **Ideal**; Good is `|z| ≤ 2`. Stale from the brief's
+  original band names, before Mark renamed them. `norm.h:111` is authoritative — `idealLo()` /
+  `idealHi()` are "what the corridor editor's two handles bind to". The Good and Watch edges follow
+  from the grade policy and are drawn, not dragged.
 - **Seat from swings** — filter shots, mark the well-positioned ones, fit. Sets `n` and
   `source = Seated`. Save states that this sets the population norm for everyone on this norm set.
 - **Import** — adopt a row from another norm pack, then adjust.
