@@ -61,6 +61,12 @@ class AppSettings : public QObject
     // Metric catalogue (Settings → Metrics) directory filter: hide roadmap-
     // placeholder (PLANNED) metrics. A view preference, persisted in the ui/ group.
     Q_PROPERTY(bool    metricsHidePlanned READ metricsHidePlanned WRITE setMetricsHidePlanned NOTIFY metricsHidePlannedChanged)
+    // Diagnostics grade policy (Settings -> Diagnostics -> Measures & norms), by NAME:
+    // "lenient" | "standard" | "strict". Applied PACK-WIDE and never per norm or per context — if
+    // "Ideal" meant one thing in one pack and something else in another, no grade would be
+    // comparable across athletes or across shared packs. The names, and the z thresholds behind
+    // them, live in norm_model.cpp; this stores only which one is chosen.
+    Q_PROPERTY(QString diagnosticsGradePolicy READ diagnosticsGradePolicy WRITE setDiagnosticsGradePolicy NOTIFY diagnosticsGradePolicyChanged)
     // Global replay behaviour (surfaced in the View menu alongside the timeline
     // options, not per-mode): whether a just-captured shot auto-replays, and
     // whether replay playback is trimmed to the detected swing (Address → Finish).
@@ -228,6 +234,8 @@ public:
         m_wristReferenceSwingDir = ppSettings().value(QStringLiteral("ui/wristReferenceSwingDir"), QString()).toString();
         m_timelineSnapToPhases = ppSettings().value(QStringLiteral("ui/timelineSnapToPhases"), false).toBool();
         m_metricsHidePlanned = ppSettings().value(QStringLiteral("ui/metricsHidePlanned"), false).toBool();
+        m_diagnosticsGradePolicy = ppSettings().value(QStringLiteral("ui/diagnosticsGradePolicy"),
+                                                      QStringLiteral("standard")).toString();
         m_autoReplayAfterCapture = ppSettings().value(QStringLiteral("ui/autoReplayAfterCapture"), true).toBool();
         m_replayTrimToSwing = ppSettings().value(QStringLiteral("ui/replayTrimToSwing"), false).toBool();
         m_reduceMotion    = ppSettings().value(QStringLiteral("ui/reduceMotion"),    false).toBool();
@@ -351,6 +359,7 @@ public:
     QString wristReferenceSwingDir() const { return m_wristReferenceSwingDir; }
     bool    timelineSnapToPhases() const { return m_timelineSnapToPhases; }
     bool    metricsHidePlanned()  const { return m_metricsHidePlanned; }
+    QString diagnosticsGradePolicy() const { return m_diagnosticsGradePolicy; }
     bool    autoReplayAfterCapture() const { return m_autoReplayAfterCapture; }
     bool    replayTrimToSwing()   const { return m_replayTrimToSwing; }
     bool    reduceMotion()  const { return m_reduceMotion; }
@@ -522,6 +531,14 @@ public:
         m_metricsHidePlanned = v;
         ppSettings().setValue(QStringLiteral("ui/metricsHidePlanned"), v);
         emit metricsHidePlannedChanged();
+    }
+
+    void setDiagnosticsGradePolicy(const QString &v)
+    {
+        if (m_diagnosticsGradePolicy == v) return;
+        m_diagnosticsGradePolicy = v;
+        ppSettings().setValue(QStringLiteral("ui/diagnosticsGradePolicy"), v);
+        emit diagnosticsGradePolicyChanged();
     }
 
     void setAutoReplayAfterCapture(bool v)
@@ -1192,6 +1209,7 @@ signals:
     void wristReferenceSwingDirChanged();
     void timelineSnapToPhasesChanged();
     void metricsHidePlannedChanged();
+    void diagnosticsGradePolicyChanged();
     void autoReplayAfterCaptureChanged();
     void replayTrimToSwingChanged();
     void reduceMotionChanged();
@@ -1285,6 +1303,7 @@ private:
     QString m_wristReferenceSwingDir;
     bool    m_timelineSnapToPhases = false;
     bool    m_metricsHidePlanned = false;
+    QString m_diagnosticsGradePolicy = QStringLiteral("standard");
     bool    m_autoReplayAfterCapture = true;
     bool    m_replayTrimToSwing = false;
     bool    m_reduceMotion    = false;

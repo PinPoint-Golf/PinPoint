@@ -45,6 +45,11 @@ Item {
     // Which sub-picker is open, if any.
     property string _sheet: ""      // "" | "measure" | "cause"
 
+    // Open the editor straight onto the measure picker. Used by the measure catalogue's "New
+    // measure": a mint writes into the DRAFT, so it needs a draft to land in, and a measure with
+    // no characteristic reading it is a validator warning the moment it saves.
+    function openMeasurePicker() { root._sheet = "measure" }
+
     readonly property var _draft: root.editor.draft
 
     function _show(message, ok) {

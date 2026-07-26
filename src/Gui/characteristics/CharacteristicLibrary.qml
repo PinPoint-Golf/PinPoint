@@ -23,8 +23,9 @@ import PinPointStudio
 
 // Settings → Reference → Diagnostics. Master (library) → detail, mirroring MetricLibrary.qml.
 //
-// Three views behind one switcher, answering three different questions:
+// Four views behind one switcher, answering four different questions:
 //   Characteristics — what does the library know?
+//   Measures        — what can it actually grade, and against what?
 //   Roadmap         — what does it need that we have not built?
 //   Causes & health — what should a coach do, and what is wrong with the content?
 // Detail and the authoring sheet overlay whichever view is active.
@@ -33,6 +34,14 @@ Item {
 
     CharacteristicLibraryModel { id: library }
     CharacteristicEditorModel  { id: editor }
+    NormModel {
+        id: norms
+        // Persisted in Settings, applied pack-wide. Seeded here rather than in the model so the
+        // model itself stays free of the settings dependency and remains testable standalone.
+        // `appSettings` is the root context property — the ONE global instance from main.cpp, per
+        // the single-shared-instance rule; never construct a local AppSettings for a write.
+        Component.onCompleted: gradePolicy = appSettings.diagnosticsGradePolicy
+    }
 
     // Bumped whenever a save lands, so every query() binding re-evaluates. The façade is read-only
     // by design, so an explicit nudge is cheaper and clearer than making it observable.
@@ -47,13 +56,25 @@ Item {
     property string _groupFilter: ""    // "" = all groups
     property string _reachFilter: ""    // "" = all reaches
     property string _selectedId:  ""    // "" = directory (master)
+    property string _selectedMeasureId: ""  // "" = measure catalogue (master)
     property bool   _editing:     false // the authoring sheet is open
-    property string _view:        "library"   // "library" | "roadmap" | "health"
+    property string _view:        "library"   // "library" | "measures" | "roadmap" | "health"
 
     // Settings-search hook (ScreenSettings.navigateToResult): return to the directory and report
     // success so the retry loop stops.
     function scrollToItem(itemId) {
-        root._selectedId = ""
+        root._selectedId        = ""
+        root._selectedMeasureId = ""
+        return true
+    }
+
+    // Deep link to one measure. Same contract as showCharacteristic: an unknown id is ignored so a
+    // stale link lands on the catalogue rather than a blank page.
+    function showMeasure(measureId) {
+        if (!measureId || measureId.length === 0) return false
+        if (Object.keys(norms.measureDetail(measureId)).length === 0) return false
+        root._view              = "measures"
+        root._selectedMeasureId = measureId
         return true
     }
 
@@ -108,27 +129,31 @@ Item {
     readonly property int _totalCount: library.query(root._filters()).length
 
     // ══ View switcher — persistent, outside every view ════════════════════════
-    // Deliberately not inside any of the three views: a control that lives in the view it
+    // Deliberately not inside any of the four views: a control that lives in the view it
     // switches away from vanishes on first use and strands the user wherever they landed.
     Item {
         id: switcherBar
         anchors.top:   parent.top
         anchors.left:  parent.left
         anchors.right: parent.right
-        height:  visible ? Theme.sp(58) : 0
+        // Measured from the Flow, not fixed: the chips WRAP at a narrow panel width, and a fixed
+        // height would let the second row spill over the view below it rather than pushing it down.
+        height:  visible ? switcherFlow.y + switcherFlow.implicitHeight + Theme.sp(10) : 0
         // Detail and the editor are full-page and carry their own way back, so the bar steps aside.
-        visible: root._selectedId === "" && !root._editing
+        visible: root._selectedId === "" && root._selectedMeasureId === "" && !root._editing
 
         Flow {
+            id: switcherFlow
             x:       Theme.sp(32)
             y:       Theme.sp(24)
             width:   parent.width - Theme.sp(64)
             spacing: Theme.sp(6)
 
             Repeater {
-                model: [{ name: "library", label: qsTr("Characteristics") },
-                        { name: "roadmap", label: qsTr("Roadmap") },
-                        { name: "health",  label: qsTr("Causes & health") }]
+                model: [{ name: "library",  label: qsTr("Characteristics") },
+                        { name: "measures", label: qsTr("Measures & norms") },
+                        { name: "roadmap",  label: qsTr("Roadmap") },
+                        { name: "health",   label: qsTr("Causes & health") }]
                 delegate: Rectangle {
                     required property var modelData
                     readonly property bool active: root._view === modelData.name
@@ -319,6 +344,29 @@ Item {
         }
     }
 
+    // ══ Measures & norms ══════════════════════════════════════════════════════
+    MeasureCatalogue {
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
+        visible: root._view === "measures" && root._selectedMeasureId === "" && !root._editing
+
+        norms: norms
+
+        onOpenMeasure: function(measureId) { root._selectedMeasureId = measureId }
+
+        // A measure exists to be read by a characteristic: mintMeasure() writes into the editor's
+        // DRAFT, so minting one with no draft open would silently discard it, and an orphan measure
+        // is a validator warning the moment it lands. So "New measure" starts a characteristic and
+        // opens the picker on it — the same picker, in the same mint mode, with somewhere to land.
+        onNewMeasureRequested: {
+            editor.beginNew()
+            root._editing = true
+            conditionEditor.openMeasurePicker()
+        }
+    }
+
     // ══ Roadmap ═══════════════════════════════════════════════════════════════
     RoadmapView {
         anchors.top:    switcherBar.bottom
@@ -358,8 +406,26 @@ Item {
         }
     }
 
+    // ══ Measure detail ════════════════════════════════════════════════════════
+    MeasureDetail {
+        anchors.fill: parent
+        visible: root._selectedMeasureId !== "" && !root._editing
+        detail:  (root._selectedMeasureId !== "" && root._revision >= 0)
+                 ? norms.measureDetail(root._selectedMeasureId) : ({})
+
+        onBack: root._selectedMeasureId = ""
+        // Following a user of this measure lands on that characteristic's page, which is the only
+        // useful thing to do with the name.
+        onOpenCondition: function(conditionId) {
+            root._selectedMeasureId = ""
+            root._view              = "library"
+            root.showCharacteristic(conditionId)
+        }
+    }
+
     // ══ Editor ════════════════════════════════════════════════════════════════
     CharacteristicEditor {
+        id: conditionEditor
         anchors.fill: parent
         visible: root._editing
         editor:  editor

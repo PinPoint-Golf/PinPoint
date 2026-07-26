@@ -600,3 +600,26 @@ pp_norm_env(wrist_render_parity_test)
 
 set_tests_properties(reference_bands_parity_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
+# The QML façade over measures, norms and contexts, run against the SHIPPED content. Its whole job
+# is that QML holds no rules, so every rule it hides is asserted here or nowhere: the (metricKey,
+# phase) join stage 9 re-points metric_catalog.cpp at, the inheritance markers on the
+# norms-by-context list, and that the band edge SHOWN is the band edge that grades.
+# Needs Qt Qml for QML_ELEMENT and AUTOMOC (already ON above, set by characteristic_editor_test).
+pp_add_test(norm_model_test
+    SOURCES ${DIAG}/tests/norm_model_test.cpp
+            ${SRC}/Gui/characteristics/norm_model.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp ${DIAG_NORM}
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${ANALYSIS}/reference_bands.cpp
+    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics
+    LINK    Qt6::Qml
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+set_tests_properties(norm_model_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")

@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "../Analysis/wrist_assessment_types.h"   // PpRag
+
 #include <QDate>
 #include <QString>
 
@@ -154,6 +156,48 @@ inline Grade grade(double value, const Norm &norm, const GradePolicy &policy = {
 
 // True when the grade says something deviated. NotMeasured is NOT a deviation — see the enum.
 inline bool isDeviation(Grade g) { return g == Grade::Watch || g == Grade::Action; }
+
+// The 4-band grade collapsed to the legacy 3-band PpRag the wrist grid renders.
+//
+// ONE definition, here, because two surfaces consume it and a second copy would let them drift:
+// NormBandProvider projects a Norm into a Band and the wrist grid runs classifyDelta() over it,
+// while the characteristic engine grades the same value through grade(). Those two paths must
+// agree on colour for the same number, and reference_bands_parity_test asserts they do — over the
+// migrated content AND over a norm with no explicit monitor, where the Action edge is z-derived.
+//
+// KNOWN CONSEQUENCE, ACCEPTED: this is not a 2:1:1 mapping. For migrated rows Ideal is exactly the
+// old green band, so Good AND Watch both sit inside the old amber. A surface showing a grade word
+// and a RAG chip together will therefore look inconsistent — "Good" beside an amber dot reads as a
+// contradiction. Show one or the other, never both.
+inline PpRag ragOf(Grade g)
+{
+    switch (g) {
+    case Grade::Ideal:       return PpRag::Green;
+    case Grade::Good:        return PpRag::Amber;
+    case Grade::Watch:       return PpRag::Amber;
+    case Grade::Action:      return PpRag::Red;
+    case Grade::NotMeasured: return PpRag::Grey;
+    }
+    return PpRag::Grey;
+}
+
+// ── Provenance standing ─────────────────────────────────────────────────────
+//
+// The sample size below which a seated norm is still an anecdote. Not a statistical threshold and
+// not presented as one — it is the point at which "fitted from swings" stops overstating itself.
+inline constexpr int kMinSeatedN = 30;
+
+// True when a norm's numbers should be read as a starting point rather than a finding.
+//
+// THIS NEVER MODIFIES A GRADE. A value three tolerances outside a heuristic norm is three
+// tolerances out, and rendering it more softly because the norm is young would hide the deviation
+// behind a caveat about the corridor. Weakness is surfaced only where a user goes to interrogate
+// the norm itself — the MeasureDetail norm row, the corridor editor, the health list, a finding's
+// detail page — and nowhere else. See NormSource's own comment.
+bool    normIsWeak(const Norm &n);
+
+// Why, in one line, for the row that says so. Empty when the norm is not weak.
+QString normWeakReason(const Norm &n);
 
 // ── Enum <-> string (the JSON spelling) ─────────────────────────────────────
 QString    normSourceName(NormSource s);

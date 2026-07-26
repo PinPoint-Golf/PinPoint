@@ -19,6 +19,7 @@
 
 #include "../../Analysis/reference_bands.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -254,6 +255,85 @@ int main()
         bogus.contextId = QStringLiteral("hovercraft");
         check(!newProv.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, bogus).valid,
               "an unknown context yields no band, never a silent fallback");
+    }
+
+    // ── The grade and the RAG cannot drift ──────────────────────────────────
+    //
+    // Two paths judge the same number and both are user-visible: the wrist grid runs
+    // classifyDelta() over a Band projected from a Norm, while the characteristic engine runs
+    // grade() over the Norm itself. ragOf() is the single collapse between them, and this is what
+    // stops the two answers separating — a value that greys amber in the grid while grading Ideal
+    // in a finding is a contradiction nothing else would catch.
+    //
+    // The Band is projected here from the norm's own fields rather than read back off
+    // NormBandProvider, so the test states the specification independently of the implementation
+    // it is checking.
+    std::printf("=== the grade and the RAG agree, over the whole shipped norm set ===\n");
+    {
+        const std::shared_ptr<const INormProvider> norms = sharedNormProvider();
+        const GradePolicy                          policy;   // the shipped default
+
+        int rows = 0, samples = 0, mismatch = 0, withMonitor = 0, withoutMonitor = 0;
+        QString firstBad;
+
+        for (const Norm &n : norms->norms().norms) {
+            ++rows;
+            n.hasExplicitMonitor() ? ++withMonitor : ++withoutMonitor;
+
+            Band b;
+            b.valid   = true;
+            b.greenLo = n.idealLo();
+            b.greenHi = n.idealHi();
+            if (n.hasExplicitMonitor()) {
+                b.amberLo = *n.monitorLo;
+                b.amberHi = *n.monitorHi;
+            } else {
+                b.amberLo = n.mu - policy.watchMaxZ * n.sigmaLo;
+                b.amberHi = n.mu + policy.watchMaxZ * n.sigmaHi;
+            }
+
+            // Sweep the corridor and well past both edges, landing exactly ON every boundary —
+            // that is where a one-sided comparison (>= versus >) diverges and nowhere else.
+            std::vector<double> values;
+            const double span = std::max({ n.sigmaLo, n.sigmaHi, 1.0 }) * 6.0;
+            for (double v = n.mu - span; v <= n.mu + span; v += span / 200.0) values.push_back(v);
+            for (double e : { b.greenLo, b.greenHi, b.amberLo, b.amberHi })
+                for (double eps : { -1e-9, 0.0, 1e-9, -0.001, 0.001 }) values.push_back(e + eps);
+
+            for (double v : values) {
+                ++samples;
+                const PpRag viaGrade = ragOf(grade(v, n, policy));
+                const PpRag viaBand  = classifyDelta(v, b);
+                if (viaGrade != viaBand) {
+                    ++mismatch;
+                    if (firstBad.isEmpty())
+                        firstBad = QStringLiteral("%1 @ %2, value=%3: grade->%4 vs band->%5")
+                                       .arg(n.measureId, n.contextId).arg(v)
+                                       .arg(QLatin1String(ragName(viaGrade)))
+                                       .arg(QLatin1String(ragName(viaBand)));
+                }
+            }
+        }
+
+        std::printf("      %d norm rows (%d with explicit monitor, %d z-derived), %d samples\n",
+                    rows, withMonitor, withoutMonitor, samples);
+        if (!firstBad.isEmpty())
+            std::printf("      first mismatch: %s\n", qPrintable(firstBad));
+
+        check(rows > 0, "the shipped norm set loaded");
+        check(mismatch == 0, "ragOf(grade(v)) equals classifyDelta(v) on every shipped norm");
+        // BOTH branches of the precedence rule have to be exercised or the assertion is half a
+        // gate: the monitor-dominated path is what migrated content uses, the z-derived path is
+        // what everything authored in the corridor editor will use.
+        check(withMonitor > 0 && withoutMonitor > 0,
+              "both the monitor-dominated and the z-derived paths were covered");
+
+        // Grey is reachable only through NotMeasured, and must never be produced by a real value.
+        check(ragOf(Grade::NotMeasured) == PpRag::Grey && ragOf(Grade::Ideal) == PpRag::Green
+                  && ragOf(Grade::Action) == PpRag::Red,
+              "the collapse is Green iff Ideal, Red iff Action, Grey iff not measured");
+        check(ragOf(Grade::Good) == PpRag::Amber && ragOf(Grade::Watch) == PpRag::Amber,
+              "Good and Watch BOTH fall in the old amber — the mapping is not 2:1:1");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

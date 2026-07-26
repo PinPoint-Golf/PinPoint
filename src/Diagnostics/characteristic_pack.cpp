@@ -18,6 +18,7 @@
 
 #include "characteristic_pack.h"
 
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -266,6 +267,42 @@ QStringList tailsOfAxis(const CharacteristicPack &pack, const QString &axis)
     return out;
 }
 
+bool measureIsDeltaFromAddress(const Measure &m)
+{
+    return (m.reducer.kind == ReducerKind::Delta || m.reducer.kind == ReducerKind::Rate)
+           && m.reducer.window.first == Phase::Address;
+}
+
+const Measure *measureForMetricAtPhase(const CharacteristicPack &pack,
+                                       const QString            &metricKey,
+                                       Phase                     phase)
+{
+    if (metricKey.isEmpty()) return nullptr;
+
+    const Measure *fallback = nullptr;    // a delta/rate match, taken only if no `at` match exists
+
+    for (const Measure &m : pack.measures) {
+        if (m.metricKey != metricKey) continue;
+
+        switch (m.reducer.kind) {
+        case ReducerKind::At:
+            // `anchor` is optional on the type; an At reducer without one reads at the window
+            // start, which is what the loader defaults it to.
+            if (m.reducer.anchor.value_or(m.reducer.window.first) == phase)
+                return &m;                // absolute reading wins outright
+            break;
+        case ReducerKind::Delta:
+        case ReducerKind::Rate:
+            if (m.reducer.window.second == phase && !fallback)
+                fallback = &m;
+            break;
+        case ReducerKind::Extremum:
+            break;                        // a peak across a window is not a reading at a phase
+        }
+    }
+    return fallback;
+}
+
 // ── Validation ──────────────────────────────────────────────────────────────
 
 ValidationReport validatePack(const CharacteristicPack &pack)
@@ -357,6 +394,37 @@ ValidationReport validatePack(const CharacteristicPack &pack)
         if (!usedMeasures.contains(m.id))
             warn(r, QStringLiteral("unusedMeasure"), m.id,
                  QStringLiteral("Measure '%1' is not used by any signal.").arg(m.id));
+
+    // Two PROVIDED measures reading the same metric with the same reducer are the same number
+    // twice. The structural duplicate detector above cannot see this: it compares SERIES, and a
+    // Provided measure has no series — it names a metric key instead. So the one class of measure
+    // that most easily duplicates is the one that was unguarded.
+    //
+    // This matters beyond tidiness. Norms key on the measure, so a duplicated measure can carry
+    // two different corridors for one quantity, and whichever the (metricKey, phase) join happens
+    // to return decides the grade. Nothing downstream can detect that — both answers look correct.
+    {
+        QHash<QString, QString> firstWithKey;      // reduction signature -> measure id
+        for (const Measure &m : pack.measures) {
+            if (m.kind != MeasureKind::Provided || m.metricKey.isEmpty()) continue;
+
+            const Reducer &rd = m.reducer;
+            const QString  sig = QStringLiteral("%1|%2|%3|%4|%5|%6")
+                                    .arg(m.metricKey, reducerKindName(rd.kind),
+                                         rd.anchor ? phaseToken(*rd.anchor) : QStringLiteral("-"),
+                                         phaseToken(rd.window.first), phaseToken(rd.window.second),
+                                         extremumSenseName(rd.sense));
+
+            const auto it = firstWithKey.constFind(sig);
+            if (it == firstWithKey.constEnd()) { firstWithKey.insert(sig, m.id); continue; }
+
+            warn(r, QStringLiteral("duplicateMeasure"), m.id,
+                 QStringLiteral("Measure '%1' reads '%2' with exactly the same reduction as '%3'. "
+                                "They are one number described twice, and a norm on each can grade "
+                                "the same value two different ways.")
+                     .arg(m.id, m.metricKey, it.value()));
+        }
+    }
 
     // --- conditions ----------------------------------------------------------
     for (const Condition &c : pack.conditions) {

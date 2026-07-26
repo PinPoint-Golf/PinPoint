@@ -68,6 +68,19 @@ QStringList INormProvider::overriddenContextsFor(const QString &measureId) const
     return out;
 }
 
+std::vector<NormSetInfo> INormProvider::layers() const
+{
+    // A leaf provider IS its own single layer. Only an assembling provider has anything else to
+    // say, and it overrides this.
+    //
+    // The pack's OWN id names it, not the provider's label: a leaf provider labels itself with
+    // where it was read from (":/diagnostics/norms.json", or a directory path), and a file path is
+    // not what a norm set is called.
+    const NormPack &p = norms();
+    const QString   name = p.id.isEmpty() ? label() : p.id;
+    return { NormSetInfo{ name, name, origin(), int(p.norms.size()), p.readOnly } };
+}
+
 namespace {
 
 // The shipped core norm set and context tree. The runtime copies are Qt resources; the SOURCE OF

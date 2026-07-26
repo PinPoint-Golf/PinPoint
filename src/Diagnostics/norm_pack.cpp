@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QObject>
 #include <QSet>
 
 #include <algorithm>
@@ -87,6 +88,39 @@ bool    normSourceFromName(const QString &s, NormSource &out) { return fromName(
 QString gradeName(Grade g) { return nameOf(kGrades, g); }
 bool    gradeFromName(const QString &s, Grade &out) { return fromName(kGrades, s, out); }
 QString gradeLabel(Grade g) { return labelOf(kGrades, g); }
+
+// ── Provenance standing ─────────────────────────────────────────────────────
+
+bool normIsWeak(const Norm &n)
+{
+    switch (n.source) {
+    case NormSource::Heuristic:  return true;                       // every one of these will move
+    case NormSource::Seated:     return n.n < kMinSeatedN;
+    case NormSource::Literature: return n.citation.trimmed().isEmpty();
+    case NormSource::Imported:   return false;                      // it stood somewhere else first
+    }
+    return true;
+}
+
+QString normWeakReason(const Norm &n)
+{
+    switch (n.source) {
+    case NormSource::Heuristic:
+        return QObject::tr("A starting figure, not a fitted one. Expected to move once it is "
+                           "seated on real swings.");
+    case NormSource::Seated:
+        return n.n < kMinSeatedN
+                   ? QObject::tr("Seated on %n swing(s) — too few to be more than indicative.", "", n.n)
+                   : QString();
+    case NormSource::Literature:
+        return n.citation.trimmed().isEmpty()
+                   ? QObject::tr("Claims a published source but carries no citation.")
+                   : QString();
+    case NormSource::Imported:
+        return QString();
+    }
+    return QString();
+}
 
 // ── NormPack ────────────────────────────────────────────────────────────────
 

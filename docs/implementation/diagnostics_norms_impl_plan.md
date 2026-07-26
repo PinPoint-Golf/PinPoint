@@ -18,7 +18,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 | 3 | Wire into the engine — **the pack lights up** | ☑ complete — 8 live signals can fire | 2026-07-25 |
 | 4 | Direction audit (all 30 signals) + `highMeans` | ☑ complete — **30/30, nothing exempt** | 2026-07-25 |
 | — | **review gate · expect context clear here** | | |
-| 5 | `NormModel` + read-only norm UI | ☐ not started | |
+| 5 | `NormModel` + read-only norm UI | ☑ complete — the measures view ships | 2026-07-25 |
 | — | **review gate** | | |
 | 6 | `CorridorEditor.qml` | ☐ not started | |
 | 7 | Editable bindings + direction control | ☐ not started | |
@@ -41,11 +41,84 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-25 | 2 | **Stage 2 complete.** 39 cell-measures minted into core.json (28 → 67); 55 norm rows (39 full_swing + 16 archetype) in norms.json. `NormBandProvider` added; `BandContext` gained `contextId`; all 4 app call sites switched to `BandProviderKind::Norm` (now the factory default). **`reference_bands_parity_test` green: 117 cells bit-identical, 77,337 classified deltas identical.** `wrist_render_parity_test` green: 2,688 cells and 67 findings identical, and its empty-norm-set guard verified to actually fail without the content. Analyzer suite **72/72**; app, `swinglab_run` and `swing_window_parity_test` all build. Next: stage 3. |
 | 2026-07-25 | 3 | **Stage 3 mechanism complete; content OWED — the pack is still dark.** `NormMeasureSource` joins values to norms; `MeasureReading` gained `grade`, `normContextId`, `contextInferred` and a `fromCorridor()` factory. Engine now fires on a **deviation (Watch/Action)**, not on leaving Ideal — see the decision below. `norm_measure_source_test` green (26 assertions incl. unknown-context, inferred-context demotion, both tails on one norm). Analyzer suite **73/73**; app + `swinglab_run` build. **BUT: all 26 corridor-signal measures still have no norm** (norms.json holds only the 39 wrist-grid rows), so no seed characteristic can fire yet. Authoring those 26 is the remaining work and needs Mark's numbers. Next: author the seed norms, then stage 4. |
 | 2026-07-25 | 3 (closed) + 4 | **THE PACK LIGHTS UP.** Direction audit of all 30 signals (3 inversions + 2 structural defects fixed); sign conventions settled and documented; `highMeans` on every signal-bearing measure; 13 seed norms authored. **8 live corridor signals can now fire, 0 left dark** — `core_pack_test` asserts it. `ballPosition` reverted to the interoperable 0 %-lead-heel scale on Mark's call. Analyzer suite 74/74. Next: stage 5. |
+| 2026-07-25 | 5 | **Stage 5 complete — the measures view ships.** `NormModel` (`src/Gui/characteristics/norm_model.{h,cpp}`, QML_ELEMENT), `MeasureCatalogue.qml` as the fourth `_view`, `MeasureDetail.qml`, and the grade-policy + norm-set strip. Both carried-forward debts paid: **`ragOf(Grade)`** promoted into `norm.h` and gated by a new `reference_bands_parity_test` section — 28,590 samples over all 68 shipped norms, covering BOTH precedence branches (56 monitor-dominated, 12 z-derived); **`measureForMetricAtPhase()`** built as a pack-layer free function (`characteristic_pack.h`) with the `NormModel` marshaller over it, so stage 9 reaches it without a QML façade. New `norm_model_test` (60 assertions). Also landed: `normIsWeak()`/`normWeakReason()` in `norm.h`, `INormProvider::layers()` (so the UI stops saying "merged"), `AppSettings::diagnosticsGradePolicy`, and a `duplicateMeasure` validator warning pulled forward from stage 10 — see the finding below. Analyzer suite **75/75**; app + `swinglab_run` build; verified headlessly with screenshots. Next: review gate, then stage 6. |
 | 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
 
 ---
 
-## ▶ Resuming at stage 5 — read this first
+## ▶ Resuming at stage 6 — read this first
+
+**Prompt to start with:**
+
+> Start stage 6 of the diagnostics norms plan — read
+> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 6".
+
+Everything through stage 5 is complete and **UNCOMMITTED** (working tree). Analyzer suite **75/75**;
+app and `swinglab_run` build clean. Do not re-verify — the Progress table is authoritative.
+
+### What stage 5 built, in one paragraph
+
+`NormModel` (`src/Gui/characteristics/norm_model.{h,cpp}`) is the QML façade: `measures(filters)`,
+`measureDetail(id)`, `normAt(measureId, contextId)`, `measureForMetricAtPhase(metricKey, phase)`,
+plus `groups` / `statuses` / `contexts` / `normSets` / `gradePolicies` and a `gradePolicy` string
+property. `MeasureCatalogue.qml` is the fourth `_view` in `CharacteristicLibrary.qml`;
+`MeasureDetail.qml` is its detail page. All rules are in C++ — QML renders shapes.
+
+### Owed from stage 5, to pick up
+
+- **The norm-set selector is a CENSUS, not a selector.** `NormModel::normSets()` lists the real
+  layers via the new `INormProvider::layers()`, but nothing can switch which set resolves, because
+  `makeMergedNormProvider()` has no way to skip a layer. Stage 6 creates the second set (the user's
+  own), so that is when the switch becomes meaningful and when the merged provider needs the filter.
+- **`AppSettings::diagnosticsGradePolicy` is read by the UI, not yet by the engine.** `NormModel`
+  applies it to every band edge it renders, and `NormMeasureSource` already takes a `GradePolicy`
+  constructor argument — but nothing in the app constructs a `NormMeasureSource` yet, so nothing
+  plumbs the setting into grading. Wire it at the same time the engine is wired into the pipeline.
+- **A structural duplicate is now surfaced, not fixed** — see the finding below. Deciding which of
+  the two measures survives is content work, not code.
+
+### The finding stage 5 turned up — needs a decision
+
+`m_leadWristAtImpact` and `m_leadWristFlexExt_p7` are **the same measure twice**: both read
+`leadWristFlexExt` as Δ-from-address at P7. They carry **different `full_swing` corridors** —
+`mu 22.5 ±7.5` (authored for `sig_scooping`) versus `mu 8.0 ±7, monitor −4..20` (migrated from the
+wrist grid) — so the same swing grades two different ways depending on which one a lookup returns.
+Nothing downstream could have caught this: both answers look correct.
+
+The validator now warns (`duplicateMeasure`, in the health view) and the join is documented as
+`at` > `delta` then pack order. **Which corridor is right is a content decision** — the wrist-grid
+number is migrated and parity-locked; the scooping number is an authored reading of the metric's own
+`howToRead`. They cannot both be the full-swing norm for one quantity.
+
+---
+
+## Stage 5 as built — what to know before extending it
+
+- **`ragOf(Grade)` lives in `norm.h`** next to `grade()`. Green iff `Ideal`, Red iff `Action`, Grey
+  iff `NotMeasured`, Amber otherwise. `reference_bands_parity_test` now asserts
+  `ragOf(grade(v, n)) == classifyDelta(v, bandFrom(n))` across all 68 shipped norms — 28,590
+  samples, both precedence branches (56 rows monitor-dominated, 12 z-derived). The one place the two
+  can legitimately disagree is under a `BandTuning` margin override, which `grade()` cannot see.
+- **`measureForMetricAtPhase()` is a pack-layer free function** (`characteristic_pack.h`), not a
+  method on `NormModel` — stage 9 re-points `metric_catalog.cpp` at it and must not go through a
+  QML façade to do so. `NormModel`'s method of the same name only marshals. Reducer semantics:
+  `at` → anchor phase (wins outright); `delta`/`rate` → the window's END phase; `extremum` → never
+  matches, because a peak across a window is not a reading at a phase.
+- **`normIsWeak()` / `normWeakReason()` are in `norm.h`**, so the corridor editor, the health list
+  and a finding's detail page all use one rule. Weak = Heuristic, or Seated with `n < kMinSeatedN`
+  (30), or Literature with no citation. It NEVER modifies a grade.
+- **Weak provenance renders on the `MeasureDetail` norm row only.** Every shipped norm is heuristic
+  today, so that line repeats on every row; it is merged onto one line with the citation to keep the
+  list readable. The repetition disappears as the literature review reclassifies rows.
+- **`PpDisplayText` does not render under `QT_QPA_PLATFORM=offscreen`** — it masks a gradient
+  through `ShaderEffectSource`/`MultiEffect`, which need an RHI backend. Page titles are blank in
+  every headless screenshot. This is a harness artefact and pre-dates this work; do not "fix" it.
+- **The view switcher measures its own height from its `Flow`.** With four chips it wraps at a
+  narrow panel width, and the old fixed `sp(58)` let the second row overlap the view below.
+
+---
+
+## ▶ Stage 5 — read this first (superseded, kept for the record)
 
 **Prompt to start with:**
 
@@ -78,7 +151,7 @@ Everything through stage 4 is committed and pushed (`d7cf345`). Analyzer suite *
 - Standalone tests reach shipped content via `PINPOINT_CORE_NORMS` / `PINPOINT_CORE_CONTEXTS` /
   `PINPOINT_CORE_PACK`; in CMake use the existing `pp_norm_env(<target>)` helper.
 
-### Carried forward — owed from earlier stages, easy to lose
+### Carried forward — owed from earlier stages, easy to lose  ✅ BOTH PAID IN STAGE 5
 
 - **`ragOf(Grade)` shared helper.** The 4-band grade collapses to the legacy 3-band `PpRag` as
   *Green iff `Ideal`, Red iff `Action`, Amber otherwise*. That rule currently exists **only inside
@@ -568,6 +641,8 @@ misleading-red for every other.
 `context_tree.h/.cpp`, `tests/`.
 `src/Gui/characteristics/`: `norm_model.h/.cpp`, `dag_layout.h/.cpp`, `MeasureCatalogue.qml`,
 `MeasureDetail.qml`, `CorridorEditor.qml`, `DagView.qml`.
+`src/Diagnostics/tests/`: `norm_model_test.cpp` (registered in `src/Analysis/tests/CMakeLists.txt`
+alongside the other `${DIAG}` suites, per repo fact 10).
 `src/Resources/diagnostics/`: `norms.json`, `contexts.json`, `core.json` (moved).
 
 **Modified** — `src/Analysis/reference_bands.{h,cpp}`, `src/Diagnostics/characteristic.{h,cpp}`,
@@ -660,6 +735,31 @@ corpus-scale work and a separate exercise — a single swing never judges it.
   target, so `swinglab_run` and `swing_window_parity_test` each get their own copy via
   `pinpoint_add_diagnostics_resources()`. Without it they would start with an empty norm set and
   silently grey the entire wrist grid — no error, no findings.
+
+- **The grade policy is three NAMED presets, not three z spinboxes.** `GradePolicy` is pack-wide and
+  singular by design — if "Ideal" means one thing here and something else in a shared pack, no grade
+  is comparable across athletes. Lenient 1.5/2.5/3.5, Standard 1.0/2.0/3.0 (shipped), Strict
+  0.75/1.5/2.25; the z values are shown under the control but are not editable, because a hand-tuned
+  policy is a private vocabulary. The table lives in `norm_model.cpp`; `AppSettings` stores only
+  which one is chosen. An unknown name resolves to Standard rather than persisting as itself.
+
+- **"New measure" opens the picker ON A NEW CHARACTERISTIC DRAFT, not on nothing.**
+  `CharacteristicEditorModel::mintMeasure()` writes into `m_draftMeasures`, which only persists via
+  the draft's `save()` — so opening the picker with no draft would silently discard the mint. It is
+  also the right model: a measure with no characteristic reading it trips `unusedMeasure` the moment
+  it lands. The catalogue therefore calls `beginNew()` and `openMeasurePicker()` together.
+
+- **`duplicateMeasure` was pulled forward from stage 10.** The structural duplicate detector
+  compares SERIES, and a `Provided` measure has no series — it names a metric key — so the one class
+  of measure that most easily duplicates was the only one unguarded. The stage-5 catalogue renders
+  such a pair adjacent, so shipping the view without surfacing it would have put the defect on
+  screen with nothing saying it was one. See the finding in the resume block.
+
+- **`INormProvider::layers()` was added so the UI stops saying "merged".** The merged provider
+  reports its CHILDREN; a leaf reports itself, named by its pack's own id rather than the path it
+  was read from; a file provider that read nothing reports NO layer, so an empty user directory does
+  not appear as a norm set the user never created. Stage 6 needs the same list to decide which set a
+  write lands in.
 
 ## Open, to raise when reached
 

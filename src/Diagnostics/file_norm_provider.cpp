@@ -97,6 +97,16 @@ public:
     QString                 label() const override { return m_label; }
     PackOrigin              origin() const override { return m_origin; }
 
+    // A provider that read NOTHING is not a layer. No user norms is the normal case, and reporting
+    // the empty directory as a norm set would put a second row in the census that a user cannot
+    // act on and did not create — indistinguishable from a real but empty set they authored.
+    std::vector<NormSetInfo> layers() const override
+    {
+        if (m_norms.id.isEmpty() && m_norms.norms.empty())
+            return {};
+        return INormProvider::layers();
+    }
+
 private:
     NormPack         m_norms;
     ContextTree      m_contexts;

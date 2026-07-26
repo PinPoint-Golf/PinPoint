@@ -130,4 +130,33 @@ bool hasCausalPath(const CharacteristicPack &pack, const QString &fromId, const 
 // Both tails of an axis, in pack order. Empty for a condition with no axis.
 QStringList tailsOfAxis(const CharacteristicPack &pack, const QString &axis);
 
+// ── The metric → measure join ───────────────────────────────────────────────
+//
+// Which measure reads `metricKey` at `phase`. This is the bridge between the two registries: the
+// metric catalogue speaks in (key, phase) and the diagnostics pack speaks in measures, and every
+// corridor the app renders has to cross that gap. Stage 9 re-points MetricCatalogue::corridor()
+// through here, which is why it lives in the pack layer and not in a QML façade.
+//
+// A measure matches a phase through its REDUCER, not through a phase field, because that is where
+// the phase actually lives:
+//   at        -> the anchor phase
+//   delta     -> the window's END phase; the measure IS the change observed at that phase
+//   rate      -> likewise the window's end
+//   extremum  -> never matches. "The lowest lag angle between P5 and P6" is not a reading at P5 or
+//                at P6, and returning it for either would attach a corridor to the wrong number.
+//
+// Ambiguity is possible and is resolved by preferring `at` over `delta`: both m_leadWristAtTop
+// (at P4) and a Δ-from-address measure could name P4 on the same metric, and the absolute reading
+// is the one a corridor keyed on a phase means. Beyond that the first match in PACK ORDER wins —
+// deterministic, but arbitrary, and a tie there means two measures describe one number. The
+// validator warns about exactly that case (`duplicateMeasure`), because no downstream check can:
+// both answers look correct. Returns nullptr when nothing matches.
+const Measure *measureForMetricAtPhase(const CharacteristicPack &pack,
+                                       const QString            &metricKey,
+                                       Phase                     phase);
+
+// True when this measure is a change from address — the flag NormativeCorridor carries so a
+// consumer knows whether to plot the corridor against the raw curve or against Δ-from-address.
+bool measureIsDeltaFromAddress(const Measure &m);
+
 } // namespace pinpoint::analysis

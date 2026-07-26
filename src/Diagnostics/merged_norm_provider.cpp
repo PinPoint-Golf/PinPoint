@@ -79,6 +79,20 @@ public:
     QString                 label() const override { return QStringLiteral("merged"); }
     PackOrigin              origin() const override { return PackOrigin::Core; }
 
+    // The CHILDREN, shipped first — never this object. "merged" is an implementation word, and a
+    // user looking at the norm-set list needs to see the shipped set and their own as separate
+    // things: that separation is what the override relationship between them means.
+    std::vector<NormSetInfo> layers() const override
+    {
+        std::vector<NormSetInfo> out;
+        if (m_core)
+            for (const NormSetInfo &i : m_core->layers()) out.push_back(i);
+        for (const auto &up : m_user)
+            if (up)
+                for (const NormSetInfo &i : up->layers()) out.push_back(i);
+        return out;
+    }
+
 private:
     void mergeNorms(const NormPack &src, PackOrigin origin)
     {

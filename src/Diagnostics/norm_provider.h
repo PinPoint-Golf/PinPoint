@@ -47,6 +47,19 @@ struct NormResolution {
     }
 };
 
+// One layer in an assembled norm set, for the census the UI shows and — from the corridor editor
+// onward — for deciding which set a write lands in. A provider that assembles others reports its
+// CHILDREN here, not itself: "merged" is an implementation word, and a user reading the norm-set
+// list needs to see the shipped set and their own set as separate things, because that is what the
+// override relationship between them means.
+struct NormSetInfo {
+    QString    id;
+    QString    label;
+    PackOrigin origin    = PackOrigin::Core;
+    int        normCount = 0;
+    bool       readOnly  = true;
+};
+
 class INormProvider {
 public:
     virtual ~INormProvider() = default;
@@ -77,6 +90,10 @@ public:
     // Every context beneath (and including) `contextId` where this measure has its OWN row. Drives
     // the "overridden" markers in the norms-by-context list.
     QStringList overriddenContextsFor(const QString &measureId) const;
+
+    // The layers behind this provider, shipped first. The default reports THIS provider as its own
+    // single layer, which is right for every leaf; only the merged provider overrides it.
+    virtual std::vector<NormSetInfo> layers() const;
 };
 
 // ── User norm set on disk ───────────────────────────────────────────────────
