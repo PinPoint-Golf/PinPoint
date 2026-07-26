@@ -72,6 +72,13 @@ authoritative. **Uncommitted at time of writing.**
 Stage 8 is `dag_layout.{h,cpp}` + `DagView.qml` — see the stage section below. It is the only stage
 with no dependency on anything stage 7 built, so nothing here blocks it.
 
+⚠ **Before writing `DagView.qml`, read the QML scope rules stage 7 paid for**, at the bottom of the
+stage-7 session-log entry. Stage 8 is a `Repeater` + `Shape` graph whose nodes are TAPPABLE, which is
+exactly the shape that bit stage 7: inside a Repeater delegate the only file-level id that resolves
+is the component root, and a handler on a composite type (`PpPressable`, which declares its own
+`id: root`) cannot see even that. It throws only when clicked — no binding, no test and no screenshot
+will show it. Delegates call methods on `root`; those methods touch every other id from file scope.
+
 ### What stage 7 established, which stage 8 should not contradict
 
 - **A binding is an EXCEPTION, not a declaration.** `resolveContextBinding()` (`context_tree.h`)
