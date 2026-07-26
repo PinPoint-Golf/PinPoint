@@ -62,16 +62,13 @@
       "kind": "provided",
       "metricKey": "leadWristFlexExt",
       "reducer": {
-        "kind": "delta",
-        "anchor": "p1",
-        "window": [
-          "p1",
-          "p7"
-        ]
+        "kind": "at",
+        "anchor": "p7"
       },
       "status": "live",
-      "label": "Lead wrist flexion/extension, change P1 to P7",
-      "highMeans": "a more bowed lead wrist at impact than at address, hands further ahead"
+      "label": "Lead wrist flexion/extension, at P7",
+      "unit": "°",
+      "highMeans": "a more bowed lead wrist at impact, less cupped"
     },
     {
       "id": "m_tempoRatio",

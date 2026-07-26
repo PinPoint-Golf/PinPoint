@@ -600,11 +600,11 @@
     {
       "measure": "m_leadWristAtImpact",
       "context": "full_swing",
-      "mu": 22.5,
-      "sigmaLo": 7.5,
-      "unit": "",
+      "mu": 15.0,
+      "sigmaLo": 12.0,
+      "unit": "°",
       "source": "heuristic",
-      "citation": "From the metric's own howToRead: impact sits roughly 15-30 deg more flexed than address. Scooping fires below about +7.5 deg, i.e. a wrist that has added almost no flexion from address."
+      "citation": "Migrated from the swing scorer's own impact band (pp_tuned_constants.h kFlexExtMu = 15.0, kFlexExtSigma = 12.0), which grades the ABSOLUTE sample at impact and is locked against HackMotion in Corpus 2. The scorer penalises only BELOW mu (cupping), which is exactly what sig_scooping detects; the two-sided corridor here is the conservative reading of the same figure. NB the sibling delta reduction (m_leadWristFlexExt_p7, the wrist-grid cell) carries mu 8.0, while this metric's howToRead implies a delta near 22.5 — see C1 in the implementation plan. That disagreement is about the DELTA and does not touch this absolute row."
     },
     {
       "measure": "m_stanceWidth",

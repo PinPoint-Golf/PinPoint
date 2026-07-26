@@ -133,6 +133,24 @@ int main(int argc, char **argv)
         check(p2.value(QStringLiteral("unit")).toString() == QString::fromUtf8("°"),
               "the measure's own unit comes back with it");
 
+        // Two reductions of ONE series at the same phase — the case the whole series/reducer split
+        // exists for. leadWristFlexExt at P7 has both an absolute reading (m_leadWristAtImpact)
+        // and a Δ-from-address reading (the wrist-grid cell). They are different numbers about the
+        // same swing — impact sits ~15° bowed in absolute terms and ~22° more bowed than address —
+        // so a corridor on one must never be applied to the other.
+        const QVariantMap imp = m.measureForMetricAtPhase(QStringLiteral("leadWristFlexExt"),
+                                                          int(Phase::Impact));
+        check(imp.value(QStringLiteral("measureId")).toString()
+                  == QLatin1String("m_leadWristAtImpact"),
+              "the ABSOLUTE reading answers a phase query at P7, not the Δ sibling");
+        check(!imp.value(QStringLiteral("deltaFromAddress")).toBool(),
+              "and it is not flagged Δ-from-address");
+        check(m.normAt(QStringLiteral("m_leadWristAtImpact"), QStringLiteral("full_swing"))
+                  .value(QStringLiteral("mu")).toDouble()
+              != m.normAt(QStringLiteral("m_leadWristFlexExt_p7"), QStringLiteral("full_swing"))
+                  .value(QStringLiteral("mu")).toDouble(),
+              "the two reductions carry genuinely different corridors");
+
         // An extremum is not a reading at a phase. m_lagAngleDown is the lowest lag angle between
         // P5 and P6; returning it for either would attach a corridor to a different number.
         check(!m.measureForMetricAtPhase(QStringLiteral("lagAngle"), int(Phase::Delivery))

@@ -71,12 +71,15 @@ property. `MeasureCatalogue.qml` is the fourth `_view` in `CharacteristicLibrary
 
 ### Owed from stage 5
 
-All three are in the **clean-up sweep** at the end of this document, which is where deferrals live
-now — read `C1`, `C2` and `C4` before starting. In short: `C1` is a real content defect stage 5
-surfaced but did not fix (two structurally identical measures carrying different corridors, so the
-same swing grades two ways); `C2` is the norm-set selector, which is a census until a second set
-exists — **stage 6 is what creates it**; `C4` is `resetSharedNormProvider()`, which stage 6 must
-call after every write or edits stay invisible until the next launch.
+All of it is in the **clean-up sweep** at the end of this document, which is where deferrals live
+now — read `C2` and `C4` before starting. `C2` is the norm-set selector, which is a census until a
+second set exists — **stage 6 is what creates it**; `C4` is `resetSharedNormProvider()`, which
+stage 6 must call after every write or edits stay invisible until the next launch.
+
+`C1` (the duplicate measure) is **closed** — it turned out to be one series needing two reductions,
+not a duplicate, and both now exist with grounded corridors. Its residue is `C1b`, a genuine ~15°
+disagreement between the wrist grid's Δ corridor and the metric's own `howToRead`, which is a corpus
+question and must NOT be fixed by editing the parity-locked table.
 
 ---
 
@@ -766,7 +769,11 @@ question that was answered and one that was never asked.
 
 | # | Owed | Closes at | State |
 |---|---|---|---|
-| C1 | **Two structurally identical measures with different corridors** — see below | content decision | ☐ open |
+| C1 | Duplicate measure — **resolved**: it was one series needing two reductions (see below) | 5 | ☑ closed |
+| C1b | The wrist grid's Δ corridor (mu 8.0) vs this metric's own `howToRead` (~22.5) — **~15° apart** | corpus / C8 | ☐ open |
+| C1c | The new absolute impact row has **no archetype siblings**, while its Δ sibling shifts ±10° | decide, then 6 or corpus | ☐ open |
+| C1d | The archetype shift is a **flat ±10° at every position** — migrated constant, not a fitted model | corpus / C8 | ☐ open |
+| C3b | The resolved archetype reaches the wrist grid but **not** the characteristic engine's `contextId` | with C3 | ☐ open |
 | C2 | Norm-set **selector** is a census; `makeMergedNormProvider()` cannot skip a layer | 6 | ☐ open |
 | C3 | `AppSettings::diagnosticsGradePolicy` reaches the UI, not the engine | engine wiring | ☐ open |
 | C4 | `resetSharedNormProvider()` must be called after every user-norm write | 6 | ☐ open |
@@ -784,25 +791,92 @@ question that was answered and one that was never asked.
 | C16 | `ragOf(Grade)` existed only inside the parity test | 5 | ☑ closed |
 | C17 | `measureForMetricAtPhase()` — the join stage 9 depends on | 5 | ☑ closed |
 
-### C1, in full — the one that needs a decision rather than code
+### C1, resolved — it was one series needing two reductions
 
-`m_leadWristAtImpact` and `m_leadWristFlexExt_p7` are **the same measure twice**: both read
-`leadWristFlexExt` as Δ-from-address at P7, with identical reducers. They carry **different
-`full_swing` corridors**:
+`m_leadWristAtImpact` and `m_leadWristFlexExt_p7` were both authored as `delta p1→p7` on
+`leadWristFlexExt`, so they computed the same number and the `duplicateMeasure` warning fired. The
+warning was right; the diagnosis of "delete one" was wrong.
 
-| measure | corridor | where it came from | used by |
-|---|---|---|---|
-| `m_leadWristAtImpact` | `mu 22.5, sigma 7.5` (15–30°) | authored at stage 3 from the metric's own `howToRead` | `sig_scooping` |
-| `m_leadWristFlexExt_p7` | `mu 8.0, sigma 7.0`, monitor `−4..20` | migrated from the wrist grid at stage 2, parity-locked | nothing (wrist view) |
+**Mark's reading was the correct one**: flexion is a time series, and these are two *reductions* of
+it to a position — an absolute value at impact and a change from address to impact. That is exactly
+what the series/reducer split exists for (`measure_facets.h`: "two measures over one series with
+different reducers are related, not duplicates"). Both should exist. What was broken was that one
+of them had the wrong reducer: `m_leadWristAtImpact`'s own **id** says "at impact", but its reducer
+said Δ and its label said "change P1 to P7".
 
-The same swing therefore grades two different ways depending on which one a lookup returns, and
-**nothing downstream could have caught it** — both answers look correct. The `duplicateMeasure`
-validator warning added at stage 5 surfaces it in the health view; the (metricKey, phase) join is
-documented as `at` > `delta` then pack order, which is deterministic but arbitrary here.
+Three facts settled it, all verified rather than assumed:
 
-They cannot both be the full-swing norm for one quantity. Resolving it means deciding which number
-is right and deleting the other measure, which is content work — and note the parity test (C5) pins
-the wrist-grid figure until it is deleted, so the two clean-ups interact.
+- `metric_extractor.cpp:103` emits the **absolute** anatomical angle — no address subtraction. So
+  the series is absolute and both reductions are expressible from it.
+- `wrist_assessment_engine.cpp:80` grades `valueDeg − p1Value`, so the wrist grid is genuinely
+  Δ-from-address and its cell measure is correctly a Δ. Corroborated by the corridor shape: the P1
+  cell is `mu 0.0 ± 5`, which is meaningless as an absolute address flexion (address is cupped,
+  −10 to −15°) but is exactly what a Δ must be at its own anchor.
+- `swing_scorer.cpp:54` already grades an **absolute** impact band — `pp_tuned_constants.h:84`
+  `kFlexExtMu = 15.0, kFlexExtSigma = 12.0`, one-sided `+1` ("penalise BELOW μ (cupping)"),
+  *"locked against HackMotion in Corpus 2"*. So the absolute corridor did not have to be invented.
+
+**What changed:** `m_leadWristAtImpact` is now `at p7` with unit `°`, `highMeans` reworded to the
+absolute sense, and its norm re-seated to `mu 15.0, sigma 12.0` from the scorer constants.
+`m_leadWristFlexExt_p7` is untouched — it is parity-locked and correct as the Δ. The
+`duplicateMeasure` warning is gone, and `measureForMetricAtPhase(leadWristFlexExt, Impact)` now
+returns the absolute reading, which is what a corridor keyed on (metric, phase) means.
+
+The scorer's one-sided band is also the better fit for `sig_scooping`: scooping IS a cupped wrist at
+impact, which is the low tail of the absolute reading, and the scorer penalises exactly that side.
+
+### C1b — the residue, which is a real disagreement about the swing
+
+Isolating the absolute reading did not make the numbers agree; it narrowed the disagreement to the
+**Δ** alone:
+
+| claim | source | Δ address→impact |
+|---|---|---|
+| *"impact sits roughly 15–30° more flexed than address"* | the metric's own `howToRead` | ≈ 22.5 |
+| the compiled wrist-grid table, migrated at stage 2 | `reference_bands.cpp` | 8.0 (ideal 1–15) |
+
+~15° apart — nearly the full width of either corridor. The three figures are self-consistent only
+under the `howToRead` reading (address ≈ −7.5° cupped, impact ≈ +15° absolute, Δ ≈ +22.5°), which
+makes the table's 8.0 the outlier.
+
+The table's shape says something too: it **peaks at P6 (9.5) and falls to 8.0 at P7** — bow maxing
+out before impact and releasing into it — where the descriptor's prose implies impact at or near
+maximum bow. Those are different claims about the swing, not different arithmetic.
+
+⚠ **If `howToRead` is right, the shipped wrist grid has been grading bow/cup against a corridor
+~15° too low since v1.** This cannot be resolved by inspection and must not be "fixed" by editing
+the table: it is pinned by `reference_bands_parity_test` until C5 deletes it, and that pin is
+deliberate. It is a corpus question, and it belongs with the literature review (C8).
+
+### C1c / C1d / C3b — bowed and cupped are both valid, and this is how that is carried
+
+Playing from a cupped **or** a bowed top is legitimate, so a single corridor on the face axis would
+red-flag one valid style. That is what the archetype contexts exist for: `archetype_bowed` and
+`archetype_cupped` sit under `full_swing` and carry their own lead-wrist face corridors, so a
+resolved bowed player is graded against the bowed model. 16 rows — 8 positions × 2 archetypes, all
+on `leadWristFlexExt`. Every other DOF inherits `full_swing` and is archetype-invariant, which
+`reference_bands_parity_test` asserts. Detection is `wrist_resemblance.h`; the resolved model lands
+in `WristAssessmentResult::archetype` (0/1/2) and reaches bands via `BandContext`.
+
+Three things that are NOT settled by the above:
+
+**C1c.** The absolute impact row added when C1 was resolved (`m_leadWristAtImpact`, `mu 15.0,
+sigma 12.0`) has only a `full_swing` row, while its Δ sibling shifts ±10° per archetype. There is a
+plausible reason to leave it: σ=12 is wide enough that a ±10 archetype sits inside 1σ, so a bowed
+player at +25° absolute still grades Ideal — the corridor absorbs the style spread by construction,
+where the Δ corridor (σ=7) cannot. **That reasoning needs confirming or rejecting, not assuming.**
+If it is rejected, the row needs two archetype siblings and they need grounded numbers.
+
+**C1d.** The shift is `kArchetypeFaceOffsetDeg = 10.0` applied uniformly P1→P8 — the compiled
+constant migrated faithfully, which was stage 2's whole remit. It is not a fitted per-position
+model, and a real bowed player is unlikely to sit at exactly +10 at address, at the top AND at
+impact. Re-seating per position is corpus work; goes with C8.
+
+**C3b.** The archetype reaches the wrist grid today (`BandContext.archetype`), but the
+characteristic engine takes a `contextId` **string** and nothing constructs a `NormMeasureSource`
+yet (C3). When the engine is wired, it must pass the resolved archetype context — otherwise a bowed
+player is graded correctly in the wrist grid and against neutral in every finding, from the same
+swing, which is worse than either alone.
 
 ### C6, verified — it is not the one-line deletion the stage-7 text implies
 
