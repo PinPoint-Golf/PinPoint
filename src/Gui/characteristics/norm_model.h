@@ -51,16 +51,22 @@ class NormModel : public QObject
 
     // The context tree in render order, each row carrying its depth. The norms-by-context list
     // indents off this — QML never derives depth by walking parents.
-    Q_PROPERTY(QVariantList contexts READ contexts CONSTANT)
+    //
+    // NOTIFY rather than CONSTANT: a user norm set may add contexts of its own, so authoring one
+    // can change this list. Every property below moves for the same reason — the corridor editor
+    // writes, and a census that could not change would go stale the first time it was used.
+    Q_PROPERTY(QVariantList contexts READ contexts NOTIFY normsChanged)
 
     // The loaded norm layers: core plus whatever the user has authored. { id, label, origin,
     // normCount, readOnly, active }.
-    Q_PROPERTY(QVariantList normSets READ normSets CONSTANT)
+    Q_PROPERTY(QVariantList normSets READ normSets NOTIFY normsChanged)
 
     // Census, for the header line.
-    Q_PROPERTY(int measureCount       READ measureCount       CONSTANT)
-    Q_PROPERTY(int normCount          READ normCount          CONSTANT)
-    Q_PROPERTY(int normedMeasureCount READ normedMeasureCount CONSTANT)
+    Q_PROPERTY(int measureCount       READ measureCount       NOTIFY normsChanged)
+    Q_PROPERTY(int normCount          READ normCount          NOTIFY normsChanged)
+    Q_PROPERTY(int normedMeasureCount READ normedMeasureCount NOTIFY normsChanged)
+    // How many corridors in the assembled set are the user's rather than the shipped ones.
+    Q_PROPERTY(int editedNormCount     READ editedNormCount     NOTIFY normsChanged)
 
     // The pack-wide grade policy, by NAME ("standard" | "strict" | "lenient"). A name rather than
     // three z numbers because the policy has to be one comparable thing across athletes and shared
@@ -83,6 +89,7 @@ public:
     int          measureCount() const;
     int          normCount() const;
     int          normedMeasureCount() const;
+    int          editedNormCount() const;
 
     QString gradePolicy() const { return m_policyName; }
     void    setGradePolicy(const QString &name);
@@ -94,10 +101,14 @@ public:
     // on its chain, "no" = has none. A measure with no norm is the interesting case — it is a
     // corridor signal that cannot fire — so filtering to it has to be reachable in one chip.
     //
+    // `edited` is the same shape over "has a corridor of the user's own": "" = any, "yes" = at
+    // least one row here is yours, "no" = none is. After an afternoon in the corridor editor,
+    // "what did I change?" has no other answer in the app.
+    //
     // Rows carry everything a row needs without a second call:
     //   { id, label, unit, group, status, statusLabel, metricKey, usedBy, highMeans,
-    //     hasNorm, ownNormCount, defaultContextId, defaultContextLabel, normInherited,
-    //     idealLo, idealHi, weakProvenance }
+    //     hasNorm, ownNormCount, editedNormCount, userEdited, defaultContextId,
+    //     defaultContextLabel, normInherited, idealLo, idealHi, weakProvenance }
     Q_INVOKABLE QVariantList measures(const QVariantMap &filters = {}) const;
 
     // Full detail for the detail page. Empty map when the id is unknown, so a stale deep link
@@ -114,7 +125,8 @@ public:
     // the active grade policy:
     //   { found, contextId, contextLabel, inherited, inheritedFrom, own,
     //     mu, idealLo, idealHi, goodLo, goodHi, watchLo, watchHi, explicitMonitor,
-    //     unit, n, source, sourceLabel, author, citation, setOn, weak, weakReason }
+    //     unit, n, source, sourceLabel, author, citation, setOn, weak, weakReason,
+    //     overridden, hasShipped, shippedIdealLo, shippedIdealHi }
     Q_INVOKABLE QVariantMap normAt(const QString &measureId, const QString &contextId) const;
 
     // The metric -> measure join, marshalled for QML. `phase` is the Phase enum as an int, which
@@ -126,8 +138,23 @@ public:
     // without going through a QML façade; this method only marshals.
     Q_INVOKABLE QVariantMap measureForMetricAtPhase(const QString &metricKey, int phase) const;
 
+    // Re-take the shared norm provider. Called after the corridor editor writes: the provider is
+    // cached process-wide, so without this the façade keeps answering from the assembly it was
+    // constructed with and an edit looks like it did nothing.
+    Q_INVOKABLE void refresh();
+
+    // Switch a norm-set layer in or out of the assembly. This is what makes the norm-set strip a
+    // selector rather than a census (ledger C2) — until a second set existed there was nothing to
+    // switch, and until makeMergedNormProvider() could skip a layer there was no way to switch it.
+    //
+    // Persisted by the panel into AppSettings::diagnosticsNormSetsOff; this object stays free of
+    // the settings dependency, exactly as it does for the grade policy.
+    Q_INVOKABLE void setNormSetActive(const QString &normSetId, bool active);
+    Q_INVOKABLE void setDisabledNormSets(const QStringList &ids);
+
 signals:
     void gradePolicyChanged();
+    void normsChanged();
 
 private:
     // The characteristics riding on one measure — shared by the row's `usedBy` count and the

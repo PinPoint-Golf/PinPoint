@@ -491,6 +491,9 @@ pp_add_test(characteristic_engine_test
 # and the core pack via PINPOINT_CORE_PACK (the Qt resource exists only inside the app binary).
 # AUTOMOC for the editor model (it is a QObject with Q_PROPERTY/Q_INVOKABLE).
 find_package(Qt6 REQUIRED COMPONENTS Qml)
+# Concurrent: norm_editor_model.cpp scans the swing library on a worker rather than stalling the
+# GUI thread for the seconds a first pass over a real library costs.
+find_package(Qt6 REQUIRED COMPONENTS Concurrent)
 set(CMAKE_AUTOMOC ON)
 
 pp_add_test(characteristic_editor_test
@@ -562,6 +565,14 @@ pp_add_test(norm_pack_test
 set_tests_properties(norm_pack_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
+# Reading a MEASURE off a stored swing — the half of the value/norm join that nothing implemented
+# until the corridor editor needed real numbers under its histogram. The load-bearing assertions are
+# that an unsegmented phase yields NOTHING (never a nearest-sample guess a sidecar would then cache),
+# that Extremum finds a peak no endpoint sees, and that an anchored Extremum is the SIGNED deviation.
+pp_add_test(measure_sample_test
+    SOURCES ${DIAG}/tests/measure_sample_test.cpp ${DIAG}/measure_sample.cpp ${DIAG_NORM}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+
 # Every corridor signal points the way its own condition claims. An inverted signal does not fail
 # loudly — it fires on the wrong swings with correct-sounding text attached — so the fixture states
 # the expected direction and the catalogue quote that decides it. A new signal with no fixture row
@@ -623,3 +634,28 @@ pp_add_test(norm_model_test
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 set_tests_properties(norm_model_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
+# The corridor editor's model. Same contract as norm_model_test — QML holds no rules, so every rule
+# this hides is asserted here or nowhere. The load-bearing one is that the two handles bind the
+# IDEAL band (mu +/- sigma), which the plan's own stage-6 text got wrong until 2026-07-26.
+#
+# Writes go to QStandardPaths::AppDataLocation, so the test sets an isolated app name: a suite that
+# wrote into the developer's real norm set would be a test with a side effect on the product.
+pp_add_test(norm_editor_model_test
+    SOURCES ${DIAG}/tests/norm_editor_model_test.cpp
+            ${SRC}/Gui/characteristics/norm_editor_model.cpp
+            ${DIAG}/measure_sample.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp ${DIAG_NORM}
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${ANALYSIS}/reference_bands.cpp
+    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics
+    LINK    Qt6::Qml Qt6::Concurrent
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+set_tests_properties(norm_editor_model_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/norm_editor_scratch")

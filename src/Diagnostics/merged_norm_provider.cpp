@@ -41,9 +41,21 @@ namespace {
 class MergedNormProvider final : public INormProvider {
 public:
     MergedNormProvider(std::unique_ptr<INormProvider>              core,
-                       std::vector<std::unique_ptr<INormProvider>> user)
-        : m_core(std::move(core)), m_user(std::move(user))
+                       std::vector<std::unique_ptr<INormProvider>> user,
+                       const QStringList                          &disabled)
+        : m_core(std::move(core)), m_user(std::move(user)), m_disabled(disabled)
     {
+        // A disabled layer is dropped HERE, before anything of it is merged. Filtering later (at
+        // resolve time, or by removing its rows afterwards) would leave its contexts in the tree
+        // and its validation issues in the report — a set that is off would still be shaping the
+        // library, which is not what "off" means.
+        if (m_core && isDisabled(*m_core)) m_core.reset();
+        m_user.erase(std::remove_if(m_user.begin(), m_user.end(),
+                                    [this](const std::unique_ptr<INormProvider> &p) {
+                                        return !p || isDisabled(*p);
+                                    }),
+                     m_user.end());
+
         std::vector<ContextNode> nodes;
 
         if (m_core) {
@@ -79,6 +91,22 @@ public:
     QString                 label() const override { return QStringLiteral("merged"); }
     PackOrigin              origin() const override { return PackOrigin::Core; }
 
+    // The shipped row, from the core layer only. Null when core carries nothing at this key — the
+    // case where dropping a user override means "inherit from the parent" rather than "go back to
+    // what shipped", which is a different promise for a button to make.
+    const Norm *shippedNorm(const QString &measureId, const QString &contextId) const override
+    {
+        return m_core ? m_core->norms().find(measureId, contextId) : nullptr;
+    }
+
+    // Recorded at merge time, not derived by comparing values: a user row holding exactly the
+    // shipped numbers is still the user's row, and a value comparison would quietly un-mark it the
+    // moment someone dragged a handle back to where it started.
+    bool isOverridden(const QString &measureId, const QString &contextId) const override
+    {
+        return m_overridden.contains(key(measureId, contextId));
+    }
+
     // The CHILDREN, shipped first — never this object. "merged" is an implementation word, and a
     // user looking at the norm-set list needs to see the shipped set and their own as separate
     // things: that separation is what the override relationship between them means.
@@ -94,6 +122,25 @@ public:
     }
 
 private:
+    static QString key(const QString &measureId, const QString &contextId)
+    {
+        return measureId + QLatin1Char('\n') + contextId;
+    }
+
+    // A provider is disabled when EVERY layer it reports is disabled. Written against layers()
+    // rather than the pack id so a nested assembly answers correctly too, and so the ids the UI
+    // shows are exactly the ids the switch acts on — a selector that named layers differently from
+    // the thing it disabled would be unusable the first time the two disagreed.
+    bool isDisabled(const INormProvider &p) const
+    {
+        const std::vector<NormSetInfo> ls = p.layers();
+        if (ls.empty())
+            return false;                 // reports no layer at all; nothing to switch off
+        for (const NormSetInfo &l : ls)
+            if (!m_disabled.contains(l.id)) return false;
+        return true;
+    }
+
     void mergeNorms(const NormPack &src, PackOrigin origin)
     {
         const bool isLocal = (origin == PackOrigin::LocalUser);
@@ -113,6 +160,7 @@ private:
                 continue;
             }
             m_norms.upsert(n);   // replaces in place, preserving order
+            if (isLocal) m_overridden.insert(key(n.measureId, n.contextId));
         }
     }
 
@@ -142,6 +190,8 @@ private:
 
     std::unique_ptr<INormProvider>              m_core;
     std::vector<std::unique_ptr<INormProvider>> m_user;
+    QStringList                                 m_disabled;
+    QSet<QString>                               m_overridden;   // keys a LocalUser layer supplied
     NormPack                                    m_norms;
     ContextTree                                 m_contexts;
     ValidationReport                            m_report;
@@ -151,16 +201,29 @@ private:
 
 std::unique_ptr<INormProvider> makeMergedNormProvider(
     std::unique_ptr<INormProvider>              core,
-    std::vector<std::unique_ptr<INormProvider>> user)
+    std::vector<std::unique_ptr<INormProvider>> user,
+    const QStringList                          &disabled)
 {
-    return std::make_unique<MergedNormProvider>(std::move(core), std::move(user));
+    return std::make_unique<MergedNormProvider>(std::move(core), std::move(user), disabled);
 }
+
+namespace {
+// Function-local static for the same reason sharedSlot() is one: nothing runs before main().
+QStringList &disabledSlot()
+{
+    static QStringList slot;
+    return slot;
+}
+} // namespace
+
+void        setDisabledNormSets(const QStringList &ids) { disabledSlot() = ids; }
+QStringList disabledNormSets() { return disabledSlot(); }
 
 std::unique_ptr<INormProvider> makeNormProvider()
 {
     std::vector<std::unique_ptr<INormProvider>> user;
     user.push_back(makeFileNormProvider());
-    return makeMergedNormProvider(makeResourceNormProvider(), std::move(user));
+    return makeMergedNormProvider(makeResourceNormProvider(), std::move(user), disabledNormSets());
 }
 
 namespace {

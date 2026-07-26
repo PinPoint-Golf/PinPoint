@@ -49,6 +49,7 @@ Item {
     property string _groupFilter:  ""   // "" = all groups
     property string _statusFilter: ""   // "" = any status
     property string _normFilter:   ""   // "" = any | "yes" | "no"
+    property string _editedFilter: ""   // "" = any | "yes" — measures you have changed
     property string _search:       ""
 
     function _filters() {
@@ -56,6 +57,7 @@ Item {
         if (root._groupFilter.length  > 0) f.group   = root._groupFilter
         if (root._statusFilter.length > 0) f.status  = root._statusFilter
         if (root._normFilter.length   > 0) f.hasNorm = root._normFilter
+        if (root._editedFilter.length > 0) f.edited  = root._editedFilter
         if (root._search.length       > 0) f.search  = root._search
         return f
     }
@@ -127,6 +129,18 @@ Item {
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3
+            }
+
+            // How far this library has drifted from what ships, said once. Absent entirely on a
+            // fresh install, which is the honest rendering of "nothing has been changed".
+            Text {
+                Layout.fillWidth: true
+                visible: root.norms.editedNormCount > 0
+                text: qsTr("%n corridor(s) changed from shipped.", "",
+                           root.norms.editedNormCount)
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorAccent
             }
 
             // ── Settings strip ─────────────────────────────────────────────────
@@ -213,6 +227,43 @@ Item {
                                 color:          Theme.colorText3
                                 wrapMode:       Text.WordWrap
                             }
+
+                            // Standard is what ships. Saying so only when it is NOT standard keeps
+                            // the default state silent — a badge that is always present says
+                            // nothing.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: root.norms.gradePolicy !== "standard"
+                                spacing: Theme.sp(6)
+
+                                Text {
+                                    text:           qsTr("Changed from the shipped setting.")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorAccent
+                                }
+                                Text {
+                                    text:           qsTr("Reset")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          gpReset.containsMouse ? Theme.colorText
+                                                                          : Theme.colorAccent
+                                    font.underline: gpReset.containsMouse
+
+                                    MouseArea {
+                                        id: gpReset
+                                        anchors.fill: parent
+                                        anchors.margins: -Theme.sp(6)
+                                        hoverEnabled: true
+                                        cursorShape:  Qt.PointingHandCursor
+                                        onClicked: {
+                                            root.norms.gradePolicy = "standard"
+                                            appSettings.diagnosticsGradePolicy = "standard"
+                                        }
+                                    }
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
                         }
                     }
 
@@ -237,37 +288,84 @@ Item {
                             Layout.fillWidth: true
                             spacing: Theme.sp(4)
 
+                            // Each row is a SWITCH once there is more than one set. A disabled
+                            // layer is left out of the assembly entirely, so turning your own set
+                            // off shows what the shipped corridors say without deleting anything.
                             Repeater {
                                 model: root.norms.normSets
-                                delegate: RowLayout {
+                                delegate: Rectangle {
+                                    id: setRow
                                     required property var modelData
-                                    Layout.fillWidth: true
-                                    spacing: Theme.sp(8)
+                                    readonly property bool switchable: root.norms.normSets.length > 1
 
-                                    Rectangle {
-                                        implicitWidth:  Theme.sp(6)
-                                        implicitHeight: Theme.sp(6)
-                                        radius: width / 2
-                                        color:  modelData.active ? Theme.colorAccent : Theme.colorBorderStrong
-                                    }
-                                    Text {
-                                        text:           modelData.label
-                                        font.family:    Theme.fontBody
-                                        font.pixelSize: Theme.fontSzBody2
-                                        color:          Theme.colorText
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: {
-                                            var bits = [modelData.origin,
-                                                        qsTr("%n norms", "", modelData.normCount)]
-                                            if (modelData.readOnly) bits.push(qsTr("read-only"))
-                                            return bits.join(" · ")
+                                    Layout.fillWidth: true
+                                    implicitHeight: Theme.sp(26)
+                                    radius: Theme.radius
+                                    color:  (setMa.containsMouse && setRow.switchable)
+                                                ? Theme.colorBg3 : "transparent"
+                                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin:  Theme.sp(6)
+                                        anchors.rightMargin: Theme.sp(6)
+                                        spacing: Theme.sp(8)
+
+                                        Rectangle {
+                                            implicitWidth:  Theme.sp(6)
+                                            implicitHeight: Theme.sp(6)
+                                            radius: width / 2
+                                            color:  modelData.active ? Theme.colorAccent
+                                                                     : Theme.colorBorderStrong
                                         }
-                                        font.family:    Theme.fontBody
-                                        font.pixelSize: Theme.fontSzMicro
-                                        color:          Theme.colorText3
-                                        elide:          Text.ElideRight
+                                        Text {
+                                            text:           modelData.label
+                                            font.family:    Theme.fontBody
+                                            font.pixelSize: Theme.fontSzBody2
+                                            color:          modelData.active ? Theme.colorText
+                                                                             : Theme.colorText3
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: {
+                                                if (!modelData.active) return qsTr("switched off")
+                                                var bits = [modelData.origin,
+                                                            qsTr("%n norm(s)", "", modelData.normCount)]
+                                                if (modelData.readOnly) bits.push(qsTr("read-only"))
+                                                return bits.join(" · ")
+                                            }
+                                            font.family:    Theme.fontBody
+                                            font.pixelSize: Theme.fontSzMicro
+                                            color:          Theme.colorText3
+                                            elide:          Text.ElideRight
+                                        }
+                                        Text {
+                                            visible: setMa.containsMouse && setRow.switchable
+                                            text:    modelData.active ? qsTr("turn off")
+                                                                      : qsTr("turn on")
+                                            font.family:    Theme.fontBody
+                                            font.pixelSize: Theme.fontSzMicro
+                                            color:          Theme.colorAccent
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: setMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled:      setRow.switchable
+                                        cursorShape:  Qt.PointingHandCursor
+                                        onClicked: {
+                                            root.norms.setNormSetActive(modelData.id,
+                                                                        !modelData.active)
+                                            // Persist through the ONE global AppSettings — never a
+                                            // local instance, or the in-memory map goes stale.
+                                            var off = []
+                                            var sets = root.norms.normSets
+                                            for (var i = 0; i < sets.length; ++i)
+                                                if (!sets[i].active) off.push(sets[i].id)
+                                            appSettings.diagnosticsNormSetsOff = off
+                                        }
                                     }
                                 }
                             }
@@ -276,11 +374,49 @@ Item {
                                 Layout.fillWidth: true
                                 visible: root.norms.normSets.length < 2
                                 text: qsTr("One set today. Authoring a corridor creates your own "
-                                           + "set, which layers over this one.")
+                                           + "set, which layers over this one — and each becomes "
+                                           + "switchable here.")
                                 font.family:    Theme.fontBody
                                 font.pixelSize: Theme.fontSzMicro
                                 color:          Theme.colorText3
                                 wrapMode:       Text.WordWrap
+                            }
+
+                            // A switched-off layer is a setting like any other, and the way back
+                            // has to be as reachable as the way out.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: appSettings.diagnosticsNormSetsOff.length > 0
+                                spacing: Theme.sp(6)
+
+                                Text {
+                                    text: qsTr("%n set(s) switched off.", "",
+                                               appSettings.diagnosticsNormSetsOff.length)
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorAccent
+                                }
+                                Text {
+                                    text:           qsTr("Switch all back on")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          nsReset.containsMouse ? Theme.colorText
+                                                                          : Theme.colorAccent
+                                    font.underline: nsReset.containsMouse
+
+                                    MouseArea {
+                                        id: nsReset
+                                        anchors.fill: parent
+                                        anchors.margins: -Theme.sp(6)
+                                        hoverEnabled: true
+                                        cursorShape:  Qt.PointingHandCursor
+                                        onClicked: {
+                                            root.norms.setDisabledNormSets([])
+                                            appSettings.diagnosticsNormSetsOff = []
+                                        }
+                                    }
+                                }
+                                Item { Layout.fillWidth: true }
                             }
                         }
                     }
@@ -361,6 +497,7 @@ Item {
                 Repeater {
                     model: [{ kind: "norm",   value: "yes", label: qsTr("Has a norm") },
                             { kind: "norm",   value: "no",  label: qsTr("No norm") },
+                            { kind: "edited", value: "yes", label: qsTr("Edited by me") },
                             { kind: "status", value: "live",          label: qsTr("Live") },
                             { kind: "status", value: "planned",       label: qsTr("Planned") },
                             { kind: "status", value: "noProducer",    label: qsTr("No producer") },
@@ -369,8 +506,9 @@ Item {
                     delegate: Rectangle {
                         required property var modelData
                         readonly property bool active:
-                            modelData.kind === "norm" ? root._normFilter   === modelData.value
-                                                      : root._statusFilter === modelData.value
+                            modelData.kind === "norm"   ? root._normFilter   === modelData.value
+                          : modelData.kind === "edited" ? root._editedFilter === modelData.value
+                                                        : root._statusFilter === modelData.value
 
                         implicitWidth:  fChip.implicitWidth + Theme.sp(18)
                         implicitHeight: Theme.sp(24)
@@ -393,6 +531,8 @@ Item {
                             onClicked: {
                                 if (modelData.kind === "norm")
                                     root._normFilter = parent.active ? "" : modelData.value
+                                else if (modelData.kind === "edited")
+                                    root._editedFilter = parent.active ? "" : modelData.value
                                 else
                                     root._statusFilter = parent.active ? "" : modelData.value
                             }
@@ -501,6 +641,19 @@ Item {
                                         font.family:    Theme.fontBody
                                         font.pixelSize: Theme.fontSzMicro
                                         color:          Theme.colorText3
+                                        elide:          Text.ElideRight
+                                    }
+
+                                    // Edited away from what ships. In the accent rather than a
+                                    // status word, because it is the one thing on this row the
+                                    // user did rather than the library.
+                                    Text {
+                                        visible: modelData.userEdited === true
+                                        text:    qsTr("%n corridor(s) edited by you", "",
+                                                      modelData.editedNormCount)
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzMicro
+                                        color:          Theme.colorAccent
                                         elide:          Text.ElideRight
                                     }
                                 }

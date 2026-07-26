@@ -40,7 +40,39 @@ Item {
         // model itself stays free of the settings dependency and remains testable standalone.
         // `appSettings` is the root context property — the ONE global instance from main.cpp, per
         // the single-shared-instance rule; never construct a local AppSettings for a write.
-        Component.onCompleted: gradePolicy = appSettings.diagnosticsGradePolicy
+        Component.onCompleted: {
+            gradePolicy = appSettings.diagnosticsGradePolicy
+            // Which norm-set layers take part. Seeded here for the same reason, and applied BEFORE
+            // anything queries: setDisabledNormSets() resets the process-wide provider, so doing it
+            // later would throw away an assembly every open view is already rendering from.
+            setDisabledNormSets(appSettings.diagnosticsNormSetsOff)
+        }
+    }
+
+    // The corridor editor's draft. Separate from NormModel exactly as CharacteristicEditorModel is
+    // separate from CharacteristicLibraryModel: one reads the library, one holds an edit.
+    NormEditorModel {
+        id: normEditor
+        libraryRoot: appSettings.athleteLibraryPath
+        Component.onCompleted: setGradePolicy(appSettings.diagnosticsGradePolicy)
+    }
+
+    Connections {
+        target: normEditor
+        // A corridor was written. The façade caches its provider, so it has to re-take before any
+        // binding re-reads — otherwise the edit is on disk and invisible until the next launch.
+        function onNormsChanged() {
+            norms.refresh()
+            root._revision++
+        }
+    }
+
+    Connections {
+        target: appSettings
+        function onDiagnosticsGradePolicyChanged() {
+            norms.gradePolicy = appSettings.diagnosticsGradePolicy
+            normEditor.setGradePolicy(appSettings.diagnosticsGradePolicy)
+        }
     }
 
     // Bumped whenever a save lands, so every query() binding re-evaluates. The façade is read-only
@@ -58,7 +90,12 @@ Item {
     property string _selectedId:  ""    // "" = directory (master)
     property string _selectedMeasureId: ""  // "" = measure catalogue (master)
     property bool   _editing:     false // the authoring sheet is open
+    property bool   _corridor:    false // the corridor editor is open, over the measure detail
     property string _view:        "library"   // "library" | "measures" | "roadmap" | "health"
+
+    function _openCorridor(measureId, contextId) {
+        if (normEditor.begin(measureId, contextId)) root._corridor = true
+    }
 
     // Settings-search hook (ScreenSettings.navigateToResult): return to the directory and report
     // success so the retry loop stops.
@@ -141,6 +178,7 @@ Item {
         height:  visible ? switcherFlow.y + switcherFlow.implicitHeight + Theme.sp(10) : 0
         // Detail and the editor are full-page and carry their own way back, so the bar steps aside.
         visible: root._selectedId === "" && root._selectedMeasureId === "" && !root._editing
+                 && !root._corridor
 
         Flow {
             id: switcherFlow
@@ -409,7 +447,7 @@ Item {
     // ══ Measure detail ════════════════════════════════════════════════════════
     MeasureDetail {
         anchors.fill: parent
-        visible: root._selectedMeasureId !== "" && !root._editing
+        visible: root._selectedMeasureId !== "" && !root._editing && !root._corridor
         detail:  (root._selectedMeasureId !== "" && root._revision >= 0)
                  ? norms.measureDetail(root._selectedMeasureId) : ({})
 
@@ -420,6 +458,19 @@ Item {
             root._selectedMeasureId = ""
             root._view              = "library"
             root.showCharacteristic(conditionId)
+        }
+        onEditCorridor: function(measureId, contextId) { root._openCorridor(measureId, contextId) }
+    }
+
+    // ══ Corridor editor ═══════════════════════════════════════════════════════
+    CorridorEditor {
+        anchors.fill: parent
+        visible: root._corridor
+        editor:  normEditor
+
+        onBack: {
+            normEditor.cancel()
+            root._corridor = false
         }
     }
 

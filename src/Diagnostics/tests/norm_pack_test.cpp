@@ -335,6 +335,118 @@ int main()
               "overriddenContextsFor lists rows in TREE order, for an indented list");
     }
 
+    std::printf("=== norm provider: shipped vs yours ===\n");
+    {
+        // What "reset to shipped" and the "edited" markers both rest on. Neither can be derived by
+        // comparing numbers: a user row holding exactly the shipped values is still a user row.
+        //
+        // Tree: any -> full_swing -> { driver, wedge }.
+        NormPack core;
+        core.id = QStringLiteral("core");
+        core.norms.push_back(makeNorm("m_ballPosition", "any",        60.0, 20.0, "%"));
+        core.norms.push_back(makeNorm("m_ballPosition", "full_swing", 50.0, 10.0, "%"));
+        // A user row holding EXACTLY the shipped numbers. Still the user's.
+        core.norms.push_back(makeNorm("m_stanceWidth",  "full_swing", 102.0, 12.0, "%"));
+
+        NormPack user;
+        user.id = QStringLiteral("user");
+        user.norms.push_back(makeNorm("m_ballPosition", "full_swing", 44.0,  6.0, "%"));
+        // A user row at a key core does NOT carry — dropping this one means "inherit from the
+        // parent", not "go back to what shipped", and a button has to promise the right one.
+        user.norms.push_back(makeNorm("m_ballPosition", "wedge",      70.0,  8.0, "%"));
+        user.norms.push_back(makeNorm("m_stanceWidth",  "full_swing", 102.0, 12.0, "%"));
+
+        std::vector<std::unique_ptr<INormProvider>> layers;
+        layers.push_back(fake(user, PackOrigin::LocalUser));
+        const auto prov = makeMergedNormProvider(fake(core, PackOrigin::Core), std::move(layers));
+
+        // isOverridden is about ONE KEY: does a user layer supply a row exactly here?
+        check(prov->isOverridden(QStringLiteral("m_ballPosition"), QStringLiteral("full_swing")),
+              "a key a user layer supplied reports as overridden");
+        check(!prov->isOverridden(QStringLiteral("m_ballPosition"), QStringLiteral("any")),
+              "a key only core supplies does not");
+        check(!prov->isOverridden(QStringLiteral("m_ballPosition"), QStringLiteral("driver")),
+              "a key NOBODY supplies does not — driver has no row of its own");
+        check(prov->isOverridden(QStringLiteral("m_stanceWidth"), QStringLiteral("full_swing")),
+              "a user row with the SHIPPED numbers is still overridden — tracked, not compared");
+
+        const Norm *shippedFs = prov->shippedNorm(QStringLiteral("m_ballPosition"),
+                                                  QStringLiteral("full_swing"));
+        check(shippedFs && near(shippedFs->mu, 50.0),
+              "shippedNorm reports what CORE says, ignoring the override on top of it");
+        check(prov->shippedNorm(QStringLiteral("m_ballPosition"), QStringLiteral("wedge")) == nullptr,
+              "a key core does not carry has NO shipped row — the reset there means inherit");
+        check(prov->shippedNorm(QStringLiteral("m_ballPosition"), QStringLiteral("driver")) == nullptr,
+              "shippedNorm is about ONE key and does not walk the tree");
+
+        // resolve().overridden is about the RESOLUTION: is the row that won the user's? The two
+        // differ exactly where inheritance does, and that difference is the point — a driver with
+        // no row of its own is still graded by the user's corridor, and must say so.
+        const NormResolution fs =
+            prov->resolve(QStringLiteral("m_ballPosition"), QStringLiteral("full_swing"));
+        check(fs.found() && fs.overridden && near(fs.norm->mu, 44.0),
+              "resolve() marks an overridden row");
+
+        const NormResolution drv =
+            prov->resolve(QStringLiteral("m_ballPosition"), QStringLiteral("driver"));
+        check(drv.found() && drv.inherited && drv.overridden && near(drv.norm->mu, 44.0),
+              "INHERITING the user's override is still being graded by the user's number");
+
+        const NormResolution any =
+            prov->resolve(QStringLiteral("m_ballPosition"), QStringLiteral("any"));
+        check(any.found() && !any.overridden && near(any.norm->mu, 60.0),
+              "a context resolving ABOVE the override is untouched by it");
+    }
+
+    std::printf("=== norm provider: a layer can be switched OFF ===\n");
+    {
+        // Ledger C2. Until makeMergedNormProvider() could skip a layer, the norm-set strip was a
+        // census with nothing to switch. The behaviour that has to hold is that a disabled layer is
+        // ABSENT, not present-and-ignored: the shipped corridor is what grades, and the layer does
+        // not appear in layers() either, because a set you cannot see is a set you cannot turn on.
+        NormPack core;
+        core.id = QStringLiteral("core");
+        core.norms.push_back(makeNorm("m_ballPosition", "full_swing", 50.0, 10.0, "%"));
+
+        NormPack user;
+        user.id = QStringLiteral("user");
+        user.norms.push_back(makeNorm("m_ballPosition", "full_swing", 44.0, 6.0, "%"));
+
+        {
+            std::vector<std::unique_ptr<INormProvider>> layers;
+            layers.push_back(fake(user, PackOrigin::LocalUser));
+            const auto on = makeMergedNormProvider(fake(core, PackOrigin::Core), std::move(layers));
+            const NormResolution r =
+                on->resolve(QStringLiteral("m_ballPosition"), QStringLiteral("full_swing"));
+            check(r.found() && near(r.norm->mu, 44.0), "with both layers on, the user row wins");
+            check(on->layers().size() == 2, "…and both layers are reported");
+        }
+        {
+            std::vector<std::unique_ptr<INormProvider>> layers;
+            layers.push_back(fake(user, PackOrigin::LocalUser));
+            const auto off = makeMergedNormProvider(fake(core, PackOrigin::Core), std::move(layers),
+                                                    QStringList{ QStringLiteral("user") });
+            const NormResolution r =
+                off->resolve(QStringLiteral("m_ballPosition"), QStringLiteral("full_swing"));
+            check(r.found() && near(r.norm->mu, 50.0),
+                  "switching the user set OFF grades against the SHIPPED corridor");
+            check(off->layers().size() == 1, "…and the disabled layer is absent from the census");
+        }
+        {
+            // The core layer is switchable like any other, and an assembly with nothing left
+            // resolves NOTHING rather than pretending it has an answer.
+            std::vector<std::unique_ptr<INormProvider>> layers;
+            layers.push_back(fake(user, PackOrigin::LocalUser));
+            const auto none = makeMergedNormProvider(
+                fake(core, PackOrigin::Core), std::move(layers),
+                QStringList{ QStringLiteral("core"), QStringLiteral("user") });
+            check(!none->resolve(QStringLiteral("m_ballPosition"),
+                                 QStringLiteral("full_swing")).found(),
+                  "every layer off resolves nothing, honestly");
+            check(none->layers().empty(), "…and reports no layers");
+        }
+    }
+
     std::printf("=== norm provider: community never wins over core ===\n");
     {
         NormPack core;

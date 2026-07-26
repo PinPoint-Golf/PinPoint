@@ -67,6 +67,11 @@ class AppSettings : public QObject
     // comparable across athletes or across shared packs. The names, and the z thresholds behind
     // them, live in norm_model.cpp; this stores only which one is chosen.
     Q_PROPERTY(QString diagnosticsGradePolicy READ diagnosticsGradePolicy WRITE setDiagnosticsGradePolicy NOTIFY diagnosticsGradePolicyChanged)
+    // Norm-set layers switched OFF, by norm-set id. Empty (the default) means every loaded set
+    // takes part, which is what a fresh install has. Turning the user's own set off is how an
+    // author sees what the shipped corridors say without deleting their overrides — so this is a
+    // view of the library, persisted, not a scratch toggle.
+    Q_PROPERTY(QStringList diagnosticsNormSetsOff READ diagnosticsNormSetsOff WRITE setDiagnosticsNormSetsOff NOTIFY diagnosticsNormSetsOffChanged)
     // Global replay behaviour (surfaced in the View menu alongside the timeline
     // options, not per-mode): whether a just-captured shot auto-replays, and
     // whether replay playback is trimmed to the detected swing (Address → Finish).
@@ -236,6 +241,8 @@ public:
         m_metricsHidePlanned = ppSettings().value(QStringLiteral("ui/metricsHidePlanned"), false).toBool();
         m_diagnosticsGradePolicy = ppSettings().value(QStringLiteral("ui/diagnosticsGradePolicy"),
                                                       QStringLiteral("standard")).toString();
+        m_diagnosticsNormSetsOff = ppSettings().value(QStringLiteral("ui/diagnosticsNormSetsOff"),
+                                                      QStringList()).toStringList();
         m_autoReplayAfterCapture = ppSettings().value(QStringLiteral("ui/autoReplayAfterCapture"), true).toBool();
         m_replayTrimToSwing = ppSettings().value(QStringLiteral("ui/replayTrimToSwing"), false).toBool();
         m_reduceMotion    = ppSettings().value(QStringLiteral("ui/reduceMotion"),    false).toBool();
@@ -360,6 +367,7 @@ public:
     bool    timelineSnapToPhases() const { return m_timelineSnapToPhases; }
     bool    metricsHidePlanned()  const { return m_metricsHidePlanned; }
     QString diagnosticsGradePolicy() const { return m_diagnosticsGradePolicy; }
+    QStringList diagnosticsNormSetsOff() const { return m_diagnosticsNormSetsOff; }
     bool    autoReplayAfterCapture() const { return m_autoReplayAfterCapture; }
     bool    replayTrimToSwing()   const { return m_replayTrimToSwing; }
     bool    reduceMotion()  const { return m_reduceMotion; }
@@ -539,6 +547,14 @@ public:
         m_diagnosticsGradePolicy = v;
         ppSettings().setValue(QStringLiteral("ui/diagnosticsGradePolicy"), v);
         emit diagnosticsGradePolicyChanged();
+    }
+
+    void setDiagnosticsNormSetsOff(const QStringList &v)
+    {
+        if (m_diagnosticsNormSetsOff == v) return;
+        m_diagnosticsNormSetsOff = v;
+        ppSettings().setValue(QStringLiteral("ui/diagnosticsNormSetsOff"), v);
+        emit diagnosticsNormSetsOffChanged();
     }
 
     void setAutoReplayAfterCapture(bool v)
@@ -1210,6 +1226,7 @@ signals:
     void timelineSnapToPhasesChanged();
     void metricsHidePlannedChanged();
     void diagnosticsGradePolicyChanged();
+    void diagnosticsNormSetsOffChanged();
     void autoReplayAfterCaptureChanged();
     void replayTrimToSwingChanged();
     void reduceMotionChanged();
@@ -1304,6 +1321,7 @@ private:
     bool    m_timelineSnapToPhases = false;
     bool    m_metricsHidePlanned = false;
     QString m_diagnosticsGradePolicy = QStringLiteral("standard");
+    QStringList m_diagnosticsNormSetsOff;
     bool    m_autoReplayAfterCapture = true;
     bool    m_replayTrimToSwing = false;
     bool    m_reduceMotion    = false;

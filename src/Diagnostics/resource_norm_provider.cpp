@@ -47,9 +47,13 @@ NormResolution INormProvider::resolve(const QString &measureId, const QString &c
 
     for (const QString &ctx : chain) {
         if (const Norm *n = norms().find(measureId, ctx)) {
-            out.norm      = n;
-            out.contextId = ctx;
-            out.inherited = (ctx != requested);
+            out.norm       = n;
+            out.contextId  = ctx;
+            out.inherited  = (ctx != requested);
+            // Where the row that WON came from, keyed on the context it was actually found at —
+            // not on the one asked for. A driver inheriting a shipped full-swing corridor is not
+            // edited, and a driver inheriting the user's full-swing override is.
+            out.overridden = isOverridden(measureId, ctx);
             return out;
         }
     }
@@ -66,6 +70,22 @@ QStringList INormProvider::overriddenContextsFor(const QString &measureId) const
     for (const QString &ctx : contexts().inOrder())
         if (norms().contains(measureId, ctx)) out.append(ctx);
     return out;
+}
+
+const Norm *INormProvider::shippedNorm(const QString &measureId, const QString &contextId) const
+{
+    // A leaf provider IS one layer, so it answers for itself: a core leaf carries the shipped row,
+    // a user leaf carries nothing shipped at all. Only the merged provider has to look further.
+    if (origin() != PackOrigin::Core)
+        return nullptr;
+    return norms().find(measureId, contextId);
+}
+
+bool INormProvider::isOverridden(const QString &, const QString &) const
+{
+    // Same reasoning inverted: a leaf's rows all come from its own layer, so a core leaf overrides
+    // nothing and a user leaf's rows are, by definition, the user's.
+    return origin() != PackOrigin::Core;
 }
 
 std::vector<NormSetInfo> INormProvider::layers() const

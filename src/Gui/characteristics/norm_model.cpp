@@ -251,8 +251,11 @@ QVariantList NormModel::normSets() const
     // reader has to see the two as separate things because that separation is what "your edit
     // overrides the shipped norm" means.
     //
-    // `active` is every layer today. It becomes a selector when a second set exists AND the merged
-    // provider can be told to skip one — see the note in the plan doc; this is a census until then.
+    // `active` is a real switch now: a disabled layer is absent from the assembly, so it does not
+    // appear in layers() at all and has to be added back from the disabled list to be shown as an
+    // off row. A set you cannot see is a set you cannot turn back on.
+    const QStringList off = disabledNormSets();
+
     QVariantList out;
     for (const NormSetInfo &l : m_norms->layers()) {
         QVariantMap r;
@@ -264,11 +267,57 @@ QVariantList NormModel::normSets() const
         r.insert(QStringLiteral("active"),    true);
         out.append(r);
     }
+
+    for (const QString &id : off) {
+        QVariantMap r;
+        r.insert(QStringLiteral("id"),        id);
+        r.insert(QStringLiteral("label"),     id);
+        r.insert(QStringLiteral("origin"),    tr("Switched off"));
+        r.insert(QStringLiteral("normCount"), 0);
+        r.insert(QStringLiteral("readOnly"),  false);
+        r.insert(QStringLiteral("active"),    false);
+        out.append(r);
+    }
     return out;
+}
+
+void NormModel::refresh()
+{
+    resetSharedNormProvider();
+    m_norms = sharedNormProvider();
+    emit normsChanged();
+}
+
+void NormModel::setNormSetActive(const QString &normSetId, bool active)
+{
+    QStringList off = disabledNormSets();
+    if (active) off.removeAll(normSetId);
+    else if (!off.contains(normSetId)) off.append(normSetId);
+    setDisabledNormSets(off);
+}
+
+void NormModel::setDisabledNormSets(const QStringList &ids)
+{
+    if (ids == disabledNormSets())
+        return;
+    // The free function in norm_provider.h, not this method — the member shadows it inside this
+    // scope, and calling it here unqualified would recurse.
+    ::pinpoint::analysis::setDisabledNormSets(ids);
+    refresh();
 }
 
 int NormModel::measureCount() const { return int(m_pack->pack().measures.size()); }
 int NormModel::normCount() const    { return int(m_norms->norms().norms.size()); }
+
+int NormModel::editedNormCount() const
+{
+    // Rows a user layer supplies, over the whole assembled set. The one number that answers "how
+    // far is this library from what we ship".
+    int n = 0;
+    for (const Norm &nm : m_norms->norms().norms)
+        if (m_norms->isOverridden(nm.measureId, nm.contextId)) ++n;
+    return n;
+}
 
 int NormModel::normedMeasureCount() const
 {
@@ -306,6 +355,7 @@ QVariantList NormModel::measures(const QVariantMap &filters) const
     const QString group   = filters.value(QStringLiteral("group")).toString();
     const QString status  = filters.value(QStringLiteral("status")).toString();
     const QString hasNorm = filters.value(QStringLiteral("hasNorm")).toString();
+    const QString edited  = filters.value(QStringLiteral("edited")).toString();
     const QString search  = filters.value(QStringLiteral("search")).toString().trimmed();
 
     QVariantList out;
@@ -319,6 +369,14 @@ QVariantList NormModel::measures(const QVariantMap &filters) const
 
         if (hasNorm == QLatin1String("yes") && !res.found()) continue;
         if (hasNorm == QLatin1String("no")  &&  res.found()) continue;
+
+        // "What have I changed?" is a real question after an afternoon in the corridor editor, and
+        // it has no other answer in the app.
+        int editedRows = 0;
+        for (const QString &cid : m_norms->overriddenContextsFor(m.id))
+            if (m_norms->isOverridden(m.id, cid)) ++editedRows;
+        if (edited == QLatin1String("yes") && editedRows == 0) continue;
+        if (edited == QLatin1String("no")  && editedRows >  0) continue;
 
         if (!search.isEmpty()) {
             const bool hit = m.label.contains(search, Qt::CaseInsensitive)
@@ -340,6 +398,11 @@ QVariantList NormModel::measures(const QVariantMap &filters) const
         r.insert(QStringLiteral("usedBy"),      usersOfMeasureIds(m.id).size());
         r.insert(QStringLiteral("ownNormCount"),
                  int(m_norms->overriddenContextsFor(m.id).size()));
+
+        // Has this measure been edited ANYWHERE? Counted over the measure's OWN rows, not the
+        // whole tree, because an inherited row is not a second edit.
+        r.insert(QStringLiteral("editedNormCount"), editedRows);
+        r.insert(QStringLiteral("userEdited"),      editedRows > 0);
 
         r.insert(QStringLiteral("hasNorm"), res.found());
         if (res.found()) {
@@ -418,6 +481,18 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
                                                                 : QString());
     out.insert(QStringLiteral("weak"),        normIsWeak(n));
     out.insert(QStringLiteral("weakReason"),  normWeakReason(n));
+
+    // ── Shipped vs yours ────────────────────────────────────────────────────
+    //
+    // Tracked, never derived by comparing numbers: a user row holding exactly the shipped values is
+    // still a user row, and a value comparison would quietly un-mark it. `overridden` follows the
+    // RESOLUTION, so a context inheriting the user's override reads as edited too — it is being
+    // graded by the user's corridor, and saying otherwise would be false.
+    const Norm *shipped = m_norms->shippedNorm(measureId, res.contextId);
+    out.insert(QStringLiteral("overridden"),     res.overridden);
+    out.insert(QStringLiteral("hasShipped"),     shipped != nullptr);
+    out.insert(QStringLiteral("shippedIdealLo"), shipped ? shipped->idealLo() : 0.0);
+    out.insert(QStringLiteral("shippedIdealHi"), shipped ? shipped->idealHi() : 0.0);
     return out;
 }
 
@@ -483,6 +558,11 @@ QVariantMap NormModel::measureDetail(const QString &measureId) const
     out.insert(QStringLiteral("hasNorm"),  !norms.isEmpty());
     out.insert(QStringLiteral("ownNormCount"),
                int(m_norms->overriddenContextsFor(measureId).size()));
+
+    int editedRows = 0;
+    for (const QString &cid : m_norms->overriddenContextsFor(measureId))
+        if (m_norms->isOverridden(measureId, cid)) ++editedRows;
+    out.insert(QStringLiteral("editedNormCount"), editedRows);
 
     // ── Used by ──────────────────────────────────────────────────────────────
     QVariantList usedBy;

@@ -45,6 +45,10 @@ Item {
 
     signal back()
     signal openCondition(string conditionId)
+    // Open the corridor editor for one (measure, context). A row that already has its own norm
+    // edits it; an inherited row overrides it — the same gesture, because "override for this
+    // context" IS opening the editor seeded from what it inherits.
+    signal editCorridor(string measureId, string contextId)
 
     readonly property var _norms:  detail.norms  || []
     readonly property var _usedBy: detail.usedBy || []
@@ -212,6 +216,19 @@ Item {
 
                 Text {
                     Layout.fillWidth: true
+                    visible: (root.detail.editedNormCount || 0) > 0
+                    // Phrased to avoid a count/verb disagreement at n = 1 — Qt's "(s)" fallback
+                    // handles the noun, but "1 … are yours" would still read wrong.
+                    text: qsTr("%n corridor(s) changed from shipped. Open one to see what it was, "
+                               + "or to reset it.", "", root.detail.editedNormCount || 0)
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorAccent
+                    wrapMode:       Text.WordWrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
                     visible: root._norms.length > 0
                     text: qsTr("Resolution walks UP the tree, so a context with no row of its own "
                                + "inherits its parent's. Only the rows marked as its own were "
@@ -234,8 +251,24 @@ Item {
                             anchors.fill: parent
                             radius: Theme.radius
                             // An inherited row is the same information seen from further away, so
-                            // it recedes; an own row is a decision somebody made.
-                            color:  modelData.own ? Theme.colorBg2 : "transparent"
+                            // it recedes; an own row is a decision somebody made. Hover lifts
+                            // either, because either can be opened.
+                            color:  normMa.containsMouse ? Theme.colorBg3
+                                  : modelData.own        ? Theme.colorBg2
+                                  :                        "transparent"
+                            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                        }
+
+                        // Tapping a row opens the corridor editor at THAT context. Placed under
+                        // the content so the row's own text stays selectable-looking rather than
+                        // swallowed by a full-bleed hit target on top of it.
+                        MouseArea {
+                            id: normMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape:  Qt.PointingHandCursor
+                            onClicked: root.editCorridor(root.detail.id || "",
+                                                         modelData.askedContextId)
                         }
 
                         ColumnLayout {
@@ -294,6 +327,33 @@ Item {
                                     font.family:    Theme.fontBody
                                     font.pixelSize: Theme.fontSzMicro
                                     color:          Theme.colorText3
+                                }
+
+                                // Not what PinPoint ships. An inherited row reads "edited" too,
+                                // because it IS being graded by the user's corridor — saying
+                                // otherwise would be false about the number beside it.
+                                Text {
+                                    visible: modelData.overridden === true
+                                    text: modelData.hasShipped
+                                            ? qsTr("· edited, ships %1 to %2")
+                                                .arg(root._num(modelData.shippedIdealLo))
+                                                .arg(root._num(modelData.shippedIdealHi))
+                                            : qsTr("· added by you")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorAccent
+                                }
+
+                                // The affordance appears on hover rather than sitting on every
+                                // row: thirteen contexts each carrying a permanent "Override"
+                                // button would read as thirteen things to do.
+                                Text {
+                                    visible: normMa.containsMouse
+                                    text:    modelData.own ? qsTr("· edit")
+                                                           : qsTr("· override for this context")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorAccent
                                 }
 
                                 Text {

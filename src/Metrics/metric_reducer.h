@@ -60,8 +60,12 @@ enum class ExtremumSense { Max, Min };
 //   At:       anchor = the phase to read.                     window unused.
 //   Delta:    anchor = start phase, window.second = end phase.
 //   Rate:     as Delta, divided by elapsed time.
-//   Extremum: window = the search span. anchor, when present, makes the result the peak
-//             |value − value(anchor)| rather than the peak absolute value.
+//   Extremum: window = the search span. anchor, when present, makes the result the peak SIGNED
+//             deviation `extremum(window, sense) − value(anchor)` rather than the peak absolute
+//             value. Signed, not |·|: an absolute deviation cannot carry a `sense`, and every
+//             anchored Extremum in the shipped pack means the signed reading — m_pelvisSwayBack is
+//             the most trail-ward sway relative to address (sense = Min), not the largest excursion
+//             in either direction.
 //
 // Extremum is deliberately first-class rather than deferred: several real characteristics are peaks
 // wearing an endpoint's clothes. Early extension is the *maximum* pelvis-toward-ball displacement

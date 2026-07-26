@@ -40,6 +40,11 @@ struct NormResolution {
     QString     contextId;              // where the norm was found; empty when nothing resolved
     bool        inherited = false;      // the norm came from an ancestor, not the requested context
 
+    // A non-core layer supplies the row that resolved. This is the "you changed this" fact, and it
+    // has to be tracked rather than inferred: a user row that happens to hold the same numbers as
+    // the shipped one is still a user row, and comparing values would call it shipped.
+    bool        overridden = false;
+
     bool  found() const { return norm != nullptr; }
     Grade grade(double value, const GradePolicy &policy = {}) const
     {
@@ -91,6 +96,27 @@ public:
     // the "overridden" markers in the norms-by-context list.
     QStringList overriddenContextsFor(const QString &measureId) const;
 
+    // ── Shipped vs yours ────────────────────────────────────────────────────
+    //
+    // Two questions the UI cannot answer by comparing numbers, and both are needed to offer a
+    // reset honestly:
+    //
+    //   * "Reset to shipped" and "Remove your override" are the SAME operation (drop the user row)
+    //     with different outcomes — the shipped corridor resolves again, or the parent's does.
+    //     Which one a button should promise depends on whether core carries a row at this exact
+    //     key, and offering the wrong promise is how a destructive action gets a reassuring label.
+    //   * A user row holding the same numbers as the shipped one is still a user row. Deriving
+    //     "edited" from a value comparison would silently un-mark it.
+
+    // The CORE row at this exact (measureId, contextId), ignoring every user layer. Null when core
+    // carries nothing there — which is exactly when a reset means "inherit from the parent" rather
+    // than "go back to what shipped". No tree walk: this is about one key, not about resolution.
+    virtual const Norm *shippedNorm(const QString &measureId, const QString &contextId) const;
+
+    // True when a NON-CORE layer supplies the row at this exact key. False for a leaf core
+    // provider, true for a leaf user provider, and tracked per key by the merged provider.
+    virtual bool isOverridden(const QString &measureId, const QString &contextId) const;
+
     // The layers behind this provider, shipped first. The default reports THIS provider as its own
     // single layer, which is right for every leaf; only the merged provider overrides it.
     virtual std::vector<NormSetInfo> layers() const;
@@ -130,12 +156,31 @@ std::unique_ptr<INormProvider> makeFileNormProvider(
 // adjusting the general full-swing norm silently overrode every club-specific shipped norm beneath
 // it. They said something about full swings; they said nothing about drivers, and core's driver row
 // is the more specific statement. To change the driver they override the driver.
+//
+// `disabled` names layers (by NormSetInfo::id) to leave OUT of the assembly. A disabled layer is
+// not merged and does not appear in layers() — it is absent, not present-and-ignored, because
+// "your set is off" has to mean the shipped corridor is what grades, not a shipped corridor with
+// an invisible override still sitting on it. The CORE layer can be disabled like any other; a
+// merged provider with nothing left resolves nothing, which reports honestly rather than
+// pretending.
 std::unique_ptr<INormProvider> makeMergedNormProvider(
     std::unique_ptr<INormProvider>              core,
-    std::vector<std::unique_ptr<INormProvider>> user);
+    std::vector<std::unique_ptr<INormProvider>> user,
+    const QStringList                          &disabled = {});
 
 // The default assembly: shipped core plus whatever the user has authored.
 std::unique_ptr<INormProvider> makeNormProvider();
+
+// ── Which layers take part, process-wide ────────────────────────────────────
+//
+// Set from AppSettings by the app so the Diagnostics module keeps no settings dependency, exactly
+// as the grade policy is. Changing it does NOT rebuild anything on its own — call
+// resetSharedNormProvider() after, or every existing reader keeps the assembly it already has.
+//
+// This is what turns the norm-set strip from a census into a selector: until a second set exists
+// there is nothing to switch, and until this exists there is no way to switch it.
+void        setDisabledNormSets(const QStringList &ids);
+QStringList disabledNormSets();
 
 // The process-wide assembled norm set, built on FIRST USE and cached.
 //

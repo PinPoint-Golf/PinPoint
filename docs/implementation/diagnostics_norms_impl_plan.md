@@ -24,7 +24,7 @@ the ledger is not. A final sweep after stage 10 must find that table with nothin
 | — | **review gate · expect context clear here** | | |
 | 5 | `NormModel` + read-only norm UI | ☑ complete — the measures view ships | 2026-07-25 · 0dea02a |
 | — | **review gate** | | |
-| 6 | `CorridorEditor.qml` | ☐ not started | |
+| 6 | `CorridorEditor.qml` | ☑ complete — **the pack meets real swings** | 2026-07-26 |
 | 7 | Editable bindings + direction control | ☐ not started | |
 | — | **review gate** | | |
 | 8 | The navigable DAG | ☐ not started | |
@@ -47,67 +47,80 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-25 | 3 | **Stage 3 mechanism complete; content OWED — the pack is still dark.** `NormMeasureSource` joins values to norms; `MeasureReading` gained `grade`, `normContextId`, `contextInferred` and a `fromCorridor()` factory. Engine now fires on a **deviation (Watch/Action)**, not on leaving Ideal — see the decision below. `norm_measure_source_test` green (26 assertions incl. unknown-context, inferred-context demotion, both tails on one norm). Analyzer suite **73/73**; app + `swinglab_run` build. **BUT: all 26 corridor-signal measures still have no norm** (norms.json holds only the 39 wrist-grid rows), so no seed characteristic can fire yet. Authoring those 26 is the remaining work and needs Mark's numbers. Next: author the seed norms, then stage 4. |
 | 2026-07-25 | 3 (closed) + 4 | **THE PACK LIGHTS UP.** Direction audit of all 30 signals (3 inversions + 2 structural defects fixed); sign conventions settled and documented; `highMeans` on every signal-bearing measure; 13 seed norms authored. **8 live corridor signals can now fire, 0 left dark** — `core_pack_test` asserts it. `ballPosition` reverted to the interoperable 0 %-lead-heel scale on Mark's call. Analyzer suite 74/74. Next: stage 5. |
 | 2026-07-25 | 5 | **Stage 5 complete — the measures view ships.** `NormModel` (`src/Gui/characteristics/norm_model.{h,cpp}`, QML_ELEMENT), `MeasureCatalogue.qml` as the fourth `_view`, `MeasureDetail.qml`, and the grade-policy + norm-set strip. Both carried-forward debts paid: **`ragOf(Grade)`** promoted into `norm.h` and gated by a new `reference_bands_parity_test` section — 28,590 samples over all 68 shipped norms, covering BOTH precedence branches (56 monitor-dominated, 12 z-derived); **`measureForMetricAtPhase()`** built as a pack-layer free function (`characteristic_pack.h`) with the `NormModel` marshaller over it, so stage 9 reaches it without a QML façade. New `norm_model_test` (60 assertions). Also landed: `normIsWeak()`/`normWeakReason()` in `norm.h`, `INormProvider::layers()` (so the UI stops saying "merged"), `AppSettings::diagnosticsGradePolicy`, and a `duplicateMeasure` validator warning pulled forward from stage 10, which immediately found a real one (ledger `C1`). Analyzer suite **75/75**; app + `swinglab_run` build; verified headlessly with screenshots. Next: review gate, then stage 6. |
+| 2026-07-26 | 6 | **Stage 6 complete — the corridor editor ships, and the first thing it did was find bugs.** Stage 6 needed a piece the plan never scoped: `IMeasureValueSource` was implemented only by test fakes, so nothing could read a measure off a stored swing and the "not optional" histogram had nothing to draw. Built `src/Diagnostics/measure_sample.{h,cpp}` — a per-swing **phase grid** (windowed median per metric per segmented phase, using WristAngleSampler's own ±15 ms convention, plus adjacent-span extrema for the 9 `extremum` measures), cached in a `swing_phasegrid.json` sidecar guarded on swing.json size+mtime. Pack-independent by design, so minting a measure does not stale 72 sidecars. Then `NormEditorModel` (draft + background library scan + histogram + save), `CorridorEditor.qml` (three routes, two IDEAL-band handles at 44 pt, live histogram with running grade counts), the norm rows in `MeasureDetail` made tappable, and the norm-set strip turned into a real selector. **Ledger C2 and C4 both closed**; `AppSettings::diagnosticsNormSetsOff` added. New suites `measure_sample_test` (34 assertions) and `norm_editor_model_test` (56); analyzer suite **77/77**, and all seven suites green at **105/105** after fixing two PRE-EXISTING link failures (`profiler_controller_test` missing `AnalysisProfileLog.cpp`, `reanalysis_controller_test` missing `pp_os_metrics.cpp` — both "Not Run", neither related to this work). Verified in the running app against the real 72-swing library. **Four new ledger entries (C18–C21) came straight off that screen** — see below. Next: review gate, then stage 7. |
+| 2026-07-26 | 6 (follow-up) | **Reset-to-default and "edited from shipped", on Mark's ask — and it uncovered a data-loss bug.** The norm stack could not say WHICH LAYER a value came from, which both asks need, so `NormResolution` gained `overridden` and `INormProvider` gained `shippedNorm()` / `isOverridden()` (tracked at merge time, never derived by comparing numbers — a user row holding the shipped values is still a user row). The corridor editor now has **two distinct undos**: *Discard changes* (unsaved dragging, writes nothing) and *Reset to shipped* / *Remove your override* — one operation, two labels, because what you get back depends on whether core carries a row at that key. Edited-from-shipped markers land on the `MeasureDetail` norm rows (quoting the shipped band), the `MeasureCatalogue` rows, a new **Edited by me** filter chip, the census line, and the grade-policy / norm-set strip (each with its own reset). **Then the characteristic editor:** `revertToShipped()` DELETED a user-created characteristic while reporting *"Restored the shipped definition"* — the backwards `overridesCore` flag conflated "core ships this id" with "a user row exists", now split into `shippedExists` / `hasUserOverride` with the destructive case labelled and styled as destructive. **And underneath it, a silent data-loss defect:** the editor loaded its user pack keying off `PackLoadResult::loaded` where the type's own comment says a merging caller must key off `parsed` — an overlay routinely fails standalone referential validation, so the editor started with an EMPTY user pack and `save()` then wrote it back, **erasing every other override the user had ever made**. Fixed, with a regression test verified to go red against the old code. All seven suites **105/105**; verified in the running app. Next: review gate, then stage 7. |
+| 2026-07-26 | 6 (drag fix) | **Handle drag ran away to absurd values; the cause was a feedback loop, not a scale factor.** The axis is derived from `mu ± watchMaxZ·sigma`, so dragging a handle widened the corridor, which widened the axis, which made the SAME pixel map to a larger value, which widened it further — a gain of about 3 per mouse-move event at ~60 Hz. Measured: with the pointer PARKED, 20 events took the corridor from 37.4 to **10,860**. Fixed by latching the axis for the duration of a gesture (`beginHandleDrag()` / `endHandleDrag()`, rule in C++ and regression-tested — the test was verified red against the old code), and by dropping `drag.target` for an absolute plot-x mapping: `drag.target` assigns `x` imperatively, which permanently broke the `x: xOf(value)` binding, so after one drag the mark stopped tracking the model and typing in the numeric field moved the number but not the handle. Ledger C24. All seven suites **105/105**; verified in the running app (30 events at one pixel: first 124.968, final 124.968). |
 | 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
 
 ---
 
-## ▶ Resuming at stage 6 — read this first
+## ▶ Resuming at stage 7 — read this first
 
 **Prompt to start with:**
 
-> Start stage 6 of the diagnostics norms plan — read
-> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 6".
+> Start stage 7 of the diagnostics norms plan — read
+> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 7".
 
-Everything through stage 5 is complete and **pushed** (`0dea02a`). Analyzer suite **75/75**; app and
-`swinglab_run` build clean. Do not re-verify — the Progress table is authoritative.
+Everything through stage 6 is complete. Analyzer suite **77/77**; all seven CTest suites **105/105**;
+app, `swinglab_run` and `swing_window_parity_test` build clean. Do not re-verify — the Progress
+table is authoritative. **Uncommitted at time of writing.**
 
-### What stage 5 built, in one paragraph
+### The one thing to read before anything else
 
-`NormModel` (`src/Gui/characteristics/norm_model.{h,cpp}`) is the QML façade: `measures(filters)`,
-`measureDetail(id)`, `normAt(measureId, contextId)`, `measureForMetricAtPhase(metricKey, phase)`,
-plus `groups` / `statuses` / `contexts` / `normSets` / `gradePolicies` and a `gradePolicy` string
-property. `MeasureCatalogue.qml` is the fourth `_view` in `CharacteristicLibrary.qml`;
-`MeasureDetail.qml` is its detail page. All rules are in C++ — QML renders shapes.
+Stage 6 was the first time the pack met real swings, and **the corridors and the producers do not
+agree**. Four new ledger entries — `C18` to `C21` — came off that screen, and `C18` in particular
+(stance width reading ~2x its own corridor, in a unit both sides spell identically) is a defect the
+norm-pack validator cannot catch by construction. Read them before treating any shipped corridor as
+a number rather than a hypothesis. None of them blocks stage 7.
 
-### Owed from stage 5
+### What stage 6 built, in one paragraph
 
-All of it is in the **clean-up sweep** at the end of this document, which is where deferrals live
-now — read `C2` and `C4` before starting. `C2` is the norm-set selector, which is a census until a
-second set exists — **stage 6 is what creates it**; `C4` is `resetSharedNormProvider()`, which
-stage 6 must call after every write or edits stay invisible until the next launch.
+`src/Diagnostics/measure_sample.{h,cpp}` reads a MEASURE off a stored swing: a per-swing **phase
+grid** (windowed median per metric at each segmented phase + adjacent-span extrema), cached in a
+`swing_phasegrid.json` sidecar. `NormEditorModel`
+(`src/Gui/characteristics/norm_editor_model.{h,cpp}`) holds the draft, scans the athlete library on
+a worker, and computes the histogram and grade counts in C++. `CorridorEditor.qml` is the view:
+three routes, two handles on the **Ideal** band, a live histogram, provenance, and a save that says
+it is setting a population norm. `MeasureDetail`'s norm rows open it; the norm-set strip is now a
+selector.
 
-`C1` (the duplicate measure) is **closed** — it turned out to be one series needing two reductions,
-not a duplicate, and both now exist with grounded corridors. Its residue is `C1b`, a genuine ~15°
-disagreement between the wrist grid's Δ corridor and the metric's own `howToRead`, which is a corpus
-question and must NOT be fixed by editing the parity-locked table.
+### Facts the next session should not re-derive
 
----
+- **The scan is pack-independent on purpose.** The sidecar caches the phase GRID, not measure
+  values, so minting a measure costs nothing. Do not "optimise" it into a measureId->value cache —
+  that trades a one-time cost for a full re-parse of the library on every pack edit.
+- **A metric with an EMPTY curve is normal.** Every setup metric in a real swing.json (stanceWidth,
+  ballPosition, tempoRatio, foot flare, toe line) ships with no `value[]` at all and nothing but
+  `phaseSamples`. The builder falls back to those, and a first implementation that read only the
+  curve produced nothing for all of them while looking exactly like "no swing carries this measure".
+- **`extremum` with an anchor is the SIGNED deviation**, not `max |value - anchor|`.
+  `metric_reducer.h`'s comment said the latter, which cannot carry a `sense`; it was corrected.
+- **The handles bind the IDEAL band.** `norm_editor_model_test` pins the drawn Good and Watch edges
+  at exactly 2x and 3x the half-widths so "the Good band" cannot creep back in.
+- **`canRevert` means YOU have an override**, not "something resolves here". A shipped row offers no
+  revert — the core set is read-only, and offering an action that can only fail is worse than not
+  offering it.
+- **Qt's offscreen platform caps the screen at 800x800**, and there is no Xvfb on this box. Grab
+  headless screenshots with `QT_SCALE_FACTOR=0.5` to fit a full page in frame.
 
-## Stage 5 as built — what to know before extending it
+### Shipped vs yours — the seam stage 6 added late
 
-- **`ragOf(Grade)` lives in `norm.h`** next to `grade()`. Green iff `Ideal`, Red iff `Action`, Grey
-  iff `NotMeasured`, Amber otherwise. `reference_bands_parity_test` now asserts
-  `ragOf(grade(v, n)) == classifyDelta(v, bandFrom(n))` across all 68 shipped norms — 28,590
-  samples, both precedence branches (56 rows monitor-dominated, 12 z-derived). The one place the two
-  can legitimately disagree is under a `BandTuning` margin override, which `grade()` cannot see.
-- **`measureForMetricAtPhase()` is a pack-layer free function** (`characteristic_pack.h`), not a
-  method on `NormModel` — stage 9 re-points `metric_catalog.cpp` at it and must not go through a
-  QML façade to do so. `NormModel`'s method of the same name only marshals. Reducer semantics:
-  `at` → anchor phase (wins outright); `delta`/`rate` → the window's END phase; `extremum` → never
-  matches, because a peak across a window is not a reading at a phase.
-- **`normIsWeak()` / `normWeakReason()` are in `norm.h`**, so the corridor editor, the health list
-  and a finding's detail page all use one rule. Weak = Heuristic, or Seated with `n < kMinSeatedN`
-  (30), or Literature with no citation. It NEVER modifies a grade.
-- **Weak provenance renders on the `MeasureDetail` norm row only.** Every shipped norm is heuristic
-  today, so that line repeats on every row; it is merged onto one line with the citation to keep the
-  list readable. The repetition disappears as the literature review reclassifies rows.
-- **`PpDisplayText` does not render under `QT_QPA_PLATFORM=offscreen`** — it masks a gradient
-  through `ShaderEffectSource`/`MultiEffect`, which need an RHI backend. Page titles are blank in
-  every headless screenshot. This is a harness artefact and pre-dates this work; do not "fix" it.
-- **The view switcher measures its own height from its `Flow`.** With four chips it wraps at a
-  narrow panel width, and the old fixed `sp(58)` let the second row overlap the view below.
+`NormResolution::overridden`, `INormProvider::shippedNorm()` and `INormProvider::isOverridden()`
+answer "is this still what we ship, and what did we ship?" — the two questions every reset and every
+"edited" marker rests on. Three rules worth not re-deriving:
 
----
+- **Tracked, never compared.** A user row holding exactly the shipped numbers is still the user's.
+- **`isOverridden` is per KEY; `resolve().overridden` is per RESOLUTION.** They differ exactly where
+  inheritance does, and both are needed: a driver with no row of its own is still graded by the
+  user's full-swing corridor and must say so.
+- **Which reset a button may offer depends on `shippedNorm()`.** Core carries a row → "Reset to
+  shipped"; core carries none → "Remove your override". Same operation, different promise.
+
+### Owed from stage 6
+
+In the **clean-up sweep** at the end of this document, as always. `C2` and `C4` are closed, and the
+follow-up closed `C22` and `C23`. `C18`-`C21` are new and are all content/producer questions, not
+code.
 
 ## ▶ Stage 5 — read this first (superseded, kept for the record)
 
@@ -416,7 +429,16 @@ Add `QString highMeans` to `Measure` and author it for every measure that has a 
   only**.
 - The Diagnostics settings header strip (fact 1): grade policy control + norm-set selector.
 
-### 6 — `CorridorEditor.qml`
+### 6 — `CorridorEditor.qml`  ☑ built
+
+**As built it needed a piece this section did not scope.** The live histogram rests on reading a
+MEASURE off a stored swing, and `IMeasureValueSource` (`norm_measure_source.h`) was implemented only
+by test fakes — nothing in the app could produce a single number to draw. That gap is now
+`src/Diagnostics/measure_sample.{h,cpp}`: a per-swing **phase grid**, cached in a
+`swing_phasegrid.json` sidecar guarded on swing.json size+mtime, holding a windowed median per
+metric at each segmented phase (WristAngleSampler's own convention, not a second one) plus the
+extremes between adjacent phases so an `extremum` window is exact by aggregation. It caches the
+GRID, not measure values, so minting a measure does not stale every sidecar in the library.
 
 Works in the measure's own units. The words `mu`, `sigma` and `z` never appear. Segmented
 control over three routes:
@@ -634,9 +656,9 @@ misleading-red for every other.
 
 **New** — `src/Diagnostics/`: `norm.h`, `norm_pack.h/.cpp`, `norm_provider.h`,
 `resource_norm_provider.cpp`, `file_norm_provider.cpp`, `merged_norm_provider.cpp`,
-`context_tree.h/.cpp`, `tests/`.
-`src/Gui/characteristics/`: `norm_model.h/.cpp`, `dag_layout.h/.cpp`, `MeasureCatalogue.qml`,
-`MeasureDetail.qml`, `CorridorEditor.qml`, `DagView.qml`.
+`context_tree.h/.cpp`, `measure_sample.h/.cpp` (stage 6, unplanned — see that section), `tests/`.
+`src/Gui/characteristics/`: `norm_model.h/.cpp`, `norm_editor_model.h/.cpp`, `dag_layout.h/.cpp`,
+`MeasureCatalogue.qml`, `MeasureDetail.qml`, `CorridorEditor.qml`, `DagView.qml`.
 `src/Diagnostics/tests/`: `norm_model_test.cpp` (registered in `src/Analysis/tests/CMakeLists.txt`
 alongside the other `${DIAG}` suites, per repo fact 10).
 `src/Resources/diagnostics/`: `norms.json`, `contexts.json`, `core.json` (moved).
@@ -757,6 +779,66 @@ corpus-scale work and a separate exercise — a single swing never judges it.
   not appear as a norm set the user never created. Stage 6 needs the same list to decide which set a
   write lands in.
 
+- **The sample sidecar caches the PHASE GRID, not measure values.** The obvious cache is
+  `measureId -> value` per swing; it is the wrong one, because the pack is editable and minting a
+  measure would stale every sidecar and force a re-parse of a 2 GB library to look at one new
+  corridor. Phases are a property of the swing, not the pack, so caching the grid the reduction
+  reads makes new measures over already-produced metrics free — which is exactly the case the
+  corridor editor creates.
+
+- **A metric with an EMPTY curve is the normal case for a whole class of metric.** Every setup
+  metric in a real swing.json — `stanceWidth`, `ballPosition`, `tempoRatio`, the foot-flare and
+  toe-line angles — ships with no `value[]` at all and nothing but `phaseSamples`: they are read once
+  at a position, so there is no curve to sample. The first implementation read only the curve and
+  produced nothing for all of them, and the symptom was indistinguishable from "no swing carries
+  this measure". The grid falls back to `phaseSamples`, and admits a phase the ladder lacks when a
+  producer labelled one.
+
+- **The scan runs on a worker and the draft guards against its own result.** A first pass over a
+  72-swing library is tens of seconds of JSON parsing; after that the sidecars make it instant. A
+  scan that finishes after the draft closed is DISCARDED rather than applied — landing one measure's
+  swings under another measure's corridor would look perfectly plausible and be about the wrong
+  thing entirely.
+
+- **`canRevert` means "you have an override", not "something resolves here".** A shipped row is not
+  inherited, so the obvious test admits it — and then offers a Revert that can only fail, because
+  the core set is read-only by design. It checks the user pack instead.
+
+- **"Reset to default" is TWO actions, not one.** Discarding unsaved changes and dropping a saved
+  override are different in kind — one writes nothing, the other is a write — and a single button
+  doing "whichever applies" would be a button whose effect you cannot predict before pressing it.
+
+- **Which reset you are offered depends on whether CORE carries a row at that key**, and the label
+  has to say so. Dropping a user row either restores the shipped corridor or leaves the context
+  inheriting; promising the first when the second is what happens is how a destructive action
+  acquires a reassuring name. The same defect existed on the characteristic side and was worse
+  there — the button said "Restore shipped version" over a plain deletion.
+
+- **"Edited" is TRACKED, never derived by comparing values.** A user row holding exactly the
+  shipped numbers is still the user's row, and a value comparison would silently un-mark it the
+  moment someone dragged a handle back to where it started. The merged provider records the keys a
+  non-core layer supplied.
+
+- **An inherited row reads as edited too.** A context with no row of its own, inheriting the user's
+  override, is being graded by the user's corridor — `resolve().overridden` follows the resolution,
+  and saying otherwise would be false about the number displayed beside it.
+
+- **The axis must not move while a handle is dragged, and that is a CORRECTNESS rule, not styling.**
+  The axis is derived from the corridor, so a live axis puts the pixel→value map inside its own
+  output: widen the corridor, widen the axis, and the same pixel means more than it did a frame ago.
+  Gain of ~3 per event. It belongs in C++ (`beginHandleDrag`/`endHandleDrag`) precisely because it
+  is testable and the failure is not subtle.
+
+- **No `drag.target` on anything whose position is a binding.** It assigns `x` imperatively and the
+  binding never comes back, so the mark silently stops tracking the model — the numeric field moved
+  the number and not the handle. Map absolute coordinates and leave the position bound.
+
+- **Two PRE-EXISTING suites were unlinkable and are now fixed.** `profiler_controller_test` (core)
+  and `reanalysis_controller_test` (gui) had been reporting "Not Run" — each was missing one source
+  from its target (`AnalysisProfileLog.cpp`, `pp_os_metrics.cpp`). Neither is related to this work;
+  they were fixed because the plan's own gate is "all seven suites", and a gate with two suites
+  silently short is not a gate.
+
 ## The clean-up sweep — everything owed before this work is done
 
 **This is the ledger, and it is the only durable one.** The "Resuming at stage N" block at the top
@@ -774,9 +856,9 @@ question that was answered and one that was never asked.
 | C1c | The new absolute impact row has **no archetype siblings**, while its Δ sibling shifts ±10° | decide, then 6 or corpus | ☐ open |
 | C1d | The archetype shift is a **flat ±10° at every position** — migrated constant, not a fitted model | corpus / C8 | ☐ open |
 | C3b | The resolved archetype reaches the wrist grid but **not** the characteristic engine's `contextId` | with C3 | ☐ open |
-| C2 | Norm-set **selector** is a census; `makeMergedNormProvider()` cannot skip a layer | 6 | ☐ open |
+| C2 | Norm-set **selector** is a census; `makeMergedNormProvider()` cannot skip a layer | 6 | ☑ closed |
 | C3 | `AppSettings::diagnosticsGradePolicy` reaches the UI, not the engine | engine wiring | ☐ open |
-| C4 | `resetSharedNormProvider()` must be called after every user-norm write | 6 | ☐ open |
+| C4 | `resetSharedNormProvider()` must be called after every user-norm write | 6 | ☑ closed |
 | C5 | Delete `reference_bands_parity_test` + `ConfigReferenceBandProvider` + `ArchetypeBandProvider` + the compiled table, together | 9 | ☐ open |
 | C6 | Remove `ContextBinding::corridorRef` — **four sites, not one** (see below) | 7 | ☐ open |
 | C7 | Delete `MetricCatalogue::corridor()`; re-point `metric_catalog.cpp` at the norm join | 9 | ☐ open |
@@ -790,6 +872,53 @@ question that was answered and one that was never asked.
 | C15 | `pelvisSway` and `shoulderAlignment` sign conventions undocumented, so unauditable | 4 | ☑ closed |
 | C16 | `ragOf(Grade)` existed only inside the parity test | 5 | ☑ closed |
 | C17 | `measureForMetricAtPhase()` — the join stage 9 depends on | 5 | ☑ closed |
+| C18 | **`stanceWidth` reads ~2x its own corridor on real swings**, and both sides spell the unit identically | corpus / producer | ☐ open |
+| C19 | The only local swings carrying the wrist DOF series are one 2026-06-11 session, and those series are **±180 wrapped** | capture / re-analyse | ☐ open |
+| C20 | `m_tempoRatio` reads `at p4`; its producer labels the phaseSample at **P7** — same shape as C13 | when tempo is re-seated | ☐ open |
+| C21 | Half the `stanceWidth` readings in the library are **0.1** — a producer failure, not a corridor one | producer | ☐ open |
+| C22 | `CharacteristicEditorModel` keyed its user pack off `loaded`, not `parsed`, and `save()` then erased every other override — **fixed**, regression-tested | 6 follow-up | ☑ closed |
+| C23 | `revertToShipped()` DELETED a user-created characteristic while reporting a restore — **fixed** | 6 follow-up | ☑ closed |
+| C24 | Handle drag ran away (axis derived from the corridor fed back into the pixel→value map) — **fixed**, regression-tested | 6 drag fix | ☑ closed |
+
+### C18–C21 — what happened the first time the pack met real swings
+
+Stage 6's histogram is described in the brief as the safety mechanism: *"a corridor grading almost
+everything Action is visibly wrong to someone who has never heard of a standard deviation"*. The
+first measure opened in the finished editor rendered **11 Action out of 11**, and every one of the
+entries below is something that screen made obvious in a second and no test had caught.
+
+The library is 72 swings, one athlete, all Wrist sessions (`/mnt/swingdata/Mark-Liversedge`).
+
+**C18 — stance width is out by about 2x, and nothing could have caught it.** The shipped
+`full_swing` corridor is `mu 102, sigma 12` in **% shoulder width**; the eleven real readings that
+are not broken run **220.7 to 257.7** in a field the producer also labels *"% shoulder width"*
+(`foot_metrics.cpp:305`). `normUnitMismatch` compares unit STRINGS and they match exactly, so the
+referential validator is structurally incapable of seeing this. Either the producer's denominator is
+not the shoulder width it claims, or the corridor was authored against a different convention. It
+must be resolved by looking at one swing's actual pixels, not by moving either number to meet the
+other.
+
+**C19 — the wrist DOF series cannot be seated locally at all.** Only the **2026-06-11** session
+carries `leadWristFlexExt` / `leadWristRadUln` (8 swings of 72); every session since carries none.
+Those eight range **-180 to +180** and read -138 deg at the top and -160 deg at address, which is not
+anatomy — the series is wrapped. The phase-grid reduction is not at fault: it reproduces each
+file's own `phaseSamples` exactly (swing_0005 P1: computed -159.90 vs the file's -159.9). So the 30
+wrist-grid measures have **no usable local sample**, and any corpus work on them needs a capture or
+re-analyse pass first.
+
+**C20 — `m_tempoRatio` asks a phase its producer does not label.** The measure is `at p4` (Top); the
+producer emits a single `phaseSamples` entry at **P7 (Impact)**. The measure therefore resolves
+unavailable on every swing in the library, silently — exactly the C13 shape, and worth a sweep for
+others rather than a fix for this one.
+
+**C21 — half the stance-width readings are 0.1.** Six of the eleven producing swings read `0.1`
+where the other five read 220-258. That is a producer failure (a denominator or a keypoint that did
+not resolve) reported as a value rather than as absent, which is the one thing
+`IMeasureValueSource` exists to keep apart. A measure that cannot be produced must report nothing.
+
+**What is NOT wrong:** `m_ballPosition` graded **4 Ideal, 2 Good** out of 6 against its shipped
+`full_swing` corridor. The pack is not uniformly miscalibrated — which is why these four are worth
+naming individually rather than filing as "the seed norms need work".
 
 ### C1, resolved — it was one series needing two reductions
 
