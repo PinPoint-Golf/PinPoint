@@ -7,6 +7,10 @@ the *how*, sequenced, with every repo fact it depends on verified rather than as
 Work spans multiple sessions with context clears between them — the tables below are what makes
 a cold restart possible. Do not treat any stage as done until its gate has actually run green.
 
+**Anything deferred goes in [the clean-up sweep](#the-clean-up-sweep--everything-owed-before-this-work-is-done)
+at the end of this document, not in the resume block.** The resume block is rewritten every stage;
+the ledger is not. A final sweep after stage 10 must find that table with nothing left open.
+
 ---
 
 ## Progress
@@ -18,7 +22,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 | 3 | Wire into the engine — **the pack lights up** | ☑ complete — 8 live signals can fire | 2026-07-25 |
 | 4 | Direction audit (all 30 signals) + `highMeans` | ☑ complete — **30/30, nothing exempt** | 2026-07-25 |
 | — | **review gate · expect context clear here** | | |
-| 5 | `NormModel` + read-only norm UI | ☑ complete — the measures view ships | 2026-07-25 |
+| 5 | `NormModel` + read-only norm UI | ☑ complete — the measures view ships | 2026-07-25 · 0dea02a |
 | — | **review gate** | | |
 | 6 | `CorridorEditor.qml` | ☐ not started | |
 | 7 | Editable bindings + direction control | ☐ not started | |
@@ -26,6 +30,7 @@ a cold restart possible. Do not treat any stage as done until its gate has actua
 | 8 | The navigable DAG | ☐ not started | |
 | 9 | Deletions and rewiring | ☐ not started | |
 | 10 | Health checks | ☐ not started | |
+| — | **clean-up sweep — the ledger at the end of this doc, nothing left open** | ☐ not started | |
 
 State vocabulary: ☐ not started · ◐ in progress · ☑ complete (gate green) · ⚠ blocked.
 
@@ -41,7 +46,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-25 | 2 | **Stage 2 complete.** 39 cell-measures minted into core.json (28 → 67); 55 norm rows (39 full_swing + 16 archetype) in norms.json. `NormBandProvider` added; `BandContext` gained `contextId`; all 4 app call sites switched to `BandProviderKind::Norm` (now the factory default). **`reference_bands_parity_test` green: 117 cells bit-identical, 77,337 classified deltas identical.** `wrist_render_parity_test` green: 2,688 cells and 67 findings identical, and its empty-norm-set guard verified to actually fail without the content. Analyzer suite **72/72**; app, `swinglab_run` and `swing_window_parity_test` all build. Next: stage 3. |
 | 2026-07-25 | 3 | **Stage 3 mechanism complete; content OWED — the pack is still dark.** `NormMeasureSource` joins values to norms; `MeasureReading` gained `grade`, `normContextId`, `contextInferred` and a `fromCorridor()` factory. Engine now fires on a **deviation (Watch/Action)**, not on leaving Ideal — see the decision below. `norm_measure_source_test` green (26 assertions incl. unknown-context, inferred-context demotion, both tails on one norm). Analyzer suite **73/73**; app + `swinglab_run` build. **BUT: all 26 corridor-signal measures still have no norm** (norms.json holds only the 39 wrist-grid rows), so no seed characteristic can fire yet. Authoring those 26 is the remaining work and needs Mark's numbers. Next: author the seed norms, then stage 4. |
 | 2026-07-25 | 3 (closed) + 4 | **THE PACK LIGHTS UP.** Direction audit of all 30 signals (3 inversions + 2 structural defects fixed); sign conventions settled and documented; `highMeans` on every signal-bearing measure; 13 seed norms authored. **8 live corridor signals can now fire, 0 left dark** — `core_pack_test` asserts it. `ballPosition` reverted to the interoperable 0 %-lead-heel scale on Mark's call. Analyzer suite 74/74. Next: stage 5. |
-| 2026-07-25 | 5 | **Stage 5 complete — the measures view ships.** `NormModel` (`src/Gui/characteristics/norm_model.{h,cpp}`, QML_ELEMENT), `MeasureCatalogue.qml` as the fourth `_view`, `MeasureDetail.qml`, and the grade-policy + norm-set strip. Both carried-forward debts paid: **`ragOf(Grade)`** promoted into `norm.h` and gated by a new `reference_bands_parity_test` section — 28,590 samples over all 68 shipped norms, covering BOTH precedence branches (56 monitor-dominated, 12 z-derived); **`measureForMetricAtPhase()`** built as a pack-layer free function (`characteristic_pack.h`) with the `NormModel` marshaller over it, so stage 9 reaches it without a QML façade. New `norm_model_test` (60 assertions). Also landed: `normIsWeak()`/`normWeakReason()` in `norm.h`, `INormProvider::layers()` (so the UI stops saying "merged"), `AppSettings::diagnosticsGradePolicy`, and a `duplicateMeasure` validator warning pulled forward from stage 10 — see the finding below. Analyzer suite **75/75**; app + `swinglab_run` build; verified headlessly with screenshots. Next: review gate, then stage 6. |
+| 2026-07-25 | 5 | **Stage 5 complete — the measures view ships.** `NormModel` (`src/Gui/characteristics/norm_model.{h,cpp}`, QML_ELEMENT), `MeasureCatalogue.qml` as the fourth `_view`, `MeasureDetail.qml`, and the grade-policy + norm-set strip. Both carried-forward debts paid: **`ragOf(Grade)`** promoted into `norm.h` and gated by a new `reference_bands_parity_test` section — 28,590 samples over all 68 shipped norms, covering BOTH precedence branches (56 monitor-dominated, 12 z-derived); **`measureForMetricAtPhase()`** built as a pack-layer free function (`characteristic_pack.h`) with the `NormModel` marshaller over it, so stage 9 reaches it without a QML façade. New `norm_model_test` (60 assertions). Also landed: `normIsWeak()`/`normWeakReason()` in `norm.h`, `INormProvider::layers()` (so the UI stops saying "merged"), `AppSettings::diagnosticsGradePolicy`, and a `duplicateMeasure` validator warning pulled forward from stage 10, which immediately found a real one (ledger `C1`). Analyzer suite **75/75**; app + `swinglab_run` build; verified headlessly with screenshots. Next: review gate, then stage 6. |
 | 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
 
 ---
@@ -53,8 +58,8 @@ picks up. Keep it factual — this is the handoff, not a summary.
 > Start stage 6 of the diagnostics norms plan — read
 > `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 6".
 
-Everything through stage 5 is complete and **UNCOMMITTED** (working tree). Analyzer suite **75/75**;
-app and `swinglab_run` build clean. Do not re-verify — the Progress table is authoritative.
+Everything through stage 5 is complete and **pushed** (`0dea02a`). Analyzer suite **75/75**; app and
+`swinglab_run` build clean. Do not re-verify — the Progress table is authoritative.
 
 ### What stage 5 built, in one paragraph
 
@@ -64,31 +69,14 @@ plus `groups` / `statuses` / `contexts` / `normSets` / `gradePolicies` and a `gr
 property. `MeasureCatalogue.qml` is the fourth `_view` in `CharacteristicLibrary.qml`;
 `MeasureDetail.qml` is its detail page. All rules are in C++ — QML renders shapes.
 
-### Owed from stage 5, to pick up
+### Owed from stage 5
 
-- **The norm-set selector is a CENSUS, not a selector.** `NormModel::normSets()` lists the real
-  layers via the new `INormProvider::layers()`, but nothing can switch which set resolves, because
-  `makeMergedNormProvider()` has no way to skip a layer. Stage 6 creates the second set (the user's
-  own), so that is when the switch becomes meaningful and when the merged provider needs the filter.
-- **`AppSettings::diagnosticsGradePolicy` is read by the UI, not yet by the engine.** `NormModel`
-  applies it to every band edge it renders, and `NormMeasureSource` already takes a `GradePolicy`
-  constructor argument — but nothing in the app constructs a `NormMeasureSource` yet, so nothing
-  plumbs the setting into grading. Wire it at the same time the engine is wired into the pipeline.
-- **A structural duplicate is now surfaced, not fixed** — see the finding below. Deciding which of
-  the two measures survives is content work, not code.
-
-### The finding stage 5 turned up — needs a decision
-
-`m_leadWristAtImpact` and `m_leadWristFlexExt_p7` are **the same measure twice**: both read
-`leadWristFlexExt` as Δ-from-address at P7. They carry **different `full_swing` corridors** —
-`mu 22.5 ±7.5` (authored for `sig_scooping`) versus `mu 8.0 ±7, monitor −4..20` (migrated from the
-wrist grid) — so the same swing grades two different ways depending on which one a lookup returns.
-Nothing downstream could have caught this: both answers look correct.
-
-The validator now warns (`duplicateMeasure`, in the health view) and the join is documented as
-`at` > `delta` then pack order. **Which corridor is right is a content decision** — the wrist-grid
-number is migrated and parity-locked; the scooping number is an authored reading of the metric's own
-`howToRead`. They cannot both be the full-swing norm for one quantity.
+All three are in the **clean-up sweep** at the end of this document, which is where deferrals live
+now — read `C1`, `C2` and `C4` before starting. In short: `C1` is a real content defect stage 5
+surfaced but did not fix (two structurally identical measures carrying different corridors, so the
+same swing grades two ways); `C2` is the norm-set selector, which is a census until a second set
+exists — **stage 6 is what creates it**; `C4` is `resetSharedNormProvider()`, which stage 6 must
+call after every write or edits stay invisible until the next launch.
 
 ---
 
@@ -761,7 +749,87 @@ corpus-scale work and a separate exercise — a single swing never judges it.
   not appear as a norm set the user never created. Stage 6 needs the same list to decide which set a
   write lands in.
 
-## Open, to raise when reached
+## The clean-up sweep — everything owed before this work is done
+
+**This is the ledger, and it is the only durable one.** The "Resuming at stage N" block at the top
+is rewritten every stage, so anything recorded only there is lost at the next handover. Every
+deferral, known defect and "revisit later" belongs here, with the stage that closes it. Nothing is
+deleted when it closes — it is marked closed, so a reader can tell the difference between a
+question that was answered and one that was never asked.
+
+**A final sweep runs after stage 10** and must find this table with nothing left open.
+
+| # | Owed | Closes at | State |
+|---|---|---|---|
+| C1 | **Two structurally identical measures with different corridors** — see below | content decision | ☐ open |
+| C2 | Norm-set **selector** is a census; `makeMergedNormProvider()` cannot skip a layer | 6 | ☐ open |
+| C3 | `AppSettings::diagnosticsGradePolicy` reaches the UI, not the engine | engine wiring | ☐ open |
+| C4 | `resetSharedNormProvider()` must be called after every user-norm write | 6 | ☐ open |
+| C5 | Delete `reference_bands_parity_test` + `ConfigReferenceBandProvider` + `ArchetypeBandProvider` + the compiled table, together | 9 | ☐ open |
+| C6 | Remove `ContextBinding::corridorRef` — **four sites, not one** (see below) | 7 | ☐ open |
+| C7 | Delete `MetricCatalogue::corridor()`; re-point `metric_catalog.cpp` at the norm join | 9 | ☐ open |
+| C8 | **Literature review of every normative corridor**; `m_lagAngleDown` is the weakest | before the numbers are trusted | ☐ open |
+| C9 | Tempo band re-cut (its low-side Watch band is empty — Good → Action at 1.8) | with C8 | ☐ open |
+| C10 | 20 norms for producer-less measures — author each **with its producer**, never in a batch | per producer | ☐ open |
+| C11 | `trailWristFlexExt` is a `planned` descriptor with **no** `imuRoles`; its 7 cells mint `NoProducer` | when the trail side is instrumented | ☐ open |
+| C12 | P1 cell-measures use an `at` reducer; revisit if the reducer model gains a zero-width delta | if ever | ☐ open |
+| C13 | `m_axisTiltAtTop` reads `secondaryAxisTilt` at P4; the metric's `howToRead` says Impact. `status: planned`, so nothing grades it yet | when its producer lands | ☐ open |
+| C14 | Two direction/measure errors on single-tail signals (`sig_scooping`, `sig_insufficientSet`) | 4 | ☑ closed |
+| C15 | `pelvisSway` and `shoulderAlignment` sign conventions undocumented, so unauditable | 4 | ☑ closed |
+| C16 | `ragOf(Grade)` existed only inside the parity test | 5 | ☑ closed |
+| C17 | `measureForMetricAtPhase()` — the join stage 9 depends on | 5 | ☑ closed |
+
+### C1, in full — the one that needs a decision rather than code
+
+`m_leadWristAtImpact` and `m_leadWristFlexExt_p7` are **the same measure twice**: both read
+`leadWristFlexExt` as Δ-from-address at P7, with identical reducers. They carry **different
+`full_swing` corridors**:
+
+| measure | corridor | where it came from | used by |
+|---|---|---|---|
+| `m_leadWristAtImpact` | `mu 22.5, sigma 7.5` (15–30°) | authored at stage 3 from the metric's own `howToRead` | `sig_scooping` |
+| `m_leadWristFlexExt_p7` | `mu 8.0, sigma 7.0`, monitor `−4..20` | migrated from the wrist grid at stage 2, parity-locked | nothing (wrist view) |
+
+The same swing therefore grades two different ways depending on which one a lookup returns, and
+**nothing downstream could have caught it** — both answers look correct. The `duplicateMeasure`
+validator warning added at stage 5 surfaces it in the health view; the (metricKey, phase) join is
+documented as `at` > `delta` then pack order, which is deterministic but arbitrary here.
+
+They cannot both be the full-swing norm for one quantity. Resolving it means deciding which number
+is right and deleting the other measure, which is content work — and note the parity test (C5) pins
+the wrist-grid figure until it is deleted, so the two clean-ups interact.
+
+### C6, verified — it is not the one-line deletion the stage-7 text implies
+
+`corridorRef` is described in stage 7 as "currently unused". It is unused as a *rule*, but it is
+wired in four places and one of them reaches QML, so deleting it is a small migration rather than a
+field removal:
+
+- `src/Diagnostics/characteristic.h:168` — the field itself
+- `src/Diagnostics/characteristic_pack.cpp:751` — read from JSON on load
+- `src/Diagnostics/characteristic_pack.cpp:860` — written back on save
+- `src/Gui/characteristics/characteristic_library_model.cpp:263` — marshalled into the binding map
+  the detail page renders
+
+Removing the field without the load path leaves any pack that carries the key failing to round-trip.
+
+### C2 and C3, in full — stage 5 shipped these knowingly incomplete
+
+**C2.** `NormModel::normSets()` lists the real layers through the new `INormProvider::layers()`, and
+the strip renders them — but nothing can switch which set *resolves*, because
+`makeMergedNormProvider()` has no way to skip a layer. There is exactly one set today, so a selector
+would have been a dropdown with one entry and no effect. Stage 6 creates the second set (the user's
+own), which is when the switch becomes meaningful and when the merged provider needs the filter.
+
+**C3.** `NormModel` applies the grade policy to every band edge it renders, so the setting is real
+where it is shown. `NormMeasureSource` already takes a `GradePolicy` constructor argument — but
+**nothing in the app constructs a `NormMeasureSource` yet**, so the setting does not reach grading.
+Wire it at the same time the engine is wired into the pipeline, or the control will silently mean
+less than it says.
+
+---
+
+## Open questions, resolved (kept for the record)
 
 - **Two more direction/measure errors found while preparing the seed norms**, both on
   SINGLE-tail signals, which the planned "audit the two-tailed axes" pass would not have reached:
@@ -769,15 +837,10 @@ corpus-scale work and a separate exercise — a single swing never judges it.
   impact"* — cupping, which is negative on `leadWristFlexExt`; and `sig_insufficientSet` reads
   `leadWristFlexExt` (bow/cup) when *"too little wrist angle by the top… less stored angle to
   release"* is the **hinge** (`leadWristRadUln`). Stage 4 must therefore audit **all 26** corridor
-  signals, not the four two-tailed ones.
+  signals, not the four two-tailed ones. — **CLOSED at stage 4**, which audited all 30.
 
 - **Two sign conventions are undocumented, so their signals cannot be audited at all:**
   `pelvisSway` (is positive toward the target? decides whether `sig_hangingBack: high` is right)
   and `shoulderAlignment`. This is the argument for `highMeans` being authored WITH each producer.
-
-- **A literature review of every normative corridor** is planned before the numbers are treated as
-  anything but starting heuristics. The tempo band re-cut waits for it: migrating its explicit
-  1.8–3.6 monitor leaves the low-side Watch band empty (the lower amber edge sits at exactly −2σ),
-  so a rushed transition jumps Good → Action at 1.8. Deliberate, and revisited with the review.
-- `shoulderAlignment`'s sign convention (fact 7) — needs deciding at stage 4, alongside
-  whoever writes its producer.
+  — **CLOSED at stage 4**: both stated, `docs/design/pinpoint_sign_conventions.md` written, and
+  `axis_direction_test` now asserts the no-stated-convention count is **zero**.
