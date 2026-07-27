@@ -142,6 +142,11 @@ QVariantList CharacteristicLibraryModel::query(const QVariantMap &filters) const
     const bool    hideProposed   = filters.value(QStringLiteral("hideProposed")).toBool();
     const bool    observableOnly = filters.value(QStringLiteral("observableOnly")).toBool();
 
+    // Free-text search over what the directory row SHOWS, plus the ids underneath it — a hit
+    // the reader cannot see in the result is a hit they cannot trust. Same shape and same
+    // reasoning as NormModel::measures().
+    const QString search = filters.value(QStringLiteral("search")).toString().trimmed();
+
     QVariantList out;
     for (const Condition &c : p.conditions) {
         if (!group.isEmpty() && conditionGroupName(c.group) != group) continue;
@@ -149,6 +154,14 @@ QVariantList CharacteristicLibraryModel::query(const QVariantMap &filters) const
         if (!reach.isEmpty() && confirmedByName(c.confirmedBy) != reach) continue;
         if (hideProposed && c.provenance.tier == ProvenanceTier::Proposed) continue;
         if (observableOnly && c.observability == Observability::Latent) continue;
+
+        if (!search.isEmpty()) {
+            const bool hit = c.label.contains(search, Qt::CaseInsensitive)
+                             || c.id.contains(search, Qt::CaseInsensitive)
+                             || c.axis.contains(search, Qt::CaseInsensitive)
+                             || conditionGroupLabel(c.group).contains(search, Qt::CaseInsensitive);
+            if (!hit) continue;
+        }
 
         // Roll the condition's measures up into one resolvability.
         MeasureStatus status       = MeasureStatus::Live;

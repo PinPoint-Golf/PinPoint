@@ -40,6 +40,40 @@ Item {
 
     readonly property var _coverage: root.library.causeCoverage()
 
+    // ── Search ────────────────────────────────────────────────────────────────
+    // One box over all three lists on this page, because they are read as one page: a
+    // measure id you are chasing appears in the health list AND the corridor scan, and two
+    // boxes would mean finding it twice.
+    //
+    // Filtered HERE rather than in the model: these lists are computed products — a coverage
+    // ranking, the validator's own findings, a corpus scan — not queries that take filters,
+    // and none is long enough for a JS pass to matter.
+    property string _search: ""
+
+    function _hitText(s) {
+        if (root._search.length === 0) return true
+        return s !== undefined && s !== null
+               && String(s).toLowerCase().indexOf(root._search.toLowerCase()) !== -1
+    }
+
+    function _searchCoverage(list) {
+        if (root._search.length === 0) return list
+        return list.filter(function(r) {
+            return root._hitText(r.label) || root._hitText(r.id) || root._hitText(r.reachLabel)
+        })
+    }
+
+    // The code LABEL is matched as well as the code: the heading is what the reader sees, so
+    // searching the words in front of them has to work.
+    function _searchFindings(list) {
+        if (root._search.length === 0) return list
+        return list.filter(function(r) {
+            return root._hitText(r.message) || root._hitText(r.subject)
+                   || root._hitText(r.measureId) || root._hitText(r.code)
+                   || root._hitText(root._codeLabel(r.code))
+        })
+    }
+
     // Re-read when the library says so — the health list spans the norm set now, so a corridor edit
     // can add or clear a row while this view is open.
     property int _revision: 0
@@ -105,8 +139,13 @@ Item {
         return out
     }
 
-    function _healthCodes() { return root._codesOf(root._health) }
-    function _healthFor(code) { return root._rowsOf(root._health, code) }
+    // What the page actually renders, once the search has had its say.
+    function _shownHealth()   { return root._searchFindings(root._health) }
+    function _shownCorpus()   { return root._searchFindings(root._corpus) }
+    function _shownCoverage() { return root._searchCoverage(root._coverage) }
+
+    function _healthCodes() { return root._codesOf(root._shownHealth()) }
+    function _healthFor(code) { return root._rowsOf(root._shownHealth(), code) }
 
     // Following a row: a norm key opens the measure, anything else opens the characteristic.
     function _followRow(row) {
@@ -135,6 +174,15 @@ Item {
 
             PpDisplayText { text: qsTr("Causes and health") }
 
+            // Sits under the title, above the first list, because it governs all three.
+            PpTextField {
+                Layout.fillWidth: true
+                Layout.maximumWidth: Theme.sp(380)
+                placeholderText: qsTr("Search causes and findings")
+                text: root._search
+                onTextChanged: root._search = text
+            }
+
             // ══ Cause coverage ════════════════════════════════════════════════
             Text {
                 Layout.fillWidth: true
@@ -148,8 +196,17 @@ Item {
                 wrapMode:       Text.WordWrap
             }
 
+            Text {
+                Layout.fillWidth: true
+                visible:        root._search.length > 0 && root._shownCoverage().length === 0
+                text:           qsTr("No cause matches “%1”.").arg(root._search)
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzBody2
+                color:          Theme.colorText3
+            }
+
             Repeater {
-                model: root._coverage
+                model: root._shownCoverage()
                 delegate: Rectangle {
                     required property var modelData
                     Layout.fillWidth: true
@@ -248,13 +305,19 @@ Item {
                 color:               Theme.colorText3
             }
 
+            // Counts what is SHOWN. Under a search, "nothing outstanding" would be a lie about
+            // the library rather than a statement about the filter, so the two are worded apart.
             Text {
                 Layout.fillWidth: true
-                text: root._health.length === 0
-                      ? qsTr("Nothing outstanding.")
-                      : qsTr("%n thing(s) worth a look. None of these stop the library working — "
-                             + "they are gaps and unfinished edges, not errors.", "",
-                             root._health.length)
+                text: {
+                    var n = root._shownHealth().length
+                    if (n > 0)
+                        return qsTr("%n thing(s) worth a look. None of these stop the library "
+                                    + "working — they are gaps and unfinished edges, not errors.",
+                                    "", n)
+                    return root._search.length > 0 ? qsTr("No finding matches “%1”.").arg(root._search)
+                                                   : qsTr("Nothing outstanding.")
+                }
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzBody2
                 color:          Theme.colorText2
@@ -435,7 +498,7 @@ Item {
             }
 
             Repeater {
-                model: root._corpus
+                model: root._shownCorpus()
                 delegate: Rectangle {
                     id: corpusRow
                     required property var modelData

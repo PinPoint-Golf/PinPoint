@@ -166,11 +166,25 @@ QVariantList MetricCatalog::query(const QVariantMap &filters, const QVariantMap 
         q.sessionType = filters.value(QStringLiteral("sessionType")).toInt();
     q.availableOnly = filters.value(QStringLiteral("availableOnly")).toBool();
 
+    // Free-text search. Applied HERE rather than in MetricQuery: the catalogue's query is a
+    // structural selection over the manifest, and a substring match on display strings is a
+    // directory affordance, not part of what the catalogue means. Matched over the fields a
+    // row actually SHOWS — a hit the reader cannot see in the result is a hit they cannot
+    // trust. Same rule as NormModel::measures().
+    const QString search = filters.value(QStringLiteral("search")).toString().trimmed();
+
     const ShotContext ctx = contextFromMap(shotCtx);
     const bool haveCtx = !shotCtx.isEmpty();
 
     QVariantList out;
     for (const MetricDescriptor *d : m_catalogue.query(q, haveCtx ? &ctx : nullptr)) {
+        if (!search.isEmpty()) {
+            const bool hit = d->label.contains(search, Qt::CaseInsensitive)
+                             || d->shortLabel.contains(search, Qt::CaseInsensitive)
+                             || d->key.contains(search, Qt::CaseInsensitive)
+                             || d->group.contains(search, Qt::CaseInsensitive);
+            if (!hit) continue;
+        }
         const MetricAvailability a =
             haveCtx ? m_catalogue.resolve(d->key, ctx) : MetricAvailability{};
         out.append(rowMap(*d, a));

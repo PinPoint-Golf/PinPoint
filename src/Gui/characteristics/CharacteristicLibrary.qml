@@ -100,6 +100,7 @@ Item {
     // ── view state ────────────────────────────────────────────────────────────
     property string _groupFilter: ""    // "" = all groups
     property string _reachFilter: ""    // "" = all reaches
+    property string _search:      ""    // free text over the directory
     property string _selectedId:  ""    // "" = directory (master)
     property string _selectedMeasureId: ""  // "" = measure catalogue (master)
     property bool   _editing:     false // the authoring sheet is open
@@ -140,8 +141,9 @@ Item {
     function _filters() {
         var _ = root._revision            // re-query after a save
         var f = { observableOnly: true }
-        if (root._groupFilter.length > 0) f.group = root._groupFilter
-        if (root._reachFilter.length > 0) f.reach = root._reachFilter
+        if (root._groupFilter.length > 0) f.group  = root._groupFilter
+        if (root._reachFilter.length > 0) f.reach  = root._reachFilter
+        if (root._search.length      > 0) f.search = root._search
         return f
     }
 
@@ -294,6 +296,17 @@ Item {
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3
+            }
+
+            // ── Search ─────────────────────────────────────────────────────────
+            // Above the chips and the same width as the catalogue's, so the two directories
+            // filter the same way in the same place.
+            PpTextField {
+                Layout.fillWidth: true
+                Layout.maximumWidth: Theme.sp(380)
+                placeholderText: qsTr("Search characteristics")
+                text: root._search
+                onTextChanged: root._search = text
             }
 
             // ── Group filter chips ─────────────────────────────────────────────

@@ -315,6 +315,50 @@ int main()
               "the export carries the screen list alongside");
     }
 
+    // ── The directory's free-text search ───────────────────────────────────────
+    // The library directory filters through query()'s `search` key, so the box in the UI is
+    // only as good as this. Checked against a label taken from the pack itself rather than a
+    // hard-coded word, so the case survives content edits.
+    {
+        CharacteristicLibraryModel model;
+
+        const QVariantList all = model.query(QVariantMap{});
+        check(!all.isEmpty(), "the directory has rows to search");
+
+        // A word from the middle of some row's label — a substring match, not a prefix one.
+        const QVariantMap first = all.isEmpty() ? QVariantMap{} : all.first().toMap();
+        const QString     label = first.value(QStringLiteral("label")).toString();
+        const QString     id    = first.value(QStringLiteral("id")).toString();
+
+        QVariantMap f;
+        f.insert(QStringLiteral("search"), label);
+        const QVariantList byLabel = model.query(f);
+        bool foundByLabel = false;
+        for (const QVariant &v : byLabel)
+            if (v.toMap().value(QStringLiteral("id")).toString() == id) foundByLabel = true;
+        check(foundByLabel, "searching a row's label finds that row");
+        check(byLabel.size() <= all.size(), "search never adds rows");
+
+        // Case-insensitive: a coach types lower case, the pack is written in sentence case.
+        f.insert(QStringLiteral("search"), label.toUpper());
+        check(model.query(f).size() == byLabel.size(), "search ignores case");
+
+        // The id is searchable too — it is what a deep link, a swing.json and this test all
+        // name a characteristic by, and it is invisible in the row.
+        f.insert(QStringLiteral("search"), id);
+        bool foundById = false;
+        for (const QVariant &v : model.query(f))
+            if (v.toMap().value(QStringLiteral("id")).toString() == id) foundById = true;
+        check(foundById, "searching a row's id finds that row");
+
+        f.insert(QStringLiteral("search"), QStringLiteral("zzzznothingmatchesthis"));
+        check(model.query(f).isEmpty(), "a search that matches nothing returns nothing");
+
+        // An empty search is not a filter — it must not quietly drop rows.
+        f.insert(QStringLiteral("search"), QStringLiteral("   "));
+        check(model.query(f).size() == all.size(), "a blank search filters nothing");
+    }
+
     // ── Census ─────────────────────────────────────────────────────────────────
     {
         int live = 0, planned = 0, gap = 0;

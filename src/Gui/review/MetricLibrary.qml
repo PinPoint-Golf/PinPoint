@@ -51,6 +51,7 @@ Item {
     // its NOTIFY keeps this in sync if the value changes elsewhere.
     property bool   _hidePlanned: appSettings.metricsHidePlanned
     property string _selectedKey: ""    // "" = directory (master)
+    property string _search:      ""    // free text over the directory
 
     // Settings-search hook (see ScreenSettings.navigateToResult): return to the
     // directory and report success so the retry loop stops.
@@ -79,9 +80,12 @@ Item {
         return t || ""
     }
 
-    // Base filter (type only) — reads _typeFilter so bindings re-run on change.
+    // Base filter (type + search) — reads both so bindings re-run on either change.
     function _baseFilters() {
-        return root._typeFilter.length > 0 ? { type: root._typeFilter } : ({})
+        var f = {}
+        if (root._typeFilter.length > 0) f.type   = root._typeFilter
+        if (root._search.length     > 0) f.search = root._search
+        return f
     }
     // Post-filter: drop planned (roadmap-placeholder) rows when the toggle is on.
     // Reads _hidePlanned so callers' bindings re-run when the toggle flips.
@@ -132,6 +136,17 @@ Item {
                 font.weight:    Theme.fontBodyWeight
                 color:          Theme.colorText3
                 wrapMode:       Text.WordWrap
+            }
+
+            // ── Search ─────────────────────────────────────────────────────────
+            // Above the chips, same width as the diagnostics directories': the three
+            // reference catalogues are read the same way, so they filter the same way.
+            PpTextField {
+                Layout.fillWidth: true
+                Layout.maximumWidth: Theme.sp(380)
+                placeholderText: qsTr("Search metrics")
+                text: root._search
+                onTextChanged: root._search = text
             }
 
             // ── Filter row: type chips (left) + Hide-planned toggle (right) ─────
@@ -277,12 +292,17 @@ Item {
             }
 
             // ── Empty state (a type with no metrics yet, or all filtered out) ──
+            // Names the filter that actually emptied the list: a search that matches nothing
+            // and a type nothing is authored for are different situations, and "no metrics of
+            // this type" sent the reader looking for a manifest gap that was not there.
             Text {
                 Layout.fillWidth: true
                 Layout.topMargin: Theme.sp(8)
                 visible: root._totalCount === 0
-                text: root._hidePlanned ? qsTr("No live metrics of this type — all are planned.")
-                                        : qsTr("No metrics of this type yet.")
+                text: root._search.length > 0
+                      ? qsTr("Nothing matches “%1”.").arg(root._search)
+                      : (root._hidePlanned ? qsTr("No live metrics of this type — all are planned.")
+                                           : qsTr("No metrics of this type yet."))
                 font.family:    Theme.fontData
                 font.pixelSize: Theme.fontSzMicro
                 color: Theme.colorText3
