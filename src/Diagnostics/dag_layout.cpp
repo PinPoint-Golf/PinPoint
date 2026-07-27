@@ -129,6 +129,7 @@ QString dagNodeKindName(DagNodeKind k)
     case DagNodeKind::Focus:   return QStringLiteral("focus");
     case DagNodeKind::Cause:   return QStringLiteral("cause");
     case DagNodeKind::Effect:  return QStringLiteral("effect");
+    case DagNodeKind::Related: return QStringLiteral("related");
     case DagNodeKind::Measure: return QStringLiteral("measure");
     }
     return QString();
@@ -386,8 +387,13 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             n.id    = s.id;
             n.label = c->label;
             n.rank  = r;
-            n.kind  = r == 0 ? DagNodeKind::Focus
-                             : (r < 0 ? DagNodeKind::Cause : DagNodeKind::Effect);
+            // Rank 0 is no longer the focus ALONE — the focus's symmetric partners share it, and
+            // typing them as the focus gave them its frame and made the long-press menu skip every
+            // item, so pressing one did nothing at all.
+            n.kind  = (s.id == focusId) ? DagNodeKind::Focus
+                    : r == 0            ? DagNodeKind::Related
+                    : r < 0             ? DagNodeKind::Cause
+                                        : DagNodeKind::Effect;
             n.x = s.x; n.y = s.y; n.w = s.w; n.h = s.h;
 
             n.latent      = c->observability == Observability::Latent;

@@ -218,8 +218,11 @@ Item {
                                  label: rel === "corroborates"
                                         ? qsTr("They cannot both be true, in fact")
                                         : qsTr("They are the same thing seen twice, in fact") })
+                    // Imperative, unlike the causal rows above it. "X no longer causes Y" carries
+                    // its own signal of change in the "no longer"; "X and Y are not linked" has
+                    // none, so it reads as a statement of fact rather than something to press.
                     items.push({ action: "unlinkRelation", destructive: true,
-                                 label: qsTr("%1 and %2 are not linked").arg(n.label).arg(root._focusLabel) })
+                                 label: qsTr("Unlink %1 and %2").arg(n.label).arg(root._focusLabel) })
                 } else if (linked === "cause") {
                     items.push({ action: "unlinkCause", destructive: true,
                                  label: qsTr("%1 no longer causes %2").arg(n.label).arg(root._focusLabel) })

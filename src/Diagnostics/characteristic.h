@@ -257,6 +257,18 @@ struct CharacteristicPack {
     QString                 sourceLabel;    // where it was loaded from, for the UI
     bool                    readOnly = false;   // the shipped core pack is not editable in place
 
+    // Edges this pack RETIRES from the layers beneath it. Only `from`, `to` and `type` are read.
+    //
+    // A causal edge needs no such thing: a LocalUser pack replaces the whole incoming causal set of
+    // any condition it names, so "absent from my list" already means "removed". A SYMMETRIC edge
+    // belongs to neither end and is written individually, so there is no list for it to be absent
+    // from — without a tombstone, a shipped corroboration could be re-typed but never dropped, and
+    // the honest answer to "delete this" would have been "you cannot", in the user's own library.
+    //
+    // Additive and ignorable: a build that does not know the key simply sees the edge again, which
+    // is the safe direction to fail in.
+    std::vector<Edge>       retiredEdges;
+
     std::vector<Measure>    measures;
     // Not `signals`: Qt's moc keyword macro expands that to an access specifier, so a member of
     // that name breaks every translation unit that includes both this header and QObject.

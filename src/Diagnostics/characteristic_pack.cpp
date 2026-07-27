@@ -846,6 +846,19 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         out.pack.edges.push_back(std::move(e));
     }
 
+    // --- retired edges -------------------------------------------------------
+    // Tombstones, not edges: they name something to REMOVE from the layers beneath, so they are not
+    // validated for referential integrity. An id that no longer exists anywhere is a tombstone for
+    // content that has already gone, which is harmless and must not fail the load.
+    for (const QJsonValue &v : root.value(QStringLiteral("retiredEdges")).toArray()) {
+        const QJsonObject o = v.toObject();
+        Edge              e;
+        e.from = o.value(QStringLiteral("from")).toString();
+        e.to   = o.value(QStringLiteral("to")).toString();
+        edgeTypeFromName(o.value(QStringLiteral("type")).toString(QStringLiteral("causes")), e.type);
+        if (!e.from.isEmpty() && !e.to.isEmpty()) out.pack.retiredEdges.push_back(std::move(e));
+    }
+
     out.parsed = true;
 
     const ValidationReport structural = validatePack(out.pack);
@@ -959,6 +972,18 @@ QJsonObject savePack(const CharacteristicPack &pack)
         edges.append(o);
     }
     root.insert(QStringLiteral("edges"), edges);
+
+    if (!pack.retiredEdges.empty()) {
+        QJsonArray retired;
+        for (const Edge &e : pack.retiredEdges) {
+            QJsonObject o;
+            o.insert(QStringLiteral("from"), e.from);
+            o.insert(QStringLiteral("to"), e.to);
+            o.insert(QStringLiteral("type"), edgeTypeName(e.type));
+            retired.append(o);
+        }
+        root.insert(QStringLiteral("retiredEdges"), retired);
+    }
 
     return root;
 }

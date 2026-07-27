@@ -138,20 +138,67 @@ private:
         // for a shipped characteristic is the main thing extra packs are for. So an endpoint is
         // qualified only when the unqualified id is not already a known condition.
         //
-        // A LocalUser pack REPLACES the edge set for any condition it names as an effect: otherwise
-        // removing a cause in the editor could never take effect, because the core edge would
-        // survive alongside the user's edited list.
+        // A LocalUser pack REPLACES the CAUSAL edge set for any condition it names as an effect:
+        // otherwise removing a cause in the editor could never take effect, because the core edge
+        // would survive alongside the user's edited list.
+        //
+        // Scoped to `Causes` on BOTH sides, and the scope is load-bearing in a way that is easy to
+        // miss. The user's editor writes its causal edges as a whole set keyed on the effect, which
+        // is what justifies the wholesale erase — but a symmetric edge is written INDIVIDUALLY, by
+        // linkRelation, and belongs to neither end. Unscoped, a user corroborates edge naming B
+        // would silently erase every SHIPPED CAUSE of B from the assembled library, because B
+        // appeared in the rewritten set. Nothing downstream could detect that: the library would
+        // simply have fewer explanations than it shipped with.
         if (isLocal) {
-            QSet<QString> rewritten;
-            for (const Edge &e : src.edges) rewritten.insert(e.to);
+            QSet<QString> rewrittenEffects;
+            for (const Edge &e : src.edges)
+                if (e.type == EdgeType::Causes) rewrittenEffects.insert(e.to);
             m_pack.edges.erase(std::remove_if(m_pack.edges.begin(), m_pack.edges.end(),
-                                              [&](const Edge &e) { return rewritten.contains(e.to); }),
+                                              [&](const Edge &e) {
+                                                  return e.type == EdgeType::Causes
+                                                         && rewrittenEffects.contains(e.to);
+                                              }),
                                m_pack.edges.end());
+
+            // A symmetric edge overrides per PAIR instead. That is what lets the user change what a
+            // shipped relation SAYS — corroborates to excludes — without ending up with both rows
+            // in the assembled library, each contradicting the other.
+            for (const Edge &u : src.edges) {
+                if (u.type == EdgeType::Causes) continue;
+                m_pack.edges.erase(
+                    std::remove_if(m_pack.edges.begin(), m_pack.edges.end(),
+                                   [&](const Edge &e) {
+                                       return e.type != EdgeType::Causes
+                                              && ((e.from == u.from && e.to == u.to)
+                                                  || (e.from == u.to && e.to == u.from));
+                                   }),
+                    m_pack.edges.end());
+            }
         }
         for (Edge e : src.edges) {
             e.from = conditionIds.contains(e.from) ? e.from : id_(e.from);
             e.to   = conditionIds.contains(e.to) ? e.to : id_(e.to);
             m_pack.edges.push_back(std::move(e));
+        }
+
+        // Tombstones, applied LAST so a pack can retire an edge and state a replacement in one
+        // file without the retirement eating its own new row. Only a LocalUser pack may retire:
+        // a community pack silently deleting a shipped relationship is the collision policy this
+        // provider exists to prevent, one step further.
+        if (isLocal) {
+            for (const Edge &t : src.retiredEdges) {
+                const bool symmetric = t.type != EdgeType::Causes;
+                m_pack.edges.erase(
+                    std::remove_if(m_pack.edges.begin(), m_pack.edges.end(),
+                                   [&](const Edge &e) {
+                                       if (e.type != t.type) return false;
+                                       // Symmetric edges match unordered: the retirement means the
+                                       // same whichever way round either row was written.
+                                       return (e.from == t.from && e.to == t.to)
+                                              || (symmetric && e.from == t.to && e.to == t.from);
+                                   }),
+                    m_pack.edges.end());
+            }
         }
     }
 

@@ -481,6 +481,15 @@ int main()
         check(nodeById(l, "rival") && nodeById(l, "rival")->rank == 0,
               "…and so does an excluded one, written from either end");
 
+        // ⚠ THE REGRESSION. Rank 0 used to MEAN "the focus", so a partner sharing that rank was
+        // typed as one. It then took the focus's frame and the long-press menu skipped every item
+        // — the node looked special and did nothing when pressed, with no error anywhere.
+        check(nodeById(l, "twin")->kind == DagNodeKind::Related,
+              "a partner on rank 0 is Related, NOT the focus");
+        check(nodeById(l, "rival")->kind == DagNodeKind::Related, "…both of them");
+        check(nodeById(l, "focus")->kind == DagNodeKind::Focus,
+              "…and the focus is still the only Focus");
+
         int corroborates = 0, excludes = 0, tipped = 0;
         for (const DagEdge &e : l.edges) {
             if (e.relation == QLatin1String("corroborates")) { ++corroborates; if (e.tip) ++tipped; }

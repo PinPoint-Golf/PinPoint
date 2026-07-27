@@ -85,6 +85,15 @@ Item {
         root._afterRelationWrite(r, false)
     }
 
+    function _flipRelation(otherId) {
+        if (!root.editor || !root.detail.id) return
+        var from = root._relationKind(otherId)
+        var to   = from === "corroborates" ? "excludes" : "corroborates"
+        var r = root.editor.editRelation(root.detail.id, otherId, from, to,
+                                         to === "corroborates" ? "moderate" : "")
+        root._afterRelationWrite(r, false)
+    }
+
     function _removeRelation(otherId) {
         if (!root.editor || !root.detail.id) return
         var r = root.editor.unlinkRelation(root.detail.id, otherId, root._relationKind(otherId))
@@ -419,11 +428,31 @@ Item {
                                 }
                             }
 
-                            // Remove. Only offered where it can succeed — a shipped relation is
-                            // readable and its type is overridable, but the editor does not delete
-                            // shipped content, and an action that can only fail is worse than none.
+                            // EDIT — change what the link says. Offered for a shipped relation too:
+                            // the user pack overrides it per PAIR, so the change takes without
+                            // leaving two contradictory rows in the assembled library.
                             Text {
-                                visible:        root.editor !== null && root._relationIsMine(relRow.modelData.id)
+                                visible:        root.editor !== null
+                                text: root._relationKind(relRow.modelData.id) === "corroborates"
+                                      ? qsTr("cannot both be")
+                                      : qsTr("same thing twice")
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzMicro
+                                color:          Theme.colorAccent
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape:  Qt.PointingHandCursor
+                                    onClicked:    root._flipRelation(relRow.modelData.id)
+                                }
+                            }
+
+                            // DELETE — including a relation the shipped pack states, which the user
+                            // pack retires with a tombstone. Editing only from the graph would have
+                            // been poor: the list is where a reader is already looking at the thing
+                            // they want gone.
+                            Text {
+                                visible:        root.editor !== null
                                 text:           qsTr("remove")
                                 font.family:    Theme.fontBody
                                 font.pixelSize: Theme.fontSzMicro

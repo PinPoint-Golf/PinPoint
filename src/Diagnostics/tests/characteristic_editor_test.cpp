@@ -856,6 +856,38 @@ int main(int argc, char **argv)
         }
 
         {
+            // ⚠ THE OTHER REGRESSION, and the worse of the two — it happened in the MERGER rather
+            // than in the editor, so no amount of care on the write side would have caught it.
+            //
+            // A LocalUser pack replaces the causal edge set of any condition it names as an effect,
+            // which is what lets the editor remove a cause. That erase was unscoped, so writing a
+            // symmetric edge naming B silently deleted every SHIPPED CAUSE of B from the assembled
+            // library. Nothing downstream could notice: the library would simply have had fewer
+            // explanations than it shipped with.
+            CharacteristicEditorModel ed;
+
+            auto shippedCauseCount = [] {
+                return int(causesOf(makeCharacteristicPackProvider()->pack(),
+                                    QStringLiteral("scooping")).size());
+            };
+            const int before = shippedCauseCount();
+            check(before > 0, "the shipped condition has causes to lose");
+
+            check(ed.linkRelation(QStringLiteral("stance_wide"), QStringLiteral("scooping"),
+                                  QStringLiteral("excludes"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "write a symmetric edge naming a condition that has shipped causes");
+
+            const int after = shippedCauseCount();
+            check(after == before,
+                  "its shipped CAUSES survive — a relation edge is not an edit to the causal set");
+
+            check(ed.unlinkRelation(QStringLiteral("stance_wide"), QStringLiteral("scooping"),
+                                    QStringLiteral("excludes"))
+                      .value(QStringLiteral("ok")).toBool(), "cleaned up");
+        }
+
+        {
             CharacteristicEditorModel ed;
 
             // A shipped relation is readable and its type is overridable, but it cannot be deleted
@@ -868,10 +900,31 @@ int main(int argc, char **argv)
             }
             check(anyShipped, "the shipped pack's own relations are listed");
             check(!anyMine, "…and none of them claims to be the user's");
-            check(!ed.unlinkRelation(QStringLiteral("insufficient_shaft_lean"),
-                                     QStringLiteral("scooping"), QStringLiteral("corroborates"))
-                       .value(QStringLiteral("ok")).toBool(),
-                  "a shipped relation is not deletable, and says so rather than no-opping");
+            // A SHIPPED relation is deletable too, via a tombstone in the user pack. Without one
+            // the user pack is purely additive for a symmetric edge — it belongs to neither end,
+            // so there is no list for it to be absent from — and "delete" would have had to mean
+            // "not the shipped ones", which is a strange thing to say about somebody's own library.
+            check(ed.unlinkRelation(QStringLiteral("insufficient_shaft_lean"),
+                                    QStringLiteral("scooping"), QStringLiteral("corroborates"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "a shipped relation is deletable, through a tombstone");
+
+            bool stillThere = false;
+            for (const QVariant &v : ed.relationsOf(QStringLiteral("scooping")))
+                if (v.toMap().value(QStringLiteral("id")).toString()
+                    == QLatin1String("insufficient_shaft_lean")) stillThere = true;
+            check(!stillThere, "…and it is gone from the assembled library, not just from the file");
+
+            // The tombstone must not outlive the deletion: putting the relation back has to bring
+            // it back, or the write would succeed and the merger would eat it again with a success
+            // message still on screen.
+            check(ed.undoUnlinkRelation().value(QStringLiteral("ok")).toBool(),
+                  "the undo restores a deleted SHIPPED relation");
+            bool restored = false;
+            for (const QVariant &v : ed.relationsOf(QStringLiteral("scooping")))
+                if (v.toMap().value(QStringLiteral("id")).toString()
+                    == QLatin1String("insufficient_shaft_lean")) restored = true;
+            check(restored, "…and the tombstone did not survive to eat it a second time");
         }
 
         {

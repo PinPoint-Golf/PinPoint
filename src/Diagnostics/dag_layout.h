@@ -67,10 +67,14 @@
 
 namespace pinpoint::analysis {
 
+// NB `Related` shares rank 0 with the focus but is NOT the focus. Typing it as one — which is what
+// "rank 0 means focus" did — gave it the focus's frame and made every menu item skip it, so a
+// press-and-hold on a corroborating partner opened nothing at all.
 enum class DagNodeKind {
     Focus,     // the condition the view is centred on
     Cause,     // rank < 0
     Effect,    // rank > 0
+    Related,   // rank 0, beside the focus: corroborates or excludes it. Not a cause, not the focus
     Measure,   // the detection lane — navigates into the measure, never re-centres the graph
 };
 

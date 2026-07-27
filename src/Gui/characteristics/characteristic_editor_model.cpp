@@ -997,11 +997,24 @@ QVariantMap CharacteristicEditorModel::linkRelation(const QString &aId, const QS
     const QString aLabel = a->label;
     const QString bLabel = b->label;
 
+    // Clear any tombstone on this pair FIRST. Re-adding a relation that was previously deleted must
+    // actually bring it back — otherwise the write succeeds, the merger applies the retirement, and
+    // the link vanishes again with a success message still on screen. That is also what makes the
+    // undo work after deleting a shipped one.
+    const auto tombsBefore = m_userPack.retiredEdges;
+    m_userPack.retiredEdges.erase(
+        std::remove_if(m_userPack.retiredEdges.begin(), m_userPack.retiredEdges.end(),
+                       [&](const Edge &t) {
+                           return t.type != EdgeType::Causes && sameUnorderedPair(t, aId, bId);
+                       }),
+        m_userPack.retiredEdges.end());
+
     m_userPack.edges.push_back(e);
 
     QString whyNot;
     if (!saveUserPack(m_userPack, &whyNot)) {
         m_userPack.edges.pop_back();
+        m_userPack.retiredEdges = tombsBefore;
         return failResult(whyNot.isEmpty() ? tr("Could not save.") : whyNot);
     }
     reload();
@@ -1040,23 +1053,24 @@ QVariantMap CharacteristicEditorModel::unlinkRelation(const QString &aId, const 
     const QString aLabel = a->label;
     const QString bLabel = b->label;
 
-    // A relation the SHIPPED pack states cannot be removed by deleting a row the user does not
-    // have. Saying so is better than a silent no-op that leaves the link on screen.
-    const bool inUser = std::any_of(m_userPack.edges.begin(), m_userPack.edges.end(),
-                                    [&](const Edge &e) {
-                                        return e.type == type && sameUnorderedPair(e, aId, bId);
-                                    });
-    if (!inUser) {
-        m_relationUndoValid = false;
-        return failResult(tr("That link is part of the shipped library. Removing shipped content "
-                             "is not something this editor does."));
-    }
-
+    // Drop the user's own row if they have one…
     m_userPack.edges.erase(std::remove_if(m_userPack.edges.begin(), m_userPack.edges.end(),
                                           [&](const Edge &e) {
                                               return e.type == type && sameUnorderedPair(e, aId, bId);
                                           }),
                            m_userPack.edges.end());
+
+    // …and TOMBSTONE it, so a relation the shipped pack states goes too. Without this the user
+    // pack is purely additive for a symmetric edge — it belongs to neither end, so there is no
+    // list for it to be absent from — and "delete" would have had to mean "not the shipped ones",
+    // which is a strange thing to tell somebody about their own library. A tombstone that names
+    // content already gone is harmless, so it is written unconditionally rather than only when
+    // core is known to state the edge.
+    Edge tomb;
+    tomb.from = aId;
+    tomb.to   = bId;
+    tomb.type = type;
+    m_userPack.retiredEdges.push_back(tomb);
 
     QString whyNot;
     if (!saveUserPack(m_userPack, &whyNot)) {
@@ -1116,6 +1130,13 @@ QVariantMap CharacteristicEditorModel::editRelation(const QString &aId, const QS
                                                      && sameUnorderedPair(e, aId, bId);
                                           }),
                            m_userPack.edges.end());
+    // Same reasoning as linkRelation: a retirement on this pair would eat the row being written.
+    m_userPack.retiredEdges.erase(
+        std::remove_if(m_userPack.retiredEdges.begin(), m_userPack.retiredEdges.end(),
+                       [&](const Edge &t) {
+                           return t.type != EdgeType::Causes && sameUnorderedPair(t, aId, bId);
+                       }),
+        m_userPack.retiredEdges.end());
     Edge e;
     e.from     = found->from;      // keep the authored orientation; it reads the same either way
     e.to       = found->to;
