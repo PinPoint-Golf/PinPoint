@@ -34,9 +34,23 @@ Item {
     required property var library     // CharacteristicLibraryModel
 
     signal openCondition(string conditionId)
+    // A row about a NORM opens the measure, not a characteristic: that page carries the corridor, the
+    // shipped-vs-yours markers and the reset. Following a name has to land somewhere you can act.
+    signal openMeasure(string measureId)
 
     readonly property var _coverage: root.library.causeCoverage()
-    readonly property var _health:   root.library.health()
+
+    // Re-read when the library says so — the health list spans the norm set now, so a corridor edit
+    // can add or clear a row while this view is open.
+    property int _revision: 0
+    readonly property var _health: (root._revision >= 0) ? root.library.health() : []
+    readonly property var _corpus: (root._revision >= 0) ? root.library.corpusHealth() : []
+
+    Connections {
+        target: root.library
+        function onHealthChanged() { root._revision++ }
+        function onCorpusChanged() { root._revision++ }
+    }
 
     // Human-readable heading per validator code. An author should never have to look up what
     // "singleTailAxis" means to act on it.
@@ -53,22 +67,51 @@ Item {
         case "inconsistentReach":  return qsTr("Reach and detection disagree")
         case "screenedHasCause":   return qsTr("A screen result something claims to cause — check edge direction")
         case "duplicateId":        return qsTr("Redefined by another pack")
+        case "bothTailsOneCondition": return qsTr("Flags both sides at once — it cannot tell too much from too little")
+
+        // The norm side. These reached this list for the first time at stage 10: the norm set's own
+        // warnings were promised to be part of it and were not, and the referential checks below had
+        // never been run by anything but their test.
+        case "zeroSigma":          return qsTr("A corridor with no tolerance — only its exact centre is Ideal")
+        case "noProvenance":       return qsTr("Claims a published source with no citation")
+        case "normUnitMismatch":   return qsTr("Corridor and measure are in different units")
+        case "unknownNormMeasure": return qsTr("Corridor on a measure the library does not have")
+        case "unknownNormContext": return qsTr("Corridor in a context the tree does not have")
+        case "normNotCapturable":  return qsTr("Corridor on something no sensor can ever produce")
+
+        // The assembled-library checks.
+        case "signalNoNorm":           return qsTr("Nothing to compare against — the signal cannot fire")
+        case "personalNormNoSample":   return qsTr("Your corridor, seated on no swings")
+        case "clubDependentNoContext": return qsTr("Club-dependent, but graded by one corridor")
+        case "emptyContext":           return qsTr("A context that changes no grade")
+        case "ungradedContext":        return qsTr("A context graded by nothing at all")
+        case "overrideCoreChanged":    return qsTr("The shipped corridor has been revised since you changed it")
+        case "oneBandCorpus":          return qsTr("Grades almost the whole library into one band")
         }
         return code
     }
 
-    function _healthCodes() {
+    // Every row's own code, in the order the codes first appear, over whichever list is being shown.
+    function _codesOf(list) {
         var seen = []
-        for (var i = 0; i < root._health.length; ++i)
-            if (seen.indexOf(root._health[i].code) === -1) seen.push(root._health[i].code)
+        for (var i = 0; i < list.length; ++i)
+            if (seen.indexOf(list[i].code) === -1) seen.push(list[i].code)
         return seen
     }
-
-    function _healthFor(code) {
+    function _rowsOf(list, code) {
         var out = []
-        for (var i = 0; i < root._health.length; ++i)
-            if (root._health[i].code === code) out.push(root._health[i])
+        for (var i = 0; i < list.length; ++i)
+            if (list[i].code === code) out.push(list[i])
         return out
+    }
+
+    function _healthCodes() { return root._codesOf(root._health) }
+    function _healthFor(code) { return root._rowsOf(root._health, code) }
+
+    // Following a row: a norm key opens the measure, anything else opens the characteristic.
+    function _followRow(row) {
+        if (row.measureId && row.measureId.length > 0) root.openMeasure(row.measureId)
+        else if (row.subject && row.subject.length > 0) root.openCondition(row.subject)
     }
 
     ScrollView {
@@ -218,6 +261,13 @@ Item {
                 wrapMode:       Text.WordWrap
             }
 
+            // One row per finding, grouped under its code.
+            //
+            // The MESSAGE is rendered, which it never used to be: the list showed a subject chip and
+            // dropped the sentence explaining it. That was survivable while every code was a
+            // one-word structural gap an author could infer, and it is not survivable now — half
+            // these rows carry the numbers, the context and the reason, and a row you cannot read is
+            // a row nobody can act on.
             Repeater {
                 model: root._healthCodes()
                 delegate: ColumnLayout {
@@ -246,37 +296,188 @@ Item {
                         Item { Layout.fillWidth: true }
                     }
 
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.sp(6)
-                        bottomPadding: Theme.sp(8)
+                    Repeater {
+                        model: codeBlock.rows
+                        delegate: Rectangle {
+                            id: rowItem
+                            required property var modelData
+                            Layout.fillWidth: true
+                            implicitHeight: rowCol.implicitHeight + Theme.sp(14)
+                            radius: Theme.radius
+                            color:  rowMa.containsMouse ? Theme.colorBg2 : "transparent"
+                            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
 
-                        Repeater {
-                            model: codeBlock.rows
-                            delegate: Rectangle {
-                                required property var modelData
-                                implicitWidth:  subjTxt.implicitWidth + Theme.sp(18)
-                                implicitHeight: Theme.sp(24)
-                                radius: height / 2
-                                color:  subjMa.containsMouse ? Theme.colorBg2 : Theme.colorBg
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin:  Theme.sp(12)
+                                anchors.rightMargin: Theme.sp(12)
+                                spacing: Theme.sp(10)
 
-                                Text {
-                                    id: subjTxt
-                                    anchors.centerIn: parent
-                                    text:           modelData.subject
-                                    font.family:    Theme.fontBody
-                                    font.pixelSize: Theme.fontSzMicro
-                                    color:          Theme.colorText3
+                                // An error among warnings has to look different. These are not pack
+                                // load errors — the library on screen IS the one they describe — so
+                                // they are shown rather than swallowed, and marked rather than
+                                // levelled with the gaps around them.
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignTop
+                                    Layout.topMargin: Theme.sp(4)
+                                    implicitWidth:  Theme.sp(6)
+                                    implicitHeight: Theme.sp(6)
+                                    radius: width / 2
+                                    color: rowItem.modelData.severity === "error"
+                                           ? Theme.colorError : Theme.colorText3
                                 }
-                                MouseArea {
-                                    id: subjMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape:  Qt.PointingHandCursor
-                                    onClicked: root.openCondition(modelData.subject)
+
+                                ColumnLayout {
+                                    id: rowCol
+                                    Layout.fillWidth: true
+                                    spacing: Theme.sp(2)
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text:           rowItem.modelData.message || ""
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzBody2
+                                        color:          Theme.colorText2
+                                        wrapMode:       Text.WordWrap
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text:           rowItem.modelData.subject || ""
+                                        font.family:    Theme.fontData
+                                        font.pixelSize: Theme.fontSzMicro
+                                        color:          Theme.colorText3
+                                        elide:          Text.ElideRight
+                                    }
                                 }
                             }
+
+                            MouseArea {
+                                id: rowMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape:  Qt.PointingHandCursor
+                                // Plain MouseArea, and the handler calls a method on `root`: inside a
+                                // Repeater delegate the only file-level id that resolves is the
+                                // component root, and a handler on a composite type cannot see even
+                                // that. It throws only when clicked.
+                                onClicked: root._followRow(rowItem.modelData)
+                            }
                         }
+                    }
+
+                    Item { Layout.fillWidth: true; implicitHeight: Theme.sp(6) }
+                }
+            }
+
+            PpDivider { Layout.fillWidth: true }
+
+            // ══ Corridors against the library ═════════════════════════════════
+            //
+            // The only check here that can catch a corridor which is merely WRONG rather than
+            // malformed — every other row is decidable from the registries alone. It needs a pass
+            // over the swing library, so it is opt-in and says what it has and has not looked at:
+            // "nothing found" and "nothing checked" must not read the same.
+            Text {
+                text:                qsTr("CORRIDORS vs THE LIBRARY")
+                font.family:         Theme.fontBody
+                font.pixelSize:      Theme.fontSzMicro
+                font.letterSpacing:  Theme.trackingMicro
+                font.capitalization: Font.AllUppercase
+                color:               Theme.colorText3
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: qsTr("Grades every stored swing against every corridor and looks for one that "
+                           + "puts almost everything in a single band. A corridor grading the whole "
+                           + "library Action is visibly wrong to someone who has never heard of a "
+                           + "standard deviation; so is one nothing can ever fall outside.")
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzBody2
+                color:          Theme.colorText2
+                wrapMode:       Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(12)
+
+                PpButton {
+                    // `label`, not `text` — PpButton is a Rectangle with its own vocabulary.
+                    label:   root.library.corpusScanning ? qsTr("Checking…") : qsTr("Check corridors")
+                    enabled: !root.library.corpusScanning
+                             && root.library.libraryRoot && root.library.libraryRoot.length > 0
+                    onClicked: root.library.startCorpusCheck()
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: {
+                        if (!root.library.libraryRoot || root.library.libraryRoot.length === 0)
+                            return qsTr("No swing library is set, so there is nothing to check against.")
+                        if (root.library.corpusScanning)
+                            return qsTr("Reading the library…")
+                        if (!root.library.corpusEverScanned)
+                            return qsTr("Not checked yet.")
+                        var n = root.library.corpusSwings
+                        var capped = root.library.corpusTruncated
+                                     ? qsTr(" The scan stopped at its cap, so this is not the whole library.")
+                                     : ""
+                        return (root._corpus.length === 0
+                                ? qsTr("%n swing(s) checked. No corridor grades the library into one band.", "", n)
+                                : qsTr("%n swing(s) checked.", "", n)) + capped
+                    }
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorText3
+                    wrapMode:       Text.WordWrap
+                }
+            }
+
+            Repeater {
+                model: root._corpus
+                delegate: Rectangle {
+                    id: corpusRow
+                    required property var modelData
+                    Layout.fillWidth: true
+                    implicitHeight: corpusCol.implicitHeight + Theme.sp(14)
+                    radius: Theme.radius
+                    color:  corpusMa.containsMouse ? Theme.colorBg2 : "transparent"
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                    ColumnLayout {
+                        id: corpusCol
+                        anchors.left:           parent.left
+                        anchors.right:          parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin:     Theme.sp(12)
+                        anchors.rightMargin:    Theme.sp(12)
+                        spacing: Theme.sp(2)
+
+                        Text {
+                            Layout.fillWidth: true
+                            text:           corpusRow.modelData.message || ""
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody2
+                            color:          Theme.colorText2
+                            wrapMode:       Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text:           corpusRow.modelData.subject || ""
+                            font.family:    Theme.fontData
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                            elide:          Text.ElideRight
+                        }
+                    }
+
+                    MouseArea {
+                        id: corpusMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked: root._followRow(corpusRow.modelData)
                     }
                 }
             }

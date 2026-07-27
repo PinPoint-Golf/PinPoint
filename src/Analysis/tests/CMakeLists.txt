@@ -523,6 +523,8 @@ pp_add_test(diagnostics_catalogue_integrity_test
     SOURCES ${DIAG}/tests/diagnostics_catalogue_integrity_test.cpp ${DIAG_PACK}
             ${SRC}/Gui/characteristics/characteristic_library_model.cpp
             ${DIAG}/dag_layout.cpp
+            # The model's health list spans the norm set now, and its corpus check reads phase grids.
+            ${DIAG}/diagnostics_health.cpp ${DIAG}/measure_sample.cpp
             ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
             ${DIAG}/merged_pack_provider.cpp
             ${SRC}/Metrics/metric_catalogue.cpp
@@ -533,11 +535,33 @@ pp_add_test(diagnostics_catalogue_integrity_test
             ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
             ${DIAG}/merged_norm_provider.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
-    LINK    Qt6::Qml
+    LINK    Qt6::Qml Qt6::Concurrent
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 # CharacteristicLibraryModel assembles the pack through the provider, which normally reads the Qt
 # resource — absent from a standalone binary. Point it at the reviewable JSON instead.
 set_tests_properties(diagnostics_catalogue_integrity_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
+# The ASSEMBLED-LIBRARY health checks: the ones no single validator can make, because they span the
+# pack, the norm set, the context tree and the metric catalogue at once. Run against the SHIPPED
+# content as well as synthetic fixtures — a check that cannot fire on real content is a check nobody
+# will notice is broken. Also gates the two rules that are easy to get backwards: the personal-layer
+# scoping (unscoped, the n=0 check opens with 39 items of noise about migrated rows) and the
+# single-tail axis, which must NOT be reported.
+pp_add_test(diagnostics_health_test
+    SOURCES ${DIAG}/tests/diagnostics_health_test.cpp ${DIAG}/diagnostics_health.cpp ${DIAG_PACK}
+            ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${ANALYSIS}/reference_bands.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+set_tests_properties(diagnostics_health_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
 # The causal DAG's layout. Everything about that view that can be wrong in a way a screenshot would

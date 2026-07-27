@@ -678,6 +678,51 @@ int main(int argc, char **argv)
             check(!hasNew, "the removed edge is gone");
             check(into == 4, "and the four shipped ones survived the round trip");
         }
+
+        // ── The undo (ledger C31) ───────────────────────────────────────────
+        //
+        // A recoverable removal offers its undo in the same breath — the binding cascade set that
+        // precedent, and "the inverse is one long-press away" is not the same promise. The
+        // load-bearing part is the STRENGTH: re-linking by hand defaults to moderate, so an undo
+        // that lost a weak edge's weakness would quietly change what the graph claims.
+        {
+            CharacteristicEditorModel ed;
+
+            check(!ed.undoUnlinkCause().value(QStringLiteral("ok")).toBool(),
+                  "with nothing removed there is nothing to put back");
+
+            const QVariantMap linked = ed.linkCause(QStringLiteral("stance_wide"),
+                                                    QStringLiteral("c_posture"),
+                                                    QStringLiteral("weak"));
+            check(linked.value(QStringLiteral("ok")).toBool(), "linked, weakly");
+
+            const QVariantMap removed = ed.unlinkCause(QStringLiteral("stance_wide"),
+                                                       QStringLiteral("c_posture"));
+            check(removed.value(QStringLiteral("ok")).toBool(), "removed again");
+            check(removed.value(QStringLiteral("canUndo")).toBool(),
+                  "…and the result SAYS it can be undone, which is what the toast keys on");
+
+            const QVariantMap undone = ed.undoUnlinkCause();
+            check(undone.value(QStringLiteral("ok")).toBool(), "the undo puts it back");
+
+            check(!ed.undoUnlinkCause().value(QStringLiteral("ok")).toBool(),
+                  "one level, consumed on use — offering it twice would imply the first did nothing");
+
+            // The strength survived. Read off the file rather than the model, because that is what
+            // the next launch will read.
+            QFile f(userPackPath());
+            check(f.open(QIODevice::ReadOnly), "the user pack is readable after the undo");
+            const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            bool foundWeak = false;
+            for (const Edge &e : res.pack.edges)
+                if (e.to == QStringLiteral("c_posture") && e.from == QStringLiteral("stance_wide"))
+                    foundWeak = (e.strength == Strength::Weak);
+            check(foundWeak, "the restored edge kept its WEAK strength, not the moderate default");
+
+            // Leave the library as this block found it.
+            check(ed.unlinkCause(QStringLiteral("stance_wide"), QStringLiteral("c_posture"))
+                      .value(QStringLiteral("ok")).toBool(), "cleaned up");
+        }
     }
 
     QFile::remove(userPackPath());

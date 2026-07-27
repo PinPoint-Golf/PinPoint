@@ -32,7 +32,14 @@ import PinPointStudio
 Item {
     id: root
 
-    CharacteristicLibraryModel { id: library }
+    CharacteristicLibraryModel {
+        id: library
+        // The health list spans the norm set, and the corpus check grades against it — so this model
+        // needs both the policy and the library path, seeded from the ONE global AppSettings exactly
+        // as its two siblings below are.
+        libraryRoot: appSettings.athleteLibraryPath
+        Component.onCompleted: gradePolicy = appSettings.diagnosticsGradePolicy
+    }
     CharacteristicEditorModel  { id: editor }
 
     NormModel {
@@ -64,6 +71,10 @@ Item {
         // binding re-reads — otherwise the edit is on disk and invisible until the next launch.
         function onNormsChanged() {
             norms.refresh()
+            // The health list reads the norm set too, so it has to re-take the same assembly — a
+            // corridor edit can create or clear a health row (a norm now exists; your override was
+            // rebased) and the list would otherwise answer from the pack it was built with.
+            library.refresh()
             root._revision++
         }
     }
@@ -73,6 +84,7 @@ Item {
         function onDiagnosticsGradePolicyChanged() {
             norms.gradePolicy = appSettings.diagnosticsGradePolicy
             normEditor.setGradePolicy(appSettings.diagnosticsGradePolicy)
+            library.gradePolicy = appSettings.diagnosticsGradePolicy
         }
     }
 
@@ -432,6 +444,11 @@ Item {
         // A health row names a subject; following it opens that characteristic, which is the only
         // useful thing to do with the name.
         onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }
+
+        // A row about a CORRIDOR opens the measure instead. That page carries the norm rows, the
+        // shipped-vs-yours markers and the reset — which is where "take theirs" actually lives, next
+        // to the numbers you would be taking, rather than as a bare button in a list.
+        onOpenMeasure: function(measureId) { root.showMeasure(measureId) }
     }
 
     // ══ Detail ════════════════════════════════════════════════════════════════

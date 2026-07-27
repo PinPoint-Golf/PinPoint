@@ -29,8 +29,8 @@ the ledger is not. A final sweep after stage 10 must find that table with nothin
 | — | **review gate** | | |
 | 8 | The navigable DAG | ☑ complete — the causes/effects lists are now one walkable graph | 2026-07-27 |
 | 9 | Deletions and rewiring | ☑ complete — a metric describes itself and no longer judges itself | 2026-07-27 |
-| 10 | Health checks | ☐ not started | |
-| — | **clean-up sweep — the ledger at the end of this doc, nothing left open** | ☐ not started | |
+| 10 | Health checks | ☑ complete — and the norm side reached the health list for the first time | 2026-07-27 |
+| — | **clean-up sweep — the ledger at the end of this doc** | ☐ not started — ⚠ and it cannot end with "nothing left open": 25 rows are open and almost none are code. See the resume block | |
 
 State vocabulary: ☐ not started · ◐ in progress · ☑ complete (gate green) · ⚠ blocked.
 
@@ -57,11 +57,83 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
 | 2026-07-27 | 8 | **Stage 8 complete — causes and effects stopped being two lists.** `src/Diagnostics/dag_layout.{h,cpp}`: rank = signed causal distance (BFS in each direction, first visit wins, so a node reachable by two paths is drawn once at the nearer one), barycentre ordering swept OUTWARD from the focus in a single deterministic pass, columns laid out at the width of their widest node and stacked at a fixed pitch — which is what makes "no overlap" a property of two lines rather than a hope. Node width is estimated from label length rather than font metrics (this module has no QtGui, and the box elides), with the caller passing the `charW` it will actually render at; the estimate and the collision test read the same number, so they cannot disagree. **The focus's measures are drawn in their own LANE beneath the band** — a measure detects a condition, it does not cause one, and putting it in the left-to-right flow would state a relationship the pack does not hold. `CharacteristicLibraryModel::dag()` marshals it; `DagView.qml` renders it, holds no layout, and REPLACED the causes/effects block in `CharacteristicDetail.qml`. Tap re-centres and pushes a breadcrumb; Expand goes to depth 2 and stops; long-press opens a menu (open its own page / add the link / remove it); a measure node leaves for `MeasureDetail`. Whatever the bound cuts off is COUNTED on the node it hangs off (`+N` beside the box), because a graph that silently omits half of what it knows is worse than one that draws nothing. **`CharacteristicEditorModel` gained `linkCause()`/`unlinkCause()`** — one edge, whole load-edit-write cycle, since the detail page has no draft to hold a pending change; every refusal (self-edge, a link that would close a loop, a duplicate, a pair that already corroborates) is made BEFORE anything is written, and an open draft blocks the path rather than racing it. Two live defects found while verifying: a **polish loop** in the menu (a `Column` sized from its children's widths, with children sized from the column — now a `ColumnLayout`, which reads implicit sizes), and a caption that still read "one step away" under a two-step graph. Also promoted `measureStatusLabel()` to sit with its enum, retiring the second copy of those four strings. New suite `dag_layout_test`; analyzer suite **78/78**, all seven suites **106/106**. **Verified by DRIVING the interactions headlessly** — synthetic press/release into the live window for tap, long-press, menu-row and Expand — because the delegate-scope trap this stage was warned about throws only on click, and no binding, test or screenshot would have shown it. Next: review gate, then stage 9. |
 | 2026-07-27 | 9 | **Stage 9 complete — the corridors left the code.** `MetricNormative` (the `dof` delegation, the one inline corridor, the hand-written `contextNote`, the `heuristic` flag), `NormativeCorridor`, `MetricCatalogue::corridor()`, `ConfigReferenceBandProvider`, `ArchetypeBandProvider` and the compiled 39-corridor table are all gone, and so are BOTH stage-2 parity gates — as one change, which was the point (`C5`): a parity test that outlives what it compares against pins norms.json to a frozen table, so the first legitimate corpus re-seat would fail a gate nobody wanted. What was permanent in them moved rather than dying: the projection rules and the grade↔RAG agreement sweep into `reference_bands_test` (now NormBandProvider's own test, asserting the archetype MECHANISM without pinning the ±10°), and the "an empty norm set greys the whole grid" guard into `wrist_norm_render_test` (`wrist_render_parity_test` renamed — with one side deleted the old name was a lie) which now also asserts the INVERSE, that a provider with no norm source greys everything, so the guard can actually fail. **The join is `corridorForMetricAtPhase()`** (`src/Diagnostics/metric_corridor.h`, header-only): (metric, phase) → measure → norm, resolved in the shot's own context. `metric_catalog.cpp` marshals it for all four live surfaces plus the Setup zone the plan did not list, and carries norm PROVENANCE with it — which context resolved, own or inherited, source, n, citation, edited-by-you — because a hand-written note saying "mid-iron · neutral archetype" is exactly what the context tree now states for real. **Three defects the work surfaced, all fixed:** (1) the tempo measure asked P4 where its producer labels P7 (`C20`), so the corridor would have vanished from MetricDetail AND the dashboard Verdict tile on the re-point; (2) the join returned ONE measure per phase, and `m_leadWristAtTop` — absolute, preferred, carrying no norm — would have blanked the Top corridor for bow/cup while the Δ cell beside it has had a band since v1, so `measuresForMetricAtPhase()` now returns the ordered candidates and the corridor takes the first one a norm answers for (`manifest_migration_test` caught this, red, before anything shipped); (3) the corridor EDITOR drew a z-derived Watch edge for all 56 migrated rows, whose monitor bounds dominate inside `grade()` — the one screen whose whole job is to show what a corridor does was showing one the app does not use. Consolidations: `bandEdgesOf()` (norm.h) is now the single Norm→band-edge projection (was three copies), `gradePolicyPresets()` moved into the norm layer because the dashboard resolves a policy by name too, and `normSourceLabel()` joined its enum (was three copies). Analyzer suite **77/77** (−2 deleted gates, +1 `manifest_migration_test`); app, `swinglab_run` and the offline targets build clean. Next: stage 10 (health checks), then the clean-up sweep. |
+| 2026-07-27 | 10 | **Stage 10 complete — and the first thing the health list did was find a hole in the shipped content.** New `src/Diagnostics/diagnostics_health.{h,cpp}`: the checks no single validator can make, because they span the pack, the norm set, the context tree and the metric catalogue at once. `CharacteristicLibraryModel::health()` now merges THREE sources where it used to passthrough one — the pack validator's warnings, the norm set's own (which `norm_provider.h` has claimed since stage 1 "ARE part of the health list" and which had never reached it), and the assembled-library checks. **`validateNormsAgainst()` — which has owned `normUnitMismatch`, `unknownNormMeasure`, `unknownNormContext` and `normNotCapturable` since stage 1 — had never been called by anything but its own test.** A check that never runs is indistinguishable from a check that passes; running it is most of what "unit no longer matches its measure" needed. **The finding:** `partial`, `pitch`, `chip`, `bunker` and `specialty` hang off `any`, and all 68 norms sit at `full_swing` or below — so a shot in any of those five contexts resolves NO corridor at all. Not a wider band, none: every reading NotMeasured, every corridor signal silent, the pack inert for that whole class of shot. That is a different statement from "this context adds nothing", so the check reports two codes — `emptyContext` (harmless, grades as its parent) and `ungradedContext` (nothing anywhere on the chain) — and the shipped tree produces five of the latter (ledger `C44`). Also built: `signalNoNorm` (scoped to LIVE measures — a producer-less measure is the roadmap's row, and authoring a corridor would not fix it), `personalNormNoSample` (scoped to the personal layer through the provider's own override tracking, pinned in BOTH directions because unscoped it opens with 39 items of noise about migrated rows), `clubDependentNoContext` (read off the metric's own `howToRead`, not a flag — the claim is already in the prose and a flag would be a second place to state it), and `oneBandCorpus` over a background library pass that grades every stored swing against every corridor (the corridor editor's histogram argument at library scale, and the only check that can catch a corridor which is merely WRONG rather than malformed; opt-in, capped at 2000 with the cap REPORTED, and `corpusEverScanned` exists so "nothing found" and "nothing checked" cannot read the same). **`overrideCoreChanged` needed a base**, and the absence of one is why it could not have been built as specified: "your row differs from the shipped row" is also just what an override IS, so a two-way comparison would report every edit forever. `Norm` gained `basedOn` (a `NormBasis`, written on a user row at save, absent on every shipped one), and the check fires only when the shipped row has moved away from that base — rows saved before it existed are silent, which is correct, because for those we genuinely do not know. The diff is in the message and **"Take theirs" is the existing drop-your-row operation**, reached by following the row to `MeasureDetail` where both bands are visible — not duplicated as a bare button in a list. **The health list now renders each row's MESSAGE**, which it never did: it showed a subject chip and dropped the sentence, which was survivable while every code was a one-word structural gap and is not survivable when half the rows carry the numbers, the context and the reason. Ledger **C30 closed** (`bothTailsOneCondition` in `validatePack` — one condition flagging both sides of one measure fires whichever way the reading goes, so it cannot tell too much from too little; a warning, not an error, because refusing to load would lock an author out of the library they need to open to fix it) and **C31 closed** (`undoUnlinkCause()` restores the removed edge WITH its strength — re-linking by hand defaults to moderate, so an undo that lost a weak edge's weakness would quietly change what the graph claims; one level, consumed on use, and the DagView toast's handler goes through a `Connections` block because a handler written inside `PpToast` would resolve `root` to the toast). New suite `diagnostics_health_test`; analyzer suite **78/78**; app builds clean and starts clean headless. Next: the clean-up sweep. |
 | 2026-07-27 | 8 (rework) | **The first version was cramped, unlabelled and tangled — all three were real, and two were layout defects rather than styling.** Mark's read of it: too little space, nothing saying what the lines meant, and "multiple competing graph arrows". (1) **Tangle.** An edge spanning more than one rank was drawn as ONE curve from end to end, so a cause that also causes an effect ran its line straight through the focus box. Fixed with **waypoints**: an edge crossing a rank now gets an invisible placeholder in that rank which takes up vertical space like a node, and the edge is emitted as one segment per hop, meeting at the waypoints with horizontal tangents so the chain reads as a single line. Edges also **fan** — each arrow gets its own point on a node's edge, ordered by where it is going, instead of every one converging on the vertical centre; and a same-rank edge now bulges into the empty gutter beside its column rather than across the middle. The new test samples every cubic at 17 points and fails if any lands inside a box that is not its own endpoint — **verified red** against the un-routed version, where it reported `cause2->effect2 crosses focus`. (2) **Unlabelled.** `DagHeading` (Caused by / Leads to / Measured by) is emitted with the span it belongs over; each causal relationship states its strength IN WORDS on the line, once, on the segment with the most room; and every relationship gets an arrowhead — emitted as three points, not an angle, because which end is the effect is the whole claim of a causal graph. The head SIZE tracks the fan spacing: five causes into one condition put five 9pt arrowheads within 4 px of each other and they merged into a solid comb. (3) **Cramped.** Gutters roughly doubled (gapX 52→120, gapY 12→34, laneGap 34→72, nodeH 34→44), the canvas floor raised to 360 so the graph is a panel rather than a strip, and node labels moved up a size. Two more defects fell out while verifying: the header strip was positioned per-column rather than above the whole band, so a tall column put its top box ABOVE the headings; and `CharacteristicLibraryModel::dag()` had never been taught to marshal `headings` or any of the new edge fields, so all three new things existed in C++ and reached nothing. Analyzer suite **78/78**, all seven suites **106/106**; interactions re-driven headlessly after the rework. |
 
 ---
 
-## ▶ Resuming at stage 10 — read this first
+## ▶ Resuming at the clean-up sweep — read this first
+
+**Prompt to start with:**
+
+> Run the clean-up sweep for the diagnostics norms plan — read
+> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at the clean-up sweep".
+
+All ten stages are complete. Analyzer suite **78/78**; app builds clean and starts clean headless.
+Stages 1–8 are pushed (`..1b12d9d`); **stages 9 and 10 are committed or uncommitted per the Session
+log — check `git log` before assuming.** Do not re-verify the stages; the Progress table is
+authoritative.
+
+### The sweep cannot mean what this document said it would, and that is the first thing to settle
+
+The plan's own instruction is that a final sweep "must find that table with nothing left open". It
+will not. **25 of the ledger's entries are open, and almost none of them are code**: read the
+`Closes at` column and they are corpus work, producer work, engine wiring, or a question for Mark.
+Closing them by writing code is not available; closing them by deleting them would be worse.
+
+So the sweep's honest job is **not** to empty the table. It is to prove that every open row has a
+NAMED trigger and that none is silently parked — and then to group them so the next person can see
+what is actually blocking what:
+
+- **Waiting on the engine being constructed at all** (`C3`, `C3b`, `C25`, and now `C44`). This is one
+  piece of work, it is not in this plan, and four ledger rows are downstream of it. `C25` is the
+  headline: bindings resolve, `detect()` honours them, three façades resolve a grade policy — and
+  **nothing in the app constructs `CharacteristicEngine`**, so no shot has ever run through any of it.
+- **Waiting on a corpus** (`C1b`, `C1c`, `C1d`, `C8`, `C9`, `C18`, `C19`, `C21`, `C41`, `C42`). The
+  numbers are hypotheses and the plan has always said so; `C8` (a literature review of every
+  normative corridor) is the parent of most of these.
+- **Waiting on a producer** (`C10`, `C11`, `C13`, `C28`). Author a norm WITH its producer, never in a
+  batch.
+- **Waiting on Mark** — the review gate (`C36`, `C40`, `C43`, plus his standing note that the
+  direction/tail design needs revisiting). These are the only ones a session can move today, and only
+  by asking.
+- **Deliberately conditional** (`C12`, `C32`, `C47`, `C48`) — each with a trigger that has not fired.
+
+If Mark wants the table emptied, the honest route is to split it: a "parked, with trigger" section
+and an "open, actionable" one. Do not mark anything closed that has not happened.
+
+### What stage 10 built, in one paragraph
+
+`src/Diagnostics/diagnostics_health.{h,cpp}` — the checks no single validator can make, because they
+span the pack, the norm set, the context tree and the metric catalogue at once. `health()` now merges
+three sources where it used to pass one through, and **`validateNormsAgainst()` runs for the first
+time since it was written at stage 1** (it had one caller: its own test). New codes: `signalNoNorm`,
+`personalNormNoSample`, `clubDependentNoContext`, `emptyContext`, `ungradedContext`,
+`overrideCoreChanged`, `oneBandCorpus`, plus `bothTailsOneCondition` in the pack validator. The health
+list renders each row's MESSAGE, which it never did. `Norm::basedOn` records what an override was made
+against, because without a base "core has since changed" is undecidable.
+
+### Facts the sweep should not re-derive
+
+- **The five ungraded contexts (`C44`) are the real find of stage 10.** `partial`, `pitch`, `chip`,
+  `bunker`, `specialty` hang off `any`; every norm sits at `full_swing` or below; a shot in any of
+  them resolves NO corridor at all. It is a content decision (author corridors, or move them under
+  `full_swing`), and it is inert only because the engine is never called.
+- **`personalNormNoSample` is scoped to the personal layer** through `INormProvider::isOverridden`,
+  and `diagnostics_health_test` pins that in BOTH directions. Unscoped it opens with 39 rows of noise
+  about migrated content that was fine yesterday.
+- **The corpus check is opt-in, capped at 2000, and the cap is reported.** `corpusEverScanned` exists
+  so "nothing found" and "nothing checked" cannot read the same.
+- **"Take theirs" is not a button.** It is the existing drop-your-row operation, reached by following
+  the health row to `MeasureDetail` where both bands are visible.
+- **`undoUnlinkCause()` restores the STRENGTH.** Re-linking by hand defaults to moderate, which would
+  quietly change what the graph claims. One level, consumed on use.
+- **A handler written inside a composite type cannot see this file's `root`** when the composite
+  declares its own — the DagView toast's undo goes through a `Connections` block for exactly that
+  reason. At FILE scope, though, `root.x` inside a `PpButton { }` is fine and is what
+  `MeasurePicker.qml` has always done; the shadowing trap is specific to Repeater delegates.
+
+## ▶ Stage 10 — read this first (superseded, kept for the record)
 
 **Prompt to start with:**
 
@@ -755,7 +827,7 @@ Only once stages 2–3 are green:
   "inherited from …" where it is an ancestor's), the norm's source and n, its citation, and whether it
   is the shipped corridor or the user's.
 
-### 10 — Health checks
+### 10 — Health checks  ☑ built
 
 Extend `CharacteristicLibraryModel::health()`:
 
@@ -1148,8 +1220,8 @@ question that was answered and one that was never asked.
 | C26 | The characteristic library list rendered UNDERNEATH the authoring sheet on the "New characteristic" path (`_editing` was not in its `visible`) — **fixed** | 7 | ☑ closed |
 | C27 | Tapping a near-duplicate in the measure picker COMMITTED a tail the author had not seen yet, read against a different measure's convention — now selects, and the tail is chosen after — **fixed** | 7 | ☑ closed |
 | C29 | Which side of the corridor fires was **invisible on the read-only detail page** (`direction` was marshalled from the start and rendered nowhere) and **unchangeable once set** — Mark's ask; both fixed | 7 follow-up | ☑ closed |
-| C30 | Nothing stops a condition carrying BOTH tails of one measure via "Add a measure" twice — it would fire either side. `setSignalDirection()` refuses to create the pair, so the flip path is safe; the attach path still needs a validator check | 10 | ☐ open |
-| C31 | **Removing a causal link from the DAG has no Undo.** The toast reports it and the inverse is one long-press away, but the project's own rule is that a recoverable removal offers an undo in the same breath — as the binding cascade does | 10 | ☐ open |
+| C30 | Nothing stopped a condition carrying BOTH tails of one measure via "Add a measure" twice — **fixed**: `bothTailsOneCondition` in `validatePack()`, a warning rather than an error because refusing to load would lock an author out of the library they need to open to fix it | 10 | ☑ closed |
+| C31 | **Removing a causal link from the DAG had no Undo** — **fixed**: `undoUnlinkCause()` restores the edge WITH its strength (re-linking by hand defaults to moderate, so an undo that lost a weak edge's weakness would quietly change what the graph claims). One level, consumed on use | 10 | ☑ closed |
 | C32 | The DAG's per-rank cap (10) and depth ceiling (2) are **unvalidated against a grown library**. Both were chosen to stop a hub becoming a hairball; nobody has yet looked at the pack that makes them bite | when the pack grows | ☐ open |
 | C34 | An edge spanning more than one rank was drawn straight THROUGH whatever sat between its ends — **fixed** by waypoint routing, with a test that samples every curve and fails on any box it crosses (verified red) | 8 rework | ☑ closed |
 | C35 | `dag()` never marshalled `headings` or the label/arrowhead fields, so three finished C++ features reached nothing — **fixed**. A marshaller is the one place a feature can be complete on both sides and still absent | 8 rework | ☑ closed |
@@ -1163,6 +1235,11 @@ question that was answered and one that was never asked.
 | C41 | A migrated norm edited in the corridor editor KEEPS its absolute monitor bounds, because dropping them would change how it grades. So a re-seated Ideal band can sit oddly against a Watch band inherited from the old table. Now visible (C39) rather than hidden, but the content question — do the monitor bounds survive a corpus re-seat, or does the row become purely z-derived? — belongs with C8 | corpus / C8 | ☐ open |
 | C43 | **The dashboard Setup zone now DRAWS corridors for stance width and ball position**, which resolved to nothing before stage 9 (the old catalogue had no per-club band, so both tiles fell back to a bare value). That is the context tree finally doing its job — but it also makes `C18` visible on the dashboard: stance width reads ~2x its own corridor on real swings, so the tile will show it pinned outside. Do not read that as a stage-9 regression, and do not "fix" it by moving either number | with C18 | ☐ open |
 | C42 | `kArchetypeFaceOffsetDeg` (pp_tuned_constants.h) is now referenced by nothing but `tuned_constants_parity_test`, which pins it. Kept deliberately as the frozen record of the value the 16 archetype norm rows were migrated from; retire it with C1d's per-position re-seat | with C1d | ☐ open |
+| C44 | **Five contexts are graded by nothing at all.** `partial`, `pitch`, `chip`, `bunker` and `specialty` hang off `any`, and all 68 norms sit at `full_swing` or below — so a shot in any of them resolves NO corridor: every reading NotMeasured, every corridor signal silent, the pack inert for that whole class of shot. Found by stage 10's `ungradedContext` check. Not urgent only because `C25` means the engine is never called yet; it becomes live the moment it is wired. Either author corridors under them or move them beneath `full_swing` — a content decision about whether a pitch shot is graded like a full swing | content / with C25 | ☐ open |
+| C45 | `validateNormsAgainst()` — the referential norm validator owning `normUnitMismatch`, `unknownNormMeasure`, `unknownNormContext`, `normNotCapturable` — had never been called by anything but its own test since stage 1. **Fixed** by running it in `diagnosticsHealth()`. Recorded because it is the same shape as `C3`/`C25`: a rule that exists, is tested, and reaches nothing | 10 | ☑ closed |
+| C46 | The health list never rendered a row's MESSAGE — only its subject chip. Survivable while every code was a one-word structural gap; not survivable once half the rows carry numbers, a context and a reason. **Fixed** | 10 | ☑ closed |
+| C47 | `overrideCoreChanged` could not be built as the plan specified, because nothing recorded what an override was made AGAINST. `Norm::basedOn` now does, written on a user row at save — but rows saved before it existed carry none and are silent. Those are unknowable, not clean; if that matters later, the only honest fix is a one-off pass asking the user which of their overrides predate the change | if it matters | ☐ open |
+| C48 | The corpus-share scan is capped at 2000 swings and has **no cancel**. The cap is reported when it bites (never silent), and the scan is opt-in — but a very large library commits the user to a pass they cannot stop | when a library is that big | ☐ open |
 
 ### C18–C21 — what happened the first time the pack met real swings
 

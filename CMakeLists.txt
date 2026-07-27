@@ -488,6 +488,8 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/norm_provider.h
         src/Diagnostics/norm_measure_source.h
         src/Diagnostics/metric_corridor.h
+        src/Diagnostics/diagnostics_health.h
+        src/Diagnostics/diagnostics_health.cpp
         src/Diagnostics/measure_sample.h
         src/Diagnostics/measure_sample.cpp
         src/Diagnostics/resource_norm_provider.cpp

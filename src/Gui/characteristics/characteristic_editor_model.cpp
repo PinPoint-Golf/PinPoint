@@ -860,26 +860,52 @@ QVariantMap CharacteristicEditorModel::unlinkCause(const QString &causeId, const
     const Condition          *effect = p.condition(effectId);
     if (!cause || !effect) return failResult(tr("That is not in the library."));
 
-    const bool exists = std::any_of(p.edges.begin(), p.edges.end(), [&](const Edge &e) {
-        return e.type == EdgeType::Causes && e.from == causeId && e.to == effectId;
-    });
-    if (!exists) return failResult(tr("There is no link to remove."));
+    const Edge *found = nullptr;
+    for (const Edge &e : p.edges)
+        if (e.type == EdgeType::Causes && e.from == causeId && e.to == effectId) { found = &e; break; }
+    if (found == nullptr) return failResult(tr("There is no link to remove."));
 
     const QString causeLabel  = cause->label;   // see linkCause: save() invalidates `p`
     const QString effectLabel = effect->label;
 
+    // Everything needed to put it back, copied out BEFORE the write — ledger C31. The project's own
+    // rule is that a recoverable removal offers an undo in the same breath, as the binding cascade
+    // does; the inverse of this operation is one long-press away but that is not the same thing, and
+    // it would not restore the STRENGTH, which is the part a reader cannot reconstruct from memory.
+    m_edgeUndo         = *found;
+    m_edgeUndoValid    = true;
+
     if (!beginEdit(effectId)) return failResult(tr("Could not open %1.").arg(effectLabel));
     removeCause(causeId);
     const QVariantMap r = save();
-    if (!r.value(QStringLiteral("ok")).toBool()) { discard(); return r; }
+    if (!r.value(QStringLiteral("ok")).toBool()) {
+        discard();
+        m_edgeUndoValid = false;
+        return r;
+    }
 
     // Say what it means, not what it did to the file. Dropping the last cause leaves a
     // characteristic that can be reported and never explained, which is a validator warning and
     // worth knowing before the reader walks away from the page.
-    const int left = int(causesOf(m_provider->pack(), effectId).size());
-    return left == 0
+    const int   left = int(causesOf(m_provider->pack(), effectId).size());
+    QVariantMap out  = left == 0
                ? okResult(tr("Removed. Nothing in the library explains %1 now.").arg(effectLabel))
                : okResult(tr("%1 no longer causes %2.").arg(causeLabel, effectLabel));
+    out.insert(QStringLiteral("canUndo"), true);
+    return out;
+}
+
+QVariantMap CharacteristicEditorModel::undoUnlinkCause()
+{
+    if (!m_edgeUndoValid)
+        return failResult(tr("There is nothing to put back."));
+
+    // Consumed whether or not it succeeds: a second attempt would re-run a link that has already
+    // been refused once, and offering the same undo twice implies the first one did not happen.
+    const Edge edge = m_edgeUndo;
+    m_edgeUndoValid = false;
+
+    return linkCause(edge.from, edge.to, strengthName(edge.strength));
 }
 
 QVariantList CharacteristicEditorModel::candidateCauses(const QString &search) const

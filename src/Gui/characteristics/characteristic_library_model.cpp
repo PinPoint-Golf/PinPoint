@@ -19,13 +19,16 @@
 #include "characteristic_library_model.h"
 
 #include "../../Diagnostics/dag_layout.h"      // the causal DAG, laid out in C++
+#include "../../Diagnostics/measure_sample.h"  // the phase grid the corpus check reads
 #include "../../Diagnostics/norm_provider.h"   // the context tree, for binding labels
 #include "metric_catalogue.h"
 
+#include <QDir>
 #include <QFile>
 #include <QHash>
 #include <QSet>
 #include <QStandardPaths>
+#include <QtConcurrent/QtConcurrent>
 
 #include <algorithm>
 
@@ -56,11 +59,32 @@ MeasureStatus weakest(MeasureStatus a, MeasureStatus b)
 } // namespace
 
 CharacteristicLibraryModel::CharacteristicLibraryModel(QObject *parent)
-    : QObject(parent), m_provider(makeCharacteristicPackProvider())
+    : QObject(parent)
+    , m_provider(makeCharacteristicPackProvider())
+    , m_norms(sharedNormProvider())
+    , m_cat(makeMetricCatalogue())
+    , m_policyName(QStringLiteral("standard"))
+    , m_corpusWatcher(new QFutureWatcher<QVariantList>(this))
 {
+    connect(m_corpusWatcher, &QFutureWatcher<QVariantList>::finished,
+            this, &CharacteristicLibraryModel::onCorpusFinished);
 }
 
-CharacteristicLibraryModel::~CharacteristicLibraryModel() = default;
+CharacteristicLibraryModel::~CharacteristicLibraryModel()
+{
+    // The worker reads only copies (a library path and value-type measures), but it writes into a
+    // future this object owns — so it has to be joined before that future dies with us.
+    if (m_corpusWatcher->isRunning())
+        m_corpusWatcher->waitForFinished();
+}
+
+void CharacteristicLibraryModel::refresh()
+{
+    m_provider = makeCharacteristicPackProvider();
+    resetSharedNormProvider();
+    m_norms    = sharedNormProvider();
+    emit healthChanged();
+}
 
 QVariantList CharacteristicLibraryModel::groups() const
 {
@@ -104,7 +128,9 @@ int CharacteristicLibraryModel::causeCount() const
 
 int CharacteristicLibraryModel::edgeCount() const { return int(m_provider->pack().edges.size()); }
 
-int CharacteristicLibraryModel::healthCount() const { return m_provider->report().warningCount(); }
+// Counts what the list SHOWS, by asking the list. Two counts derived independently is how a badge
+// ends up disagreeing with the page it links to.
+int CharacteristicLibraryModel::healthCount() const { return int(health().size()); }
 
 QVariantList CharacteristicLibraryModel::query(const QVariantMap &filters) const
 {
@@ -557,18 +583,212 @@ QVariantList CharacteristicLibraryModel::causeCoverage() const
     return out;
 }
 
+namespace {
+
+// A health row. `subject` is either an id or a "measure@context" norm key, and the two halves are
+// split out when it is the latter so the view can act on the row rather than only describe it.
+QVariantMap healthRow(const ValidationIssue &i)
+{
+    QVariantMap r;
+    r.insert(QStringLiteral("code"),     i.code);
+    r.insert(QStringLiteral("subject"),  i.subject);
+    r.insert(QStringLiteral("message"),  i.message);
+    r.insert(QStringLiteral("severity"),
+             i.severity == IssueSeverity::Error ? QStringLiteral("error") : QStringLiteral("warning"));
+
+    const int at = i.subject.indexOf(QLatin1Char('@'));
+    if (at > 0) {
+        r.insert(QStringLiteral("measureId"), i.subject.left(at));
+        r.insert(QStringLiteral("contextId"), i.subject.mid(at + 1));
+    } else {
+        r.insert(QStringLiteral("measureId"), QString());
+        r.insert(QStringLiteral("contextId"), QString());
+    }
+    return r;
+}
+
+} // namespace
+
 QVariantList CharacteristicLibraryModel::health() const
 {
     QVariantList out;
+
+    // The characteristic pack's own warnings. Errors are excluded here as they always were: a pack
+    // with errors did not load, so the library on screen is not the one they describe.
     for (const ValidationIssue &i : m_provider->report().issues) {
         if (i.severity != IssueSeverity::Warning) continue;
-        QVariantMap r;
-        r.insert(QStringLiteral("code"), i.code);
-        r.insert(QStringLiteral("subject"), i.subject);
-        r.insert(QStringLiteral("message"), i.message);
-        out.append(r);
+        out.append(healthRow(i));
     }
+
+    // The norm set's own warnings. norm_provider.h has said since stage 1 that "warnings here ARE
+    // part of the health list" — they were not, because this list only ever read the pack provider.
+    if (m_norms) {
+        for (const ValidationIssue &i : m_norms->report().issues) {
+            if (i.severity != IssueSeverity::Warning) continue;
+            out.append(healthRow(i));
+        }
+
+        // The assembled-library checks, INCLUDING the referential norm validation that nothing had
+        // ever called. Those can be errors (a unit mismatch is), and unlike a pack load error they
+        // describe the library that is actually on screen — so they are shown, and marked.
+        for (const ValidationIssue &i : diagnosticsHealth(m_provider->pack(), *m_norms, m_cat))
+            out.append(healthRow(i));
+    }
+
     return out;
+}
+
+QVariantList CharacteristicLibraryModel::corpusHealth() const
+{
+    QVariantList out;
+    for (const ValidationIssue &i : corpusShareHealth(m_corpusCounts))
+        out.append(healthRow(i));
+    return out;
+}
+
+void CharacteristicLibraryModel::setGradePolicy(const QString &name)
+{
+    // Resolved through the shared table, never stored as handed in — same rule as every other holder
+    // of this setting: an unknown name must grade against the default AND read as the default.
+    const QString resolved = QString::fromLatin1(gradePolicyPresetFor(name).name);
+    if (resolved == m_policyName) return;
+    m_policyName = resolved;
+    // The counts were taken under the old policy, so they no longer describe what the app would say.
+    // Dropped rather than re-graded in place: re-grading needs the values, and only the scan has them.
+    m_corpusCounts.clear();
+    m_corpusEverScanned = false;
+    emit gradePolicyChanged();
+    emit corpusChanged();
+}
+
+void CharacteristicLibraryModel::setLibraryRoot(const QString &root)
+{
+    if (root == m_libraryRoot) return;
+    m_libraryRoot = root;
+    // A new library invalidates what the old one said. Reported as never-scanned rather than as
+    // "nothing wrong", which is the distinction corpusEverScanned exists for.
+    m_corpusCounts.clear();
+    m_corpusEverScanned = false;
+    m_corpusSwings      = 0;
+    emit corpusChanged();
+}
+
+// One pass over the library, grading every reading against every norm that resolves for it.
+//
+// Cheap enough to be worth doing whole: the expensive part is reading a swing's phase grid, which is
+// sidecar-cached and pack-INDEPENDENT, so covering all 67 measures costs the same as covering one.
+// That is exactly why measure_sample caches the grid rather than measure values.
+void CharacteristicLibraryModel::startCorpusCheck()
+{
+    if (m_corpusWatcher->isRunning() || m_libraryRoot.isEmpty()) {
+        if (m_libraryRoot.isEmpty()) {
+            m_corpusEverScanned = false;
+            emit corpusChanged();
+        }
+        return;
+    }
+
+    // Everything the worker needs, BY VALUE. It must not touch the pack or the provider: those live
+    // on this thread and a refresh() would pull them out from under it.
+    struct Target { Measure measure; QString contextId; Norm norm; };
+    std::vector<Target> targets;
+    const CharacteristicPack &pack = m_provider->pack();
+    for (const Norm &n : m_norms->norms().norms) {
+        const Measure *m = pack.measure(n.measureId);
+        if (m == nullptr || m->status != MeasureStatus::Live) continue;
+        targets.push_back(Target{ *m, n.contextId, n });
+    }
+
+    const QString     root   = m_libraryRoot;
+    const GradePolicy policy = gradePolicyByName(m_policyName);
+
+    m_corpusScanning = true;
+    emit corpusChanged();
+
+    // A cap, not a sample size — and REPORTED when it bites, because a silent cap reads as "that is
+    // the whole library". Same figure the corridor editor's scan uses.
+    constexpr int kMaxScan = 2000;
+
+    m_corpusWatcher->setFuture(QtConcurrent::run([root, targets, policy]() -> QVariantList {
+        // Grade counts per target, plus the swing count as the last entry — one future, so the two
+        // cannot arrive out of step.
+        std::vector<int> ideal(targets.size(), 0), good(targets.size(), 0),
+                         watch(targets.size(), 0), action(targets.size(), 0);
+        int  swings    = 0;
+        bool truncated = false;
+
+        const QDir rootDir(root);
+        const QStringList athletes = rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const QString &athlete : athletes) {
+            const QDir aDir(rootDir.filePath(athlete));
+            for (const QString &session : aDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+                const QDir sDir(aDir.filePath(session));
+                for (const QString &swing : sDir.entryList({ QStringLiteral("swing_*") },
+                                                           QDir::Dirs, QDir::Name)) {
+                    if (swings >= kMaxScan) { truncated = true; break; }
+                    const SwingPhaseGrid grid = readPhaseGrid(sDir.filePath(swing),
+                                                              /*writeSidecar*/ true);
+                    ++swings;
+                    for (size_t t = 0; t < targets.size(); ++t) {
+                        const std::optional<double> v = reduceOverGrid(grid, targets[t].measure);
+                        if (!v) continue;
+                        switch (grade(*v, targets[t].norm, policy)) {
+                        case Grade::Ideal:  ++ideal[t];  break;
+                        case Grade::Good:   ++good[t];   break;
+                        case Grade::Watch:  ++watch[t];  break;
+                        case Grade::Action: ++action[t]; break;
+                        case Grade::NotMeasured: break;
+                        }
+                    }
+                }
+            }
+        }
+
+        QVariantList out;
+        for (size_t t = 0; t < targets.size(); ++t) {
+            QVariantMap r;
+            r.insert(QStringLiteral("measureId"), targets[t].measure.id);
+            r.insert(QStringLiteral("contextId"), targets[t].contextId);
+            r.insert(QStringLiteral("ideal"),     ideal[t]);
+            r.insert(QStringLiteral("good"),      good[t]);
+            r.insert(QStringLiteral("watch"),     watch[t]);
+            r.insert(QStringLiteral("action"),    action[t]);
+            out.append(r);
+        }
+        QVariantMap tail;
+        tail.insert(QStringLiteral("swings"),    swings);
+        tail.insert(QStringLiteral("truncated"), truncated);
+        out.append(tail);
+        return out;
+    }));
+}
+
+void CharacteristicLibraryModel::onCorpusFinished()
+{
+    const QVariantList res = m_corpusWatcher->future().result();
+
+    m_corpusCounts.clear();
+    m_corpusSwings = 0;
+    for (const QVariant &v : res) {
+        const QVariantMap r = v.toMap();
+        if (r.contains(QStringLiteral("swings"))) {
+            m_corpusSwings    = r.value(QStringLiteral("swings")).toInt();
+            m_corpusTruncated = r.value(QStringLiteral("truncated")).toBool();
+            continue;
+        }
+        CorpusGradeCounts c;
+        c.measureId = r.value(QStringLiteral("measureId")).toString();
+        c.contextId = r.value(QStringLiteral("contextId")).toString();
+        c.ideal     = r.value(QStringLiteral("ideal")).toInt();
+        c.good      = r.value(QStringLiteral("good")).toInt();
+        c.watch     = r.value(QStringLiteral("watch")).toInt();
+        c.action    = r.value(QStringLiteral("action")).toInt();
+        m_corpusCounts.push_back(c);
+    }
+
+    m_corpusScanning    = false;
+    m_corpusEverScanned = true;
+    emit corpusChanged();
 }
 
 QVariantList CharacteristicLibraryModel::usersOfMeasure(const QString &measureId) const

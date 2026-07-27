@@ -258,6 +258,23 @@ Item {
               : ({ ok: false, message: "" })
 
         toast.severity = r.ok ? "info" : "warn"
+        // Ledger C31: a recoverable removal offers its undo in the same breath. Only when the model
+        // says it can be undone — offering an action that can only fail is worse than not offering it.
+        toast.showUndo = (r.ok === true && r.canUndo === true)
+        toast.show(r.message || "")
+        if (r.ok) {
+            root._revision++
+            root.graphChanged()
+        }
+    }
+
+    // Put back the link that was just removed, WITH its strength — which re-linking by hand would
+    // not restore, and which is the part a reader cannot reconstruct from memory.
+    function _undoUnlink() {
+        if (!root.editor) return
+        var r = root.editor.undoUnlinkCause()
+        toast.showUndo = false                  // one level: the undo is consumed by using it
+        toast.severity = r.ok ? "info" : "warn"
         toast.show(r.message || "")
         if (r.ok) {
             root._revision++
@@ -768,6 +785,15 @@ Item {
         anchors.bottom:           parent.bottom
         z: 11
         glyph: "◇"
-        showUndo: false
+        showUndo: false                        // set per notice by _runMenuAction
+    }
+
+    // The undo handler CANNOT be written inside the PpToast block above. PpToast declares its own
+    // `id: root`, which shadows this file's — the same trap that threw ReferenceError at stage 7,
+    // and one that only ever surfaces on a click, so no binding, test or screenshot would show it. A
+    // Connections block declares no `root` of its own, so `root` here is this file's.
+    Connections {
+        target: toast
+        function onUndoClicked() { root._undoUnlink() }
     }
 }

@@ -1,0 +1,108 @@
+/*
+ * Copyright (c) 2026 Mark Liversedge (liversedge@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
+#pragma once
+
+#include "characteristic_pack.h"     // CharacteristicPack, ValidationIssue
+#include "norm_provider.h"
+#include "../Metrics/metric_catalogue.h"
+
+#include <vector>
+
+// The ASSEMBLED-LIBRARY health checks — the ones no single validator can make.
+//
+// `validatePack()` sees a characteristic pack. `validateNormPack()` sees a norm set. Each is
+// complete for what it can see, and neither can answer the question an author actually asks — *can
+// this signal ever fire?* — because that spans the pack, the norm set, the context tree and the
+// metric catalogue at once. Those checks live here, as a free function over the registries, so the
+// health list is computed somewhere it can be tested rather than inside a QML façade.
+//
+// EVERYTHING HERE IS A WARNING. Nothing in this file is a load error: a library with a signal that
+// cannot fire is not broken, it is incomplete, and refusing to load it would take the app down over
+// a missing corridor. The health list is the place incompleteness is stated out loud.
+//
+// Codes, and what each one means an author should DO:
+//
+//   signalNoNorm           A corridor signal on a live measure with no norm in any context. It
+//                          cannot fire — not "does not fire on this swing", cannot, ever. Author a
+//                          norm or accept that the characteristic is undetectable.
+//   personalNormNoSample   A corridor of YOUR OWN, seated on nothing (n = 0). Fine as a starting
+//                          figure; worth knowing you typed it rather than measured it. Scoped to
+//                          the personal layer through the provider's own override tracking, so the
+//                          39 migrated shipped rows never appear here — unscoped, this check opens
+//                          with 39 items of noise about content that was fine yesterday.
+//   clubDependentNoContext The metric's own `howToRead` says the number is club-dependent, and every
+//                          norm for it sits at full swing or above. One corridor is grading a driver
+//                          and a wedge against the same band, which the descriptor already says is
+//                          wrong. Add per-club rows.
+//   emptyContext           A context with no norms of its own. Harmless — it grades as its parent
+//                          does — but it is a control with no effect until something is authored
+//                          under it.
+//   ungradedContext        Worse, and a different statement: nothing resolves anywhere up its chain,
+//                          so a shot in that context is graded by NOTHING. Not a wider corridor,
+//                          none. This is what the shipped tree looks like today for partial, pitch,
+//                          chip, bunker and specialty — five branches hanging off `any`, where every
+//                          authored norm sits at `full_swing` or below.
+//   overrideCoreChanged    Your override was made against shipped numbers that have since been
+//                          revised. Offers a diff and "Take theirs" (which is the existing
+//                          drop-your-row operation — one operation, honest label).
+//   oneBandCorpus          A corridor grading an implausible share of the drawn library into a
+//                          single band. NOT produced here: it needs a library scan and arrives
+//                          asynchronously. The code is declared here so the health list has one
+//                          vocabulary and the view's label table has one home.
+//
+// Deliberately NOT a check: the unread edge of a single-tail axis. `s_posture` reads one end of
+// `lumbar_curve` and nothing reads the other, but the norm is a single two-sided row — the "missing"
+// tail is a condition nobody has authored, not a corridor anybody is missing. Reporting it would
+// make the health list argue for content the model does not need.
+
+namespace pinpoint::analysis {
+
+// The share of a drawn sample that has to land in one grade band before `oneBandCorpus` is worth
+// reporting. Not a statistical threshold: it is the point at which the histogram would be visibly
+// wrong to someone who has never heard of a standard deviation, which is the argument the corridor
+// editor's histogram was built on.
+inline constexpr double kOneBandShare  = 0.9;
+// Below this many produced readings the share means nothing — three swings in one band is a Tuesday.
+inline constexpr int    kMinCorpusForShare = 8;
+
+// `oneBandCorpus` needs a library scan, so it is produced by the caller that can afford one and
+// passed in as counts. One row per (measure, context) that resolved a norm and produced values.
+struct CorpusGradeCounts {
+    QString measureId;
+    QString contextId;
+    int     ideal  = 0;
+    int     good   = 0;
+    int     watch  = 0;
+    int     action = 0;
+
+    int total() const { return ideal + good + watch + action; }
+};
+
+// The registry-only checks: everything decidable from the assembled library alone. Includes the
+// REFERENTIAL norm validation (`validateNormsAgainst` — unknown measure/context, unit mismatch, a
+// norm on a measure no sensor can produce), which existed from stage 1 and which nothing in the app
+// had ever called.
+std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
+                                               const INormProvider      &norms,
+                                               const MetricCatalogue    &catalogue);
+
+// The corpus-share check, over counts a caller has already gathered.
+std::vector<ValidationIssue> corpusShareHealth(const std::vector<CorpusGradeCounts> &counts);
+
+} // namespace pinpoint::analysis

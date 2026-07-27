@@ -516,6 +516,35 @@ ValidationReport validatePack(const CharacteristicPack &pack)
         }
     }
 
+    // --- one condition flagging BOTH tails of one measure --------------------
+    //
+    // Ledger C30. Two tails of a corridor are two CONDITIONS — high and low mean different things
+    // about the swing, which is what an axis pairs. One condition carrying both fires whichever way
+    // the value goes, so it is not a detector at all: it says "this is off" for every swing that is
+    // not exactly average, with whichever consequence text the author wrote for one side.
+    //
+    // `setSignalDirection()` already refuses to create the pair when flipping a tail in place. The
+    // ATTACH path cannot see it — "Add a measure" twice builds two ids that are both legitimate on
+    // their own — so it is caught here. A warning, not an error: refusing to load would lock an
+    // author out of the library they need to open in order to fix it.
+    for (const Condition &c : pack.conditions) {
+        QHash<QString, QSet<int>> tailsPerMeasure;      // measureId -> the directions attached
+        for (const QString &sid : c.detectedBy) {
+            const Signal *s = pack.signal(sid);
+            if (!s || s->test != SignalTest::OutsideCorridor || !s->direction.has_value()) continue;
+            for (const QString &mid : s->measures)
+                tailsPerMeasure[mid].insert(static_cast<int>(*s->direction));
+        }
+        for (auto it = tailsPerMeasure.cbegin(); it != tailsPerMeasure.cend(); ++it) {
+            if (it.value().size() < 2) continue;
+            warn(r, QStringLiteral("bothTailsOneCondition"), c.id,
+                 QStringLiteral("'%1' flags BOTH sides of '%2'. It will fire whichever way the "
+                                "reading goes, so it cannot distinguish too much from too little — "
+                                "the two sides belong on the two tails of an axis. Remove one.")
+                     .arg(c.id, it.key()));
+        }
+    }
+
     // --- edges ---------------------------------------------------------------
     for (const Edge &e : pack.edges) {
         if (!conditionSet.contains(e.from))

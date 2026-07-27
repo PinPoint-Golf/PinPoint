@@ -93,6 +93,12 @@ struct ValidationReport {
 //   inconsistentReach    a Screened/Asserted condition that also claims to be detected by a signal
 //   screenedHasCause     a Screened cause with an incoming edge — the likeliest symptom of a
 //                        wholly INVERTED graph, which no coverage count can detect
+//   bothTailsOneCondition  one condition flagging BOTH sides of one measure's corridor. It fires
+//                        whichever way the reading goes, so it cannot tell too much from too little
+//
+// The checks that span the pack, the norm set, the context tree and the metric catalogue at once —
+// "can this signal ever fire?" — live in `diagnostics_health.h`, because no single pack can answer
+// them.
 ValidationReport validatePack(const CharacteristicPack &pack);
 
 // ── Persistence ─────────────────────────────────────────────────────────────

@@ -93,6 +93,20 @@ const std::vector<GradePolicyPreset> &gradePolicyPresets();
 const GradePolicyPreset &gradePolicyPresetFor(const QString &name);
 GradePolicy              gradePolicyByName(const QString &name);
 
+// The shipped numbers an override was made against.
+//
+// Recorded on a USER row when it is saved and never on a shipped one. It is the BASE of a three-way
+// comparison, and without it "the shipped corridor has been revised since you overrode it" is
+// undecidable: your row differing from the shipped row is also just what an override IS, so a
+// two-way comparison would report every edit, forever, as though core had moved.
+struct NormBasis {
+    double                mu      = 0.0;
+    double                sigmaLo = 0.0;
+    double                sigmaHi = 0.0;
+    std::optional<double> monitorLo;
+    std::optional<double> monitorHi;
+};
+
 struct Norm {
     // Keys on the MEASURE (post-reducer), never the metric key. A measure carries its reducer and
     // its phase, so "Δ-from-address at P4" and "absolute at impact" are different measures and
@@ -127,6 +141,11 @@ struct Norm {
     QString    author;
     QString    citation;                          // DOI/PMID, or the note explaining a provisional figure
     QDate      setOn;
+
+    // Set only on a row in a non-core layer, at save time — see NormBasis. Absent on every shipped
+    // row, and absent on user rows written before it existed, where "has core moved?" is genuinely
+    // unknown rather than answered no.
+    std::optional<NormBasis> basedOn;
 
     bool hasExplicitMonitor() const { return monitorLo.has_value() && monitorHi.has_value(); }
 

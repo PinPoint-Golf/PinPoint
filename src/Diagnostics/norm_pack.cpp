@@ -353,6 +353,26 @@ Norm readNorm(const QJsonObject &o)
     if (!setOn.isEmpty())
         n.setOn = QDate::fromString(setOn, Qt::ISODate);
 
+    // The shipped values this override was made against. Written only on a user row; a shipped set
+    // carrying one would be claiming to override itself. Read unconditionally so a hand-edited file
+    // round-trips, and validated only in the sense that a partial object is taken as absent —
+    // half a base cannot answer the question it exists to answer.
+    const QJsonValue basedOn = o.value(QStringLiteral("basedOn"));
+    if (basedOn.isObject()) {
+        const QJsonObject b = basedOn.toObject();
+        if (b.contains(QStringLiteral("mu")) && b.contains(QStringLiteral("sigmaLo"))) {
+            NormBasis basis;
+            basis.mu      = b.value(QStringLiteral("mu")).toDouble();
+            basis.sigmaLo = b.value(QStringLiteral("sigmaLo")).toDouble();
+            basis.sigmaHi = b.contains(QStringLiteral("sigmaHi"))
+                                ? b.value(QStringLiteral("sigmaHi")).toDouble()
+                                : basis.sigmaLo;
+            readOptionalDouble(b, QStringLiteral("monitorLo"), basis.monitorLo);
+            readOptionalDouble(b, QStringLiteral("monitorHi"), basis.monitorHi);
+            n.basedOn = basis;
+        }
+    }
+
     return n;
 }
 
@@ -373,6 +393,17 @@ QJsonObject writeNorm(const Norm &n)
     if (!n.author.isEmpty())     o.insert(QStringLiteral("author"), n.author);
     if (!n.citation.isEmpty())   o.insert(QStringLiteral("citation"), n.citation);
     if (n.setOn.isValid())       o.insert(QStringLiteral("setOn"), n.setOn.toString(Qt::ISODate));
+
+    if (n.basedOn.has_value()) {
+        const NormBasis &b = *n.basedOn;
+        QJsonObject bo;
+        bo.insert(QStringLiteral("mu"),      b.mu);
+        bo.insert(QStringLiteral("sigmaLo"), b.sigmaLo);
+        if (b.sigmaHi != b.sigmaLo) bo.insert(QStringLiteral("sigmaHi"), b.sigmaHi);
+        if (b.monitorLo.has_value()) bo.insert(QStringLiteral("monitorLo"), *b.monitorLo);
+        if (b.monitorHi.has_value()) bo.insert(QStringLiteral("monitorHi"), *b.monitorHi);
+        o.insert(QStringLiteral("basedOn"), bo);
+    }
     return o;
 }
 

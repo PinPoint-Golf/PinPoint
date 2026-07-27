@@ -178,6 +178,14 @@ public:
                                       const QString &strength = QStringLiteral("moderate"));
     Q_INVOKABLE QVariantMap unlinkCause(const QString &causeId, const QString &effectId);
 
+    // Put back the link `unlinkCause()` just removed, strength and all — ledger C31. A recoverable
+    // removal offers an undo in the same breath (the binding cascade sets the precedent); "the
+    // inverse is one long-press away" is not an undo, and re-linking by hand would not restore the
+    // strength, which is the part a reader cannot reconstruct. One level, consumed on use: the
+    // removal it reverses is a whole load-edit-write cycle, and a stack of those would be a claim
+    // about history the file cannot back up.
+    Q_INVOKABLE QVariantMap undoUnlinkCause();
+
     // ── The measure picker ──────────────────────────────────────────────────
     // A typed phrase SEEDS facet selections; it is not a query. Wrong guesses are corrected by
     // tapping chips, which is far easier than rephrasing a search that returned nothing.
@@ -209,6 +217,11 @@ private:
     void   reload();
     void   touch();
     QString mintConditionId(const QString &label) const;
+
+    // The edge unlinkCause() removed, for undoUnlinkCause(). One level, and NOT part of the draft:
+    // the removal is committed to the file, so this outlives any open edit.
+    pinpoint::analysis::Edge m_edgeUndo;
+    bool                     m_edgeUndoValid = false;
 
     std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_provider;
     // Read-only, and only ever asked for its context tree. The shared instance because the corridor

@@ -610,6 +610,24 @@ QVariantMap NormEditorModel::save()
     if (!m_draft.setOn.isValid())
         m_draft.setOn = QDate::currentDate();
 
+    // Record the SHIPPED numbers this override is being made against, if core carries a row at this
+    // exact key. It is the base of a three-way comparison, and it is what lets the health list say
+    // later that the shipped corridor has been revised since — a claim a two-way comparison cannot
+    // make, because "yours differs from theirs" is also just what an override is. Re-stamped on every
+    // save, so re-editing an override re-bases it against what core says today; that is right,
+    // because the author has just looked at the shipped band beside their own.
+    if (const Norm *shipped = m_norms ? m_norms->shippedNorm(m_measureId, m_contextId) : nullptr) {
+        NormBasis basis;
+        basis.mu        = shipped->mu;
+        basis.sigmaLo   = shipped->sigmaLo;
+        basis.sigmaHi   = shipped->sigmaHi;
+        basis.monitorLo = shipped->monitorLo;
+        basis.monitorHi = shipped->monitorHi;
+        m_draft.basedOn = basis;
+    } else {
+        m_draft.basedOn.reset();      // nothing shipped here: there is no base to record
+    }
+
     NormPack pack = readUserPack();
     pack.upsert(m_draft);
 
