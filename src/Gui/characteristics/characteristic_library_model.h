@@ -74,6 +74,17 @@ public:
     //     causes[], effects[], bindings[], citation, state }
     Q_INVOKABLE QVariantMap detail(const QString &conditionId) const;
 
+    // The navigable causal DAG around one condition, already laid out — see dag_layout.h. QML
+    // renders `nodes` and `edges` and positions nothing; every coordinate, rank and encoding flag in
+    // here was decided in C++, where it can be tested.
+    //
+    // `options` carries the theme's own metrics (nodeH, gapX, gapY, laneGap, padX, charW, minW,
+    // maxW, depth, maxPerRank, includeMeasures); anything omitted keeps the DagLayoutOptions
+    // default. Returns { nodes[], edges[], width, height, focusX, focusY, truncated }, and an empty
+    // node list for an unknown id.
+    Q_INVOKABLE QVariantMap dag(const QString     &conditionId,
+                                const QVariantMap &options = {}) const;
+
     // Measures with no producer, ranked by how many conditions they block. EXCLUDES capture gaps —
     // listing something no sensor can ever resolve as missing pipeline work would corrupt the
     // roadmap's meaning for every other row (see captureGaps()).

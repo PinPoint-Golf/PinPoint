@@ -806,6 +806,82 @@ void CharacteristicEditorModel::removeCause(const QString &causeId)
     if (m_draftEdges.size() != before) touch();
 }
 
+QVariantMap CharacteristicEditorModel::linkCause(const QString &causeId, const QString &effectId,
+                                                 const QString &strength)
+{
+    if (m_editing)
+        return failResult(tr("Finish or discard the open edit first."));
+
+    const CharacteristicPack &p = m_provider->pack();
+    const Condition          *cause  = p.condition(causeId);
+    const Condition          *effect = p.condition(effectId);
+    if (!cause || !effect)  return failResult(tr("That is not in the library."));
+    if (causeId == effectId) return failResult(tr("Nothing causes itself."));
+
+    for (const Edge &e : p.edges)
+        if (e.type == EdgeType::Causes && e.from == causeId && e.to == effectId)
+            return failResult(tr("%1 already causes %2.").arg(cause->label, effect->label));
+
+    // A causal path the other way already exists, so this edge would close a loop. The validator
+    // would reject the assembled library — every characteristic, not just this one — so it is
+    // refused here, where the reason can still be said in the user's own terms.
+    if (hasCausalPath(p, effectId, causeId))
+        return failResult(tr("%1 already leads to %2, so this would make the chain circular.")
+                              .arg(effect->label, cause->label));
+
+    for (const Edge &e : p.edges)
+        if (e.type == EdgeType::Corroborates
+            && ((e.from == causeId && e.to == effectId) || (e.from == effectId && e.to == causeId)))
+            return failResult(tr("These two corroborate each other. One relationship or the other — "
+                                 "a pair that both causes and corroborates counts twice when the "
+                                 "explanation is ranked."));
+
+    // Copy the labels out BEFORE editing. save() reloads the provider, which destroys the pack
+    // these two point into — reading them afterwards is a use-after-free that would surface as a
+    // garbled toast on a good day.
+    const QString causeLabel  = cause->label;
+    const QString effectLabel = effect->label;
+
+    if (!beginEdit(effectId)) return failResult(tr("Could not open %1.").arg(effectLabel));
+    addCause(causeId, strength);
+    const QVariantMap r = save();
+    if (!r.value(QStringLiteral("ok")).toBool()) { discard(); return r; }
+
+    return okResult(tr("%1 now causes %2.").arg(causeLabel, effectLabel));
+}
+
+QVariantMap CharacteristicEditorModel::unlinkCause(const QString &causeId, const QString &effectId)
+{
+    if (m_editing)
+        return failResult(tr("Finish or discard the open edit first."));
+
+    const CharacteristicPack &p = m_provider->pack();
+    const Condition          *cause  = p.condition(causeId);
+    const Condition          *effect = p.condition(effectId);
+    if (!cause || !effect) return failResult(tr("That is not in the library."));
+
+    const bool exists = std::any_of(p.edges.begin(), p.edges.end(), [&](const Edge &e) {
+        return e.type == EdgeType::Causes && e.from == causeId && e.to == effectId;
+    });
+    if (!exists) return failResult(tr("There is no link to remove."));
+
+    const QString causeLabel  = cause->label;   // see linkCause: save() invalidates `p`
+    const QString effectLabel = effect->label;
+
+    if (!beginEdit(effectId)) return failResult(tr("Could not open %1.").arg(effectLabel));
+    removeCause(causeId);
+    const QVariantMap r = save();
+    if (!r.value(QStringLiteral("ok")).toBool()) { discard(); return r; }
+
+    // Say what it means, not what it did to the file. Dropping the last cause leaves a
+    // characteristic that can be reported and never explained, which is a validator warning and
+    // worth knowing before the reader walks away from the page.
+    const int left = int(causesOf(m_provider->pack(), effectId).size());
+    return left == 0
+               ? okResult(tr("Removed. Nothing in the library explains %1 now.").arg(effectLabel))
+               : okResult(tr("%1 no longer causes %2.").arg(causeLabel, effectLabel));
+}
+
 QVariantList CharacteristicEditorModel::candidateCauses(const QString &search) const
 {
     const CharacteristicPack &p = m_provider->pack();

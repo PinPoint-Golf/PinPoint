@@ -27,7 +27,7 @@ the ledger is not. A final sweep after stage 10 must find that table with nothin
 | 6 | `CorridorEditor.qml` | ☑ complete — **the pack meets real swings** | 2026-07-26 |
 | 7 | Editable bindings + direction control | ☑ complete — bindings **resolve and are honoured**, not just stored | 2026-07-26 |
 | — | **review gate** | | |
-| 8 | The navigable DAG | ☐ not started | |
+| 8 | The navigable DAG | ☑ complete — the causes/effects lists are now one walkable graph | 2026-07-27 |
 | 9 | Deletions and rewiring | ☐ not started | |
 | 10 | Health checks | ☐ not started | |
 | — | **clean-up sweep — the ledger at the end of this doc, nothing left open** | ☐ not started | |
@@ -55,31 +55,84 @@ picks up. Keep it factual — this is the handoff, not a summary.
 
 **And the first version of the control threw `ReferenceError: root is not defined` the moment it was clicked** — a defect no binding, no test and no screenshot could show, because it only exists inside an imperative handler. Two rules came out of it, both now written into `CharacteristicEditor.qml`: (1) a handler on a **composite** type cannot see this file's `root` — `PpPressable` declares its own `id: root`, which shadows it, and every chip in this file that works uses a plain `MouseArea`; (2) inside a Repeater delegate the ONLY file-level id that resolves is the component root, so `bindingToast.show(...)` in a delegate handler was the same bug waiting for the next click. Every delegate handler now calls a method on `root` (`_flipTail`, `_applyBinding`, `_dropBinding`) and those touch the other ids from file scope. The tail chips also became two explicit `TailChip` components instead of a nested Repeater — `Direction` is High|Low and always will be, so the second component boundary bought nothing. |
 | 2026-07-25 | pre-4 | **Three decisions from Mark, all landed.** (a) Fire-on-deviation confirmed. (b) `stanceWidth` is now **% of shoulder width** — invariant unit, computed from the shoulder pair over the same address reference frames; the millimetre reading moved to its own `stanceWidthMm` metric so both units stay invariant. (c) The two spinal measures are **roadmap items, not capture gaps**: they cannot come from the pose skeleton, but a DTL back-contour producer would resolve them, so `roleNeedsNonPoseSensor` keeps its detection and loses its "never" conclusion. Seed pack now has **zero capture gaps**. Tempo band re-cut DEFERRED pending a literature review. Analyzer suite 73/73; app + swinglab_run build. |
+| 2026-07-27 | 8 | **Stage 8 complete — causes and effects stopped being two lists.** `src/Diagnostics/dag_layout.{h,cpp}`: rank = signed causal distance (BFS in each direction, first visit wins, so a node reachable by two paths is drawn once at the nearer one), barycentre ordering swept OUTWARD from the focus in a single deterministic pass, columns laid out at the width of their widest node and stacked at a fixed pitch — which is what makes "no overlap" a property of two lines rather than a hope. Node width is estimated from label length rather than font metrics (this module has no QtGui, and the box elides), with the caller passing the `charW` it will actually render at; the estimate and the collision test read the same number, so they cannot disagree. **The focus's measures are drawn in their own LANE beneath the band** — a measure detects a condition, it does not cause one, and putting it in the left-to-right flow would state a relationship the pack does not hold. `CharacteristicLibraryModel::dag()` marshals it; `DagView.qml` renders it, holds no layout, and REPLACED the causes/effects block in `CharacteristicDetail.qml`. Tap re-centres and pushes a breadcrumb; Expand goes to depth 2 and stops; long-press opens a menu (open its own page / add the link / remove it); a measure node leaves for `MeasureDetail`. Whatever the bound cuts off is COUNTED on the node it hangs off (`+N` beside the box), because a graph that silently omits half of what it knows is worse than one that draws nothing. **`CharacteristicEditorModel` gained `linkCause()`/`unlinkCause()`** — one edge, whole load-edit-write cycle, since the detail page has no draft to hold a pending change; every refusal (self-edge, a link that would close a loop, a duplicate, a pair that already corroborates) is made BEFORE anything is written, and an open draft blocks the path rather than racing it. Two live defects found while verifying: a **polish loop** in the menu (a `Column` sized from its children's widths, with children sized from the column — now a `ColumnLayout`, which reads implicit sizes), and a caption that still read "one step away" under a two-step graph. Also promoted `measureStatusLabel()` to sit with its enum, retiring the second copy of those four strings. New suite `dag_layout_test`; analyzer suite **78/78**, all seven suites **106/106**. **Verified by DRIVING the interactions headlessly** — synthetic press/release into the live window for tap, long-press, menu-row and Expand — because the delegate-scope trap this stage was warned about throws only on click, and no binding, test or screenshot would have shown it. Next: review gate, then stage 9. |
+| 2026-07-27 | 8 (rework) | **The first version was cramped, unlabelled and tangled — all three were real, and two were layout defects rather than styling.** Mark's read of it: too little space, nothing saying what the lines meant, and "multiple competing graph arrows". (1) **Tangle.** An edge spanning more than one rank was drawn as ONE curve from end to end, so a cause that also causes an effect ran its line straight through the focus box. Fixed with **waypoints**: an edge crossing a rank now gets an invisible placeholder in that rank which takes up vertical space like a node, and the edge is emitted as one segment per hop, meeting at the waypoints with horizontal tangents so the chain reads as a single line. Edges also **fan** — each arrow gets its own point on a node's edge, ordered by where it is going, instead of every one converging on the vertical centre; and a same-rank edge now bulges into the empty gutter beside its column rather than across the middle. The new test samples every cubic at 17 points and fails if any lands inside a box that is not its own endpoint — **verified red** against the un-routed version, where it reported `cause2->effect2 crosses focus`. (2) **Unlabelled.** `DagHeading` (Caused by / Leads to / Measured by) is emitted with the span it belongs over; each causal relationship states its strength IN WORDS on the line, once, on the segment with the most room; and every relationship gets an arrowhead — emitted as three points, not an angle, because which end is the effect is the whole claim of a causal graph. The head SIZE tracks the fan spacing: five causes into one condition put five 9pt arrowheads within 4 px of each other and they merged into a solid comb. (3) **Cramped.** Gutters roughly doubled (gapX 52→120, gapY 12→34, laneGap 34→72, nodeH 34→44), the canvas floor raised to 360 so the graph is a panel rather than a strip, and node labels moved up a size. Two more defects fell out while verifying: the header strip was positioned per-column rather than above the whole band, so a tall column put its top box ABOVE the headings; and `CharacteristicLibraryModel::dag()` had never been taught to marshal `headings` or any of the new edge fields, so all three new things existed in C++ and reached nothing. Analyzer suite **78/78**, all seven suites **106/106**; interactions re-driven headlessly after the rework. |
 
 ---
 
-## ▶ Resuming at stage 8 — read this first
+## ▶ Resuming at stage 9 — read this first
 
 **Prompt to start with:**
 
-> Start stage 8 of the diagnostics norms plan — read
-> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 8".
+> Start stage 9 of the diagnostics norms plan — read
+> `docs/implementation/diagnostics_norms_impl_plan.md`, section "Resuming at stage 9".
 
-Everything through stage 7 is complete. Analyzer suite **77/77**; all seven CTest suites
-**105/105**; app builds clean and was verified running. Do not re-verify — the Progress table is
-authoritative. **Uncommitted at time of writing.**
+Everything through stage 8 is complete. Analyzer suite **78/78**; all seven CTest suites
+**106/106**; app builds clean and every interaction was driven headlessly. Do not re-verify — the
+Progress table is authoritative. **Uncommitted at time of writing.**
 
-Stage 8 is `dag_layout.{h,cpp}` + `DagView.qml` — see the stage section below. It is the only stage
-with no dependency on anything stage 7 built, so nothing here blocks it.
+Stage 9 is **deletions and rewiring** — the stage that removes the old corridor plumbing now that
+the norm stack has replaced it. Its full instruction list is in the stage section below and it is
+unusually literal; follow the ORDER, because two of the steps destroy information if run early.
 
-⚠ **Before writing `DagView.qml`, read the QML scope rules stage 7 paid for**, at the bottom of the
-stage-7 session-log entry. Stage 8 is a `Repeater` + `Shape` graph whose nodes are TAPPABLE, which is
-exactly the shape that bit stage 7: inside a Repeater delegate the only file-level id that resolves
-is the component root, and a handler on a composite type (`PpPressable`, which declares its own
-`id: root`) cannot see even that. It throws only when clicked — no binding, no test and no screenshot
-will show it. Delegates call methods on `root`; those methods touch every other id from file scope.
+### What stage 9 must not get wrong
 
-### What stage 7 established, which stage 8 should not contradict
+- **Convert the tempo corridor BEFORE deleting anything.** Its `contextNote` prose (the Address→Top
+  vs Takeaway→Top basis mismatch) is the only record of why that band is provisional. It moves to
+  the norm's citation/note field, or it is lost.
+- **`reference_bands_parity_test` dies at this stage, with the table and both old providers, as ONE
+  change.** It is a migration gate, not a permanent one: it pins norms.json to a frozen table, so
+  the first legitimate corpus re-seat of a wrist corridor will fail it. Deleting the test while
+  keeping the providers, or the reverse, leaves a gate that tests nothing. Ledger `C5`.
+- **`metric_catalog.cpp:183–202` feeds FOUR live surfaces** — `MetricDetail.qml`, `PpBandRail`,
+  `PpDashboardMotionZone`, `PpDashboardVerdictZone`. All four are recent work and all four need a
+  visual check after the re-point, not just a green suite. `measureForMetricAtPhase()` (built in
+  stage 5, `characteristic_pack.h`) is the join to point them at.
+
+### Where the engine still is not
+
+`C25` and `C3` are the same hole and stage 8 did not close it: **nothing in the app constructs
+`CharacteristicEngine`**. Bindings resolve, `detect()` honours them, the grade policy reaches the
+UI — and no shot runs through any of it. When it is wired it must be handed the shot's context
+(`C3b`) and the chosen grade policy, or the whole pack stays inert in a way every surface will
+report as "nothing was wrong".
+
+### What stage 8 built, in one paragraph
+
+`src/Diagnostics/dag_layout.{h,cpp}` — ranks by signed causal distance (BFS, first visit wins),
+orders each rank by barycentre sweeping outward from the focus, and emits `{id, kind, x, y, w, h}`
+per node plus a cubic per edge, with every encoding flag (latent, offeredOnly, available +
+reason, coverage, hidden counts) decided in C++. `CharacteristicLibraryModel::dag()` marshals it;
+`DagView.qml` renders it and positions nothing. It REPLACED the causes/effects lists in
+`CharacteristicDetail.qml`. Edges spanning more than one rank are routed through WAYPOINTS that
+reserve vertical space in the ranks they cross, arrows FAN at both ends, each relationship states
+its strength in words on its own line, and the two sides are headed "Caused by" and "Leads to". `CharacteristicEditorModel` gained `linkCause()`/`unlinkCause()` — one
+edge, whole cycle, with the cycle/duplicate/self/corroborates refusals stated before anything is
+written.
+
+### Facts stage 9 should not re-derive
+
+- **`measureStatusLabel()` now lives with the enum** (`characteristic.cpp`'s table), and
+  `resolvabilityLabel()` in `characteristic_library_model.cpp` forwards to it. Two copies of a
+  user-facing string had already appeared; there must not be a third.
+- **A LocalUser pack REPLACES the edge set of any condition it names as an effect**
+  (`merged_pack_provider.cpp`). Any code that writes one edge must therefore write the condition's
+  WHOLE incoming set — which is why `linkCause()` goes through `beginEdit`/`addCause`/`save` rather
+  than appending to `m_userPack.edges`, and why its test asserts the four shipped edges survive.
+- **`save()` reloads the provider**, which destroys the pack any `const Condition *` points into.
+  Copy labels out before calling it. This was live in the first draft of `linkCause()`.
+- **The Qt offscreen platform caps the screen at 800×800** and there is no Xvfb on this box. Grab
+  with `QT_SCALE_FACTOR=0.5`.
+
+### The QML scope rules, which stage 8 also had to obey
+
+Unchanged from stage 7 and now written into `DagView.qml` as well: inside a Repeater delegate the
+ONLY file-level id that resolves is the component root, and a handler on a composite type (which
+declares its own `id: root`) cannot see even that. Every delegate handler in `DagView.qml` calls a
+method on `root`; those methods touch `nodeMenu`, `toast` and the caption from file scope. It throws
+only when clicked, so it was verified by DRIVING the clicks — see the session log.
+
+### What stage 7 established, which the later stages should not contradict
 
 - **A binding is an EXCEPTION, not a declaration.** `resolveContextBinding()` (`context_tree.h`)
   walks the chain exactly as a norm does: nearest row wins, and a condition with no row anywhere on
@@ -102,7 +155,7 @@ will show it. Delegates call methods on `root`; those methods touch every other 
 - **The picker will not mint a measure with no `highMeans`.** That gate is the whole reason stage 4
   existed; three signals shipped inverted for want of one sentence.
 
-### Owed from stage 7
+### Owed from stage 7 (kept for the record)
 
 In the **clean-up sweep** at the end of this document, as always. `C6` is closed. `C25` is new and
 is the real one: bindings now resolve and the engine honours them, **but nothing in the app
@@ -555,7 +608,7 @@ it fires happily, on the wrong swings, with correct-sounding consequence text at
 `ContextBinding::corridorRef` removed at all four sites (`C6`). A pack still carrying the key loads
 clean and drops it on the next save.
 
-### 8 — The navigable DAG
+### 8 — The navigable DAG  ☑ built
 
 `dag_layout.h/.cpp` in C++ — **no layout logic in QML**. Rank nodes by signed distance from
 focus (causes negative, effects positive); barycentre ordering within rank; emit
@@ -912,6 +965,37 @@ corpus-scale work and a separate exercise — a single swing never judges it.
   they were fixed because the plan's own gate is "all seven suites", and a gate with two suites
   silently short is not a gate.
 
+- **Rank is the SHORTEST causal distance, and a node is drawn once.** A condition reachable as a
+  cause at both one and two steps is placed at one. Drawing it at both distances would make one
+  condition look like two, and the nearer explanation is the one a coach acts on.
+
+- **A measure gets its own LANE, not a rank.** It was tempting to put the focus's measures at rank 0
+  beside it, or one column further left. Both state a relationship the pack does not hold: a measure
+  detects a condition, it does not cause one, and this view's whole readability rests on
+  left-to-right meaning "causes" without a legend.
+
+- **Node width is estimated from label length, not measured.** `dag_layout` is Qt-only and has no
+  `QFontMetrics` — the right trade, because the node is a fixed-height pill with elided text, so an
+  approximate width costs a little slack at the end of a long label and nothing else. What has to be
+  exact is that no two boxes overlap, and overlap is decided from the same numbers, so the layout and
+  the collision test cannot disagree about a width they both read from one function. The caller
+  passes the `charW` it will actually render at, so the estimate tracks the theme.
+
+- **The graph edits go through `beginEdit`/`addCause`/`save`, not through `m_userPack.edges`.** A
+  LocalUser pack REPLACES the incoming edge set of any condition it names as an effect
+  (`merged_pack_provider.cpp`), so a user row carrying only the new edge would silently delete every
+  shipped one. Reusing the draft path means the whole set is rewritten by construction; the test
+  asserts the four shipped edges into `c_posture` survive a link and an unlink.
+
+- **A cycle is refused in `linkCause()`, not left to the validator.** The assembled library is
+  re-validated after every merge, so one circular edge fails every characteristic rather than the
+  one being edited. Refusing it at the point of the edit is also the only place the reason can still
+  be stated in the content's own words ("X already leads to Y").
+
+- **An open draft BLOCKS a graph edit rather than merging with it.** Two unsynchronised writers onto
+  one condition means whichever saves second discards the other's work, and neither user action
+  looks like it lost anything.
+
 ## The clean-up sweep — everything owed before this work is done
 
 **This is the ledger, and it is the only durable one.** The "Resuming at stage N" block at the top
@@ -957,6 +1041,12 @@ question that was answered and one that was never asked.
 | C27 | Tapping a near-duplicate in the measure picker COMMITTED a tail the author had not seen yet, read against a different measure's convention — now selects, and the tail is chosen after — **fixed** | 7 | ☑ closed |
 | C29 | Which side of the corridor fires was **invisible on the read-only detail page** (`direction` was marshalled from the start and rendered nowhere) and **unchangeable once set** — Mark's ask; both fixed | 7 follow-up | ☑ closed |
 | C30 | Nothing stops a condition carrying BOTH tails of one measure via "Add a measure" twice — it would fire either side. `setSignalDirection()` refuses to create the pair, so the flip path is safe; the attach path still needs a validator check | 10 | ☐ open |
+| C31 | **Removing a causal link from the DAG has no Undo.** The toast reports it and the inverse is one long-press away, but the project's own rule is that a recoverable removal offers an undo in the same breath — as the binding cascade does | 10 | ☐ open |
+| C32 | The DAG's per-rank cap (10) and depth ceiling (2) are **unvalidated against a grown library**. Both were chosen to stop a hub becoming a hairball; nobody has yet looked at the pack that makes them bite | when the pack grows | ☐ open |
+| C34 | An edge spanning more than one rank was drawn straight THROUGH whatever sat between its ends — **fixed** by waypoint routing, with a test that samples every curve and fails on any box it crosses (verified red) | 8 rework | ☑ closed |
+| C35 | `dag()` never marshalled `headings` or the label/arrowhead fields, so three finished C++ features reached nothing — **fixed**. A marshaller is the one place a feature can be complete on both sides and still absent | 8 rework | ☑ closed |
+| C36 | The DAG's measure lane **repeats** the DETECTED FROM block directly above it on the same page. It earns its place as tappable navigation, but two renderings of one fact on one screen is a question for the review gate, not a settled design | review gate | ☐ open |
+| C33 | A **polish loop** in the DAG's long-press menu (a `Column` sized from its children while they were sized from it) — **fixed** by switching to `ColumnLayout`. Recorded because it appeared only in the log, not on screen | 8 | ☑ closed |
 | C28 | 40 of 67 core measures carry no `highMeans`. The picker now refuses to mint without one, so this is a floor for NEW content only; the existing 40 are all wrist cell-measures with no signals, and `axis_direction_test` still gates every signal-bearing one | with C10 / per producer | ☐ open |
 
 ### C18–C21 — what happened the first time the pack met real swings

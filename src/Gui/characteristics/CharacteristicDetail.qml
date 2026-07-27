@@ -21,22 +21,29 @@ import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import PinPointStudio
 
-// Detail page for one condition. Read-only in this pass; the sentence editor lands separately.
+// Detail page for one condition.
 //
-// Shows causes AND effects, because the same condition is routinely both — a page that showed only
-// one direction would hide half the graph and make a chain look like a root.
+// Causes and effects are ONE graph, not two lists. They used to be rendered as a pair of stacked
+// lists here, which said how many of each there were and nothing about the shape they sat in — and
+// following a chain back to its root meant a page load per step. DagView replaces both: it is a
+// navigation surface, and it is where the same-condition-is-both-a-cause-and-an-effect structure
+// this pack is built on finally shows.
 Item {
     id: root
 
     property var    detail: ({})       // CharacteristicLibraryModel.detail()
     property string locale: "en"
 
+    // The graph asks the model for its own layout, so the detail map is not enough.
+    required property var library      // CharacteristicLibraryModel
+    property var          editor: null // CharacteristicEditorModel — omit for a read-only graph
+
     signal back()
     signal edit()
     signal openCondition(string conditionId)
+    signal openMeasure(string measureId)
+    signal graphChanged()
 
-    readonly property var _causes:   detail.causes   || []
-    readonly property var _effects:  detail.effects  || []
     readonly property var _measures: detail.measures || []
 
     ScrollView {
@@ -237,98 +244,18 @@ Item {
                 }
             }
 
-            // ── Causes and effects ───────────────────────────────────────────
-            Repeater {
-                model: [
-                    { head: qsTr("USUALLY CAUSED BY"), rows: root._causes,
-                      empty: qsTr("Nothing in the library explains this yet.") },
-                    { head: qsTr("WHICH IN TURN CAUSES"), rows: root._effects, empty: "" }
-                ]
+            // ── How it connects ──────────────────────────────────────────────
+            // The whole causes/effects picture, walkable. Replaces the two lists that used to sit
+            // here; every coordinate in it comes from dag_layout.cpp.
+            DagView {
+                Layout.fillWidth: true
+                library: root.library
+                editor:  root.editor
+                rootId:  root.detail.id || ""
 
-                delegate: ColumnLayout {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    spacing: Theme.sp(8)
-                    visible: modelData.rows.length > 0 || modelData.empty.length > 0
-
-                    Text {
-                        text:                modelData.head
-                        font.family:         Theme.fontBody
-                        font.pixelSize:      Theme.fontSzMicro
-                        font.letterSpacing:  Theme.trackingMicro
-                        font.capitalization: Font.AllUppercase
-                        color:               Theme.colorText3
-                    }
-
-                    Text {
-                        visible:        modelData.rows.length === 0
-                        text:           modelData.empty
-                        font.family:    Theme.fontBody
-                        font.pixelSize: Theme.fontSzBody2
-                        color:          Theme.colorText3
-                    }
-
-                    Repeater {
-                        model: modelData.rows
-                        delegate: Item {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            implicitHeight: Theme.sp(38)
-
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: Theme.radius
-                                color:  linkMa.containsMouse ? Theme.colorBg2 : "transparent"
-                                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
-                            }
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin:  Theme.sp(10)
-                                anchors.rightMargin: Theme.sp(10)
-                                spacing: Theme.sp(8)
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text:           modelData.label || modelData.id
-                                    font.family:    Theme.fontBody
-                                    font.pixelSize: Theme.fontSzBody2
-                                    // An Asserted cause is OFFERED, never concluded — it must look
-                                    // different everywhere it appears.
-                                    color:          modelData.offeredOnly === true ? Theme.colorText3
-                                                                                   : Theme.colorText
-                                    font.italic:    modelData.offeredOnly === true
-                                    elide:          Text.ElideRight
-                                }
-
-                                // Strength as a WORD. It is a ranking weight, not a probability,
-                                // and must never be rendered as a percentage.
-                                Text {
-                                    text:           modelData.strengthLabel || ""
-                                    font.family:    Theme.fontBody
-                                    font.pixelSize: Theme.fontSzMicro
-                                    color:          Theme.colorText3
-                                }
-
-                                Text {
-                                    visible:        (modelData.reach || "measured") !== "measured"
-                                    text:           modelData.reachLabel || ""
-                                    font.family:    Theme.fontBody
-                                    font.pixelSize: Theme.fontSzMicro
-                                    color:          Theme.colorText3
-                                }
-                            }
-
-                            MouseArea {
-                                id: linkMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape:  Qt.PointingHandCursor
-                                onClicked:    root.openCondition(modelData.id)
-                            }
-                        }
-                    }
-                }
+                onOpenCondition: function (conditionId) { root.openCondition(conditionId) }
+                onOpenMeasure:   function (measureId)   { root.openMeasure(measureId) }
+                onGraphChanged:  root.graphChanged()
             }
 
             // ── Provenance ───────────────────────────────────────────────────

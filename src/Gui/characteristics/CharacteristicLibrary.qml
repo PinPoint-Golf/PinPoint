@@ -441,9 +441,23 @@ Item {
         detail:  (root._selectedId !== "" && root._revision >= 0)
                  ? library.detail(root._selectedId) : ({})
 
+        library: library
+        // The graph's one editing affordance writes a single edge through the editor model. It is
+        // handed the same instance the authoring sheet uses so both see one user pack.
+        editor:  editor
+
         onBack: root._selectedId = ""
         // Causes are conditions, so following one is just another detail page.
         onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }
+        // A measure node leaves the graph for the measure's own page, which is where its corridor,
+        // its norms and its other users are.
+        onOpenMeasure: function(measureId) {
+            root._selectedId = ""
+            root.showMeasure(measureId)
+        }
+        // An edge was added or removed from the graph: the census, the directory rows and this
+        // page's own detail map are all now stale.
+        onGraphChanged: root._revision++
         onEdit: {
             if (editor.beginEdit(root._selectedId)) root._editing = true
         }

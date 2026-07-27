@@ -250,6 +250,7 @@ struct CharacteristicPack {
 QString measureKindName(MeasureKind k);
 bool    measureKindFromName(const QString &s, MeasureKind &out);
 QString measureStatusName(MeasureStatus s);
+QString measureStatusLabel(MeasureStatus s);   // "Live", "No producer", … — the UI's own words
 bool    measureStatusFromName(const QString &s, MeasureStatus &out);
 QString signalTestName(SignalTest t);
 bool    signalTestFromName(const QString &s, SignalTest &out);

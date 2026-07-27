@@ -523,6 +523,7 @@ set_tests_properties(characteristic_editor_test PROPERTIES
 pp_add_test(diagnostics_catalogue_integrity_test
     SOURCES ${DIAG}/tests/diagnostics_catalogue_integrity_test.cpp ${DIAG_PACK}
             ${SRC}/Gui/characteristics/characteristic_library_model.cpp
+            ${DIAG}/dag_layout.cpp
             ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
             ${DIAG}/merged_pack_provider.cpp
             ${SRC}/Metrics/metric_catalogue.cpp
@@ -539,6 +540,14 @@ pp_add_test(diagnostics_catalogue_integrity_test
 # resource — absent from a standalone binary. Point it at the reviewable JSON instead.
 set_tests_properties(diagnostics_catalogue_integrity_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
+# The causal DAG's layout. Everything about that view that can be wrong in a way a screenshot would
+# not show: two boxes on top of each other (a hidden node reads as a graph that lacks it), a picture
+# that reshuffles between visits, a depth bound that silently drops what it cut, and the empty state
+# — a characteristic connected to nothing, which is every freshly authored one.
+pp_add_test(dag_layout_test
+    SOURCES ${DIAG}/tests/dag_layout_test.cpp ${DIAG}/dag_layout.cpp ${DIAG_PACK}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 
 # ── Norms ───────────────────────────────────────────────────────────────────
 set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp

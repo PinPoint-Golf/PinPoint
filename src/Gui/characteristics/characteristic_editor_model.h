@@ -161,6 +161,23 @@ public:
     Q_INVOKABLE void         removeCause(const QString &causeId);
     Q_INVOKABLE QVariantList candidateCauses(const QString &search = QString()) const;
 
+    // ── One link at a time, from the graph ──────────────────────────────────
+    //
+    // The three above edit a DRAFT and take effect on save. The DAG on the detail page has no draft
+    // — it is a read-only surface with one editing affordance — so these two do the whole cycle
+    // (load the effect, change one edge, write) and report what happened. They refuse while a draft
+    // is open rather than racing it: two unsynchronised edit paths onto one condition is how the
+    // later save silently discards the earlier one.
+    //
+    // Both return { ok, message }. The refusals are the point: a self-edge, a link that would make
+    // the graph cyclic, and a pair that already corroborates each other (the validator forbids
+    // Corroborates alongside a causal path, so adding the edge would break the whole library rather
+    // than just this row). Each is refused BEFORE anything is written, with the reason in the
+    // message — a graph edit that half-lands is not recoverable by a reader.
+    Q_INVOKABLE QVariantMap linkCause(const QString &causeId, const QString &effectId,
+                                      const QString &strength = QStringLiteral("moderate"));
+    Q_INVOKABLE QVariantMap unlinkCause(const QString &causeId, const QString &effectId);
+
     // ── The measure picker ──────────────────────────────────────────────────
     // A typed phrase SEEDS facet selections; it is not a query. Wrong guesses are corrected by
     // tapping chips, which is far easier than rephrasing a search that returned nothing.

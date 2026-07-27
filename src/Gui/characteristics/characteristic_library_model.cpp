@@ -18,6 +18,7 @@
 
 #include "characteristic_library_model.h"
 
+#include "../../Diagnostics/dag_layout.h"      // the causal DAG, laid out in C++
 #include "../../Diagnostics/norm_provider.h"   // the context tree, for binding labels
 #include "metric_catalogue.h"
 
@@ -32,16 +33,9 @@ using namespace pinpoint::analysis;
 
 namespace {
 
-QString resolvabilityLabel(MeasureStatus s)
-{
-    switch (s) {
-    case MeasureStatus::Live:          return QObject::tr("Live");
-    case MeasureStatus::Planned:       return QObject::tr("Planned");
-    case MeasureStatus::NoProducer:    return QObject::tr("No producer");
-    case MeasureStatus::NotCapturable: return QObject::tr("Not measurable from capture");
-    }
-    return QString();
-}
+// The four status words live with the enum (characteristic.cpp's table), not here. They are read by
+// the DAG's measure lane too, and two copies of a user-facing string are two copies that can drift.
+QString resolvabilityLabel(MeasureStatus s) { return measureStatusLabel(s); }
 
 // The weakest status across a condition's measures decides how the row reads: a characteristic is
 // only as resolvable as its least resolvable input.
@@ -306,6 +300,109 @@ QVariantMap CharacteristicLibraryModel::detail(const QString &conditionId) const
                      .arg(immaterialLabels.join(QStringLiteral(", ")));
     out.insert(QStringLiteral("appliesSummary"), parts.join(QLatin1Char(' ')));
 
+    return out;
+}
+
+QVariantMap CharacteristicLibraryModel::dag(const QString &conditionId, const QVariantMap &options) const
+{
+    DagLayoutOptions opt;
+    auto num = [&options](const char *key, double def) {
+        const QVariant v = options.value(QString::fromLatin1(key));
+        return v.isValid() ? v.toDouble() : def;
+    };
+    opt.nodeH      = num("nodeH", opt.nodeH);
+    opt.gapX       = num("gapX", opt.gapX);
+    opt.gapY       = num("gapY", opt.gapY);
+    opt.laneGap    = num("laneGap", opt.laneGap);
+    opt.padX       = num("padX", opt.padX);
+    opt.charW      = num("charW", opt.charW);
+    opt.minW       = num("minW", opt.minW);
+    opt.maxW       = num("maxW", opt.maxW);
+    opt.depth      = int(num("depth", opt.depth));
+    opt.maxPerRank = int(num("maxPerRank", opt.maxPerRank));
+    opt.includeMeasures =
+        options.value(QStringLiteral("includeMeasures"), opt.includeMeasures).toBool();
+
+    const DagLayout l = layoutDag(m_provider->pack(), conditionId, opt);
+
+    QVariantList nodes;
+    for (const DagNode &n : l.nodes) {
+        QVariantMap m;
+        m.insert(QStringLiteral("id"), n.id);
+        m.insert(QStringLiteral("kind"), dagNodeKindName(n.kind));
+        m.insert(QStringLiteral("label"), n.label);
+        m.insert(QStringLiteral("rank"), n.rank);
+        m.insert(QStringLiteral("x"), n.x);
+        m.insert(QStringLiteral("y"), n.y);
+        m.insert(QStringLiteral("w"), n.w);
+        m.insert(QStringLiteral("h"), n.h);
+        m.insert(QStringLiteral("latent"), n.latent);
+        m.insert(QStringLiteral("offeredOnly"), n.offeredOnly);
+        m.insert(QStringLiteral("reach"), n.reach);
+        m.insert(QStringLiteral("reachLabel"), n.reachLabel);
+        m.insert(QStringLiteral("available"), n.available);
+        m.insert(QStringLiteral("unavailableReason"), n.unavailableReason);
+        m.insert(QStringLiteral("coverage"), n.coverage);
+        m.insert(QStringLiteral("hiddenCauses"), n.hiddenCauses);
+        m.insert(QStringLiteral("hiddenEffects"), n.hiddenEffects);
+        m.insert(QStringLiteral("groupLabel"), n.groupLabel);
+        m.insert(QStringLiteral("statusLabel"), n.statusLabel);
+        m.insert(QStringLiteral("metricKey"), n.metricKey);
+        nodes.append(m);
+    }
+
+    QVariantList edges;
+    for (const DagEdge &e : l.edges) {
+        QVariantMap m;
+        m.insert(QStringLiteral("from"), e.from);
+        m.insert(QStringLiteral("to"), e.to);
+        m.insert(QStringLiteral("strength"), e.strength);
+        m.insert(QStringLiteral("strengthLabel"), e.strengthLabel);
+        m.insert(QStringLiteral("weight"), e.weight);
+        m.insert(QStringLiteral("detects"), e.detects);
+        m.insert(QStringLiteral("offeredOnly"), e.offeredOnly);
+        m.insert(QStringLiteral("segment"), e.segment);
+        m.insert(QStringLiteral("segments"), e.segments);
+        m.insert(QStringLiteral("x1"), e.x1);
+        m.insert(QStringLiteral("y1"), e.y1);
+        m.insert(QStringLiteral("c1x"), e.c1x);
+        m.insert(QStringLiteral("c1y"), e.c1y);
+        m.insert(QStringLiteral("c2x"), e.c2x);
+        m.insert(QStringLiteral("c2y"), e.c2y);
+        m.insert(QStringLiteral("x2"), e.x2);
+        m.insert(QStringLiteral("y2"), e.y2);
+        m.insert(QStringLiteral("label"), e.label);
+        m.insert(QStringLiteral("labelX"), e.labelX);
+        m.insert(QStringLiteral("labelY"), e.labelY);
+        m.insert(QStringLiteral("tip"), e.tip);
+        m.insert(QStringLiteral("tipAx"), e.tipAx);
+        m.insert(QStringLiteral("tipAy"), e.tipAy);
+        m.insert(QStringLiteral("tipBx"), e.tipBx);
+        m.insert(QStringLiteral("tipBy"), e.tipBy);
+        m.insert(QStringLiteral("tipCx"), e.tipCx);
+        m.insert(QStringLiteral("tipCy"), e.tipCy);
+        edges.append(m);
+    }
+
+    QVariantList headings;
+    for (const DagHeading &h : l.headings) {
+        QVariantMap m;
+        m.insert(QStringLiteral("label"), h.label);
+        m.insert(QStringLiteral("x"), h.x);
+        m.insert(QStringLiteral("y"), h.y);
+        m.insert(QStringLiteral("w"), h.w);
+        headings.append(m);
+    }
+
+    QVariantMap out;
+    out.insert(QStringLiteral("nodes"), nodes);
+    out.insert(QStringLiteral("edges"), edges);
+    out.insert(QStringLiteral("headings"), headings);
+    out.insert(QStringLiteral("width"), l.width);
+    out.insert(QStringLiteral("height"), l.height);
+    out.insert(QStringLiteral("focusX"), l.focusX);
+    out.insert(QStringLiteral("focusY"), l.focusY);
+    out.insert(QStringLiteral("truncated"), l.truncated);
     return out;
 }
 

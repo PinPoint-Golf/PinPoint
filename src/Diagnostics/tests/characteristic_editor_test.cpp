@@ -586,6 +586,102 @@ int main(int argc, char **argv)
 
     QFile::remove(userPackPath());
 
+    // ── One link at a time, from the graph ──────────────────────────────────────
+    //
+    // linkCause/unlinkCause do the whole load-edit-write cycle in one call, because the DAG on the
+    // detail page has no draft to hold a pending change. The refusals are the substance: each is a
+    // way the library can be broken by an edit that looks locally reasonable, and each has to be
+    // caught BEFORE anything is written.
+    {
+        {
+            CharacteristicEditorModel ed;
+
+            check(!ed.linkCause(QStringLiteral("c_posture"), QStringLiteral("c_posture"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "nothing causes itself");
+            check(!ed.linkCause(QStringLiteral("nosuch"), QStringLiteral("c_posture"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "an id that is not in the library is refused");
+            check(!ed.linkCause(QStringLiteral("thoracic_kyphosis"), QStringLiteral("c_posture"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "a link that already exists is refused rather than duplicated");
+
+            // The one that would take the WHOLE library down: the assembled pack is re-validated
+            // after every merge, so a cycle here would fail every characteristic, not just this
+            // one. It has to be refused where the reason can still be stated in the user's terms.
+            check(!ed.linkCause(QStringLiteral("c_posture"), QStringLiteral("thoracic_kyphosis"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "a link that would close a loop is refused");
+
+            const QVariantMap r = ed.linkCause(QStringLiteral("stance_wide"),
+                                               QStringLiteral("c_posture"),
+                                               QStringLiteral("weak"));
+            check(r.value(QStringLiteral("ok")).toBool(), "an unrelated pair links");
+            check(r.value(QStringLiteral("message")).toString().contains(QStringLiteral("causes")),
+                  "and says what it did in the content's own words");
+
+            // A draft in flight and a one-shot graph edit are two unsynchronised writers onto one
+            // condition; whichever saved second would silently discard the other.
+            ed.beginEdit(QStringLiteral("c_posture"));
+            check(!ed.linkCause(QStringLiteral("ball_back"), QStringLiteral("c_posture"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "an open draft blocks a graph edit rather than racing it");
+            check(!ed.unlinkCause(QStringLiteral("stance_wide"), QStringLiteral("c_posture"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "…and blocks the removal too");
+            ed.discard();
+        }
+
+        // It landed in the USER pack, and the core edges for that condition came with it. The merge
+        // REPLACES the edge set of any condition a user pack names as an effect, so a user row
+        // carrying only the new edge would silently delete the four shipped ones.
+        {
+            QFile f(userPackPath());
+            check(f.open(QIODevice::ReadOnly), "the user pack is readable");
+            const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            check(res.parsed, "it parses");
+
+            int  into = 0;
+            bool hasNew = false, hasShipped = false;
+            for (const Edge &e : res.pack.edges) {
+                if (e.to != QStringLiteral("c_posture")) continue;
+                ++into;
+                if (e.from == QStringLiteral("stance_wide"))       hasNew     = true;
+                if (e.from == QStringLiteral("thoracic_kyphosis")) hasShipped = true;
+            }
+            check(hasNew, "the new edge round-trips");
+            check(hasShipped, "and the shipped edges are carried with it, not replaced by it");
+            check(into == 5, "four shipped plus one new");
+        }
+
+        // Removing it puts the condition back where it started.
+        {
+            CharacteristicEditorModel ed;
+            check(!ed.unlinkCause(QStringLiteral("ball_back"), QStringLiteral("c_posture"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "a link that is not there cannot be removed");
+            check(ed.unlinkCause(QStringLiteral("stance_wide"), QStringLiteral("c_posture"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "the link comes back out");
+        }
+        {
+            QFile f(userPackPath());
+            check(f.open(QIODevice::ReadOnly), "the user pack is still readable");
+            const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            int  into = 0;
+            bool hasNew = false;
+            for (const Edge &e : res.pack.edges) {
+                if (e.to != QStringLiteral("c_posture")) continue;
+                ++into;
+                if (e.from == QStringLiteral("stance_wide")) hasNew = true;
+            }
+            check(!hasNew, "the removed edge is gone");
+            check(into == 4, "and the four shipped ones survived the round trip");
+        }
+    }
+
+    QFile::remove(userPackPath());
+
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
 }

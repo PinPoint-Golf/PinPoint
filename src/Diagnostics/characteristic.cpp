@@ -159,6 +159,7 @@ QString measureKindName(MeasureKind k) { return nameOf(kMeasureKinds, k); }
 bool    measureKindFromName(const QString &s, MeasureKind &out) { return fromName(kMeasureKinds, s, out); }
 
 QString measureStatusName(MeasureStatus s) { return nameOf(kMeasureStatuses, s); }
+QString measureStatusLabel(MeasureStatus s) { return labelOf(kMeasureStatuses, s); }
 bool    measureStatusFromName(const QString &s, MeasureStatus &out) { return fromName(kMeasureStatuses, s, out); }
 
 QString signalTestName(SignalTest t) { return nameOf(kSignalTests, t); }

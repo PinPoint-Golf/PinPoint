@@ -420,6 +420,7 @@ qt_add_qml_module(PinPointStudio
         src/Gui/characteristics/MeasureCatalogue.qml
         src/Gui/characteristics/MeasureDetail.qml
         src/Gui/characteristics/CorridorEditor.qml
+        src/Gui/characteristics/DagView.qml
         src/Gui/characteristics/RoadmapView.qml
         src/Gui/characteristics/HealthView.qml
         src/Gui/diagnostics/WristDiagnostics.qml
@@ -477,6 +478,8 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/characteristic_engine.cpp
         src/Diagnostics/relation_resolver.h
         src/Diagnostics/relation_resolver.cpp
+        src/Diagnostics/dag_layout.h
+        src/Diagnostics/dag_layout.cpp
         src/Diagnostics/norm.h
         src/Diagnostics/context_tree.h
         src/Diagnostics/context_tree.cpp
