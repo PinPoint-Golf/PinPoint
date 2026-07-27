@@ -321,7 +321,16 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
                        const ContextTree *contexts = nullptr, const QString &contextId = {});
 ```
 
-Per condition: skip `Latent` ones (no signals by definition), resolve the context binding, evaluate every signal, emit a `Finding`.
+Per condition: skip `Latent` ones (no signals by definition), skip `Retired` and `Superseded` ones,
+resolve the context binding, evaluate every signal, emit a `Finding`.
+
+**`ConditionState` gates detection on those two values and no others.** They are the states that
+mean *withdrawn*, and withdrawn content must not diagnose — until this was added the engine read all
+six identically, so retiring a characteristic changed a badge and nothing else. The other four are
+editorial confidence rather than withdrawal, and **62 of the 112 shipped conditions are `Draft`** —
+reading "not finished" as "not in use" would dark more than half the library while every census
+still said it was there. A `Superseded` condition must name its successor (the validator refuses
+otherwise), so the replacement is already in the pack and evaluates in its place.
 
 Three rules that must not be softened downstream:
 
@@ -432,7 +441,7 @@ The section to read before assuming anything here runs. "Dormant" means written 
 
 ### 8.3 Content — the shipped numbers
 
-**Pack** (`core.json`) — 106 measures, 83 signals, 112 conditions, 159 edges:
+**Pack** (`core.json`) — 106 measures, 83 signals, 112 conditions, 178 edges:
 
 | Measures | | Signals | | Conditions | |
 |---|---|---|---|---|---|
@@ -447,7 +456,7 @@ The section to read before assuming anything here runs. "Dormant" means written 
 | | | | | with binding rows | **0** |
 
 Reducers: 52 `at`, 42 `delta`, 10 `extremum`, 2 `rate`.
-Edges: 145 `Causes`, 9 `Corroborates`, 5 `Excludes` — 61 strong, 83 moderate, 15 weak.
+Edges: 164 `Causes`, 9 `Corroborates`, 5 `Excludes` — 69 strong, 94 moderate, 15 weak.
 Groups: setup 41, ballFlight 20, armsAndClub 15, impact 9, lateral 8, posture 7, sequence 6,
 release 3, finish 3.
 
@@ -473,6 +482,16 @@ cost no pipeline work whatsoever.
 
 The single `order` signal (`sig_sequenceOrder`) still cannot fire: both of its measures
 (`m_pelvisRotPeak`, `m_thoraxRotPeak`) are `planned`.
+
+**Every one of those 16 can also be EXPLAINED**, and that was not true when they were first
+counted. Ten of them had no cause at all and four had neither cause nor effect — so the least
+explicable part of the library was precisely the part a golfer would meet first. The gap formed at
+the intersection of two healthy-looking states: the causal work went in per GROUP, while the firing
+set is decided per PRODUCER, and the eleven live-but-unclaimed producer keys arrived after their
+group had been wired. Nothing reported it, because `noCause` is a warning that fires 25 more times
+on content nobody can capture yet. `core_pack_test` now gates it directly — scoped to what can fire,
+because a `noCause` on a producer-less condition is a backlog and a condition that fires TODAY with
+nothing behind it is a defect in what ships.
 
 **A constraint that caps all of this**: most pose metrics are session-gated to Wrist Motion
 (`wristSessionOk`, sessionType 1 or −1) — a documented catalogue design, not a bug — so the head,
@@ -505,6 +524,14 @@ Four validators, plus one set of checks that spans them.
 | `diagnosticsHealth(pack, norms, catalogue)` | all three registries at once | `CharacteristicLibraryModel::health()` |
 
 `validateNormsAgainst()` had owned `normUnitMismatch`, `unknownNormMeasure`, `unknownNormContext` and `normNotCapturable` since stage 1 with exactly one caller: its own test. **A check that never runs is indistinguishable from a check that passes.** If you add a referential check, add the call site in the same change.
+
+**And a check that cannot stay silent is worse than none.** `observableNoSignal` fired on all seven
+signal-less strike outcomes — `chunk`, `thin`, `top`, `sky`, `shank`, `pull_hook`, `push_slice` —
+which are `Observable` (a golfer can plainly see a thin shot) and `Asserted` (we cannot measure it
+from our pixels) *by design*. Seven rows describing the design is a health list people learn to
+scroll past. It is now scoped by `ConfirmedBy`, exactly as `inconsistentReach` one line below it
+always was. `bothTailsOneCondition`, `inconsistentReach`, `needsRevalidation` and `duplicateMeasure`
+had no test in either direction, which is how that survived; all four are now gated both ways.
 
 `health()` merges three sources — the pack validator's warnings, the norm set's own (which `norm_provider.h` had promised were "part of the health list" while they were not), and `diagnosticsHealth()`. Codes, with what each means an author should DO, are documented at the top of `diagnostics_health.h`.
 
@@ -586,7 +613,7 @@ All in the analyzer suite: `cmake -S src/Analysis/tests -B build/analyzer-tests`
 | Suite | Gates |
 |---|---|
 | `characteristic_pack_test` | load, save, validation, every error and warning code |
-| `core_pack_test` | the SHIPPED pack: ids, referential integrity, and that every live corridor signal can fire |
+| `core_pack_test` | the SHIPPED pack: ids, referential integrity, that every live corridor signal can fire, and that **everything which can fire can also be explained** — a condition detectable today with no cause is a defect, not a backlog item |
 | `axis_direction_test` | every corridor signal points the way its own condition claims. The fixture carries the catalogue quote that decides each row, so a new signal with no fixture row **fails** |
 | `norm_test` | the grade rule: per-side z, and monitor bounds dominating in both directions |
 | `norm_pack_test` | persistence, validation, layering — and that context specificity beats layer precedence |
@@ -614,6 +641,8 @@ Each of these is a bug that shipped or nearly shipped. They are here because non
 1. **An inverted signal is invisible.** It fires confidently, on the wrong swings, with correct-sounding consequence text. `highMeans` + `axis_direction_test` exist solely to prevent it. Three signals shipped inverted.
 2. **A field can be complete on both sides and reach nothing.** Add to the marshaller in the same change, and grep it when you add to a value type.
 3. **A rule can exist, be tested, and never run.** `validateNormsAgainst` for nine stages; `detect()` today. Add the call site in the same change, or write down that you did not.
+3b. **Detection and explanation are authored on different axes, so the gap between them is invisible.** Causal edges go in per condition GROUP; what can actually fire is decided per PRODUCER. Add a live producer and the condition over it joins the firing set without ever passing the group sweep that would have given it a cause — which is how ten of the sixteen detectable conditions came to have no explanation while every census looked healthy. **When you make something newly detectable, check what explains it in the same change.**
+3c. **A warning that fires on the design is worse than no warning.** `observableNoSignal` accused seven conditions of an omission that was the content telling the truth. Scope a check to the state it actually means, and gate it in BOTH directions — the negative case is what catches this, and four checks had neither.
 4. **A corridor keyed on the wrong phase disappears silently.** The reducer must name the phase the producer labels.
 5. **Do not pin shipped numbers in a test.** Two parity gates had to be deleted for exactly this. Gate *shapes* and *relationships*, not values.
 6. **Unit strings can match while conventions do not.** `normUnitMismatch` compares strings and is structurally incapable of catching stance width reading ~2× its corridor in a field both sides spell `% shoulder width`.
