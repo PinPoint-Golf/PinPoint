@@ -727,6 +727,57 @@ int main(int argc, char **argv)
 
     QFile::remove(userPackPath());
 
+    // ── How often a cause produces its effect ───────────────────────────────────
+    //
+    // Separate from linkCause, which REFUSES a pair that is already linked. Re-stating an existing
+    // edge to change one field would have to defeat that refusal, and a call that both creates and
+    // silently overwrites is one an author cannot predict from its name.
+    {
+        CharacteristicEditorModel ed;
+
+        auto strengthOf = [](const char *from, const char *to) {
+            // Held, not bound through a temporary — see norm_model_test's copy of this note.
+            const auto prov = makeCharacteristicPackProvider();
+            const CharacteristicPack &p = prov->pack();
+            for (const Edge &e : p.edges)
+                if (e.type == EdgeType::Causes && e.from == QLatin1String(from)
+                    && e.to == QLatin1String(to))
+                    return strengthName(e.strength);
+            return QString();
+        };
+
+        check(strengthOf("early_extension", "shank") == QLatin1String("strong"),
+              "the shipped edge says 'usually'");
+
+        check(!ed.setCauseStrength(QStringLiteral("early_extension"), QStringLiteral("shank"),
+                                   QStringLiteral("sideways"))
+                   .value(QStringLiteral("ok")).toBool(),
+              "an unknown strength is refused rather than defaulted");
+        check(!ed.setCauseStrength(QStringLiteral("stance_wide"), QStringLiteral("shank"),
+                                   QStringLiteral("weak"))
+                   .value(QStringLiteral("ok")).toBool(),
+              "a pair with no causal edge between them is refused — this does not create one");
+        check(!ed.setCauseStrength(QStringLiteral("early_extension"), QStringLiteral("shank"),
+                                   QStringLiteral("strong"))
+                   .value(QStringLiteral("ok")).toBool(),
+              "…and setting what it already says is refused, not silently written");
+
+        check(ed.setCauseStrength(QStringLiteral("early_extension"), QStringLiteral("shank"),
+                                  QStringLiteral("weak"))
+                  .value(QStringLiteral("ok")).toBool(),
+              "'usually' becomes 'sometimes'");
+        check(strengthOf("early_extension", "shank") == QLatin1String("weak"),
+              "…and the assembled library agrees");
+
+        // The rest of the effect's causal set must survive. This goes through the draft, which
+        // REPLACES that whole set on save — so an edge dropped here would vanish silently.
+        const int causeCount = int(causesOf(makeCharacteristicPackProvider()->pack(),
+                                            QStringLiteral("shank")).size());
+        check(causeCount >= 2, "the effect's other causes are still there");
+    }
+
+    QFile::remove(userPackPath());
+
     // ── The non-causal relations: add, edit, delete, undo ───────────────────────
     //
     // These do NOT go through the draft, and the test exists as much to pin that as to pin the

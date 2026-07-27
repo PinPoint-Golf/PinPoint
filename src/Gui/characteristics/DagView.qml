@@ -281,12 +281,30 @@ Item {
                     // none, so it reads as a statement of fact rather than something to press.
                     items.push({ action: "unlinkRelation", destructive: true,
                                  label: qsTr("Unlink %1 and %2").arg(n.label).arg(root._focusLabel) })
-                } else if (linked === "cause") {
-                    items.push({ action: "unlinkCause", destructive: true,
-                                 label: qsTr("%1 no longer causes %2").arg(n.label).arg(root._focusLabel) })
-                } else if (linked === "effect") {
-                    items.push({ action: "unlinkEffect", destructive: true,
-                                 label: qsTr("%1 no longer causes %2").arg(root._focusLabel).arg(n.label) })
+                } else if (linked === "cause" || linked === "effect") {
+                    // How OFTEN, in the same words the line is labelled with, and offered from
+                    // either end of the edge. Until now the only route to this was opening the
+                    // condition at the FAR end and finding the row in its causes list — so from a
+                    // cause's own page there was no route at all, and the graph drew a word it gave
+                    // you no way to change.
+                    var from = linked === "cause" ? n.label : root._focusLabel
+                    var to   = linked === "cause" ? root._focusLabel : n.label
+                    var cur  = root._strengthBetween(n.id)
+                    var opts = [{ s: "weak",     w: qsTr("sometimes") },
+                                { s: "moderate", w: qsTr("often") },
+                                { s: "strong",   w: qsTr("usually") }]
+                    for (var oi = 0; oi < opts.length; ++oi) {
+                        // The current one is left out rather than shown ticked: it is what the line
+                        // already says, and a row that changes nothing is a row that wastes a press.
+                        if (opts[oi].s === cur) continue
+                        items.push({ action: "strength:" + opts[oi].s, destructive: false,
+                                     label: qsTr("%1 %2 causes %3").arg(from).arg(opts[oi].w).arg(to) })
+                    }
+                    items.push({ action: linked === "cause" ? "unlinkCause" : "unlinkEffect",
+                                 destructive: true,
+                                 label: linked === "cause"
+                                        ? qsTr("%1 no longer causes %2").arg(n.label).arg(root._focusLabel)
+                                        : qsTr("%1 no longer causes %2").arg(root._focusLabel).arg(n.label) })
                 } else {
                     items.push({ action: "link", destructive: false,
                                  label: qsTr("%1 causes %2").arg(n.label).arg(root._focusLabel) })
@@ -337,6 +355,18 @@ Item {
         return root._linkBetween(id) !== ""
     }
 
+    // The causal edge's strength token, or "". Direction-agnostic: the menu asks about the link
+    // between this node and the focus, and which way it runs is `_linkBetween`'s question.
+    function _strengthBetween(id) {
+        for (var i = 0; i < root._edges.length; ++i) {
+            var e = root._edges[i]
+            if (e.detects || e.symmetric === true) continue
+            if ((e.from === id && e.to === root._focusId)
+                || (e.from === root._focusId && e.to === id)) return e.strength || ""
+        }
+        return ""
+    }
+
     // "" | "corroborates" | "excludes". Read from either end, because the edge means the same
     // whichever way round its author happened to type it.
     function _relationBetween(id) {
@@ -359,6 +389,21 @@ Item {
         if (!root.editor) return
 
         var rel = root._relationBetween(id)
+
+        // "strength:<token>" — the only action that carries a value, so it is unpacked before the
+        // table below rather than adding three near-identical rows to it.
+        if (action.indexOf("strength:") === 0) {
+            var linked = root._linkBetween(id)
+            var s      = action.substring("strength:".length)
+            var rs = linked === "cause" ? root.editor.setCauseStrength(id, root._focusId, s)
+                                        : root.editor.setCauseStrength(root._focusId, id, s)
+            root._lastRemovalWasRelation = false
+            toast.severity = rs.ok ? "info" : "warn"
+            toast.showUndo = false
+            toast.show(rs.message || "")
+            if (rs.ok) { root._revision++; root.graphChanged() }
+            return
+        }
 
         var r = action === "link"           ? root.editor.linkCause(id, root._focusId, "moderate")
               : action === "unlinkCause"    ? root.editor.unlinkCause(id, root._focusId)

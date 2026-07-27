@@ -191,6 +191,17 @@ public:
     // about history the file cannot back up.
     Q_INVOKABLE QVariantMap undoUnlinkCause();
 
+    // How often this cause produces this effect — sometimes / often / usually.
+    //
+    // Separate from `linkCause`, which refuses a pair that is already linked: re-stating an existing
+    // edge to change one field would have to defeat that refusal, and a call that both creates and
+    // silently overwrites is one an author cannot predict from its name.
+    //
+    // The strength is a RANKING WEIGHT and never a probability — `strengthLabel()` is words for that
+    // reason, and nothing may render it as a percentage.
+    Q_INVOKABLE QVariantMap setCauseStrength(const QString &causeId, const QString &effectId,
+                                             const QString &strength);
+
     // ── The non-causal relations ────────────────────────────────────────────
     //
     // Corroborates and Excludes do NOT go through the draft, and that is a structural fact rather

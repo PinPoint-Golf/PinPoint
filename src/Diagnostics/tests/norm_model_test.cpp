@@ -169,7 +169,13 @@ int main(int argc, char **argv)
     {
         // The algorithm lives in the pack layer so C++ callers (stage 9) reach it without a QML
         // façade. If the two ever disagree, the page and the pipeline grade differently.
-        const CharacteristicPack &pack = makeCharacteristicPackProvider()->pack();
+        // Hold the PROVIDER, not just a reference into the pack it owns. Binding the reference
+        // directly to `makeCharacteristicPackProvider()->pack()` lets the unique_ptr temporary die
+        // at the end of that statement, leaving `pack` dangling — which read correctly most of the
+        // time and failed about one run in eight, depending on whether the freed memory still held
+        // the old bytes. Ledger X6.
+        const auto provider = makeCharacteristicPackProvider();
+        const CharacteristicPack &pack = provider->pack();
         const Measure *direct = measureForMetricAtPhase(pack, QStringLiteral("leadWristFlexExt"),
                                                         Phase::Top);
         check(direct && direct->id == QLatin1String("m_leadWristAtTop"),

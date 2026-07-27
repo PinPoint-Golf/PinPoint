@@ -920,6 +920,43 @@ QVariantMap CharacteristicEditorModel::unlinkCause(const QString &causeId, const
     return out;
 }
 
+QVariantMap CharacteristicEditorModel::setCauseStrength(const QString &causeId,
+                                                        const QString &effectId,
+                                                        const QString &strength)
+{
+    if (m_editing)
+        return failResult(tr("Finish or discard the open edit first."));
+
+    Strength st{};
+    if (!strengthFromName(strength, st)) return failResult(tr("That is not a strength."));
+
+    const CharacteristicPack &p      = m_provider->pack();
+    const Condition          *cause  = p.condition(causeId);
+    const Condition          *effect = p.condition(effectId);
+    if (!cause || !effect) return failResult(tr("That is not in the library."));
+
+    const Edge *found = nullptr;
+    for (const Edge &e : p.edges)
+        if (e.type == EdgeType::Causes && e.from == causeId && e.to == effectId) { found = &e; break; }
+    if (!found) return failResult(tr("%1 does not cause %2.").arg(cause->label, effect->label));
+    if (found->strength == st)
+        return failResult(tr("It already says %1.").arg(strengthLabel(st)));
+
+    // Copy out before the write: save() reloads the provider and destroys the pack these point into.
+    const QString causeLabel  = cause->label;
+    const QString effectLabel = effect->label;
+
+    // Through the draft, unlike the symmetric relations — a causal edge IS owned by its effect, and
+    // `addCause` upserts on the cause id, so this is the same load-edit-write cycle `linkCause` uses
+    // rather than a second way to write the same row.
+    if (!beginEdit(effectId)) return failResult(tr("Could not open %1.").arg(effectLabel));
+    addCause(causeId, strength);
+    const QVariantMap r = save();
+    if (!r.value(QStringLiteral("ok")).toBool()) { discard(); return r; }
+
+    return okResult(tr("%1 %2 causes %3.").arg(causeLabel, strengthLabel(st), effectLabel));
+}
+
 QVariantMap CharacteristicEditorModel::undoUnlinkCause()
 {
     if (!m_edgeUndoValid)
