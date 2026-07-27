@@ -7,9 +7,14 @@ the *how*, sequenced, with every repo fact it depends on verified rather than as
 Work spans multiple sessions with context clears between them — the tables below are what makes
 a cold restart possible. Do not treat any stage as done until its gate has actually run green.
 
-**Anything deferred goes in [the clean-up sweep](#the-clean-up-sweep--everything-owed-before-this-work-is-done)
-at the end of this document, not in the resume block.** The resume block is rewritten every stage;
-the ledger is not. A final sweep after stage 10 must find that table with nothing left open.
+**Anything deferred goes in the ledger at the end of this document, not in the resume block.** The
+resume block is rewritten every stage; the ledger is not.
+
+**⊘ This work package is COMPLETE as of 2026-07-27.** All ten stages landed and are pushed. The
+ledger's remaining open rows are NOT debts of this package — they belong to the next one, *Diagnosis
+execution, verification and validation*, and are handed over rather than left dangling. See
+[the handoff](#handoff--what-belongs-to-the-next-work-package) before reading the ledger, or its
+open rows will read as unfinished business here.
 
 ---
 
@@ -30,7 +35,7 @@ the ledger is not. A final sweep after stage 10 must find that table with nothin
 | 8 | The navigable DAG | ☑ complete — the causes/effects lists are now one walkable graph | 2026-07-27 |
 | 9 | Deletions and rewiring | ☑ complete — a metric describes itself and no longer judges itself | 2026-07-27 |
 | 10 | Health checks | ☑ complete — and the norm side reached the health list for the first time | 2026-07-27 |
-| — | **clean-up sweep — the ledger at the end of this doc** | ☐ not started — ⚠ and it cannot end with "nothing left open": 25 rows are open and almost none are code. See the resume block | |
+| — | **clean-up sweep** | ⊘ **not part of this work package** — carried to *Diagnosis execution, V&V*. See the handoff section | 2026-07-27 |
 
 State vocabulary: ☐ not started · ◐ in progress · ☑ complete (gate green) · ⚠ blocked.
 
@@ -63,7 +68,90 @@ picks up. Keep it factual — this is the handoff, not a summary.
 
 ---
 
-## ▶ Resuming at the clean-up sweep — read this first
+## ⊘ This work package is complete
+
+All ten stages landed and are pushed (`..748b2ca`). Analyzer suite **78/78**; app builds clean and
+starts clean headless. There is no stage 11 and no sweep to run here.
+
+**What it delivered:** population norms as editable content, resolved through a context tree, with
+every compiled corridor migrated out of code behind a parity gate that was then deleted along with the
+table it pinned; the corridor editor and the measures view; context bindings that resolve and are
+honoured; a direction control in the measure's own words; the causal DAG; and the assembled-library
+health checks. A metric descriptor now describes a metric and no longer judges it.
+
+**What it deliberately did not do:** run a diagnosis. Nothing in the app constructs
+`CharacteristicEngine`. That was never in scope — the pack, the norms and the editors are the content
+layer, and executing a diagnosis against a real shot is a different piece of work with a different
+gate. It is the next work package, below.
+
+---
+
+## Handoff — what belongs to the next work package
+
+**Next package: *Diagnosis execution, verification and validation*.**
+
+The ledger at the end of this document still has open rows. **They are not debts of this package.**
+Every one of them is either downstream of executing a diagnosis, or waiting on data that does not
+exist yet, or a question for Mark. They are recorded here so the next package starts with a register
+rather than a blank page.
+
+### 1. Execution — the gap everything else hangs off
+
+`C25` `C3` `C3b`, and the practical urgency of `C44`.
+
+**Nothing constructs `CharacteristicEngine`.** Bindings resolve, `detect()` honours them, three
+façades resolve a grade policy — and no shot has ever run through any of it. Wiring it means:
+
+- constructing a `NormMeasureSource` over a shot's readings;
+- handing `detect()` the shot's RESOLVED context (`C3b`) — otherwise a bowed player is graded
+  correctly in the wrist grid and against neutral in every finding, from the same swing, which is
+  worse than either alone;
+- handing it the chosen grade policy (`C3`), or the setting means less than it says;
+- deciding **where findings surface for a coach**. Nothing specifies this, and it is probably the real
+  reason the wiring has not happened. It is a design question before it is an implementation one.
+
+### 2. Verification — does a diagnosis say true things?
+
+`C8` (the parent), `C1b` `C1c` `C1d` `C9` `C18` `C19` `C21` `C28` `C41` `C42` `C43`.
+
+Every shipped corridor is a starting figure (`source: heuristic`, `n = 0`) and the plan has always said
+so. Two of these are sharper than the rest:
+
+- **`C1b`** — the wrist grid's Δ corridor and the metric's own `howToRead` disagree by ~15°. One of
+  them has been wrong since v1, and inspection cannot settle which.
+- **`C18` / `C21`** — stance width reads ~2× its own corridor in a unit both sides spell identically,
+  and half its readings are `0.1`. A producer question, now visible on the dashboard (`C43`).
+
+### 3. Validation — is it useful, and does it stay useful?
+
+`C10` `C11` `C13` `C32`, plus the corpus-scale accuracy work the norms exist for. Author a norm WITH
+its producer, never in a batch. `C32` (the DAG's caps against a grown library) belongs here because it
+only bites once the pack has grown.
+
+### 4. Small and cosmetic — do them whenever
+
+`C49` (the "would inherit" sentence does not say what), `C50` (adopt offers a no-op), `C51` (whether
+`emptyContext` still earns a row), `C47` (overrides predating `basedOn` are unknowable), `C48` (the
+corpus scan has no cancel), `C12` (a reducer-model question that may never matter).
+
+### 5. For Mark — review gate
+
+`C36` (the DAG's measure lane repeats the block above it) and `C40` (bow/cup at Impact now draws the
+absolute corridor, not the Δ one). Plus his standing note that **the direction/tail design needs
+revisiting** — said 2026-07-26, deferred deliberately, and not to be treated as settled.
+
+### The rule the next package inherits
+
+**Shot type INFORMS a diagnosis; it never gates one.** Mark, 2026-07-27. The general corridors live at
+`any` for that reason, `detect()`'s `applicable` gate stays as the general exclusion mechanism (and is
+simply always true while shot type is its only key), and `material` is how context is allowed to
+speak — an immaterial finding is still produced, listed and counted in coverage, and only its ranking
+weight goes to zero. A characteristic that is silently not assessed reads to a coach as "nothing was
+wrong there".
+
+---
+
+## ▶ The clean-up sweep (superseded — re-scoped to the next work package)
 
 **Prompt to start with:**
 
@@ -1177,15 +1265,18 @@ corpus-scale work and a separate exercise — a single swing never judges it.
   one condition means whichever saves second discards the other's work, and neither user action
   looks like it lost anything.
 
-## The clean-up sweep — everything owed before this work is done
+## The ledger — every deferral, defect and open question
 
-**This is the ledger, and it is the only durable one.** The "Resuming at stage N" block at the top
-is rewritten every stage, so anything recorded only there is lost at the next handover. Every
-deferral, known defect and "revisit later" belongs here, with the stage that closes it. Nothing is
-deleted when it closes — it is marked closed, so a reader can tell the difference between a
-question that was answered and one that was never asked.
+**This is the durable record.** The "Resuming at stage N" blocks above are rewritten every stage, so
+anything recorded only there is lost at the next handover. Every deferral, known defect and "revisit
+later" is here, with what closes it. Nothing is deleted when it closes — it is marked closed, so a
+reader can tell the difference between a question that was answered and one that was never asked.
 
-**A final sweep runs after stage 10** and must find this table with nothing left open.
+**⊘ The open rows are NOT unfinished business in this work package.** This package is complete; its
+stages all landed. Every remaining open row is handed to *Diagnosis execution, verification and
+validation* — see [the handoff](#handoff--what-belongs-to-the-next-work-package), which groups them by
+what actually unblocks them. Read the `Closes at` column as *what has to happen first*, not as *a
+stage that owes this*.
 
 | # | Owed | Closes at | State |
 |---|---|---|---|
