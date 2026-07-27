@@ -452,9 +452,17 @@ ValidationReport validatePack(const CharacteristicPack &pack)
                 err(r, QStringLiteral("unknownSignal"), c.id,
                     QStringLiteral("Condition '%1' references unknown signal '%2'.").arg(c.id, sid));
 
-        if (c.observability == Observability::Observable && c.detectedBy.isEmpty())
+        // Scoped by ConfirmedBy, or it accuses the content of exactly what the content says.
+        // "Observable" answers CAN IT BE SEEN; "Asserted"/"Screened" answers HOW IT IS ESTABLISHED.
+        // A thin shot is plainly visible and equally plainly not measurable from our pixels, so it
+        // ships Observable + Asserted with no signal ON PURPOSE — the golfer knows and the app does
+        // not. Unscoped, this fired on all seven of those, and a health list carrying seven rows
+        // that describe the design is a health list people learn to scroll past. The inverse of
+        // this pair is already scoped the same way, one check below.
+        if (c.observability == Observability::Observable && c.detectedBy.isEmpty()
+            && !isOutsideCaptureReach(c.confirmedBy))
             warn(r, QStringLiteral("observableNoSignal"), c.id,
-                 QStringLiteral("'%1' is Observable but nothing detects it.").arg(c.id));
+                 QStringLiteral("'%1' is Observable and Measured, but nothing detects it.").arg(c.id));
 
         // A condition that is only reachable by a screen or by asking cannot also be measured.
         if (isOutsideCaptureReach(c.confirmedBy) && !c.detectedBy.isEmpty())

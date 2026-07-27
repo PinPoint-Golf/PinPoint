@@ -82,7 +82,8 @@ struct ValidationReport {
 //   badReducer           a measure's reducer is malformed
 //
 // WARNINGS — the pack works, but the health list should show it:
-//   observableNoSignal   an Observable condition nothing can detect
+//   observableNoSignal   an Observable and Measured condition nothing can detect. Scoped to
+//                        Measured: Screened/Asserted conditions are signal-less by design
 //   noCause              a condition with no cause: it can be reported but never explained
 //   noResolvableCause    every cause is Asserted, so the resolver can offer but never conclude
 //   orphanCause          a Latent condition that explains nothing — dead weight

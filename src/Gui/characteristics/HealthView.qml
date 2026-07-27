@@ -96,6 +96,7 @@ Item {
         case "noResolvableCause":  return qsTr("Only Behavioural causes — can be offered, never concluded")
         case "orphanCause":        return qsTr("Explains nothing")
         case "unusedMeasure":      return qsTr("Measure nothing uses")
+        case "duplicateMeasure":   return qsTr("One number described twice — a corridor on each grades it two ways")
         case "observableNoSignal": return qsTr("Nothing detects it")
         case "needsRevalidation":  return qsTr("Flagged for revalidation")
         case "inconsistentReach":  return qsTr("Reach and detection disagree")

@@ -399,10 +399,93 @@ int main()
     }
 
     // ── Health warnings (these ARE the health list) ─────────────────────────────
+    //
+    // Every check below is gated in BOTH directions. Half the value is the negative case: a check
+    // that cannot stay silent is a check that reports the design rather than a defect, and a health
+    // list carrying rows nobody can act on is one people stop reading. Four of these had no test at
+    // all in either direction, which is how `observableNoSignal` came to accuse seven deliberately
+    // signal-less conditions without anything noticing.
     {
         CharacteristicPack p = goodPack();
         p.conditions.front().detectedBy.clear();
         check(hasWarning(validatePack(p), "observableNoSignal"), "an undetectable Observable warns");
+
+        // ...but only when it claimed to be MEASURED. Observability answers "can it be seen";
+        // ConfirmedBy answers "how is it established". A thin shot is plainly visible and equally
+        // plainly not measurable from our pixels — Observable + Asserted with no signal is the
+        // truthful encoding, not an omission.
+        p.conditions.front().confirmedBy = ConfirmedBy::Asserted;
+        check(!hasWarning(validatePack(p), "observableNoSignal"),
+              "an Observable + Asserted condition is signal-less by design and stays silent");
+
+        p.conditions.front().confirmedBy = ConfirmedBy::Screened;
+        p.conditions.front().screenRef   = QStringLiteral("screen.hipInternalRotation");
+        check(!hasWarning(validatePack(p), "observableNoSignal"),
+              "an Observable + Screened condition stays silent too");
+    }
+    {
+        // inconsistentReach — the inverse of the pair above, and the reason that one is scoped:
+        // a condition outside capture reach may not ALSO claim to be detected.
+        check(!hasWarning(validatePack(goodPack()), "inconsistentReach"),
+              "a Measured condition with a signal does not warn about reach");
+
+        CharacteristicPack p = goodPack();
+        p.conditions.front().confirmedBy = ConfirmedBy::Asserted;   // keeps its signal
+        check(hasWarning(validatePack(p), "inconsistentReach"),
+              "an Asserted condition that also claims a detecting signal warns");
+    }
+    {
+        // needsRevalidation — a state, not a shape. It must survive the round-trip to be reported
+        // at all, so the check and the enum spelling are gated together.
+        check(!hasWarning(validatePack(goodPack()), "needsRevalidation"),
+              "an Active condition is not flagged for revalidation");
+
+        CharacteristicPack p = goodPack();
+        p.conditions.front().state = ConditionState::NeedsRevalidation;
+        check(hasWarning(validatePack(p), "needsRevalidation"),
+              "a condition flagged for revalidation warns");
+        const PackLoadResult back = loadPack(savePack(p), QStringLiteral("revalidation"));
+        check(hasWarning(back.report, "needsRevalidation"),
+              "and the flag survives a save/load, or the warning would vanish on reload");
+    }
+    {
+        // duplicateMeasure — two Provided measures reading one metric with an IDENTICAL reduction.
+        // They are one number described twice, and a norm on each can grade the same value two
+        // different ways. Only the reduction distinguishes them, so the check keys on all of it.
+        check(!hasWarning(validatePack(goodPack()), "duplicateMeasure"),
+              "distinct measures do not warn about duplication");
+
+        auto provided = [](const QString &id, Phase anchor) {
+            Measure m;
+            m.id             = id;
+            m.kind           = MeasureKind::Provided;
+            m.metricKey      = QStringLiteral("stanceWidth");
+            m.reducer.kind   = ReducerKind::At;
+            m.reducer.anchor = anchor;
+            return m;
+        };
+
+        CharacteristicPack p = goodPack();
+        p.measures.push_back(provided(QStringLiteral("widthA"), Phase::Address));
+        p.measures.push_back(provided(QStringLiteral("widthB"), Phase::Impact));
+        check(!hasWarning(validatePack(p), "duplicateMeasure"),
+              "one metric read at two different phases is two measures, not a duplicate");
+
+        p.measures.back().reducer.anchor = Phase::Address;          // now byte-identical
+        check(hasWarning(validatePack(p), "duplicateMeasure"),
+              "one metric read twice with the same reduction warns");
+    }
+    {
+        // bothTailsOneCondition — one condition holding both tails of one corridor fires whichever
+        // way the reading goes, so it cannot tell too much from too little. The fixture is built for
+        // this: two signals, one measure, opposite directions, correctly split across two conditions.
+        check(!hasWarning(validatePack(goodPack()), "bothTailsOneCondition"),
+              "the two tails split across two conditions do not warn");
+
+        CharacteristicPack p = goodPack();
+        p.conditions.front().detectedBy = { QStringLiteral("sigWide"), QStringLiteral("sigNarrow") };
+        check(hasWarning(validatePack(p), "bothTailsOneCondition"),
+              "one condition holding both tails of one measure warns");
     }
     {
         CharacteristicPack p = goodPack();
