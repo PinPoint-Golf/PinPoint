@@ -406,10 +406,20 @@ QVariantMap CharacteristicEditorModel::save()
     for (const Signal &s : m_draftSignals)   upsert(m_userPack.signalDefs, s);
     upsert(m_userPack.conditions, m_draft);
 
-    // Replace this condition's whole incoming edge set — otherwise removing a cause in the editor
-    // could never take effect, because the previous edge would survive alongside the new list.
+    // Replace this condition's whole incoming CAUSAL edge set — otherwise removing a cause in the
+    // editor could never take effect, because the previous edge would survive alongside the new
+    // list.
+    //
+    // Scoped to `Causes`, and that scope is load-bearing. `beginEdit()` loads only causal edges into
+    // the draft, so an unscoped erase would delete every Corroborates and Excludes edge that happens
+    // to point AT this condition — silently, on a save the author made for an unrelated reason like
+    // fixing a typo in the consequence. A symmetric edge belongs to neither end, so it cannot live
+    // in a draft that models "the effect owns its causes"; it is written by linkRelation() instead,
+    // and this line is what keeps the two from destroying each other.
     m_userPack.edges.erase(std::remove_if(m_userPack.edges.begin(), m_userPack.edges.end(),
-                                          [&](const Edge &e) { return e.to == m_draft.id; }),
+                                          [&](const Edge &e) {
+                                              return e.type == EdgeType::Causes && e.to == m_draft.id;
+                                          }),
                            m_userPack.edges.end());
     for (const Edge &e : m_draftEdges) m_userPack.edges.push_back(e);
 
@@ -921,6 +931,314 @@ QVariantMap CharacteristicEditorModel::undoUnlinkCause()
     m_edgeUndoValid = false;
 
     return linkCause(edge.from, edge.to, strengthName(edge.strength));
+}
+
+// ── The non-causal relations ────────────────────────────────────────────────
+//
+// These four own their own load-edit-write cycle rather than borrowing the draft's, because a
+// symmetric edge belongs to neither end and the draft models "the effect owns its incoming causes".
+// See the header for the full reasoning.
+
+namespace {
+
+// Symmetric in meaning, so an author may write it whichever way round they think of it and every
+// lookup has to read both. A pair-match that only checked one direction would let the same relation
+// be authored twice and silently double-count.
+bool sameUnorderedPair(const Edge &e, const QString &a, const QString &b)
+{
+    return (e.from == a && e.to == b) || (e.from == b && e.to == a);
+}
+
+} // namespace
+
+QVariantMap CharacteristicEditorModel::linkRelation(const QString &aId, const QString &bId,
+                                                    const QString &typeName, const QString &strength)
+{
+    if (m_editing)
+        return failResult(tr("Finish or discard the open edit first."));
+
+    EdgeType type{};
+    if (!edgeTypeFromName(typeName, type) || type == EdgeType::Causes)
+        return failResult(tr("That is not a relation this can author."));
+
+    const CharacteristicPack &p = m_provider->pack();
+    const Condition          *a = p.condition(aId);
+    const Condition          *b = p.condition(bId);
+    if (!a || !b)   return failResult(tr("That is not in the library."));
+    if (aId == bId) return failResult(tr("Nothing relates to itself."));
+
+    for (const Edge &e : p.edges)
+        if (e.type != EdgeType::Causes && sameUnorderedPair(e, aId, bId))
+            return failResult(tr("%1 and %2 are already linked. Change that link rather than "
+                                 "adding a second one.").arg(a->label, b->label));
+
+    // Corroboration over an existing causal path is refused by `validatePack`, and the reason is
+    // worth saying in the author's own terms: the pair would count TWICE when the explanation is
+    // ranked — once as cause and effect, once as independent confirmation — which would quietly
+    // promote it above better-supported answers.
+    if (type == EdgeType::Corroborates && hasCausalPath(p, aId, bId))
+        return failResult(tr("%1 and %2 are already causally linked, so they cannot also "
+                             "corroborate — the pair would count twice in the ranking.")
+                              .arg(a->label, b->label));
+
+    Strength st{};
+    if (!strengthFromName(strength, st)) st = Strength::Moderate;
+
+    Edge e;
+    e.from = aId;
+    e.to   = bId;
+    e.type = type;
+    // An exclusion is not a matter of degree — the pair is incompatible or it is not — so it takes
+    // the default rather than pretending to a strength somebody chose.
+    e.strength = (type == EdgeType::Excludes) ? Strength::Strong : st;
+
+    // Copy the labels out BEFORE the write: saveUserPack + reload destroys the pack these point
+    // into, and reading them afterwards is a use-after-free that surfaces as a garbled toast.
+    const QString aLabel = a->label;
+    const QString bLabel = b->label;
+
+    m_userPack.edges.push_back(e);
+
+    QString whyNot;
+    if (!saveUserPack(m_userPack, &whyNot)) {
+        m_userPack.edges.pop_back();
+        return failResult(whyNot.isEmpty() ? tr("Could not save.") : whyNot);
+    }
+    reload();
+    emit draftChanged();
+
+    return okResult(type == EdgeType::Corroborates
+                        ? tr("%1 is now also seen as %2.").arg(aLabel, bLabel)
+                        : tr("%1 and %2 cannot both describe one swing.").arg(aLabel, bLabel));
+}
+
+QVariantMap CharacteristicEditorModel::unlinkRelation(const QString &aId, const QString &bId,
+                                                      const QString &typeName)
+{
+    if (m_editing)
+        return failResult(tr("Finish or discard the open edit first."));
+
+    EdgeType type{};
+    if (!edgeTypeFromName(typeName, type) || type == EdgeType::Causes)
+        return failResult(tr("That is not a relation this can author."));
+
+    const CharacteristicPack &p = m_provider->pack();
+    const Condition          *a = p.condition(aId);
+    const Condition          *b = p.condition(bId);
+    if (!a || !b) return failResult(tr("That is not in the library."));
+
+    const Edge *found = nullptr;
+    for (const Edge &e : p.edges)
+        if (e.type == type && sameUnorderedPair(e, aId, bId)) { found = &e; break; }
+    if (!found) return failResult(tr("They are not linked that way."));
+
+    // Everything needed to put it back, copied out BEFORE the write — same rule as the causal undo,
+    // and for the same reason: the strength is the part a reader cannot reconstruct from memory.
+    m_relationUndo      = *found;
+    m_relationUndoValid = true;
+
+    const QString aLabel = a->label;
+    const QString bLabel = b->label;
+
+    // A relation the SHIPPED pack states cannot be removed by deleting a row the user does not
+    // have. Saying so is better than a silent no-op that leaves the link on screen.
+    const bool inUser = std::any_of(m_userPack.edges.begin(), m_userPack.edges.end(),
+                                    [&](const Edge &e) {
+                                        return e.type == type && sameUnorderedPair(e, aId, bId);
+                                    });
+    if (!inUser) {
+        m_relationUndoValid = false;
+        return failResult(tr("That link is part of the shipped library. Removing shipped content "
+                             "is not something this editor does."));
+    }
+
+    m_userPack.edges.erase(std::remove_if(m_userPack.edges.begin(), m_userPack.edges.end(),
+                                          [&](const Edge &e) {
+                                              return e.type == type && sameUnorderedPair(e, aId, bId);
+                                          }),
+                           m_userPack.edges.end());
+
+    QString whyNot;
+    if (!saveUserPack(m_userPack, &whyNot)) {
+        m_relationUndoValid = false;
+        return failResult(whyNot.isEmpty() ? tr("Could not save.") : whyNot);
+    }
+    reload();
+    emit draftChanged();
+
+    QVariantMap out = okResult(tr("%1 and %2 are no longer linked.").arg(aLabel, bLabel));
+    out.insert(QStringLiteral("canUndo"), true);
+    return out;
+}
+
+QVariantMap CharacteristicEditorModel::editRelation(const QString &aId, const QString &bId,
+                                                    const QString &fromTypeName,
+                                                    const QString &toTypeName,
+                                                    const QString &strength)
+{
+    if (m_editing)
+        return failResult(tr("Finish or discard the open edit first."));
+
+    EdgeType fromType{}, toType{};
+    if (!edgeTypeFromName(fromTypeName, fromType) || fromType == EdgeType::Causes
+        || !edgeTypeFromName(toTypeName, toType) || toType == EdgeType::Causes)
+        return failResult(tr("That is not a relation this can author."));
+
+    const CharacteristicPack &p = m_provider->pack();
+    const Condition          *a = p.condition(aId);
+    const Condition          *b = p.condition(bId);
+    if (!a || !b) return failResult(tr("That is not in the library."));
+
+    const Edge *found = nullptr;
+    for (const Edge &e : p.edges)
+        if (e.type == fromType && sameUnorderedPair(e, aId, bId)) { found = &e; break; }
+    if (!found) return failResult(tr("They are not linked that way."));
+
+    // Turning an exclusion into a corroboration can be illegal where the reverse never is, so the
+    // check runs on the DESTINATION type rather than being skipped because a link already exists.
+    if (toType == EdgeType::Corroborates && hasCausalPath(p, aId, bId))
+        return failResult(tr("%1 and %2 are already causally linked, so they cannot corroborate — "
+                             "the pair would count twice in the ranking.").arg(a->label, b->label));
+
+    Strength st = found->strength;
+    if (!strength.isEmpty()) strengthFromName(strength, st);
+    if (toType == EdgeType::Excludes) st = Strength::Strong;   // an exclusion has no degree
+
+    const QString aLabel = a->label;
+    const QString bLabel = b->label;
+
+    // The shipped row cannot be edited in place, but it CAN be overridden: the user pack's edge
+    // wins, so writing the new one and dropping any stale user row of the old type is the whole
+    // operation whether or not core states it.
+    m_userPack.edges.erase(std::remove_if(m_userPack.edges.begin(), m_userPack.edges.end(),
+                                          [&](const Edge &e) {
+                                              return e.type != EdgeType::Causes
+                                                     && sameUnorderedPair(e, aId, bId);
+                                          }),
+                           m_userPack.edges.end());
+    Edge e;
+    e.from     = found->from;      // keep the authored orientation; it reads the same either way
+    e.to       = found->to;
+    e.type     = toType;
+    e.strength = st;
+    m_userPack.edges.push_back(e);
+
+    QString whyNot;
+    if (!saveUserPack(m_userPack, &whyNot))
+        return failResult(whyNot.isEmpty() ? tr("Could not save.") : whyNot);
+    reload();
+    emit draftChanged();
+
+    if (fromType != toType)
+        return okResult(toType == EdgeType::Corroborates
+                            ? tr("%1 is now also seen as %2.").arg(aLabel, bLabel)
+                            : tr("%1 and %2 cannot both describe one swing.").arg(aLabel, bLabel));
+    return okResult(tr("Updated to %1.").arg(strengthLabel(st)));
+}
+
+QVariantMap CharacteristicEditorModel::undoUnlinkRelation()
+{
+    if (!m_relationUndoValid)
+        return failResult(tr("There is nothing to put back."));
+
+    // Consumed whether or not it succeeds — offering the same undo twice implies the first one did
+    // not happen.
+    const Edge edge     = m_relationUndo;
+    m_relationUndoValid = false;
+
+    return linkRelation(edge.from, edge.to, edgeTypeName(edge.type), strengthName(edge.strength));
+}
+
+QVariantList CharacteristicEditorModel::relationCandidates(const QString &focusId,
+                                                           const QString &typeName,
+                                                           const QString &search) const
+{
+    const CharacteristicPack &p = m_provider->pack();
+    const QString             q = search.trimmed().toLower();
+
+    EdgeType type{};
+    if (!edgeTypeFromName(typeName, type) || type == EdgeType::Causes) return {};
+    if (!p.condition(focusId)) return {};
+
+    QVariantList out;
+    for (const Condition &c : p.conditions) {
+        if (c.id == focusId) continue;
+
+        // Already related in EITHER direction and either kind: offering it again would produce a
+        // second row saying the same thing, or a refusal the reader could have been spared.
+        bool related = false;
+        for (const Edge &e : p.edges)
+            if (e.type != EdgeType::Causes && sameUnorderedPair(e, focusId, c.id)) related = true;
+        if (related) continue;
+
+        // Excluded rather than listed-and-refused. A picker that offers a choice it will reject is
+        // a worse control than one that does not offer it.
+        if (type == EdgeType::Corroborates && hasCausalPath(p, focusId, c.id)) continue;
+
+        if (!q.isEmpty()) {
+            bool hit = c.label.toLower().contains(q) || c.id.toLower().contains(q);
+            if (!hit)
+                for (const QString &al : c.aliases)
+                    if (al.toLower().contains(q)) { hit = true; break; }
+            if (!hit) continue;
+        }
+
+        QVariantMap m;
+        m.insert(QStringLiteral("id"), c.id);
+        m.insert(QStringLiteral("label"), c.label);
+        m.insert(QStringLiteral("group"), conditionGroupName(c.group));
+        m.insert(QStringLiteral("groupLabel"), conditionGroupLabel(c.group));
+        m.insert(QStringLiteral("aliases"), c.aliases);
+        out.append(m);
+    }
+    // Grouped order, then alphabetical: a corroborating partner is nearly always in the same part
+    // of the swing, so the useful candidates cluster.
+    std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        const QVariantMap x = a.toMap(), y = b.toMap();
+        if (x.value(QStringLiteral("group")) != y.value(QStringLiteral("group")))
+            return x.value(QStringLiteral("group")).toString()
+                 < y.value(QStringLiteral("group")).toString();
+        return x.value(QStringLiteral("label")).toString()
+             < y.value(QStringLiteral("label")).toString();
+    });
+    return out;
+}
+
+QVariantList CharacteristicEditorModel::relationsOf(const QString &conditionId) const
+{
+    const CharacteristicPack &p = m_provider->pack();
+    if (!p.condition(conditionId)) return {};
+
+    QVariantList out;
+    for (const Edge &e : p.edges) {
+        if (e.type == EdgeType::Causes) continue;
+        const QString other = (e.from == conditionId) ? e.to
+                            : (e.to == conditionId)   ? e.from
+                                                      : QString();
+        if (other.isEmpty()) continue;
+        const Condition *oc = p.condition(other);
+
+        // Whether the row is the USER's. A shipped relation is readable and its type is
+        // overridable, but it cannot be deleted — and the surface has to know that before the tap,
+        // not after a refusal.
+        const bool mine = std::any_of(m_userPack.edges.begin(), m_userPack.edges.end(),
+                                      [&](const Edge &u) {
+                                          return u.type == e.type
+                                                 && sameUnorderedPair(u, conditionId, other);
+                                      });
+
+        QVariantMap m;
+        m.insert(QStringLiteral("id"), other);
+        m.insert(QStringLiteral("label"), oc ? oc->label : other);
+        m.insert(QStringLiteral("groupLabel"), oc ? conditionGroupLabel(oc->group) : QString());
+        m.insert(QStringLiteral("relation"), edgeTypeName(e.type));
+        m.insert(QStringLiteral("strength"), strengthName(e.strength));
+        m.insert(QStringLiteral("strengthLabel"),
+                 e.type == EdgeType::Excludes ? QString() : strengthLabel(e.strength));
+        m.insert(QStringLiteral("mine"), mine);
+        out.append(m);
+    }
+    return out;
 }
 
 QVariantList CharacteristicEditorModel::candidateCauses(const QString &search) const

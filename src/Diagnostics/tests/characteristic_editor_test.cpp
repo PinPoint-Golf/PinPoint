@@ -727,6 +727,189 @@ int main(int argc, char **argv)
 
     QFile::remove(userPackPath());
 
+    // ── The non-causal relations: add, edit, delete, undo ───────────────────────
+    //
+    // These do NOT go through the draft, and the test exists as much to pin that as to pin the
+    // behaviour: a symmetric edge belongs to neither end, so a draft that models "the effect owns
+    // its incoming causes" cannot hold one without the other end's next save rewriting it.
+    {
+        {
+            CharacteristicEditorModel ed;
+
+            check(!ed.linkRelation(QStringLiteral("sway"), QStringLiteral("sway"),
+                                   QStringLiteral("corroborates"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "nothing relates to itself");
+            check(!ed.linkRelation(QStringLiteral("sway"), QStringLiteral("nosuch"),
+                                   QStringLiteral("corroborates"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "an unknown id is refused");
+            check(!ed.linkRelation(QStringLiteral("sway"), QStringLiteral("slide"),
+                                   QStringLiteral("causes"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "a CAUSAL edge is not something this authors — that is linkCause's job");
+
+            // The rule that matters most, and the one an author would not think of: corroboration
+            // over an existing causal path makes the pair count twice when the explanation is
+            // ranked, once as cause-and-effect and once as independent confirmation.
+            check(!ed.linkRelation(QStringLiteral("limited_thoracic_rotation"),
+                                   QStringLiteral("short_backswing"),
+                                   QStringLiteral("corroborates"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "corroboration over an existing causal path is refused, in the author's terms");
+            // …and the same pair CAN exclude, because an exclusion makes no confirmation claim.
+            check(ed.linkRelation(QStringLiteral("limited_thoracic_rotation"),
+                                  QStringLiteral("short_backswing"), QStringLiteral("excludes"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "…but excluding them is legal — an exclusion confirms nothing");
+            check(ed.unlinkRelation(QStringLiteral("limited_thoracic_rotation"),
+                                    QStringLiteral("short_backswing"), QStringLiteral("excludes"))
+                      .value(QStringLiteral("ok")).toBool(), "cleaned up");
+        }
+
+        {
+            CharacteristicEditorModel ed;
+
+            const QVariantMap added = ed.linkRelation(QStringLiteral("stance_wide"),
+                                                      QStringLiteral("ball_forward"),
+                                                      QStringLiteral("corroborates"),
+                                                      QStringLiteral("weak"));
+            check(added.value(QStringLiteral("ok")).toBool(), "a legal relation is written");
+
+            // Symmetric: the pair reads the same whichever way round it is asked for, or an author
+            // could add the same relation twice by typing the ends in the other order.
+            check(!ed.linkRelation(QStringLiteral("ball_forward"), QStringLiteral("stance_wide"),
+                                   QStringLiteral("corroborates"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "the reverse pair is recognised as the SAME relation, not a second one");
+            check(!ed.linkRelation(QStringLiteral("ball_forward"), QStringLiteral("stance_wide"),
+                                   QStringLiteral("excludes"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "…and a second relation of a different kind is refused too");
+
+            // EDIT: the type changes, and an exclusion drops the strength word because it has no
+            // degree — the pair is incompatible or it is not.
+            const QVariantMap edited = ed.editRelation(
+                QStringLiteral("stance_wide"), QStringLiteral("ball_forward"),
+                QStringLiteral("corroborates"), QStringLiteral("excludes"));
+            check(edited.value(QStringLiteral("ok")).toBool(), "the relation's TYPE can be changed");
+
+            QVariantList rel = ed.relationsOf(QStringLiteral("stance_wide"));
+            bool asExcludes = false, hadStrengthWord = false, isMine = false;
+            for (const QVariant &v : rel) {
+                const QVariantMap m = v.toMap();
+                if (m.value(QStringLiteral("id")).toString() != QLatin1String("ball_forward")) continue;
+                asExcludes      = m.value(QStringLiteral("relation")).toString() == QLatin1String("excludes");
+                hadStrengthWord = !m.value(QStringLiteral("strengthLabel")).toString().isEmpty();
+                isMine          = m.value(QStringLiteral("mine")).toBool();
+            }
+            check(asExcludes, "…and the change is what the surface reads back");
+            check(!hadStrengthWord, "an exclusion carries no strength word");
+            check(isMine, "a row the user wrote says so, so the surface knows it can be deleted");
+
+            // DELETE, then UNDO — with the strength restored, which is the part a reader cannot
+            // reconstruct from memory.
+            check(ed.editRelation(QStringLiteral("stance_wide"), QStringLiteral("ball_forward"),
+                                  QStringLiteral("excludes"), QStringLiteral("corroborates"),
+                                  QStringLiteral("weak"))
+                      .value(QStringLiteral("ok")).toBool(), "and back again, with a strength");
+
+            const QVariantMap removed = ed.unlinkRelation(QStringLiteral("stance_wide"),
+                                                          QStringLiteral("ball_forward"),
+                                                          QStringLiteral("corroborates"));
+            check(removed.value(QStringLiteral("ok")).toBool(), "a relation the user wrote is removable");
+            check(removed.value(QStringLiteral("canUndo")).toBool(), "…and it offers an undo");
+            check(ed.relationsOf(QStringLiteral("stance_wide")).isEmpty(), "it is gone");
+
+            check(ed.undoUnlinkRelation().value(QStringLiteral("ok")).toBool(), "the undo puts it back");
+            check(!ed.undoUnlinkRelation().value(QStringLiteral("ok")).toBool(),
+                  "…once, and only once");
+
+            QFile f(userPackPath());
+            check(f.open(QIODevice::ReadOnly), "the user pack is readable after the undo");
+            const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            bool restoredWeak = false;
+            for (const Edge &e : res.pack.edges)
+                if (e.type == EdgeType::Corroborates
+                    && ((e.from == QStringLiteral("stance_wide") && e.to == QStringLiteral("ball_forward"))
+                        || (e.to == QStringLiteral("stance_wide") && e.from == QStringLiteral("ball_forward"))))
+                    restoredWeak = (e.strength == Strength::Weak);
+            check(restoredWeak, "the restored relation kept its WEAK strength, not the default");
+
+            // ⚠ THE REGRESSION. `save()` used to erase EVERY incoming edge of the condition being
+            // edited, while `beginEdit()` loads only causal ones — so editing a characteristic for
+            // an unrelated reason (a typo in its consequence) silently deleted every corroborates
+            // and excludes edge pointing at it. Latent until this package authored the first ones.
+            check(ed.beginEdit(QStringLiteral("ball_forward")), "open the OTHER end for an edit");
+            ed.setConsequence(QStringLiteral("An unrelated edit."));
+            check(ed.save().value(QStringLiteral("ok")).toBool(), "…and save it");
+
+            bool survived = false;
+            for (const QVariant &v : ed.relationsOf(QStringLiteral("ball_forward")))
+                if (v.toMap().value(QStringLiteral("id")).toString() == QLatin1String("stance_wide"))
+                    survived = true;
+            check(survived, "an unrelated save does NOT delete the symmetric edge pointing at it");
+
+            check(ed.unlinkRelation(QStringLiteral("stance_wide"), QStringLiteral("ball_forward"),
+                                    QStringLiteral("corroborates"))
+                      .value(QStringLiteral("ok")).toBool(), "cleaned up");
+        }
+
+        {
+            CharacteristicEditorModel ed;
+
+            // A shipped relation is readable and its type is overridable, but it cannot be deleted
+            // — and the surface has to know that BEFORE the tap, which is what `mine` is for.
+            QVariantList shipped = ed.relationsOf(QStringLiteral("scooping"));
+            bool anyShipped = false, anyMine = false;
+            for (const QVariant &v : shipped) {
+                anyShipped = true;
+                if (v.toMap().value(QStringLiteral("mine")).toBool()) anyMine = true;
+            }
+            check(anyShipped, "the shipped pack's own relations are listed");
+            check(!anyMine, "…and none of them claims to be the user's");
+            check(!ed.unlinkRelation(QStringLiteral("insufficient_shaft_lean"),
+                                     QStringLiteral("scooping"), QStringLiteral("corroborates"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "a shipped relation is not deletable, and says so rather than no-opping");
+        }
+
+        {
+            CharacteristicEditorModel ed;
+
+            // The candidate list EXCLUDES the illegal choices rather than listing and refusing
+            // them. A picker that offers a choice it will reject is a worse control than one that
+            // does not offer it.
+            const QVariantList cands = ed.relationCandidates(QStringLiteral("scooping"),
+                                                             QStringLiteral("corroborates"));
+            check(!cands.isEmpty(), "there are candidates to relate to");
+
+            bool offersSelf = false, offersExisting = false, offersCausallyLinked = false;
+            for (const QVariant &v : cands) {
+                const QString id = v.toMap().value(QStringLiteral("id")).toString();
+                if (id == QLatin1String("scooping"))                offersSelf = true;
+                if (id == QLatin1String("insufficient_shaft_lean")) offersExisting = true;
+                if (id == QLatin1String("hip_stall"))               offersCausallyLinked = true;
+            }
+            check(!offersSelf, "it never offers the condition itself");
+            check(!offersExisting, "nor one it is already related to");
+            check(!offersCausallyLinked, "nor one a causal path already reaches");
+
+            // Search reaches the ALIASES, because an author looking for a partner types the coach
+            // term for the same reason a golfer does.
+            const QVariantList byAlias = ed.relationCandidates(QStringLiteral("sway"),
+                                                               QStringLiteral("excludes"),
+                                                               QStringLiteral("standing up"));
+            bool foundByAlias = false;
+            for (const QVariant &v : byAlias)
+                if (v.toMap().value(QStringLiteral("id")).toString() == QLatin1String("early_extension"))
+                    foundByAlias = true;
+            check(foundByAlias, "candidate search matches a coach term, not only the label");
+        }
+    }
+
+    QFile::remove(userPackPath());
+
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
 }

@@ -191,6 +191,38 @@ public:
     // about history the file cannot back up.
     Q_INVOKABLE QVariantMap undoUnlinkCause();
 
+    // ── The non-causal relations ────────────────────────────────────────────
+    //
+    // Corroborates and Excludes do NOT go through the draft, and that is a structural fact rather
+    // than a shortcut. `beginEdit()` models "the effect owns its incoming causes" — it loads causal
+    // edges only, and `save()` replaces that whole set. A symmetric edge belongs to neither end, so
+    // whichever end held it would have its identity rewritten by the other end's next save.
+    //
+    // These four therefore own their own load-edit-write cycle against the user pack. Every refusal
+    // is made BEFORE anything is written, in the author's own terms, because the alternative is the
+    // assembled-library validator failing every characteristic over one bad edge.
+    Q_INVOKABLE QVariantMap linkRelation(const QString &aId, const QString &bId,
+                                         const QString &typeName,
+                                         const QString &strength = QStringLiteral("moderate"));
+    Q_INVOKABLE QVariantMap unlinkRelation(const QString &aId, const QString &bId,
+                                           const QString &typeName);
+    // Change what an existing relation SAYS: its type (corroborates ↔ excludes) or, for a
+    // corroboration, how strongly. One call, because both are edits to one row and doing it as
+    // remove-then-add would leave the graph briefly invalid and the undo pointing at nothing.
+    Q_INVOKABLE QVariantMap editRelation(const QString &aId, const QString &bId,
+                                         const QString &fromTypeName, const QString &toTypeName,
+                                         const QString &strength = QString());
+    Q_INVOKABLE QVariantMap undoUnlinkRelation();
+
+    // Conditions this one could legally be related to, with the illegal ones EXCLUDED rather than
+    // listed and refused on tap. A picker that offers a choice it will reject is a worse control
+    // than one that does not offer it.
+    Q_INVOKABLE QVariantList relationCandidates(const QString &focusId, const QString &typeName,
+                                                const QString &search = {}) const;
+
+    // The relations a condition already has, for the surface that edits them.
+    Q_INVOKABLE QVariantList relationsOf(const QString &conditionId) const;
+
     // ── The measure picker ──────────────────────────────────────────────────
     // A typed phrase SEEDS facet selections; it is not a query. Wrong guesses are corrected by
     // tapping chips, which is far easier than rephrasing a search that returned nothing.
@@ -227,6 +259,12 @@ private:
     // the removal is committed to the file, so this outlives any open edit.
     pinpoint::analysis::Edge m_edgeUndo;
     bool                     m_edgeUndoValid = false;
+
+    // A separate slot from the causal one. They are offered by different toasts on different
+    // surfaces, and sharing one would let "put the link back" restore the wrong kind of link —
+    // silently, since both are edges and both would apply cleanly.
+    pinpoint::analysis::Edge m_relationUndo;
+    bool                     m_relationUndoValid = false;
 
     std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_provider;
     // Read-only, and only ever asked for its context tree. The shared instance because the corridor

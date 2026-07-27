@@ -206,16 +206,37 @@ Item {
             // Which way the link runs matters to the wording: "remove this link" has to say which
             // link, and the two directions are different claims about the swing.
             var linked = root._linkBetween(n.id)
+            var rel    = root._relationBetween(n.id)
             if (n.kind !== "focus" && root.editor) {
-                if (linked === "cause")
+                // A pair already related symmetrically is offered the SYMMETRIC actions and not the
+                // causal ones. Offering "X causes Y" beside an existing corroboration would invite
+                // an edit the validator refuses — the pair would then count twice in the ranking —
+                // and a menu that offers a choice it will reject is worse than one that does not.
+                if (rel !== "") {
+                    items.push({ action: rel === "corroborates" ? "toExcludes" : "toCorroborates",
+                                 destructive: false,
+                                 label: rel === "corroborates"
+                                        ? qsTr("They cannot both be true, in fact")
+                                        : qsTr("They are the same thing seen twice, in fact") })
+                    items.push({ action: "unlinkRelation", destructive: true,
+                                 label: qsTr("%1 and %2 are not linked").arg(n.label).arg(root._focusLabel) })
+                } else if (linked === "cause") {
                     items.push({ action: "unlinkCause", destructive: true,
                                  label: qsTr("%1 no longer causes %2").arg(n.label).arg(root._focusLabel) })
-                else if (linked === "effect")
+                } else if (linked === "effect") {
                     items.push({ action: "unlinkEffect", destructive: true,
                                  label: qsTr("%1 no longer causes %2").arg(root._focusLabel).arg(n.label) })
-                else
+                } else {
                     items.push({ action: "link", destructive: false,
                                  label: qsTr("%1 causes %2").arg(n.label).arg(root._focusLabel) })
+                    // Corroboration is refused wherever a causal path already exists, so it is only
+                    // offered where it could actually be written.
+                    if (!root._causallyReachable(n.id))
+                        items.push({ action: "corroborate", destructive: false,
+                                     label: qsTr("%1 is the same thing seen another way").arg(n.label) })
+                    items.push({ action: "exclude", destructive: false,
+                                 label: qsTr("%1 cannot also be true").arg(n.label) })
+                }
             }
         }
         if (items.length === 0) return
@@ -237,8 +258,32 @@ Item {
         for (var i = 0; i < root._edges.length; ++i) {
             var e = root._edges[i]
             if (e.detects) continue
+            // A symmetric relation is asked about separately (_relationBetween) — it is not a
+            // direction, and answering "cause" or "effect" for one would put the causal wording in
+            // front of a reader for a link that makes no causal claim.
+            if (e.symmetric === true) continue
             if (e.from === id && e.to === root._focusId) return "cause"
             if (e.from === root._focusId && e.to === id) return "effect"
+        }
+        return ""
+    }
+
+    // Is there a causal path between this node and the focus, in either direction? Corroboration
+    // over one is refused by the validator, so the menu must not offer it. Only the DRAWN edges are
+    // consulted — a path outside the current depth is not visible, so the model still gets the last
+    // word and the refusal it returns is the one a reader sees.
+    function _causallyReachable(id) {
+        return root._linkBetween(id) !== ""
+    }
+
+    // "" | "corroborates" | "excludes". Read from either end, because the edge means the same
+    // whichever way round its author happened to type it.
+    function _relationBetween(id) {
+        for (var i = 0; i < root._edges.length; ++i) {
+            var e = root._edges[i]
+            if (e.symmetric !== true) continue
+            if ((e.from === id && e.to === root._focusId)
+                || (e.from === root._focusId && e.to === id)) return e.relation
         }
         return ""
     }
@@ -252,10 +297,22 @@ Item {
         if (action === "measure") { root.openMeasure(id);   return }
         if (!root.editor) return
 
-        var r = action === "link"        ? root.editor.linkCause(id, root._focusId, "moderate")
-              : action === "unlinkCause" ? root.editor.unlinkCause(id, root._focusId)
-              : action === "unlinkEffect" ? root.editor.unlinkCause(root._focusId, id)
+        var rel = root._relationBetween(id)
+
+        var r = action === "link"           ? root.editor.linkCause(id, root._focusId, "moderate")
+              : action === "unlinkCause"    ? root.editor.unlinkCause(id, root._focusId)
+              : action === "unlinkEffect"   ? root.editor.unlinkCause(root._focusId, id)
+              : action === "corroborate"    ? root.editor.linkRelation(id, root._focusId, "corroborates", "moderate")
+              : action === "exclude"        ? root.editor.linkRelation(id, root._focusId, "excludes")
+              : action === "unlinkRelation" ? root.editor.unlinkRelation(id, root._focusId, rel)
+              : action === "toExcludes"     ? root.editor.editRelation(id, root._focusId, "corroborates", "excludes")
+              : action === "toCorroborates" ? root.editor.editRelation(id, root._focusId, "excludes", "corroborates", "moderate")
               : ({ ok: false, message: "" })
+
+        // Which undo the toast offers depends on which KIND of link was removed. Sharing one slot
+        // would let "put the link back" restore the wrong kind — silently, since both are edges and
+        // both would apply cleanly.
+        root._lastRemovalWasRelation = (action === "unlinkRelation")
 
         toast.severity = r.ok ? "info" : "warn"
         // Ledger C31: a recoverable removal offers its undo in the same breath. Only when the model
@@ -270,9 +327,12 @@ Item {
 
     // Put back the link that was just removed, WITH its strength — which re-linking by hand would
     // not restore, and which is the part a reader cannot reconstruct from memory.
+    property bool _lastRemovalWasRelation: false
+
     function _undoUnlink() {
         if (!root.editor) return
-        var r = root.editor.undoUnlinkCause()
+        var r = root._lastRemovalWasRelation ? root.editor.undoUnlinkRelation()
+                                             : root.editor.undoUnlinkCause()
         toast.showUndo = false                  // one level: the undo is consumed by using it
         toast.severity = r.ok ? "info" : "warn"
         toast.show(r.message || "")

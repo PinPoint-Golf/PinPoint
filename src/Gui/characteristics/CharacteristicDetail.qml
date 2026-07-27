@@ -46,6 +46,63 @@ Item {
 
     readonly property var _measures: detail.measures || []
 
+    // ── The non-causal relations, and editing them ───────────────────────────
+    //
+    // Authored HERE rather than on the graph, and that is not a placement preference. The validator
+    // refuses corroboration wherever a causal path already exists, so the conditions the DAG draws
+    // are precisely the ones that cannot corroborate — a "relate these two" action on a drawn node
+    // would be offered almost exclusively where it must be refused. Adding one needs a picker over
+    // the whole library, which is what this is.
+    property int    _relRevision: 0
+    property string _pickerKind:  ""     // "" = closed | "corroborates" | "excludes"
+    property string _pickerSearch: ""
+
+    readonly property var _relations:
+        (root.editor && root._relRevision >= 0 && root.detail.id)
+            ? root.editor.relationsOf(root.detail.id) : []
+
+    function _relationIsMine(otherId) {
+        for (var i = 0; i < root._relations.length; ++i)
+            if (root._relations[i].id === otherId) return root._relations[i].mine === true
+        return false
+    }
+
+    function _relationKind(otherId) {
+        for (var i = 0; i < root._relations.length; ++i)
+            if (root._relations[i].id === otherId) return root._relations[i].relation
+        return ""
+    }
+
+    function _openRelationPicker(kind) {
+        root._pickerSearch = ""
+        root._pickerKind   = kind
+    }
+
+    function _addRelation(otherId) {
+        if (!root.editor || !root.detail.id) return
+        var r = root.editor.linkRelation(root.detail.id, otherId, root._pickerKind, "moderate")
+        root._pickerKind = ""
+        root._afterRelationWrite(r, false)
+    }
+
+    function _removeRelation(otherId) {
+        if (!root.editor || !root.detail.id) return
+        var r = root.editor.unlinkRelation(root.detail.id, otherId, root._relationKind(otherId))
+        root._afterRelationWrite(r, r.ok === true && r.canUndo === true)
+    }
+
+    function _afterRelationWrite(r, canUndo) {
+        relToast.severity = r.ok ? "info" : "warn"
+        relToast.showUndo = canUndo
+        relToast.show(r.message || "")
+        if (r.ok) {
+            root._relRevision++
+            // The detail map and the graph both hold a copy of the edge set, so the page has to be
+            // told rather than left to notice.
+            root.graphChanged()
+        }
+    }
+
     ScrollView {
         anchors.fill: parent
         contentWidth: availableWidth
@@ -282,10 +339,12 @@ Item {
             // a claim the pack does not hold. These sit beneath it as what they are: two readings of
             // one event, and pairs that cannot both be true of one swing.
             Repeater {
-                model: [{ rows: root.detail.corroboratedBy || [],
+                model: [{ kind: "corroborates",
+                          rows: root.detail.corroboratedBy || [],
                           head: qsTr("ALSO SEEN AS"),
                           hint: qsTr("The same event, read another way. Independent confirmation — no causal claim either direction.") },
-                        { rows: root.detail.excludes || [],
+                        { kind: "excludes",
+                          rows: root.detail.excludes || [],
                           head: qsTr("CANNOT ALSO BE"),
                           hint: qsTr("One swing cannot be both. If both fire, the explanation keeps the more confident reading and says which it dropped.") }]
 
@@ -293,32 +352,88 @@ Item {
                     required property var modelData
                     Layout.fillWidth: true
                     spacing: Theme.sp(6)
-                    visible: modelData.rows.length > 0
+                    // The heading stays when the list is empty IF this page can author one —
+                    // otherwise "add a link" has nowhere to live and the relation is only ever
+                    // reachable from a graph that does not draw it until it exists.
+                    visible: modelData.rows.length > 0 || root.editor !== null
 
-                    Text {
-                        text:                modelData.head
-                        font.family:         Theme.fontBody
-                        font.pixelSize:      Theme.fontSzMicro
-                        font.letterSpacing:  Theme.trackingMicro
-                        font.capitalization: Font.AllUppercase
-                        color:               Theme.colorText3
-                    }
+                    RowLayout {
+                        id: relHead
+                        // The section's own kind, hoisted so the handlers below reach it from the
+                        // delegate scope rather than from a file-level id, which a Repeater
+                        // delegate cannot see.
+                        readonly property string kind: modelData.kind
+                        Layout.fillWidth: true
+                        spacing: Theme.sp(8)
 
-                    Repeater {
-                        model: modelData.rows
-                        delegate: Text {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            text:           modelData.label + " · " + modelData.groupLabel
+                        Text {
+                            text:                modelData.head
+                            font.family:         Theme.fontBody
+                            font.pixelSize:      Theme.fontSzMicro
+                            font.letterSpacing:  Theme.trackingMicro
+                            font.capitalization: Font.AllUppercase
+                            color:               Theme.colorText3
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // ADD lives here rather than on the graph, because a corroborating partner
+                        // is almost never already drawn: the validator refuses corroboration over a
+                        // causal path, so the very conditions the DAG shows are the ones that
+                        // cannot corroborate. It needs a picker over the whole library.
+                        Text {
+                            visible:        root.editor !== null
+                            text:           qsTr("Add a link →")
                             font.family:    Theme.fontBody
-                            font.pixelSize: Theme.fontSzBody
+                            font.pixelSize: Theme.fontSzMicro
                             color:          Theme.colorAccent
-                            elide:          Text.ElideRight
 
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape:  Qt.PointingHandCursor
-                                onClicked:    root.openCondition(parent.modelData.id)
+                                onClicked:    root._openRelationPicker(relHead.kind)
+                            }
+                        }
+                    }
+
+                    Repeater {
+                        model: modelData.rows
+                        delegate: RowLayout {
+                            id: relRow
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: Theme.sp(8)
+
+                            Text {
+                                Layout.fillWidth: true
+                                text:           relRow.modelData.label + " · " + relRow.modelData.groupLabel
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzBody
+                                color:          Theme.colorAccent
+                                elide:          Text.ElideRight
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape:  Qt.PointingHandCursor
+                                    onClicked:    root.openCondition(relRow.modelData.id)
+                                }
+                            }
+
+                            // Remove. Only offered where it can succeed — a shipped relation is
+                            // readable and its type is overridable, but the editor does not delete
+                            // shipped content, and an action that can only fail is worse than none.
+                            Text {
+                                visible:        root.editor !== null && root._relationIsMine(relRow.modelData.id)
+                                text:           qsTr("remove")
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzMicro
+                                color:          Theme.colorError
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape:  Qt.PointingHandCursor
+                                    onClicked:    root._removeRelation(relRow.modelData.id)
+                                }
                             }
                         }
                     }
@@ -372,6 +487,162 @@ Item {
             }
 
             Item { Layout.fillWidth: true; implicitHeight: Theme.sp(24) }
+        }
+    }
+
+    // ══ The relation picker ═══════════════════════════════════════════════════
+    //
+    // Only LEGAL candidates are listed. The model filters out the condition itself, anything it is
+    // already related to, and — for a corroboration — anything a causal path already reaches, so
+    // the list cannot offer a choice the write would refuse.
+    Rectangle {
+        id: relPicker
+        anchors.fill: parent
+        color:   Theme.colorBg
+        opacity: 0.97
+        visible: root._pickerKind !== ""
+        z: 20
+
+        // Swallows anything aimed at the page underneath, so a click meant for the picker cannot
+        // navigate the page it is covering.
+        MouseArea { anchors.fill: parent }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Theme.sp(32)
+            spacing: Theme.sp(12)
+
+            RowLayout {
+                Layout.fillWidth: true
+                Text {
+                    Layout.fillWidth: true
+                    text: root._pickerKind === "corroborates"
+                          ? qsTr("What else is this same event, read another way?")
+                          : qsTr("What could this not also be, in one swing?")
+                    font.family:    Theme.fontDisplay
+                    font.pixelSize: Theme.fontSzHeading
+                    color:          Theme.colorText
+                    wrapMode:       Text.WordWrap
+                }
+                Text {
+                    text:           qsTr("Cancel")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorText3
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked:    root._pickerKind = ""
+                    }
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: root._pickerKind === "corroborates"
+                      ? qsTr("Anything already causally linked to this is left out: a pair that both "
+                             + "causes and corroborates would count twice when the explanation is ranked.")
+                      : qsTr("An exclusion has no degree — the pair is incompatible or it is not.")
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorText3
+                wrapMode:       Text.WordWrap
+            }
+
+            PpTextField {
+                Layout.fillWidth: true
+                placeholderText: qsTr("Search — the coach term works too")
+                onTextChanged: root._pickerSearch = text
+            }
+
+            ScrollView {
+                Layout.fillWidth:  true
+                Layout.fillHeight: true
+                clip: true
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: Theme.sp(2)
+
+                    Repeater {
+                        model: (root.editor && root._pickerKind !== "" && root.detail.id)
+                               ? root.editor.relationCandidates(root.detail.id, root._pickerKind,
+                                                                root._pickerSearch)
+                               : []
+
+                        delegate: Rectangle {
+                            id: candRow
+                            required property var modelData
+                            Layout.fillWidth: true
+                            implicitHeight: Theme.sp(40)
+                            color: candMa.containsMouse ? Theme.colorBg2 : "transparent"
+                            radius: Theme.sp(4)
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin:  Theme.sp(10)
+                                anchors.rightMargin: Theme.sp(10)
+                                spacing: Theme.sp(8)
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text:           candRow.modelData.label
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzBody
+                                        color:          Theme.colorText
+                                        elide:          Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: (candRow.modelData.aliases || []).length > 0
+                                              ? candRow.modelData.groupLabel + " · "
+                                                + (candRow.modelData.aliases || []).join(", ")
+                                              : candRow.modelData.groupLabel
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzMicro
+                                        color:          Theme.colorText3
+                                        elide:          Text.ElideRight
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: candMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape:  Qt.PointingHandCursor
+                                // Through a method on the component root: a handler in a Repeater
+                                // delegate can see that and nothing else at file scope.
+                                onClicked:    root._addRelation(candRow.modelData.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    PpToast {
+        id: relToast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom:           parent.bottom
+        z: 30
+        glyph: "◇"
+        showUndo: false
+    }
+
+    // The undo handler cannot live inside the PpToast block: PpToast declares its own `id: root`,
+    // which shadows this file's. A Connections block declares none, so `root` here is this file's.
+    Connections {
+        target: relToast
+        function onUndoClicked() {
+            if (!root.editor) return
+            var r = root.editor.undoUnlinkRelation()
+            relToast.showUndo = false          // one level: the undo is consumed by using it
+            root._afterRelationWrite(r, false)
         }
     }
 }
