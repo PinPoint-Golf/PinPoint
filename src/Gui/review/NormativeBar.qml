@@ -16,8 +16,8 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-// A horizontal corridor bar for ONE NormativeCorridor map
-// { greenLo, greenHi, amberLo, amberHi, deltaFromAddress }: a green "tour core" band
+// A horizontal corridor bar for ONE corridor map, as MetricCatalog marshals it out of the norm set
+// { greenLo, greenHi, amberLo, amberHi, deltaFromAddress, … }: a green "Ideal" band
 // nested inside a wider amber band on a muted track, with the amber min/max tick
 // labels below. Self-contained and prop-driven so charting can reuse it later — set
 // `value` to render an optional "you" marker (hidden while it is NaN).

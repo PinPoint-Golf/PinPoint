@@ -63,11 +63,9 @@ public:
     // Per-shot resolution across the registered providers (best available wins).
     MetricAvailability resolve(const QString &key, const ShotContext &ctx) const;
 
-    // Normative corridor for a metric at a phase: DOF metrics resolve via IReferenceBandProvider
-    // (Phase→PpSwingPosition mapped through wristCheckpoints()); non-DOF metrics use inline corridors.
-    // nullopt when the metric is unknown, has no normative for that phase, or the band is invalid.
-    std::optional<NormativeCorridor> corridor(const QString &key, Phase p,
-                                              const BandContext &bc = {}) const;
+    // There is no corridor() here. The catalogue describes metrics; it does not judge them. A
+    // corridor is (metric, phase) → measure → norm, resolved in the shot's context —
+    // `Diagnostics/metric_corridor.h`.
 
 private:
     std::vector<MetricDescriptor>        m_descriptors;   // owns; never mutated after build

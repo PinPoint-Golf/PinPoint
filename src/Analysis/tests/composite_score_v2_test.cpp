@@ -30,7 +30,7 @@ static FixtureWristAngleSource withSegConf(FixtureWristAngleSource src, float co
 int main()
 {
     std::printf("=== Composite Wrist score v2 ===\n");
-    ConfigReferenceBandProvider provider;
+    NormBandProvider provider;
 
     // 1. Clean swing → no faults → 100, no contributions.
     {

@@ -43,16 +43,9 @@ GradePolicy policyFor(const QString &name)
     return GradePolicy{ 1.0, 2.0, 3.0 };
 }
 
-QString sourceLabel(NormSource s)
-{
-    switch (s) {
-    case NormSource::Heuristic:  return QObject::tr("Authored figure");
-    case NormSource::Seated:     return QObject::tr("Seated on swings");
-    case NormSource::Literature: return QObject::tr("Published");
-    case NormSource::Imported:   return QObject::tr("Imported");
-    }
-    return QString();
-}
+// Forwards to the words that live with the enum (norm.h). This was the THIRD copy of those four
+// strings — the measures view and the metric detail page render them too.
+QString sourceLabel(NormSource s) { return normSourceLabel(s); }
 
 // How many swings one scan will look at. A cap, not a sample size — and it is REPORTED when it
 // bites (sampleSummary.truncated), because a silent cap reads as "that is the whole library".
@@ -740,13 +733,21 @@ QVariantMap NormEditorModel::draft() const
     out.insert(QStringLiteral("contextLabel"), contextLabel(m_contextId));
     out.insert(QStringLiteral("route"),        m_route);
 
+    // The Watch edge through bandEdgesOf(), so the editor draws the edge that GRADES. It matters for
+    // a migrated row: the draft is a copy of the resolved norm, monitor bounds and all, and those
+    // bounds dominate the z-derived edge inside grade(). Deriving the number here from sigma alone
+    // showed the wrong edge on all 56 migrated corridors — a corridor the app does not use, in the
+    // one screen whose entire job is to show what a corridor does.
+    const NormBandEdges e = bandEdgesOf(m_draft, p);
+
     out.insert(QStringLiteral("mu"),      m_draft.mu);
-    out.insert(QStringLiteral("idealLo"), m_draft.idealLo());
-    out.insert(QStringLiteral("idealHi"), m_draft.idealHi());
+    out.insert(QStringLiteral("idealLo"), e.idealLo);
+    out.insert(QStringLiteral("idealHi"), e.idealHi);
     out.insert(QStringLiteral("goodLo"),  m_draft.mu - p.goodMaxZ * m_draft.sigmaLo);
     out.insert(QStringLiteral("goodHi"),  m_draft.mu + p.goodMaxZ * m_draft.sigmaHi);
-    out.insert(QStringLiteral("watchLo"), m_draft.mu - p.watchMaxZ * m_draft.sigmaLo);
-    out.insert(QStringLiteral("watchHi"), m_draft.mu + p.watchMaxZ * m_draft.sigmaHi);
+    out.insert(QStringLiteral("watchLo"), e.watchLo);
+    out.insert(QStringLiteral("watchHi"), e.watchHi);
+    out.insert(QStringLiteral("explicitMonitor"), m_draft.hasExplicitMonitor());
 
     out.insert(QStringLiteral("n"),           m_draft.n);
     out.insert(QStringLiteral("source"),      normSourceName(m_draft.source));

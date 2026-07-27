@@ -34,31 +34,11 @@ namespace {
 // the control offers three considered settings rather than three spinboxes. The z values are shown
 // beneath each so the setting is inspectable, but they are not editable: a hand-tuned policy is a
 // private vocabulary.
-struct PolicyPreset {
-    const char *name;
-    const char *label;
-    const char *hint;
-    GradePolicy policy;
-};
-
-const PolicyPreset kPolicies[] = {
-    { "lenient",  QT_TRANSLATE_NOOP("NormModel", "Lenient"),
-      QT_TRANSLATE_NOOP("NormModel", "Flags less. Suits a wide range of styles."),
-      GradePolicy{ 1.5, 2.5, 3.5 } },
-    { "standard", QT_TRANSLATE_NOOP("NormModel", "Standard"),
-      QT_TRANSLATE_NOOP("NormModel", "The shipped setting. Ordinary variation is not a finding."),
-      GradePolicy{ 1.0, 2.0, 3.0 } },
-    { "strict",   QT_TRANSLATE_NOOP("NormModel", "Strict"),
-      QT_TRANSLATE_NOOP("NormModel", "Flags more. Suits a narrow, coached population."),
-      GradePolicy{ 0.75, 1.5, 2.25 } },
-};
-
-const PolicyPreset &presetFor(const QString &name)
-{
-    for (const PolicyPreset &p : kPolicies)
-        if (name == QLatin1String(p.name)) return p;
-    return kPolicies[1];                                     // standard
-}
+//
+// The TABLE lives in the norm layer (gradePolicyPresets(), norm.h) because the metric detail page
+// and the dashboard corridors now resolve a policy by name too, and two tables would let two
+// surfaces grade against different z's while showing the same word. This file translates the labels
+// at the point of render, which is the only part of a preset that is UI.
 
 QString statusLabel(MeasureStatus s)
 {
@@ -71,16 +51,10 @@ QString statusLabel(MeasureStatus s)
     return QString();
 }
 
-QString sourceLabel(NormSource s)
-{
-    switch (s) {
-    case NormSource::Heuristic:  return QObject::tr("Authored figure");
-    case NormSource::Seated:     return QObject::tr("Seated on swings");
-    case NormSource::Literature: return QObject::tr("Published");
-    case NormSource::Imported:   return QObject::tr("Imported");
-    }
-    return QString();
-}
+// Forwards to the words that live with the enum (norm.h). Kept as a local name because this file
+// reads it in several places, but it is NOT a second definition — same shape as
+// resolvabilityLabel() over measureStatusLabel().
+QString sourceLabel(NormSource s) { return normSourceLabel(s); }
 
 QString originLabel(PackOrigin o)
 {
@@ -132,14 +106,14 @@ NormModel::NormModel(QObject *parent)
 
 NormModel::~NormModel() = default;
 
-GradePolicy NormModel::policy() const { return presetFor(m_policyName).policy; }
+GradePolicy NormModel::policy() const { return gradePolicyByName(m_policyName); }
 
 void NormModel::setGradePolicy(const QString &name)
 {
     // Resolve through the table rather than storing what was handed in: an unknown name must land
     // on standard, not persist as itself and silently grade against the default while the control
     // shows something else.
-    const QString resolved = QString::fromLatin1(presetFor(name).name);
+    const QString resolved = QString::fromLatin1(gradePolicyPresetFor(name).name);
     if (resolved == m_policyName) return;
     m_policyName = resolved;
     emit gradePolicyChanged();
@@ -148,7 +122,7 @@ void NormModel::setGradePolicy(const QString &name)
 QVariantList NormModel::gradePolicies() const
 {
     QVariantList out;
-    for (const PolicyPreset &p : kPolicies) {
+    for (const GradePolicyPreset &p : gradePolicyPresets()) {
         QVariantMap m;
         m.insert(QStringLiteral("name"),      QString::fromLatin1(p.name));
         m.insert(QStringLiteral("label"),     QCoreApplication::translate("NormModel", p.label));
@@ -453,22 +427,19 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     out.insert(QStringLiteral("inheritedFrom"), res.inherited ? (cn ? cn->label : res.contextId)
                                                               : QString());
 
+    // The Watch edge — where Action begins — comes from bandEdgesOf(), the one place the precedence
+    // (explicit monitor bounds DOMINATE the z-derived edge, exactly as grade() applies them) is
+    // stated. Showing the z edge while grading on the monitor would render a corridor the app does
+    // not use.
+    const NormBandEdges edges = bandEdgesOf(n, pol);
+
     out.insert(QStringLiteral("mu"),      n.mu);
-    out.insert(QStringLiteral("idealLo"), n.idealLo());
-    out.insert(QStringLiteral("idealHi"), n.idealHi());
+    out.insert(QStringLiteral("idealLo"), edges.idealLo);
+    out.insert(QStringLiteral("idealHi"), edges.idealHi);
     out.insert(QStringLiteral("goodLo"),  n.mu - pol.goodMaxZ * n.sigmaLo);
     out.insert(QStringLiteral("goodHi"),  n.mu + pol.goodMaxZ * n.sigmaHi);
-
-    // The Watch edge — where Action begins. Explicit monitor bounds DOMINATE the z-derived edge,
-    // exactly as grade() applies them, so the number shown is the number that grades. Rendering
-    // the z edge here while grading on the monitor would show a corridor the app does not use.
-    if (n.hasExplicitMonitor()) {
-        out.insert(QStringLiteral("watchLo"), *n.monitorLo);
-        out.insert(QStringLiteral("watchHi"), *n.monitorHi);
-    } else {
-        out.insert(QStringLiteral("watchLo"), n.mu - pol.watchMaxZ * n.sigmaLo);
-        out.insert(QStringLiteral("watchHi"), n.mu + pol.watchMaxZ * n.sigmaHi);
-    }
+    out.insert(QStringLiteral("watchLo"), edges.watchLo);
+    out.insert(QStringLiteral("watchHi"), edges.watchHi);
     out.insert(QStringLiteral("explicitMonitor"), n.hasExplicitMonitor());
 
     out.insert(QStringLiteral("unit"),        n.unit);

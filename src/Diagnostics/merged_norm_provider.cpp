@@ -228,8 +228,7 @@ std::unique_ptr<INormProvider> makeNormProvider()
 
 namespace {
 // Function-local static, so nothing runs before main(). See the header for why this is cached at
-// all: the compiled table it replaces was free, and MetricCatalogue::corridor() builds a band
-// provider per call.
+// all: the compiled table it replaced was free, and callers build a band provider per lookup.
 std::shared_ptr<const INormProvider> &sharedSlot()
 {
     static std::shared_ptr<const INormProvider> slot;

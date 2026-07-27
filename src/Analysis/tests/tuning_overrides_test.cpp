@@ -128,7 +128,7 @@ int main()
 
     // 6. The band provider honours a bands.* margin override (amber widens; green unchanged).
     {
-        ConfigReferenceBandProvider prov;
+        NormBandProvider prov;
         const Band b0 = prov.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, BandContext{});
         BandContext ctx; ctx.tuning.flexExtMargin = 20.0;
         const Band b1 = prov.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, ctx);

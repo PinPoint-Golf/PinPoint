@@ -18,6 +18,7 @@
 
 #include "norm_pack.h"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -63,11 +64,13 @@ bool fromName(const Row<E> (&rows)[N], const QString &s, E &out)
     return false;
 }
 
+// The label column carries the user-facing words: "authored figure" says what a heuristic norm IS
+// to a reader who has never seen the enum, where the token is only the JSON spelling.
 const Row<NormSource> kNormSources[] = {
-    { NormSource::Heuristic,  "heuristic",  "heuristic" },
-    { NormSource::Seated,     "seated",     "seated" },
-    { NormSource::Literature, "literature", "literature" },
-    { NormSource::Imported,   "imported",   "imported" },
+    { NormSource::Heuristic,  "heuristic",  "Authored figure" },
+    { NormSource::Seated,     "seated",     "Seated on swings" },
+    { NormSource::Literature, "literature", "Published" },
+    { NormSource::Imported,   "imported",   "Imported" },
 };
 
 // The user-facing words. An ordinary, monotone ramp: nobody has to be told Ideal outranks Good, and
@@ -84,10 +87,42 @@ const Row<Grade> kGrades[] = {
 
 QString normSourceName(NormSource s) { return nameOf(kNormSources, s); }
 bool    normSourceFromName(const QString &s, NormSource &out) { return fromName(kNormSources, s, out); }
+QString normSourceLabel(NormSource s) { return labelOf(kNormSources, s); }
 
 QString gradeName(Grade g) { return nameOf(kGrades, g); }
 bool    gradeFromName(const QString &s, Grade &out) { return fromName(kGrades, s, out); }
 QString gradeLabel(Grade g) { return labelOf(kGrades, g); }
+
+// ── Grade-policy presets ────────────────────────────────────────────────────
+//
+// The label and hint are marked for translation in the "NormModel" context because that panel is
+// where they are rendered — the strings live here so the numbers and the words they promise cannot
+// be edited apart, and the render site translates them at the point of use.
+const std::vector<GradePolicyPreset> &gradePolicyPresets()
+{
+    static const std::vector<GradePolicyPreset> kPresets = {
+        { "lenient",  QT_TRANSLATE_NOOP("NormModel", "Lenient"),
+          QT_TRANSLATE_NOOP("NormModel", "Flags less. Suits a wide range of styles."),
+          GradePolicy{ 1.5, 2.5, 3.5 } },
+        { "standard", QT_TRANSLATE_NOOP("NormModel", "Standard"),
+          QT_TRANSLATE_NOOP("NormModel", "The shipped setting. Ordinary variation is not a finding."),
+          GradePolicy{ 1.0, 2.0, 3.0 } },
+        { "strict",   QT_TRANSLATE_NOOP("NormModel", "Strict"),
+          QT_TRANSLATE_NOOP("NormModel", "Flags more. Suits a narrow, coached population."),
+          GradePolicy{ 0.75, 1.5, 2.25 } },
+    };
+    return kPresets;
+}
+
+const GradePolicyPreset &gradePolicyPresetFor(const QString &name)
+{
+    const std::vector<GradePolicyPreset> &presets = gradePolicyPresets();
+    for (const GradePolicyPreset &p : presets)
+        if (name == QLatin1String(p.name)) return p;
+    return presets[1];                                       // standard
+}
+
+GradePolicy gradePolicyByName(const QString &name) { return gradePolicyPresetFor(name).policy; }
 
 // ── Provenance standing ─────────────────────────────────────────────────────
 

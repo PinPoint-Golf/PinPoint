@@ -69,7 +69,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "it. Higher is closer to the reference; a low score points you at whichever checkpoint "
             "fell outside its band — most often a cupped lead wrist at the top. It needs the "
             "lead-forearm and lead-hand IMUs and is produced only in a Wrist Motion session."),
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
         .usedBy = { QStringLiteral("review:verdict"), QStringLiteral("shotlist:score") },
     });
@@ -94,7 +93,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "'blended' — the player sits between styles. Use it to read a player's natural pattern "
             "before coaching toward or away from it. v1 scores lead-wrist flex/extension only; it "
             "needs the lead-forearm and lead-hand IMUs."),
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
         .usedBy = { QStringLiteral("review:verdict") },
     });
@@ -118,7 +116,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "today. When it lands it will summarise the body-rotation, sequence and delivery "
             "metrics the way the wrist score summarises the wrist checkpoints."),
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("review:verdict"), QStringLiteral("shotlist:score") },
     });
@@ -147,9 +144,6 @@ void installMetricManifest(MetricCatalogue &cat)
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
-        .normative = { .dof = PpJointDof::LeadWristFlexExt,
-                       .contextNote = QStringLiteral("mid-iron · neutral archetype"),
-                       .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
         .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
                     QStringLiteral("assessment:wrist"),
@@ -176,9 +170,6 @@ void installMetricManifest(MetricCatalogue &cat)
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
-        .normative = { .dof = PpJointDof::LeadWristRadUln,
-                       .contextNote = QStringLiteral("mid-iron · neutral archetype"),
-                       .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
         .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
                     QStringLiteral("assessment:wrist"),
@@ -206,9 +197,6 @@ void installMetricManifest(MetricCatalogue &cat)
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
-        .normative = { .dof = PpJointDof::LeadForearmRot,
-                       .contextNote = QStringLiteral("mid-iron · neutral archetype"),
-                       .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand, R::LeadUpperArm } },
         .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
                     QStringLiteral("assessment:wrist") },
@@ -234,9 +222,6 @@ void installMetricManifest(MetricCatalogue &cat)
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
-        .normative = { .dof = PpJointDof::LeadElbowFlex,
-                       .contextNote = QStringLiteral("mid-iron · neutral archetype"),
-                       .heuristic = true },
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand, R::LeadUpperArm } },
         .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
                     QStringLiteral("assessment:wrist") },
@@ -267,9 +252,6 @@ void installMetricManifest(MetricCatalogue &cat)
         // state legible instead of leaving seven pack measures pointing at a metric key that does
         // not exist.
         .planned = true,
-        .normative = { .dof = PpJointDof::TrailWristFlexExt,
-                       .contextNote = QStringLiteral("mid-iron · neutral archetype"),
-                       .heuristic = true },
         // No imuRoles: SegmentRole has no trail-side arm roles yet, and inventing them for a
         // producer nobody has built would put model surface in the enum ahead of anything that
         // uses it. The requirement is stated in howToRead until the instrumentation pass adds them.
@@ -298,7 +280,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "pelvis IMU, which today's placement slots do not yet provide."),
         .phases = { P::Top, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis } },
         .usedBy = { QStringLiteral("characteristic:sequence_order") },
     });
@@ -321,7 +302,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "the power story lives (see X-factor). Planned: needs a thorax IMU."),
         .phases = { P::Top, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Thorax } },
         .usedBy = { QStringLiteral("characteristic:sequence_order") },
     });
@@ -345,7 +325,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "much the gap grows early in the downswing. Planned: needs pelvis and thorax IMUs."),
         .phases = { P::Top },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
     });
 
@@ -368,7 +347,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "sequencing, not more turn. Planned: needs pelvis and thorax IMUs."),
         .phases = { P::Transition, P::Downswing },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
         .usedBy = { QStringLiteral("characteristic:xfactor_deficit") },
     });
@@ -392,7 +370,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "a swing metric. Planned: needs a pelvis IMU plus thigh IMUs."),
         .phases = { P::Top, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis, R::LeadThigh, R::TrailThigh } },
     });
 
@@ -417,7 +394,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "moves the low point. Planned: needs pelvis and thorax IMUs (or a calibrated 3D camera)."),
         .phases = { P::Address, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
         .usedBy = { QStringLiteral("characteristic:loss_of_posture"),
                     QStringLiteral("characteristic:posture_too_upright") },
@@ -442,7 +418,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "needs a face-on camera (or IMUs)."),
         .phases = { P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
     });
 
@@ -465,7 +440,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "face-on camera."),
         .phases = { P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:reverse_spine") },
     });
@@ -489,7 +463,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "hanging back. Planned: needs a face-on camera and a calibrated ground plane."),
         .phases = { P::Top, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:hanging_back"),
                     QStringLiteral("characteristic:slide"),
@@ -516,7 +489,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "lone face-on camera cannot resolve it. Planned."),
         .phases = { P::Downswing, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .minTier = ReconstructionTier::Stereo3D },
         .usedBy = { QStringLiteral("characteristic:early_extension") },
     });
@@ -540,7 +512,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "Planned: needs a face-on camera and a calibrated ground plane."),
         .phases = { P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:trail_hip_hike") },
     });
@@ -565,8 +536,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "player-dependent. On a single face-on camera this is an in-plane estimate, so treat "
             "motion along the depth axis as approximate. Needs face-on club tracking."),
         .phases = { P::Impact },
-        .normative = { .contextNote = QStringLiteral("club-dependent — see reference norms"),
-                       .heuristic = true },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -589,7 +558,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "accelerating at impact usually mean the release is late or the body has stalled. Needs "
             "face-on club tracking (the grip point)."),
         .phases = { P::Impact },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -611,7 +579,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "widening early) throws away speed and steepens the club, while holding it too long can "
             "leave the face open. It needs both the face-on club track and the lead-forearm pose."),
         .phases = { P::Downswing, P::Impact },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("chart:review"),
                     QStringLiteral("characteristic:casting") },
@@ -634,7 +601,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "back. Too little lean (or backward lean) on an iron usually means an early release, "
             "with thin/fat tendencies. It needs the face-on club track; Wrist Motion session."),
         .phases = { P::Impact },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -660,7 +626,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "a hand-path proxy that should be labelled as such. Planned: needs the club track."),
         .phases = { P::Downswing },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
     });
 
@@ -683,7 +648,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "this is a canonical down-the-line metric. Planned: needs the club track and a DTL camera."),
         .phases = { P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
         .usedBy = { QStringLiteral("characteristic:over_the_top") },
     });
@@ -706,7 +670,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "makes it fully in-plane. Planned: needs the club track."),
         .phases = { P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
     });
 
@@ -730,7 +693,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "clearly labelled as an estimate. Planned: needs club instrumentation."),
         .phases = { P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::ClubInstrumented },
     });
 
@@ -754,7 +716,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "deferred until the measured-clubhead detector lands so the head is measured, not projected."),
         .phases = { P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .clubTrack = true, .ballTrack = true },
     });
 
@@ -784,7 +745,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "confidently segmented swing — it is refused rather than estimated when the phase "
             "events are unreliable."),
         .phases = { P::Impact },
-        .normative = { .heuristic = true },
     });
 
     cat.addDescriptor({
@@ -807,26 +767,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "uncertainty: the top of the swing sits in both halves of the sum, so a small error in "
             "locating it moves this number more than you would expect."),
         .phases = { P::Impact },
-        .normative = {
-            // The FIRST inline corridor in the manifest. Non-DOF, so it cannot
-            // delegate to reference_bands (guide step D).
-            //
-            // PROVISIONAL. These are the published tour figures, and they are
-            // measured Takeaway→Top while this metric is Address→Top — so the
-            // band sits slightly low for this basis by the (small, structurally
-            // bounded, but so far UNMEASURED) Address→Takeaway gap. Re-centre it
-            // from the corpus distribution before treating it as authoritative.
-            .inlineCorridors = { { .phase = P::Impact,
-                                   .greenLo = 2.2, .greenHi = 3.0,
-                                   .amberLo = 1.8, .amberHi = 3.6,
-                                   .deltaFromAddress = false } },
-            .contextNote = QStringLiteral(
-                "Measured from address to the top, then top to impact. Published tour figures are "
-                "measured from the takeaway instead, so this reads a little higher than the 3:1 "
-                "benchmark; the corridor is provisional until the difference is measured on a "
-                "corpus."),
-            .heuristic = true,
-        },
+        // The corridor that used to be inlined here (green 2.2–3.0, amber 1.8–3.6) is now the
+        // `m_tempoRatio` norm row in src/Resources/diagnostics/norms.json, and the note explaining
+        // why it is provisional — published figures are measured Takeaway→Top where this metric is
+        // Address→Top — is that norm's citation. It was the manifest's only inline corridor.
         .usedBy = { QStringLiteral("characteristic:transition_rush") },
     });
 
@@ -850,7 +794,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "and lead forearm) and the club track."),
         .phases = { P::Transition, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax, R::LeadForearm }, .clubTrack = true },
     });
 
@@ -875,7 +818,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "and neither is wrong; it also happens to be how a stance is described out loud. Needs "
             "a face-on whole-body camera with both shoulders visible at address."),
         .phases = { P::Address },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review"),
                     QStringLiteral("characteristic:stance_narrow"),
@@ -899,7 +841,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "that, and for any normative judgement. Present only when the ball was detected at "
             "address, since the ball IS the ruler."),
         .phases = { P::Address },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .ballTrack = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -927,7 +868,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "between swings and cameras, unlike stance width itself. Needs a face-on camera and a "
             "detected ball at address."),
         .phases = { P::Address },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true, .ballTrack = true },
         .usedBy = { QStringLiteral("chart:review"),
                     QStringLiteral("characteristic:ball_back"),
@@ -950,7 +890,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "easier for the lead hip to rotate open and clear through the strike, which can help "
             "players who struggle to finish their turn. Needs a face-on whole-body camera."),
         .phases = { P::Address },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -972,7 +911,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "useful lever for players who lack mobility or over-rotate. Needs a face-on whole-body "
             "camera."),
         .phases = { P::Address },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -995,7 +933,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "target-line alignment, which a down-the-line or overhead view would resolve more "
             "directly. Needs a face-on whole-body camera."),
         .phases = { P::Address },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -1018,7 +955,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "legitimate stylistic choice for stability. Read the trend rather than any single "
             "value. Needs a face-on whole-body camera."),
         .phases = { P::Top },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -1046,7 +982,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "for the image-plane line, with a down-the-line view giving true target-line alignment."),
         .phases = { P::Address, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:alignment_closed"),
                     QStringLiteral("characteristic:alignment_open") },
@@ -1071,7 +1006,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "needs a face-on camera."),
         .phases = { P::Address, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
     });
 
@@ -1094,7 +1028,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "take over. Planned: needs a face-on camera (down-the-line for true target-line alignment)."),
         .phases = { P::Address, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
     });
 
@@ -1117,7 +1050,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "needs a face-on camera."),
         .phases = { P::Address, P::Impact },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
     });
 
@@ -1141,7 +1073,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "rather than any single frame, and pair it with pelvis sway to see whether the whole "
             "body is sliding. Needs a face-on camera; Wrist Motion session."),
         .phases = { P::Top, P::Impact },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -1163,7 +1094,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "suggests a drop into the shot. Read it alongside spine forward bend and pelvis lift. "
             "Needs a face-on camera; Wrist Motion session."),
         .phases = { P::Top, P::Impact },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -1186,7 +1116,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "over-active head. Read it with head sway and lift for the full picture of head motion. "
             "Needs a face-on camera; Wrist Motion session."),
         .phases = { P::Top, P::Impact },
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review") },
     });
@@ -1224,7 +1153,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "makes it a producer worth building rather than a gap that can never close."),
         .phases = { P::Address },
         .planned = true,
-        .normative = { .heuristic = true },
         .usedBy = { QStringLiteral("characteristic:c_posture") },
     });
 
@@ -1246,7 +1174,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "down-the-line silhouette."),
         .phases = { P::Address },
         .planned = true,
-        .normative = { .heuristic = true },
         .usedBy = { QStringLiteral("characteristic:s_posture") },
     });
 
@@ -1269,7 +1196,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "its own. Needs a face-on camera."),
         .phases = { P::Top },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:flat_shoulder_plane") },
     });
@@ -1292,7 +1218,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "in the anatomy vocabulary. Needs a face-on camera."),
         .phases = { P::Impact, P::ShaftParallelThrough },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:late_buckle") },
     });
@@ -1315,7 +1240,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "extending down the line. Needs a face-on camera."),
         .phases = { P::Impact, P::ShaftParallelThrough },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:chicken_wing") },
     });
@@ -1341,7 +1265,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "and a short one."),
         .phases = { P::Address },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .ballTrack = true },
         .usedBy = { QStringLiteral("characteristic:ball_too_close"),
                     QStringLiteral("characteristic:ball_too_far") },
@@ -1368,7 +1291,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "camera."),
         .phases = { P::Address, P::ArmParallelDown },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:forward_lunge") },
     });
@@ -1391,7 +1313,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "face-on camera."),
         .phases = { P::Top },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:flying_elbow") },
     });
@@ -1414,7 +1335,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "camera."),
         .phases = { P::Top },
         .planned = true,
-        .normative = { .heuristic = true },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:loss_of_width") },
     });

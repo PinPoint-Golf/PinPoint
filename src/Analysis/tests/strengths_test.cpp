@@ -35,7 +35,7 @@ static int goodCount(const std::vector<PpWristFinding> &v)
 int main()
 {
     std::printf("=== Tier-2 strengths ===\n");
-    ConfigReferenceBandProvider provider;
+    NormBandProvider provider;
 
     // 1. Cast swing — set / face-rotation / width are all good, adjacent to the cast fault → surface.
     {

@@ -104,7 +104,7 @@ struct Measure {
 // Signals are purely COMPARATIVE. Change and rate are not tests — they are reducers, and live on
 // the measure. One place expresses time.
 enum class SignalTest {
-    OutsideCorridor,   // preferred: authors no numbers, inherits the catalogue's NormativeCorridor
+    OutsideCorridor,   // preferred: authors no numbers, inherits the measure's norm
     Threshold,         // an authored number; needs a citation to be more than an opinion
     Order,             // two measures, temporal ordering (kinematic sequence)
     Ratio,             // two measures, a ratio (tempo)

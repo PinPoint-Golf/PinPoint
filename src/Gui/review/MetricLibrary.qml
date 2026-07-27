@@ -34,7 +34,10 @@ Item {
     // ── façade + labels (declared declaratively; assembled once, read-only) ────
     // NB: ids must NOT collide with MetricDetail's `mc`/`labels` properties — inside the Loader's
     // Component, `mc: mc` would self-reference the (undefined) local property, blanking the detail.
-    MetricCatalog  { id: catalog }
+    // The corridors it resolves are graded under the pack-wide policy the user chose in Diagnostics
+    // settings, so it has to be told which one — a norm with no explicit monitor band takes its
+    // Watch edge from the policy.
+    MetricCatalog  { id: catalog; gradePolicy: appSettings.diagnosticsGradePolicy }
     TimelineLabels { id: metricLabels }
 
     // ── view state ────────────────────────────────────────────────────────────

@@ -57,7 +57,7 @@ QVariantMap pointMap(const PpRagCell &c)
 
 WristDiagnosticsModel::WristDiagnosticsModel(QObject *parent)
     : QObject(parent)
-    , m_provider(makeReferenceBandProvider(BandProviderKind::Norm))
+    , m_provider(makeReferenceBandProvider())
 {
     // No data until a swing is reviewed (analysisDetail bound from shotReplay).
 }

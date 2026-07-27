@@ -36,7 +36,7 @@ static FixtureWristAngleSource withSegConf(FixtureWristAngleSource src, float co
 int main()
 {
     std::printf("=== Tier-2 confidence ===\n");
-    ConfigReferenceBandProvider provider;
+    NormBandProvider provider;
 
     // 1. Confidence is a fraction of the rule base (data quality < 1 pulls it down), in (0, ruleBase).
     {

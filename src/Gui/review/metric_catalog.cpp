@@ -18,6 +18,8 @@
 
 #include "metric_catalog.h"
 
+#include "../../Diagnostics/metric_corridor.h"
+
 using namespace pinpoint::analysis;
 
 namespace {
@@ -119,7 +121,22 @@ QVariantMap rowMap(const MetricDescriptor &d, const MetricAvailability &a)
 MetricCatalog::MetricCatalog(QObject *parent)
     : QObject(parent)
     , m_catalogue(makeMetricCatalogue())
+    , m_pack(makeCharacteristicPackProvider())
+    , m_norms(sharedNormProvider())
+    , m_policyName(QStringLiteral("standard"))
 {
+}
+
+MetricCatalog::~MetricCatalog() = default;
+
+void MetricCatalog::setGradePolicy(const QString &name)
+{
+    // Resolved through the shared table, not stored as handed in — same rule as NormModel: an
+    // unknown name must grade against the default AND read as the default.
+    const QString resolved = QString::fromLatin1(gradePolicyPresetFor(name).name);
+    if (resolved == m_policyName) return;
+    m_policyName = resolved;
+    emit gradePolicyChanged();
 }
 
 QVariantList MetricCatalog::groups() const
@@ -180,25 +197,80 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
         phases.append(static_cast<int>(p));
     m.insert(QStringLiteral("phases"), phases);
 
-    // Normative: contextNote / heuristic + the resolved corridor for each of the metric's phases.
+    // Normative: the corridor for each of the metric's phases, resolved through the NORM SET — the
+    // (metric, phase) → measure → norm join, in the shot's own context. The metric descriptor no
+    // longer carries corridors of its own; it describes the metric and does not judge it.
+    //
+    // Provenance travels with them, because the numbers are now content a user can interrogate and
+    // edit: which norm, resolved at which context, inherited or not, how well founded, and whether
+    // it is the shipped corridor or theirs. That replaced the descriptor's hand-authored
+    // `contextNote` — a sentence naming a context ("mid-iron · neutral archetype") is exactly what
+    // the context tree now states for real.
+    const CharacteristicPack &pack     = m_pack->pack();
+    const QString             contextId = ctx.band.resolvedContextId();
+    const GradePolicy         policy    = gradePolicyByName(m_policyName);
+
     QVariantList corridors;
+    QString      normContextId, normSource, normSourceWords, normCitation, normWeakWhy, normMeasureId;
+    bool         anyOverridden = false, anyWeak = false, anyInherited = false;
+    int          normN = 0;
+
     for (Phase p : d->phases) {
-        const std::optional<NormativeCorridor> c = m_catalogue.corridor(key, p, ctx.band);
+        const std::optional<MetricCorridor> c =
+            corridorForMetricAtPhase(pack, *m_norms, key, p, contextId, policy);
         if (!c)
             continue;
+
         QVariantMap cm;
-        cm.insert(QStringLiteral("phase"),           static_cast<int>(c->phase));
-        cm.insert(QStringLiteral("greenLo"),         c->greenLo);
-        cm.insert(QStringLiteral("greenHi"),         c->greenHi);
-        cm.insert(QStringLiteral("amberLo"),         c->amberLo);
-        cm.insert(QStringLiteral("amberHi"),         c->amberHi);
+        cm.insert(QStringLiteral("phase"),            static_cast<int>(c->phase));
+        cm.insert(QStringLiteral("greenLo"),          c->greenLo);
+        cm.insert(QStringLiteral("greenHi"),          c->greenHi);
+        cm.insert(QStringLiteral("amberLo"),          c->amberLo);
+        cm.insert(QStringLiteral("amberHi"),          c->amberHi);
         cm.insert(QStringLiteral("deltaFromAddress"), c->deltaFromAddress);
+        cm.insert(QStringLiteral("measureId"),        c->measureId);
+        cm.insert(QStringLiteral("contextId"),        c->contextId);
+        cm.insert(QStringLiteral("inherited"),        c->inherited);
+        cm.insert(QStringLiteral("overridden"),       c->overridden);
         corridors.append(cm);
+
+        // Metric-wide provenance. The named fields describe the FIRST corridor that resolved, since
+        // a one-line summary has to pick one; the flags are OR-ed across all of them, so a metric
+        // with a single edited or weakly-founded phase still says so. Different phases are different
+        // measures and can in principle resolve at different contexts, which is why the per-corridor
+        // maps above carry their own `contextId` / `inherited` / `overridden` too.
+        if (normContextId.isEmpty()) {
+            normContextId = c->contextId;
+            normMeasureId = c->measureId;
+            if (const Norm *n = m_norms->resolve(c->measureId, contextId).norm) {
+                normSource      = normSourceName(n->source);
+                normSourceWords = normSourceLabel(n->source);
+                normCitation    = n->citation;
+                normWeakWhy     = normWeakReason(*n);
+                normN           = n->n;
+                anyWeak         = normIsWeak(*n);
+            }
+        }
+        anyOverridden = anyOverridden || c->overridden;
+        anyInherited  = anyInherited  || c->inherited;
     }
+
     QVariantMap normative;
-    normative.insert(QStringLiteral("contextNote"), d->normative.contextNote);
-    normative.insert(QStringLiteral("heuristic"),   d->normative.heuristic);
-    normative.insert(QStringLiteral("corridors"),   corridors);
+    normative.insert(QStringLiteral("corridors"),  corridors);
+    normative.insert(QStringLiteral("measureId"),  normMeasureId);
+    normative.insert(QStringLiteral("contextId"),  normContextId);
+    if (const ContextNode *cn = m_norms->contexts().node(normContextId))
+        normative.insert(QStringLiteral("contextLabel"), cn->label);
+    else
+        normative.insert(QStringLiteral("contextLabel"), normContextId);
+    normative.insert(QStringLiteral("inherited"),  anyInherited);
+    normative.insert(QStringLiteral("overridden"), anyOverridden);
+    normative.insert(QStringLiteral("source"),      normSource);
+    normative.insert(QStringLiteral("sourceLabel"), normSourceWords);
+    normative.insert(QStringLiteral("citation"),    normCitation);
+    normative.insert(QStringLiteral("n"),          normN);
+    normative.insert(QStringLiteral("weak"),       anyWeak);
+    normative.insert(QStringLiteral("weakReason"), normWeakWhy);
     m.insert(QStringLiteral("normative"), normative);
 
     // Requirement (rendered for the "How it's measured" section).

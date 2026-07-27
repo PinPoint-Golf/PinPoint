@@ -20,26 +20,8 @@
 
 #include "metric_providers.h"
 #include "metric_resolver.h"
-#include "reference_bands.h"
-#include "wrist_analysis_adapter.h"   // wristCheckpoints() — canonical Phase <-> PpSwingPosition map
 
 namespace pinpoint::analysis {
-
-namespace {
-
-// Map a segmentation Phase to its assessment swing-position via the one canonical table
-// (wrist_analysis_adapter.h). nullopt when the phase is not an assessment checkpoint.
-std::optional<PpSwingPosition> swingPositionForPhase(Phase p)
-{
-    const int phaseInt = static_cast<int>(p);
-    const WristCheckpoint *ck = wristCheckpoints();
-    for (int i = 0; i < kNumPos; ++i)
-        if (ck[i].phase == phaseInt)
-            return ck[i].pos;
-    return std::nullopt;
-}
-
-} // namespace
 
 void MetricCatalogue::addDescriptor(const MetricDescriptor &d)
 {
@@ -97,41 +79,6 @@ std::vector<const MetricDescriptor *> MetricCatalogue::query(const MetricQuery &
 MetricAvailability MetricCatalogue::resolve(const QString &key, const ShotContext &ctx) const
 {
     return resolveAvailability(m_providers, descriptor(key), key, ctx);
-}
-
-std::optional<NormativeCorridor> MetricCatalogue::corridor(const QString &key, Phase p,
-                                                           const BandContext &bc) const
-{
-    const MetricDescriptor *d = descriptor(key);
-    if (!d)
-        return std::nullopt;
-    const MetricNormative &n = d->normative;
-
-    // DOF metrics: delegate to the reference-band provider (single source of truth for corridors).
-    if (n.dof) {
-        const std::optional<PpSwingPosition> pos = swingPositionForPhase(p);
-        if (!pos)
-            return std::nullopt;
-        const std::unique_ptr<IReferenceBandProvider> provider =
-            makeReferenceBandProvider(BandProviderKind::Norm);
-        const Band b = provider->band(*n.dof, *pos, bc);
-        if (!b.valid)
-            return std::nullopt;
-        NormativeCorridor c;
-        c.phase            = p;
-        c.greenLo          = b.greenLo;
-        c.greenHi          = b.greenHi;
-        c.amberLo          = b.amberLo;
-        c.amberHi          = b.amberHi;
-        c.deltaFromAddress = true;                // wrist DOFs are Δ-from-address
-        return c;
-    }
-
-    // Non-DOF metrics: inline corridor for this phase, if the manifest declared one.
-    for (const NormativeCorridor &c : n.inlineCorridors)
-        if (c.phase == p)
-            return c;
-    return std::nullopt;
 }
 
 MetricCatalogue makeMetricCatalogue()

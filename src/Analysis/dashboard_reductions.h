@@ -50,7 +50,8 @@ struct RailSample {
     QString band;            // "green" | "yellow" | "red" | "" (unscored)
 };
 
-// One phase's normative corridor — the MetricNormative corridor shape, flattened.
+// One phase's normative corridor, flattened — the shape MetricCatalog marshals out of the norm set
+// (Diagnostics/metric_corridor.h) and QML hands back in.
 struct RailCorridor {
     int    phase   = -1;
     double greenLo = 0.0, greenHi = 0.0;

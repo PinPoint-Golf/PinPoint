@@ -20,12 +20,13 @@
 
 #include "metric_type.h"
 #include "swing_analysis.h"          // Phase, SegmentRole, ReconstructionTier
-#include "wrist_assessment_types.h"  // PpJointDof
+// wrist_assessment_types.h is no longer needed HERE (PpJointDof left with MetricNormative at stage 9)
+// but several includers of this header have always got PpJointDof / PpSwingPosition through it.
+#include "wrist_assessment_types.h"
 
 #include <QString>
 #include <QStringList>
 
-#include <optional>
 #include <vector>
 
 // MetricDescriptor — the stable identity + metadata of a metric (design §3.4). Constant for every
@@ -45,25 +46,16 @@ struct MetricRequirement {
     ReconstructionTier       minTier     = ReconstructionTier::Angles2D;
 };
 
-// One phase's normative corridor — same semantics as reference_bands::Band (a GREEN core with an
-// AMBER margin either side; outside amber is RED). Used inline for non-DOF metrics (speeds, setup
-// scalars) until a dedicated band provider lands; DOF metrics resolve through reference_bands.
-struct NormativeCorridor {
-    Phase  phase = Phase::Impact;
-    double greenLo = 0.0, greenHi = 0.0;   // "tour core"
-    double amberLo = 0.0, amberHi = 0.0;   // core ± margin
-    bool   deltaFromAddress = false;       // wrist DOFs are Δ-from-address; speeds are absolute
-};
-
-// How a metric's normative / comparative values are sourced (design §3.3).
-struct MetricNormative {
-    // Preferred: delegate to the reference-band provider (wrist DOFs).
-    std::optional<PpJointDof>      dof;
-    // Fallback: inline corridors per phase (speeds, setup scalars) until a provider lands.
-    std::vector<NormativeCorridor> inlineCorridors;
-    QString                        contextNote;       // "mid-iron · neutral archetype" (BandContext)
-    bool                           heuristic = true;  // reference_bands: every number is expected to move
-};
+// A metric descriptor carries NO normative values.
+//
+// Until stage 9 of the diagnostics-norms work it did: `MetricNormative` held a DOF to delegate to
+// the compiled band table, or a per-phase inline corridor, plus a hand-written note naming the
+// context those numbers assumed. All three are gone. Corridors are now content in the norm set,
+// keyed on a MEASURE (post-reducer, so "Δ from address at the top" and "absolute at impact" cannot
+// be confused for one another) and resolved in the shot's own context through the tree — see
+// `Diagnostics/metric_corridor.h`, which is what every metric surface calls.
+//
+// The descriptor states what a metric IS. It no longer judges it.
 
 // The metric descriptor. `key` equals the existing MetricSeries.key / ScoredMetric.key.
 struct MetricDescriptor {
@@ -84,7 +76,6 @@ struct MetricDescriptor {
     // Surfaced so the directory can badge it "Planned" — the requirement then reads as "will need …".
     bool               planned = false;
 
-    MetricNormative    normative;
     // NB: named `requirement`, NOT `requires` — `requires` is a C++20 keyword and cannot be an identifier.
     MetricRequirement  requirement;
 

@@ -26,6 +26,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <vector>
 
 // Norms — the normative distribution a measured value is graded against.
 //
@@ -70,6 +71,27 @@ struct GradePolicy {
     double goodMaxZ  = 2.0;   // 1 < |z| <= 2    -> Good
     double watchMaxZ = 3.0;   // 2 < |z| <= 3    -> Watch;  beyond -> Action
 };
+
+// The policy PRESETS, by name. The name is what is persisted and what crosses into QML, because the
+// policy has to be one comparable thing across athletes and shared packs — see GradePolicy's own
+// comment. Here rather than in the panel that renders them, because more than one surface now needs
+// name → numbers (the measures view, the corridor editor and the metric detail / dashboard
+// corridors), and a second table would let two of them grade against different z's while showing
+// the same word.
+struct GradePolicyPreset {
+    const char *name;      // stable, persisted token
+    const char *label;     // user-facing, translated at the point of render
+    const char *hint;
+    GradePolicy policy;
+};
+
+const std::vector<GradePolicyPreset> &gradePolicyPresets();
+
+// Unknown names resolve to `standard` rather than being kept as themselves: a stored name nothing
+// recognises must grade against the default AND read as the default, or the control shows one thing
+// while the app does another.
+const GradePolicyPreset &gradePolicyPresetFor(const QString &name);
+GradePolicy              gradePolicyByName(const QString &name);
 
 struct Norm {
     // Keys on the MEASURE (post-reducer), never the metric key. A measure carries its reducer and
@@ -157,13 +179,52 @@ inline Grade grade(double value, const Norm &norm, const GradePolicy &policy = {
 // True when the grade says something deviated. NotMeasured is NOT a deviation — see the enum.
 inline bool isDeviation(Grade g) { return g == Grade::Watch || g == Grade::Action; }
 
+// ── The edges a norm DRAWS as ───────────────────────────────────────────────
+//
+// ONE definition, because three surfaces project a norm into a corridor to render it — the wrist
+// grid (NormBandProvider → Band → PpRagCell), the measures view (NormModel::normAt) and the metric
+// detail page / dashboard rails (metric_corridor.h) — and each of them must draw the edge that
+// grade() actually applies. A second copy is how a surface ends up showing a corridor the app does
+// not use: the Watch edge is `monitorLo/Hi` when the norm states them and z-derived when it does
+// not, and that precedence has to be stated once.
+//
+// The Ideal band is policy-INDEPENDENT (it is mu ± sigma, the norm's own claim). Only the Watch
+// edge moves with the grade policy, and then only for a norm with no explicit monitor band.
+struct NormBandEdges {
+    double idealLo = 0.0, idealHi = 0.0;   // mu −/+ sigma
+    double watchLo = 0.0, watchHi = 0.0;   // where Action begins
+};
+
+// `marginOverride` is the SwingLab `bands.*` sweep (negative ⇒ not set), which replaces the Watch
+// edge with the Ideal band widened by a fixed number of units either side. It exists because half
+// the shipped norms do not store their Watch edge as a margin at all, so sweeping "the margin"
+// without it would silently do nothing on those.
+inline NormBandEdges bandEdgesOf(const Norm &n, const GradePolicy &policy = {},
+                                 double marginOverride = -1.0)
+{
+    NormBandEdges e;
+    e.idealLo = n.idealLo();
+    e.idealHi = n.idealHi();
+    if (marginOverride >= 0.0) {
+        e.watchLo = e.idealLo - marginOverride;
+        e.watchHi = e.idealHi + marginOverride;
+    } else if (n.hasExplicitMonitor()) {
+        e.watchLo = *n.monitorLo;
+        e.watchHi = *n.monitorHi;
+    } else {
+        e.watchLo = n.mu - policy.watchMaxZ * n.sigmaLo;
+        e.watchHi = n.mu + policy.watchMaxZ * n.sigmaHi;
+    }
+    return e;
+}
+
 // The 4-band grade collapsed to the legacy 3-band PpRag the wrist grid renders.
 //
 // ONE definition, here, because two surfaces consume it and a second copy would let them drift:
 // NormBandProvider projects a Norm into a Band and the wrist grid runs classifyDelta() over it,
 // while the characteristic engine grades the same value through grade(). Those two paths must
-// agree on colour for the same number, and reference_bands_parity_test asserts they do — over the
-// migrated content AND over a norm with no explicit monitor, where the Action edge is z-derived.
+// agree on colour for the same number, and `reference_bands_test` asserts they do over the whole
+// shipped set — including a norm with no explicit monitor, where the Action edge is z-derived.
 //
 // KNOWN CONSEQUENCE, ACCEPTED: this is not a 2:1:1 mapping. For migrated rows Ideal is exactly the
 // old green band, so Good AND Watch both sit inside the old amber. A surface showing a grade word
@@ -202,6 +263,10 @@ QString normWeakReason(const Norm &n);
 // ── Enum <-> string (the JSON spelling) ─────────────────────────────────────
 QString    normSourceName(NormSource s);
 bool       normSourceFromName(const QString &s, NormSource &out);
+
+// The user-facing words for a norm's provenance. WITH the enum, not in a façade: the measures view
+// and the metric detail page both render it, and two copies of four strings is how they drift.
+QString    normSourceLabel(NormSource s);
 QString    gradeName(Grade g);
 bool       gradeFromName(const QString &s, Grade &out);
 

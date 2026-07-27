@@ -22,15 +22,17 @@
     "never a silent grade.",
     "",
     "The wrist-grid rows below were migrated from the compiled table that used to live in",
-    "src/Analysis/reference_bands.cpp, and are pinned by reference_bands_parity_test. That",
-    "table is gone: THIS FILE is now the only place those corridors exist. Edit them here.",
+    "src/Analysis/reference_bands.cpp. That table, both of its providers and the parity gate",
+    "that pinned this file to it are all gone (stage 9): THIS FILE is the only place those",
+    "corridors exist, and nothing pins them any more. Re-seat them here.",
     "",
     "They are STARTING HEURISTICS (design §11) — every number is expected to move once it",
     "is re-seated against a corpus. They carry no citation because there is nothing to",
     "cite; 'source: heuristic' with no n says exactly that.",
     "",
     "The archetype_bowed / archetype_cupped rows are the face-corridor shift that used to",
-    "be a compiled ±10° offset inside ArchetypeBandProvider (kArchetypeFaceOffsetDeg).",
+    "be a compiled ±10° offset for one DOF (kArchetypeFaceOffsetDeg, kept in",
+    "pp_tuned_constants.h only as the frozen record of what they were migrated from).",
     "Bowed styles tolerate more bow and cupped styles more cup, so grading a valid style",
     "against the neutral corridor would red-flag it. They override full_swing on the",
     "lead-wrist face axis ONLY; every other DOF is archetype-invariant and inherits."
@@ -595,7 +597,7 @@
       "source": "heuristic",
       "monitorLo": 1.8,
       "monitorHi": 3.6,
-      "citation": "Published tour figures, measured Takeaway->Top where this metric is Address->Top, so the band sits slightly low for this basis by the (small, structurally bounded, so far UNMEASURED) Address->Takeaway gap. Provisional until re-centred on a corpus. NB the low-side Watch band is empty: 1.8 is exactly -2 sigma, so a rushed transition goes Good -> Action at 1.8. Deliberate for now; revisit with the literature review."
+      "citation": "Measured from address to the top, then top to impact. Published tour figures are measured from the TAKEAWAY instead, so this metric reads a little higher than the 3:1 benchmark and a band cut for that basis sits slightly low for this one -- by the (small, structurally bounded, so far UNMEASURED) Address->Takeaway gap. Provisional until re-centred on a corpus. NB the low-side Watch band is empty: 1.8 is exactly -2 sigma, so a rushed transition goes Good -> Action at 1.8. Deliberate for now; revisit with the literature review."
     },
     {
       "measure": "m_leadWristAtImpact",

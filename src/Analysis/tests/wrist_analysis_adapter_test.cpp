@@ -86,7 +86,7 @@ int main()
     analysisDetail[QStringLiteral("phases")] = phases;
 
     const InMemoryWristAngleSource src = parseAnalysisDetail(analysisDetail);
-    ConfigReferenceBandProvider provider;
+    NormBandProvider provider;
     const PpWristAssessmentResult r = WristAssessmentEngine::assess(src, provider);
 
     // 1. Real values flow through to the cells.

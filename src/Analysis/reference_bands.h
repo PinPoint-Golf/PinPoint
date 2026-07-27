@@ -27,8 +27,8 @@
 
 // Reference bands — the "where good comes from" provider (design §6). A band is the expected
 // Δ-from-address corridor for a (DOF, position) cell: a GREEN core with an AMBER margin either side;
-// outside amber is RED. Supplied behind an abstract provider so the source is swappable (config /
-// player-baseline / archetype — design §6); v1 ships ConfigReferenceBandProvider only.
+// outside amber is RED. Supplied behind an abstract provider so the source is swappable; the one
+// implementation is NormBandProvider, which projects the corridors out of the diagnostics norm set.
 
 namespace pinpoint::analysis {
 
@@ -117,46 +117,30 @@ public:
     virtual Band band(PpJointDof dof, PpSwingPosition pos, const BandContext &ctx = {}) const = 0;
 };
 
-// Declarative bands from a versioned, compiled-in table (design §5 seeds; §11: every number is a
-// starting heuristic and is expected to move). Green corridors are stored per (DOF, position); the
-// amber margin is per-DOF. Ships first; the IReferenceBandProvider seam allows JSON / player-baseline
-// / archetype providers later without touching the engine.
-class ConfigReferenceBandProvider : public IReferenceBandProvider {
-public:
-    static constexpr int kVersion = 1;
-    Band band(PpJointDof dof, PpSwingPosition pos, const BandContext &ctx = {}) const override;
-};
-
-// Archetype-aware bands (design §6): the neutral config corridors, shifted on the **face DOF** (the
-// style-dependent lead-wrist flex-ext axis) per `ctx.archetype` — so a valid bowed / cupped style is
-// scored against its own model rather than red-flagged. Archetype 0 (neutral) ≡ the config bands.
-// Other DOFs are archetype-invariant in v1.
+// There is no compiled band table any more.
 //
-// SUPERSEDED by NormBandProvider: the ±10° shift is now two ordinary norm rows under the
-// archetype_bowed / archetype_cupped contexts rather than a compiled special case for one DOF.
-// Retained only as the parity test's reference implementation — it is what NormBandProvider is
-// proved byte-identical against — and is not reachable from the app.
-class ArchetypeBandProvider : public IReferenceBandProvider {
-public:
-    Band band(PpJointDof dof, PpSwingPosition pos, const BandContext &ctx = {}) const override;
-private:
-    ConfigReferenceBandProvider m_config;
-};
+// `ConfigReferenceBandProvider` held one: 39 green corridors per (DOF, position) with a per-DOF
+// amber margin, and `ArchetypeBandProvider` shifted the face DOF ±10° for a bowed or cupped style
+// as a compiled special case. Both were migrated into the norm set at stage 2 — the corridors are
+// ordinary norm rows and the archetype shift is two more rows under the `archetype_bowed` /
+// `archetype_cupped` contexts — proven byte-identical, and deleted at stage 9 together with the
+// parity gate that pinned them. The seam below is what survives, and NormBandProvider is the only
+// implementation: corridors are CONTENT, and a second copy compiled into the binary would be a
+// second answer to the same question.
 
 // Bands projected from the diagnostics norm set (src/Resources/diagnostics/norms.json).
 //
 // This is the provider the app uses. It exists as an IReferenceBandProvider rather than replacing
 // the seam because the wrist grid renders `Band::greenLo/greenHi` directly into PpRagCell — the
 // band SHAPE is user-visible, not just the resulting PpRag — so projecting a Norm back into a Band
-// makes the migration structurally exact instead of merely tested:
+// made the migration structurally exact instead of merely tested:
 //
 //     greenLo = mu - sigmaLo      greenHi = mu + sigmaHi        (the Ideal band)
 //     amberLo = monitorLo         amberHi = monitorHi           (the Watch/Action edge)
 //
-// With migrated content those four numbers are bit-for-bit the old table's, so classifyDelta() is
-// left completely untouched and reference_bands_parity_test can assert equality rather than
-// nearness. A norm with no explicit monitor band (anything authored in the corridor editor) has its
-// amber edges derived from the GradePolicy instead.
+// Those four numbers come from `bandEdgesOf()` (norm.h), which is the one place that precedence is
+// stated: a norm with no explicit monitor band — anything authored in the corridor editor — has its
+// amber edges derived from the GradePolicy instead. classifyDelta() was left completely untouched.
 //
 // Resolution walks the context tree from ctx.resolvedContextId(). A DOF/position with no norm in
 // any context yields an INVALID band, which is what the engine greys — same as the old table
@@ -181,8 +165,8 @@ private:
     GradePolicy                          m_policy;
 };
 
-enum class BandProviderKind { Config, Archetype, Norm };
-
-std::unique_ptr<IReferenceBandProvider> makeReferenceBandProvider(BandProviderKind kind = BandProviderKind::Norm);
+// No kind parameter: there is one provider, and a factory offering a choice that does not exist
+// would read as a decision a caller has to make.
+std::unique_ptr<IReferenceBandProvider> makeReferenceBandProvider();
 
 } // namespace pinpoint::analysis

@@ -1,7 +1,8 @@
 # Metric Catalogue — developer guide (adding a metric end-to-end)
 
-The **Metric Catalogue** owns metric *identity + metadata* (label, unit, meaning, normative
-corridor, requirements) and abstracts *which producer computes each metric*. It is additive metadata
+The **Metric Catalogue** owns metric *identity + metadata* (label, unit, meaning, requirements) and
+abstracts *which producer computes each metric*. It does **not** own corridors — those are norm-set
+content, resolved through `Diagnostics/metric_corridor.h`; see Step D. It is additive metadata
 over the existing `MetricSeries` keys — no `swing.json` schema change. This guide is the recipe for
 adding a new metric so it appears (correctly) in the directory and resolves per shot.
 
@@ -52,9 +53,10 @@ Two easy traps:
 - The descriptor member is `requirement`, **not** `requires` — `requires` is a C++20 keyword and
   cannot be an identifier.
 - The producer `Phase` enum (Address…Finish, `swing_analysis.h`) is **distinct** from
-  `PpSwingPosition` (P1…P8, `wrist_assessment_types.h`). DOF normative lookup maps between them via
-  the one canonical table `wristCheckpoints()` (`wrist_analysis_adapter.h`) — reuse it, never
-  duplicate the mapping.
+  `PpSwingPosition` (P1…P8, `wrist_assessment_types.h`). Where you need to cross between them, the
+  one canonical table is `wristCheckpoints()` (`wrist_analysis_adapter.h`) — reuse it, never
+  duplicate the mapping. (The diagnostics pack speaks `Phase` throughout, so a corridor lookup never
+  crosses; the wrist grid's cell measures encode the position in their id.)
 
 ## 2. Recipe — add a new metric
 
@@ -90,7 +92,7 @@ cat.addDescriptor({
     .flexPositive = true,
     .phases = { Phase::Top, Phase::Impact },
     .scored = false,
-    .normative = { /* see Step D */ .heuristic = true },
+    // No normative block — a descriptor describes a metric, it does not judge it. See Step D.
     .requirement = { .imuRoles = { SegmentRole::LeadForearm, SegmentRole::LeadHand } },
     .usedBy = { QStringLiteral("chart:review") },
 });
@@ -112,15 +114,37 @@ Resolution rule (in `metric_resolver.cpp`): over all providers that list the key
 (`Measured` > `Bridged` > `Unavailable`), ties broken by `priority()`. If no provider claims the key,
 it is `Unavailable` with the descriptor requirement rendered as the reason.
 
-### Step D — normative values
-- **DOF metric** (wrist / forearm / elbow): set `.normative.dof = PpJointDof::…`. `corridor()` then
-  delegates to `makeReferenceBandProvider()` (Phase mapped to `PpSwingPosition` via
-  `wristCheckpoints()`). If your DOF is new, add it to `PpJointDof` (append before `Count`) and to the
-  `ConfigReferenceBandProvider` table (`reference_bands.cpp`), and extend `dofForMetricKey()`.
-- **Non-DOF metric** (speeds, setup scalars): leave `.dof` unset and either supply
-  `.inlineCorridors` (a `NormativeCorridor` per phase, same green-core/amber-margin semantics) where
-  `docs/` gives a defensible range, or leave them empty — the detail page then shows "no normative
-  reference yet" rather than a fake band. There is deliberately no non-DOF band *provider* in v1.
+### Step D — the corridor (a norm, not a descriptor field)
+
+**A metric descriptor carries no normative values.** `MetricNormative` — the `dof` delegation, the
+`inlineCorridors`, the `contextNote`, the `heuristic` flag — was deleted at stage 9 of the
+diagnostics-norms work, along with `MetricCatalogue::corridor()`. A corridor is now **content**:
+
+1. **The pack needs a measure that reads your metric.** A measure names your `metricKey` plus a
+   **reducer**, and the reducer is where the phase lives (`at p7`, `delta p1→p4`, `extremum p5..p6`).
+   Author it in `src/Resources/diagnostics/core.json`, or through Settings → Diagnostics → Measures,
+   which mints one and refuses to do so without a `highMeans` sentence.
+2. **The norm set needs a row for that measure**, at a context: `mu`, `sigmaLo`/`sigmaHi`, optional
+   absolute `monitorLo`/`monitorHi`, `unit` (which must match the measure's — the loader refuses a
+   mismatch), `source` and a `citation` where the figure is provisional. Author it in
+   `src/Resources/diagnostics/norms.json` or seat it from real swings in the corridor editor.
+3. **Nothing else is needed.** Every metric surface — `MetricDetail`, `PpBandRail`, the dashboard
+   Motion / Setup / Verdict zones — resolves through `corridorForMetricAtPhase()`
+   (`src/Diagnostics/metric_corridor.h`) via `MetricCatalog::descriptor()`, in the shot's own
+   context. With no measure or no norm it renders "no norm for this metric yet" rather than a fake
+   band.
+
+Two rules worth knowing before you author the measure, because both decide what a surface draws:
+
+- **The corridor is found through the REDUCER, not through the metric's `phases` list.** A measure
+  whose reducer names a phase the metric does not declare resolves nothing and the corridor silently
+  disappears — that was ledger C20, live for two stages on `m_tempoRatio`. Make the reducer name the
+  phase the PRODUCER labels.
+- **`at` beats `delta` where both name one phase**, because a corridor keyed on a phase means the
+  absolute reading there. `leadWristFlexExt` has both at P7 and the absolute one wins.
+
+Club-dependence is a **context**, not a note: put per-club rows under `driver` / `iron` / `wedge` in
+the tree and they resolve automatically, inheriting `full_swing` where you author nothing.
 
 ### Step E — CMake (only if you added files)
 Manifest/provider edits need no CMake change. New `.cpp` files reach three targets (analysis guide
@@ -135,8 +159,10 @@ Add cases to `src/Analysis/tests/metric_catalogue_test.cpp`:
   counts.
 - **resolve()**: a `ShotContext` where it is `Measured`, and one where it is `Unavailable` with the
   right reason (session gate / missing sensor).
-- **corridor()** (if it has normative): DOF path matches `reference_bands`, or inline path returns the
-  corridor; a non-checkpoint phase and unknown key return `nullopt`.
+- **corridors**: nothing goes in this test — the catalogue no longer resolves them. If your metric
+  gains a norm, add a case to `manifest_migration_test` (`src/Diagnostics/tests/`) asserting it
+  resolves a corridor at every phase it declares. That is the gate that catches a reducer naming a
+  phase the metric does not.
 
 Build + run (targeted, `--parallel 4` per the box's memory cap):
 ```bash
@@ -147,8 +173,8 @@ ctest --test-dir build/analyzer-tests -R metric_catalogue --output-on-failure
 ### Step G — verify in the app
 Build the app once, open **Settings → Metrics**, confirm the metric appears in its group with the
 right unit/short-label and source glyph, and that its detail page renders the meaning, how-to-read,
-normative bar (for DOF/inline metrics), requirement, and usedBy. Run the full 7-suite gate before any
-release.
+normative bar (for any metric with a norm), requirement, and usedBy. Run the full 7-suite gate
+before any release.
 
 ## 3. QML façade shapes (for UI work)
 
@@ -156,21 +182,31 @@ release.
 QVariant. Row shape from `query(filters, shotCtx={})`:
 `{ key, label, shortLabel, unit, type, group, scored, sources:[…], availability:{state,reason,tier} }`.
 Detail from `descriptor(key, shotCtx={})` adds `description, howToRead, flexPositive, phases:[int…],
-normative:{contextNote,heuristic,corridors:[…]}, requires:{…}, usedBy:[…]`. **Phases are Phase ints**
-— render with `TimelineLabels`. `shotCtx` (all optional): `{ tier, sessionType, imuRoles:[roleName…],
+normative:{…}, requires:{…}, usedBy:[…]`. **Phases are Phase ints** — render with `TimelineLabels`.
+
+The `normative` map is resolved out of the NORM SET, not the descriptor:
+`{ corridors:[{phase,greenLo,greenHi,amberLo,amberHi,deltaFromAddress,measureId,contextId,inherited,overridden}],
+measureId, contextId, contextLabel, inherited, overridden, source, sourceLabel, n, citation, weak,
+weakReason }`. A metric with no measure or no norm gets an empty `corridors` list — draw the
+"no norm yet" state, never a zeroed band. The Watch edge (`amberLo/amberHi`) is policy-dependent for
+any norm that states no monitor band, which is why the host must bind
+`gradePolicy: appSettings.diagnosticsGradePolicy` on the `MetricCatalog` it declares. `shotCtx` (all optional): `{ tier, sessionType, imuRoles:[roleName…],
 hasFaceOn, hasClubTrack, hasBallTrack, archetype, club, shape }`; empty `{}` = the context-free
 directory view.
 
 ## 4. Deferred (not in v1)
 
 The new-dashboard rewrite (query-driven zones); the kinematic **Sequence** producer; wiring a live
-swing adherence scorer so `swingScore` becomes Measured; a non-DOF `SpeedBandProvider` /
-player-baseline normative provider; retiring `ChartMetrics::shortLabel` once the catalogue is the
-single source of short names.
+swing adherence scorer so `swingScore` becomes Measured; retiring `ChartMetrics::shortLabel` once the catalogue is
+the single source of short names.
 
 *(2026-07-21: `tempoBackswing` / `tempoRatio` / `ballPosition` left this list — all three now have
-producers. `tempoRatio` is also the manifest's first user of `inlineCorridors`, the non-DOF normative
-path; worth cribbing from if you need a band for a speed or a setup scalar.)*
+producers.)*
+
+*(2026-07-27: a "non-DOF band provider" also left it, because the question dissolved. Corridors are
+norm-set content for every metric, DOF or not — `m_tempoRatio` and `m_stanceWidth` are ordinary norm
+rows beside the 39 migrated wrist cells. If you need a band for a speed, author a measure and a
+norm.)*
 
 ## Appendix A — per-metric work plan (capture · detection · calibration · V&V)
 

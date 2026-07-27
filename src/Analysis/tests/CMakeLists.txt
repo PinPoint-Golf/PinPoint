@@ -64,7 +64,6 @@ set(WRIST_ENGINE ${ANALYSIS}/reference_bands.cpp
 
 pp_add_test(reference_bands_test    SOURCES reference_bands_test.cpp ${ANALYSIS}/reference_bands.cpp ${NORM_SRC}
     INCLUDE ${NORM_INC})
-pp_add_test(archetype_bands_test    SOURCES archetype_bands_test.cpp ${WRIST_ENGINE} INCLUDE ${NORM_INC})
 pp_add_test(tier1_banding_test      SOURCES tier1_banding_test.cpp   ${WRIST_ENGINE} INCLUDE ${NORM_INC})
 pp_add_test(wrist_analysis_adapter_test
     SOURCES wrist_analysis_adapter_test.cpp ${ANALYSIS}/wrist_analysis_adapter.cpp ${WRIST_ENGINE}
@@ -75,7 +74,7 @@ pp_add_test(relationship_rules_test SOURCES relationship_rules_test.cpp ${WRIST_
 pp_add_test(confidence_test         SOURCES confidence_test.cpp         ${WRIST_ENGINE} INCLUDE ${NORM_INC})
 pp_add_test(composite_score_v2_test SOURCES composite_score_v2_test.cpp ${WRIST_ENGINE} INCLUDE ${NORM_INC})
 
-foreach(t reference_bands_test archetype_bands_test tier1_banding_test wrist_analysis_adapter_test
+foreach(t reference_bands_test tier1_banding_test wrist_analysis_adapter_test
           fault_rules_test strengths_test relationship_rules_test confidence_test
           composite_score_v2_test)
     pp_norm_env(${t})
@@ -609,26 +608,38 @@ pp_add_test(norm_measure_source_test
             ${DIAG}/merged_norm_provider.cpp
     INCLUDE ${NORM_INC})
 
-# THE MIGRATION GATE. NormBandProvider (bands projected from norms.json) must reproduce
-# ArchetypeBandProvider (the compiled table) bit-for-bit, on every band edge and every classified
-# delta. This test is what licenses deleting that table; if it fails, the CONVERSION is wrong, not
-# the target.
-pp_add_test(reference_bands_parity_test
-    SOURCES ${DIAG}/tests/reference_bands_parity_test.cpp ${ANALYSIS}/reference_bands.cpp
+# The stage-2 migration gates (reference_bands_parity_test, wrist_render_parity_test) are GONE. They
+# compared NormBandProvider against the compiled band table, and both were deleted at stage 9
+# together with that table — a parity test outliving what it compares against pins the shipped norms
+# to a frozen set of numbers, so the first legitimate corpus re-seat of a corridor would fail a gate
+# nobody wanted (ledger C5). What was permanent in them moved: the projection rules and the
+# grade↔RAG agreement sweep into reference_bands_test, the "an empty norm set greys the whole grid"
+# guard into wrist_norm_render_test below.
+#
+# The engine rendered from the SHIPPED norm set — real bands, all three RAGs reached, findings
+# produced — and the inverse that makes those assertions a gate: with no norm source every cell greys,
+# which is exactly how a failed content read presents at runtime.
+pp_add_test(wrist_norm_render_test
+    SOURCES ${DIAG}/tests/wrist_norm_render_test.cpp ${WRIST_ENGINE}
+    INCLUDE ${NORM_INC})
+pp_norm_env(wrist_norm_render_test)
+
+# Stage 9's own gate: the corridors the metric surfaces used to get from the manifest now come from
+# the norm set through corridorForMetricAtPhase(), and nothing a surface drew went missing. Carries
+# the last migration PIN in the suite — the four tempo numbers, which retire with ledger C9.
+pp_add_test(manifest_migration_test
+    SOURCES ${DIAG}/tests/manifest_migration_test.cpp
             ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
             ${DIAG}/merged_norm_provider.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
-# The other half of the migration gate: nothing DOWNSTREAM of the bands moved either — every cell's
-# rag/band/delta and every finding's id/severity/confidence, over a fixture sweep that actually
-# reaches Green, Amber and Red. Also catches a silently empty norm set, which a band-level diff
-# would report as a clean pass.
-pp_add_test(wrist_render_parity_test
-    SOURCES ${DIAG}/tests/wrist_render_parity_test.cpp ${WRIST_ENGINE}
-    INCLUDE ${NORM_INC})
-pp_norm_env(wrist_render_parity_test)
-
-set_tests_properties(reference_bands_parity_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+set_tests_properties(manifest_migration_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
 # The QML façade over measures, norms and contexts, run against the SHIPPED content. Its whole job
 # is that QML holds no rules, so every rule it hides is asserted here or nowhere: the (metricKey,

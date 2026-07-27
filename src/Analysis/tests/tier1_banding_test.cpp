@@ -32,7 +32,7 @@ static PpRag rag(const PpWristAssessmentResult &r, PpJointDof d, PpSwingPosition
 int main()
 {
     std::printf("=== Tier-1 banding (assess) ===\n");
-    ConfigReferenceBandProvider provider;
+    NormBandProvider provider;
 
     // Clean swing → every assessable cell is Green; P1 is Ref; trail-wrist P8 (no corridor) is Grey.
     {

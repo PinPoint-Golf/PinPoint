@@ -184,9 +184,9 @@ QStringList disabledNormSets();
 
 // The process-wide assembled norm set, built on FIRST USE and cached.
 //
-// This exists because norms are read from files while the compiled table they replace was free:
-// MetricCatalogue::corridor() builds a band provider per call, and re-reading two JSON files on
-// every corridor lookup would be a real regression. Caching keeps the old cost profile.
+// This exists because norms are read from files while the compiled table they replaced was free,
+// and callers build a band provider per lookup rather than holding one — re-reading two JSON files
+// on every corridor lookup would be a real regression. Caching keeps the old cost profile.
 //
 // It is a function-local static, so nothing runs before main() and the "no self-registering
 // statics" rule the pack providers follow is not broken — this is lazy initialisation, not startup

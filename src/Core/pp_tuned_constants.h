@@ -37,8 +37,9 @@
 //
 // NOT here (deliberately): the wrist axis SIGN conventions and ZXY decomposition in
 // src/Analysis/wrist_angles.h — those are sign/axis CHOICES baked into code structure,
-// not single numeric literals, and stay at their source of truth. The full reference-band
-// lo/hi corridor arrays stay in reference_bands.cpp (a Corpus-2 re-seat, not a freeze).
+// not single numeric literals, and stay at their source of truth. The reference-band lo/hi
+// corridor arrays are no longer code at all — they are norm rows in
+// src/Resources/diagnostics/norms.json, edited as content and re-seated from a corpus.
 
 namespace pinpoint::tuned {
 
@@ -142,6 +143,10 @@ inline constexpr double kFlipFaultDeg          = -8.0;  // F3: P6→P7 FE drop �
 inline constexpr double kFlipWatchDeg          = -5.0;  // F3: ≤ this ⇒ Watch
 inline constexpr double kTrailFlattenDeg       = -8.0;  // flip corroboration: trail-wrist P6→P7 drop
 inline constexpr double kArchetypeTopDeltaDeg  = 10.0;  // detectArchetype: |FE Δ@Top| ⇒ bowed/cupped
+// The archetype face-corridor shift. No longer APPLIED from here: it now exists as 16 norm rows
+// (8 positions × bowed/cupped, lead-wrist flex-ext) under the archetype contexts, which is what
+// lets it be re-seated per position rather than staying flat. Kept as the frozen record of the
+// value those rows were migrated from — see the plan's ledger C1d.
 inline constexpr double kArchetypeFaceOffsetDeg = 10.0; // archetype face-corridor shift (±)
 } // namespace rules
 

@@ -76,7 +76,7 @@
       "metricKey": "tempoRatio",
       "reducer": {
         "kind": "at",
-        "anchor": "p4"
+        "anchor": "p7"
       },
       "status": "live",
       "label": "Tempo ratio",

@@ -273,13 +273,14 @@ bool measureIsDeltaFromAddress(const Measure &m)
            && m.reducer.window.first == Phase::Address;
 }
 
-const Measure *measureForMetricAtPhase(const CharacteristicPack &pack,
-                                       const QString            &metricKey,
-                                       Phase                     phase)
+std::vector<const Measure *> measuresForMetricAtPhase(const CharacteristicPack &pack,
+                                                      const QString            &metricKey,
+                                                      Phase                     phase)
 {
-    if (metricKey.isEmpty()) return nullptr;
+    std::vector<const Measure *> absolute;   // `at` — the reading a phase-keyed corridor means
+    std::vector<const Measure *> changes;    // `delta` / `rate` — the change observed AT that phase
 
-    const Measure *fallback = nullptr;    // a delta/rate match, taken only if no `at` match exists
+    if (metricKey.isEmpty()) return {};
 
     for (const Measure &m : pack.measures) {
         if (m.metricKey != metricKey) continue;
@@ -289,18 +290,28 @@ const Measure *measureForMetricAtPhase(const CharacteristicPack &pack,
             // `anchor` is optional on the type; an At reducer without one reads at the window
             // start, which is what the loader defaults it to.
             if (m.reducer.anchor.value_or(m.reducer.window.first) == phase)
-                return &m;                // absolute reading wins outright
+                absolute.push_back(&m);
             break;
         case ReducerKind::Delta:
         case ReducerKind::Rate:
-            if (m.reducer.window.second == phase && !fallback)
-                fallback = &m;
+            if (m.reducer.window.second == phase)
+                changes.push_back(&m);
             break;
         case ReducerKind::Extremum:
             break;                        // a peak across a window is not a reading at a phase
         }
     }
-    return fallback;
+
+    absolute.insert(absolute.end(), changes.begin(), changes.end());
+    return absolute;
+}
+
+const Measure *measureForMetricAtPhase(const CharacteristicPack &pack,
+                                       const QString            &metricKey,
+                                       Phase                     phase)
+{
+    const std::vector<const Measure *> all = measuresForMetricAtPhase(pack, metricKey, phase);
+    return all.empty() ? nullptr : all.front();
 }
 
 // ── Validation ──────────────────────────────────────────────────────────────

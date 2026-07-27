@@ -89,7 +89,10 @@ Item {
     // NB: id must NOT be `catalog` — the zones have a `catalog` property, and an
     // unqualified `catalog: catalog` binding would resolve to the zone's OWN (null)
     // property (id/property shadowing — see CLAUDE.md / commit 39857cc).
-    MetricCatalog { id: metricCat }
+    // gradePolicy: the corridors this façade resolves are graded under the pack-wide policy chosen
+    // in Diagnostics settings. Stance width and ball position — both drawn in the Setup zone — carry
+    // no explicit monitor band, so their Watch edge comes from the policy and nowhere else.
+    MetricCatalog { id: metricCat; gradePolicy: appSettings.diagnosticsGradePolicy }
 
     // Wrist findings/strengths for the Verdict zone (wrist-only; empty elsewhere).
     // id must NOT be `wristModel` (same shadowing trap as `catalog` above).

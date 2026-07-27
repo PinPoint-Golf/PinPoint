@@ -55,6 +55,24 @@ Item {
         return t || ""
     }
 
+    // One line naming the norm behind this metric's corridors: which context it resolved in,
+    // whether that context is its own or an ancestor's, how well founded it is, and whether it is
+    // still the shipped corridor. Every part comes marshalled from C++ — the words for a norm's
+    // provenance live with the enum, not here.
+    function _normProvenance() {
+        var n = root._norm
+        if (!n) return ""
+        var parts = []
+        if (n.contextLabel)
+            parts.push(n.inherited === true ? qsTr("Inherited from %1").arg(n.contextLabel)
+                                            : n.contextLabel)
+        if (n.sourceLabel)
+            parts.push(n.n > 0 ? qsTr("%1, n = %2").arg(n.sourceLabel).arg(n.n) : n.sourceLabel)
+        if (n.overridden === true)
+            parts.push(qsTr("edited by you"))
+        return parts.join(" · ")
+    }
+
     // "LeadForearm" → "Lead forearm"
     function _humanRole(r) {
         var s = String(r).replace(/([A-Z])/g, " $1").trim().toLowerCase()
@@ -261,11 +279,14 @@ Item {
                 Layout.leftMargin: Theme.sp(26)
                 spacing: Theme.sp(14)
 
-                // Context note (shared across this metric's corridors).
+                // Where the corridor came from: the norm set, resolved in this shot's context. The
+                // inheritance is STATED rather than implied — a driver graded by the full-swing
+                // corridor is the whole point of the context tree, and "mid-iron" printed as a note
+                // used to be the only hint of it.
                 Text {
-                    visible: (root._norm.contextNote || "").length > 0
+                    visible: root._corridors.length > 0 && root._normProvenance().length > 0
                     Layout.fillWidth: true
-                    text: (root._norm && root._norm.contextNote) ? root._norm.contextNote : ""
+                    text: root._normProvenance()
                     font.family:    Theme.fontData
                     font.pixelSize: Theme.fontSzMicro
                     color: Theme.colorText3
@@ -280,9 +301,16 @@ Item {
                         Layout.fillWidth: true
                         spacing: Theme.sp(6)
 
+                        // The phase, and — where the corridor grades a CHANGE from address rather
+                        // than an absolute reading — which of the two it is. Two rows on one metric
+                        // can now differ, so neither can be left to be assumed.
                         Text {
-                            text: (root.labels && modelData.phase !== undefined)
-                                  ? root.labels.phaseFullName(modelData.phase) : ""
+                            text: {
+                                if (!root.labels || modelData.phase === undefined) return ""
+                                var n = root.labels.phaseFullName(modelData.phase)
+                                return modelData.deltaFromAddress === true
+                                       ? qsTr("%1 · change from address").arg(n) : n
+                            }
                             font.family:    Theme.fontBody
                             font.pixelSize: Theme.fontSzBody2
                             color: Theme.colorText
@@ -295,11 +323,24 @@ Item {
                     }
                 }
 
-                // Heuristic caption — this norm is a rule of thumb, not a hard band.
+                // Why this corridor should be read as a starting point. The norm's own words —
+                // never derived here, because how well founded a corridor is is a property of the
+                // norm and not of the page showing it.
                 Text {
-                    visible: root._corridors.length > 0 && root._norm && root._norm.heuristic === true
+                    visible: root._corridors.length > 0 && (root._norm.weakReason || "").length > 0
                     Layout.fillWidth: true
-                    text: qsTr("Heuristic — expected to move through the swing, not a fixed target.")
+                    text: (root._norm && root._norm.weakReason) ? root._norm.weakReason : ""
+                    font.family:    Theme.fontData
+                    font.pixelSize: Theme.fontSzMicro
+                    color: Theme.colorText3
+                    wrapMode: Text.WordWrap
+                }
+
+                // The citation, which is where a provisional figure explains itself.
+                Text {
+                    visible: root._corridors.length > 0 && (root._norm.citation || "").length > 0
+                    Layout.fillWidth: true
+                    text: (root._norm && root._norm.citation) ? root._norm.citation : ""
                     font.family:    Theme.fontData
                     font.pixelSize: Theme.fontSzMicro
                     color: Theme.colorText3
@@ -310,7 +351,7 @@ Item {
                 Text {
                     visible: root._corridors.length === 0
                     Layout.fillWidth: true
-                    text: qsTr("No normative reference yet.")
+                    text: qsTr("No norm for this metric yet.")
                     font.family:    Theme.fontData
                     font.pixelSize: Theme.fontSzMicro
                     color: Theme.colorText3

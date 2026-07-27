@@ -31,7 +31,7 @@ static const PpWristFinding *find(const std::vector<PpWristFinding> &v, const ch
 
 static std::vector<PpWristFinding> assessFindings(const IWristAngleSource &src)
 {
-    ConfigReferenceBandProvider provider;
+    NormBandProvider provider;
     return WristAssessmentEngine::assess(src, provider).findings;
 }
 

@@ -5,12 +5,13 @@
 //   ctest --test-dir build/analyzer-tests -R metric_catalogue --output-on-failure
 //
 // Covers: manifest completeness (the 12 live keys, unique, correct types/groups), query filtering
-// (type / group / scored / availableOnly), per-shot resolve() across ShotContexts (session gating,
-// IMU-role gating, club-track / face-on gating), and corridor() delegation (DOF → reference_bands,
-// non-DOF → nullopt, non-checkpoint phase → nullopt).
+// (type / group / scored / availableOnly), and per-shot resolve() across ShotContexts (session
+// gating, IMU-role gating, club-track / face-on gating).
+//
+// NOT corridors. The catalogue no longer judges a metric — a corridor resolves through the norm set
+// (Diagnostics/metric_corridor.h) and is gated by manifest_migration_test.
 
 #include "metric_catalogue.h"
-#include "reference_bands.h"
 
 #include <cstdio>
 
@@ -254,50 +255,14 @@ int main()
         check(cat.query(aq, nullptr).empty(), "availableOnly without ctx → empty");
     }
 
-    // 6. corridor() — DOF delegation matches reference_bands; non-DOF + non-checkpoint → nullopt.
-    {
-        const auto dofC = cat.corridor(QStringLiteral("leadWristFlexExt"), Phase::Impact);
-        check(dofC.has_value(), "corridor(bow/cup, Impact) has a value");
-
-        const std::unique_ptr<IReferenceBandProvider> rb =
-            makeReferenceBandProvider(BandProviderKind::Archetype);
-        const Band b = rb->band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P7);
-        if (dofC && b.valid)
-            check(dofC->greenLo == b.greenLo && dofC->greenHi == b.greenHi,
-                  "corridor delegates to reference_bands (P7 green bounds match)");
-        else
-            check(false, "reference band for bow/cup @P7 is valid");
-
-        check(!cat.corridor(QStringLiteral("clubheadSpeed"), Phase::Impact).has_value(),
-              "corridor(clubheadSpeed) → nullopt (no DOF, no inline)");
-
-        // tempoRatio is the first INLINE corridor in the manifest — the non-DOF
-        // path, which has no reference_bands delegation to fall back on. The
-        // dashboard Verdict tile renders only when BOTH a sample and a corridor
-        // resolve at Impact, so losing either silently hides the tile.
-        const auto tempoC = cat.corridor(QStringLiteral("tempoRatio"), Phase::Impact);
-        check(tempoC.has_value(), "corridor(tempoRatio, Impact) has a value (inline, non-DOF)");
-        if (tempoC) {
-            check(tempoC->greenLo == 2.2 && tempoC->greenHi == 3.0,
-                  "tempoRatio green corridor is the 2.2–3.0:1 tour core");
-            check(tempoC->amberLo < tempoC->greenLo && tempoC->amberHi > tempoC->greenHi,
-                  "tempoRatio amber margin brackets the green core");
-            check(!tempoC->deltaFromAddress,
-                  "tempoRatio corridor is absolute, not Δ-from-address");
-        }
-        check(!cat.corridor(QStringLiteral("tempoRatio"), Phase::Top).has_value(),
-              "corridor(tempoRatio, Top) → nullopt (only Impact is declared)");
-        check(!cat.corridor(QStringLiteral("tempoBackswing"), Phase::Impact).has_value(),
-              "corridor(tempoBackswing) → nullopt (no defensible band yet)");
-        check(!cat.corridor(QStringLiteral("ballPosition"), Phase::Address).has_value(),
-              "corridor(ballPosition) → nullopt (club-dependent, no single band)");
-        check(!cat.corridor(QStringLiteral("wristScore"), Phase::Impact).has_value(),
-              "corridor(wristScore) → nullopt (Summary, no normative)");
-        check(!cat.corridor(QStringLiteral("leadWristFlexExt"), Phase::Finish).has_value(),
-              "corridor(bow/cup, Finish) → nullopt (not an assessment checkpoint)");
-        check(!cat.corridor(QStringLiteral("nope"), Phase::Impact).has_value(),
-              "corridor(unknown key) → nullopt");
-    }
+    // 6. There is no corridor() any more.
+    //
+    // The catalogue described metrics AND judged them until stage 9: `.normative` carried a DOF to
+    // delegate to the compiled band table, or an inline corridor per phase. Both are gone. A
+    // corridor is now (metric, phase) → measure → norm, resolved in the shot's context, and it is
+    // gated by manifest_migration_test — including that every metric which HAD a corridor still
+    // resolves one. There is nothing to assert here beyond what the descriptor still owns, which
+    // sections 1–5 cover.
 
     std::printf("=== %s ===\n", g_fail == 0 ? "ALL PASS" : "FAILURES");
     return g_fail ? 1 : 0;

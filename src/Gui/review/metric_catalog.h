@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "../../Diagnostics/norm_provider.h"
+#include "../../Diagnostics/pack_provider.h"
 #include "../../Metrics/metric_catalogue.h"
 
 #include <QObject>
@@ -25,6 +27,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
+
+#include <memory>
 
 // MetricCatalog — the QML façade over pinpoint::analysis::MetricCatalogue (design §7), the same
 // shape as ChartMetrics / SwingDataSource: a QML_ELEMENT declared `MetricCatalog { id: mc }` whose
@@ -44,8 +48,20 @@ class MetricCatalog : public QObject
     Q_PROPERTY(QVariantList groups READ groups CONSTANT)   // distinct groups, manifest order
     Q_PROPERTY(QVariantList types  READ types  CONSTANT)   // ["summary","pointInTime",…]
 
+    // The pack-wide grade policy, by NAME ("standard" | "strict" | "lenient") — the same property
+    // NormModel exposes, for the same reason: a corridor's Watch edge is z-derived for any norm
+    // that states no monitor band (stance width and ball position, both drawn on the dashboard
+    // Setup zone), so a façade grading against the default while the user has chosen Strict would
+    // draw a corridor the app does not use. Bound to AppSettings by whichever page hosts this
+    // object, so the façade itself stays free of the settings dependency.
+    Q_PROPERTY(QString gradePolicy READ gradePolicy WRITE setGradePolicy NOTIFY gradePolicyChanged)
+
 public:
     explicit MetricCatalog(QObject *parent = nullptr);
+    ~MetricCatalog() override;
+
+    QString gradePolicy() const { return m_policyName; }
+    void    setGradePolicy(const QString &name);
 
     QVariantList groups() const;
     QVariantList types() const;
@@ -64,6 +80,14 @@ public:
     Q_INVOKABLE QVariantMap availability(const QString &key,
                                          const QVariantMap &shotCtx) const;
 
+signals:
+    void gradePolicyChanged();
+
 private:
     pinpoint::analysis::MetricCatalogue m_catalogue;
+    // The pack and the norm set: a corridor is now (metric, phase) → measure → norm, so the façade
+    // needs both registries. Assembled once and read-only thereafter, same as the catalogue.
+    std::unique_ptr<pinpoint::analysis::ICharacteristicPackProvider> m_pack;
+    std::shared_ptr<const pinpoint::analysis::INormProvider>         m_norms;
+    QString                                                          m_policyName;
 };

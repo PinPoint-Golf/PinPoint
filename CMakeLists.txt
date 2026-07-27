@@ -487,6 +487,7 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/norm_pack.cpp
         src/Diagnostics/norm_provider.h
         src/Diagnostics/norm_measure_source.h
+        src/Diagnostics/metric_corridor.h
         src/Diagnostics/measure_sample.h
         src/Diagnostics/measure_sample.cpp
         src/Diagnostics/resource_norm_provider.cpp
@@ -2661,7 +2662,7 @@ if(PINPOINT_BUILD_TOOLS)
     # ONE target, so an offline binary that omits it starts with an empty norm set. Since the wrist
     # corridors are content now rather than a compiled table, that would leave every band absent —
     # swinglab_run and in-app re-analyse would grey the whole wrist grid and produce no findings,
-    # silently, with no error to notice. wrist_render_parity_test guards the same failure in the
+    # silently, with no error to notice. wrist_norm_render_test guards the same failure in the
     # test suite; this is the build-side half of it.
     function(pinpoint_add_diagnostics_resources tgt)
         qt_add_resources(${tgt} "${tgt}_diagnostics"
