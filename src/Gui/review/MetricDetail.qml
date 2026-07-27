@@ -35,6 +35,11 @@ Item {
     property string metricKey: ""
 
     signal back()
+    // Through to where this corridor is DEFINED — the measure's norm rows in Diagnostics, from which
+    // the corridor editor opens. A metric page states what good looks like; this is the way to the
+    // place that decides it, so a reader who disagrees with a band can go and change it rather than
+    // hunting for it in another panel.
+    signal openNorm(string measureId)
 
     // Full descriptor map for the current key (empty when unset / unknown).
     readonly property var d: (mc && metricKey && metricKey.length > 0) ? mc.descriptor(metricKey) : ({})
@@ -319,6 +324,42 @@ Item {
                         NormativeBar {
                             Layout.fillWidth: true
                             corridor: modelData
+                        }
+
+                        // Through to where this corridor is DEFINED, so it can be edited. Named
+                        // rather than labelled "edit": the measure and the context ARE the identity
+                        // of a norm, and a metric key is not — two phases of one metric are two
+                        // measures with two norms, which is why this sits per corridor.
+                        //
+                        // Styled as the app's text link (ScreenHome's "Switch →"): accent colour at
+                        // REST, body font, trailing arrow, cursor change and nothing else. The
+                        // muted-until-hover treatment is for secondary chrome; a way out of the page
+                        // has to look like one before the pointer arrives.
+                        Text {
+                            Layout.fillWidth: true
+                            text: {
+                                var mlabel = modelData.measureLabel || modelData.measureId || ""
+                                var clabel = modelData.contextLabel || ""
+                                if (mlabel.length === 0) return ""
+                                return (clabel.length > 0)
+                                       ? qsTr("%1 · %2 →").arg(mlabel).arg(clabel)
+                                       : qsTr("%1 →").arg(mlabel)
+                            }
+                            visible: text.length > 0
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody2
+                            color:          Theme.colorAccent
+                            elide:          Text.ElideRight
+
+                            // Plain MouseArea, and the handler calls through `root`: inside a
+                            // Repeater delegate the only file-level id that resolves is the
+                            // component root, and a handler on a composite type could not see even
+                            // that. It throws only when clicked.
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape:  Qt.PointingHandCursor
+                                onClicked: root.openNorm(modelData.measureId || "")
+                            }
                         }
                     }
                 }

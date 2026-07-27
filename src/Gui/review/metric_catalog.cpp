@@ -232,6 +232,19 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
         cm.insert(QStringLiteral("contextId"),        c->contextId);
         cm.insert(QStringLiteral("inherited"),        c->inherited);
         cm.insert(QStringLiteral("overridden"),       c->overridden);
+
+        // Named, not just keyed — the detail page offers a link through to where this corridor is
+        // DEFINED so it can be edited, and a link has to say where it goes. Per corridor rather than
+        // per metric, because different phases of one metric are different measures with different
+        // norms: bow/cup at the top is a Δ-from-address cell, at impact it is the absolute reading.
+        if (const Measure *m = pack.measure(c->measureId))
+            cm.insert(QStringLiteral("measureLabel"), m->label.isEmpty() ? m->id : m->label);
+        else
+            cm.insert(QStringLiteral("measureLabel"), c->measureId);
+        if (const ContextNode *cn = m_norms->contexts().node(c->contextId))
+            cm.insert(QStringLiteral("contextLabel"), cn->label);
+        else
+            cm.insert(QStringLiteral("contextLabel"), c->contextId);
         corridors.append(cm);
 
         // Metric-wide provenance. The named fields describe the FIRST corridor that resolved, since

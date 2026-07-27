@@ -85,6 +85,17 @@ Item {
         Qt.callLater(function() { characteristicPanel.showCharacteristic(conditionId) })
     }
 
+    // Deep link to the MEASURE that defines a corridor — the norm rows in Diagnostics, from which the
+    // corridor editor opens. Reached from a metric's detail page: the metric catalogue says what good
+    // looks like, and this is the way to the place that decides it. Same callLater shape as its two
+    // siblings above; the panel Loader must have instantiated before it can be addressed.
+    function showMeasureDetail(measureId) {
+        searchInput.text = ""
+        root.searchQuery = ""
+        root.activeNavIndex = 10                      // Diagnostics
+        Qt.callLater(function() { characteristicPanel.showMeasure(measureId) })
+    }
+
     function scrollWithRetry(panel, itemId, retries) {
         if (!panel || retries > 3) return
         var ok = panel.scrollToItem(itemId)
@@ -443,7 +454,11 @@ Item {
                 ScreenPlaceholder { titleText: "Launch Monitor" }                                          // 6
                 StoragePanel {    id: storagePanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 7
                 ScreenPlaceholder { titleText: "Archiving" }                                               // 8
-                MetricLibrary {   id: metricLibraryPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 9
+                MetricLibrary {
+                    id: metricLibraryPanel                                                              // 9
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    onOpenNorm: function(measureId) { root.showMeasureDetail(measureId) }
+                }
                 CharacteristicLibrary { id: characteristicPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 10
             }
         }

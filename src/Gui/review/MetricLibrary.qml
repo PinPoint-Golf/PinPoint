@@ -31,6 +31,10 @@ import PinPointStudio
 Item {
     id: root
 
+    // Through to where a corridor is DEFINED, so a reader who disagrees with a band can edit it.
+    // The destination is the Diagnostics panel, which this one cannot address — the host does.
+    signal openNorm(string measureId)
+
     // ── façade + labels (declared declaratively; assembled once, read-only) ────
     // NB: ids must NOT collide with MetricDetail's `mc`/`labels` properties — inside the Loader's
     // Component, `mc: mc` would self-reference the (undefined) local property, blanking the detail.
@@ -300,6 +304,10 @@ Item {
                 labels:    metricLabels
                 metricKey: root._selectedKey
                 onBack:    root._selectedKey = ""
+                // Forwarded rather than handled here: the destination is a DIFFERENT settings panel
+                // (Diagnostics), and this panel has no business knowing about its siblings. The
+                // screen that hosts both performs the jump — same division as showMetricDetail().
+                onOpenNorm: function(measureId) { root.openNorm(measureId) }
             }
         }
     }
