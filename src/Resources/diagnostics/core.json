@@ -4851,6 +4851,120 @@
       "strength": "weak"
     },
     {
+      "from": "limited_trail_hip_ir",
+      "to": "excessive_head_sway",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "excessive_head_sway",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "stance_wide",
+      "to": "sway",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "excessive_heel_lift",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "excessive_heel_lift",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "head_drop_backswing",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "head_drop_backswing",
+      "to": "low_point_behind_ball",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "trail_knee_straighten",
+      "to": "head_rise_backswing",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "head_rise_backswing",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_shoulder_flexion",
+      "to": "bent_lead_arm",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "bent_lead_arm",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "hip_stall",
+      "to": "deceleration",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "trying_to_lift_the_ball",
+      "to": "deceleration",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "grip_weak",
+      "to": "early_face_roll",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "limited_wrist_mobility",
+      "to": "early_face_roll",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "casting",
+      "to": "insufficient_shaft_lean",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "trying_to_lift_the_ball",
+      "to": "insufficient_shaft_lean",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_forward",
+      "to": "insufficient_shaft_lean",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "stance_narrow",
+      "to": "off_balance_finish",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
       "from": "feet_alignment_open",
       "to": "alignment_open",
       "type": "corroborates",

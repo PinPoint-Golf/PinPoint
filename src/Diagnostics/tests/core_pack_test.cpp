@@ -12,6 +12,7 @@
 
 #include <QFile>
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 
@@ -75,11 +76,11 @@ int main()
         }
 
         auto coverage = [&](const char *id) { return coverageOf(p, QString::fromLatin1(id)); };
-        check(coverage("poor_pelvic_disassociation") == 9, "poor pelvic disassociation explains 9");
-        check(coverage("limited_thoracic_rotation") == 8, "limited thoracic rotation explains 8");
+        check(coverage("poor_pelvic_disassociation") == 10, "poor pelvic disassociation explains 10");
+        check(coverage("limited_thoracic_rotation") == 11, "limited thoracic rotation explains 11");
         check(coverage("limited_lead_hip_ir") == 6, "limited lead-hip internal rotation explains 6");
-        check(coverage("limited_trail_hip_ir") == 5, "limited trail-hip internal rotation explains 5");
-        check(coverage("poor_core_stability") == 5, "poor core stability explains 5");
+        check(coverage("limited_trail_hip_ir") == 7, "limited trail-hip internal rotation explains 7");
+        check(coverage("poor_core_stability") == 6, "poor core stability explains 6");
 
         const int topFive = coverage("poor_pelvic_disassociation") + coverage("limited_thoracic_rotation")
                           + coverage("limited_lead_hip_ir") + coverage("limited_trail_hip_ir")
@@ -343,6 +344,51 @@ int main()
         std::printf("        (%d live corridor signals, %d without a norm)\n", live, dark);
         check(live > 0, "there are live corridor signals to check");
         check(dark == 0, "every LIVE corridor signal resolves a norm — the pack cannot go dark");
+
+        // ── Nothing the app can DETECT is left without an EXPLANATION ───────────
+        // The counterpart to the check above, and the one that nearly slipped. A signal that can
+        // fire on a condition with no cause hands the coach "your head moved" — which the golfer
+        // already knew — and the whole point of the model is the next sentence.
+        //
+        // This gap was invisible because it forms at the intersection of two healthy-looking
+        // states: the causal work went in per GROUP, while the firing set is decided per PRODUCER,
+        // and the eleven live-but-unclaimed producer keys arrived after their group had already
+        // been wired. Four such conditions shipped isolated — no cause AND no effect — and six
+        // more had no cause. All ten were among the sixteen that can actually fire, so the least
+        // explicable part of the library was precisely the part a golfer would meet first.
+        //
+        // Scoped to what can fire, deliberately. `noCause` on a producer-less condition is a
+        // content backlog and the validator already reports it; a condition that fires TODAY with
+        // nothing behind it is a defect in what ships.
+        int fireable = 0, unexplained = 0;
+        for (const Condition &c : p.conditions) {
+            if (c.observability == Observability::Latent) continue;
+
+            const bool canFire = std::any_of(
+                c.detectedBy.cbegin(), c.detectedBy.cend(), [&](const QString &sid) {
+                    const Signal *sig = p.signal(sid);
+                    if (sig == nullptr || sig->measures.isEmpty()) return false;
+                    return std::all_of(
+                        sig->measures.cbegin(), sig->measures.cend(), [&](const QString &mid) {
+                            const Measure *m = p.measure(mid);
+                            if (m == nullptr || m->status != MeasureStatus::Live) return false;
+                            return sig->test != SignalTest::OutsideCorridor
+                                   || !nres.pack.contextsFor(mid).isEmpty();
+                        });
+                });
+            if (!canFire) continue;
+
+            ++fireable;
+            if (causesOf(p, c.id).isEmpty()) {
+                ++unexplained;
+                std::printf("        '%s' can fire today but has no cause — it would be reported "
+                            "and never explained\n", qPrintable(c.id));
+            }
+        }
+        std::printf("        (%d conditions can fire, %d of them unexplainable)\n",
+                    fireable, unexplained);
+        check(fireable > 0, "there are conditions that can fire");
+        check(unexplained == 0, "every condition that can fire today has at least one cause");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
