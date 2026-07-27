@@ -587,6 +587,13 @@ QVariantList CharacteristicLibraryModel::screens() const
         r.insert(QStringLiteral("citation"), s.citation);
         // The numeric floor and its unit travel together or not at all: a bare number with no unit
         // is unreadable, and the validator refuses that pairing at load for the same reason.
+        //
+        // NOTHING RENDERS THESE THREE YET, and that is deliberate rather than the marshaller trap
+        // it resembles. `passCriterion` is the prose a human reads and already states the figure;
+        // the structured triple exists to RECORD an answer against, which needs per-athlete screen
+        // storage that does not exist anywhere in the app. Shipped now so the registry's shape is
+        // settled before something depends on it — but if you are hunting a field that is complete
+        // on both sides and reaching nothing, this one is known.
         r.insert(QStringLiteral("hasPassValue"), s.passAtLeast.has_value());
         r.insert(QStringLiteral("passAtLeast"), s.passAtLeast.value_or(0.0));
         r.insert(QStringLiteral("unit"), s.unit);

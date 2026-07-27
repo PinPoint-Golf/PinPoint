@@ -312,6 +312,52 @@ int main()
               "no findings means no explanation, no offers, no recommendations");
     }
 
+    // ── Withdrawn content does not diagnose ─────────────────────────────────────
+    //
+    // Retired and Superseded are the only two states that mean "do not use this any more". The
+    // engine read all six identically until now, so retiring a characteristic changed a badge and
+    // nothing else — it went on firing exactly as it did the day it was sound.
+    //
+    // The negative half of this test is the more important one. Draft and Candidate are editorial
+    // confidence, NOT withdrawal, and most of the shipped pack is Draft; a reading of the field
+    // that treats "not finished" as "not in use" would dark more than half the library while every
+    // count and census still said it was there.
+    {
+        FakeSource src;
+        src.add(QStringLiteral("mSway"), 99.0, 0.0, 10.0);   // way outside — sway must fire
+
+        for (const ConditionState st : { ConditionState::Draft, ConditionState::Candidate,
+                                         ConditionState::NeedsRevalidation }) {
+            CharacteristicPack p = pack;
+            for (Condition &c : p.conditions)
+                if (c.id == QStringLiteral("sway")) c.state = st;
+            check(detect(p, src).fired().contains(QStringLiteral("sway")),
+                  QByteArray("a ").append(conditionStateName(st).toLatin1())
+                      .append(" condition still detects — it is confidence, not withdrawal")
+                      .constData());
+        }
+
+        for (const ConditionState st : { ConditionState::Retired, ConditionState::Superseded }) {
+            CharacteristicPack p = pack;
+            for (Condition &c : p.conditions)
+                if (c.id == QStringLiteral("sway")) {
+                    c.state        = st;
+                    c.supersededBy = QStringLiteral("slide");   // the validator requires a successor
+                }
+            const DetectionResult d = detect(p, src);
+            check(!d.fired().contains(QStringLiteral("sway")),
+                  QByteArray("a ").append(conditionStateName(st).toLatin1())
+                      .append(" condition does not fire").constData());
+            // OMITTED, not NotFired: it was never asked, and NotFired would claim it was assessed
+            // and found absent — the same distinction the binding rule turns on.
+            check(d.find(QStringLiteral("sway")) == nullptr,
+                  QByteArray("a ").append(conditionStateName(st).toLatin1())
+                      .append(" condition is omitted from the result, not reported as absent")
+                      .constData());
+            check(d.findings.size() == 3, "and the rest of the library is untouched");
+        }
+    }
+
     // ── Context bindings: what does not apply here is never asked ───────────────
     //
     // The load-bearing distinction is that an inapplicable condition is ABSENT from the result, not

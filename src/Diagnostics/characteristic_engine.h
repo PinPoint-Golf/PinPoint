@@ -134,6 +134,11 @@ struct DetectionResult {
 // Evaluate every Observable condition in the pack. Latent conditions are not evaluated here — they
 // have no signals by definition and are resolved by the explanation pass from what they explain.
 //
+// Retired and Superseded conditions are skipped: those two states mean "withdrawn", and withdrawn
+// content must not diagnose. The other four states are editorial confidence rather than withdrawal
+// and are all evaluated — most of the shipped pack is Draft, so treating Draft as withdrawn would
+// silently dark the library.
+//
 // `contexts` + `contextId` say what KIND OF SHOT this was, and a condition whose bindings make it
 // inapplicable there is OMITTED from the result entirely — not reported as NotFired (which would
 // claim it was assessed and found absent) and not as Unavailable (which would claim the app tried

@@ -170,6 +170,17 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
         // pass from what they explain, not detected here.
         if (c.observability == Observability::Latent) continue;
 
+        // Withdrawn content does not diagnose. Retired and Superseded are the two states that mean
+        // "do not use this any more", and until now the engine read all six identically — a
+        // retired characteristic would have gone on firing exactly as it did the day it was sound.
+        //
+        // ONLY those two. Draft and Candidate are editorial confidence, not withdrawal, and 62 of
+        // the 112 shipped conditions are Draft — gating on them would dark more than half the
+        // library on a reading of the field nobody has agreed to. A Superseded condition is
+        // additionally required by the validator to name its successor, so the replacement is
+        // already in the pack and evaluates in its place; dropping it here loses nothing.
+        if (c.state == ConditionState::Retired || c.state == ConditionState::Superseded) continue;
+
         // Does this condition apply to this kind of shot? Resolved through the context tree, so an
         // author writes one row at `partial` rather than four beneath it.
         bool material = true;

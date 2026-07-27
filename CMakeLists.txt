@@ -2594,6 +2594,16 @@ if(PINPOINT_BUILD_TOOLS)
         src/Diagnostics/resource_norm_provider.cpp
         src/Diagnostics/file_norm_provider.cpp
         src/Diagnostics/merged_norm_provider.cpp
+        # screens.json and drills.json are embedded into every offline target by
+        # pinpoint_add_diagnostics_resources below, so their loaders belong here too — otherwise the
+        # offline binaries carry two reference sets no code in them can read, which looks like
+        # content that failed to load rather than content nothing asked for.
+        #
+        # Nothing offline CALLS them yet, so the linker drops the code and the binaries do not grow.
+        # What this buys is that the day a diagnosis runs in swinglab_run — where a
+        # TestRecommendation has to resolve its screenRef to a protocol — the link does not fail.
+        src/Diagnostics/screen_pack.cpp
+        src/Diagnostics/drill_pack.cpp
         src/Analysis/pose_runner.cpp
         src/Analysis/ball_runner.cpp
         src/Analysis/shaft_tracker.cpp
