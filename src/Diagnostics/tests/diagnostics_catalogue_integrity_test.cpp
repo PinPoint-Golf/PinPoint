@@ -16,6 +16,10 @@
 #include "characteristic_library_model.h"
 #include "metric_catalogue.h"
 
+#include <QDir>
+#include <QFileInfo>
+#include <QMetaMethod>
+#include <QRegularExpression>
 #include <QFile>
 #include <QSet>
 
@@ -440,6 +444,108 @@ int main()
         check(foundScooping, "searching a coach term finds the characteristic it names");
         check(model.glossary(QStringLiteral("zzzz-no-such-term")).isEmpty(),
               "…and a term nothing answers to returns nothing, rather than everything");
+
+        // ── The bibliography ────────────────────────────────────────────────
+        //
+        // Same trap, one registry later. The References view's whole value is the PAIRING — this
+        // paper, and the claims resting on it at the tier each earned — so a marshaller that
+        // shipped the papers and dropped `cites` would render a plausible, useless appendix and
+        // nothing would report it.
+        const QVariantList refs = model.references();
+        check(!refs.isEmpty(), "the reference registry is marshalled");
+
+        int withUrl = 0, withCites = 0, withTier = 0, totalCites = 0;
+        for (const QVariant &v : refs) {
+            const QVariantMap r = v.toMap();
+            if (r.value(QStringLiteral("url")).toString().startsWith(QLatin1String("https://doi.org/")))
+                ++withUrl;
+            const QVariantList cites = r.value(QStringLiteral("cites")).toList();
+            if (!cites.isEmpty()) ++withCites;
+            totalCites += cites.size();
+            for (const QVariant &cv : cites) {
+                const QVariantMap c = cv.toMap();
+                // Every claim row needs the tier LABEL (what the chip renders) and the id the tap
+                // navigates to. Either one missing and the row is decoration.
+                if (!c.value(QStringLiteral("tierLabel")).toString().isEmpty()
+                    && !c.value(QStringLiteral("fromId")).toString().isEmpty())
+                    ++withTier;
+            }
+        }
+        check(withUrl == refs.size(), "every reference carries an openable doi.org URL");
+        check(withCites > 0, "references carry the claims that rest on them");
+        check(totalCites > 0 && withTier == totalCites,
+              "and every claim row carries its tier label and a target to navigate to");
+
+        // Ordering is the argument: the paper four claims rest on is a different kind of object
+        // from the one cited once, and an alphabetical bibliography hides exactly that.
+        int prev = 1 << 30;
+        bool descending = true;
+        for (const QVariant &v : refs) {
+            const int n = v.toMap().value(QStringLiteral("citeCount")).toInt();
+            if (n > prev) descending = false;
+            prev = n;
+        }
+        check(descending, "references are ordered by how much of the library they hold up");
+    }
+
+    // ── Every Connections handler names a signal that exists ────────────────────
+    //
+    // `Connections { target: library; function onLibraryChanged() {…} }` is not an error at build
+    // time and not an error at load time. It warns at INSTANTIATION — which for a view inside a
+    // lazily-loaded settings panel means the first time a human opens that panel, and never in a
+    // headless start. So it shipped, and the only thing that caught it was Mark opening the page.
+    //
+    // The handler is a string and the signal list is in the metaobject, so the check is a join.
+    // This is the cheapest available answer to a class of defect that no compile, no test and no
+    // screenshot can otherwise see: the view goes on rendering, it simply stops updating.
+    std::printf("=== every Connections handler on the model names a real signal ===\n");
+    {
+        const QMetaObject *mo = &CharacteristicLibraryModel::staticMetaObject;
+        QSet<QString>      handlers;                    // "onHealthChanged", …
+        for (int i = mo->methodOffset(); i < mo->methodCount(); ++i) {
+            const QMetaMethod m = mo->method(i);
+            if (m.methodType() != QMetaMethod::Signal) continue;
+            QString n = QString::fromLatin1(m.name());
+            handlers.insert(QStringLiteral("on") + n.at(0).toUpper() + n.mid(1));
+        }
+        // Q_PROPERTY NOTIFY signals count too — a view keying off one is legitimate.
+        check(!handlers.isEmpty(), "the model exposes signals to connect to");
+
+        const QDir      dir(QStringLiteral(PP_DIAG_QML_DIR));
+        const QFileInfoList files = dir.entryInfoList({ QStringLiteral("*.qml") }, QDir::Files);
+        check(!files.isEmpty(), "the diagnostics QML directory was found");
+
+        // Only blocks whose target is the library model — a Connections on anything else is not
+        // ours to judge from here.
+        const QRegularExpression block(
+            QStringLiteral("Connections\\s*\\{[^}]*?target:\\s*[A-Za-z_.]*\\blibrary\\b[^}]*?\\}"),
+            QRegularExpression::DotMatchesEverythingOption);
+        const QRegularExpression fn(QStringLiteral("function\\s+(on[A-Za-z0-9_]+)\\s*\\("));
+
+        int checked = 0, bogus = 0;
+        for (const QFileInfo &fi : files) {
+            QFile qf(fi.absoluteFilePath());
+            if (!qf.open(QIODevice::ReadOnly)) continue;
+            const QString src = QString::fromUtf8(qf.readAll());
+
+            auto bit = block.globalMatch(src);
+            while (bit.hasNext()) {
+                const QString body = bit.next().captured(0);
+                auto          hit  = fn.globalMatch(body);
+                while (hit.hasNext()) {
+                    const QString h = hit.next().captured(1);
+                    ++checked;
+                    if (!handlers.contains(h)) {
+                        ++bogus;
+                        std::printf("        %s connects '%s', which the model does not emit\n",
+                                    qPrintable(fi.fileName()), qPrintable(h));
+                    }
+                }
+            }
+        }
+        std::printf("        (%d handlers checked across %d files)\n", checked, int(files.size()));
+        check(checked > 0, "there are handlers to check — the regex still matches the QML");
+        check(bogus == 0, "no view connects a signal the model does not have");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");

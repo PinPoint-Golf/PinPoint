@@ -23,6 +23,7 @@
 #include "../../Diagnostics/screen_pack.h"     // what `Condition::screenRef` points at
 #include "../../Diagnostics/measure_sample.h"  // the phase grid the corpus check reads
 #include "../../Diagnostics/norm_provider.h"   // the context tree, for binding labels
+#include "../../Diagnostics/reference_pack.h"  // what `Provenance::citation` points at
 #include "metric_catalogue.h"
 
 #include <QDir>
@@ -645,6 +646,72 @@ QVariantList CharacteristicLibraryModel::drills() const
         if (ca != cb) return ca > cb;
         return a.toMap().value(QStringLiteral("label")).toString()
              < b.toMap().value(QStringLiteral("label")).toString();
+    });
+    return out;
+}
+
+QVariantList CharacteristicLibraryModel::references() const
+{
+    const CharacteristicPack &p = m_provider->pack();
+
+    QVariantList out;
+    for (const Reference &ref : sharedReferenceSet().references) {
+        // Every claim resting on this paper, and the tier each one earned. An edge cited at
+        // `indirect` and one cited at `supported` make very different use of the same source, so
+        // the tier travels with the row rather than being averaged away into a count.
+        QVariantList cites;
+        for (const Edge &e : p.edges) {
+            if (e.provenance.citation != ref.doi) continue;
+            const Condition *from = p.condition(e.from);
+            const Condition *to   = p.condition(e.to);
+            QVariantMap r;
+            r.insert(QStringLiteral("kind"), QStringLiteral("edge"));
+            r.insert(QStringLiteral("fromId"), e.from);
+            r.insert(QStringLiteral("toId"), e.to);
+            r.insert(QStringLiteral("from"), from ? from->label : e.from);
+            r.insert(QStringLiteral("to"), to ? to->label : e.to);
+            r.insert(QStringLiteral("edgeType"), edgeTypeName(e.type));
+            r.insert(QStringLiteral("tier"), provenanceTierName(e.provenance.tier));
+            r.insert(QStringLiteral("tierLabel"), provenanceTierLabel(e.provenance.tier));
+            cites.append(r);
+        }
+        for (const Condition &c : p.conditions) {
+            if (c.provenance.citation != ref.doi) continue;
+            QVariantMap r;
+            r.insert(QStringLiteral("kind"), QStringLiteral("condition"));
+            r.insert(QStringLiteral("fromId"), c.id);
+            r.insert(QStringLiteral("from"), c.label);
+            r.insert(QStringLiteral("tier"), provenanceTierName(c.provenance.tier));
+            r.insert(QStringLiteral("tierLabel"), provenanceTierLabel(c.provenance.tier));
+            cites.append(r);
+        }
+
+        QVariantMap r;
+        r.insert(QStringLiteral("id"), ref.id);
+        r.insert(QStringLiteral("doi"), ref.doi);
+        r.insert(QStringLiteral("url"), ref.url());
+        r.insert(QStringLiteral("title"), ref.title);
+        r.insert(QStringLiteral("authors"), ref.authors);
+        r.insert(QStringLiteral("journal"), ref.journal);
+        r.insert(QStringLiteral("year"), ref.year);
+        r.insert(QStringLiteral("establishes"), ref.establishes);
+        r.insert(QStringLiteral("cites"), cites);
+        r.insert(QStringLiteral("citeCount"), cites.size());
+        out.append(r);
+    }
+
+    // By how much of the library each one holds up. That ordering IS the argument: the paper four
+    // claims rest on is a different kind of object from the one cited once, and a bibliography
+    // sorted alphabetically hides exactly that.
+    std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        const int ca = a.toMap().value(QStringLiteral("citeCount")).toInt();
+        const int cb = b.toMap().value(QStringLiteral("citeCount")).toInt();
+        if (ca != cb) return ca > cb;
+        const int ya = a.toMap().value(QStringLiteral("year")).toInt();
+        const int yb = b.toMap().value(QStringLiteral("year")).toInt();
+        if (ya != yb) return ya > yb;
+        return a.toMap().value(QStringLiteral("title")).toString()
+             < b.toMap().value(QStringLiteral("title")).toString();
     });
     return out;
 }

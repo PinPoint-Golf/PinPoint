@@ -1,0 +1,152 @@
+{
+  "id": "core",
+  "version": "1.0.0",
+  "schemaVersion": 1,
+  "_comment": "The bibliography behind every citation in core.json. The pack stores a DOI; this stores what the DOI IS, so a reader can see the paper without leaving the app. Every record here was resolved against CrossRef and its title, journal, authors and year read off that record -- nothing is recalled, and nothing is added from a reference list without resolving it first. `year` is the issue year, which is what a reader will match against; several of these were online-first the year before. NO commercial organisation, product or certification body may be named in this file: core_pack_test greps content bytes for it, and two of these papers have manufacturer-employed authors -- they are peer-reviewed with DOIs, and only the work is recorded.",
+  "references": [
+    {
+      "id": "ref.vad2004",
+      "doi": "10.1177/0363546503261729",
+      "title": "Low Back Pain in Professional Golfers: The Role of Associated Hip and Low Back Range-of-Motion Deficits",
+      "authors": "Vad, Bhat, Basrai, Gebeh, Aspergren, Andrews",
+      "journal": "The American Journal of Sports Medicine",
+      "year": 2004,
+      "establishes": "In 42 male professional golfers, a history of low back pain correlated with decreased LEAD hip internal rotation, FABERE distance and lumbar extension. No significant trail-hip finding — the asymmetry is the result."
+    },
+    {
+      "id": "ref.kim2015",
+      "doi": "10.1177/0363546514555698",
+      "title": "Lumbopelvic kinematic characteristics of golfers with limited hip rotation",
+      "authors": "Kim, You, Kwon, Yi",
+      "journal": "The American Journal of Sports Medicine",
+      "year": 2015,
+      "establishes": "Golfers with hip internal rotation below 20° showed significantly greater lumbar flexion, axial rotation and lateral bending, and greater pelvic posterior tilt, than those at or above 30°."
+    },
+    {
+      "id": "ref.mun2015",
+      "doi": "10.1186/s12938-015-0041-5",
+      "title": "Kinematic relationship between rotation of lumbar spine and hip joints during golf swing in professional golfers",
+      "authors": "Mun, Suh, Park, Choi",
+      "journal": "BioMedical Engineering OnLine",
+      "year": 2015,
+      "establishes": "Lumbar–hip rotational coupling of r≈0.81. The lead hip's contribution to overall rotation is markedly high in the EARLY downswing; the lumbar spine contributes more late."
+    },
+    {
+      "id": "ref.cole2016",
+      "doi": "10.1007/s40279-015-0429-1",
+      "title": "The Biomechanics of the Modern Golf Swing: Implications for Lower Back Injuries",
+      "authors": "Cole, Grimshaw",
+      "journal": "Sports Medicine",
+      "year": 2016,
+      "establishes": "Review. Skilled golfers laterally slide the pelvis toward the target and this contributes to clubhead speed; argues the lumbar spine may not safely accommodate the resulting loads."
+    },
+    {
+      "id": "ref.edwards2020",
+      "doi": "10.1016/j.smhs.2020.03.002",
+      "title": "Low back pain and golf: A review of biomechanical risk factors",
+      "authors": "Edwards, Dickin, Wang",
+      "journal": "Sports Medicine and Health Science",
+      "year": 2020,
+      "establishes": "Professionals with low back pain show significantly more lead-side lateral bending in the backswing. Notes that crunch-factor evidence is conflicting and was not reproduced as a risk factor by two independent methods."
+    },
+    {
+      "id": "ref.watson2023",
+      "doi": "10.1080/02640414.2024.2319443",
+      "title": "Biomechanical parameters of the golf swing associated with lower back pain: A systematic review",
+      "authors": "Watson, Coughlan, Clement, Murray, Murray, Miller",
+      "journal": "Journal of Sports Sciences",
+      "year": 2023,
+      "establishes": "Mixed and null results: NO significant differences in hip angle, trunk angle or crunch factor in recreational golfers. Elite golfers with low back pain showed shorter transition phases and greater peak lead-side lumbar lateral flexion."
+    },
+    {
+      "id": "ref.myers2008",
+      "doi": "10.1080/02640410701373543",
+      "title": "The role of upper torso and pelvis rotation in driving performance during the golf swing",
+      "authors": "Myers, Lephart, Tsai, Sell, Smoliga, Jolly",
+      "journal": "Journal of Sports Sciences",
+      "year": 2008,
+      "establishes": "X-factor and upper-torso rotational velocity are significantly related to ball velocity. Read alongside Madrid et al. 2020, which disagrees."
+    },
+    {
+      "id": "ref.chu2010",
+      "doi": "10.1080/02640414.2010.507249",
+      "title": "The relationship between biomechanical variables and driving performance during the golf swing",
+      "authors": "Chu, Sell, Lephart",
+      "journal": "Journal of Sports Sciences",
+      "year": 2010,
+      "establishes": "Models accounted for 44–74% of ball-velocity variance. X-factor, delayed release of the arms and wrists, trunk tilting and weight shifting were significantly related to ball velocity. Read alongside Madrid et al. 2020, which disagrees on wrist release."
+    },
+    {
+      "id": "ref.tinmark2010",
+      "doi": "10.1080/14763141.2010.535842",
+      "title": "Elite golfers' kinematic sequence in full-swing and partial-swing shots",
+      "authors": "Tinmark, Hellström, Halvorsen, Thorstensson",
+      "journal": "Sports Biomechanics",
+      "year": 2010,
+      "establishes": "Significant proximal-to-distal temporal sequencing with a successive increase in peak segment angular speed — across genders, skill levels, and both full and partial shots."
+    },
+    {
+      "id": "ref.madrid2020",
+      "doi": "10.3390/app10175728",
+      "title": "Association between the On-Plane Angular Motions of the Axle-Chain System and Clubhead Speed in Skilled Male Golfers",
+      "authors": "Madrid, Avalos, Levine, Tuttle, Becker, Kwon",
+      "journal": "Applied Sciences",
+      "year": 2020,
+      "establishes": "66 skilled golfers. Higher clubhead speed was associated with shorter downswings, larger rotation ranges, larger hip–shoulder separation at impact and delayed transitions — but clubhead speed was NOT well associated with wrist-cock angles or ranges, or with X-factor and X-factor stretch. This is the conflicting half of the wrist-release and X-factor claims; it is recorded here because it must be read, not because anything cites it."
+    },
+    {
+      "id": "ref.cheng2025",
+      "doi": "10.1080/14763141.2025.2547277",
+      "title": "Effects of on-plane wrist release style on morphological, temporal, and kinematic swing characteristic in golf drives performed by skilled male golfers",
+      "authors": "Cheng, Mori, Lee, Martinez, Baek, Alvis, Kwon",
+      "journal": "Sports Biomechanics",
+      "year": 2025,
+      "establishes": "84 elite male golfers across four wrist-release styles. Delayed-release styles showed larger uncocking velocities, longer transitions, shorter early-downswing phases and a complete proximal-to-distal sequence, compared with early-release and recocking styles."
+    },
+    {
+      "id": "ref.wood2018",
+      "doi": "10.3390/proceedings2060249",
+      "title": "The Influence of Face Angle and Club Path on the Resultant Launch Angle of a Golf Ball",
+      "authors": "Wood, Henrikson, Broadie",
+      "journal": "Proceedings of the 12th Conference of the International Sports Engineering Association",
+      "year": 2018,
+      "establishes": "Player and robot studies: initial launch direction falls 61–83% toward the face angle, with the remainder toward the club path, varying by club type."
+    },
+    {
+      "id": "ref.henrikson2020",
+      "doi": "10.3390/proceedings2020049027",
+      "title": "The Role of Friction and Tangential Compliance on the Resultant Launch Angle of a Golf Ball",
+      "authors": "Henrikson, Wood, Broadie, Nuttall",
+      "journal": "Proceedings of the 13th Conference of the International Sports Engineering Association",
+      "year": 2020,
+      "establishes": "A Hertzian impact model with tangential compliance via Coulomb friction predicts launch direction from delivered face angle and path, and explores launch direction against the friction coefficient."
+    },
+    {
+      "id": "ref.penner2003",
+      "doi": "10.1088/0034-4885/66/2/202",
+      "title": "The physics of golf",
+      "authors": "Penner",
+      "journal": "Reports on Progress in Physics",
+      "year": 2003,
+      "establishes": "Peer-reviewed physics review: double-pendulum swing models, club–ball impact, the loft / launch / spin relationships, and turf interaction. The general impact physics behind most of the strike and ball-flight edges."
+    },
+    {
+      "id": "ref.kim2021",
+      "doi": "10.1038/s41598-020-79091-7",
+      "title": "Small changes in ball position at address cause a chain effect in golf swing",
+      "authors": "Kim, Lee, Lee, Lee, Shim, Lee",
+      "journal": "Scientific Reports",
+      "year": 2021,
+      "establishes": "20 professionals, five mediolateral ball positions, SPM analysis. Target-side ball position produced a significantly more open shoulder angle at address, during the downswing and at impact, plus lead-foot weight bias — and a less in-to-out club path at impact. The trend reversed for trail-side positions."
+    },
+    {
+      "id": "ref.hume2005",
+      "doi": "10.2165/00007256-200535050-00005",
+      "title": "The role of biomechanics in maximising distance and accuracy of golf shots",
+      "authors": "Hume, Keogh, Reid",
+      "journal": "Sports Medicine",
+      "year": 2005,
+      "establishes": "Review of the biomechanics of distance and accuracy. General background; nothing in the pack cites it, and it is listed so a reader can find the survey rather than because a claim rests on it."
+    }
+  ]
+}

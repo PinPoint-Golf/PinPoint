@@ -292,11 +292,34 @@ int main()
             if (c.provenance.tier == ProvenanceTier::Proposed) ++proposed;
         check(proposed > 0, "uncited content is tiered as proposed, not laundered");
 
-        bool noFakeCitations = true;
-        for (const Condition &c : p.conditions)
-            if (c.provenance.tier != ProvenanceTier::Proposed && c.provenance.citation.isEmpty())
+        // Keyed on citationRequired(), not on "above proposed". Two tiers are ABOVE proposed and
+        // legitimately carry no citation: NoSourceFound asserts the absence of a source, and
+        // Practice cites a body of coaching practice this repo is not permitted to name. Demanding
+        // a citation for either would make the finding unrecordable — which is how they came to be
+        // conflated with "nobody has looked" in the first place.
+        bool noFakeCitations = true, noUndatedSearch = true;
+        for (const Condition &c : p.conditions) {
+            if (citationRequired(c.provenance.tier) && c.provenance.citation.isEmpty())
                 noFakeCitations = false;
-        check(noFakeCitations, "no condition claims a tier above proposed without a citation");
+            if (searchDateRequired(c.provenance.tier) && !c.provenance.searched())
+                noUndatedSearch = false;
+        }
+        check(noFakeCitations, "no condition claims a cited tier without a citation");
+        check(noUndatedSearch, "no condition records a search outcome without the date it was made");
+
+        // The same two rules over the edges, which until now could make neither claim at all.
+        bool edgesHonest = true;
+        for (const Edge &e : p.edges)
+            if ((citationRequired(e.provenance.tier) && e.provenance.citation.isEmpty())
+                || (searchDateRequired(e.provenance.tier) && !e.provenance.searched()))
+                edgesHonest = false;
+        check(edgesHonest, "no edge claims a cited tier without a citation, or a search without a date");
+
+        std::map<QString, int> byTier;
+        for (const Edge &e : p.edges) ++byTier[provenanceTierName(e.provenance.tier)];
+        std::printf("        (edge provenance:");
+        for (const auto &kv : byTier) std::printf(" %s=%d", qPrintable(kv.first), kv.second);
+        std::printf(")\n");
     }
 
     // ── Every condition says what it costs the golfer ───────────────────────────

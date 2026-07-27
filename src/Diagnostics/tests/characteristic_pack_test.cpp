@@ -10,6 +10,7 @@
 
 #include "../characteristic_pack.h"
 
+#include <QDate>
 #include <QJsonArray>
 #include <QJsonDocument>
 
@@ -396,6 +397,108 @@ int main()
         check(conditionGroupFromName(QStringLiteral("finish"), g) && g == ConditionGroup::Finish,
               "finish parses");
         check(allConditionGroups().size() == 9, "all nine groups are enumerated in one place");
+    }
+
+    // ── Edge provenance ─────────────────────────────────────────────────────────
+    //
+    // An edge is a CLAIM, and for a long while it was the only claim in the pack that could not say
+    // how well founded it was — a bare citation string, no tier, so an uncited edge and a cited one
+    // drew identically while `strength` ranked which cause a coach saw first.
+    //
+    // The two tiers that carry no citation are the point of the exercise. Proposed means nobody has
+    // looked; NoSourceFound means somebody looked and the literature is silent; Practice means the
+    // field agrees and has never measured it. Those call for three different actions, and the old
+    // schema could express only the first.
+    {
+        CharacteristicPack p = goodPack();
+        p.edges.front().provenance.tier        = ProvenanceTier::Supported;
+        p.edges.front().provenance.citation    = QStringLiteral("10.1177/0363546514555698");
+        p.edges.front().provenance.searchedOn  = QDate(2026, 7, 27);
+        p.edges.front().provenance.searchTerms = QStringLiteral("hip internal rotation golf");
+
+        const PackLoadResult back = loadPack(savePack(p), QStringLiteral("edge-prov"));
+        check(back.loaded, "a pack with edge provenance loads");
+        const Edge &e = back.pack.edges.front();
+        check(e.provenance.tier == ProvenanceTier::Supported, "the tier round-trips");
+        check(e.provenance.citation == QStringLiteral("10.1177/0363546514555698"),
+              "the citation round-trips");
+        check(e.provenance.searchedOn == QDate(2026, 7, 27), "the search date round-trips");
+        check(e.provenance.searchTerms == QStringLiteral("hip internal rotation golf"),
+              "the search terms round-trip, so a re-run starts from what was already tried");
+    }
+    {
+        // A cited tier with no citation is a claim about the literature that names none of it.
+        CharacteristicPack p = goodPack();
+        p.edges.front().provenance.tier = ProvenanceTier::Indirect;
+        const PackLoadResult back = loadPack(savePack(p), QStringLiteral("edge-tier"));
+        check(hasWarning(back.report, "edgeTierNoCitation"),
+              "an edge claiming a cited tier with no citation is demoted and warns");
+        check(back.pack.edges.front().provenance.tier == ProvenanceTier::Proposed,
+              "and it is demoted to proposed, not left claiming what it cannot show");
+    }
+    {
+        // The demotion must NOT reach the two uncited tiers, or recording a null destroys it.
+        for (const ProvenanceTier t : { ProvenanceTier::NoSourceFound, ProvenanceTier::Practice }) {
+            CharacteristicPack p = goodPack();
+            p.edges.front().provenance.tier       = t;
+            p.edges.front().provenance.searchedOn = QDate(2026, 7, 27);
+            const PackLoadResult back = loadPack(savePack(p), QStringLiteral("edge-null"));
+            check(back.pack.edges.front().provenance.tier == t,
+                  QByteArray(provenanceTierName(t).toLatin1())
+                      .append(" survives the load — it is a finding, not a missing citation")
+                      .constData());
+        }
+    }
+    {
+        // NoSourceFound is a claim about the outcome of a SEARCH, so it is meaningless undated:
+        // it cannot be told from an unasked question, or re-opened when the field publishes.
+        CharacteristicPack p = goodPack();
+        p.edges.front().provenance.tier = ProvenanceTier::NoSourceFound;
+        const PackLoadResult undated = loadPack(savePack(p), QStringLiteral("edge-undated"));
+        check(hasWarning(undated.report, "searchNoDate"),
+              "an undated noSourceFound warns and falls back to proposed");
+        check(undated.pack.edges.front().provenance.tier == ProvenanceTier::Proposed,
+              "an undated search outcome reverts to the open question it actually is");
+    }
+    {
+        // Practice is NOT a claim about a search, and demanding a date of it was the bug that
+        // made this model incoherent: it forced every edge authored from coaching knowledge to
+        // record as `proposed`, which says nobody has any basis for it. They plainly had one --
+        // it is where the whole library came from. The tier says what the EVIDENCE is; searchedOn
+        // says whether anybody has LOOKED; those are independent.
+        CharacteristicPack p = goodPack();
+        p.edges.front().provenance.tier = ProvenanceTier::Practice;
+        const PackLoadResult back = loadPack(savePack(p), QStringLiteral("edge-practice"));
+        check(!hasWarning(back.report, "searchNoDate"),
+              "an undated practice edge does not warn — it is orthodoxy, not a search result");
+        check(back.pack.edges.front().provenance.tier == ProvenanceTier::Practice,
+              "and it keeps the tier, so the claim's real basis is on the record");
+        check(needsLiteratureSearch(back.pack.edges.front().provenance),
+              "yet it stays in the work queue: attributed is not the same as checked");
+
+        // Once searched and still unmatched, it keeps the tier and gains the date.
+        p.edges.front().provenance.searchedOn = QDate(2026, 7, 27);
+        const PackLoadResult dated = loadPack(savePack(p), QStringLiteral("edge-practice-dated"));
+        check(!needsLiteratureSearch(dated.pack.edges.front().provenance),
+              "a dated practice edge leaves the queue — somebody has now been to the literature");
+    }
+    {
+        // Back-compat: the old schema's bare citation string on an edge. No shipped edge ever had
+        // one, but a community pack written against it might, and silently dropping the field
+        // would lose the only thing that schema could say.
+        QJsonObject root = savePack(goodPack());
+        QJsonArray  es   = root.value(QStringLiteral("edges")).toArray();
+        QJsonObject e0   = es.at(0).toObject();
+        e0.insert(QStringLiteral("citation"), QStringLiteral("10.0000/legacy"));
+        es.replace(0, e0);
+        root.insert(QStringLiteral("edges"), es);
+
+        const PackLoadResult back = loadPack(root, QStringLiteral("legacy-edge"));
+        const Edge          &e    = back.pack.edges.front();
+        check(e.provenance.citation == QStringLiteral("10.0000/legacy"),
+              "a legacy bare edge citation is preserved, not dropped");
+        check(e.provenance.tier == ProvenanceTier::Supported,
+              "and reads as Supported — a citation somebody wrote and did not grade");
     }
 
     // ── Health warnings (these ARE the health list) ─────────────────────────────

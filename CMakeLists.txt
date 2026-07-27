@@ -425,6 +425,7 @@ qt_add_qml_module(PinPointStudio
         src/Gui/characteristics/HealthView.qml
         src/Gui/characteristics/GlossaryView.qml
         src/Gui/characteristics/ScreensView.qml
+        src/Gui/characteristics/ReferencesView.qml
         src/Gui/diagnostics/WristDiagnostics.qml
         src/Gui/diagnostics/DofTrajectoryStrip.qml
         src/Gui/diagnostics/PositionAngleGrid.qml
@@ -496,6 +497,7 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/screen_pack.cpp
         src/Diagnostics/drill_pack.h
         src/Diagnostics/drill_pack.cpp
+        src/Diagnostics/reference_pack.cpp
         src/Diagnostics/measure_sample.h
         src/Diagnostics/measure_sample.cpp
         src/Diagnostics/resource_norm_provider.cpp
@@ -656,6 +658,7 @@ qt_add_resources(PinPointStudio "app_diagnostics"
         src/Resources/diagnostics/contexts.json
         src/Resources/diagnostics/screens.json
         src/Resources/diagnostics/drills.json
+                src/Resources/diagnostics/references.json
 )
 
 qt_add_resources(PinPointStudio "app_icons"
@@ -2604,6 +2607,7 @@ if(PINPOINT_BUILD_TOOLS)
         # TestRecommendation has to resolve its screenRef to a protocol — the link does not fail.
         src/Diagnostics/screen_pack.cpp
         src/Diagnostics/drill_pack.cpp
+        src/Diagnostics/reference_pack.cpp
         src/Analysis/pose_runner.cpp
         src/Analysis/ball_runner.cpp
         src/Analysis/shaft_tracker.cpp
@@ -2694,6 +2698,7 @@ if(PINPOINT_BUILD_TOOLS)
                 src/Resources/diagnostics/contexts.json
                 src/Resources/diagnostics/screens.json
                 src/Resources/diagnostics/drills.json
+                src/Resources/diagnostics/references.json
         )
     endfunction()
 

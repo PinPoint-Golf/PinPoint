@@ -281,6 +281,48 @@ Item {
                 }
             }
 
+            // ── References — always shown ──────────────────────────────────────
+            // Same outline treatment as Roadmap, and to its LEFT so that in a shipping build (where
+            // Roadmap is hidden) this is the far-right chip, while a developer build keeps Roadmap
+            // beyond it. Unlike Roadmap it is never hidden: the sources behind a claim are the
+            // user's business, not a maintainer's, and a library that cannot show its working is
+            // asking to be taken on faith.
+            Rectangle {
+                id: refsChip
+                Layout.alignment: Qt.AlignRight | Qt.AlignTop
+
+                readonly property bool active: root._view === "references"
+
+                implicitWidth:  refText.implicitWidth + Theme.sp(22)
+                implicitHeight: Theme.sp(28)
+                radius: height / 2
+                color:  "transparent"
+                border.width: 1
+                border.color: active ? Theme.colorAccent
+                                     : refMa.containsMouse ? Theme.colorBorderStrong
+                                                           : Theme.colorBorderMid
+                Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
+
+                Text {
+                    id: refText
+                    anchors.centerIn: parent
+                    text:           qsTr("References")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          refsChip.active ? Theme.colorAccent
+                                                    : refMa.containsMouse ? Theme.colorText2
+                                                                          : Theme.colorText3
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                }
+                MouseArea {
+                    id: refMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root._view = "references"
+                }
+            }
+
             // ── Roadmap — developer builds only ────────────────────────────────
             // Outline, never a fill: quieter than the content chips at every state, but it
             // keeps a full-strength border and lifts to the accent when selected, so it is
@@ -574,6 +616,18 @@ Item {
         anchors.right:  parent.right
         anchors.bottom: parent.bottom
         visible: root._view === "screens" && root._selectedId === "" && !root._editing
+        library: library
+
+        onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }
+    }
+
+    // ══ References ════════════════════════════════════════════════════════════
+    ReferencesView {
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
+        visible: root._view === "references" && root._selectedId === "" && !root._editing
         library: library
 
         onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }

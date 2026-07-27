@@ -521,7 +521,7 @@ set_tests_properties(characteristic_editor_test PROPERTIES
 # producer the catalogue does not have.
 pp_add_test(diagnostics_catalogue_integrity_test
     SOURCES ${DIAG}/tests/diagnostics_catalogue_integrity_test.cpp ${DIAG_PACK}
-            ${DIAG}/screen_pack.cpp ${DIAG}/drill_pack.cpp
+            ${DIAG}/screen_pack.cpp ${DIAG}/drill_pack.cpp ${DIAG}/reference_pack.cpp
             ${SRC}/Gui/characteristics/characteristic_library_model.cpp
             ${DIAG}/dag_layout.cpp
             # The model's health list spans the norm set now, and its corpus check reads phase grids.
@@ -540,8 +540,10 @@ pp_add_test(diagnostics_catalogue_integrity_test
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 # CharacteristicLibraryModel assembles the pack through the provider, which normally reads the Qt
 # resource — absent from a standalone binary. Point it at the reviewable JSON instead.
+target_compile_definitions(diagnostics_catalogue_integrity_test PRIVATE
+    PP_DIAG_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../Gui/characteristics")
 set_tests_properties(diagnostics_catalogue_integrity_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json")
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json;PINPOINT_CORE_REFERENCES=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/references.json")
 
 # The ASSEMBLED-LIBRARY health checks: the ones no single validator can make, because they span the
 # pack, the norm set, the context tree and the metric catalogue at once. Run against the SHIPPED
@@ -573,10 +575,10 @@ set_tests_properties(diagnostics_health_test PROPERTIES
 # both directions and the validators in both, firing and staying silent.
 pp_add_test(reference_sets_test
     SOURCES ${DIAG}/tests/reference_sets_test.cpp
-            ${DIAG}/screen_pack.cpp ${DIAG}/drill_pack.cpp ${DIAG_PACK}
+            ${DIAG}/screen_pack.cpp ${DIAG}/drill_pack.cpp ${DIAG}/reference_pack.cpp ${DIAG_PACK}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 set_tests_properties(reference_sets_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json")
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json;PINPOINT_CORE_REFERENCES=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/references.json")
 
 # The causal DAG's layout. Everything about that view that can be wrong in a way a screenshot would
 # not show: two boxes on top of each other (a hidden node reads as a graph that lacks it), a picture

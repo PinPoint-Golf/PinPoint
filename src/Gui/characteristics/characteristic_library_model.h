@@ -171,6 +171,18 @@ public:
     Q_INVOKABLE QVariantList screens() const;
     Q_INVOKABLE QVariantList drills() const;
 
+    // The bibliography, each entry carrying WHAT IT SUPPORTS.
+    //
+    // A reference list on its own is an appendix nobody opens. The question a reader actually has
+    // is "why does the app believe this?", and the answer is the pairing — this paper, and the four
+    // causal claims resting on it, at the tier each one earned. So every row carries its citing
+    // edges and conditions, and the rows sort by how much of the library they hold up.
+    //
+    // Entries nothing cites are kept and marked, not dropped: one of them is the paper that
+    // CONTRADICTS two claims the pack does make, and a bibliography that silently omitted it would
+    // be the most misleading version of this view we could ship.
+    Q_INVOKABLE QVariantList references() const;
+
     // The glossary: every condition, its coach terms, and what it means in plain language.
     //
     // No second dataset — the rule set IS the glossary, which is the whole reason `aliases` and the

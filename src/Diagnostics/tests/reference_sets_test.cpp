@@ -13,6 +13,7 @@
 
 #include "../characteristic_pack.h"
 #include "../drill_pack.h"
+#include "../reference_pack.h"
 #include "../screen_pack.h"
 
 #include <QFile>
@@ -44,8 +45,9 @@ static CharacteristicPack shippedPack()
 int main()
 {
     std::printf("=== the shipped registries load ===\n");
-    const ScreenSet &screens = sharedScreenSet();
-    const DrillSet  &drills  = sharedDrillSet();
+    const ScreenSet    &screens = sharedScreenSet();
+    const DrillSet     &drills  = sharedDrillSet();
+    const ReferenceSet &refs    = sharedReferenceSet();
 
     check(!screens.screens.empty(), "the screen set loaded");
     check(!drills.drills.empty(), "the drill set loaded");
@@ -192,6 +194,96 @@ int main()
         const DrillLoadResult rd = loadDrillSet(saveDrillSet(drills), QStringLiteral("rt"));
         check(rd.loaded && rd.set.drills.size() == drills.drills.size(),
               "a drill set survives save and load");
+    }
+
+    // ── The bibliography ────────────────────────────────────────────────────
+    //
+    // The join runs Provenance::citation -> Reference::doi and is an EXACT STRING MATCH into a
+    // separate file, exactly like screenRef and drills. A citation whose DOI is not in the registry
+    // fails silently and in the worst possible way: the edge still loads, still validates, still
+    // renders its tier chip — and the References view simply never mentions the claim, so the
+    // library looks better sourced than it is.
+    std::printf("=== references ===\n");
+    const CharacteristicPack pack = shippedPack();
+    {
+        check(!refs.references.empty(), "the shipped reference set loads");
+        check(validateReferenceSet(refs).ok(), "and validates clean");
+
+        QSet<QString> known;
+        for (const Reference &r : refs.references) known.insert(r.doi);
+
+        int dangling = 0, cited = 0;
+        for (const Edge &e : pack.edges) {
+            if (e.provenance.citation.isEmpty()) continue;
+            ++cited;
+            if (!known.contains(e.provenance.citation)) {
+                ++dangling;
+                std::printf("        edge '%s' -> '%s' cites '%s', which is not in the registry\n",
+                            qPrintable(e.from), qPrintable(e.to),
+                            qPrintable(e.provenance.citation));
+            }
+        }
+        for (const Condition &c : pack.conditions) {
+            if (c.provenance.citation.isEmpty()) continue;
+            ++cited;
+            if (!known.contains(c.provenance.citation)) {
+                ++dangling;
+                std::printf("        condition '%s' cites '%s', which is not in the registry\n",
+                            qPrintable(c.id), qPrintable(c.provenance.citation));
+            }
+        }
+        std::printf("        (%d citations over %d references, %d dangling)\n",
+                    cited, int(refs.references.size()), dangling);
+        check(cited > 0, "the pack cites something");
+        check(dangling == 0, "every citation in the pack resolves to a reference");
+
+        // Every reference must be openable and identifiable. A row that renders as a bare DOI is
+        // one a reader cannot judge, and the DOI is also the only route to the paper itself.
+        bool complete = true;
+        for (const Reference &r : refs.references)
+            if (r.doi.isEmpty() || r.title.isEmpty() || r.authors.isEmpty() || r.year <= 0)
+                complete = false;
+        check(complete, "every reference carries a DOI, title, authors and year");
+
+        bool urls = true;
+        for (const Reference &r : refs.references)
+            if (!r.url().startsWith(QStringLiteral("https://doi.org/"))) urls = false;
+        check(urls, "and resolves to a doi.org URL the view can open");
+
+        // A DOI that is cited by nothing is legitimate and must NOT be pruned: one of them is the
+        // paper that contradicts claims the pack does make, and dropping it would leave the
+        // bibliography agreeing with itself.
+        int uncited = 0;
+        for (const Reference &r : refs.references) {
+            bool used = false;
+            for (const Edge &e : pack.edges)
+                if (e.provenance.citation == r.doi) used = true;
+            for (const Condition &c : pack.conditions)
+                if (c.provenance.citation == r.doi) used = true;
+            if (!used) ++uncited;
+        }
+        std::printf("        (%d references cited by nothing — kept deliberately)\n", uncited);
+
+        const ReferenceLoadResult rr = loadReferenceSet(saveReferenceSet(refs), QStringLiteral("rt"));
+        check(rr.loaded && rr.set.references.size() == refs.references.size(),
+              "a reference set survives save and load");
+
+        // Validators, in both directions.
+        ReferenceSet bad = refs;
+        bad.references.front().doi.clear();
+        check(hasCode(validateReferenceSet(bad), "referenceNoDoi"),
+              "a reference with no DOI is refused — nothing could cite it or open it");
+
+        ReferenceSet dup = refs;
+        dup.references.push_back(dup.references.front());
+        dup.references.back().id = QStringLiteral("ref.other");
+        check(hasCode(validateReferenceSet(dup), "duplicateDoi"),
+              "two references sharing a DOI are refused — the second is unreachable");
+
+        ReferenceSet ns = refs;
+        ns.references.front().id = QStringLiteral("vad2004");
+        check(hasCode(validateReferenceSet(ns), "referenceIdNamespace"),
+              "an id outside the ref. namespace is refused");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");

@@ -2307,7 +2307,10 @@
       "state": "active",
       "consequence": "An exaggerated low-back arch at address pre-tensions the lower back and makes it harder to turn the pelvis without the spine taking the load.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1080/02640414.2024.2319443",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "golf low back pain biomechanical risk factors systematic review"
       },
       "axis": "lumbar_curve",
       "injuryNote": "A sustained end-range low-back arch under rotational load is associated with lower back discomfort. Worth raising with a clinician if pain is present."
@@ -2528,7 +2531,10 @@
       "state": "active",
       "consequence": "The pelvis moving toward the ball in the downswing takes away the room the arms need, leaving the hands to rescue the strike.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1080/02640414.2024.2319443",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "golf low back pain biomechanical risk factors systematic review"
       },
       "drills": [
         "drill.postureRod",
@@ -2551,7 +2557,10 @@
       "state": "active",
       "consequence": "Leaning toward the target at the top loads the trail side of the lower back and makes a sequenced downswing hard to start from the ground.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "supported",
+        "citation": "10.1016/j.smhs.2020.03.002",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "reverse spine angle lateral bending golf low back pain"
       },
       "injuryNote": "Combined end-range extension and rotation is the loading pattern most often linked with lower back pain in golfers. Worth raising with a clinician if pain is present."
     },
@@ -2607,7 +2616,10 @@
       "state": "active",
       "consequence": "Sliding away from the target in the backswing moves the low point behind the ball and has to be reversed exactly to strike it.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1016/j.smhs.2020.03.002",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "golf low back pain biomechanical risk factors systematic review"
       },
       "drills": [
         "drill.trailHipLoad",
@@ -2630,7 +2642,10 @@
       "state": "active",
       "consequence": "Excess lateral movement toward the target in the downswing outruns the rotation and leaves the face open at impact.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1007/s40279-015-0429-1",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis lateral slide toward target downswing clubhead speed"
       }
     },
     {
@@ -2795,7 +2810,10 @@
       "state": "active",
       "consequence": "Releasing the wrist angle early spends the stored angle before it can be used, so speed peaks before the ball rather than at it.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1080/14763141.2025.2547277",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "early wrist release style kinematics elite golfers"
       },
       "drills": [
         "drill.wristHold",
@@ -2857,7 +2875,10 @@
       "state": "active",
       "consequence": "When the chest leads the pelvis, the chain that multiplies speed from the ground up never forms and speed has to be made by the arms.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "supported",
+        "citation": "10.1080/14763141.2010.535842",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "proximal to distal sequencing golf swing segment angular speed"
       }
     },
     {
@@ -2877,7 +2898,10 @@
       "state": "active",
       "consequence": "Little separation between the chest and the pelvis at the top means little elastic load to release, so the downswing starts from a standstill.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "supported",
+        "citation": "10.1080/02640410701373543",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "X-factor upper torso pelvis rotation ball velocity golf"
       }
     },
     {
@@ -2896,7 +2920,10 @@
       "state": "active",
       "consequence": "Starting down too quickly relative to the backswing leaves the sequence no time to form from the ground up.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1080/14763141.2025.2547277",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "transition phase duration downswing golf release"
       },
       "drills": [
         "drill.pumpToDelivery"
@@ -2914,7 +2941,9 @@
       "provenance": {
         "tier": "proposed"
       },
-      "injuryNote": "Rotation that the hips cannot supply is usually taken from the lower back, which has very little rotation available. Worth raising with a clinician if pain is present."
+      "injuryNote": {
+        "en": "Rotation the hips cannot supply is usually taken from the lower back, which has very little rotation available. The measured link with low-back pain in golfers has been found for the LEAD hip rather than the trail hip, so treat this as a mechanism worth knowing rather than a demonstrated risk. Worth raising with a clinician if pain is present."
+      }
     },
     {
       "id": "limited_lead_hip_ir",
@@ -2926,7 +2955,10 @@
       "state": "active",
       "consequence": "The downswing turns the pelvis toward the target over the lead foot, to end range and quickly. A restriction here is the more common and more consequential of the two sides, and forces the pelvis to move rather than turn.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1177/0363546503261729",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lead hip internal rotation range of motion deficit low back pain professional golfers"
       },
       "injuryNote": "Rotation that the hips cannot supply is usually taken from the lower back, which has very little rotation available. Worth raising with a clinician if pain is present."
     },
@@ -4368,1069 +4400,1962 @@
       "from": "limited_hip_extension",
       "to": "s_posture",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "hip ankle mobility restriction golf swing compensation"
+      }
     },
     {
       "from": "poor_core_stability",
       "to": "s_posture",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "thoracic_kyphosis",
       "to": "c_posture",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_thoracic_extension",
       "to": "c_posture",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "ball_too_far",
       "to": "c_posture",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "club_too_short",
       "to": "c_posture",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "aim_bias_open",
       "to": "alignment_open",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "ball_forward",
       "to": "alignment_open",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "supported",
+        "citation": "10.1038/s41598-020-79091-7",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position address shoulder alignment golf swing kinematics"
+      }
     },
     {
       "from": "aim_bias_closed",
       "to": "alignment_closed",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "ball_back",
       "to": "alignment_closed",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "supported",
+        "citation": "10.1038/s41598-020-79091-7",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position address shoulder alignment golf swing kinematics"
+      }
     },
     {
       "from": "aim_bias_open",
       "to": "ball_forward",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "aim_bias_closed",
       "to": "ball_back",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "poor_single_leg_balance",
       "to": "stance_wide",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "limited_trail_hip_ir",
       "to": "stance_narrow",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "hip ankle mobility restriction golf swing compensation"
+      }
     },
     {
       "from": "stance_habit",
       "to": "stance_narrow",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "early_extension",
       "to": "loss_of_posture",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis anterior displacement downswing posture loss golf"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "loss_of_posture",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_trail_hip_ir",
       "to": "loss_of_posture",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1177/0363546514555698",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "limited hip internal rotation golf lumbopelvic kinematics"
+      }
     },
     {
       "from": "poor_core_stability",
       "to": "loss_of_posture",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "limited_lead_hip_ir",
       "to": "early_extension",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1186/s12938-015-0041-5",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lead hip rotation contribution early downswing lumbar coupling"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "early_extension",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "limited_ankle_dorsiflexion",
       "to": "early_extension",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "hip ankle mobility restriction golf swing compensation"
+      }
     },
     {
       "from": "ball_too_close",
       "to": "early_extension",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "posture_too_upright",
       "to": "early_extension",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "s_posture",
       "to": "reverse_spine",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "reverse_spine",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_trail_hip_ir",
       "to": "reverse_spine",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1177/0363546514555698",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "limited hip internal rotation golf lateral bending backswing"
+      }
     },
     {
       "from": "poor_core_stability",
       "to": "reverse_spine",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "c_posture",
       "to": "flat_shoulder_plane",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "flat_shoulder_plane",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "posture_too_upright",
       "to": "flat_shoulder_plane",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "limited_trail_hip_ir",
       "to": "trail_hip_hike",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1177/0363546514555698",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "limited hip internal rotation golfers lumbopelvic lateral bending pelvic tilt"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "trail_hip_hike",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "poor_core_stability",
       "to": "trail_hip_hike",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "limited_trail_hip_ir",
       "to": "sway",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1177/0363546514555698",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "limited hip internal rotation golfers lumbopelvic compensation"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "sway",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "poor_single_leg_balance",
       "to": "sway",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "slide",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "limited_lead_hip_ir",
       "to": "slide",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1186/s12938-015-0041-5",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lead hip rotation contribution early downswing lumbar coupling"
+      }
     },
     {
       "from": "sway",
       "to": "slide",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "poor_single_leg_balance",
       "to": "hanging_back",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "sway",
       "to": "hanging_back",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "limited_lead_hip_ir",
       "to": "hanging_back",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1186/s12938-015-0041-5",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lead hip rotation contribution early downswing lumbar coupling"
+      }
     },
     {
       "from": "trying_to_lift_the_ball",
       "to": "hanging_back",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "forward_lunge",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "transition_rush",
       "to": "forward_lunge",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "poor_single_leg_balance",
       "to": "late_buckle",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "slide",
       "to": "late_buckle",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "limited_lead_hip_ir",
       "to": "late_buckle",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "hip ankle mobility restriction golf swing compensation"
+      }
     },
     {
       "from": "limited_shoulder_external_rotation",
       "to": "flying_elbow",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "flying_elbow",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "c_posture",
       "to": "flying_elbow",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "over_the_top",
       "to": "chicken_wing",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "early_extension",
       "to": "chicken_wing",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis anterior displacement downswing posture loss golf"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "chicken_wing",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "limited_lead_hip_ir",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1186/s12938-015-0041-5",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lead hip rotation early downswing golf swing compensation"
+      }
     },
     {
       "from": "flat_shoulder_plane",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "transition_rush",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "alignment_open",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1038/s41598-020-79091-7",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "open shoulder angle downswing club path in to out impact"
+      }
     },
     {
       "from": "limited_shoulder_flexion",
       "to": "loss_of_width",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "casting",
       "to": "loss_of_width",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "over_the_top",
       "to": "loss_of_width",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "transition_rush",
       "to": "casting",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1080/14763141.2025.2547277",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "wrist release style transition phase time golf drives elite"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "casting",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "insufficient_set",
       "to": "casting",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "limited_wrist_mobility",
       "to": "casting",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "casting",
       "to": "scooping",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "trying_to_lift_the_ball",
       "to": "scooping",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "hanging_back",
       "to": "scooping",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "limited_wrist_mobility",
       "to": "insufficient_set",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_shoulder_flexion",
       "to": "insufficient_set",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "sequence_order",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "transition_rush",
       "to": "sequence_order",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1080/14763141.2025.2547277",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "transition phase duration proximal to distal sequence golf"
+      }
     },
     {
       "from": "limited_lead_hip_ir",
       "to": "sequence_order",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1186/s12938-015-0041-5",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lead hip rotation timing lumbar spine sequence golf"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "xfactor_deficit",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "xfactor_deficit",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "c_posture",
       "to": "xfactor_deficit",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "tempo_habit",
       "to": "transition_rush",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "poor_core_stability",
       "to": "transition_rush",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "limited_trail_hip_ir",
       "to": "excessive_head_sway",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "hip ankle mobility restriction golf swing compensation"
+      }
     },
     {
       "from": "poor_pelvic_disassociation",
       "to": "excessive_head_sway",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis thorax separation dissociation golf swing coordination"
+      }
     },
     {
       "from": "stance_wide",
       "to": "sway",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "excessive_heel_lift",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_trail_hip_ir",
       "to": "excessive_heel_lift",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "hip ankle mobility restriction golf swing compensation"
+      }
     },
     {
       "from": "poor_core_stability",
       "to": "head_drop_backswing",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "trunk endurance balance golf swing posture handicap"
+      }
     },
     {
       "from": "head_drop_backswing",
       "to": "low_point_behind_ball",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "trail_knee_straighten",
       "to": "head_rise_backswing",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "head_rise_backswing",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_shoulder_flexion",
       "to": "bent_lead_arm",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "bent_lead_arm",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "hip_stall",
       "to": "deceleration",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "trying_to_lift_the_ball",
       "to": "deceleration",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "grip_weak",
       "to": "early_face_roll",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "limited_wrist_mobility",
       "to": "early_face_roll",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "casting",
       "to": "insufficient_shaft_lean",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "trying_to_lift_the_ball",
       "to": "insufficient_shaft_lean",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "ball_forward",
       "to": "insufficient_shaft_lean",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "stance_narrow",
       "to": "off_balance_finish",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "feet_alignment_open",
       "to": "alignment_open",
       "type": "corroborates",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "feet_alignment_closed",
       "to": "alignment_closed",
       "type": "corroborates",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "hip_alignment_open",
       "to": "alignment_open",
       "type": "corroborates",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "hip_alignment_closed",
       "to": "alignment_closed",
       "type": "corroborates",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "aim_bias_open",
       "to": "feet_alignment_open",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "aim_bias_closed",
       "to": "feet_alignment_closed",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "aim_bias_open",
       "to": "hip_alignment_open",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "aim_bias_closed",
       "to": "hip_alignment_closed",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "over_the_top",
       "to": "pull",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.3390/proceedings2060249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "club path contribution launch direction golf ball"
+      }
     },
     {
       "from": "over_the_top",
       "to": "slice",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "club path face orientation spin axis golf ball curvature"
+      }
     },
     {
       "from": "outside_takeaway",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "across_the_line",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "inside_takeaway",
       "to": "under_plane_stuck",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "laid_off",
       "to": "under_plane_stuck",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "steep_backswing_plane",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "flat_backswing_plane",
       "to": "under_plane_stuck",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "under_plane_stuck",
       "to": "push",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.3390/proceedings2060249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "club path contribution launch direction golf ball"
+      }
     },
     {
       "from": "under_plane_stuck",
       "to": "hook",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "club path face orientation spin axis golf ball curvature"
+      }
     },
     {
       "from": "under_plane_stuck",
       "to": "push_slice",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.3390/proceedings2020049027",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "friction tangential compliance launch angle golf ball impact model"
+      }
     },
     {
       "from": "hip_spin_out",
       "to": "under_plane_stuck",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "disconnection",
       "to": "over_the_top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "disconnection",
       "to": "loss_of_width",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "open_face_to_path",
       "to": "slice",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "oblique impact golf ball spin generation face orientation"
+      }
     },
     {
       "from": "open_face_to_path",
       "to": "push_slice",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "supported",
+        "citation": "10.3390/proceedings2060249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "face angle club path launch direction golf ball"
+      }
     },
     {
       "from": "closed_face_to_path",
       "to": "hook",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "oblique impact golf ball spin generation face orientation"
+      }
     },
     {
       "from": "closed_face_to_path",
       "to": "pull_hook",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "supported",
+        "citation": "10.3390/proceedings2060249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "face angle club path launch direction golf ball"
+      }
     },
     {
       "from": "grip_weak",
       "to": "open_face_to_path",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "grip_strong",
       "to": "closed_face_to_path",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "early_face_roll",
       "to": "open_face_to_path",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "casting",
       "to": "thin",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "casting",
       "to": "launch_high",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "loft launch angle spin golf ball impact model"
+      }
     },
     {
       "from": "casting",
       "to": "ball_speed_deficit",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1080/02640414.2010.507249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "delayed release wrists ball velocity golf regression"
+      }
     },
     {
       "from": "scooping",
       "to": "thin",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "scooping",
       "to": "launch_high",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "loft launch angle spin golf ball impact model"
+      }
     },
     {
       "from": "hip_stall",
       "to": "scooping",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "insufficient_shaft_lean",
       "to": "launch_high",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "loft launch angle spin golf ball impact model"
+      }
     },
     {
       "from": "insufficient_shaft_lean",
       "to": "ball_speed_deficit",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "deceleration",
       "to": "ball_speed_deficit",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "clubhead speed ball speed energy transfer golf impact"
+      }
     },
     {
       "from": "deceleration",
       "to": "chunk",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "low_point_behind_ball",
       "to": "chunk",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "low_point_behind_ball",
       "to": "thin",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "hanging_back",
       "to": "low_point_behind_ball",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "sway",
       "to": "low_point_behind_ball",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "excessive_axis_tilt_impact",
       "to": "low_point_behind_ball",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "early_extension",
       "to": "shank",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis anterior displacement downswing posture loss golf"
+      }
     },
     {
       "from": "early_extension",
       "to": "strike_heel",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis anterior displacement downswing posture loss golf"
+      }
     },
     {
       "from": "early_extension",
       "to": "under_plane_stuck",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis anterior displacement downswing posture loss golf"
+      }
     },
     {
       "from": "ball_too_close",
       "to": "shank",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "attack_too_steep",
       "to": "sky",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "attack_too_steep",
       "to": "chunk",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "attack_too_steep",
       "to": "spin_excess",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "impact obliquity loft spin rate golf ball"
+      }
     },
     {
       "from": "attack_too_shallow",
       "to": "thin",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "attack_too_shallow",
       "to": "top",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "insufficient_axis_tilt_impact",
       "to": "attack_too_steep",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "ball_forward",
       "to": "thin",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "ball_forward",
       "to": "pull",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1038/s41598-020-79091-7",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position club path impact launch direction golf"
+      }
     },
     {
       "from": "ball_back",
       "to": "push",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1038/s41598-020-79091-7",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position club path impact launch direction golf"
+      }
     },
     {
       "from": "ball_back",
       "to": "launch_low",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "ball_back",
       "to": "chunk",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "bent_lead_arm",
       "to": "loss_of_width",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "bent_lead_arm",
       "to": "casting",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "bent_lead_arm",
       "to": "overswing",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
     },
     {
       "from": "limited_thoracic_rotation",
       "to": "short_backswing",
       "type": "causes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "thoracic rotation extension restriction golf swing compensation posture"
+      }
     },
     {
       "from": "trail_knee_straighten",
       "to": "sway",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "weight_trail_at_address",
       "to": "hanging_back",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address alignment aim ball position golf setup geometry"
+      }
     },
     {
       "from": "hips_closed_at_impact",
       "to": "scooping",
       "type": "causes",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "hip_spin_out",
       "to": "hanging_back",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane posture loss lateral shift golf downswing kinematics"
+      }
     },
     {
       "from": "off_balance_finish",
       "to": "strike_toe",
       "type": "causes",
-      "strength": "weak"
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "low point control strike quality turf interaction golf"
+      }
     },
     {
       "from": "insufficient_shaft_lean",
       "to": "scooping",
       "type": "corroborates",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "steep_downswing_shaft",
       "to": "over_the_top",
       "type": "corroborates",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "excessive_head_sway",
       "to": "sway",
       "type": "corroborates",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "hips_closed_at_impact",
       "to": "under_plane_stuck",
       "type": "corroborates",
-      "strength": "moderate"
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "weight_back_at_finish",
       "to": "hanging_back",
       "type": "corroborates",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "chunk",
       "to": "top",
       "type": "excludes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "chunk",
       "to": "thin",
       "type": "excludes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "thin",
       "to": "top",
       "type": "excludes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "sky",
       "to": "chunk",
       "type": "excludes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     },
     {
       "from": "pull_hook",
       "to": "push_slice",
       "type": "excludes",
-      "strength": "strong"
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice"
+      }
     }
   ]
 }

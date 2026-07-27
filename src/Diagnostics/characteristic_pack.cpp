@@ -211,6 +211,39 @@ QJsonObject writeReducer(const Reducer &r)
     return o;
 }
 
+// ── Provenance, shared by conditions and edges ───────────────────────────────
+// One reader and one writer for both, so an edge's provenance can never drift from a condition's.
+// The tier vocabulary is the same vocabulary; the thing being claimed is the only difference.
+
+Provenance parseProvenance(const QJsonObject &o)
+{
+    Provenance p;
+    p.author      = o.value(QStringLiteral("author")).toString();
+    p.citation    = o.value(QStringLiteral("citation")).toString();
+    p.searchTerms = o.value(QStringLiteral("searchTerms")).toString();
+    provenanceTierFromName(o.value(QStringLiteral("tier")).toString(), p.tier);
+
+    const QString on = o.value(QStringLiteral("searchedOn")).toString();
+    if (!on.isEmpty()) p.searchedOn = QDate::fromString(on, Qt::ISODate);
+    return p;
+}
+
+// Written only when it says something. A provenance block of five default fields on all 178 edges
+// would treble the file for no information, and `git diff` on the content is how this library is
+// reviewed.
+QJsonObject writeProvenance(const Provenance &p)
+{
+    QJsonObject o;
+    if (!p.author.isEmpty())      o.insert(QStringLiteral("author"), p.author);
+    if (!p.citation.isEmpty())    o.insert(QStringLiteral("citation"), p.citation);
+    if (p.tier != ProvenanceTier::Proposed)
+        o.insert(QStringLiteral("tier"), provenanceTierName(p.tier));
+    if (p.searchedOn.isValid())
+        o.insert(QStringLiteral("searchedOn"), p.searchedOn.toString(Qt::ISODate));
+    if (!p.searchTerms.isEmpty()) o.insert(QStringLiteral("searchTerms"), p.searchTerms);
+    return o;
+}
+
 } // namespace
 
 // ── Graph helpers ───────────────────────────────────────────────────────────
@@ -813,15 +846,22 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         confirmedByFromName(o.value(QStringLiteral("confirmedBy")).toString(), c.confirmedBy);
         conditionStateFromName(o.value(QStringLiteral("state")).toString(), c.state);
 
-        const QJsonObject prov = o.value(QStringLiteral("provenance")).toObject();
-        c.provenance.author   = prov.value(QStringLiteral("author")).toString();
-        c.provenance.citation = prov.value(QStringLiteral("citation")).toString();
-        provenanceTierFromName(prov.value(QStringLiteral("tier")).toString(), c.provenance.tier);
+        c.provenance = parseProvenance(o.value(QStringLiteral("provenance")).toObject());
         // A tier is only as good as its citation. An author cannot claim Supported without one.
-        if (c.provenance.citation.isEmpty() && c.provenance.tier != ProvenanceTier::Proposed) {
+        if (citationRequired(c.provenance.tier) && c.provenance.citation.isEmpty()) {
             c.provenance.tier = ProvenanceTier::Proposed;
             warn(r, QStringLiteral("proposedTier"), c.id,
                  QStringLiteral("'%1' claimed a citation tier with no citation; demoted to proposed.")
+                     .arg(c.id));
+        }
+        // NoSourceFound is the one tier that is MEANT to have no citation, and demoting it would
+        // destroy the finding it records — turning "we looked and the literature is silent" back
+        // into "nobody has looked". What it needs instead is the date that makes it re-openable.
+        if (searchDateRequired(c.provenance.tier) && !c.provenance.searched()) {
+            c.provenance.tier = ProvenanceTier::Proposed;
+            warn(r, QStringLiteral("searchNoDate"), c.id,
+                 QStringLiteral("'%1' records the outcome of a search with no date to have made it "
+                                "on; an undated result cannot be told from an unasked question.")
                      .arg(c.id));
         }
 
@@ -846,11 +886,37 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
     for (const QJsonValue &v : root.value(QStringLiteral("edges")).toArray()) {
         const QJsonObject o = v.toObject();
         Edge              e;
-        e.from     = o.value(QStringLiteral("from")).toString();
-        e.to       = o.value(QStringLiteral("to")).toString();
-        e.citation = o.value(QStringLiteral("citation")).toString();
+        e.from = o.value(QStringLiteral("from")).toString();
+        e.to   = o.value(QStringLiteral("to")).toString();
         edgeTypeFromName(o.value(QStringLiteral("type")).toString(QStringLiteral("causes")), e.type);
         strengthFromName(o.value(QStringLiteral("strength")).toString(QStringLiteral("moderate")), e.strength);
+
+        e.provenance = parseProvenance(o.value(QStringLiteral("provenance")).toObject());
+        // An edge used to carry a bare `citation` string with no tier. No shipped edge ever did,
+        // but a community pack written against the old schema might, and dropping it silently
+        // would lose the one thing that schema COULD say. A citation with no tier is a claim
+        // somebody made and did not grade, which is exactly what Supported means.
+        if (e.provenance.citation.isEmpty()) {
+            const QString legacy = o.value(QStringLiteral("citation")).toString();
+            if (!legacy.isEmpty()) {
+                e.provenance.citation = legacy;
+                if (e.provenance.tier == ProvenanceTier::Proposed)
+                    e.provenance.tier = ProvenanceTier::Supported;
+            }
+        }
+        if (citationRequired(e.provenance.tier) && e.provenance.citation.isEmpty()) {
+            e.provenance.tier = ProvenanceTier::Proposed;
+            warn(r, QStringLiteral("edgeTierNoCitation"), e.from,
+                 QStringLiteral("The edge '%1' -> '%2' claims a citation tier with no citation; "
+                                "demoted to proposed.").arg(e.from, e.to));
+        }
+        if (searchDateRequired(e.provenance.tier) && !e.provenance.searched()) {
+            e.provenance.tier = ProvenanceTier::Proposed;
+            warn(r, QStringLiteral("searchNoDate"), e.from,
+                 QStringLiteral("The edge '%1' -> '%2' records the outcome of a search with no date "
+                                "to have made it on; an undated result cannot be told from an "
+                                "unasked question.").arg(e.from, e.to));
+        }
         out.pack.edges.push_back(std::move(e));
     }
 
@@ -944,10 +1010,13 @@ QJsonObject savePack(const CharacteristicPack &pack)
         if (!c.drills.isEmpty())      o.insert(QStringLiteral("drills"), writeStringList(c.drills));
         if (!c.aliases.isEmpty())     o.insert(QStringLiteral("aliases"), writeStringList(c.aliases));
 
-        QJsonObject prov;
-        if (!c.provenance.author.isEmpty())   prov.insert(QStringLiteral("author"), c.provenance.author);
-        if (!c.provenance.citation.isEmpty()) prov.insert(QStringLiteral("citation"), c.provenance.citation);
-        prov.insert(QStringLiteral("tier"), provenanceTierName(c.provenance.tier));
+        // Through the shared writer, which omits a default tier — but a condition writes its
+        // provenance block unconditionally, because every condition HAS a tier claim to make and a
+        // missing block on one of them would read as content that lost its provenance rather than
+        // content that never claimed any.
+        QJsonObject prov = writeProvenance(c.provenance);
+        if (!prov.contains(QStringLiteral("tier")))
+            prov.insert(QStringLiteral("tier"), provenanceTierName(c.provenance.tier));
         o.insert(QStringLiteral("provenance"), prov);
 
         if (!c.bindings.empty()) {
@@ -976,7 +1045,8 @@ QJsonObject savePack(const CharacteristicPack &pack)
         o.insert(QStringLiteral("to"), e.to);
         o.insert(QStringLiteral("type"), edgeTypeName(e.type));
         o.insert(QStringLiteral("strength"), strengthName(e.strength));
-        if (!e.citation.isEmpty()) o.insert(QStringLiteral("citation"), e.citation);
+        const QJsonObject prov = writeProvenance(e.provenance);
+        if (!prov.isEmpty()) o.insert(QStringLiteral("provenance"), prov);
         edges.append(o);
     }
     root.insert(QStringLiteral("edges"), edges);

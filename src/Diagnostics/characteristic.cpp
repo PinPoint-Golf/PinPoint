@@ -110,9 +110,12 @@ const Row<ConfirmedBy> kConfirmedBys[] = {
 };
 
 const Row<ProvenanceTier> kTiers[] = {
-    { ProvenanceTier::Proposed,    "proposed",    "Proposed" },
-    { ProvenanceTier::Supported,   "supported",   "Supported" },
-    { ProvenanceTier::Established, "established", "Established" },
+    { ProvenanceTier::Proposed,      "proposed",      "Proposed" },
+    { ProvenanceTier::NoSourceFound, "noSourceFound", "No source found" },
+    { ProvenanceTier::Practice,      "practice",      "Coaching practice" },
+    { ProvenanceTier::Indirect,      "indirect",      "Indirect support" },
+    { ProvenanceTier::Supported,     "supported",     "Supported" },
+    { ProvenanceTier::Established,   "established",   "Established" },
 };
 
 const Row<ConditionState> kStates[] = {
@@ -194,6 +197,7 @@ QString confirmedByName(ConfirmedBy c) { return nameOf(kConfirmedBys, c); }
 bool    confirmedByFromName(const QString &s, ConfirmedBy &out) { return fromName(kConfirmedBys, s, out); }
 
 QString provenanceTierName(ProvenanceTier t) { return nameOf(kTiers, t); }
+QString provenanceTierLabel(ProvenanceTier t) { return labelOf(kTiers, t); }
 bool    provenanceTierFromName(const QString &s, ProvenanceTier &out) { return fromName(kTiers, s, out); }
 
 QString conditionStateName(ConditionState s) { return nameOf(kStates, s); }

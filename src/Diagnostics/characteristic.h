@@ -20,6 +20,7 @@
 
 #include "measure_facets.h"
 
+#include <QDate>
 #include <QHash>
 #include <QString>
 #include <QStringList>
@@ -157,10 +158,37 @@ enum class ConfirmedBy {
                 // OFFER it as an explanation; it must never conclude it.
 };
 
+// How well sourced a claim is — and, just as importantly, whether anybody has LOOKED.
+//
+// `Proposed` and `NoSourceFound` are the pair that carries the most information between them.
+// Collapsed into one value (which is what shipped for a year) the library cannot distinguish "we
+// have not checked this" from "we checked and the literature is silent", and those call for
+// opposite actions: the first is a task, the second is a finding. A null result is a result, and it
+// is only worth anything if it records WHEN it was taken — see `Provenance::searchedOn`.
+//
+// `Indirect` exists because of what golf literature actually contains. A paper will establish that
+// limited hip internal rotation produces greater lumbopelvic compensation; it will not test
+// "early extension", because that is a coaching label and not a measured variable. Filing such a
+// source under Supported would make the citation look like it backs the EDGE when it backs the
+// reasoning behind the edge — the same overclaim in a different costume.
+// `Practice` is the tier for a claim that coaching teaches universally and nobody has tested. That
+// is NOT the same as unsupported — a fault every competent coach works from is evidence of a kind,
+// and filing it as NoSourceFound would throw away the distinction between "the field is silent" and
+// "the field agrees but has never measured it".
+//
+// It carries no citation, and that is forced rather than lazy: the sources are commercial screening
+// and launch-monitor bodies, and this repo's standing rule is that the TERMS are common domain
+// while the ATTRIBUTION must not enter the content in any form — not a citation, not an author, not
+// a note. `core_pack_test` greps the raw bytes for exactly that. So the tier records the STATE of
+// the evidence and `searchTerms` records what was looked for; naming who says it is what we cannot
+// do, and it is also the part that carries the least information.
 enum class ProvenanceTier {
-    Proposed,     // no citation. The UI must badge it as such wherever it appears.
-    Supported,    // a peer-reviewed source supports the direction/phase
-    Established,  // consistently reproduced across sources
+    Proposed,       // nobody has searched yet. The UI must badge it wherever it appears.
+    NoSourceFound,  // searched, and nothing supports it. Requires `searchedOn` to mean anything.
+    Practice,       // established coaching practice; no peer-reviewed test found. No citation.
+    Indirect,       // a source supports the MECHANISM; the named pair is our inference
+    Supported,      // a peer-reviewed source tests this cause and this effect
+    Established,    // consistently reproduced across independent sources
 };
 
 // Authoring lifecycle. The transitions are modelled now so a backtest harness can later gate
@@ -173,6 +201,16 @@ struct Provenance {
                                // certification body — the domain terms are common property, the
                                // attributions are not.
     ProvenanceTier tier = ProvenanceTier::Proposed;
+
+    // What was actually done to look, and when. Without these a NoSourceFound is unfalsifiable:
+    // nobody can tell a thorough search from a lazy one, or know whether it predates the paper
+    // that would have answered it. `searchedOn` is what makes the null re-openable — a 2026 null
+    // on a question the field is actively publishing on is worth re-running in 2028, and a null
+    // with no date is worth nothing at all.
+    QDate          searchedOn;   // null QDate == never searched
+    QString        searchTerms;  // the query, so a re-run starts from what was already tried
+
+    bool searched() const { return searchedOn.isValid(); }
 };
 
 // Context binding. There is deliberately NO valence field and there must never be one: context
@@ -246,7 +284,13 @@ struct Edge {
     QString  to;
     EdgeType type     = EdgeType::Causes;
     Strength strength = Strength::Moderate;
-    QString  citation;
+
+    // The same Provenance a Condition carries, deliberately — an edge is a CLAIM, and for a long
+    // while it was the only claim in the pack that could not say how well founded it was. A
+    // condition with no citation is forced to badge as Proposed; an edge held a bare citation
+    // string with no tier, so an uncited edge and a cited one drew identically and `strength`
+    // (which ranks which cause a coach is shown first) looked equally authoritative either way.
+    Provenance provenance;
 };
 
 // ── Pack ────────────────────────────────────────────────────────────────────
@@ -304,6 +348,7 @@ bool    observabilityFromName(const QString &s, Observability &out);
 QString confirmedByName(ConfirmedBy c);
 bool    confirmedByFromName(const QString &s, ConfirmedBy &out);
 QString provenanceTierName(ProvenanceTier t);
+QString provenanceTierLabel(ProvenanceTier t);  // "Coaching practice", "No source found", … — the UI's own words
 bool    provenanceTierFromName(const QString &s, ProvenanceTier &out);
 QString conditionStateName(ConditionState s);
 bool    conditionStateFromName(const QString &s, ConditionState &out);
@@ -338,6 +383,44 @@ struct DirectionPhrase {
 };
 
 DirectionPhrase directionPhrase(Direction d, const QString &highMeans);
+
+// True when the tier is a positive claim about the LITERATURE, so it MUST name the source it is
+// claiming. NoSourceFound and Practice are deliberately excluded, for opposite reasons: the first
+// is a claim about the ABSENCE of a source, and demanding a citation for it would make the null
+// unrecordable; the second cites a body of practice this repo is not permitted to name.
+inline bool citationRequired(ProvenanceTier t)
+{
+    return t == ProvenanceTier::Indirect || t == ProvenanceTier::Supported
+           || t == ProvenanceTier::Established;
+}
+
+// True when somebody has actually looked, whatever the answer was. The complement is the work
+// queue: `Proposed` is the only tier that means the question is still open.
+inline bool provenanceSettled(ProvenanceTier t) { return t != ProvenanceTier::Proposed; }
+
+// True when the tier is a claim about the OUTCOME OF A SEARCH and carries no citation to evidence
+// it. Only NoSourceFound qualifies: "the literature is silent" is meaningless without a date,
+// because it cannot be told from an unasked question and cannot be re-opened when the field
+// publishes. A cited tier needs no date — the citation is its own evidence.
+//
+// `Practice` is deliberately NOT here, and the reason is the whole shape of this model: the tier
+// says what the EVIDENCE is, `searchedOn` says whether anybody has LOOKED, and those are
+// independent questions. An edge asserted from coaching knowledge is `practice` on the day it is
+// written, with no date, because it is orthodoxy that nobody has yet checked against the
+// literature. Searching it later either finds a paper (it becomes indirect/supported) or does not
+// (it stays practice, now dated). Requiring the date up front collapsed the two axes and forced
+// every honestly-authored edge to masquerade as `proposed` — as though it had come from nowhere.
+inline bool searchDateRequired(ProvenanceTier t)
+{
+    return t == ProvenanceTier::NoSourceFound;
+}
+
+// The work queue, and the reason it is not `tier == Proposed`. What makes a claim outstanding is
+// that nobody has been to the literature for it — not that nobody can say where it came from.
+inline bool needsLiteratureSearch(const Provenance &p)
+{
+    return !p.searched() && p.citation.isEmpty();
+}
 
 // True when this condition can never be established by capture, so it must not appear in the
 // measure roadmap however many characteristics it blocks.
