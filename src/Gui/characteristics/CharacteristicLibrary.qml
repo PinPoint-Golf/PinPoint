@@ -94,7 +94,18 @@ Item {
 
     Connections {
         target: editor
-        function onLibraryChanged() { root._revision++ }
+        // EVERY write through the editor lands here — `reload()` is what save(), linkCause,
+        // unlinkCause and the three relation calls all finish with — so this is the one place the
+        // reader's façade has to re-take its provider.
+        //
+        // Bumping the revision alone was not enough and looked like it was: the bindings re-ran, but
+        // against the pack `library` was BUILT with, since the façade caches its provider and the
+        // editor writes through one of its own. A new causal link was on disk, in the editor's view
+        // of the world, and invisible on the page that had just asked for it until the next launch.
+        function onLibraryChanged() {
+            library.refresh()
+            root._revision++
+        }
     }
 
     // Running from a build tree rather than a shipped artefact. This is the app's EXISTING
@@ -610,6 +621,9 @@ Item {
         }
         // An edge was added or removed from the graph: the census, the directory rows and this
         // page's own detail map are all now stale.
+        //
+        // The façade's own re-take happens in the `onLibraryChanged` handler above, which every
+        // write reaches; this is only the nudge for the bindings on THIS page.
         onGraphChanged: root._revision++
         onEdit: {
             if (editor.beginEdit(root._selectedId)) root._editing = true

@@ -871,7 +871,9 @@ Item {
 
                 PpDisplayText { text: qsTr("Add a cause") }
                 Item { Layout.fillWidth: true }
-                PpButton { label: qsTr("Done"); onClicked: root._sheet = "" }
+                // "Cancel", not "Done": picking one now commits and returns, so the only thing this
+                // button does is leave WITHOUT choosing. "Done" would imply the choice needs it.
+                PpButton { label: qsTr("Cancel"); onClicked: root._sheet = "" }
             }
 
             PpTextField {
@@ -935,9 +937,19 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape:  Qt.PointingHandCursor
+                                // Choosing one RETURNS, the way the measure picker already does.
+                                // It used to toggle and stay, which made the sheet a multi-select
+                                // the header's own "Add a cause" did not promise — and left the
+                                // author on a list, hunting for Done, after they had already said
+                                // what they wanted.
+                                //
+                                // `addCause` upserts, so re-picking one that is already a cause is
+                                // harmless and still returns: the author asked for it either way.
+                                // Removing one lives on the row's own ✕ in the causes list behind
+                                // this sheet, next to the thing being removed.
                                 onClicked: {
-                                    if (modelData.selected) root.editor.removeCause(modelData.id)
-                                    else                    root.editor.addCause(modelData.id, "moderate")
+                                    root.editor.addCause(modelData.id, "moderate")
+                                    root._sheet = ""
                                 }
                             }
                         }
