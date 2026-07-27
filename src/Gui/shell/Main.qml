@@ -361,12 +361,20 @@ ApplicationWindow {
         }
     }
 
+    // True while the user is on one of the session screens (Swing/Wrist/GRF/Coach).
+    // The session screens own everything that faces the athlete at the mat — the
+    // header DETECT cluster and the secondary-display cast below — so both gate on
+    // this rather than on the settings alone.
+    readonly property bool sessionScreenActive: navController.currentIndex >= screenSwing
+                                                && navController.currentIndex <= screenCoach
+
     // ── Post-shot dashboard secondary-display cast ───────────────────────────
     // Surfaces the configurable dashboard on the secondary display, in one of three
-    // ways chosen by postShotDisplayMode — ALL of them on the target screen:
-    //   • PANEL — a PERSISTENT windowed (framed, movable) dashboard, shown the moment
-    //     it is configured (panel + a secondary screen). Persistent ⇒ dwell inert.
-    //   • KIOSK — a PERSISTENT full-screen dashboard, also shown as soon as configured.
+    // ways chosen by postShotDisplayMode — ALL of them on the target screen, and ALL
+    // of them ONLY while a session screen is on show (see sessionScreenActive):
+    //   • PANEL — a PERSISTENT windowed (framed, movable) dashboard, up for as long as
+    //     the session screen is (panel + a secondary screen). Persistent ⇒ dwell inert.
+    //   • KIOSK — a PERSISTENT full-screen dashboard, same lifetime.
     //   • WINDOW — a TEMPORARY windowed overlay that pops after a freshly captured shot
     //     (postShotDelay) and auto-closes after the dwell; gated on post-shot content
     //     including metrics.
@@ -424,12 +432,14 @@ ApplicationWindow {
     }
     function _closeCast() { if (_dashWin) { _dashWin.destroy(); _dashWin = null; _dashWinTemporary = false } }
 
-    // Persistent modes (PANEL + KIOSK) — open whenever configured, stay up, recreate
-    // if the target screen or windowed/fullscreen mode changes. Redundant calls
-    // (already up, right screen + mode) are no-ops so the content just refreshes.
+    // Persistent modes (PANEL + KIOSK) — open whenever configured AND the user is on
+    // a session screen, stay up, recreate if the target screen or windowed/fullscreen
+    // mode changes. Redundant calls (already up, right screen + mode) are no-ops so
+    // the content just refreshes.
     function _syncPersistent() {
         var m = appSettings.postShotDisplayMode
-        var wantPersistent = (m === "panel" || m === "kiosk") && postShotCast.target !== null
+        var wantPersistent = (m === "panel" || m === "kiosk")
+                             && postShotCast.target !== null && root.sessionScreenActive
         if (wantPersistent) {
             var kioskMode = (m === "kiosk")
             if (_dashWin && _dashWin.visible && !_dashWinTemporary
@@ -448,8 +458,23 @@ ApplicationWindow {
         // Mirror is a content transform — apply it live, no re-map needed.
         function onPostShotMirrorChanged()       { if (root._dashWin) root._dashWin.mirror = appSettings.postShotMirror }
     }
-    // Open at startup if a persistent mode is already configured (a bound readonly
-    // can't emit an initial change); a short delay lets the screen list settle.
+    // The cast follows the user in and out of the session screens. Leaving one (Home,
+    // Settings, Athletes, the wizard) takes the surface down whatever its mode — a
+    // temporary pop included, with its timers cancelled so it can't reappear over an
+    // unrelated screen; returning brings a persistent mode straight back. This is
+    // also what keeps a configured panel/kiosk from opening at startup on Home.
+    onSessionScreenActiveChanged: {
+        if (sessionScreenActive) {
+            _syncPersistent()
+        } else {
+            castShowTimer.stop()
+            castDwellTimer.stop()
+            _closeCast()
+        }
+    }
+    // Re-check at startup in case the app opens straight onto a session screen (a
+    // bound readonly can't emit an initial change); a short delay lets the screen
+    // list settle.
     Timer { interval: 250; running: true; repeat: false; onTriggered: root._syncPersistent() }
 
     Timer {
@@ -474,7 +499,8 @@ ApplicationWindow {
     Connections {
         target: shotProcessor
         function onShotProcessed(shotId, swingDir) {
-            if (swingDir === "" || !postShotCast.target)
+            // No cast surface off the session screens — not even a post-shot pop.
+            if (swingDir === "" || !postShotCast.target || !root.sessionScreenActive)
                 return
             var mode = appSettings.postShotDisplayMode
             if (mode === "panel" || mode === "kiosk") {
@@ -582,8 +608,7 @@ ApplicationWindow {
                 showVersionPill: true
                 // Session screens (Swing/Wrist/GRF/Coach) gate the centred DETECT
                 // cluster the header hosts during live Capture.
-                sessionScreenActive: navController.currentIndex >= root.screenSwing
-                                     && navController.currentIndex <= root.screenCoach
+                sessionScreenActive: root.sessionScreenActive
                 isFullscreen: root.visibility === Window.FullScreen
                 onFullscreenToggleRequested: root.toggleFullscreen()
                 // Route through window.close() so the session-active confirm
