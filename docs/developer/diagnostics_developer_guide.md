@@ -28,13 +28,19 @@
 
 ## 1. What this subsystem is
 
-Three registries and the rules that join them.
+Five registries and the rules that join them.
 
 | Registry | Owns | Lives in |
 |---|---|---|
 | **Metric catalogue** | what can be measured, and what it means | `src/Metrics/` — see its own guide |
 | **Characteristic pack** | measures, signals, characteristics, causal edges | `src/Diagnostics/` + `core.json` |
 | **Norm set** | what normal looks like, per measure per context | `src/Diagnostics/` + `norms.json`, `contexts.json` |
+| **Screen set** | the physical tests a `screenRef` names — protocol and pass criterion | `src/Diagnostics/screen_pack.*` + `screens.json` |
+| **Drill set** | what a golfer does about a characteristic | `src/Diagnostics/drill_pack.*` + `drills.json` |
+
+The last two are flat reference lists rather than provider hierarchies, and deliberately: the
+pack/norm polymorphism exists so a COMMUNITY pack can be namespaced against core, and there is no
+community story for a screen. They layer a user file over the shipped one and stop there.
 
 The design rule that shapes everything: **numbers are content, not code.** No corridor is compiled in. Before stage 9 of the norms work there was a table in `reference_bands.cpp`; it was migrated behind a byte-for-byte parity gate and then deleted along with the gate, because a parity test that outlives what it compares against pins the shipped content to a frozen table and blocks the first legitimate re-seat.
 
@@ -49,6 +55,8 @@ The second rule: **a metric describes itself and does not judge itself.** `Metri
    core.json          measures · signals · conditions · edges
    norms.json         norms  (measure, context) -> mu/sigma/monitor + provenance
    contexts.json      the shot-type tree
+   screens.json       the physical tests a screenRef names — protocol + pass criterion
+   drills.json        what a golfer does about a characteristic
         │
         │  resource_pack_provider / resource_norm_provider  (+ file_* for the user's own,
         │  merged_* to layer them)
@@ -76,7 +84,7 @@ The second rule: **a metric describes itself and does not judge itself.** `Metri
    CharacteristicLibraryModel · CharacteristicEditorModel · NormModel · NormEditorModel
         │
         ▼
- VIEWS   Settings → Diagnostics (4 views) · Settings → Metrics · the wrist grid
+ VIEWS   Settings → Diagnostics (6 views) · Settings → Metrics · the wrist grid
 ```
 
 **All logic stays in C++.** QML renders shapes and holds no rules: it does not walk the context tree, does not decide what "inherited" means, does not compute a band edge from a policy, and does not lay out the causal graph. Every one of those is a statement about correctness, and a statement about correctness written in a delegate is a statement nothing can test.
@@ -98,13 +106,25 @@ struct Measure {
     QStringList   aliases;
     QString       unit;
     ViewNeeded    viewNeeded;      // FaceOn | DownTheLine | Any
-    MeasureStatus status;          // Live | Planned | NoProducer | NotCapturable
+    MeasureStatus status;          // Live | Planned | NoProducer | NotCapturable | ExternalDevice
     QString       gapReason;       // NotCapturable: why, in one line
     QString       highMeans;       // what a HIGH value means, in the measure's own words
 };
 ```
 
-Two fields carry more weight than their size suggests:
+**`ExternalDevice` is the third answer to "why is there no value", and not a shade of either
+neighbour.** A launch monitor resolves face angle, spin and strike location; integrating one is work
+we intend to do, so `NotCapturable` would be false. But the work is an INTEGRATION, not a producer
+written from our own pixels, and a roadmap row reading "build a spin-axis producer" sends somebody
+the wrong way — so it is roadmap-eligible and **sectioned apart** in `roadmap()` and
+`roadmapMarkdown()`, while `captureGaps()` stays `NotCapturable`-only. The per-shot half lives on
+the requirement (`MetricRequirement::launchMonitor`): a golfer with no launch monitor gets "needs a
+launch monitor" through the same path a missing face-on camera takes, and the day a connector sets
+`ShotContext::hasLaunchMonitor` the same metric resolves Measured with no content change. A norm on
+one is legitimate — it is what the reading will be graded against — which is why `normNotCapturable`
+stays scoped to `NotCapturable`.
+
+Three fields carry more weight than their size suggests:
 
 - **`reducer` is where the phase lives.** There is no phase field. `At{p7}` is impact; `Delta{p1→p4}` is the change to the top; `Extremum{p5..p6, Min}` is a trough across a stretch. Two measures over one metric with different reducers are *related, not duplicates* — that is the whole point of the split, and `m_leadWristAtImpact` (absolute) versus `m_leadWristFlexExt_p7` (Δ from address) is the case that proves it.
 - **`highMeans` is a correctness mechanism, not decoration.** It is the sentence an author reads *instead of* picking "High" or "Low" when attaching a signal. Three signals shipped inverted because someone picked a direction against a sign convention that was unstated or the opposite of what they assumed — and an inverted signal fires happily, on the wrong swings, with correct-sounding consequence text attached. The measure picker refuses to mint a measure without one.
@@ -132,7 +152,8 @@ struct Signal {
 ```cpp
 struct Condition {
     QString                     id, label, axis;
-    ConditionGroup              group;         // Setup | Posture | Lateral | ArmsAndClub | Release | Sequence
+    QStringList                 aliases;       // coach phrasing that resolves here — the glossary
+    ConditionGroup              group;         // Setup … Sequence | Impact | Finish | BallFlight
     Observability               observability; // Observable | Latent | Both
     ConfirmedBy                 confirmedBy;   // Measured | Screened | Asserted
     ConditionState              state;
@@ -327,7 +348,24 @@ Fired conditions → ranked root causes + test recommendations. Two rules do the
 1. **A characteristic with an in-pack cause is never a root.** The graph is not two clean layers — early extension causes loss of posture, casting causes scooping. Presenting a leaf as a root hands the coach a symptom and calls it the diagnosis.
 2. **An `Asserted` cause is offered, never concluded.**
 
-`TestRecommendation` ("screen this — it would explain four of your findings") is the highest-value output of the model and costs no capture hardware: the dominant causes in the pack are screen-backed, so a handful of physical tests explain most of what was detected.
+`TestRecommendation` ("screen this — it would explain four of your findings") is the highest-value output of the model and costs no capture hardware: the dominant causes in the pack are screen-backed, so a handful of physical tests explain most of what was detected. The `screenRef` it carries now resolves to a protocol and a pass criterion in `screens.json`, so the recommendation names a test somebody can actually run.
+
+### The two non-causal edge types
+
+Both are consumed by `explain()`, and the asymmetry between them is deliberate.
+
+- **`Excludes` changes the output.** Two findings that cannot both describe one swing are resolved
+  BEFORE ranking: the more confident stands, ties break on the id, and the dropped one is recorded
+  in `Explanation::suppressed` with a reason rather than vanishing. Leaving both in would put a
+  contradiction in front of a coach and let one cause be credited twice for two versions of one
+  event. A suppressed finding is never also listed as `unexplained`.
+- **`Corroborates` is reported, and breaks ties.** It never scales a score. A multiplier would mean
+  inventing a number nobody could defend when asked why one cause outranked another — the same
+  reason `material` contributes zero rather than a fraction. `characteristic_engine_test` asserts
+  the scores are identical with and without the edge.
+
+Both are symmetric in meaning, so `relatedBy()` reads them from either end and an author may write
+the edge whichever way round they think of it.
 
 ---
 
@@ -388,45 +426,63 @@ The section to read before assuming anything here runs. "Dormant" means written 
 | **`SignalTest::Threshold`** | implemented in `evaluate()` | content — no shipped signal uses it |
 | **`SignalTest::Ratio`** | implemented in `evaluate()` | content — no shipped signal uses it |
 | **`Norm::basedOn`** | written at save, read by `overrideCoreChanged` | time. No existing user row has one, so the check is correctly silent until an override is saved |
-| **`EdgeType::Corroborates` / `Excludes`** | validated and refused where illegal | content — all 81 shipped edges are `Causes` |
+| ~~**`EdgeType::Corroborates` / `Excludes`**~~ | **no longer dormant** — 9 and 5 shipped, and `relation_resolver` consumes both | a caller of `explain()` |
 
 **Why the engine is not wired is not laziness.** Three of the four inputs exist. The undecided one is *where findings surface for a coach* — nothing in the product specifies it, and that is a design question before it is an implementation one. Wiring it without an answer would produce a correct diagnosis nobody sees.
 
 ### 8.3 Content — the shipped numbers
 
-**Pack** (`core.json`) — 67 measures, 31 signals, 50 conditions, 81 edges:
+**Pack** (`core.json`) — 106 measures, 83 signals, 112 conditions, 159 edges:
 
 | Measures | | Signals | | Conditions | |
 |---|---|---|---|---|---|
-| Live | **38** | `outsideCorridor` | 30 | Observable | 31 |
-| Planned | 27 | `order` | 1 | Latent | 19 |
-| NoProducer | 2 | with a direction | 30 | `Measured` | 31 |
-| Provided | 58 | | | `Screened` | 13 |
-| Composed | 9 | | | `Asserted` | 6 |
-| with `highMeans` | 27 | | | with an axis | 11 |
-| with a norm | 44 | | | with binding rows | **0** |
+| Live | **44** | `outsideCorridor` | 82 | Observable | 90 |
+| Planned | 51 | `order` | 1 | Latent | 22 |
+| NoProducer | 2 | with a direction | 82 | `Measured` | 83 |
+| ExternalDevice | 9 | | | `Screened` | 13 |
+| Provided | 97 | | | `Asserted` | 16 |
+| Composed | 9 | | | with an axis | 45 |
+| with `highMeans` | 70 | | | with aliases | 86 |
+| with a norm | 95 | | | with drills | 23 |
+| | | | | with binding rows | **0** |
 
-Reducers: 38 `delta`, 20 `at`, 9 `extremum`. Edges: 32 strong, 40 moderate, 9 weak — all `Causes`.
+Reducers: 52 `at`, 42 `delta`, 10 `extremum`, 2 `rate`.
+Edges: 145 `Causes`, 9 `Corroborates`, 5 `Excludes` — 61 strong, 83 moderate, 15 weak.
+Groups: setup 41, ballFlight 20, armsAndClub 15, impact 9, lateral 8, posture 7, sequence 6,
+release 3, finish 3.
 
-**Norms** (`norms.json`) — 68 rows: 44 at `any`, 8 + 8 at the two archetypes, 2 each at driver / fairway wood / iron / wedge. **Every row is `source: heuristic` with `n = 0`**; 56 carry explicit monitor bounds (the migrated wrist grid + tempo), 7 carry a citation.
+**Norms** (`norms.json`) — 149 rows: 95 at `any`, 8 + 8 at the two archetypes, and 12 / 2 / 12 / 12 at driver / fairway wood / iron / wedge. **Every row is `source: heuristic` with `n = 0`**; 56 carry explicit monitor bounds (the migrated wrist grid + tempo), 7 carry a citation.
 
 **Contexts** (`contexts.json`) — 13 nodes, one root. 7 have norms at or beneath them; the other 5 (`partial`, `pitch`, `chip`, `bunker`, `specialty`) carry none of their own and inherit from `any`, which the health list reports as harmless.
 
+**Screens** (`screens.json`) — 13, all referenced by at least one condition. Nine carry a numeric pass floor with its unit; four are qualitative on purpose, and `reference_sets_test` asserts that so the absence of a number reads as intent rather than as unfinished content.
+
+**Drills** (`drills.json`) — 12, attached to 23 conditions. Attached where a starter set can honestly answer the fault, not to everything — a field that is always populated is a field readers learn to skip.
+
 ### 8.4 Content — what can actually fire
 
-**8 of the 30 corridor signals can fire.** The other 22 all sit on measures that are `planned` (20) or
-`noProducer` (2) — every signal on a **live** measure has a norm, which `core_pack_test` asserts. So the
-dark ones are waiting on *producers*, not on corridors.
+**16 of the 83 signals can fire**, covering 16 conditions. Every one of the other 67 sits on a
+measure that is `planned` (56), `externalDevice` (10) or `noProducer` (2) — **zero** are live with no
+norm, which `core_pack_test` asserts. So the dark ones are waiting on *producers*, not on corridors.
 
-The single `order` signal (`sig_sequenceOrder`) cannot fire either: both of its measures
-(`m_pelvisRotPeak`, `m_thoraxRotPeak`) are `planned`. So **8 of 31 signals in total** are capable of
-firing, and that is a producer ceiling, not a content one.
+That is double the eight signals of the previous content package, and the doubling came entirely
+from a gap nobody had noticed: eleven producer keys were live and carried **no measure at all** in
+the pack — head sway, head lift, head tilt, lead heel lift, the two foot flares, toe line, impact
+shaft lean, hand speed, clubhead speed and backswing tempo. Putting measures and corridors on them
+cost no pipeline work whatsoever.
+
+The single `order` signal (`sig_sequenceOrder`) still cannot fire: both of its measures
+(`m_pelvisRotPeak`, `m_thoraxRotPeak`) are `planned`.
+
+**A constraint that caps all of this**: most pose metrics are session-gated to Wrist Motion
+(`wristSessionOk`, sessionType 1 or −1) — a documented catalogue design, not a bug — so the head,
+foot and shaft-lean signals read Unavailable in a Swing session today. See the metric catalogue
+guide, and ledger `X1` in the content-extension plan.
 
 The 9 `Composed` measures (facet-built rather than metric-backed) are all `planned` or `noProducer` and none has a norm: the whole Composed path is content-complete and production-dormant.
 
-Condition fields in use: `consequence` 50/50, `provenance` 50/50, `screenRef` 13, `injuryNote` 4.
-`Condition::drills` is a real field with **no content behind it anywhere** (0 of 50) — the one place
-the pack is structurally ready for something nobody has authored.
+Condition fields in use: `consequence` 112/112, `provenance` 112/112, `aliases` 86, `drills` 23,
+`screenRef` 13, `injuryNote` 4, `bindings` **0**.
 
 ### 8.5 The honest summary
 
@@ -465,11 +521,11 @@ Two scoping rules there are load-bearing:
 
 ## 10. The GUI façades
 
-Four `QML_ELEMENT` marshallers, all instantiated by `CharacteristicLibrary.qml` (the Diagnostics settings panel, `ScreenSettings.qml` panel 10).
+Four `QML_ELEMENT` marshallers, all instantiated by `CharacteristicLibrary.qml` (the Diagnostics settings panel, `ScreenSettings.qml` panel 10). Six views hang off it: Characteristics, Measures & norms, Glossary, Screens & drills, Causes & health, and Roadmap (developer builds only).
 
 | Façade | Owns | Notes |
 |---|---|---|
-| `CharacteristicLibraryModel` | read-only queries over the pack: directory, detail, DAG, roadmap, capture gaps, cause coverage, **health**, the corpus scan | holds the pack, the norm set AND the metric catalogue, because health spans all three |
+| `CharacteristicLibraryModel` | read-only queries over the pack: directory, detail, DAG, roadmap, capture gaps, cause coverage, **health**, the corpus scan, and the two reference registries + the glossary | holds the pack, the norm set AND the metric catalogue, because health spans all three |
 | `CharacteristicEditorModel` | the draft: one condition being authored, its signals, bindings, the measure picker, `linkCause`/`unlinkCause` + undo | a draft, deliberately separate from the read model |
 | `NormModel` | measures & norms directory, `measureDetail`, `normAt`, the metric→measure join marshalled | read-only |
 | `NormEditorModel` | one corridor being edited: the draft, the library scan, the histogram, save/discard/reset | writes; call `refresh()` on the readers after |
@@ -495,6 +551,19 @@ The reducer must name the phase the **producer** actually labels. `m_tempoRatio`
 ### A characteristic
 
 Needs a `consequence` (why it matters), a `ConfirmedBy`, an `Observability`, and either `detectedBy` signals or a reason it is latent. Causal edges are `Causes` from cause to effect; the validator refuses cycles, self-edges, and `Corroborates` over an existing causal path.
+
+### A screen or a drill
+
+Author it in `screens.json` / `drills.json`, in the `screen.` / `drill.` namespace — the join with
+`Condition::screenRef` and `Condition::drills` is an exact string match, so an id outside the
+namespace matches nothing and fails **silently**, which the validator refuses at load. A screen needs
+a protocol and a pass criterion; a numeric pass floor needs its unit beside it. A drill needs an
+instruction and a target, and the target is written as INTENT — nothing here has measured an effect
+on anybody.
+
+**Describe a screen generically, from the clinical range-of-motion literature.** No branded
+screening system may be named, cited or alluded to. The movements are common property; the packaging
+of them into a named system is somebody's product, and `reference_sets_test` greps the raw bytes.
 
 ### A new signal test
 
@@ -531,7 +600,8 @@ All in the analyzer suite: `cmake -S src/Analysis/tests -B build/analyzer-tests`
 | `manifest_migration_test` | the (metric, phase) → measure → norm join for every metric that ever had a corridor |
 | `reference_bands_test` | the Norm→Band projection, the archetype mechanism, and `ragOf(grade(v)) == classifyDelta(v)` over the whole shipped set |
 | `wrist_norm_render_test` | the engine renders a real grid from the shipped norms — and an empty norm source greys everything, so the guard can fail |
-| `norm_model_test`, `norm_editor_model_test`, `characteristic_editor_test`, `diagnostics_catalogue_integrity_test` | the façades: every rule they hide is asserted here or nowhere |
+| `reference_sets_test` | the screen and drill registries: every reference resolves both ways, each validator fires AND stays silent, and no branded screening system reached the content |
+| `norm_model_test`, `norm_editor_model_test`, `characteristic_editor_test`, `diagnostics_catalogue_integrity_test` | the façades: every rule they hide is asserted here or nowhere — including that screens, drills and the glossary reach QML, which is the "complete on both sides and reaching nothing" trap |
 
 Standalone tests reach shipped content through `pp_norm_env(<target>)` and `-DPP_CORE_PACK_PATH`.
 
@@ -570,6 +640,8 @@ src/Diagnostics/
   characteristic_engine.{h,cpp} detect(), evaluate(), Finding                  ◄ dormant
   relation_resolver.{h,cpp}     ranked causes + screen recommendations         ◄ dormant
   measure_sample.{h,cpp}        phase grid + sidecar; read a measure off a swing
+  screen_pack.{h,cpp}           the physical screens a `screenRef` names
+  drill_pack.{h,cpp}            the drills a `drills` entry names
   measure_facets.{h,cpp}        Composed-measure vocabulary + validity table
   anatomy_vocabulary.{h,cpp}    body-part vocabulary shared with the overlays
   dag_layout.{h,cpp}            the causal graph, laid out in C++
@@ -577,8 +649,8 @@ src/Diagnostics/
   {resource,file,merged}_{pack,norm}_provider.cpp   layering
   pack_provider.h               ICharacteristicPackProvider, PackOrigin
 
-src/Gui/characteristics/        4 façades + 11 QML views
-src/Resources/diagnostics/      core.json · norms.json · contexts.json
+src/Gui/characteristics/        4 façades + 13 QML views
+src/Resources/diagnostics/      core.json · norms.json · contexts.json · screens.json · drills.json
 src/Analysis/reference_bands.{h,cpp}   NormBandProvider — Norm -> Band for the wrist grid
 src/Gui/review/metric_catalog.cpp      corridors for the metric + dashboard surfaces
 ```

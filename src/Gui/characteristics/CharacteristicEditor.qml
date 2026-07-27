@@ -201,6 +201,42 @@ Item {
                 }
             }
 
+            // ── Also called ───────────────────────────────────────────────────
+            // One concept, several names. A golfer searches by the word they were taught, so these
+            // are what make the library reachable at all for anyone who did not write it — and they
+            // carry the glossary, which needs no second dataset. Edited as one comma-separated line
+            // because an author types all of them in one go.
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(6)
+
+                Text {
+                    text:                qsTr("ALSO CALLED")
+                    font.family:         Theme.fontBody
+                    font.pixelSize:      Theme.fontSzMicro
+                    font.letterSpacing:  Theme.trackingMicro
+                    font.capitalization: Font.AllUppercase
+                    color:               Theme.colorText3
+                }
+
+                PpTextField {
+                    Layout.fillWidth: true
+                    text: root._draft.aliasLine || ""
+                    placeholderText: qsTr("flip, flipping, breakdown through impact")
+                    onEditingFinished: root.editor.setAliases(text)
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("Comma separated. Two characteristics cannot share a term — the "
+                               + "health list says so if they do.")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorText3
+                    wrapMode:       Text.WordWrap
+                }
+            }
+
             // ── Group ─────────────────────────────────────────────────────────
             Flow {
                 Layout.fillWidth: true
@@ -294,6 +330,8 @@ Item {
                                     text: (modelData.directionSentence || "")
                                           + (modelData.status === "notCapturable"
                                              ? " · " + qsTr("not measurable from capture")
+                                             : modelData.status === "externalDevice"
+                                               ? " · " + qsTr("needs a launch monitor")
                                              : modelData.status === "noProducer"
                                                ? " · " + qsTr("no producer yet") : "")
                                     font.family:    Theme.fontBody

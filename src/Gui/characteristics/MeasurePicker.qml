@@ -511,6 +511,8 @@ Item {
                                       : qsTr("needs the down-the-line view"))
                         if (root._preview.status === "notCapturable")
                             bits.push(qsTr("not measurable from capture"))
+                        else if (root._preview.status === "externalDevice")
+                            bits.push(qsTr("read from a launch monitor — needs one connected"))
                         else if (root._preview.status === "noProducer")
                             bits.push(qsTr("no producer yet — this is roadmap work"))
                         return bits.join(" · ")

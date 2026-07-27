@@ -18,6 +18,9 @@
 
 #include "diagnostics_health.h"
 
+#include "drill_pack.h"
+#include "screen_pack.h"
+
 #include <QObject>
 #include <QRegularExpression>
 #include <QSet>
@@ -115,6 +118,39 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                            "detects is undetectable.")
                                    .arg(s.id, m->label.isEmpty() ? m->id : m->label)));
         }
+    }
+
+    // ── A screen or drill reference pointing at nothing ─────────────────────
+    //
+    // Both joins are exact string matches into a separate registry, so a typo or a renamed row
+    // fails SILENTLY: the condition still loads, still validates, still renders — and the panel
+    // that was meant to tell a coach how to run the test shows nothing at all, with no error
+    // anywhere to say why. That is the same shape as a corridor keyed on the wrong phase, which
+    // cost two stages before it was found.
+    {
+        const ScreenSet &screens = sharedScreenSet();
+        const DrillSet  &drills  = sharedDrillSet();
+
+        for (const Condition &c : pack.conditions) {
+            if (!c.screenRef.isEmpty() && !screens.screen(c.screenRef))
+                out.push_back(warn(QStringLiteral("unknownScreenRef"), c.id,
+                                   QObject::tr("'%1' is settled by the screen '%2', and no such "
+                                               "screen is authored. The recommendation would name a "
+                                               "test nobody can look up.")
+                                       .arg(c.label.isEmpty() ? c.id : c.label, c.screenRef)));
+
+            for (const QString &d : c.drills)
+                if (!drills.drill(d))
+                    out.push_back(warn(QStringLiteral("unknownDrillRef"), c.id,
+                                       QObject::tr("'%1' names the drill '%2', which is not in the "
+                                                   "drill set.")
+                                           .arg(c.label.isEmpty() ? c.id : c.label, d)));
+        }
+
+        // The other direction is not an error and is not reported: a screen or drill nothing points
+        // at yet is a library being written, not a library that is wrong.
+        for (const ValidationIssue &i : validateScreenSet(screens).issues) out.push_back(i);
+        for (const ValidationIssue &i : validateDrillSet(drills).issues)   out.push_back(i);
     }
 
     // ── Your own corridors, seated on nothing ───────────────────────────────

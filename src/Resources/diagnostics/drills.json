@@ -1,0 +1,114 @@
+{
+  "id": "core",
+  "version": "1.0.0",
+  "schemaVersion": 1,
+  "_comment": [
+    "The drill registry. A `drills` entry on a characteristic names a row here.",
+    "",
+    "`Condition::drills` has been a real field with no content behind it anywhere — 0 of 50 shipped",
+    "conditions carried one — which is the last sentence missing from a library whose stated purpose",
+    "is to drive the 'so what' conversation. A fault with no answer to 'what do I do about it' stops",
+    "one sentence short of being useful.",
+    "",
+    "HONESTY RULES, which differ from a measurement's. A drill states what the golfer DOES and what",
+    "it is trying to CHANGE. `targets` is written as intent — 'to feel the trail hip accept load' —",
+    "and never as a promise, because nothing here has measured an effect size on anybody. Where a",
+    "drill is commonly the wrong answer, `note` says so: a drill that treats a symptom while the",
+    "cause is a range-of-motion restriction will fail, and the golfer will conclude they cannot do it.",
+    "",
+    "This is a starter set covering the causes that explain the most, not a coaching syllabus. It is",
+    "expected to grow, and the registry exists so it can grow as reviewable content rather than as",
+    "strings scattered through a UI."
+  ],
+  "drills": [
+    {
+      "id": "drill.pelvicSeparation",
+      "label": "Chest-still pelvis turns",
+      "instruction": "In your golf posture with a club across your shoulders, turn your hips left and right while keeping the club — and your chest — pointing where it started. Small and slow. If your chest moves, reduce the range until it does not.",
+      "targets": "To feel the pelvis rotating independently of the chest, which is the movement the backswing is built on.",
+      "note": "If the pelvis will not move without the chest, that is a mobility answer before it is a practice one — screen the hips first."
+    },
+    {
+      "id": "drill.trailHipLoad",
+      "label": "Trail hip load and hold",
+      "instruction": "Take your address position, make a slow backswing turn, and stop at the top. Feel the pressure in the trail hip socket rather than on the outside of the trail foot. Hold for three seconds, then return.",
+      "targets": "To feel the trail hip accepting the turn instead of the pelvis sliding away from the target.",
+      "equipment": ["an alignment stick outside the trail hip, optional"],
+      "note": "The stick is a feedback aid, not the drill. If the hip cannot rotate internally, the slide is the body finding the only route it has."
+    },
+    {
+      "id": "drill.trailHeelWall",
+      "label": "Trail heel against a wall",
+      "instruction": "Set up with your trail heel a few inches from a wall and make backswings without touching it.",
+      "targets": "To feel a backswing that turns rather than slides.",
+      "note": "Pairs with the hip load drill; this one gives the feedback, that one gives the feel."
+    },
+    {
+      "id": "drill.pumpToDelivery",
+      "label": "Pump to delivery",
+      "instruction": "Swing to the top, then move down to about waist height and stop, checking that the shaft is on the plane it started on and your hands still have their angle. Return to the top and repeat three times, then hit the shot.",
+      "targets": "To rehearse the delivery position rather than to arrive at it by accident.",
+      "note": "Rehearsal, not a swing thought. Trying to do this consciously at full speed produces a different, slower swing."
+    },
+    {
+      "id": "drill.pressureShiftStep",
+      "label": "Step-through",
+      "instruction": "Start with your feet together, make a backswing, and step toward the target with the lead foot as you start down. Small shots first.",
+      "targets": "To feel the weight arriving on the lead side before the club does.",
+      "note": "It exaggerates on purpose. The aim is the sequence, not the step."
+    },
+    {
+      "id": "drill.holdTheFinish",
+      "label": "Hold the finish",
+      "instruction": "Hit the shot and hold your finish, balanced on the lead foot, until the ball lands. If you cannot hold it, take 20 yards off the swing and try again.",
+      "targets": "To make balance the constraint the swing is built inside, rather than something checked afterwards.",
+      "note": "The most diagnostic drill in this list: where you fall tells you what happened earlier."
+    },
+    {
+      "id": "drill.towelUnderArms",
+      "label": "Towel under the lead arm",
+      "instruction": "Tuck a small towel under your lead upper arm and make three-quarter swings without dropping it.",
+      "targets": "To feel the lead arm and the chest moving as one unit through the backswing.",
+      "equipment": ["a small towel"],
+      "note": "Easy to overdo. The arm should stay connected, not pinned — a swing with no separation at all is its own fault."
+    },
+    {
+      "id": "drill.lowPointDivot",
+      "label": "Line on the ground",
+      "instruction": "Draw a line across your stance and make swings taking the turf on the target side of it, without a ball. Then put the ball on the line.",
+      "targets": "To move the bottom of the arc ahead of the ball, and to see where it currently is.",
+      "note": "It shows you the low point before it fixes it, which is most of the value."
+    },
+    {
+      "id": "drill.gateForPath",
+      "label": "Gate drill",
+      "instruction": "Place two tees, or a headcover just outside the ball, so the club has to travel through a gate to reach it. Start with slow half swings.",
+      "targets": "To feel the club approaching from a different direction, with immediate feedback when it does not.",
+      "equipment": ["two tees, or a headcover"],
+      "note": "Set the gate for the path you want, not against the one you have — a gate that punishes the current swing without offering another produces a flinch, not a change."
+    },
+    {
+      "id": "drill.wristHold",
+      "label": "Lead wrist hold",
+      "instruction": "Make slow half swings holding the lead wrist in the position it reached at the top all the way to impact. Feel the hands leading the clubhead.",
+      "targets": "To feel the wrist holding its angle under load rather than releasing it early.",
+      "note": "If the wrist cannot hold the position slowly, it will not hold it fast. Screen wrist mobility before repeating this one many times."
+    },
+    {
+      "id": "drill.postureRod",
+      "label": "Rod along the spine",
+      "instruction": "Hold an alignment stick along your spine, touching the back of your head, your upper back and your tailbone. Rehearse your address position and your backswing turn keeping all three in contact.",
+      "targets": "To feel the spine angle you set at address being kept through the turn.",
+      "equipment": ["an alignment stick"],
+      "note": "A fixed upper-back curve will stop all three touching. That is information, not a failure."
+    },
+    {
+      "id": "drill.standoffCheck",
+      "label": "Standoff check",
+      "instruction": "Set up with a headcover just outside the toe of the club and make swings without hitting it.",
+      "targets": "To keep the distance between the body and the ball the same at impact as it was at address.",
+      "equipment": ["a headcover"],
+      "note": "The standard first answer to a hosel strike, and it works because it addresses the standoff rather than the fear."
+    }
+  ]
+}

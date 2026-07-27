@@ -43,6 +43,7 @@
       },
       "status": "live",
       "label": "Lag angle, lowest P5 to P6",
+      "unit": "°",
       "highMeans": "more angle retained between the lead arm and the shaft in the downswing"
     },
     {
@@ -55,6 +56,7 @@
       },
       "status": "live",
       "label": "Lead wrist flexion/extension, at P4",
+      "unit": "°",
       "highMeans": "a more bowed lead wrist at the top, less cupped"
     },
     {
@@ -80,6 +82,7 @@
       },
       "status": "live",
       "label": "Tempo ratio",
+      "unit": ":1",
       "highMeans": "a longer backswing relative to the downswing, a slower transition"
     },
     {
@@ -92,6 +95,7 @@
       },
       "status": "planned",
       "label": "Shoulder alignment to the target line, at P1",
+      "unit": "°",
       "highMeans": "a more closed shoulder line, aimed further right of the target for a right-handed golfer"
     },
     {
@@ -104,6 +108,7 @@
       },
       "status": "planned",
       "label": "Spine forward bend, at P1",
+      "unit": "°",
       "highMeans": "more forward bend from the hips, standing over the ball more"
     },
     {
@@ -121,6 +126,7 @@
       },
       "status": "planned",
       "label": "Spine forward bend, peak P4 to P7 from P1",
+      "unit": "°",
       "highMeans": "more forward bend than at address during the swing, a dip"
     },
     {
@@ -133,6 +139,7 @@
       },
       "status": "planned",
       "label": "Secondary axis tilt, at P4",
+      "unit": "°",
       "highMeans": "more tilt away from the target at the top"
     },
     {
@@ -150,6 +157,7 @@
       },
       "status": "planned",
       "label": "Pelvis thrust toward the ball, peak P5 to P7 from P1",
+      "unit": "cm",
       "highMeans": "the pelvis further toward the ball during the downswing"
     },
     {
@@ -166,6 +174,7 @@
       },
       "status": "planned",
       "label": "Pelvis lift, change P1 to P4",
+      "unit": "cm",
       "highMeans": "the pelvis higher than at address by the top"
     },
     {
@@ -183,6 +192,7 @@
       },
       "status": "planned",
       "label": "Pelvis lateral sway, peak P1 to P4 from P1",
+      "unit": "cm",
       "highMeans": "the pelvis further toward the lead side during the backswing"
     },
     {
@@ -200,6 +210,7 @@
       },
       "status": "planned",
       "label": "Pelvis lateral sway, peak P5 to P7 from P1",
+      "unit": "cm",
       "highMeans": "the pelvis further toward the lead side during the downswing"
     },
     {
@@ -216,6 +227,7 @@
       },
       "status": "planned",
       "label": "Pelvis lateral sway, change P1 to P7",
+      "unit": "cm",
       "highMeans": "the pelvis further toward the lead side at impact than at address"
     },
     {
@@ -228,6 +240,7 @@
       },
       "status": "planned",
       "label": "Club path, at P7",
+      "unit": "°",
       "highMeans": "a more in-to-out path through impact"
     },
     {
@@ -244,6 +257,7 @@
       },
       "status": "planned",
       "label": "X-factor stretch, peak P4 to P5",
+      "unit": "°",
       "highMeans": "more separation added between chest and pelvis through transition"
     },
     {
@@ -259,7 +273,9 @@
         "sense": "max"
       },
       "status": "planned",
-      "label": "Pelvis rotation, peak P4 to P7"
+      "label": "Pelvis rotation, peak P4 to P7",
+      "unit": "°",
+      "highMeans": "the pelvis reaching a more open peak rotation, further toward the target"
     },
     {
       "id": "m_thoraxRotPeak",
@@ -274,7 +290,9 @@
         "sense": "max"
       },
       "status": "planned",
-      "label": "Thorax rotation, peak P4 to P7"
+      "label": "Thorax rotation, peak P4 to P7",
+      "unit": "°",
+      "highMeans": "the chest reaching a more open peak rotation, further toward the target"
     },
     {
       "id": "m_thoracicCurve",
@@ -291,7 +309,8 @@
       "status": "noProducer",
       "label": "",
       "metricKey": "thoracicFlexion",
-      "highMeans": "a more rounded upper back"
+      "highMeans": "a more rounded upper back",
+      "unit": "°"
     },
     {
       "id": "m_lumbarCurve",
@@ -308,7 +327,8 @@
       "status": "noProducer",
       "label": "",
       "metricKey": "lumbarExtension",
-      "highMeans": "a more arched lower back"
+      "highMeans": "a more arched lower back",
+      "unit": "°"
     },
     {
       "id": "m_shoulderPlane",
@@ -325,7 +345,8 @@
       "status": "planned",
       "label": "",
       "metricKey": "shoulderPlaneAngle",
-      "highMeans": "a steeper, more vertical shoulder turn"
+      "highMeans": "a steeper, more vertical shoulder turn",
+      "unit": "°"
     },
     {
       "id": "m_ballBodyGap",
@@ -342,7 +363,8 @@
       "status": "planned",
       "label": "",
       "metricKey": "ballBodyDistance",
-      "highMeans": "further from the body, reaching more for the ball"
+      "highMeans": "further from the body, reaching more for the ball",
+      "unit": "% shoulder width"
     },
     {
       "id": "m_thoraxDrift",
@@ -363,7 +385,8 @@
       "status": "planned",
       "label": "",
       "metricKey": "thoraxLateralDrift",
-      "highMeans": "the chest further toward the lead side by early downswing"
+      "highMeans": "the chest further toward the lead side by early downswing",
+      "unit": "% stance width"
     },
     {
       "id": "m_leadKneeFlex",
@@ -384,7 +407,8 @@
       "status": "planned",
       "label": "",
       "metricKey": "leadKneeFlexion",
-      "highMeans": "more lead-knee bend through impact"
+      "highMeans": "more lead-knee bend through impact",
+      "unit": "°"
     },
     {
       "id": "m_trailElbowRise",
@@ -401,7 +425,8 @@
       "status": "planned",
       "label": "",
       "metricKey": "trailElbowHeight",
-      "highMeans": "the trail elbow higher above the shoulder line"
+      "highMeans": "the trail elbow higher above the shoulder line",
+      "unit": "% shoulder width"
     },
     {
       "id": "m_leadArmToTorso",
@@ -422,7 +447,8 @@
       "status": "planned",
       "label": "",
       "metricKey": "leadArmToTorso",
-      "highMeans": "the lead arm further from the torso after impact"
+      "highMeans": "the lead arm further from the torso after impact",
+      "unit": "°"
     },
     {
       "id": "m_leadHandWidth",
@@ -439,7 +465,8 @@
       "status": "planned",
       "label": "",
       "metricKey": "leadHandWidth",
-      "highMeans": "the hands further from the body at the top, a wider arc"
+      "highMeans": "the hands further from the body at the top, a wider arc",
+      "unit": "% arm length"
     },
     {
       "id": "m_leadWristFlexExt_p1",
@@ -716,7 +743,8 @@
       },
       "status": "live",
       "label": "Lead forearm roll — change from address at P2",
-      "unit": "°"
+      "unit": "°",
+      "highMeans": "the lead forearm rotated further away from the target — the face opening in the takeaway"
     },
     {
       "id": "m_leadForearmRot_p3",
@@ -872,7 +900,8 @@
       },
       "status": "live",
       "label": "Lead elbow flexion — change from address at P4",
-      "unit": "°"
+      "unit": "°",
+      "highMeans": "more bend in the lead elbow at the top — a narrower, more collapsed arc"
     },
     {
       "id": "m_leadElbowFlex_p5",
@@ -1045,6 +1074,555 @@
       "status": "planned",
       "label": "Trail wrist bow / cup — change from address at P7",
       "unit": "°"
+    },
+    {
+      "id": "m_feetAlignment",
+      "kind": "provided",
+      "metricKey": "feetAlignment",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Foot line, relative to the target line, at P1",
+      "unit": "°",
+      "highMeans": "the feet aimed further right of the target for a right-handed golfer — closed"
+    },
+    {
+      "id": "m_hipAlignment",
+      "kind": "provided",
+      "metricKey": "hipAlignment",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Hip line, relative to the target line, at P1",
+      "unit": "°",
+      "highMeans": "the hips aimed further right of the target for a right-handed golfer — closed"
+    },
+    {
+      "id": "m_headSwayBack",
+      "kind": "provided",
+      "metricKey": "headSway",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "live",
+      "label": "Head sway away from the ball, address to the top",
+      "unit": "cm",
+      "highMeans": "the head further from the ball line, off the ball"
+    },
+    {
+      "id": "m_headLiftBack",
+      "kind": "provided",
+      "metricKey": "headLift",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "live",
+      "label": "Head height change, address to the top",
+      "unit": "cm",
+      "highMeans": "the head higher than it was at address"
+    },
+    {
+      "id": "m_leadHeelLiftTop",
+      "kind": "provided",
+      "metricKey": "leadHeelLift",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "live",
+      "label": "Lead heel lift, at the top",
+      "unit": "cm",
+      "highMeans": "the lead heel further off the ground"
+    },
+    {
+      "id": "m_handSpeedP6P7",
+      "kind": "provided",
+      "metricKey": "handSpeed",
+      "reducer": {
+        "kind": "rate",
+        "anchor": "p6",
+        "window": [
+          "p6",
+          "p7"
+        ]
+      },
+      "status": "live",
+      "label": "Hand speed, rate of change from delivery to impact",
+      "unit": "mph/s",
+      "highMeans": "the hands still accelerating into the ball"
+    },
+    {
+      "id": "m_clubheadSpeedImpact",
+      "kind": "provided",
+      "metricKey": "clubheadSpeed",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Clubhead speed, at impact",
+      "unit": "mph",
+      "highMeans": "a faster clubhead at the ball"
+    },
+    {
+      "id": "m_impactShaftLean",
+      "kind": "provided",
+      "metricKey": "impactShaftLean",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Shaft lean, at impact",
+      "unit": "°",
+      "highMeans": "the hands further ahead of the clubhead at impact — more forward lean"
+    },
+    {
+      "id": "m_kneeFlexAddress",
+      "kind": "provided",
+      "metricKey": "leadKneeFlexion",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Lead knee flexion, at address",
+      "unit": "°",
+      "highMeans": "more bend in the lead knee at address — sitting deeper"
+    },
+    {
+      "id": "m_trailKneeFlex",
+      "kind": "provided",
+      "metricKey": "trailKneeFlexion",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p1",
+        "window": [
+          "p1",
+          "p4"
+        ]
+      },
+      "status": "planned",
+      "label": "Trail knee flexion, change from address to the top",
+      "unit": "°",
+      "highMeans": "the trail knee gaining flex through the backswing rather than losing it"
+    },
+    {
+      "id": "m_thoraxRotP4",
+      "kind": "provided",
+      "metricKey": "thoraxRotation",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "planned",
+      "label": "Chest rotation, at the top",
+      "unit": "°",
+      "highMeans": "a bigger shoulder turn at the top"
+    },
+    {
+      "id": "m_pelvisRotP5",
+      "kind": "provided",
+      "metricKey": "pelvisRotation",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p5"
+      },
+      "status": "planned",
+      "label": "Pelvis rotation, at P5",
+      "unit": "°",
+      "highMeans": "the pelvis already further open in early downswing"
+    },
+    {
+      "id": "m_pelvisRotP7",
+      "kind": "provided",
+      "metricKey": "pelvisRotation",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Pelvis rotation, at impact",
+      "unit": "°",
+      "highMeans": "the pelvis further open at impact"
+    },
+    {
+      "id": "m_pelvisRotRateP6P7",
+      "kind": "provided",
+      "metricKey": "pelvisRotation",
+      "reducer": {
+        "kind": "rate",
+        "anchor": "p6",
+        "window": [
+          "p6",
+          "p7"
+        ]
+      },
+      "status": "planned",
+      "label": "Pelvis rotation rate, delivery to impact",
+      "unit": "°/s",
+      "highMeans": "the pelvis still turning hard into impact rather than stalling"
+    },
+    {
+      "id": "m_axisTiltImpact",
+      "kind": "provided",
+      "metricKey": "secondaryAxisTilt",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Secondary axis tilt, at impact",
+      "unit": "°",
+      "highMeans": "more tilt away from the target at impact — the trail shoulder lower"
+    },
+    {
+      "id": "m_spineSideBendTop",
+      "kind": "provided",
+      "metricKey": "spineSideBend",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "planned",
+      "label": "Spine side bend, at the top",
+      "unit": "°",
+      "highMeans": "more side bend toward the trail side at the top"
+    },
+    {
+      "id": "m_leadUpperArmToChest",
+      "kind": "provided",
+      "metricKey": "leadUpperArmToChest",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p1",
+          "p4"
+        ],
+        "sense": "max"
+      },
+      "status": "planned",
+      "label": "Widest lead-arm gap from the chest, address to the top",
+      "unit": "% shoulder width",
+      "highMeans": "the lead arm running further from the chest — less connected"
+    },
+    {
+      "id": "m_comOverLeadFootFinish",
+      "kind": "provided",
+      "metricKey": "comOverLeadFoot",
+      "reducer": {
+        "kind": "at",
+        "anchor": "finish"
+      },
+      "status": "planned",
+      "label": "Pelvis centre from the lead ankle, at the finish",
+      "unit": "% stance width",
+      "highMeans": "the body further from being stacked over the lead foot"
+    },
+    {
+      "id": "m_pelvisSwayFinish",
+      "kind": "provided",
+      "metricKey": "pelvisSway",
+      "reducer": {
+        "kind": "at",
+        "anchor": "finish"
+      },
+      "status": "planned",
+      "label": "Pelvis lateral position, at the finish",
+      "unit": "cm",
+      "highMeans": "the pelvis further toward the target at the finish"
+    },
+    {
+      "id": "m_thoraxRotFinish",
+      "kind": "provided",
+      "metricKey": "thoraxRotation",
+      "reducer": {
+        "kind": "at",
+        "anchor": "finish"
+      },
+      "status": "planned",
+      "label": "Chest rotation, at the finish",
+      "unit": "°",
+      "highMeans": "a fuller turn through to the finish"
+    },
+    {
+      "id": "m_shaftDirectionP2",
+      "kind": "provided",
+      "metricKey": "shaftDirection",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p2"
+      },
+      "status": "planned",
+      "label": "Shaft direction, at P2",
+      "unit": "°",
+      "highMeans": "the shaft pointing further right of the target — outside the line",
+      "viewNeeded": "downTheLine"
+    },
+    {
+      "id": "m_shaftDirectionP4",
+      "kind": "provided",
+      "metricKey": "shaftDirection",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "planned",
+      "label": "Shaft direction, at the top",
+      "unit": "°",
+      "highMeans": "the club pointing further right of the target — across the line",
+      "viewNeeded": "downTheLine"
+    },
+    {
+      "id": "m_shaftAngleP4",
+      "kind": "provided",
+      "metricKey": "shaftAngleVsHorizontal",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "planned",
+      "label": "Shaft angle past parallel, at the top",
+      "unit": "°",
+      "highMeans": "the shaft further past parallel — a longer backswing"
+    },
+    {
+      "id": "m_shaftPlaneBackswing",
+      "kind": "provided",
+      "metricKey": "swingPlane",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p2",
+        "window": [
+          "p2",
+          "p4"
+        ]
+      },
+      "status": "planned",
+      "label": "Swing plane change, P2 to the top",
+      "unit": "°",
+      "highMeans": "the shaft climbing further above the plane it started on — steeper",
+      "viewNeeded": "downTheLine"
+    },
+    {
+      "id": "m_shaftPlaneDelivery",
+      "kind": "provided",
+      "metricKey": "swingPlane",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p6"
+      },
+      "status": "planned",
+      "label": "Swing plane, at delivery",
+      "unit": "°",
+      "highMeans": "a steeper delivery plane, the shaft higher above the address plane",
+      "viewNeeded": "downTheLine"
+    },
+    {
+      "id": "m_lowPointAhead",
+      "kind": "provided",
+      "metricKey": "lowPointAhead",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Low point, relative to the ball",
+      "unit": "cm",
+      "highMeans": "the arc bottoming out further ahead of the ball, toward the target"
+    },
+    {
+      "id": "m_attackAngle",
+      "kind": "provided",
+      "metricKey": "attackAngle",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Angle of attack, at impact",
+      "unit": "°",
+      "highMeans": "a more upward strike — hitting up on the ball",
+      "viewNeeded": "downTheLine"
+    },
+    {
+      "id": "m_launchDirection",
+      "kind": "provided",
+      "metricKey": "launchDirection",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Start direction",
+      "unit": "°",
+      "highMeans": "the ball starting further right of the target"
+    },
+    {
+      "id": "m_launchAngle",
+      "kind": "provided",
+      "metricKey": "launchAngle",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Launch angle",
+      "unit": "°",
+      "highMeans": "a higher launch off the face"
+    },
+    {
+      "id": "m_ballSpeed",
+      "kind": "provided",
+      "metricKey": "ballSpeed",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "planned",
+      "label": "Ball speed",
+      "unit": "mph",
+      "highMeans": "a faster ball off the face"
+    },
+    {
+      "id": "m_faceAngle",
+      "kind": "provided",
+      "metricKey": "faceAngle",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Face angle, at impact",
+      "unit": "°",
+      "highMeans": "the face further closed relative to the target line",
+      "gapReason": "Requires launch monitor: face orientation at impact is a sub-millisecond event and is not optically resolvable at our frame rates."
+    },
+    {
+      "id": "m_faceToPath",
+      "kind": "provided",
+      "metricKey": "faceToPath",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Face to path, at impact",
+      "unit": "°",
+      "highMeans": "the face further open relative to the path — curvature to the right",
+      "gapReason": "Requires launch monitor: derived from face angle, which needs the device."
+    },
+    {
+      "id": "m_spinAxis",
+      "kind": "provided",
+      "metricKey": "spinAxis",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Spin axis",
+      "unit": "°",
+      "highMeans": "the axis tilted further right — more curvature to the right",
+      "gapReason": "Requires launch monitor: curvature develops over a flight an indoor capture never sees."
+    },
+    {
+      "id": "m_spinRate",
+      "kind": "provided",
+      "metricKey": "spinRate",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Spin rate",
+      "unit": "rpm",
+      "highMeans": "more spin on the ball",
+      "gapReason": "Requires launch monitor: spin is not measurable over the short flight an indoor capture sees."
+    },
+    {
+      "id": "m_smashFactor",
+      "kind": "provided",
+      "metricKey": "smashFactor",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Smash factor",
+      "unit": "ratio",
+      "highMeans": "more of the clubhead speed reaching the ball — a more efficient strike",
+      "gapReason": "Requires launch monitor: needs a validated clubhead-speed and ball-speed pair."
+    },
+    {
+      "id": "m_strikeLocation",
+      "kind": "provided",
+      "metricKey": "strikeLocation",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Strike location across the face",
+      "unit": "mm",
+      "highMeans": "the strike further toward the toe",
+      "gapReason": "Requires launch monitor: impact position on the face is not resolvable from any camera view we take."
+    },
+    {
+      "id": "m_carryDistance",
+      "kind": "provided",
+      "metricKey": "carryDistance",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Carry",
+      "unit": "yd",
+      "highMeans": "the ball carrying further",
+      "gapReason": "Requires launch monitor: carry is a flight-model output, not something an indoor capture observes."
+    },
+    {
+      "id": "m_dynamicLoft",
+      "kind": "provided",
+      "metricKey": "dynamicLoft",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Dynamic loft, at impact",
+      "unit": "°",
+      "highMeans": "more loft delivered to the ball — a higher, weaker flight",
+      "gapReason": "Requires launch monitor: derived from face orientation at impact."
+    },
+    {
+      "id": "m_spinLoft",
+      "kind": "provided",
+      "metricKey": "spinLoft",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "externalDevice",
+      "label": "Spin loft, at impact",
+      "unit": "°",
+      "highMeans": "a larger angle between delivered loft and the path — more spin, less speed",
+      "gapReason": "Requires launch monitor: derived from delivered loft, which needs face orientation at impact."
     }
   ],
   "signals": [
@@ -1295,12 +1873,431 @@
         "m_pelvisRotPeak",
         "m_thoraxRotPeak"
       ]
+    },
+    {
+      "id": "sig_feetAlignmentOpen",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_feetAlignment"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_feetAlignmentClosed",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_feetAlignment"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_hipAlignmentOpen",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_hipAlignment"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_hipAlignmentClosed",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_hipAlignment"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_kneeFlexExcess",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_kneeFlexAddress"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_kneeFlexInsufficient",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_kneeFlexAddress"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_insideTakeaway",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftDirectionP2"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_outsideTakeaway",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftDirectionP2"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_earlyFaceRoll",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadForearmRot_p2"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_steepBackswingPlane",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftPlaneBackswing"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_flatBackswingPlane",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftPlaneBackswing"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_acrossTheLine",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftDirectionP4"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_laidOff",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftDirectionP4"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_overswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftAngleP4"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_bentLeadArm",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadElbowFlex_p4"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_trailKneeStraighten",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_trailKneeFlex"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_headDropBackswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_headLiftBack"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_headRiseBackswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_headLiftBack"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_excessiveHeadSway",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_headSwayBack"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_excessiveHeelLift",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadHeelLiftTop"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_shortBackswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_thoraxRotP4"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_disconnection",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadUpperArmToChest"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_steepDownswingShaft",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftPlaneDelivery"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_underPlaneStuck",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftPlaneDelivery"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_hipSpinOut",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisRotP5"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_hipStall",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisRotRateP6P7"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_deceleration",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_handSpeedP6P7"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_insufficientShaftLean",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_impactShaftLean"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_lowPointBehind",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_lowPointAhead"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_attackTooSteep",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_attackAngle"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_attackTooShallow",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_attackAngle"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_hipsClosedImpact",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisRotP7"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_axisTiltImpactLow",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_axisTiltImpact"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_axisTiltImpactHigh",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_axisTiltImpact"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_offBalanceFinish",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_comOverLeadFootFinish"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_weightBackFinish",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayFinish"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_abbreviatedFinish",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_thoraxRotFinish"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_openFaceToPath",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_faceToPath"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_closedFaceToPath",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_faceToPath"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_pull",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_launchDirection"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_push",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_launchDirection"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_launchLow",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_launchAngle"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_launchHigh",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_launchAngle"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_ballSpeedDeficit",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_ballSpeed"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_slice",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spinAxis"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_hook",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spinAxis"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_strikeToe",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_strikeLocation"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_strikeHeel",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_strikeLocation"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_smashDeficit",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_smashFactor"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_spinExcess",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spinRate"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_spinDeficit",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spinRate"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_carryDeficit",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_carryDistance"
+      ],
+      "direction": "low"
     }
   ],
   "conditions": [
     {
       "id": "s_posture",
       "label": "S-posture",
+      "aliases": [
+        "too much arch at address"
+      ],
       "group": "setup",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1318,6 +2315,9 @@
     {
       "id": "c_posture",
       "label": "C-posture",
+      "aliases": [
+        "rounded back at address"
+      ],
       "group": "setup",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1329,11 +2329,17 @@
       "provenance": {
         "tier": "proposed"
       },
-      "axis": "thoracic_curve"
+      "axis": "thoracic_curve",
+      "drills": [
+        "drill.postureRod"
+      ]
     },
     {
       "id": "posture_too_upright",
       "label": "Standing too upright",
+      "aliases": [
+        "standing too tall at address"
+      ],
       "group": "setup",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1446,6 +2452,9 @@
     {
       "id": "ball_too_close",
       "label": "Ball too close to the body",
+      "aliases": [
+        "crowding it"
+      ],
       "group": "setup",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1457,11 +2466,17 @@
       "provenance": {
         "tier": "proposed"
       },
-      "axis": "ball_body_distance"
+      "axis": "ball_body_distance",
+      "drills": [
+        "drill.standoffCheck"
+      ]
     },
     {
       "id": "ball_too_far",
       "label": "Ball too far from the body",
+      "aliases": [
+        "reaching for it"
+      ],
       "group": "setup",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1478,6 +2493,10 @@
     {
       "id": "loss_of_posture",
       "label": "Loss of posture",
+      "aliases": [
+        "coming out of it",
+        "standing up through it"
+      ],
       "group": "posture",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1488,11 +2507,18 @@
       "consequence": "Losing the address spine angle during the swing changes the distance to the ball mid-swing, so the low point has to be found by compensation rather than by repetition.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.postureRod"
+      ]
     },
     {
       "id": "early_extension",
       "label": "Early extension",
+      "aliases": [
+        "standing up",
+        "hip thrust toward the ball"
+      ],
       "group": "posture",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1503,11 +2529,19 @@
       "consequence": "The pelvis moving toward the ball in the downswing takes away the room the arms need, leaving the hands to rescue the strike.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.postureRod",
+        "drill.standoffCheck"
+      ]
     },
     {
       "id": "reverse_spine",
       "label": "Reverse spine angle",
+      "aliases": [
+        "reverse pivot",
+        "leaning left at the top"
+      ],
       "group": "posture",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1524,6 +2558,9 @@
     {
       "id": "flat_shoulder_plane",
       "label": "Flat shoulder plane",
+      "aliases": [
+        "flat shoulder turn"
+      ],
       "group": "posture",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1539,6 +2576,9 @@
     {
       "id": "trail_hip_hike",
       "label": "Trail hip hike",
+      "aliases": [
+        "hip riding up"
+      ],
       "group": "posture",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1554,6 +2594,10 @@
     {
       "id": "sway",
       "label": "Sway",
+      "aliases": [
+        "swaying off the ball",
+        "lateral slide back"
+      ],
       "group": "lateral",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1564,11 +2608,19 @@
       "consequence": "Sliding away from the target in the backswing moves the low point behind the ball and has to be reversed exactly to strike it.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.trailHipLoad",
+        "drill.trailHeelWall"
+      ]
     },
     {
       "id": "slide",
       "label": "Slide",
+      "aliases": [
+        "sliding",
+        "excessive lateral drive"
+      ],
       "group": "lateral",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1584,6 +2636,11 @@
     {
       "id": "hanging_back",
       "label": "Hanging back",
+      "aliases": [
+        "staying back",
+        "falling back",
+        "reverse weight shift"
+      ],
       "group": "lateral",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1594,11 +2651,18 @@
       "consequence": "Weight left on the trail side at impact moves the low point behind the ball, costing compression and adding loft.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.pressureShiftStep",
+        "drill.holdTheFinish"
+      ]
     },
     {
       "id": "forward_lunge",
       "label": "Forward lunge",
+      "aliases": [
+        "lunging at it"
+      ],
       "group": "lateral",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1614,6 +2678,9 @@
     {
       "id": "late_buckle",
       "label": "Late lead-knee buckle",
+      "aliases": [
+        "knee buckling through impact"
+      ],
       "group": "lateral",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1629,6 +2696,10 @@
     {
       "id": "flying_elbow",
       "label": "Flying trail elbow",
+      "aliases": [
+        "trail elbow flying",
+        "disconnected trail arm"
+      ],
       "group": "armsAndClub",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1644,6 +2715,10 @@
     {
       "id": "chicken_wing",
       "label": "Chicken wing",
+      "aliases": [
+        "lead-elbow breakdown",
+        "wing"
+      ],
       "group": "armsAndClub",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1659,6 +2734,11 @@
     {
       "id": "over_the_top",
       "label": "Over the top",
+      "aliases": [
+        "coming over it",
+        "out-to-in",
+        "OTT"
+      ],
       "group": "armsAndClub",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1669,11 +2749,19 @@
       "consequence": "The club moving outside the ideal path at the start of the downswing produces an out-to-in strike — a pull or a slice depending on the face.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.gateForPath",
+        "drill.pumpToDelivery"
+      ]
     },
     {
       "id": "loss_of_width",
       "label": "Loss of width",
+      "aliases": [
+        "narrow downswing",
+        "collapsing arms"
+      ],
       "group": "armsAndClub",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1684,11 +2772,20 @@
       "consequence": "The hands collapsing toward the chest in the backswing shortens the arc and removes the space the downswing needs to build speed.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.towelUnderArms"
+      ]
     },
     {
       "id": "casting",
       "label": "Casting",
+      "aliases": [
+        "early release",
+        "throwing it from the top",
+        "throwaway",
+        "losing lag"
+      ],
       "group": "release",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1699,11 +2796,21 @@
       "consequence": "Releasing the wrist angle early spends the stored angle before it can be used, so speed peaks before the ball rather than at it.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.wristHold",
+        "drill.pumpToDelivery"
+      ]
     },
     {
       "id": "scooping",
       "label": "Scooping",
+      "aliases": [
+        "flip",
+        "flipping",
+        "breakdown through impact",
+        "adding loft"
+      ],
       "group": "release",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1714,11 +2821,18 @@
       "consequence": "Adding loft through impact with the lead wrist means the club is rising at the ball, costing compression and distance control.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.wristHold"
+      ]
     },
     {
       "id": "insufficient_set",
       "label": "Insufficient wrist set",
+      "aliases": [
+        "no wrist hinge",
+        "dead hands"
+      ],
       "group": "release",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1749,6 +2863,11 @@
     {
       "id": "xfactor_deficit",
       "label": "Low separation",
+      "aliases": [
+        "no separation",
+        "all-arms swing",
+        "low coil"
+      ],
       "group": "sequence",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1764,6 +2883,10 @@
     {
       "id": "transition_rush",
       "label": "Rushed transition",
+      "aliases": [
+        "quick from the top",
+        "snatching it"
+      ],
       "group": "sequence",
       "observability": "observable",
       "confirmedBy": "measured",
@@ -1774,7 +2897,10 @@
       "consequence": "Starting down too quickly relative to the backswing leaves the sequence no time to form from the ground up.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.pumpToDelivery"
+      ]
     },
     {
       "id": "limited_trail_hip_ir",
@@ -1815,7 +2941,10 @@
       "consequence": "When the pelvis cannot move independently of the chest, the two turn together and no separation can be built or released.",
       "provenance": {
         "tier": "proposed"
-      }
+      },
+      "drills": [
+        "drill.pelvicSeparation"
+      ]
     },
     {
       "id": "limited_thoracic_rotation",
@@ -2015,6 +3144,1220 @@
       "confirmedBy": "asserted",
       "state": "active",
       "consequence": "A stance width the golfer has settled on and repeats without thinking about it.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "feet_alignment_open",
+      "label": "Feet open",
+      "aliases": [
+        "open stance",
+        "aiming left"
+      ],
+      "axis": "feet_alignment",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_feetAlignmentOpen"
+      ],
+      "state": "draft",
+      "consequence": "Feet aimed left of the target for a right-handed golfer. The body will tend to swing along the line it is set up on, so the club arrives travelling left and the ball starts there unless something else compensates.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "feet_alignment_closed",
+      "label": "Feet closed",
+      "aliases": [
+        "closed stance",
+        "aiming right"
+      ],
+      "axis": "feet_alignment",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_feetAlignmentClosed"
+      ],
+      "state": "draft",
+      "consequence": "Feet aimed right of the target for a right-handed golfer. The swing tends to follow, so the club arrives travelling right and the ball starts there.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "hip_alignment_open",
+      "label": "Hips open at address",
+      "aliases": [
+        "hips aiming left"
+      ],
+      "axis": "hip_alignment",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hipAlignmentOpen"
+      ],
+      "state": "draft",
+      "consequence": "The pelvis already points left of the target at address, so part of the turn through the ball has been spent before the swing starts and there is less left to give.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "hip_alignment_closed",
+      "label": "Hips closed at address",
+      "aliases": [
+        "hips aiming right"
+      ],
+      "axis": "hip_alignment",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hipAlignmentClosed"
+      ],
+      "state": "draft",
+      "consequence": "The pelvis points right of the target at address, which encourages the club to travel out to the right through impact.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "excessive_knee_flex",
+      "label": "Sitting too deep",
+      "aliases": [
+        "squatting at address"
+      ],
+      "axis": "knee_flex_address",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_kneeFlexExcess"
+      ],
+      "state": "draft",
+      "consequence": "Too much knee bend at address drops the whole swing centre and leaves the legs with nowhere to go — the golfer has spent the flex they needed for the downswing before the club has moved.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "insufficient_knee_flex",
+      "label": "Legs too straight",
+      "aliases": [
+        "standing too tall",
+        "locked legs"
+      ],
+      "axis": "knee_flex_address",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_kneeFlexInsufficient"
+      ],
+      "state": "draft",
+      "consequence": "Straight legs at address take the lower body out of the swing. Without knee flex there is nothing to push against, so the arms and shoulders end up supplying the speed.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "grip_strong",
+      "label": "Strong grip",
+      "aliases": [
+        "hands turned right",
+        "shut grip"
+      ],
+      "axis": "grip_rotation",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "The hands are rotated away from the target on the club, which tends to return the face closed. It is not a fault on its own — it becomes one when the rest of the swing is built for a neutral face.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "grip_weak",
+      "label": "Weak grip",
+      "aliases": [
+        "hands turned left",
+        "open grip"
+      ],
+      "axis": "grip_rotation",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "The hands are rotated toward the target on the club, which tends to return the face open. Again not a fault in itself, but it decides what the rest of the swing has to do to square the face.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "weight_trail_at_address",
+      "label": "Weight on the trail foot at address",
+      "aliases": [
+        "sitting back at address"
+      ],
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "Starting with the weight already back on the trail side leaves the golfer with further to travel to reach the lead side, and makes hanging back the path of least resistance.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "inside_takeaway",
+      "label": "Club taken inside",
+      "aliases": [
+        "sucked inside",
+        "behind you",
+        "rolled it inside"
+      ],
+      "axis": "takeaway_direction",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_insideTakeaway"
+      ],
+      "state": "draft",
+      "consequence": "The club is dragged behind the hands early, so the arms and body have to re-route it to get back to the ball — usually by throwing it out and over, or by getting stuck underneath.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "outside_takeaway",
+      "label": "Club taken outside",
+      "aliases": [
+        "picked it up outside",
+        "lifted it away"
+      ],
+      "axis": "takeaway_direction",
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_outsideTakeaway"
+      ],
+      "state": "draft",
+      "consequence": "The club is pushed away from the body early, putting it above the plane before the swing has properly begun. From there the most natural way down is over the top.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "early_face_roll",
+      "label": "Face rolled open early",
+      "aliases": [
+        "fanning it open",
+        "rolling the face"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_earlyFaceRoll"
+      ],
+      "state": "draft",
+      "consequence": "The lead forearm rotates the face open in the takeaway, which has to be undone before impact. The face arrives late unless the hands do something about it on the way down.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "steep_backswing_plane",
+      "label": "Steep backswing plane",
+      "aliases": [
+        "too upright going back"
+      ],
+      "axis": "backswing_plane",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_steepBackswingPlane"
+      ],
+      "state": "draft",
+      "consequence": "The shaft climbs above the plane it started on, which sets up a steep, out-to-in delivery unless the downswing shallows it deliberately.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "flat_backswing_plane",
+      "label": "Flat backswing plane",
+      "aliases": [
+        "too flat going back",
+        "round it"
+      ],
+      "axis": "backswing_plane",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_flatBackswingPlane"
+      ],
+      "state": "draft",
+      "consequence": "The shaft drops below the plane it started on, which makes it easy to get stuck behind the body coming down and to need the hands to save the shot.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "across_the_line",
+      "label": "Across the line at the top",
+      "aliases": [
+        "crossed at the top",
+        "pointing right"
+      ],
+      "axis": "top_direction",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_acrossTheLine"
+      ],
+      "state": "draft",
+      "consequence": "At the top the club points right of the target rather than parallel to it. The most common recovery is to throw the club out and over on the way down.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "laid_off",
+      "label": "Laid off at the top",
+      "aliases": [
+        "pointing left at the top"
+      ],
+      "axis": "top_direction",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_laidOff"
+      ],
+      "state": "draft",
+      "consequence": "At the top the club points left of the target. It tends to arrive from too far inside, which leaves the face with a lot to do in very little time.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "overswing",
+      "label": "Overswing",
+      "aliases": [
+        "too long",
+        "past parallel"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_overswing"
+      ],
+      "state": "draft",
+      "consequence": "The shaft travels well past parallel at the top, usually because something collapsed to let it — the lead arm, the wrists or the trail knee. Length past the point of control costs accuracy without adding speed.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "bent_lead_arm",
+      "label": "Lead arm bent at the top",
+      "aliases": [
+        "collapsed lead arm",
+        "chicken-winged going back"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_bentLeadArm"
+      ],
+      "state": "draft",
+      "consequence": "The lead elbow folds in the backswing, which shortens the arc. A narrower backswing gives the downswing less room to build speed and makes the low point harder to control.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "trail_knee_straighten",
+      "label": "Trail knee straightens",
+      "aliases": [
+        "standing up on it going back"
+      ],
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_trailKneeStraighten"
+      ],
+      "state": "draft",
+      "consequence": "The trail knee loses its flex on the way back, which lets the hips slide instead of turn. It usually shows up alongside a sway off the ball.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.trailHipLoad"
+      ]
+    },
+    {
+      "id": "head_drop_backswing",
+      "label": "Head drops in the backswing",
+      "aliases": [
+        "dipping",
+        "squatting into it"
+      ],
+      "axis": "head_height_backswing",
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_headDropBackswing"
+      ],
+      "state": "draft",
+      "consequence": "The swing centre lowers on the way back, so it has to come back up before impact or the club bottoms out behind the ball.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "head_rise_backswing",
+      "label": "Head rises in the backswing",
+      "aliases": [
+        "standing up going back"
+      ],
+      "axis": "head_height_backswing",
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_headRiseBackswing"
+      ],
+      "state": "draft",
+      "consequence": "The swing centre lifts on the way back, and whatever went up has to come down again in time for impact — which is a timing problem rather than a technique one.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "excessive_head_sway",
+      "label": "Head sways off the ball",
+      "aliases": [
+        "swaying off it",
+        "off the ball"
+      ],
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_excessiveHeadSway"
+      ],
+      "state": "draft",
+      "consequence": "The head moves laterally away from the target in the backswing. The swing centre has moved, so the arc has moved with it and has to be returned exactly before impact.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "excessive_heel_lift",
+      "label": "Lead heel lifts excessively",
+      "aliases": [
+        "heel off the ground"
+      ],
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_excessiveHeelLift"
+      ],
+      "state": "draft",
+      "consequence": "A lifting lead heel is a legitimate way to make more turn, and many fine players use one. It becomes a problem only when the heel has to find the ground again in time — the more it lifts, the more precise that has to be.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "short_backswing",
+      "label": "Short backswing",
+      "aliases": [
+        "no turn",
+        "short of the top"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_shortBackswing"
+      ],
+      "state": "draft",
+      "consequence": "The chest does not turn far enough by the top, so the swing has less coil to work with. This is a question of absolute turn, which is different from having no separation between the chest and the pelvis.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "disconnection",
+      "label": "Lead arm disconnected",
+      "aliases": [
+        "arms lifting",
+        "loss of connection",
+        "run-off"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_disconnection"
+      ],
+      "state": "draft",
+      "consequence": "The lead upper arm runs away from the chest in the backswing, so the arms and body are no longer moving as one unit. The arms then have to time their arrival rather than being delivered by the turn.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.towelUnderArms"
+      ]
+    },
+    {
+      "id": "steep_downswing_shaft",
+      "label": "Steep through delivery",
+      "aliases": [
+        "steep",
+        "chopping",
+        "out of position coming down"
+      ],
+      "axis": "delivery_plane",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_steepDownswingShaft"
+      ],
+      "state": "draft",
+      "consequence": "The shaft is steeper than the plane it started on as it comes into delivery. This is the club-domain view of the same event over-the-top describes at the ball.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.pumpToDelivery"
+      ]
+    },
+    {
+      "id": "under_plane_stuck",
+      "label": "Stuck under the plane",
+      "aliases": [
+        "stuck",
+        "trapped",
+        "dropping it too far inside"
+      ],
+      "axis": "delivery_plane",
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_underPlaneStuck"
+      ],
+      "state": "draft",
+      "consequence": "The club drops well under the plane coming down and the body outruns it, so the arms are trapped behind. Everything after that is a save — usually the hands flipping the face closed, or a block right when they do not.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.gateForPath"
+      ]
+    },
+    {
+      "id": "hip_spin_out",
+      "label": "Hips spin out",
+      "aliases": [
+        "spinning out",
+        "no shift"
+      ],
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hipSpinOut"
+      ],
+      "state": "draft",
+      "consequence": "The pelvis opens early without shifting toward the target first, so the lower body turns out of the way instead of leading. The club is left behind and the strike moves toward the heel.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "hip_stall",
+      "label": "Hips stall through impact",
+      "aliases": [
+        "stalling",
+        "stopping the turn"
+      ],
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hipStall"
+      ],
+      "state": "draft",
+      "consequence": "The pelvis stops turning before impact. Something still has to deliver the clubhead, so the hands take over — which is where a flip through impact comes from.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "deceleration",
+      "label": "Decelerating into impact",
+      "aliases": [
+        "quitting on it",
+        "slowing down"
+      ],
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_deceleration"
+      ],
+      "state": "draft",
+      "consequence": "The hands are slowing down before the ball rather than after it. Speed lost before impact is speed the ball never sees, and a decelerating strike is an inconsistent one.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "insufficient_shaft_lean",
+      "label": "Not enough shaft lean",
+      "aliases": [
+        "no forward lean",
+        "adding loft"
+      ],
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_insufficientShaftLean"
+      ],
+      "state": "draft",
+      "consequence": "The hands are not ahead of the clubhead at impact, so the club presents more loft than it was built with. With an iron that costs compression, distance and control of the flight.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.wristHold"
+      ]
+    },
+    {
+      "id": "low_point_behind_ball",
+      "label": "Low point behind the ball",
+      "aliases": [
+        "bottoming out early",
+        "hitting behind it"
+      ],
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_lowPointBehind"
+      ],
+      "state": "draft",
+      "consequence": "The arc bottoms out before it reaches the ball. Two centimetres either way is the difference between a heavy strike and a thin one, which is why the same error produces both misses.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.lowPointDivot"
+      ]
+    },
+    {
+      "id": "attack_too_steep",
+      "label": "Attack angle too steep",
+      "aliases": [
+        "too much down on it"
+      ],
+      "axis": "attack_angle",
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_attackTooSteep"
+      ],
+      "state": "draft",
+      "consequence": "The clubhead is travelling too far downward at impact for the club in hand. It costs speed, adds spin, and with a teed driver invites the ball off the top of the face.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "attack_too_shallow",
+      "label": "Attack angle too shallow",
+      "aliases": [
+        "picking it",
+        "too shallow"
+      ],
+      "axis": "attack_angle",
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_attackTooShallow"
+      ],
+      "state": "draft",
+      "consequence": "The clubhead is travelling too flat or too upward for the club in hand, which moves the strike up the face and takes the compression out of an iron.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "open_face_to_path",
+      "label": "Face open to the path",
+      "aliases": [
+        "face open"
+      ],
+      "axis": "face_to_path",
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_openFaceToPath"
+      ],
+      "state": "draft",
+      "consequence": "At impact the face points right of where the club is travelling, which is what puts left-to-right curve on the ball. How much it curves depends on how big that gap is.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "closed_face_to_path",
+      "label": "Face closed to the path",
+      "aliases": [
+        "face closed",
+        "shut face"
+      ],
+      "axis": "face_to_path",
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_closedFaceToPath"
+      ],
+      "state": "draft",
+      "consequence": "At impact the face points left of where the club is travelling, which puts right-to-left curve on the ball.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "hips_closed_at_impact",
+      "label": "Hips under-rotated at impact",
+      "aliases": [
+        "hips not clearing",
+        "blocked"
+      ],
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hipsClosedImpact"
+      ],
+      "state": "draft",
+      "consequence": "The pelvis has not opened far enough by impact, so the body is still in the way of the arms. The club has to find room somewhere, and it usually finds it by the hands taking over.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "insufficient_axis_tilt_impact",
+      "label": "Not enough tilt at impact",
+      "aliases": [
+        "no tilt",
+        "level shoulders at impact"
+      ],
+      "axis": "axis_tilt_impact",
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_axisTiltImpactLow"
+      ],
+      "state": "draft",
+      "consequence": "The upper body is not leaning away from the target enough at impact. The club then arrives too steeply, and with a driver there is no room left to hit up on the ball.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "excessive_axis_tilt_impact",
+      "label": "Too much tilt at impact",
+      "aliases": [
+        "falling back",
+        "too much tilt"
+      ],
+      "axis": "axis_tilt_impact",
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_axisTiltImpactHigh"
+      ],
+      "state": "draft",
+      "consequence": "The upper body leans too far away from the target at impact, which hangs the weight back and moves the low point behind the ball.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "off_balance_finish",
+      "label": "Cannot hold the finish",
+      "aliases": [
+        "falling over",
+        "stepping through"
+      ],
+      "group": "finish",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_offBalanceFinish"
+      ],
+      "state": "draft",
+      "consequence": "The golfer finishes without being able to stand still in it. A finish that cannot be held is the end of a swing that was not in balance earlier — it is a symptom worth reading backwards.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.holdTheFinish"
+      ]
+    },
+    {
+      "id": "weight_back_at_finish",
+      "label": "Weight still back at the finish",
+      "aliases": [
+        "hanging back",
+        "stuck on the back foot"
+      ],
+      "group": "finish",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_weightBackFinish"
+      ],
+      "state": "draft",
+      "consequence": "The pressure never reached the lead side. The strike has almost always suffered before the finish shows it, but the finish is where it becomes obvious to the eye.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.holdTheFinish"
+      ]
+    },
+    {
+      "id": "abbreviated_finish",
+      "label": "Follow-through cut short",
+      "aliases": [
+        "quitting on it",
+        "no follow-through"
+      ],
+      "group": "finish",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_abbreviatedFinish"
+      ],
+      "state": "draft",
+      "consequence": "The turn stops early after impact. Sometimes it is a deliberate control shot; when it is not, it usually means the swing was decelerating well before the ball.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "pull",
+      "label": "Pull",
+      "aliases": [
+        "pulled it",
+        "started left"
+      ],
+      "axis": "start_line",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_pull"
+      ],
+      "state": "draft",
+      "consequence": "Starts left of the target and flies straight — the face and the path were both left at impact. It is a miss that feels solid, which is why it survives so long.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "push",
+      "label": "Push",
+      "aliases": [
+        "pushed it",
+        "started right",
+        "block",
+        "blocked it"
+      ],
+      "axis": "start_line",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_push"
+      ],
+      "state": "draft",
+      "consequence": "Starts right of the target and flies straight — the face and the path were both right. A push that came from swinging too far in-to-out with the face matching is what a coach calls a BLOCK: the ball never comes back.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "launch_low",
+      "label": "Low ball flight",
+      "aliases": [
+        "flighted too low",
+        "no height"
+      ],
+      "axis": "launch_angle",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_launchLow"
+      ],
+      "state": "draft",
+      "consequence": "The ball leaves lower than the club should send it. It runs out rather than stopping, and into any wind it will not hold its line.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "launch_high",
+      "label": "Ballooning",
+      "aliases": [
+        "ballooning",
+        "too much height",
+        "floating it"
+      ],
+      "axis": "launch_angle",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_launchHigh"
+      ],
+      "state": "draft",
+      "consequence": "The ball climbs higher than the club should send it, which trades carry for height and leaves the flight at the mercy of the wind.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "ball_speed_deficit",
+      "label": "Lost ball speed",
+      "aliases": [
+        "no distance",
+        "lost yards"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_ballSpeedDeficit"
+      ],
+      "state": "draft",
+      "consequence": "The ball leaves slower than this golfer normally sends it with this club — energy went somewhere other than into the ball, which is usually the strike rather than the swing.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "slice",
+      "label": "Slice",
+      "aliases": [
+        "slicing it",
+        "cutting it",
+        "banana ball"
+      ],
+      "axis": "curvature",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_slice"
+      ],
+      "state": "draft",
+      "consequence": "Curves hard to the right in flight, because the face was open to the path it was travelling on. The playable version of the same shape is a FADE — the difference is how much, and whether it was intended.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "hook",
+      "label": "Hook",
+      "aliases": [
+        "hooking it",
+        "snap hook",
+        "duck hook"
+      ],
+      "axis": "curvature",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hook"
+      ],
+      "state": "draft",
+      "consequence": "Curves hard to the left, because the face was closed to the path. The playable version is a DRAW. A severe one is a snap hook or duck hook.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "pull_hook",
+      "label": "Pull-hook",
+      "aliases": [
+        "smother",
+        "double cross"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "Starts left AND curves further left — the smother. The face was closed to the target and closed to the path, so nothing was pointing anywhere near where the ball was meant to go.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "push_slice",
+      "label": "Push-slice",
+      "aliases": [
+        "big block-slice"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "Starts right and curves further right. The path went right and the face was open even to that, so there was nothing at impact aimed at the target at all.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "chunk",
+      "label": "Chunk",
+      "aliases": [
+        "fat",
+        "heavy",
+        "laying the sod over it",
+        "chunked it"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "The ground was struck before the ball. Most of the clubhead speed goes into the turf, so the ball comes up well short however good the swing looked.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.lowPointDivot"
+      ]
+    },
+    {
+      "id": "thin",
+      "label": "Thin",
+      "aliases": [
+        "blade",
+        "bladed it",
+        "skulled it",
+        "thinned it"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "The leading edge caught the ball around its equator. It screams away low with almost normal speed but no height and no spin, so it will not stop.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.lowPointDivot"
+      ]
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "aliases": [
+        "topped it",
+        "dribbler"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "The club bottomed out above the ball's equator and the ball dribbles forward along the ground.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "sky",
+      "label": "Sky",
+      "aliases": [
+        "pop-up",
+        "skied it",
+        "sky ball"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "A teed ball struck high on the crown from too steep an attack. Very high, very short, and usually a mark on the top of the driver to remember it by.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "shank",
+      "label": "Shank",
+      "aliases": [
+        "hosel rocket",
+        "shanked it",
+        "socket"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "asserted",
+      "state": "draft",
+      "consequence": "Struck off the hosel, so the ball shoots sharply right and low. The most feared miss in the game, and almost always a standoff problem: the club is further from the body at impact than it was at address.",
+      "provenance": {
+        "tier": "proposed"
+      },
+      "drills": [
+        "drill.standoffCheck"
+      ]
+    },
+    {
+      "id": "strike_toe",
+      "label": "Toe strike",
+      "aliases": [
+        "off the toe"
+      ],
+      "axis": "strike_location",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_strikeToe"
+      ],
+      "state": "draft",
+      "consequence": "Contact out toward the toe. Gear effect puts draw spin on it and the strike bleeds ball speed, so it curves left and comes up short.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "strike_heel",
+      "label": "Heel strike",
+      "aliases": [
+        "off the heel"
+      ],
+      "axis": "strike_location",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_strikeHeel"
+      ],
+      "state": "draft",
+      "consequence": "Contact in toward the heel. Gear effect puts fade spin on it and, like the toe, it costs ball speed.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "smash_deficit",
+      "label": "Poor strike efficiency",
+      "aliases": [
+        "not compressing it"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_smashDeficit"
+      ],
+      "state": "draft",
+      "consequence": "The ball is slow for the clubhead speed that was delivered — energy lost to an off-centre strike. It separates a speed problem from a contact problem, which look identical on the scorecard.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "spin_excess",
+      "label": "Too much spin",
+      "aliases": [
+        "spinny",
+        "too much spin"
+      ],
+      "axis": "spin_rate",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_spinExcess"
+      ],
+      "state": "draft",
+      "consequence": "More spin than the club should produce, which balloons the flight and costs carry.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "spin_deficit",
+      "label": "Too little spin",
+      "aliases": [
+        "knuckleball",
+        "no spin"
+      ],
+      "axis": "spin_rate",
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_spinDeficit"
+      ],
+      "state": "draft",
+      "consequence": "Less spin than the club should produce. The ball knuckles, will not hold its line, and with a short iron will not stop on the green.",
+      "provenance": {
+        "tier": "proposed"
+      }
+    },
+    {
+      "id": "carry_deficit",
+      "label": "Short carry",
+      "aliases": [
+        "coming up short"
+      ],
+      "group": "ballFlight",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_carryDeficit"
+      ],
+      "state": "draft",
+      "consequence": "The ball carries less than this golfer normally carries this club.",
       "provenance": {
         "tier": "proposed"
       }
@@ -2506,6 +4849,474 @@
       "to": "transition_rush",
       "type": "causes",
       "strength": "weak"
+    },
+    {
+      "from": "feet_alignment_open",
+      "to": "alignment_open",
+      "type": "corroborates",
+      "strength": "strong"
+    },
+    {
+      "from": "feet_alignment_closed",
+      "to": "alignment_closed",
+      "type": "corroborates",
+      "strength": "strong"
+    },
+    {
+      "from": "hip_alignment_open",
+      "to": "alignment_open",
+      "type": "corroborates",
+      "strength": "moderate"
+    },
+    {
+      "from": "hip_alignment_closed",
+      "to": "alignment_closed",
+      "type": "corroborates",
+      "strength": "moderate"
+    },
+    {
+      "from": "aim_bias_open",
+      "to": "feet_alignment_open",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "aim_bias_closed",
+      "to": "feet_alignment_closed",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "aim_bias_open",
+      "to": "hip_alignment_open",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "aim_bias_closed",
+      "to": "hip_alignment_closed",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "over_the_top",
+      "to": "pull",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "over_the_top",
+      "to": "slice",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "outside_takeaway",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "across_the_line",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "inside_takeaway",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "laid_off",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "steep_backswing_plane",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "flat_backswing_plane",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "under_plane_stuck",
+      "to": "push",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "under_plane_stuck",
+      "to": "hook",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "under_plane_stuck",
+      "to": "push_slice",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "hip_spin_out",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "disconnection",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "disconnection",
+      "to": "loss_of_width",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "open_face_to_path",
+      "to": "slice",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "open_face_to_path",
+      "to": "push_slice",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "closed_face_to_path",
+      "to": "hook",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "closed_face_to_path",
+      "to": "pull_hook",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "grip_weak",
+      "to": "open_face_to_path",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "grip_strong",
+      "to": "closed_face_to_path",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "early_face_roll",
+      "to": "open_face_to_path",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "casting",
+      "to": "thin",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "casting",
+      "to": "launch_high",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "casting",
+      "to": "ball_speed_deficit",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "scooping",
+      "to": "thin",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "scooping",
+      "to": "launch_high",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "hip_stall",
+      "to": "scooping",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "insufficient_shaft_lean",
+      "to": "launch_high",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "insufficient_shaft_lean",
+      "to": "ball_speed_deficit",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "deceleration",
+      "to": "ball_speed_deficit",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "deceleration",
+      "to": "chunk",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "low_point_behind_ball",
+      "to": "chunk",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "low_point_behind_ball",
+      "to": "thin",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "hanging_back",
+      "to": "low_point_behind_ball",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "sway",
+      "to": "low_point_behind_ball",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "excessive_axis_tilt_impact",
+      "to": "low_point_behind_ball",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "early_extension",
+      "to": "shank",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "early_extension",
+      "to": "strike_heel",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "early_extension",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_too_close",
+      "to": "shank",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "attack_too_steep",
+      "to": "sky",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "attack_too_steep",
+      "to": "chunk",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "attack_too_steep",
+      "to": "spin_excess",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "attack_too_shallow",
+      "to": "thin",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "attack_too_shallow",
+      "to": "top",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "insufficient_axis_tilt_impact",
+      "to": "attack_too_steep",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_forward",
+      "to": "thin",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "ball_forward",
+      "to": "pull",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_back",
+      "to": "push",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_back",
+      "to": "launch_low",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "ball_back",
+      "to": "chunk",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "bent_lead_arm",
+      "to": "loss_of_width",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "bent_lead_arm",
+      "to": "casting",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "bent_lead_arm",
+      "to": "overswing",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "short_backswing",
+      "type": "causes",
+      "strength": "strong"
+    },
+    {
+      "from": "trail_knee_straighten",
+      "to": "sway",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "weight_trail_at_address",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "hips_closed_at_impact",
+      "to": "scooping",
+      "type": "causes",
+      "strength": "moderate"
+    },
+    {
+      "from": "hip_spin_out",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "off_balance_finish",
+      "to": "strike_toe",
+      "type": "causes",
+      "strength": "weak"
+    },
+    {
+      "from": "insufficient_shaft_lean",
+      "to": "scooping",
+      "type": "corroborates",
+      "strength": "strong"
+    },
+    {
+      "from": "steep_downswing_shaft",
+      "to": "over_the_top",
+      "type": "corroborates",
+      "strength": "strong"
+    },
+    {
+      "from": "excessive_head_sway",
+      "to": "sway",
+      "type": "corroborates",
+      "strength": "moderate"
+    },
+    {
+      "from": "hips_closed_at_impact",
+      "to": "under_plane_stuck",
+      "type": "corroborates",
+      "strength": "moderate"
+    },
+    {
+      "from": "weight_back_at_finish",
+      "to": "hanging_back",
+      "type": "corroborates",
+      "strength": "strong"
+    },
+    {
+      "from": "chunk",
+      "to": "top",
+      "type": "excludes",
+      "strength": "strong"
+    },
+    {
+      "from": "chunk",
+      "to": "thin",
+      "type": "excludes",
+      "strength": "strong"
+    },
+    {
+      "from": "thin",
+      "to": "top",
+      "type": "excludes",
+      "strength": "strong"
+    },
+    {
+      "from": "sky",
+      "to": "chunk",
+      "type": "excludes",
+      "strength": "strong"
+    },
+    {
+      "from": "pull_hook",
+      "to": "push_slice",
+      "type": "excludes",
+      "strength": "strong"
     }
   ]
 }

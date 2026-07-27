@@ -212,11 +212,18 @@ std::vector<QString> PlannedMetricProvider::provides() const
         QStringLiteral("pelvisSway"),       QStringLiteral("pelvisThrust"),
         QStringLiteral("pelvisLift"),
         QStringLiteral("swingPlane"),       QStringLiteral("clubPath"),
-        QStringLiteral("attackAngle"),      QStringLiteral("faceAngle"),
+        QStringLiteral("attackAngle"),
         QStringLiteral("lowPointAhead"),
         QStringLiteral("kinematicSequence"),
         QStringLiteral("shoulderAlignment"), QStringLiteral("elbowAlignment"),
         QStringLiteral("hipAlignment"),      QStringLiteral("feetAlignment"),
+        // Added with the content extension. `faceAngle` LEFT this list in the same change: it is
+        // not a producer we are going to write, it is a device we are going to talk to.
+        QStringLiteral("trailKneeFlexion"), QStringLiteral("comOverLeadFoot"),
+        QStringLiteral("leadUpperArmToChest"),
+        QStringLiteral("shaftDirection"),   QStringLiteral("shaftAngleVsHorizontal"),
+        QStringLiteral("launchDirection"),  QStringLiteral("launchAngle"),
+        QStringLiteral("ballSpeed"),
     };
 }
 
@@ -228,6 +235,31 @@ MetricAvailability PlannedMetricProvider::availability(const QString &key, const
     a.state  = MetricAvailability::Unavailable;
     a.reason = QStringLiteral("planned — not yet produced in this build");
     return a;
+}
+
+// -------------------------------------------------------------------------- LaunchMonitorProvider
+
+std::vector<QString> LaunchMonitorProvider::provides() const
+{
+    return {
+        QStringLiteral("faceAngle"),      QStringLiteral("faceToPath"),
+        QStringLiteral("spinRate"),       QStringLiteral("spinAxis"),
+        QStringLiteral("smashFactor"),    QStringLiteral("strikeLocation"),
+        QStringLiteral("carryDistance"),  QStringLiteral("dynamicLoft"),
+        QStringLiteral("spinLoft"),
+    };
+}
+
+MetricAvailability LaunchMonitorProvider::availability(const QString &key, const ShotContext &ctx) const
+{
+    Q_UNUSED(key)
+    // No session gate and no camera requirement: a launch monitor sees what it sees whatever else
+    // is connected. The single requirement is the device itself, and routing it through
+    // fromRequirement() means the "needs a launch monitor" sentence is rendered by the same code
+    // that renders "needs a face-on camera" — one voice for every absent input.
+    MetricRequirement req;
+    req.launchMonitor = true;
+    return fromRequirement(req, ctx);
 }
 
 } // namespace pinpoint::analysis

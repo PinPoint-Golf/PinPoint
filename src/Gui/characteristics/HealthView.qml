@@ -102,6 +102,17 @@ Item {
         case "screenedHasCause":   return qsTr("A screen result something claims to cause — check edge direction")
         case "duplicateId":        return qsTr("Redefined by another pack")
         case "bothTailsOneCondition": return qsTr("Flags both sides at once — it cannot tell too much from too little")
+        case "duplicateAlias":     return qsTr("Two characteristics answer to one coach term")
+        case "unknownScreenRef":   return qsTr("Names a screen that is not in the screen set")
+        case "unknownDrillRef":    return qsTr("Names a drill that is not in the drill set")
+        case "screenNoProtocol":   return qsTr("A screen with no protocol — nobody could run it")
+        case "screenNoPass":       return qsTr("A screen with no pass criterion — the answer is unrecordable")
+        case "screenIdNamespace":  return qsTr("A screen id outside the screen. namespace")
+        case "screenUnitMissing":  return qsTr("A numeric pass floor with no unit")
+        case "drillNoInstruction": return qsTr("A drill that does not say what the golfer does")
+        case "drillNoTarget":      return qsTr("A drill that does not say what it is trying to change")
+        case "drillIdNamespace":   return qsTr("A drill id outside the drill. namespace")
+        case "externalDeviceNoReason": return qsTr("Reads from an external device but does not say which")
 
         // The norm side. These reached this list for the first time at stage 10: the norm set's own
         // warnings were promised to be part of it and were not, and the referential checks below had

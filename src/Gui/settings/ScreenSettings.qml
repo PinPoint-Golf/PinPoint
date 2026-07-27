@@ -59,7 +59,7 @@ Item {
             var panels = [
                 generalPanel, appearancePanel, displaysPanel,
                 camerasPanel, imusPanel, microphonesPanel,
-                null, storagePanel, null, metricLibraryPanel, characteristicPanel
+                null, storagePanel, null, characteristicPanel
             ]
             var panel = panels[entry.panelIndex]
             if (panel) scrollWithRetry(panel, entry.itemId, 0)
@@ -72,8 +72,8 @@ Item {
     function showMetricDetail(key) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 9                       // Metrics
-        Qt.callLater(function() { metricLibraryPanel.showMetric(key) })
+        root.activeNavIndex = 9                       // Diagnostics
+        Qt.callLater(function() { characteristicPanel.showMetric(key) })
     }
 
     // Deep link straight to one characteristic's detail page. Same callLater shape as
@@ -81,7 +81,7 @@ Item {
     function showCharacteristicDetail(conditionId) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 10                      // Diagnostics
+        root.activeNavIndex = 9                       // Diagnostics
         Qt.callLater(function() { characteristicPanel.showCharacteristic(conditionId) })
     }
 
@@ -92,7 +92,7 @@ Item {
     function showMeasureDetail(measureId) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 10                      // Diagnostics
+        root.activeNavIndex = 9                       // Diagnostics
         Qt.callLater(function() { characteristicPanel.showMeasure(measureId) })
     }
 
@@ -217,15 +217,17 @@ Item {
                                 { navIdx: 6, icon: "◎", label: qsTr("Launch Monitor"), sectionHead: "",               hasBadge: false },
                                 { navIdx: 7, icon: "▥", label: qsTr("Storage"),        sectionHead: qsTr("Data"),     hasBadge: false },
                                 { navIdx: 8, icon: "▤", label: qsTr("Archiving"),      sectionHead: "",               hasBadge: false },
-                                { navIdx: 9, icon: "≣", label: qsTr("Metrics"),        sectionHead: qsTr("Reference"), hasBadge: false },
-                                { navIdx: 10, icon: "◇", label: qsTr("Diagnostics"),    sectionHead: "",               hasBadge: false },
+                                // Metrics was navIdx 9 until it became a VIEW inside Diagnostics:
+                                // a metric, the measures that read it and the corridors that judge
+                                // them are one chain, and following it meant leaving the panel.
+                                // Everything below it moved up one when it went.
+                                { navIdx: 9, icon: "◇", label: qsTr("Diagnostics"),    sectionHead: qsTr("Reference"), hasBadge: false },
                                 // Not a panel: emits resourceMonitorRequested() (its
                                 // own screen) rather than switching activeNavIndex.
-                                // NB: this row moved 10 -> 11 when Characteristics was
-                                // added. It is an ACTION row, so its navIdx never
-                                // indexes the StackLayout — but it must not collide
-                                // with a panel index either.
-                                { navIdx: 11, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
+                                // It is an ACTION row, so its navIdx never indexes the
+                                // StackLayout — but it must not collide with a panel
+                                // index either.
+                                { navIdx: 10, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
                             ]
 
                             delegate: Column {
@@ -454,12 +456,7 @@ Item {
                 ScreenPlaceholder { titleText: "Launch Monitor" }                                          // 6
                 StoragePanel {    id: storagePanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 7
                 ScreenPlaceholder { titleText: "Archiving" }                                               // 8
-                MetricLibrary {
-                    id: metricLibraryPanel                                                              // 9
-                    Layout.fillWidth: true; Layout.fillHeight: true
-                    onOpenNorm: function(measureId) { root.showMeasureDetail(measureId) }
-                }
-                CharacteristicLibrary { id: characteristicPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 10
+                CharacteristicLibrary { id: characteristicPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 9
             }
         }
     }

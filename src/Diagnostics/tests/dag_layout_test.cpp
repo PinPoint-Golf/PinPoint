@@ -453,6 +453,73 @@ int main()
         check(nodeById(l, "focus")->hiddenEffects == 16, "the rest are counted on the focus");
     }
 
+    // ── The non-causal relations ────────────────────────────────────────────
+    //
+    // Rank is signed causal distance, so a symmetric relation has no direction to rank by. It sits
+    // on the focus's OWN rank and draws no arrowhead — an arrow would assert a direction these two
+    // do not have, and a reader would take it as causal.
+    std::printf("\nCorroborates and excludes are drawn, and drawn differently\n");
+    {
+        CharacteristicPack q = fixture();
+        q.conditions.push_back(Condition{});
+        q.conditions.back().id    = QStringLiteral("twin");
+        q.conditions.back().label = QStringLiteral("Twin");
+        q.conditions.push_back(Condition{});
+        q.conditions.back().id    = QStringLiteral("rival");
+        q.conditions.back().label = QStringLiteral("Rival");
+        q.edges.push_back(Edge{ QStringLiteral("focus"), QStringLiteral("twin"),
+                                EdgeType::Corroborates, Strength::Strong, {} });
+        // Written the other way round on purpose: the edge means the same from either end, and a
+        // reader must not have to know which way an author happened to type it.
+        q.edges.push_back(Edge{ QStringLiteral("rival"), QStringLiteral("focus"),
+                                EdgeType::Excludes, Strength::Strong, {} });
+
+        const DagLayout l = layoutDag(q, QStringLiteral("focus"));
+
+        check(nodeById(l, "twin") && nodeById(l, "twin")->rank == 0,
+              "a corroborating partner joins the focus's own rank, not the causal flow");
+        check(nodeById(l, "rival") && nodeById(l, "rival")->rank == 0,
+              "…and so does an excluded one, written from either end");
+
+        int corroborates = 0, excludes = 0, tipped = 0;
+        for (const DagEdge &e : l.edges) {
+            if (e.relation == QLatin1String("corroborates")) { ++corroborates; if (e.tip) ++tipped; }
+            if (e.relation == QLatin1String("excludes"))     { ++excludes;     if (e.tip) ++tipped; }
+        }
+        check(corroborates > 0, "the corroborates edge is emitted");
+        check(excludes > 0, "the excludes edge is emitted");
+        check(tipped == 0, "neither carries an arrowhead — they claim no direction");
+
+        int symmetric = 0, labelled = 0;
+        for (const DagEdge &e : l.edges) {
+            if (e.symmetric) ++symmetric;
+            if (e.relation == QLatin1String("excludes") && !e.strengthLabel.isEmpty()) ++labelled;
+        }
+        check(symmetric == corroborates + excludes, "every non-causal edge says it is symmetric");
+        check(labelled == 0,
+              "an exclusion carries no strength word — the pair is incompatible or it is not");
+
+        // Evaluated into a local FIRST: the arguments to check() are evaluated in an unspecified
+        // order, so building the message inline can read `why` before the call has filled it.
+        QString       why;
+        const bool    crosses = linesCrossBoxes(l, &why);
+        const QString msg     = QStringLiteral("…and they route around the boxes too%1")
+                                    .arg(why.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(why));
+        check(!crosses, qPrintable(msg));
+
+        // Scoped to the FOCUS. A corroborates edge between two of the focus's causes is a fact about
+        // those two, not about the thing being read, and drawing it would answer a question nobody
+        // asked on this page.
+        CharacteristicPack r = fixture();
+        r.edges.push_back(Edge{ QStringLiteral("cause1"), QStringLiteral("cause2"),
+                                EdgeType::Corroborates, Strength::Strong, {} });
+        const DagLayout lr = layoutDag(r, QStringLiteral("focus"));
+        int offFocus = 0;
+        for (const DagEdge &e : lr.edges)
+            if (e.relation == QLatin1String("corroborates")) ++offFocus;
+        check(offFocus == 0, "a non-causal edge that does not touch the focus is not drawn");
+    }
+
     std::printf("\n%s (%d failure%s)\n", g_fail == 0 ? "PASSED" : "FAILED", g_fail,
                 g_fail == 1 ? "" : "s");
     return g_fail == 0 ? 0 : 1;

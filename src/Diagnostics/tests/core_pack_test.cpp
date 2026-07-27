@@ -76,7 +76,7 @@ int main()
 
         auto coverage = [&](const char *id) { return coverageOf(p, QString::fromLatin1(id)); };
         check(coverage("poor_pelvic_disassociation") == 9, "poor pelvic disassociation explains 9");
-        check(coverage("limited_thoracic_rotation") == 7, "limited thoracic rotation explains 7");
+        check(coverage("limited_thoracic_rotation") == 8, "limited thoracic rotation explains 8");
         check(coverage("limited_lead_hip_ir") == 6, "limited lead-hip internal rotation explains 6");
         check(coverage("limited_trail_hip_ir") == 5, "limited trail-hip internal rotation explains 5");
         check(coverage("poor_core_stability") == 5, "poor core stability explains 5");
@@ -84,8 +84,24 @@ int main()
         const int topFive = coverage("poor_pelvic_disassociation") + coverage("limited_thoracic_rotation")
                           + coverage("limited_lead_hip_ir") + coverage("limited_trail_hip_ir")
                           + coverage("poor_core_stability");
-        check(topFive >= int(p.edges.size()) * 3 / 10,
-              "five causes account for a substantial share of every causal edge");
+
+        // Measured against the SWING-fault edges, not every edge in the pack.
+        //
+        // The claim being made is that a handful of physical capacities explain most of what goes
+        // wrong IN THE SWING — that this is a diagnosis rather than a restated fault list. The
+        // ball-flight layer added a second tier of edges (fault → outcome) that no screen result
+        // reaches directly and never will: a tight trail hip does not cause a slice, it causes the
+        // delivery that causes the slice. Counting those in the denominator would make the same
+        // library look less concentrated purely for having become able to explain the shot the
+        // golfer actually saw. Scoped, not loosened — the threshold itself is unchanged.
+        int swingEdges = 0;
+        for (const Edge &e : p.edges) {
+            const Condition *to = p.condition(e.to);
+            if (e.type == EdgeType::Causes && to && to->group != ConditionGroup::BallFlight)
+                ++swingEdges;
+        }
+        check(topFive >= swingEdges * 3 / 10,
+              "five causes account for a substantial share of every SWING causal edge");
 
         // Every dominant cause must be screen-backed — that is what makes the output actionable
         // without any capture hardware at all.
@@ -122,7 +138,7 @@ int main()
 
     // ── Every characteristic resolves to Live, or to a NAMED missing measure ────
     {
-        int live = 0, planned = 0, noProducer = 0, notCapturable = 0;
+        int live = 0, planned = 0, noProducer = 0, notCapturable = 0, externalDevice = 0;
         bool everyGapNamed = true;
 
         for (const Condition &c : p.conditions) {
@@ -141,12 +157,19 @@ int main()
                         ++notCapturable;
                         if (m->gapReason.isEmpty()) everyGapNamed = false;
                         break;
+                    // Held to the same standard as a capture gap: the status says something stands
+                    // in the way, and only the reason says WHICH device. Two surfaces quote it.
+                    case MeasureStatus::ExternalDevice:
+                        ++externalDevice;
+                        if (m->gapReason.isEmpty()) everyGapNamed = false;
+                        break;
                     }
                 }
             }
         }
-        std::printf("        (measure bindings: %d live, %d planned, %d no-producer, %d capture-gap)\n",
-                    live, planned, noProducer, notCapturable);
+        std::printf("        (measure bindings: %d live, %d planned, %d no-producer, "
+                    "%d external-device, %d capture-gap)\n",
+                    live, planned, noProducer, externalDevice, notCapturable);
         check(everyGapNamed, "every characteristic resolves to a real measure, gaps named");
         check(live > 0, "some characteristics are LIVE on day one, not all stubs");
     }
@@ -163,11 +186,14 @@ int main()
         check(provided > 0 && allBound, "every Provided measure names a MetricCatalogue key");
 
         // The payoff of ranking series rather than reduced measures: one producer unblocks several
-        // characteristics. pelvisSway carries sway, slide and hanging back at three different phases.
+        // characteristics. pelvisSway carries sway, slide, hanging back and the finish read at four
+        // different phases — one producer, four faults, which is the payoff being demonstrated. The
+        // number is updated deliberately when a reducer is added, never loosened to a `>=`: the
+        // claim is that these are the reducers somebody chose, not that there are some.
         int onPelvisSway = 0;
         for (const Measure &m : p.measures)
             if (m.metricKey == QStringLiteral("pelvisSway")) ++onPelvisSway;
-        check(onPelvisSway == 3, "three characteristics sit on one pelvis-sway series (one producer)");
+        check(onPelvisSway == 4, "four characteristics sit on one pelvis-sway series (one producer)");
     }
 
     // ── The spinal measures are roadmap items, not capture gaps ─────────────────

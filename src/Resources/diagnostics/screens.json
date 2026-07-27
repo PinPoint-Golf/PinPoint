@@ -1,0 +1,148 @@
+{
+  "id": "core",
+  "version": "1.0.0",
+  "schemaVersion": 1,
+  "_comment": [
+    "The physical-screen registry. A `screenRef` on a characteristic names a row here, and this is",
+    "what turns 'screen this — it would explain four of your findings' from a namespace into",
+    "something a coach can actually run.",
+    "",
+    "PROVENANCE. Every protocol below is described GENERICALLY, from the clinical range-of-motion",
+    "literature: a seated trunk rotation, a knee-to-wall, a modified Thomas test. No branded",
+    "screening system is named, cited or alluded to anywhere, and core_pack_test greps the raw bytes",
+    "to keep it that way. The movements are common property; the packaging of them is somebody's",
+    "product.",
+    "",
+    "PASS CRITERIA are typical adult reference values from that literature and are seeds, exactly",
+    "like the norm corridors: they are `proposed` until somebody attaches a DOI. Where the",
+    "literature gives a range rather than a threshold the criterion is stated in words and",
+    "passAtLeast is omitted, because inventing a number would read as more certain than the words.",
+    "",
+    "None of these is a diagnosis. A screen says what the body can do on a table; whether that",
+    "explains what the swing did is the explanation pass's job, and whether it needs treating is a",
+    "clinician's."
+  ],
+  "screens": [
+    {
+      "id": "screen.trailHipInternalRotation",
+      "label": "Trail hip internal rotation",
+      "bodyRegion": "Hip",
+      "protocol": "Seated with the hip and knee at 90 degrees, or prone with the knee flexed, rotate the shin outward so the hip turns inward. Measure the angle the shin travels from vertical with a goniometer, stopping at the first resistance rather than at end range, and keep the pelvis still — letting it lift is what makes this test read high.",
+      "passCriterion": "At least 30 degrees; 30 to 45 is typical for an adult.",
+      "passAtLeast": 30.0,
+      "unit": "°",
+      "note": "The trail hip has to accept the backswing turn. A restriction here shows up as the pelvis sliding instead of rotating, which is why sway and a straightening trail knee both point at it."
+    },
+    {
+      "id": "screen.leadHipInternalRotation",
+      "label": "Lead hip internal rotation",
+      "bodyRegion": "Hip",
+      "protocol": "As for the trail hip, on the lead side.",
+      "passCriterion": "At least 30 degrees; 30 to 45 is typical for an adult.",
+      "passAtLeast": 30.0,
+      "unit": "°",
+      "note": "The lead hip has to clear through impact. When it cannot, the pelvis finds room by moving toward the ball instead — which is early extension."
+    },
+    {
+      "id": "screen.pelvicDisassociation",
+      "label": "Pelvic disassociation",
+      "bodyRegion": "Pelvis",
+      "protocol": "Standing in a golf posture, rotate the pelvis left and right while holding the chest still — a club across the shoulders makes the chest easy to watch. Look for smooth, independent rotation rather than the whole trunk turning together or the lower back hinging to supply it.",
+      "passCriterion": "Smooth independent rotation both ways, with no lumbar hinge and no compensatory sway.",
+      "note": "Qualitative on purpose: what matters is whether the two can move separately, not how many degrees. This is the single most explanatory screen in the library."
+    },
+    {
+      "id": "screen.thoracicRotation",
+      "label": "Thoracic rotation",
+      "bodyRegion": "Thoracic spine",
+      "protocol": "Seated with the arms crossed on the chest to remove the shoulders from the movement, rotate the trunk each way. Seated rather than standing so the hips cannot contribute.",
+      "passCriterion": "At least 45 degrees to each side.",
+      "passAtLeast": 45.0,
+      "unit": "°",
+      "note": "A restriction here limits the backswing turn itself, which is a different fault from having turn but no separation."
+    },
+    {
+      "id": "screen.thoracicExtension",
+      "label": "Thoracic extension",
+      "bodyRegion": "Thoracic spine",
+      "protocol": "Prone press-up, or a wall angel with the low back flat. Watch whether the upper back can reach neutral extension without the lumbar spine arching to fake it.",
+      "passCriterion": "Reaches neutral extension without a lumbar compensation.",
+      "note": "Qualitative: the question is whether the segment can get there at all."
+    },
+    {
+      "id": "screen.thoracicKyphosis",
+      "label": "Fixed thoracic curve",
+      "bodyRegion": "Thoracic spine",
+      "protocol": "Observe the standing upper-back curve from the side, or measure it with an inclinometer. The distinction that matters is whether the curve is postural — it straightens on request — or fixed.",
+      "passCriterion": "A curve that is not fixed: it reduces when the golfer stands tall.",
+      "note": "A fixed curve is a structural fact to work around, not a fault to correct. Telling somebody to stand up out of one is asking for something they cannot give."
+    },
+    {
+      "id": "screen.shoulderFlexion",
+      "label": "Shoulder flexion",
+      "bodyRegion": "Shoulder",
+      "protocol": "Supine with the knees bent and the low back flat, raise the arm overhead. Keeping the back flat is the whole test — an arching lumbar spine will produce the range the shoulder does not have.",
+      "passCriterion": "At least 160 degrees.",
+      "passAtLeast": 160.0,
+      "unit": "°"
+    },
+    {
+      "id": "screen.trailShoulderExternalRotation",
+      "label": "Trail shoulder external rotation",
+      "bodyRegion": "Shoulder",
+      "protocol": "Supine, shoulder abducted to 90 degrees and elbow flexed to 90 (the 90/90 position), rotate the forearm back toward the table. Stabilise the shoulder blade.",
+      "passCriterion": "At least 80 degrees.",
+      "passAtLeast": 80.0,
+      "unit": "°",
+      "note": "The trail arm needs this to fold at the top without the elbow flying."
+    },
+    {
+      "id": "screen.ankleDorsiflexion",
+      "label": "Ankle dorsiflexion",
+      "bodyRegion": "Ankle",
+      "protocol": "Knee-to-wall: foot square to a wall, drive the knee forward over the toes until the heel begins to lift, and measure the distance from the big toe to the wall.",
+      "passCriterion": "At least 10 cm.",
+      "passAtLeast": 10.0,
+      "unit": "cm",
+      "note": "A stiff ankle takes away the lead leg's ability to accept load, which shows up at the finish."
+    },
+    {
+      "id": "screen.hipExtension",
+      "label": "Hip extension",
+      "bodyRegion": "Hip",
+      "protocol": "Modified Thomas test: supine at the end of a table, one knee held to the chest, the other thigh hanging free. Watch whether the free thigh reaches horizontal.",
+      "passCriterion": "The thigh reaches neutral (horizontal) without the low back arching.",
+      "note": "A hip that cannot extend pulls the pelvis into a tilt the low back has to absorb, which is the mechanism behind an exaggerated address arch."
+    },
+    {
+      "id": "screen.wristMobility",
+      "label": "Wrist mobility",
+      "bodyRegion": "Wrist",
+      "protocol": "Goniometer through flexion and extension, then radial and ulnar deviation, on both wrists. Compare sides — an asymmetry matters more here than an absolute figure.",
+      "passCriterion": "At least 60 degrees of extension and 60 of flexion, with radial and ulnar deviation broadly symmetric between sides.",
+      "passAtLeast": 60.0,
+      "unit": "°",
+      "note": "The lead wrist has to hold a position under load through impact; a restriction is why some golfers cannot hold one however much they practise."
+    },
+    {
+      "id": "screen.coreStability",
+      "label": "Core stability",
+      "bodyRegion": "Trunk",
+      "protocol": "A front plank held with a neutral spine, or an anti-rotation hold against a band. The test ends when the pelvis drops or rotates, not when it hurts.",
+      "passCriterion": "At least 60 seconds without the pelvis dropping or rotating.",
+      "passAtLeast": 60.0,
+      "unit": "s",
+      "note": "Endurance rather than strength: the swing asks for a position to be held repeatedly, not once."
+    },
+    {
+      "id": "screen.singleLegBalance",
+      "label": "Single-leg balance",
+      "bodyRegion": "Whole body",
+      "protocol": "Stand on one leg, eyes open, hands on hips. Time to the first loss of control — a hop, a hand off the hip, or the free foot touching down. Test both sides.",
+      "passCriterion": "At least 25 seconds, each side.",
+      "passAtLeast": 25.0,
+      "unit": "s",
+      "note": "Read the two sides together. A golfer who is steady on the trail leg and not on the lead one has a reason not to move onto it."
+    }
+  ]
+}

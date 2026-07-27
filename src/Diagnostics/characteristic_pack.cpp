@@ -365,6 +365,14 @@ ValidationReport validatePack(const CharacteristicPack &pack)
         if (!rc.valid)
             err(r, QStringLiteral("badReducer"), m.id,
                 QStringLiteral("Measure '%1': %2").arg(m.id, rc.reason));
+
+        // An ExternalDevice measure without a reason is indistinguishable, on every surface that
+        // shows it, from one nobody has got round to. The status says WHAT stands in the way; the
+        // reason has to say WHICH device, or the roadmap's integration section is a list of labels.
+        if (m.status == MeasureStatus::ExternalDevice && m.gapReason.isEmpty())
+            warn(r, QStringLiteral("externalDeviceNoReason"), m.id,
+                 QStringLiteral("Measure '%1' reads from an external device but does not say which. "
+                                "Name it — the roadmap and the measure page both quote this.").arg(m.id));
     }
 
     // --- signals -------------------------------------------------------------
@@ -468,6 +476,32 @@ ValidationReport validatePack(const CharacteristicPack &pack)
         if (!c.supersededBy.isEmpty() && !conditionSet.contains(c.supersededBy))
             err(r, QStringLiteral("unknownCondition"), c.id,
                 QStringLiteral("'%1' is superseded by unknown condition '%2'.").arg(c.id, c.supersededBy));
+    }
+
+    // --- one term, one condition ---------------------------------------------
+    //
+    // Aliases are how the library is reachable for anyone who did not write it, so two conditions
+    // claiming one term is not untidiness — it decides which page a search for "flip" lands on, and
+    // whichever came first in the file wins. The comparison folds case and trims, because "OTT" and
+    // "ott " are the same word to the person typing it. A condition's own LABEL counts as a claim on
+    // that term too.
+    {
+        QHash<QString, QString> claimedBy;      // folded term -> condition id
+        for (const Condition &c : pack.conditions) {
+            QStringList terms = c.aliases;
+            terms << c.label;
+            for (const QString &raw : terms) {
+                const QString t = raw.trimmed().toCaseFolded();
+                if (t.isEmpty()) continue;
+                const auto it = claimedBy.constFind(t);
+                if (it == claimedBy.constEnd()) { claimedBy.insert(t, c.id); continue; }
+                if (it.value() == c.id) continue;
+                warn(r, QStringLiteral("duplicateAlias"), c.id,
+                     QStringLiteral("'%1' and '%2' both answer to \"%3\". One term can only lead "
+                                    "one place — rename it on whichever owns it less.")
+                         .arg(c.id, it.value(), raw.trimmed()));
+            }
+        }
     }
 
     // --- axis pairing --------------------------------------------------------
@@ -757,6 +791,7 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         Condition         c;
         c.id         = o.value(QStringLiteral("id")).toString();
         c.label      = o.value(QStringLiteral("label")).toString();
+        c.aliases    = readStringList(o.value(QStringLiteral("aliases")));
         c.axis       = o.value(QStringLiteral("axis")).toString();
         c.detectedBy = readStringList(o.value(QStringLiteral("detectedBy")));
         c.screenRef  = o.value(QStringLiteral("screenRef")).toString();
@@ -886,6 +921,7 @@ QJsonObject savePack(const CharacteristicPack &pack)
         if (!c.consequence.isEmpty()) o.insert(QStringLiteral("consequence"), writeLocalised(c.consequence));
         if (!c.injuryNote.isEmpty())  o.insert(QStringLiteral("injuryNote"), writeLocalised(c.injuryNote));
         if (!c.drills.isEmpty())      o.insert(QStringLiteral("drills"), writeStringList(c.drills));
+        if (!c.aliases.isEmpty())     o.insert(QStringLiteral("aliases"), writeStringList(c.aliases));
 
         QJsonObject prov;
         if (!c.provenance.author.isEmpty())   prov.insert(QStringLiteral("author"), c.provenance.author);

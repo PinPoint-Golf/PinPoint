@@ -38,10 +38,13 @@ Item {
     // failure, it is an honest statement that no sensor we have can see this.
     function _resolvabilityColor(r) {
         switch (r) {
-        case "live":          return Theme.colorRagGood
-        case "planned":       return Theme.colorRagWatch
-        case "noProducer":    return Theme.colorRagFault
-        case "notCapturable": return Theme.colorRagNone
+        case "live":           return Theme.colorRagGood
+        case "planned":        return Theme.colorRagWatch
+        case "noProducer":     return Theme.colorRagFault
+        // An integration we intend to build, gated on hardware the golfer may not own — not our
+        // failure and not a dead end, so it reads as the amber neighbour of "planned", not as none.
+        case "externalDevice": return Theme.colorRagWatch
+        case "notCapturable":  return Theme.colorRagNone
         }
         return Theme.colorRagNone
     }
@@ -89,6 +92,11 @@ Item {
                 // Causes and effects both, because the same condition is routinely both.
                 text: {
                     var bits = []
+                    // When the search matched an ALIAS rather than the label, say so first. Without
+                    // it a search for "flip" returns a row headed "Scooping" and the reader cannot
+                    // tell whether the library understood them or just guessed.
+                    if (characteristic.matchedAlias)
+                        bits.push(qsTr("also called \"%1\"").arg(characteristic.matchedAlias))
                     if (characteristic.measureCount > 0)
                         bits.push(qsTr("%n measure(s)", "", characteristic.measureCount))
                     if (characteristic.causeCount > 0)

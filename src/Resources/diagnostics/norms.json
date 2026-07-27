@@ -607,7 +607,7 @@
       "context": "any",
       "mu": 2.6,
       "sigmaLo": 0.4,
-      "unit": "",
+      "unit": ":1",
       "source": "heuristic",
       "monitorLo": 1.8,
       "monitorHi": 3.6,
@@ -711,9 +711,659 @@
       "context": "any",
       "mu": 70.0,
       "sigmaLo": 22.0,
-      "unit": "",
+      "unit": "°",
       "source": "heuristic",
       "citation": "ESTIMATE, not a published figure - the catalogue states a direction but no number. The corridor is deliberately wide so it under-fires rather than over-fires. First candidate for the literature review, and for re-seating from a corpus."
+    },
+    {
+      "measure": "m_spineBendAtAddress",
+      "context": "any",
+      "mu": 40.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_spineBendLoss",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 5.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_axisTiltAtTop",
+      "context": "any",
+      "mu": 12.0,
+      "sigmaLo": 6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisThrustDown",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 4.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisLiftTop",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 2.5,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisSwayBack",
+      "context": "any",
+      "mu": -2.0,
+      "sigmaLo": 3.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisSwayDown",
+      "context": "any",
+      "mu": 8.0,
+      "sigmaLo": 4.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisSwayImpact",
+      "context": "any",
+      "mu": 3.0,
+      "sigmaLo": 4.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_thoraxDrift",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 10.0,
+      "unit": "% stance width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadKneeFlex",
+      "context": "any",
+      "mu": 25.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shoulderAlignment",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shoulderPlane",
+      "context": "any",
+      "mu": 50.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_ballBodyGap",
+      "context": "any",
+      "mu": 130.0,
+      "sigmaLo": 20.0,
+      "unit": "% shoulder width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailElbowRise",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 15.0,
+      "unit": "% shoulder width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadArmToTorso",
+      "context": "any",
+      "mu": 20.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadHandWidth",
+      "context": "any",
+      "mu": 65.0,
+      "sigmaLo": 10.0,
+      "unit": "% arm length",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_xFactorStretch",
+      "context": "any",
+      "mu": 5.0,
+      "sigmaLo": 3.0,
+      "sigmaHi": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_clubPathAtImpact",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_feetAlignment",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_hipAlignment",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 5.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_headSwayBack",
+      "context": "any",
+      "mu": 4.0,
+      "sigmaLo": 3.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_headLiftBack",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 3.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadHeelLiftTop",
+      "context": "any",
+      "mu": 2.0,
+      "sigmaLo": 2.0,
+      "sigmaHi": 4.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_impactShaftLean",
+      "context": "any",
+      "mu": 5.0,
+      "sigmaLo": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_impactShaftLean",
+      "context": "driver",
+      "mu": 0.0,
+      "sigmaLo": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_impactShaftLean",
+      "context": "iron",
+      "mu": 8.0,
+      "sigmaLo": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_impactShaftLean",
+      "context": "wedge",
+      "mu": 10.0,
+      "sigmaLo": 5.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_kneeFlexAddress",
+      "context": "any",
+      "mu": 22.0,
+      "sigmaLo": 7.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_trailKneeFlex",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_thoraxRotP4",
+      "context": "any",
+      "mu": 90.0,
+      "sigmaLo": 12.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_thoraxRotP4",
+      "context": "driver",
+      "mu": 95.0,
+      "sigmaLo": 12.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_thoraxRotP4",
+      "context": "iron",
+      "mu": 88.0,
+      "sigmaLo": 12.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_thoraxRotP4",
+      "context": "wedge",
+      "mu": 80.0,
+      "sigmaLo": 12.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisRotP5",
+      "context": "any",
+      "mu": 25.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisRotP7",
+      "context": "any",
+      "mu": 40.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisRotP7",
+      "context": "driver",
+      "mu": 45.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisRotP7",
+      "context": "iron",
+      "mu": 38.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisRotP7",
+      "context": "wedge",
+      "mu": 30.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisRotRateP6P7",
+      "context": "any",
+      "mu": 250.0,
+      "sigmaLo": 100.0,
+      "unit": "°/s",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_axisTiltImpact",
+      "context": "any",
+      "mu": 25.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_axisTiltImpact",
+      "context": "driver",
+      "mu": 30.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_axisTiltImpact",
+      "context": "iron",
+      "mu": 20.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_axisTiltImpact",
+      "context": "wedge",
+      "mu": 15.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_spineSideBendTop",
+      "context": "any",
+      "mu": 8.0,
+      "sigmaLo": 6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_leadUpperArmToChest",
+      "context": "any",
+      "mu": 25.0,
+      "sigmaLo": 12.0,
+      "unit": "% shoulder width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_comOverLeadFootFinish",
+      "context": "any",
+      "mu": 15.0,
+      "sigmaLo": 10.0,
+      "unit": "% stance width",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisSwayFinish",
+      "context": "any",
+      "mu": 12.0,
+      "sigmaLo": 6.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_thoraxRotFinish",
+      "context": "any",
+      "mu": 110.0,
+      "sigmaLo": 20.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftDirectionP2",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 5.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftDirectionP4",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftAngleP4",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 15.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftAngleP4",
+      "context": "driver",
+      "mu": 10.0,
+      "sigmaLo": 15.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftAngleP4",
+      "context": "iron",
+      "mu": -5.0,
+      "sigmaLo": 15.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftAngleP4",
+      "context": "wedge",
+      "mu": -20.0,
+      "sigmaLo": 15.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftPlaneBackswing",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 8.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_shaftPlaneDelivery",
+      "context": "any",
+      "mu": -3.0,
+      "sigmaLo": 6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_lowPointAhead",
+      "context": "any",
+      "mu": 5.0,
+      "sigmaLo": 4.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_lowPointAhead",
+      "context": "driver",
+      "mu": -3.0,
+      "sigmaLo": 4.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_lowPointAhead",
+      "context": "iron",
+      "mu": 8.0,
+      "sigmaLo": 4.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_lowPointAhead",
+      "context": "wedge",
+      "mu": 8.0,
+      "sigmaLo": 5.0,
+      "unit": "cm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_attackAngle",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_attackAngle",
+      "context": "driver",
+      "mu": 2.0,
+      "sigmaLo": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_attackAngle",
+      "context": "iron",
+      "mu": -4.0,
+      "sigmaLo": 2.5,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_attackAngle",
+      "context": "wedge",
+      "mu": -5.0,
+      "sigmaLo": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_handSpeedP6P7",
+      "context": "any",
+      "mu": 20.0,
+      "sigmaLo": 40.0,
+      "unit": "mph/s",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_faceToPath",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 2.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_launchDirection",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 2.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_launchAngle",
+      "context": "any",
+      "mu": 15.0,
+      "sigmaLo": 5.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_launchAngle",
+      "context": "driver",
+      "mu": 13.0,
+      "sigmaLo": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_launchAngle",
+      "context": "iron",
+      "mu": 17.0,
+      "sigmaLo": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_launchAngle",
+      "context": "wedge",
+      "mu": 28.0,
+      "sigmaLo": 6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_spinAxis",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 5.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_strikeLocation",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 8.0,
+      "unit": "mm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_smashFactor",
+      "context": "any",
+      "mu": 1.4,
+      "sigmaLo": 0.08,
+      "unit": "ratio",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_smashFactor",
+      "context": "driver",
+      "mu": 1.48,
+      "sigmaLo": 0.05,
+      "unit": "ratio",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_smashFactor",
+      "context": "iron",
+      "mu": 1.38,
+      "sigmaLo": 0.06,
+      "unit": "ratio",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_smashFactor",
+      "context": "wedge",
+      "mu": 1.2,
+      "sigmaLo": 0.1,
+      "unit": "ratio",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_spinRate",
+      "context": "any",
+      "mu": 5000.0,
+      "sigmaLo": 2000.0,
+      "unit": "rpm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_spinRate",
+      "context": "driver",
+      "mu": 2600.0,
+      "sigmaLo": 600.0,
+      "unit": "rpm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_spinRate",
+      "context": "iron",
+      "mu": 6000.0,
+      "sigmaLo": 1500.0,
+      "unit": "rpm",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_spinRate",
+      "context": "wedge",
+      "mu": 9000.0,
+      "sigmaLo": 2000.0,
+      "unit": "rpm",
+      "source": "heuristic"
     }
   ]
 }

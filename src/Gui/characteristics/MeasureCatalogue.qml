@@ -501,6 +501,7 @@ Item {
                             { kind: "status", value: "live",          label: qsTr("Live") },
                             { kind: "status", value: "planned",       label: qsTr("Planned") },
                             { kind: "status", value: "noProducer",    label: qsTr("No producer") },
+                            { kind: "status", value: "externalDevice", label: qsTr("Launch monitor") },
                             { kind: "status", value: "notCapturable", label: qsTr("Capture gap") }]
 
                     delegate: Rectangle {

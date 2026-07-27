@@ -21,6 +21,7 @@
 #include <QObject>   // tr() for the direction phrasing — the only user-facing strings in this file
 
 #include <algorithm>
+#include <vector>
 
 namespace pinpoint::analysis {
 
@@ -65,10 +66,11 @@ const Row<MeasureKind> kMeasureKinds[] = {
 };
 
 const Row<MeasureStatus> kMeasureStatuses[] = {
-    { MeasureStatus::Live,          "live",          "Live" },
-    { MeasureStatus::Planned,       "planned",       "Planned" },
-    { MeasureStatus::NoProducer,    "noProducer",    "No producer" },
-    { MeasureStatus::NotCapturable, "notCapturable", "Not measurable from capture" },
+    { MeasureStatus::Live,           "live",           "Live" },
+    { MeasureStatus::Planned,        "planned",        "Planned" },
+    { MeasureStatus::NoProducer,     "noProducer",     "No producer" },
+    { MeasureStatus::NotCapturable,  "notCapturable",  "Not measurable from capture" },
+    { MeasureStatus::ExternalDevice, "externalDevice", "Needs a launch monitor" },
 };
 
 const Row<SignalTest> kSignalTests[] = {
@@ -90,6 +92,9 @@ const Row<ConditionGroup> kGroups[] = {
     { ConditionGroup::ArmsAndClub, "armsAndClub", "Arms & club" },
     { ConditionGroup::Release,     "release",     "Release" },
     { ConditionGroup::Sequence,    "sequence",    "Sequence" },
+    { ConditionGroup::Impact,      "impact",      "Impact" },
+    { ConditionGroup::Finish,      "finish",      "Finish" },
+    { ConditionGroup::BallFlight,  "ballFlight",  "Ball flight" },
 };
 
 const Row<Observability> kObservabilities[] = {
@@ -171,6 +176,16 @@ bool    directionFromName(const QString &s, Direction &out) { return fromName(kD
 QString conditionGroupName(ConditionGroup g)  { return nameOf(kGroups, g); }
 QString conditionGroupLabel(ConditionGroup g) { return labelOf(kGroups, g); }
 bool    conditionGroupFromName(const QString &s, ConditionGroup &out) { return fromName(kGroups, s, out); }
+
+const std::vector<ConditionGroup> &allConditionGroups()
+{
+    static const std::vector<ConditionGroup> v = [] {
+        std::vector<ConditionGroup> r;
+        for (const auto &row : kGroups) r.push_back(row.value);
+        return r;
+    }();
+    return v;
+}
 
 QString observabilityName(Observability o) { return nameOf(kObservabilities, o); }
 bool    observabilityFromName(const QString &s, Observability &out) { return fromName(kObservabilities, s, out); }

@@ -345,6 +345,35 @@ not a movement, which is a very different conversation.
 
 ---
 
+## 4b. What the ball did — and what a launch monitor adds
+
+The library now names the shots themselves, not only the swings that produce them: pull, push,
+slice, hook, chunk, thin, top, sky, shank and the rest. **They are ordinary characteristics**, in a
+group called Ball flight, which is what lets an explanation run all the way from a physical
+restriction to the shot you actually saw — a tight lead hip causes early extension, early extension
+causes the club to come from under, and that causes the block right.
+
+Two things are worth understanding about them.
+
+**Some are camera-work and some need a launch monitor.** Where the ball STARTS is something two
+cameras can see: pulls, pushes, launch height, ball speed. How it CURVES develops over a flight an
+indoor capture never sees, so slice, hook, spin and strike location need a launch monitor. Until one
+is connected those read *"needs a launch monitor"* rather than going quietly blank — the same way a
+metric says *"needs a face-on camera"* when a camera is missing. Launch-monitor integration is
+planned; when it arrives those readings simply start working, with no change to the library.
+
+**Some the app cannot yet tell apart, and says so.** A chunk is the ground struck before the ball
+AND a collapse in ball speed — two readings at once — and the app currently judges one reading at a
+time. So chunk, thin, top, sky and shank are marked as things only you or your coach can confirm.
+They are still in the library, still carry their definitions, and still sit at the end of the causal
+chains; the app simply does not claim to have seen one.
+
+**Draw and fade are deliberately absent.** A draw is a hook you meant. The shape is identical and the
+app has no way to know your intention, so it reports the curvature and leaves whether it was wanted
+to you — the same reason nothing in this model calls a finding good or bad.
+
+---
+
 ## 5. Where to find all this in the app
 
 | What you want | Where to go |
@@ -352,8 +381,15 @@ not a movement, which is a very different conversation.
 | Every metric the app can measure, what it means, its corridors | **Settings → Metrics** |
 | The corridors themselves, to inspect or edit | **Settings → Diagnostics → Measures & norms** |
 | Characteristics, their consequences, their causes | **Settings → Diagnostics → Characteristics** |
+| **What a coaching term means, in plain language** | **Settings → Diagnostics → Glossary** |
+| **The physical tests, and the drills that answer a fault** | **Settings → Diagnostics → Screens & drills** |
 | What is missing or wrong in the library | **Settings → Diagnostics → Causes & health** |
 | What is not yet measurable, and why | **Settings → Diagnostics → Roadmap** |
+
+**Search by the word you were taught.** Every characteristic carries the other names coaches use for
+it, so *flip* finds Scooping, *OTT* finds Over the top, and *standing up* finds Early extension. That
+works in the Characteristics list and in the Glossary, and the row tells you which term matched so
+you can see the library understood you rather than guessed.
 
 **A shortcut worth knowing.** On any metric's page in **Settings → Metrics**, each corridor is drawn
 as a band with a coloured link underneath it naming the norm behind it — for example

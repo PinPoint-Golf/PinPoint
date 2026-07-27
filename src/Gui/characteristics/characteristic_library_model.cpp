@@ -19,6 +19,8 @@
 #include "characteristic_library_model.h"
 
 #include "../../Diagnostics/dag_layout.h"      // the causal DAG, laid out in C++
+#include "../../Diagnostics/drill_pack.h"      // what `Condition::drills` points at
+#include "../../Diagnostics/screen_pack.h"     // what `Condition::screenRef` points at
 #include "../../Diagnostics/measure_sample.h"  // the phase grid the corpus check reads
 #include "../../Diagnostics/norm_provider.h"   // the context tree, for binding labels
 #include "metric_catalogue.h"
@@ -46,10 +48,14 @@ MeasureStatus weakest(MeasureStatus a, MeasureStatus b)
 {
     auto rank = [](MeasureStatus s) {
         switch (s) {
-        case MeasureStatus::Live:          return 0;
-        case MeasureStatus::Planned:       return 1;
-        case MeasureStatus::NoProducer:    return 2;
-        case MeasureStatus::NotCapturable: return 3;
+        case MeasureStatus::Live:           return 0;
+        case MeasureStatus::Planned:        return 1;
+        case MeasureStatus::NoProducer:     return 2;
+        // Weaker than NoProducer: that one needs code we can write, this one needs code AND hardware
+        // the golfer may not own. Still stronger than NotCapturable, which needs something that does
+        // not exist.
+        case MeasureStatus::ExternalDevice: return 3;
+        case MeasureStatus::NotCapturable:  return 4;
         }
         return 2;
     };
@@ -89,9 +95,7 @@ void CharacteristicLibraryModel::refresh()
 QVariantList CharacteristicLibraryModel::groups() const
 {
     QVariantList out;
-    for (ConditionGroup g : { ConditionGroup::Setup, ConditionGroup::Posture, ConditionGroup::Lateral,
-                              ConditionGroup::ArmsAndClub, ConditionGroup::Release,
-                              ConditionGroup::Sequence }) {
+    for (ConditionGroup g : allConditionGroups()) {
         QVariantMap m;
         m.insert(QStringLiteral("name"), conditionGroupName(g));
         m.insert(QStringLiteral("label"), conditionGroupLabel(g));
@@ -156,10 +160,18 @@ QVariantList CharacteristicLibraryModel::query(const QVariantMap &filters) const
         if (observableOnly && c.observability == Observability::Latent) continue;
 
         if (!search.isEmpty()) {
-            const bool hit = c.label.contains(search, Qt::CaseInsensitive)
-                             || c.id.contains(search, Qt::CaseInsensitive)
-                             || c.axis.contains(search, Qt::CaseInsensitive)
-                             || conditionGroupLabel(c.group).contains(search, Qt::CaseInsensitive);
+            // Aliases are searched even though the row does not show every one of them — this is the
+            // deliberate exception to "a hit the reader cannot see is a hit they cannot trust". A
+            // golfer types the word they were taught ("flip", "OTT", "standing up"); if that word
+            // does not find the page, the library is unreachable for them, and the MATCHED alias is
+            // marshalled below so the row can show why it was returned.
+            bool hit = c.label.contains(search, Qt::CaseInsensitive)
+                       || c.id.contains(search, Qt::CaseInsensitive)
+                       || c.axis.contains(search, Qt::CaseInsensitive)
+                       || conditionGroupLabel(c.group).contains(search, Qt::CaseInsensitive);
+            if (!hit)
+                for (const QString &a : c.aliases)
+                    if (a.contains(search, Qt::CaseInsensitive)) { hit = true; break; }
             if (!hit) continue;
         }
 
@@ -187,9 +199,18 @@ QVariantList CharacteristicLibraryModel::query(const QVariantMap &filters) const
             for (const QString &t : tailsOfAxis(p, c.axis))
                 if (t != c.id) axisPartner = t;
 
+        // Which alias answered, when one did. Without it a search for "flip" returns "Scooping" and
+        // the reader cannot tell whether the library understood them or simply guessed.
+        QString matchedAlias;
+        if (!search.isEmpty() && !c.label.contains(search, Qt::CaseInsensitive))
+            for (const QString &a : c.aliases)
+                if (a.contains(search, Qt::CaseInsensitive)) { matchedAlias = a; break; }
+
         QVariantMap r;
         r.insert(QStringLiteral("id"), c.id);
         r.insert(QStringLiteral("label"), c.label);
+        r.insert(QStringLiteral("aliases"), c.aliases);
+        r.insert(QStringLiteral("matchedAlias"), matchedAlias);
         r.insert(QStringLiteral("group"), conditionGroupName(c.group));
         r.insert(QStringLiteral("groupLabel"), conditionGroupLabel(c.group));
         r.insert(QStringLiteral("axis"), c.axis);
@@ -231,6 +252,63 @@ QVariantMap CharacteristicLibraryModel::detail(const QString &conditionId) const
     out.insert(QStringLiteral("citation"), c->provenance.citation);
     out.insert(QStringLiteral("author"), c->provenance.author);
     out.insert(QStringLiteral("observability"), observabilityName(c->observability));
+
+    // The non-causal relations. The DAG draws the causal graph and only the causal graph — rank is
+    // signed causal distance, and a symmetric edge has no direction to rank by — so without these
+    // rows a corroborates or excludes edge would be authored, validated, consumed by the explanation
+    // pass, and visible nowhere. That is the trap this guide names twice.
+    auto relationRows = [&](EdgeType type) {
+        QVariantList rows;
+        for (const Edge &e : p.edges) {
+            if (e.type != type) continue;
+            const QString otherId = (e.from == conditionId) ? e.to
+                                  : (e.to == conditionId)   ? e.from
+                                                            : QString();
+            if (otherId.isEmpty()) continue;
+            const Condition *other = p.condition(otherId);
+            QVariantMap r;
+            r.insert(QStringLiteral("id"), otherId);
+            r.insert(QStringLiteral("label"), other ? other->label : otherId);
+            r.insert(QStringLiteral("groupLabel"), other ? conditionGroupLabel(other->group) : QString());
+            rows.append(r);
+        }
+        return rows;
+    };
+    out.insert(QStringLiteral("corroboratedBy"), relationRows(EdgeType::Corroborates));
+    out.insert(QStringLiteral("excludes"), relationRows(EdgeType::Excludes));
+
+    // The screen RESOLVED, not just its id. `screenRef` has been marshalled since v1 and the page
+    // showed the raw `screen.trailHipInternalRotation` — which tells a coach the name of a test and
+    // nothing about how to run it. `screenMissing` is deliberate: a dangling reference must read as
+    // a defect, not as a condition that happens to have no screen.
+    if (!c->screenRef.isEmpty()) {
+        if (const Screen *s = sharedScreenSet().screen(c->screenRef)) {
+            QVariantMap sm;
+            sm.insert(QStringLiteral("id"), s->id);
+            sm.insert(QStringLiteral("label"), s->label);
+            sm.insert(QStringLiteral("bodyRegion"), s->bodyRegion);
+            sm.insert(QStringLiteral("protocol"), s->protocol);
+            sm.insert(QStringLiteral("passCriterion"), s->passCriterion);
+            sm.insert(QStringLiteral("note"), s->note);
+            out.insert(QStringLiteral("screen"), sm);
+        } else {
+            out.insert(QStringLiteral("screenMissing"), true);
+        }
+    }
+
+    QVariantList drillRows;
+    for (const QString &did : c->drills) {
+        const Drill *d = sharedDrillSet().drill(did);
+        QVariantMap  r;
+        r.insert(QStringLiteral("id"), did);
+        r.insert(QStringLiteral("label"), d ? d->label : did);
+        r.insert(QStringLiteral("instruction"), d ? d->instruction : QString());
+        r.insert(QStringLiteral("targets"), d ? d->targets : QString());
+        r.insert(QStringLiteral("note"), d ? d->note : QString());
+        r.insert(QStringLiteral("missing"), d == nullptr);
+        drillRows.append(r);
+    }
+    out.insert(QStringLiteral("drills"), drillRows);
 
     QVariantList measures;
     for (const QString &sid : c->detectedBy) {
@@ -400,6 +478,11 @@ QVariantMap CharacteristicLibraryModel::dag(const QString &conditionId, const QV
         m.insert(QStringLiteral("weight"), e.weight);
         m.insert(QStringLiteral("detects"), e.detects);
         m.insert(QStringLiteral("offeredOnly"), e.offeredOnly);
+        // Without these two the corroborates and excludes edges would be laid out, routed and
+        // drawn — as causal lines. That is the marshaller trap in its most misleading form: not a
+        // blank, but a confident wrong claim.
+        m.insert(QStringLiteral("relation"), e.relation);
+        m.insert(QStringLiteral("symmetric"), e.symmetric);
         m.insert(QStringLiteral("segment"), e.segment);
         m.insert(QStringLiteral("segments"), e.segments);
         m.insert(QStringLiteral("x1"), e.x1);
@@ -475,6 +558,138 @@ int CharacteristicLibraryModel::usageOfMeasure(const QString &measureId) const
     return n;
 }
 
+QVariantList CharacteristicLibraryModel::screens() const
+{
+    const CharacteristicPack &p = m_provider->pack();
+
+    QVariantList out;
+    for (const Screen &s : sharedScreenSet().screens) {
+        // What this screen would settle. A screen with nothing pointing at it is still listed —
+        // the library is being written, and a row nobody uses YET is not a row that is wrong — but
+        // the count is what makes the list readable in the order that matters.
+        QVariantList settles;
+        for (const Condition &c : p.conditions) {
+            if (c.screenRef != s.id) continue;
+            QVariantMap r;
+            r.insert(QStringLiteral("id"), c.id);
+            r.insert(QStringLiteral("label"), c.label);
+            r.insert(QStringLiteral("explains"), coverageOf(p, c.id));
+            settles.append(r);
+        }
+
+        QVariantMap r;
+        r.insert(QStringLiteral("id"), s.id);
+        r.insert(QStringLiteral("label"), s.label);
+        r.insert(QStringLiteral("bodyRegion"), s.bodyRegion);
+        r.insert(QStringLiteral("protocol"), s.protocol);
+        r.insert(QStringLiteral("passCriterion"), s.passCriterion);
+        r.insert(QStringLiteral("note"), s.note);
+        r.insert(QStringLiteral("citation"), s.citation);
+        // The numeric floor and its unit travel together or not at all: a bare number with no unit
+        // is unreadable, and the validator refuses that pairing at load for the same reason.
+        r.insert(QStringLiteral("hasPassValue"), s.passAtLeast.has_value());
+        r.insert(QStringLiteral("passAtLeast"), s.passAtLeast.value_or(0.0));
+        r.insert(QStringLiteral("unit"), s.unit);
+        r.insert(QStringLiteral("settles"), settles);
+        r.insert(QStringLiteral("settlesCount"), settles.size());
+        out.append(r);
+    }
+
+    std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        const int ca = a.toMap().value(QStringLiteral("settlesCount")).toInt();
+        const int cb = b.toMap().value(QStringLiteral("settlesCount")).toInt();
+        if (ca != cb) return ca > cb;
+        return a.toMap().value(QStringLiteral("label")).toString()
+             < b.toMap().value(QStringLiteral("label")).toString();
+    });
+    return out;
+}
+
+QVariantList CharacteristicLibraryModel::drills() const
+{
+    const CharacteristicPack &p = m_provider->pack();
+
+    QVariantList out;
+    for (const Drill &d : sharedDrillSet().drills) {
+        QVariantList answers;
+        for (const Condition &c : p.conditions) {
+            if (!c.drills.contains(d.id)) continue;
+            QVariantMap r;
+            r.insert(QStringLiteral("id"), c.id);
+            r.insert(QStringLiteral("label"), c.label);
+            answers.append(r);
+        }
+
+        QVariantMap r;
+        r.insert(QStringLiteral("id"), d.id);
+        r.insert(QStringLiteral("label"), d.label);
+        r.insert(QStringLiteral("instruction"), d.instruction);
+        r.insert(QStringLiteral("targets"), d.targets);
+        r.insert(QStringLiteral("equipment"), d.equipment);
+        r.insert(QStringLiteral("note"), d.note);
+        r.insert(QStringLiteral("answers"), answers);
+        r.insert(QStringLiteral("answersCount"), answers.size());
+        out.append(r);
+    }
+
+    std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        const int ca = a.toMap().value(QStringLiteral("answersCount")).toInt();
+        const int cb = b.toMap().value(QStringLiteral("answersCount")).toInt();
+        if (ca != cb) return ca > cb;
+        return a.toMap().value(QStringLiteral("label")).toString()
+             < b.toMap().value(QStringLiteral("label")).toString();
+    });
+    return out;
+}
+
+QVariantList CharacteristicLibraryModel::glossary(const QString &search) const
+{
+    const CharacteristicPack &p = m_provider->pack();
+    const QString             q = search.trimmed();
+
+    QVariantList out;
+    for (const Condition &c : p.conditions) {
+        if (!q.isEmpty()) {
+            bool hit = c.label.contains(q, Qt::CaseInsensitive)
+                       || c.consequence.text().contains(q, Qt::CaseInsensitive);
+            if (!hit)
+                for (const QString &a : c.aliases)
+                    if (a.contains(q, Qt::CaseInsensitive)) { hit = true; break; }
+            if (!hit) continue;
+        }
+
+        // "Commonly caused by …", straight off the causal edges. This is what makes the glossary
+        // cost nothing to maintain: the entry is not written anywhere, it is the graph read out.
+        QVariantList causedBy;
+        for (const QString &cid : causesOf(p, c.id)) {
+            const Condition *cause = p.condition(cid);
+            QVariantMap      r;
+            r.insert(QStringLiteral("id"), cid);
+            r.insert(QStringLiteral("label"), cause ? cause->label : cid);
+            causedBy.append(r);
+        }
+
+        QVariantMap r;
+        r.insert(QStringLiteral("id"), c.id);
+        r.insert(QStringLiteral("label"), c.label);
+        r.insert(QStringLiteral("aliases"), c.aliases);
+        r.insert(QStringLiteral("meaning"), c.consequence.text());
+        r.insert(QStringLiteral("group"), conditionGroupName(c.group));
+        r.insert(QStringLiteral("groupLabel"), conditionGroupLabel(c.group));
+        r.insert(QStringLiteral("causedBy"), causedBy);
+        r.insert(QStringLiteral("proposed"), c.provenance.tier == ProvenanceTier::Proposed);
+        out.append(r);
+    }
+
+    // Alphabetical by the name a reader would look up, not by group: a glossary is consulted, not
+    // browsed, and grouping it would make the common use — "what does X mean" — the slow one.
+    std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value(QStringLiteral("label")).toString().toCaseFolded()
+             < b.toMap().value(QStringLiteral("label")).toString().toCaseFolded();
+    });
+    return out;
+}
+
 QVariantList CharacteristicLibraryModel::roadmap() const
 {
     const CharacteristicPack &p   = m_provider->pack();
@@ -488,6 +703,7 @@ QVariantList CharacteristicLibraryModel::roadmap() const
     struct Group {
         QString       label;
         QString       metricKey;
+        QString       gapReason;            // ExternalDevice: which device, in one line
         MeasureStatus status = MeasureStatus::NoProducer;
         ViewNeeded    view   = ViewNeeded::Any;
         int           samples = 0;          // how many reducers sit on this series
@@ -499,7 +715,12 @@ QVariantList CharacteristicLibraryModel::roadmap() const
         if (m.status == MeasureStatus::Live) continue;
         // Capture gaps are NOT roadmap items. One row implying a producer that will never be built
         // corrupts the artefact's meaning for every other row.
-        if (m.status == MeasureStatus::NotCapturable) continue;
+        //
+        // ExternalDevice rows DO belong here — integrating a launch monitor is work we intend to do,
+        // and leaving it out would make the roadmap understate what stands between the pack and a
+        // complete diagnosis. They carry `integration: true` so the view can section them: the
+        // reader has to be able to tell "write this producer" from "talk to that device", and a
+        // single ranked list cannot say both.
 
         const QString key = m.metricKey.isEmpty() ? canonicalSeriesId(m.series) : m.metricKey;
         Group        &g   = groups[key];
@@ -508,6 +729,7 @@ QVariantList CharacteristicLibraryModel::roadmap() const
             g.metricKey = m.metricKey;
             g.status    = m.status;
             g.view      = m.viewNeeded;
+            g.gapReason = m.gapReason;
             // Prefer the catalogue's own name and view requirement: a Provided measure has no
             // facets to generate a series label from, and the requirement is the catalogue's to
             // state, not ours to guess.
@@ -534,9 +756,17 @@ QVariantList CharacteristicLibraryModel::roadmap() const
         r.insert(QStringLiteral("viewNeeded"), viewNeededName(g.view));
         r.insert(QStringLiteral("blocks"), g.blocked.size());
         r.insert(QStringLiteral("samples"), g.samples);
+        r.insert(QStringLiteral("integration"), g.status == MeasureStatus::ExternalDevice);
+        r.insert(QStringLiteral("gapReason"), g.gapReason);
         out.append(r);
     }
+    // Pipeline work first, integrations after — then by how much each unblocks. Sorting them into
+    // one ranked list by `blocks` alone would put "integrate a launch monitor" at the top of a list
+    // a developer reads as their queue.
     std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        const bool ia = a.toMap().value(QStringLiteral("integration")).toBool();
+        const bool ib = b.toMap().value(QStringLiteral("integration")).toBool();
+        if (ia != ib) return !ia;
         const int ba = a.toMap().value(QStringLiteral("blocks")).toInt();
         const int bb = b.toMap().value(QStringLiteral("blocks")).toInt();
         if (ba != bb) return ba > bb;
@@ -838,22 +1068,41 @@ QString CharacteristicLibraryModel::roadmapMarkdown() const
                          "picked up: a measure some characteristic needs and nothing yet produces. "
                          "Ranked by how many characteristics it unblocks.\n\n");
 
-    const QVariantList rows = roadmap();
-    if (rows.isEmpty()) {
-        md += QStringLiteral("_Nothing outstanding._\n\n");
-    } else {
-        md += QStringLiteral("| Measure | Unblocks | Status | View | Metric key |\n");
-        md += QStringLiteral("|---|---:|---|---|---|\n");
-        for (const QVariant &v : rows) {
+    // Split at the source rather than filtering the table twice: "write this producer" and
+    // "integrate that device" are different kinds of work, wanted by different people, and a single
+    // ranked list cannot say both without the reader assuming the wrong one.
+    QVariantList rows, integrations;
+    for (const QVariant &v : roadmap()) {
+        if (v.toMap().value(QStringLiteral("integration")).toBool()) integrations.append(v);
+        else                                                        rows.append(v);
+    }
+
+    auto table = [](const QVariantList &l) {
+        QString t = QStringLiteral("| Measure | Unblocks | Status | View | Metric key |\n");
+        t += QStringLiteral("|---|---:|---|---|---|\n");
+        for (const QVariant &v : l) {
             const QVariantMap r = v.toMap();
-            md += QStringLiteral("| %1 | %2 | %3 | %4 | `%5` |\n")
-                      .arg(r.value(QStringLiteral("label")).toString())
-                      .arg(r.value(QStringLiteral("blocks")).toInt())
-                      .arg(r.value(QStringLiteral("statusLabel")).toString(),
-                           r.value(QStringLiteral("viewNeeded")).toString(),
-                           r.value(QStringLiteral("metricKey")).toString());
+            t += QStringLiteral("| %1 | %2 | %3 | %4 | `%5` |\n")
+                     .arg(r.value(QStringLiteral("label")).toString())
+                     .arg(r.value(QStringLiteral("blocks")).toInt())
+                     .arg(r.value(QStringLiteral("statusLabel")).toString(),
+                          r.value(QStringLiteral("viewNeeded")).toString(),
+                          r.value(QStringLiteral("metricKey")).toString());
         }
-        md += QLatin1Char('\n');
+        return t + QStringLiteral("\n");
+    };
+
+    if (rows.isEmpty()) md += QStringLiteral("_Nothing outstanding._\n\n");
+    else                md += table(rows);
+
+    if (!integrations.isEmpty()) {
+        md += QStringLiteral("## Needs an external device\n\n");
+        md += QStringLiteral("Also roadmap work, but the work is an INTEGRATION rather than a "
+                             "producer written from our own pixels — and the golfer needs the "
+                             "hardware too. Until one is connected these read \"needs a launch "
+                             "monitor\" on every shot, which is the intended fallback, not a "
+                             "failure.\n\n");
+        md += table(integrations);
     }
 
     // Capture gaps are deliberately a SEPARATE section, never roadmap rows. A reader has to be able

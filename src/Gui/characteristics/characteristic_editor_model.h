@@ -107,6 +107,11 @@ public:
     // ── Field edits ─────────────────────────────────────────────────────────
     Q_INVOKABLE void setLabel(const QString &v);
     Q_INVOKABLE void setGroup(const QString &groupName);
+    // The coach terms this characteristic answers to. Taken as one comma-separated line rather than
+    // a list editor: an author types "flip, flipping, breakdown through impact" in one go, and a
+    // per-row add/remove UI would make the common case the slow one. Trimmed, de-duplicated and
+    // emptied-out here so the draft never carries a blank term into the duplicate lint.
+    Q_INVOKABLE void setAliases(const QString &commaSeparated);
     Q_INVOKABLE void setConsequence(const QString &v);
     Q_INVOKABLE void setInjuryNote(const QString &v);
     Q_INVOKABLE void setCitation(const QString &v);

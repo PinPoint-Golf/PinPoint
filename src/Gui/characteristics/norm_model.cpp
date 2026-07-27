@@ -43,10 +43,11 @@ namespace {
 QString statusLabel(MeasureStatus s)
 {
     switch (s) {
-    case MeasureStatus::Live:          return QObject::tr("Live");
-    case MeasureStatus::Planned:       return QObject::tr("Planned");
-    case MeasureStatus::NoProducer:    return QObject::tr("No producer");
-    case MeasureStatus::NotCapturable: return QObject::tr("Not measurable from capture");
+    case MeasureStatus::Live:           return QObject::tr("Live");
+    case MeasureStatus::Planned:        return QObject::tr("Planned");
+    case MeasureStatus::NoProducer:     return QObject::tr("No producer");
+    case MeasureStatus::NotCapturable:  return QObject::tr("Not measurable from capture");
+    case MeasureStatus::ExternalDevice: return QObject::tr("Needs a launch monitor");
     }
     return QString();
 }
@@ -190,7 +191,8 @@ QVariantList NormModel::statuses() const
 {
     QVariantList out;
     for (MeasureStatus s : { MeasureStatus::Live, MeasureStatus::Planned,
-                             MeasureStatus::NoProducer, MeasureStatus::NotCapturable }) {
+                             MeasureStatus::NoProducer, MeasureStatus::ExternalDevice,
+                             MeasureStatus::NotCapturable }) {
         QVariantMap r;
         r.insert(QStringLiteral("name"),  measureStatusName(s));
         r.insert(QStringLiteral("label"), statusLabel(s));
@@ -557,6 +559,15 @@ QVariantMap NormModel::measureDetail(const QString &measureId) const
     if (m->status == MeasureStatus::NotCapturable) {
         availability = m->gapReason.isEmpty()
                            ? tr("No sensor this product has can resolve this measure.")
+                           : m->gapReason;
+    } else if (m->status == MeasureStatus::ExternalDevice) {
+        // Distinct from both neighbours: a corridor here IS worth authoring — it is what the reading
+        // will be graded against — but no value arrives until the golfer has the hardware AND the
+        // integration lands. Saying "roadmap work" would imply we can close it on our own.
+        availability = m->gapReason.isEmpty()
+                           ? tr("Read from a launch monitor. Values arrive once one is connected "
+                                "and the integration lands; a corridor authored now is what they "
+                                "will be graded against.")
                            : m->gapReason;
     } else if (m->status == MeasureStatus::NoProducer) {
         availability = tr("Nothing produces a value for this yet — it is roadmap work.");

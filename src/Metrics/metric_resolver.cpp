@@ -32,6 +32,8 @@ QString describeRequirement(const MetricRequirement &req, const ShotContext &ctx
         missing << QStringLiteral("club tracking");
     if (req.ballTrack && !ctx.hasBallTrack)
         missing << QStringLiteral("ball tracking");
+    if (req.launchMonitor && !ctx.hasLaunchMonitor)
+        missing << QStringLiteral("a launch monitor");
 
     QStringList roles;
     for (SegmentRole r : req.imuRoles)

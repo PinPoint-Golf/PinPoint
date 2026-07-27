@@ -134,6 +134,13 @@ struct DagEdge {
     // The detection lane: measure -> condition. Not a causal claim, and drawn differently.
     bool    detects = false;
 
+    // Which relationship this line states: "causes" | "corroborates" | "excludes" (empty on a
+    // detection edge). The graph is RANKED by causal distance, so a symmetric relation has no
+    // direction to rank by and is only ever drawn on the focus's own rank — see the admission rule
+    // in the .cpp. It also gets no arrowhead: an arrow claims a direction these two do not have.
+    QString relation;
+    bool    symmetric = false;
+
     // The cause is Asserted, so the LINK is offered rather than concluded. Carried on the edge as
     // well as the node because a solid arrow into the focus reads as a finding on its own.
     bool    offeredOnly = false;

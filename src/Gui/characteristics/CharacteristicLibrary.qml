@@ -138,6 +138,16 @@ Item {
         return true
     }
 
+    // Deep link to one METRIC's detail page — the dashboard tile click-through, routed via
+    // MetricRoute. It used to land on a settings panel of its own; the panel became a view here, so
+    // the entry point moved with it rather than being dropped.
+    function showMetric(key) {
+        if (!key || key.length === 0) return false
+        root._view = "metrics"
+        metricLibraryView.showMetric(key)
+        return true
+    }
+
     // Deep link from elsewhere in the app. An unknown id is ignored, so a stale link lands on the
     // directory rather than a blank page.
     function showCharacteristic(conditionId) {
@@ -223,9 +233,17 @@ Item {
                 spacing: Theme.sp(6)
 
                 Repeater {
+                    // The order is the order somebody works in: what the library CLAIMS, the
+                    // readings behind it, the metrics those readings come from, what is wrong with
+                    // the lot, what to do about it, and finally what the words mean. Metrics used
+                    // to be its own settings panel; it sits here because a metric, a measure and a
+                    // corridor are one chain and reading them meant leaving the page.
                     model: [{ name: "library",  label: qsTr("Characteristics") },
                             { name: "measures", label: qsTr("Measures & norms") },
-                            { name: "health",   label: qsTr("Causes & health") }]
+                            { name: "metrics",  label: qsTr("Metrics") },
+                            { name: "health",   label: qsTr("Causes & health") },
+                            { name: "screens",  label: qsTr("Drills") },
+                            { name: "glossary", label: qsTr("Glossary") }]
                     delegate: Rectangle {
                         required property var modelData
                         readonly property bool active: root._view === modelData.name
@@ -508,6 +526,46 @@ Item {
         visible: root._developerBuild && root._view === "roadmap"
                  && root._selectedId === "" && !root._editing
         library: library
+    }
+
+    // ══ Metrics ═══════════════════════════════════════════════════════════════
+    // Was Settings → Metrics, a panel of its own. A metric, the measures that read it and the
+    // corridors that judge them are one chain, and following it meant leaving the page — so the
+    // panel became a view, and `openNorm` now crosses to a sibling view instead of a sibling panel.
+    MetricLibrary {
+        id: metricLibraryView
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
+        visible: root._view === "metrics" && root._selectedId === "" && !root._editing
+
+        onOpenNorm: function(measureId) { root.showMeasure(measureId) }
+    }
+
+    // ══ Glossary ══════════════════════════════════════════════════════════════
+    // The rule set read out as plain language. No second dataset — see GlossaryView.qml.
+    GlossaryView {
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
+        visible: root._view === "glossary" && root._selectedId === "" && !root._editing
+        library: library
+
+        onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }
+    }
+
+    // ══ Screens & drills ══════════════════════════════════════════════════════
+    ScreensView {
+        anchors.top:    switcherBar.bottom
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.bottom: parent.bottom
+        visible: root._view === "screens" && root._selectedId === "" && !root._editing
+        library: library
+
+        onOpenCondition: function(conditionId) { root.showCharacteristic(conditionId) }
     }
 
     // ══ Causes & health ═══════════════════════════════════════════════════════

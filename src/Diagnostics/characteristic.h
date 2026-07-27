@@ -64,11 +64,21 @@ enum class MeasureStatus {
     Planned,        // a producer is planned
     NoProducer,     // nothing produces it yet — ROADMAP work, someone could pick this up
     NotCapturable,  // no sensor this product has can ever resolve it — a CAPTURE GAP, not roadmap
+    ExternalDevice, // a producer is intended, but it reads from hardware the user may not own
 };
 
 // The distinction between NoProducer and NotCapturable is the whole reason the roadmap can be
 // trusted as a work queue. NoProducer means "we could build this"; NotCapturable means "a different
 // sensor or view is required, and listing it as missing pipeline work would mislead every reader".
+//
+// ExternalDevice is the third answer, and it is not a shade of either. A launch monitor resolves
+// face angle, spin and strike location; integrating one is work we intend to do, so calling it
+// NotCapturable would be false. But the work is an INTEGRATION, not a producer written from our own
+// pixels, and a roadmap row reading "build a spin-axis producer" would send somebody the wrong way.
+// So it is roadmap-eligible and sectioned apart. The per-shot half lives on the requirement
+// (MetricRequirement::launchMonitor): a user with no launch monitor gets "needs a launch monitor"
+// through the same path a missing face-on camera already takes, which is what makes the absence
+// graceful rather than a hole. `gapReason` is required here exactly as it is for NotCapturable.
 struct Measure {
     QString       id;                                   // stable, never reused
     MeasureKind   kind   = MeasureKind::Composed;
@@ -123,7 +133,14 @@ struct Signal {
 };
 
 // ── Condition ───────────────────────────────────────────────────────────────
-enum class ConditionGroup { Setup, Posture, Lateral, ArmsAndClub, Release, Sequence };
+//
+// The order here is the order the library and the editor list them in, and it is the order of the
+// swing: what you set up, what the body does, what the arms and club do, then the strike and what
+// the ball did about it. BallFlight sits last because an outcome is where an explanation ENDS —
+// the chain runs fault -> strike -> flight, and the golfer reads it from the bottom up.
+enum class ConditionGroup {
+    Setup, Posture, Lateral, ArmsAndClub, Release, Sequence, Impact, Finish, BallFlight
+};
 
 enum class Observability {
     Observable,   // it can be seen in the swing
@@ -183,6 +200,12 @@ struct ContextBinding {
 struct Condition {
     QString                     id;                    // stable, never reused
     QString                     label;
+    // Coach phrasing that resolves here — "flip", "early release", "standing up", "OTT". One concept
+    // has several names and a golfer searches by the one they were taught, so the aliases are how the
+    // library is reachable at all for anybody who did not write it. They also carry the glossary:
+    // rendering "Scooping — also called flipping: …" needs no second dataset. Two conditions may not
+    // claim one term (`duplicateAlias`), or a search would resolve to whichever came first.
+    QStringList                 aliases;
     QString                     axis;                  // joins the two tails of one measure; may be empty
     ConditionGroup              group        = ConditionGroup::Setup;
     Observability               observability = Observability::Observable;
@@ -259,6 +282,11 @@ bool    directionFromName(const QString &s, Direction &out);
 QString conditionGroupName(ConditionGroup g);
 QString conditionGroupLabel(ConditionGroup g);
 bool    conditionGroupFromName(const QString &s, ConditionGroup &out);
+
+// The groups, in list order. One definition, because the order IS the swing and two hand-written
+// copies of it (the library's filter row and the editor's picker) had already drifted apart by the
+// time a third group was added.
+const std::vector<ConditionGroup> &allConditionGroups();
 QString observabilityName(Observability o);
 bool    observabilityFromName(const QString &s, Observability &out);
 QString confirmedByName(ConfirmedBy c);

@@ -43,6 +43,7 @@ struct ShotContext {
     bool                     hasFaceOn    = false;
     bool                     hasClubTrack = false;   // ShaftTrack2D valid
     bool                     hasBallTrack = false;   // BallTrack2D present
+    bool                     hasLaunchMonitor = false;   // a launch monitor supplied readings for this shot
     int                      sessionType  = -1;      // SessionController::Type; -1 = none
     BandContext              band;                   // archetype/club/shape for normative resolution
 

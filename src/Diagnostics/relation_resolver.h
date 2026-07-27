@@ -58,12 +58,39 @@ struct TestRecommendation {
     int         coverage = 0;
 };
 
+// A fired finding that ANOTHER fired finding independently confirms — the shaft and the wrist
+// saying the same thing about one event, or the feet and the shoulders about one aim.
+//
+// Deliberately REPORTED rather than scored. Corroboration is evidence a coach reads ("seen two
+// ways"), and turning it into a score multiplier would mean inventing a number nobody could defend
+// when asked why one cause outranked another — the same reason `material` contributes zero rather
+// than a fraction. It does break ties, which is a use that needs no fabricated magnitude.
+struct Corroboration {
+    QString     conditionId;
+    QStringList corroboratedBy;
+};
+
+// A fired finding that another fired finding rules out. Recorded, never silently dropped: "we saw
+// both and kept this one" is a different statement from "we only saw this one", and a coach who
+// cannot see the first will not trust the second.
+struct Suppression {
+    QString conditionId;   // dropped from the explanation
+    QString excludedBy;    // the finding that stands
+    QString reason;        // one line, for the UI
+};
+
 struct Explanation {
     std::vector<RankedCause>        roots;            // concluded, best first
     std::vector<RankedCause>        offered;          // Asserted — for the coach to confirm
     std::vector<TestRecommendation> recommendations;  // unknown screens, by value
     QStringList                     unexplained;      // fired, with nothing in the pack to explain it
+    std::vector<Corroboration>      corroborations;   // independently confirmed findings
+    std::vector<Suppression>        suppressed;       // findings an exclusion ruled out
 };
+
+// Conditions related to `conditionId` by a non-causal edge, in either direction — Corroborates and
+// Excludes are symmetric in meaning, so which end an author wrote them from must not matter.
+QStringList relatedBy(const CharacteristicPack &pack, const QString &conditionId, EdgeType type);
 
 // `knownScreenResults` carries any physical-screen answers already entered — condition id -> present.
 // Absent from the map means "not screened yet", which is what generates a recommendation rather

@@ -329,6 +329,75 @@ int main()
               "an author's weaker status is not overridden upward");
     }
 
+    // ── ExternalDevice: roadmap work gated on hardware, not a capture gap ───────
+    //
+    // The three statuses answer three different questions and the UI renders each differently, so
+    // the round-trip matters as much as the check: a status that saved as one thing and loaded as
+    // another would silently reclassify a launch-monitor row as pipeline work.
+    {
+        CharacteristicPack p = goodPack();
+        p.measures.front().status    = MeasureStatus::ExternalDevice;
+        p.measures.front().gapReason = QStringLiteral("Requires launch monitor: spin is not "
+                                                      "measurable over a short indoor flight.");
+        const PackLoadResult res = loadPack(savePack(p), QStringLiteral("lm"));
+        const Measure       *m   = res.pack.measure(QStringLiteral("stanceWidth"));
+        check(m && m->status == MeasureStatus::ExternalDevice,
+              "ExternalDevice survives a save/load round-trip");
+        check(!hasWarning(validatePack(p), "externalDeviceNoReason"),
+              "…and a named device passes the reason check");
+
+        p.measures.front().gapReason.clear();
+        check(hasWarning(validatePack(p), "externalDeviceNoReason"),
+              "an external-device measure that does not say WHICH device warns");
+    }
+
+    // ── One coach term, one condition ───────────────────────────────────────────
+    //
+    // Not tidiness: a search for "flip" resolves to whichever condition came first in the file, so
+    // a shared alias sends the reader to the wrong page with no sign anything went wrong.
+    {
+        CharacteristicPack p = goodPack();
+        p.conditions.at(0).aliases = { QStringLiteral("wide base") };
+        p.conditions.at(1).aliases = { QStringLiteral("Wide Base") };   // same term, different case
+        check(hasWarning(validatePack(p), "duplicateAlias"),
+              "two conditions claiming one term warns, case-insensitively");
+
+        p.conditions.at(1).aliases = { QStringLiteral("narrow base") };
+        check(!hasWarning(validatePack(p), "duplicateAlias"), "…and distinct terms do not");
+
+        // A LABEL is a claim on a term too — an alias that shadows another condition's name is the
+        // same defect wearing different clothes.
+        p.conditions.at(1).aliases = { p.conditions.at(0).label };
+        check(hasWarning(validatePack(p), "duplicateAlias"),
+              "an alias that shadows another condition's label warns");
+    }
+    {
+        CharacteristicPack p = goodPack();
+        p.conditions.front().aliases = { QStringLiteral("wide base"), QStringLiteral("too wide") };
+        const PackLoadResult res = loadPack(savePack(p), QStringLiteral("aliases"));
+        const Condition     *c   = res.pack.condition(p.conditions.front().id);
+        check(c && c->aliases.size() == 2 && c->aliases.contains(QStringLiteral("too wide")),
+              "condition aliases survive a save/load round-trip");
+    }
+
+    // ── The new condition groups ────────────────────────────────────────────────
+    // Impact, Finish and BallFlight were added with the outcome layer. A group whose token does not
+    // round-trip silently lands every condition in it back in Setup, which is the default.
+    {
+        CharacteristicPack p = goodPack();
+        p.conditions.front().group = ConditionGroup::BallFlight;
+        const PackLoadResult res = loadPack(savePack(p), QStringLiteral("groups"));
+        const Condition     *c   = res.pack.condition(p.conditions.front().id);
+        check(c && c->group == ConditionGroup::BallFlight, "ballFlight round-trips as itself");
+
+        ConditionGroup g{};
+        check(conditionGroupFromName(QStringLiteral("impact"), g) && g == ConditionGroup::Impact,
+              "impact parses");
+        check(conditionGroupFromName(QStringLiteral("finish"), g) && g == ConditionGroup::Finish,
+              "finish parses");
+        check(allConditionGroups().size() == 9, "all nine groups are enumerated in one place");
+    }
+
     // ── Health warnings (these ARE the health list) ─────────────────────────────
     {
         CharacteristicPack p = goodPack();

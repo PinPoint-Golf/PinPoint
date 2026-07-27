@@ -298,9 +298,7 @@ QVariantList CharacteristicEditorModel::reducerKinds() const
 QVariantList CharacteristicEditorModel::conditionGroups() const
 {
     QVariantList out;
-    for (ConditionGroup g : { ConditionGroup::Setup, ConditionGroup::Posture, ConditionGroup::Lateral,
-                              ConditionGroup::ArmsAndClub, ConditionGroup::Release,
-                              ConditionGroup::Sequence }) {
+    for (ConditionGroup g : allConditionGroups()) {
         QVariantMap m;
         m.insert(QStringLiteral("name"), conditionGroupName(g));
         m.insert(QStringLiteral("label"), conditionGroupLabel(g));
@@ -489,6 +487,23 @@ void CharacteristicEditorModel::setGroup(const QString &groupName)
     ConditionGroup g{};
     if (!conditionGroupFromName(groupName, g) || g == m_draft.group) return;
     m_draft.group = g;
+    touch();
+}
+
+void CharacteristicEditorModel::setAliases(const QString &commaSeparated)
+{
+    QStringList next;
+    for (const QString &raw : commaSeparated.split(QLatin1Char(','))) {
+        const QString t = raw.trimmed();
+        if (t.isEmpty()) continue;
+        // Case-insensitive, because "OTT" and "ott" are one term to whoever types either.
+        bool already = false;
+        for (const QString &have : next)
+            if (have.compare(t, Qt::CaseInsensitive) == 0) { already = true; break; }
+        if (!already) next << t;
+    }
+    if (next == m_draft.aliases) return;
+    m_draft.aliases = next;
     touch();
 }
 
@@ -1188,6 +1203,9 @@ QVariantMap CharacteristicEditorModel::draft() const
 
     out.insert(QStringLiteral("id"), m_draft.id);
     out.insert(QStringLiteral("label"), m_draft.label);
+    out.insert(QStringLiteral("aliases"), m_draft.aliases);
+    // The field is edited as one line, so the marshaller hands back the same shape the setter takes.
+    out.insert(QStringLiteral("aliasLine"), m_draft.aliases.join(QStringLiteral(", ")));
     out.insert(QStringLiteral("group"), conditionGroupName(m_draft.group));
     out.insert(QStringLiteral("groupLabel"), conditionGroupLabel(m_draft.group));
     out.insert(QStringLiteral("consequence"), m_draft.consequence.text());

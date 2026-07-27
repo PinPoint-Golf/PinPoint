@@ -98,4 +98,16 @@ public:
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
+// The launch-monitor metrics: face angle and everything downstream of it, spin, strike location and
+// carry. Deliberately NOT a planned placeholder — a planned metric has no producer and is a promise;
+// these have a producer that the golfer may or may not own, so the honest answer is the ordinary
+// requirement one ("needs a launch monitor"), which flips to Measured the moment a connector sets
+// `ShotContext::hasLaunchMonitor`. That makes this class the integration's insertion point rather
+// than a stub somebody will have to delete.
+class LaunchMonitorProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
+};
+
 } // namespace pinpoint::analysis

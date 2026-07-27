@@ -79,6 +79,39 @@ Two consequences, both enforced:
   words — *"further back, toward the trail foot"* — so an author choosing a signal direction reads
   the meaning rather than guessing at High/Low. Asserted present on every signal-bearing measure.
 
+## The trap this cost time on, once
+
+**`attackAngle` reads the STRIKE DIRECTION, not steepness.** Its descriptor says "higher means a
+more upward strike", so **`attack_too_steep` is the LOW tail** — the condition's name and the
+metric's sign point opposite ways, and an author matching the words *steep* and *high* would ship it
+inverted. That is precisely the defect class `highMeans` and the fixture table exist for, and it
+survived only because writing the fixture row forced somebody to quote the descriptor.
+
+The general lesson: **a condition's NAME is not evidence about its tail.** Read the measure's own
+sentence, every time, even when the answer looks obvious.
+
+## Conventions added with the ball-flight layer
+
+All written right-handed; handedness is a transform applied at read time, never a mirrored duplicate.
+
+| Metric | Positive means |
+|---|---|
+| `launchDirection` | right of the target — so a pull is the LOW tail, a push the high one |
+| `launchAngle` | a higher launch |
+| `ballSpeed`, `carryDistance`, `clubheadSpeed` | faster / further |
+| `faceToPath` | the face OPEN to the path — curvature to the right |
+| `spinAxis` | tilted right — a fade or a slice |
+| `spinRate` | more spin |
+| `smashFactor` | a more efficient strike |
+| `strikeLocation` | toward the TOE; negative toward the heel |
+| `dynamicLoft`, `spinLoft` | more loft delivered / a larger loft-to-path angle |
+| `shaftDirection` | pointing right of the target — across the line at the top, outside in the takeaway |
+| `shaftAngleVsHorizontal` | past parallel; zero IS parallel to the ground |
+| `hipAlignment`, `feetAlignment` | closed — following `shoulderAlignment` and club path, where open is negative |
+| `trailKneeFlexion` | more bend, matching the lead knee |
+| `leadUpperArmToChest` | a larger gap — the arm further from the chest |
+| `comOverLeadFoot` | further FROM the lead ankle, so a balanced finish is the low end |
+
 ## Not covered by either rule
 
 A metric on neither axis **must state its own convention**: `pelvisThrust` is toward the ball, which

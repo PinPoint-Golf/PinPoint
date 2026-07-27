@@ -162,6 +162,22 @@ public:
     // are about to change.
     Q_INVOKABLE QVariantList usersOfMeasure(const QString &measureId) const;
 
+    // ── The two reference registries ────────────────────────────────────────
+    //
+    // Marshalled here rather than from their own façade because both are read ALONGSIDE the pack
+    // and never on their own: a screen is only interesting for what it would settle, and a drill for
+    // what it answers. Each row therefore carries the conditions that point at it, which is the
+    // question the view is really asking.
+    Q_INVOKABLE QVariantList screens() const;
+    Q_INVOKABLE QVariantList drills() const;
+
+    // The glossary: every condition, its coach terms, and what it means in plain language.
+    //
+    // No second dataset — the rule set IS the glossary, which is the whole reason `aliases` and the
+    // outcome `consequence` texts were worth authoring. `search` matches labels, aliases and the
+    // meaning text, so a golfer who only knows the word they were taught can still find the page.
+    Q_INVOKABLE QVariantList glossary(const QString &search = {}) const;
+
     // The roadmap as shareable markdown. This artefact is meant to leave the app — it is what
     // prioritises pipeline work — so it is generated whole rather than scraped off the view.
     Q_INVOKABLE QString roadmapMarkdown() const;

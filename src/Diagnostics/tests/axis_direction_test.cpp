@@ -96,6 +96,112 @@ static const Expect kExpected[] = {
     { "sig_chickenWing",      Direction::High,
       "leadArmToTorso: 'a rising angle there means the arm is separating from the body'" },
     { "sig_lateBuckle",       Direction::High,  "leadKneeFlexion: 'higher means more bend'" },
+
+    // ── the other two alignment lines ───────────────────────────────────────
+    // Same convention as the shoulder line, and stated in each descriptor rather than inferred from
+    // its neighbour: an author reading only the feet row must be able to settle the tail from it.
+    { "sig_feetAlignmentOpen",   Direction::Low,
+      "feetAlignment: 'OPEN IS NEGATIVE AND CLOSED IS POSITIVE'" },
+    { "sig_feetAlignmentClosed", Direction::High,
+      "feetAlignment: closed is the positive end" },
+    { "sig_hipAlignmentOpen",    Direction::Low,
+      "hipAlignment: 'OPEN IS NEGATIVE AND CLOSED IS POSITIVE'" },
+    { "sig_hipAlignmentClosed",  Direction::High,
+      "hipAlignment: closed is the positive end" },
+
+    // ── content extension: setup ────────────────────────────────────────────
+    { "sig_kneeFlexExcess",       Direction::High, "leadKneeFlexion: 'higher means more bend'" },
+    { "sig_kneeFlexInsufficient", Direction::Low,  "leadKneeFlexion: 'higher means more bend'" },
+
+    // ── content extension: backswing ────────────────────────────────────────
+    { "sig_insideTakeaway",       Direction::Low,
+      "shaftDirection: 'POSITIVE POINTS RIGHT OF THE TARGET … outside in the takeaway'; inside is left" },
+    { "sig_outsideTakeaway",      Direction::High, "shaftDirection: outside is the positive end" },
+    { "sig_earlyFaceRoll",        Direction::High,
+      "m_leadForearmRot_p2 highMeans: 'the face opening in the takeaway'" },
+    { "sig_steepBackswingPlane",  Direction::High,
+      "m_shaftPlaneBackswing highMeans: 'climbing further above the plane it started on — steeper'" },
+    { "sig_flatBackswingPlane",   Direction::Low,  "the other end of that same range" },
+    { "sig_acrossTheLine",        Direction::High,
+      "shaftDirection: 'across the line at the top' is the positive, right-of-target end" },
+    { "sig_laidOff",              Direction::Low,  "…and laid off is the negative, left-of-target end" },
+    { "sig_overswing",            Direction::High,
+      "shaftAngleVsHorizontal: 'POSITIVE IS PAST PARALLEL and negative is short of it'" },
+    { "sig_bentLeadArm",          Direction::High,
+      "m_leadElbowFlex_p4 highMeans: 'more bend in the lead elbow at the top'" },
+    { "sig_trailKneeStraighten",  Direction::Low,
+      "trailKneeFlexion: 'HIGHER MEANS MORE BEND'; straightening is losing it" },
+    { "sig_headDropBackswing",    Direction::Low,
+      "headLift measures a rise from address; a drop is the negative end" },
+    { "sig_headRiseBackswing",    Direction::High, "…and a rise is the positive end" },
+    { "sig_excessiveHeadSway",    Direction::High,
+      "m_headSwayBack highMeans: 'the head further from the ball line, off the ball'" },
+    { "sig_excessiveHeelLift",    Direction::High, "leadHeelLift measures a lift; more is more" },
+    { "sig_shortBackswing",       Direction::Low,
+      "thoraxRotation at the top: a short backswing is LESS turn" },
+    { "sig_disconnection",        Direction::High,
+      "leadUpperArmToChest: 'HIGHER MEANS A LARGER GAP — the arm further from the chest'" },
+
+    // ── content extension: transition and downswing ─────────────────────────
+    { "sig_steepDownswingShaft",  Direction::High,
+      "m_shaftPlaneDelivery highMeans: 'a steeper delivery plane, the shaft higher above the "
+      "address plane'" },
+    { "sig_underPlaneStuck",      Direction::Low,  "…and stuck under the plane is the other end" },
+    { "sig_hipSpinOut",           Direction::High,
+      "pelvisRotation at P5: spinning out is the pelvis ALREADY further open in early downswing" },
+    { "sig_hipStall",             Direction::Low,
+      "m_pelvisRotRateP6P7 highMeans: 'still turning hard into impact rather than stalling'" },
+    { "sig_deceleration",         Direction::Low,
+      "m_handSpeedP6P7 highMeans: 'the hands still accelerating into the ball'" },
+
+    // ── content extension: impact ───────────────────────────────────────────
+    { "sig_insufficientShaftLean", Direction::Low,
+      "impactShaftLean: more lean is the positive end, so not enough of it is the low one" },
+    { "sig_lowPointBehind",       Direction::Low,
+      "lowPointAhead: ahead of the ball is positive, so behind it is negative" },
+    // The catalogue's convention is the strike direction, NOT steepness — so "too steep" is the LOW
+    // tail. This is precisely the inversion `highMeans` exists to prevent: the condition's name and
+    // the metric's sign point opposite ways, and an author matching the words would get it wrong.
+    { "sig_attackTooSteep",       Direction::Low,
+      "attackAngle: 'HIGHER MEANS A MORE UPWARD STRIKE', so steeper is the low end" },
+    { "sig_attackTooShallow",     Direction::High, "…and shallower or upward is the high end" },
+    { "sig_openFaceToPath",       Direction::High,
+      "faceToPath: 'POSITIVE MEANS THE FACE IS OPEN TO THE PATH'" },
+    { "sig_closedFaceToPath",     Direction::Low,  "…and negative means closed" },
+    { "sig_hipsClosedImpact",     Direction::Low,
+      "pelvisRotation at impact: closed is LESS open, the low end" },
+    { "sig_axisTiltImpactLow",    Direction::Low,
+      "secondaryAxisTilt: more tilt away from the target is positive, so too little is the low end" },
+    { "sig_axisTiltImpactHigh",   Direction::High, "…and too much is the high end" },
+
+    // ── content extension: finish ───────────────────────────────────────────
+    { "sig_offBalanceFinish",     Direction::High,
+      "comOverLeadFoot: 'HIGHER MEANS FURTHER FROM THE LEAD ANKLE', so off balance is the high end" },
+    { "sig_weightBackFinish",     Direction::Low,
+      "pelvisSway: 'positive is toward the lead side'; still back at the finish is negative" },
+    { "sig_abbreviatedFinish",    Direction::Low,
+      "thoraxRotation at the finish: a cut-short follow-through is LESS turn" },
+
+    // ── content extension: ball flight and strike ───────────────────────────
+    // Every one of these reads a metric whose descriptor states its sign in capitals, because the
+    // outcome layer is where a wrong tail would be most visible and least questioned: a golfer who
+    // is told they pull it will believe it.
+    { "sig_pull",          Direction::Low,
+      "launchDirection: 'POSITIVE IS RIGHT OF THE TARGET', so a pull is the low end" },
+    { "sig_push",          Direction::High, "…and a push is the high end" },
+    { "sig_launchLow",     Direction::Low,  "launchAngle: 'HIGHER MEANS A HIGHER LAUNCH'" },
+    { "sig_launchHigh",    Direction::High, "…and ballooning is the high end of the same range" },
+    { "sig_ballSpeedDeficit", Direction::Low, "ballSpeed: 'HIGHER IS FASTER'; a deficit is less" },
+    { "sig_slice",         Direction::High,
+      "spinAxis: 'POSITIVE TILTS RIGHT … a fade or a slice'" },
+    { "sig_hook",          Direction::Low,  "…and negative tilts left" },
+    { "sig_strikeToe",     Direction::High, "strikeLocation: 'POSITIVE IS TOWARD THE TOE'" },
+    { "sig_strikeHeel",    Direction::Low,  "…negative toward the heel" },
+    { "sig_smashDeficit",  Direction::Low,
+      "smashFactor: 'HIGHER IS A MORE EFFICIENT STRIKE'" },
+    { "sig_spinExcess",    Direction::High, "spinRate: 'HIGHER IS MORE SPIN'" },
+    { "sig_spinDeficit",   Direction::Low,  "…and a knuckleball is the low end" },
+    { "sig_carryDeficit",  Direction::Low,  "carryDistance: 'HIGHER IS FURTHER'" },
 };
 
 // Signals whose metric states NO sign convention anywhere, so their direction cannot be checked

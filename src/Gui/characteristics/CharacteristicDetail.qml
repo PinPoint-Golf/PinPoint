@@ -114,6 +114,23 @@ Item {
                 }
             }
 
+            // ── The other names for it ───────────────────────────────────────
+            // Above the consequence, not below: a reader who arrived by searching a coach term needs
+            // to see their own word confirmed before they read anything else, or they cannot tell
+            // whether they landed on the right page.
+            Text {
+                Layout.fillWidth: true
+                text: (root.detail.aliases && root.detail.aliases.length > 0)
+                      ? qsTr("Also called ") + root.detail.aliases.join(qsTr(", "))
+                      : ""
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                font.italic:    true
+                color:          Theme.colorText3
+                wrapMode:       Text.WordWrap
+                visible:        text.length > 0
+            }
+
             // ── What it costs the golfer ─────────────────────────────────────
             Text {
                 Layout.fillWidth: true
@@ -256,6 +273,65 @@ Item {
                 onOpenCondition: function (conditionId) { root.openCondition(conditionId) }
                 onOpenMeasure:   function (measureId)   { root.openMeasure(measureId) }
                 onGraphChanged:  root.graphChanged()
+            }
+
+            // ── Relations that are not causal ────────────────────────────────
+            //
+            // Below the graph rather than in it. The DAG ranks by signed causal distance, and a
+            // symmetric relation has no direction to rank by — drawing one in that flow would state
+            // a claim the pack does not hold. These sit beneath it as what they are: two readings of
+            // one event, and pairs that cannot both be true of one swing.
+            Repeater {
+                model: [{ rows: root.detail.corroboratedBy || [],
+                          head: qsTr("ALSO SEEN AS"),
+                          hint: qsTr("The same event, read another way. Independent confirmation — no causal claim either direction.") },
+                        { rows: root.detail.excludes || [],
+                          head: qsTr("CANNOT ALSO BE"),
+                          hint: qsTr("One swing cannot be both. If both fire, the explanation keeps the more confident reading and says which it dropped.") }]
+
+                delegate: ColumnLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: Theme.sp(6)
+                    visible: modelData.rows.length > 0
+
+                    Text {
+                        text:                modelData.head
+                        font.family:         Theme.fontBody
+                        font.pixelSize:      Theme.fontSzMicro
+                        font.letterSpacing:  Theme.trackingMicro
+                        font.capitalization: Font.AllUppercase
+                        color:               Theme.colorText3
+                    }
+
+                    Repeater {
+                        model: modelData.rows
+                        delegate: Text {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            text:           modelData.label + " · " + modelData.groupLabel
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody
+                            color:          Theme.colorAccent
+                            elide:          Text.ElideRight
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape:  Qt.PointingHandCursor
+                                onClicked:    root.openCondition(parent.modelData.id)
+                            }
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text:           modelData.hint
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                        wrapMode:       Text.WordWrap
+                    }
+                }
             }
 
             // ── Provenance ───────────────────────────────────────────────────

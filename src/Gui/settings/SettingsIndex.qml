@@ -23,10 +23,11 @@ import PinPointStudio
 // Full-text search index for all settings panels.
 //
 // panelIndex → panel name mapping:
-//   0  General        4  IMUs
-//   1  Appearance     5  Launch Monitor (placeholder — no entries yet)
-//   2  Displays       6  Storage
-//   3  Cameras        7  Archiving      (placeholder — no entries yet)
+//   0  General        5  Microphone
+//   1  Appearance     6  Launch Monitor (placeholder — no entries yet)
+//   2  Displays       7  Storage
+//   3  Cameras        8  Archiving      (placeholder — no entries yet)
+//   4  IMUs           9  Diagnostics    (metrics, drills and the glossary live here too)
 //
 // label / subtitle / groupLabel / panelLabel are wrapped in qsTr() so they
 // are extracted by lupdate and searched against the user's active locale.
@@ -319,24 +320,35 @@ QtObject {
           label: qsTr("Save launch monitor data"),         subtitle: qsTr("Ball-flight data from connected launch monitor"),
           itemId: "setting_saveLaunchMon" },
 
-        // ── Metrics (panelIndex: 9) ───────────────────────────────────────────
+        // ── Diagnostics (panelIndex: 9) ───────────────────────────────────────
+        //
+        // Metrics was panelIndex 9 and Diagnostics 10 until the metric catalogue became a VIEW
+        // inside Diagnostics rather than a panel beside it. Its search entries stayed — the words
+        // people look for did not change, only where they land.
 
-        { panelIndex: 9, panelLabel: qsTr("Metrics"),     groupLabel: qsTr("Metric catalogue"),
-          label: qsTr("Metric catalogue"),                 subtitle: qsTr("Browse every metric — meaning, how to read it, and requirements"),
-          actions: "metric catalogue directory reference normative corridor tour wrist bow cup hinge roll elbow clubhead hand speed lag stance foot flare toe heel",
-          itemId: "" }
-
-        ,
-        // ── Diagnostics (panelIndex: 10) ──────────────────────────────────────
-
-        { panelIndex: 10, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 9, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Swing diagnostics"),                subtitle: qsTr("Named faults and their causes — what each costs the golfer"),
           actions: "diagnostics characteristics faults causes diagnosis library swing early extension loss of posture over the top casting scooping sway slide hanging back chicken wing flying elbow reverse spine s-posture c-posture ball position stance width alignment tempo sequence x-factor",
           itemId: "" },
 
-        { panelIndex: 10, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 9, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Reference"),
+          label: qsTr("Metric catalogue"),                 subtitle: qsTr("Browse every metric — meaning, how to read it, and requirements"),
+          actions: "metric metrics catalogue directory reference normative corridor tour wrist bow cup hinge roll elbow clubhead hand speed lag stance foot flare toe heel",
+          itemId: "" },
+
+        { panelIndex: 9, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Physical screens"),                 subtitle: qsTr("Causes the app cannot measure — which screens would explain the most"),
           actions: "screen screening physical mobility hip internal rotation thoracic rotation pelvic disassociation core stability balance ankle dorsiflexion shoulder flexion wrist mobility",
+          itemId: "" },
+
+        { panelIndex: 9, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
+          label: qsTr("Drills"),                           subtitle: qsTr("What a golfer does about a characteristic, and what it is trying to change"),
+          actions: "drill drills practice rehearsal feel gate towel step pump hold the finish low point standoff",
+          itemId: "" },
+
+        { panelIndex: 9, panelLabel: qsTr("Diagnostics"), groupLabel: qsTr("Swing diagnostics"),
+          label: qsTr("Glossary"),                         subtitle: qsTr("What a coaching term means — search by the word you were taught"),
+          actions: "glossary terms vocabulary jargon flip flipping ott over the top standing up early release casting shank chunk fat thin slice hook pull push block",
           itemId: "" }
 
         // TODO: add entries when Launch Monitor panel is implemented (panelIndex: 6)

@@ -60,7 +60,7 @@ int main()
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 54, "descriptor count == 54");
+        checkEqI(static_cast<int>(cat.all().size()), 70, "descriptor count == 70");
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -81,8 +81,8 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  31, "TimeSeries count");
-        checkEqI(countType(cat, MetricType::PointInTime), 17, "PointInTime count");
+        checkEqI(countType(cat, MetricType::TimeSeries),  36, "TimeSeries count");
+        checkEqI(countType(cat, MetricType::PointInTime), 28, "PointInTime count");
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
@@ -101,7 +101,16 @@ int main()
         // Arm geometry (trail elbow height, swing width, arm-to-torso) is its own group rather
         // than being filed under wrist and forearm, which would mislabel it in the directory.
         MetricQuery armq; armq.group = QStringLiteral("Arms");
-        checkEqI(static_cast<int>(cat.query(armq).size()), 3, "group 'Arms' == 3");
+        checkEqI(static_cast<int>(cat.query(armq).size()), 4, "group 'Arms' == 4");
+
+        // Two groups arrived with the content extension. Ball flight is what the golfer sees and
+        // Strike is what the face did; keeping them apart matters because one of them is mostly
+        // camera-resolvable and the other is entirely launch-monitor territory.
+        MetricQuery bfq; bfq.group = QStringLiteral("Ball flight");
+        checkEqI(static_cast<int>(cat.query(bfq).size()), 7, "group 'Ball flight' == 7");
+
+        MetricQuery stq; stq.group = QStringLiteral("Strike");
+        checkEqI(static_cast<int>(cat.query(stq).size()), 2, "group 'Strike' == 2");
 
         MetricQuery alq; alq.group = QStringLiteral("Alignment");
         checkEqI(static_cast<int>(cat.query(alq).size()), 4, "group 'Alignment' == 4");
@@ -172,11 +181,17 @@ int main()
         const char *planned[] = { "pelvisRotation", "thoraxRotation", "xFactor", "xFactorStretch",
                                   "hipInternalRotation", "spineForwardBend", "spineSideBend",
                                   "secondaryAxisTilt", "pelvisSway", "pelvisThrust", "pelvisLift",
-                                  "swingPlane", "clubPath", "attackAngle", "faceAngle",
+                                  "swingPlane", "clubPath", "attackAngle",
                                   "lowPointAhead",
                                   "kinematicSequence", "swingScore",
                                   "shoulderAlignment", "elbowAlignment", "hipAlignment",
-                                  "feetAlignment" };
+                                  "feetAlignment",
+                                  // Added with the content extension. `faceAngle` LEFT this list in
+                                  // the same change — it is not a producer we will write, it is a
+                                  // device we will talk to, and it is asserted below instead.
+                                  "trailKneeFlexion", "comOverLeadFoot", "leadUpperArmToChest",
+                                  "shaftDirection", "shaftAngleVsHorizontal",
+                                  "launchDirection", "launchAngle", "ballSpeed" };
         int flagged = 0, unavailable = 0;
         // Use a fully-capable context to prove these are gated by "no producer", not missing sensors.
         ShotContext capable = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax,
@@ -191,10 +206,49 @@ int main()
             const MetricAvailability a = cat.resolve(QString::fromLatin1(k), capable);
             if (a.state == MetricAvailability::Unavailable) ++unavailable;
         }
-        checkEqI(flagged, 22, "all 22 planned metrics carry .planned == true");
-        checkEqI(unavailable, 22, "all 22 planned metrics resolve Unavailable even fully-equipped");
+        checkEqI(flagged, 29, "all 29 planned metrics carry .planned == true");
+        checkEqI(unavailable, 29, "all 29 planned metrics resolve Unavailable even fully-equipped");
         check(cat.resolve(QStringLiteral("pelvisRotation"), capable).reason.contains(QStringLiteral("planned")),
               "planned reason says 'planned'");
+    }
+
+    // 3e. Launch-monitor metrics — a REQUIREMENT, not a planned promise.
+    //
+    // The distinction is the whole point of the split: a planned metric has no producer and always
+    // resolves Unavailable, whereas these have a producer the golfer may not own. So they must read
+    // "needs a launch monitor" without one and Measured with one, through the same requirement path
+    // that renders every other absent input. Getting this wrong in either direction is a lie: as
+    // `planned` they would promise work we are not doing, and as unconditionally Measured they
+    // would report numbers nobody supplied.
+    {
+        const char *lm[] = { "faceAngle", "faceToPath", "spinRate", "spinAxis", "smashFactor",
+                             "strikeLocation", "carryDistance", "dynamicLoft", "spinLoft" };
+
+        ShotContext capable = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax,
+                                          SegmentRole::LeadForearm, SegmentRole::LeadHand },
+                                        /*faceOn*/ true, /*club*/ true);
+        capable.hasBallTrack = true;
+        capable.tier = ReconstructionTier::ClubInstrumented;
+
+        int notPlanned = 0, unavailableWithout = 0, saysWhy = 0, measuredWith = 0;
+        for (const char *k : lm) {
+            const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(k));
+            if (d && !d->planned && d->requirement.launchMonitor) ++notPlanned;
+
+            const MetricAvailability without = cat.resolve(QString::fromLatin1(k), capable);
+            if (without.state == MetricAvailability::Unavailable) ++unavailableWithout;
+            if (without.reason.contains(QStringLiteral("launch monitor"))) ++saysWhy;
+
+            ShotContext withLm = capable;
+            withLm.hasLaunchMonitor = true;
+            if (cat.resolve(QString::fromLatin1(k), withLm).state == MetricAvailability::Measured)
+                ++measuredWith;
+        }
+        checkEqI(notPlanned, 9, "all 9 launch-monitor metrics require the device, not a producer");
+        checkEqI(unavailableWithout, 9, "…and are Unavailable on a fully-equipped shot without one");
+        checkEqI(saysWhy, 9, "…each saying WHY, so the absence is graceful rather than blank");
+        checkEqI(measuredWith, 9, "…and Measured the moment a connector reports one, with no "
+                                  "catalogue change");
     }
 
     // 4. resolve() — club-track / face-on gating (kinematics + foot).

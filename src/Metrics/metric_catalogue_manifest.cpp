@@ -70,7 +70,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "fell outside its band — most often a cupped lead wrist at the top. It needs the "
             "lead-forearm and lead-hand IMUs and is produced only in a Wrist Motion session."),
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
-        .usedBy = { QStringLiteral("review:verdict"), QStringLiteral("shotlist:score") },
+        .usedBy = { QStringLiteral("review:verdict"),
+                    QStringLiteral("shotlist:score") },
     });
 
     cat.addDescriptor({
@@ -117,7 +118,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "metrics the way the wrist score summarises the wrist checkpoints."),
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("review:verdict"), QStringLiteral("shotlist:score") },
+        .usedBy = { QStringLiteral("review:verdict"),
+                    QStringLiteral("shotlist:score") },
     });
 
     // ---------------------------------------------------------------- Wrist & forearm (IMU, scored)
@@ -145,8 +147,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top, P::Impact },
         .scored = true,
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
-        .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
-                    QStringLiteral("assessment:wrist"),
+        .usedBy = { QStringLiteral("assessment:wrist"),
+                    QStringLiteral("chart:review"),
+                    QStringLiteral("score:wrist"),
                     QStringLiteral("characteristic:scooping") },
     });
 
@@ -171,8 +174,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top, P::Impact },
         .scored = true,
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand } },
-        .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
-                    QStringLiteral("assessment:wrist"),
+        .usedBy = { QStringLiteral("assessment:wrist"),
+                    QStringLiteral("chart:review"),
+                    QStringLiteral("score:wrist"),
                     QStringLiteral("characteristic:insufficient_set") },
     });
 
@@ -198,8 +202,10 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top, P::Impact },
         .scored = true,
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand, R::LeadUpperArm } },
-        .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
-                    QStringLiteral("assessment:wrist") },
+        .usedBy = { QStringLiteral("assessment:wrist"),
+                    QStringLiteral("chart:review"),
+                    QStringLiteral("score:wrist"),
+                    QStringLiteral("characteristic:early_face_roll") },
     });
 
     cat.addDescriptor({
@@ -223,8 +229,10 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top, P::Impact },
         .scored = true,
         .requirement = { .imuRoles = { R::LeadForearm, R::LeadHand, R::LeadUpperArm } },
-        .usedBy = { QStringLiteral("chart:review"), QStringLiteral("score:wrist"),
-                    QStringLiteral("assessment:wrist") },
+        .usedBy = { QStringLiteral("assessment:wrist"),
+                    QStringLiteral("chart:review"),
+                    QStringLiteral("score:wrist"),
+                    QStringLiteral("characteristic:bent_lead_arm") },
     });
 
     cat.addDescriptor({
@@ -281,7 +289,10 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top, P::Impact },
         .planned = true,
         .requirement = { .imuRoles = { R::Pelvis } },
-        .usedBy = { QStringLiteral("characteristic:sequence_order") },
+        .usedBy = { QStringLiteral("characteristic:hip_spin_out"),
+                    QStringLiteral("characteristic:hip_stall"),
+                    QStringLiteral("characteristic:hips_closed_at_impact"),
+                    QStringLiteral("characteristic:sequence_order") },
     });
 
     cat.addDescriptor({
@@ -303,7 +314,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top, P::Impact },
         .planned = true,
         .requirement = { .imuRoles = { R::Thorax } },
-        .usedBy = { QStringLiteral("characteristic:sequence_order") },
+        .usedBy = { QStringLiteral("characteristic:abbreviated_finish"),
+                    QStringLiteral("characteristic:sequence_order"),
+                    QStringLiteral("characteristic:short_backswing") },
     });
 
     cat.addDescriptor({
@@ -441,7 +454,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Impact },
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:reverse_spine") },
+        .usedBy = { QStringLiteral("characteristic:excessive_axis_tilt_impact"),
+                    QStringLiteral("characteristic:insufficient_axis_tilt_impact"),
+                    QStringLiteral("characteristic:reverse_spine") },
     });
 
     cat.addDescriptor({
@@ -466,7 +481,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:hanging_back"),
                     QStringLiteral("characteristic:slide"),
-                    QStringLiteral("characteristic:sway") },
+                    QStringLiteral("characteristic:sway"),
+                    QStringLiteral("characteristic:weight_back_at_finish") },
     });
 
     cat.addDescriptor({
@@ -531,8 +547,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "on the ground plane. It is the headline power number and the biggest single driver of "
             "distance."),
         .howToRead = QStringLiteral(
-            "Read the peak, which occurs right around impact. As references, tour drivers run about "
-            "113 mph and 7-irons about 89 mph (TrackMan 2024), but the right number is club- and "
+            "Read the peak, which occurs right around impact. As widely-published references, tour "
+            "drivers run about 113 mph and 7-irons about 89 mph, but the right number is club- and "
             "player-dependent. On a single face-on camera this is an in-plane estimate, so treat "
             "motion along the depth axis as approximate. Needs face-on club tracking."),
         .phases = { P::Impact },
@@ -559,7 +575,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "face-on club tracking (the grip point)."),
         .phases = { P::Impact },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:deceleration") },
     });
 
     cat.addDescriptor({
@@ -602,7 +619,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "with thin/fat tendencies. It needs the face-on club track; Wrist Motion session."),
         .phases = { P::Impact },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:insufficient_shaft_lean") },
     });
 
     // ------------------------------------------------ Club delivery (PLANNED — club track / DTL)
@@ -627,6 +645,10 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Downswing },
         .planned = true,
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
+        .usedBy = { QStringLiteral("characteristic:flat_backswing_plane"),
+                    QStringLiteral("characteristic:steep_backswing_plane"),
+                    QStringLiteral("characteristic:steep_downswing_shaft"),
+                    QStringLiteral("characteristic:under_plane_stuck") },
     });
 
     cat.addDescriptor({
@@ -664,13 +686,16 @@ void installMetricManifest(MetricCatalogue &cat)
             "velocity. It controls compression and low point: irons are struck with a descending "
             "blow, while the driver is best hit slightly on the up to launch it high with low spin."),
         .howToRead = QStringLiteral(
-            "Read at Impact. References run about −1.3° for the driver (many good drives are "
-            "positive, +3 to +5°) and about −4.5° for a 7-iron (TrackMan). A too-steep iron angle "
+            "Read at Impact. HIGHER MEANS A MORE UPWARD STRIKE: widely-published references run "
+            "about −1.3° for the driver (many good drives are positive, +3 to +5°) and about −4.5° "
+            "for a 7-iron. A too-steep iron angle "
             "digs and loses speed; a downward driver angle costs carry. A down-the-line camera "
             "makes it fully in-plane. Planned: needs the club track."),
         .phases = { P::Impact },
         .planned = true,
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
+        .usedBy = { QStringLiteral("characteristic:attack_too_shallow"),
+                    QStringLiteral("characteristic:attack_too_steep") },
     });
 
     cat.addDescriptor({
@@ -688,12 +713,16 @@ void installMetricManifest(MetricCatalogue &cat)
             "are the difference between a fairway and a penalty area."),
         .howToRead = QStringLiteral(
             "Read at Impact; you want small, repeatable open/closed values matched to the intended "
-            "path. Face angle really needs a club-mounted device or full club tracking to measure "
-            "directly — a camera alone can only offer a forearm-and-wrist proxy, which must be "
-            "clearly labelled as an estimate. Planned: needs club instrumentation."),
+            "path. Requires a launch monitor: face orientation at impact is a sub-millisecond event "
+            "and a camera alone can only offer a forearm-and-wrist proxy, which would be an "
+            "estimate wearing a measurement's clothes. The lead-wrist measures corroborate it; they "
+            "do not stand in for it."),
         .phases = { P::Impact },
-        .planned = true,
-        .requirement = { .clubTrack = true, .minTier = ReconstructionTier::ClubInstrumented },
+        // Deliberately NOT `.planned`. It had been planned-with-a-club-track requirement, which
+        // told two stories at once: that a producer was coming, and that club instrumentation would
+        // be enough. Neither is true — this needs a launch monitor, and saying so once is what lets
+        // the same descriptor go live the day a connector lands.
+        .requirement = { .launchMonitor = true },
     });
 
     cat.addDescriptor({
@@ -717,6 +746,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Impact },
         .planned = true,
         .requirement = { .faceOnCamera = true, .clubTrack = true, .ballTrack = true },
+        .usedBy = { QStringLiteral("characteristic:low_point_behind_ball") },
     });
 
     // --------------------------------------------- Tempo & sequence (phase events / fused)
@@ -956,7 +986,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "value. Needs a face-on whole-body camera."),
         .phases = { P::Top },
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:excessive_heel_lift") },
     });
 
     // -------------------------------------------- Alignment (PLANNED — pose lines at address/impact)
@@ -1018,9 +1049,10 @@ void installMetricManifest(MetricCatalogue &cat)
         .group = QStringLiteral("Alignment"),
         .description = QStringLiteral(
             "Which way the hip line points — the angle of the line joining the lead and trail hips "
-            "in the image plane — read at address and at impact. The hips both set a player's aim "
-            "and, by how far they open by impact, reveal how well the lower body is leading the "
-            "downswing."),
+            "in the image plane — read at address and at impact. OPEN IS NEGATIVE AND CLOSED IS "
+            "POSITIVE, the same convention as shoulder alignment and club path. The hips both set a "
+            "player's aim and, by how far they open by impact, reveal how well the lower body is "
+            "leading the downswing."),
         .howToRead = QStringLiteral(
             "Read at Address and Impact. Near-square at address is typical, and by impact the hips "
             "are usually more open than the shoulders — a lower body that clears ahead of the upper "
@@ -1029,6 +1061,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Address, P::Impact },
         .planned = true,
         .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:hip_alignment_closed"),
+                    QStringLiteral("characteristic:hip_alignment_open") },
     });
 
     cat.addDescriptor({
@@ -1040,8 +1074,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .group = QStringLiteral("Alignment"),
         .description = QStringLiteral(
             "The alignment of the feet as a body line — the angle of the line joining the lead and "
-            "trail ankles in the image plane — read at address and at impact. It complements the "
-            "address-only toe line by adding an impact read and by using the ankle joints rather "
+            "trail ankles in the image plane — read at address and at impact. OPEN IS NEGATIVE AND "
+            "CLOSED IS POSITIVE, the same convention as shoulder and hip alignment. It complements "
+            "the address-only toe line by adding an impact read and by using the ankle joints rather "
             "than the toes, so it is less affected by foot flare."),
         .howToRead = QStringLiteral(
             "Read at Address and Impact. At address it reports the stance line (open / square / "
@@ -1051,6 +1086,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Address, P::Impact },
         .planned = true,
         .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:feet_alignment_closed"),
+                    QStringLiteral("characteristic:feet_alignment_open") },
     });
 
     // ---------------------------------------------------- Head (whole-body pose, face-on, 2D; live)
@@ -1074,7 +1111,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "body is sliding. Needs a face-on camera; Wrist Motion session."),
         .phases = { P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:excessive_head_sway") },
     });
 
     cat.addDescriptor({
@@ -1095,7 +1133,9 @@ void installMetricManifest(MetricCatalogue &cat)
             "Needs a face-on camera; Wrist Motion session."),
         .phases = { P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("chart:review") },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:head_drop_backswing"),
+                    QStringLiteral("characteristic:head_rise_backswing") },
     });
 
     cat.addDescriptor({
@@ -1219,7 +1259,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Impact, P::ShaftParallelThrough },
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:late_buckle") },
+        .usedBy = { QStringLiteral("characteristic:excessive_knee_flex"),
+                    QStringLiteral("characteristic:insufficient_knee_flex"),
+                    QStringLiteral("characteristic:late_buckle") },
     });
 
     cat.addDescriptor({
@@ -1337,6 +1379,384 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:loss_of_width") },
+    });
+
+    // ======================================================================================
+    // Content extension: the metrics the extended fault library needs.
+    //
+    // Every one of these is authored BEFORE the measure and the signal that will read it, because
+    // `axis_direction_test` settles a signal's tail by quoting the descriptor's own `howToRead`.
+    // A metric that ships without saying which way is positive is exactly how three signals shipped
+    // inverted, so the sign sentence is the first thing written here, not the last.
+    // ======================================================================================
+
+    // ---------------------------------------------------- Lower body (whole-body pose, face-on, 2D)
+
+    cat.addDescriptor({
+        .key = QStringLiteral("trailKneeFlexion"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Trail knee flexion"),
+        .shortLabel = QStringLiteral("Trail knee"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Feet & stance"),
+        .description = QStringLiteral(
+            "The angle between the trail shin and the trail thigh through the swing. The trail knee "
+            "holds the flex it was given at address while the pelvis turns against it; losing that "
+            "flex on the way back is how a turn becomes a slide, and it takes the pressure off the "
+            "trail side before the downswing can use it."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the change from address to the top is the reading that matters. "
+            "HIGHER MEANS MORE BEND, the same convention as the lead knee. A knee angle is between "
+            "two SEGMENTS, not a property of the knee point. Needs a face-on camera."),
+        .phases = { P::Address, P::Top },
+        .planned = true,
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:trail_knee_straighten") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("comOverLeadFoot"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Balance over the lead foot"),
+        .shortLabel = QStringLiteral("Balance"),
+        .unit = QStringLiteral("% stance width"),
+        .group = QStringLiteral("Feet & stance"),
+        .description = QStringLiteral(
+            "How far the pelvis centre sits from the lead ankle, along the stance line, as a "
+            "percentage of stance width. At the finish a golfer who has used the ground is stacked "
+            "over the lead foot and can hold the position; one who has not is still falling."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the reading that matters is at the finish. HIGHER MEANS FURTHER "
+            "FROM THE LEAD ANKLE — still back, or fallen through it — so a balanced finish is the "
+            "low end. It is a proxy for balance, not a measurement of it: without pressure data "
+            "this reads geometry only. Needs a face-on camera."),
+        .phases = { P::Impact, P::Finish },
+        .planned = true,
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:off_balance_finish") },
+    });
+
+    // ---------------------------------------------------- Arms
+
+    cat.addDescriptor({
+        .key = QStringLiteral("leadUpperArmToChest"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead arm connection"),
+        .shortLabel = QStringLiteral("Connection"),
+        .unit = QStringLiteral("% shoulder width"),
+        .group = QStringLiteral("Arms"),
+        .description = QStringLiteral(
+            "The gap between the lead upper arm and the chest, normalised by shoulder width. "
+            "Coaches call the arm staying near the body 'connection'; the arm running away from it "
+            "in the backswing is a different fault from the trail elbow flying, and a different one "
+            "again from the lead elbow folding after impact, which is why it is its own curve."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the widest gap between address and the top is the reading that "
+            "matters. HIGHER MEANS A LARGER GAP — the arm further from the chest. Some separation is "
+            "normal and a value of zero would mean the arm is pinned, which is its own fault. Needs "
+            "a face-on camera."),
+        .phases = { P::Top },
+        .planned = true,
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("characteristic:disconnection") },
+    });
+
+    // ---------------------------------------------------- Shaft geometry (club track, DTL)
+
+    cat.addDescriptor({
+        .key = QStringLiteral("shaftDirection"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Shaft direction"),
+        .shortLabel = QStringLiteral("Shaft dir"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "Where the shaft points relative to the target line, seen down the line. Read in the "
+            "takeaway it says whether the club was dragged inside or pushed outside; read at the "
+            "top it is the across-the-line / laid-off distinction, which is the same question asked "
+            "at the other end of the backswing."),
+        .howToRead = QStringLiteral(
+            "Read at P2 and at the Top. POSITIVE POINTS RIGHT OF THE TARGET for a right-handed "
+            "golfer — across the line at the top, outside in the takeaway — and negative points "
+            "left: laid off, or dragged inside. Zero is parallel to the target line, which is the "
+            "reference both positions are named against. Planned: needs the club track and a "
+            "down-the-line camera."),
+        .phases = { P::ShaftParallelBack, P::Top },
+        .planned = true,
+        .requirement = { .clubTrack = true },
+        .usedBy = { QStringLiteral("characteristic:across_the_line"),
+                    QStringLiteral("characteristic:inside_takeaway"),
+                    QStringLiteral("characteristic:laid_off"),
+                    QStringLiteral("characteristic:outside_takeaway") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("shaftAngleVsHorizontal"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Shaft angle at the top"),
+        .shortLabel = QStringLiteral("Past parallel"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "How far past horizontal the shaft has travelled at the top of the backswing. "
+            "'Parallel' is the reference every coach uses for backswing length, and length is a "
+            "different question from plane or direction — a swing can be long and on plane."),
+        .howToRead = QStringLiteral(
+            "Read at the Top. ZERO IS PARALLEL TO THE GROUND; POSITIVE IS PAST PARALLEL and "
+            "negative is short of it. Length is strongly club-dependent and partly a matter of "
+            "flexibility and style, so the corridor is wide and a reading outside it is a "
+            "conversation, not a verdict. Planned: needs the club track and a face-on camera."),
+        .phases = { P::Top },
+        .planned = true,
+        .requirement = { .faceOnCamera = true, .clubTrack = true },
+        .usedBy = { QStringLiteral("characteristic:overswing") },
+    });
+
+    // ---------------------------------------------------- Ball flight (ball track, face-on)
+    //
+    // Start line and launch are resolvable from our own ball track; CURVATURE is not, because it
+    // develops over a flight we do not see indoors. That split is the whole reason the ball-flight
+    // outcomes divide into camera-measured and launch-monitor ones.
+
+    cat.addDescriptor({
+        .key = QStringLiteral("launchDirection"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Start direction"),
+        .shortLabel = QStringLiteral("Start dir"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The horizontal direction the ball leaves on, relative to the target line. Start "
+            "direction is dominated by where the face pointed at impact, which is what makes it the "
+            "first question of any miss: a pull and a push are the same swing fault only if the "
+            "face agreed with the path."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact from the ball track. POSITIVE IS RIGHT OF THE TARGET for a "
+            "right-handed golfer, negative is left — the same convention as club path and the "
+            "alignment lines. It says nothing about curvature, which needs a launch monitor. "
+            "Planned: needs the ball track and a face-on camera."),
+        .phases = { P::Impact },
+        .planned = true,
+        .requirement = { .faceOnCamera = true, .ballTrack = true },
+        .usedBy = { QStringLiteral("characteristic:pull"),
+                    QStringLiteral("characteristic:push") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("launchAngle"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Launch angle"),
+        .shortLabel = QStringLiteral("Launch"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The vertical angle the ball leaves on. Together with ball speed it is most of what "
+            "decides carry, and it is the reading that separates a thin strike from a fat one when "
+            "both have lost distance: the thin one launches far too low, the fat one loses speed."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact from the ball track. HIGHER MEANS A HIGHER LAUNCH. Strongly "
+            "club-dependent — a driver and a wedge have nothing to say to each other here — so the "
+            "corridor is authored per club and reading it at the general context means little. "
+            "Planned: needs the ball track and a face-on camera."),
+        .phases = { P::Impact },
+        .planned = true,
+        .requirement = { .faceOnCamera = true, .ballTrack = true },
+        .usedBy = { QStringLiteral("characteristic:launch_high"),
+                    QStringLiteral("characteristic:launch_low") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("ballSpeed"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Ball speed"),
+        .shortLabel = QStringLiteral("Ball spd"),
+        .unit = QStringLiteral("mph"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "How fast the ball leaves the face. It is the single best summary of how much of the "
+            "clubhead's energy reached the ball, so a collapse in it with an otherwise ordinary "
+            "swing is the signature of a strike problem rather than a speed problem."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact, averaged over several streaks rather than one — a single "
+            "frame-pair estimate is noisy. HIGHER IS FASTER. Club- and athlete-dependent, so it is "
+            "read against the golfer's own normal rather than a population figure. Planned: needs "
+            "the ball track and a face-on camera."),
+        .phases = { P::Impact },
+        .planned = true,
+        .requirement = { .faceOnCamera = true, .ballTrack = true },
+        .usedBy = { QStringLiteral("characteristic:ball_speed_deficit") },
+    });
+
+    // ---------------------------------------------------- Launch monitor
+    //
+    // NOT `.planned`. A planned metric has no producer and always resolves Unavailable; these have
+    // a producer — a launch monitor — and resolve through the ordinary requirement path, which
+    // reports "needs a launch monitor" until one is connected and Measured the moment one is. That
+    // is the graceful fallback for a golfer who does not own one, and it is the same mechanism a
+    // missing face-on camera already uses rather than a second story about absence.
+
+    cat.addDescriptor({
+        .key = QStringLiteral("faceToPath"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Face to path"),
+        .shortLabel = QStringLiteral("Face/path"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The face angle relative to the club path at impact. This is the number that decides "
+            "which way the ball curves, and it is why a slice and a pull can come from the same "
+            "out-to-in swing: the path chose the start line, the face-to-path chose the shape."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE MEANS THE FACE IS OPEN TO THE PATH for a right-handed golfer "
+            "— curvature to the right — and negative means closed, curving left. Zero is a straight "
+            "shot on whatever line the path started it. Requires a launch monitor: face orientation "
+            "at impact is a sub-millisecond event and is not optically resolvable at our frame "
+            "rates."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
+        .usedBy = { QStringLiteral("characteristic:closed_face_to_path"),
+                    QStringLiteral("characteristic:open_face_to_path") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("spinAxis"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Spin axis"),
+        .shortLabel = QStringLiteral("Spin axis"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The tilt of the ball's axis of rotation, which is what curves the flight. It is the "
+            "outcome the golfer actually sees, where face-to-path is the cause of it at impact."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. POSITIVE TILTS RIGHT for a right-handed golfer — a fade or a "
+            "slice — and negative tilts left. Requires a launch monitor: the curvature develops "
+            "over a flight an indoor capture never sees."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
+        .usedBy = { QStringLiteral("characteristic:hook"),
+                    QStringLiteral("characteristic:slice") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("spinRate"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Spin rate"),
+        .shortLabel = QStringLiteral("Spin"),
+        .unit = QStringLiteral("rpm"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "How fast the ball is spinning as it leaves. Too much costs distance and makes the "
+            "flight balloon; too little costs the height and stopping power a shot needs to hold a "
+            "green."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. HIGHER IS MORE SPIN. Strongly club-dependent — what is a "
+            "knuckleball for a wedge is a spinny drive — so the corridor is authored per club. "
+            "Requires a launch monitor: spin is not measurable over the short flight an indoor "
+            "capture sees."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
+        .usedBy = { QStringLiteral("characteristic:spin_deficit"),
+                    QStringLiteral("characteristic:spin_excess") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("smashFactor"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Smash factor"),
+        .shortLabel = QStringLiteral("Smash"),
+        .unit = QStringLiteral("ratio"),
+        .group = QStringLiteral("Strike"),
+        .description = QStringLiteral(
+            "Ball speed divided by clubhead speed — how much of the club's energy reached the ball. "
+            "It isolates strike quality from speed: two golfers swinging identically fast can be a "
+            "club apart in distance because one finds the middle of the face."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. HIGHER IS A MORE EFFICIENT STRIKE, with the practical ceiling set by "
+            "the club's loft — a driver reaches far higher than a wedge, so this is read per club "
+            "and never across them. Requires a launch monitor: it needs a validated clubhead-speed "
+            "and ball-speed pair, and our clubhead speed is camera-derived."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
+        .usedBy = { QStringLiteral("characteristic:smash_deficit") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("strikeLocation"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Strike location"),
+        .shortLabel = QStringLiteral("Strike"),
+        .unit = QStringLiteral("mm"),
+        .group = QStringLiteral("Strike"),
+        .description = QStringLiteral(
+            "Where on the face the ball was struck, across the heel-toe axis. Off-centre contact "
+            "bleeds speed and, through gear effect, curves the ball in the opposite direction to "
+            "the miss — which is why a toe strike can draw and a heel strike fade from one swing."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS TOWARD THE TOE, negative toward the heel, zero at the "
+            "centre of the face. Requires a launch monitor, or face impact markers: the impact "
+            "position on the face is not resolvable from any camera view we take."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
+        .usedBy = { QStringLiteral("characteristic:strike_heel"),
+                    QStringLiteral("characteristic:strike_toe") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("carryDistance"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Carry"),
+        .shortLabel = QStringLiteral("Carry"),
+        .unit = QStringLiteral("yd"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "How far the ball flies before it lands. It is the number a golfer plans a round with, "
+            "and the one every other ball-flight metric is ultimately serving."),
+        .howToRead = QStringLiteral(
+            "Read after Impact. HIGHER IS FURTHER. Club- and athlete-dependent, so it is read "
+            "against the golfer's own normal for that club. Requires a launch monitor: carry is a "
+            "flight-model output, not something an indoor capture observes."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
+        .usedBy = { QStringLiteral("characteristic:carry_deficit") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("dynamicLoft"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Dynamic loft"),
+        .shortLabel = QStringLiteral("Dyn loft"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "The loft actually presented to the ball at impact, as opposed to the loft stamped on "
+            "the club. Shaft lean removes it and flipping the hands adds it, which is why two "
+            "golfers with the same 7-iron can launch it four degrees apart."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. HIGHER MEANS MORE LOFT DELIVERED — a higher, weaker flight. Requires a "
+            "launch monitor: it is derived from face orientation at impact, which is not optically "
+            "resolvable at our frame rates."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("spinLoft"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Spin loft"),
+        .shortLabel = QStringLiteral("Spin loft"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "The angle between the delivered loft and the direction the clubhead is travelling. It "
+            "is what generates spin: a small spin loft gives a hot, low-spinning strike, a large one "
+            "trades speed for spin and height."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. HIGHER MEANS MORE SPIN AND LESS SPEED for the same clubhead speed. "
+            "Requires a launch monitor: it is derived from delivered loft, which needs face "
+            "orientation at impact."),
+        .phases = { P::Impact },
+        .requirement = { .launchMonitor = true },
     });
 }
 

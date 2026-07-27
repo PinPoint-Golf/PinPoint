@@ -43,6 +43,12 @@ struct MetricRequirement {
     std::vector<SegmentRole> imuRoles;                                 // required anatomical IMU roles
     bool                     clubTrack   = false;                      // ShaftTrack2D present
     bool                     ballTrack   = false;                      // BallTrack2D present
+    // A connected launch monitor. Face angle at impact, spin and strike location are not optically
+    // resolvable at our frame rates, and an integration is intended rather than a producer of our
+    // own. Stating it HERE rather than as a separate status is what makes the absence graceful: a
+    // user without one gets "needs a launch monitor" through the same path a missing face-on camera
+    // takes, and the day a connector lands the same metric resolves Measured with no content change.
+    bool                     launchMonitor = false;
     ReconstructionTier       minTier     = ReconstructionTier::Angles2D;
 };
 

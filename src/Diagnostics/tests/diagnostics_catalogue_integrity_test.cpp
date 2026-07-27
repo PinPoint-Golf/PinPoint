@@ -78,6 +78,13 @@ int main()
         int unresolved = 0;
         for (const Condition &c : p.conditions) {
             if (c.observability == Observability::Latent) continue;
+            // A condition only establishable by asking, or by a physical screen, cannot resolve to
+            // a metric BY DEFINITION — and `validatePack` already refuses it a signal, so requiring
+            // one here would demand the two rules contradict each other. The ball-flight outcomes
+            // that need a CONJUNCTION of readings (a chunk is low point behind AND speed collapse,
+            // which the engine's OR over signals cannot express) ship this way deliberately: the
+            // golfer knows, and the app does not yet.
+            if (isOutsideCaptureReach(c.confirmedBy)) continue;
             bool resolves = false;
             for (const QString &sid : c.detectedBy) {
                 const Signal *s = p.signal(sid);
@@ -274,8 +281,8 @@ int main()
             pelvisSwaySamples = r.value(QStringLiteral("samples")).toInt();
         }
         check(pelvisSwayRows == 1, "a series with several reducers is ONE roadmap row");
-        check(pelvisSwaySamples == 3, "that row knows it carries three reducers");
-        check(pelvisSwayBlocks == 3, "and that it unblocks three characteristics");
+        check(pelvisSwaySamples == 4, "that row knows it carries four reducers");
+        check(pelvisSwayBlocks == 4, "and that it unblocks four characteristics");
 
         check(!rows.isEmpty()
                   && rows.first().toMap().value(QStringLiteral("blocks")).toInt() >= pelvisSwayBlocks,
@@ -374,6 +381,65 @@ int main()
         }
         std::printf("        (%d metrics referenced: %d with a producer, %d planned, %d capture gaps)\n",
                     int(packUses.size()), live, planned, gap);
+    }
+
+    // ── The reference registries reach the marshaller ──────────────────────────
+    //
+    // The trap this guards is the one the developer guide names twice: a field can be complete on
+    // both sides and reach nothing, because QML reads `undefined` and renders silence. The screen
+    // registry, the drill registry and the glossary are all new content whose ONLY route to a
+    // reader is through these three invokables, so a marshaller that dropped a key would produce
+    // three empty views and no error anywhere.
+    std::printf("=== screens, drills and the glossary reach QML ===\n");
+    {
+        CharacteristicLibraryModel model;
+
+        const QVariantList screens = model.screens();
+        check(!screens.isEmpty(), "the screen registry is marshalled");
+        int settling = 0, withProtocol = 0;
+        for (const QVariant &v : screens) {
+            const QVariantMap r = v.toMap();
+            if (!r.value(QStringLiteral("protocol")).toString().isEmpty()) ++withProtocol;
+            if (r.value(QStringLiteral("settlesCount")).toInt() > 0) ++settling;
+        }
+        check(withProtocol == screens.size(), "every screen row carries its protocol");
+        check(settling > 0, "…and the join back to the conditions each would settle works");
+        // Ranked by what they settle, which is the argument the model makes: a handful of physical
+        // tests, needing no capture hardware, explain most of what the library detects.
+        check(screens.first().toMap().value(QStringLiteral("settlesCount")).toInt()
+                  >= screens.last().toMap().value(QStringLiteral("settlesCount")).toInt(),
+              "screens are ranked by how much they settle, not alphabetically");
+
+        const QVariantList drills = model.drills();
+        check(!drills.isEmpty(), "the drill registry is marshalled");
+        int answering = 0;
+        for (const QVariant &v : drills)
+            if (v.toMap().value(QStringLiteral("answersCount")).toInt() > 0) ++answering;
+        check(answering > 0, "…and drills join back to the characteristics they answer");
+
+        const QVariantList glossary = model.glossary();
+        check(glossary.size() == int(p.conditions.size()),
+              "the glossary covers every characteristic — it IS the rule set, not a subset of it");
+
+        int withAliases = 0, withMeaning = 0;
+        for (const QVariant &v : glossary) {
+            const QVariantMap r = v.toMap();
+            if (!r.value(QStringLiteral("aliases")).toStringList().isEmpty()) ++withAliases;
+            if (!r.value(QStringLiteral("meaning")).toString().isEmpty()) ++withMeaning;
+        }
+        check(withMeaning == glossary.size(), "every entry says what it means");
+        check(withAliases > 0, "…and the coach terms reached it");
+
+        // The search is the whole point: a golfer types the word they were TAUGHT, which is
+        // usually not the word the library was written in.
+        const QVariantList byAlias = model.glossary(QStringLiteral("flip"));
+        bool foundScooping = false;
+        for (const QVariant &v : byAlias)
+            if (v.toMap().value(QStringLiteral("id")).toString() == QLatin1String("scooping"))
+                foundScooping = true;
+        check(foundScooping, "searching a coach term finds the characteristic it names");
+        check(model.glossary(QStringLiteral("zzzz-no-such-term")).isEmpty(),
+              "…and a term nothing answers to returns nothing, rather than everything");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");

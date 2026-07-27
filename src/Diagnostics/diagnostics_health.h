@@ -58,6 +58,16 @@
 //                          none. This is what the shipped tree looks like today for partial, pitch,
 //                          chip, bunker and specialty — five branches hanging off `any`, where every
 //                          authored norm sits at `full_swing` or below.
+//   unknownScreenRef       A condition names a `screen.*` id the screen registry does not have. The
+//                          join is an exact string match, so this fails SILENTLY: the condition
+//                          loads and renders, and the panel that should tell a coach how to run the
+//                          test is simply blank. Fix the id, or author the screen.
+//   unknownDrillRef        The same, for a `drill.*` id.
+//   screenNoProtocol       A screen nobody could run — no protocol authored.
+//   screenNoPass           A screen with no pass criterion, so its answer is unrecordable.
+//   drillNoInstruction     A drill that does not say what the golfer does.
+//   drillNoTarget          A drill that does not say what it is trying to change, so nobody can
+//                          judge whether it is the right one.
 //   overrideCoreChanged    Your override was made against shipped numbers that have since been
 //                          revised. Offers a diff and "Take theirs" (which is the existing
 //                          drop-your-row operation — one operation, honest label).

@@ -164,7 +164,33 @@ inline double normZ(double value, const Norm &norm)
     const double sigma = (value < norm.mu) ? norm.sigmaLo : norm.sigmaHi;
     if (!(sigma > 0.0))
         return (value == norm.mu) ? 0.0 : std::numeric_limits<double>::infinity();
+
     return (value - norm.mu) / sigma;
+}
+
+// Is `value` inside the band `threshold` tolerances wide?
+//
+// Expressed as a comparison against COMPUTED EDGES rather than as `|z| <= threshold`, and that is
+// the whole point of it existing.
+//
+// grade() and bandEdgesOf() are not exact inverses in floating point. bandEdgesOf computes
+// `mu - k*sigmaLo`; asking `(value - mu)/sigmaLo <= k` is a different calculation, and for
+// mu = 1.40, sigmaLo = 0.08 the edge is 1.3199999999999998 while dividing that difference back
+// gives 1.0000000000000009. A value sitting exactly ON the drawn edge therefore graded Good while
+// the band it was drawn from called it Green — two user-visible paths disagreeing about one number.
+// `reference_bands_test` sweeps every band edge to ±1e-9 hunting for exactly that.
+//
+// An epsilon does not fix it; it moves it. A tolerance on the z comparison makes grade() round in
+// samples that the band still excludes, which is the same disagreement with the sign flipped. What
+// removes the whole class is computing the edge the SAME WAY on both paths and comparing inclusively
+// against it — then the two agree by construction, at every magnitude, with no fudge factor.
+inline bool withinBand(double value, const Norm &norm, double threshold)
+{
+    const double sigma = (value < norm.mu) ? norm.sigmaLo : norm.sigmaHi;
+    if (!(sigma > 0.0))
+        return value == norm.mu;      // a norm admitting only its own centre; the validator warns
+    return (value >= norm.mu - threshold * norm.sigmaLo)
+        && (value <= norm.mu + threshold * norm.sigmaHi);
 }
 
 // Grade a value against a norm.
@@ -179,19 +205,17 @@ inline double normZ(double value, const Norm &norm)
 // regardless of how few tolerances out it was. Both halves of the rule are needed to reproduce that.
 inline Grade grade(double value, const Norm &norm, const GradePolicy &policy = {})
 {
-    const double az = std::fabs(normZ(value, norm));
-
     if (norm.hasExplicitMonitor()) {
         if (value < *norm.monitorLo || value > *norm.monitorHi)
             return Grade::Action;
-        if (az <= policy.idealMaxZ) return Grade::Ideal;
-        if (az <= policy.goodMaxZ)  return Grade::Good;
+        if (withinBand(value, norm, policy.idealMaxZ)) return Grade::Ideal;
+        if (withinBand(value, norm, policy.goodMaxZ))  return Grade::Good;
         return Grade::Watch;                      // capped: inside the monitor band is never Action
     }
 
-    if (az <= policy.idealMaxZ) return Grade::Ideal;
-    if (az <= policy.goodMaxZ)  return Grade::Good;
-    if (az <= policy.watchMaxZ) return Grade::Watch;
+    if (withinBand(value, norm, policy.idealMaxZ)) return Grade::Ideal;
+    if (withinBand(value, norm, policy.goodMaxZ))  return Grade::Good;
+    if (withinBand(value, norm, policy.watchMaxZ)) return Grade::Watch;
     return Grade::Action;
 }
 

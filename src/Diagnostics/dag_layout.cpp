@@ -180,6 +180,39 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     walk(-1);
     walk(+1);
 
+    // ── 1b. The focus's non-causal partners, admitted to its OWN rank ───────
+    //
+    // Corroborates and Excludes are symmetric, so they have no direction to rank by and cannot join
+    // the left-to-right causal flow without stating a claim the pack does not hold. They belong
+    // beside the focus, on rank 0.
+    //
+    // Scoped to the FOCUS deliberately. A corroborates edge between two of the focus's causes is a
+    // fact about those two, not about the thing being read, and drawing every non-causal edge
+    // anywhere in the subgraph would fill the picture with lines that answer a question nobody
+    // asked. The claim this makes is narrow and true: "this finding — and what else says the same
+    // thing, or rules it out".
+    //
+    // A partner already ranked as a cause or an effect keeps that rank: it is in the picture, the
+    // edge will still be drawn to it, and moving it would break the causal reading to serve the
+    // secondary one.
+    for (EdgeType t : { EdgeType::Corroborates, EdgeType::Excludes }) {
+        for (const Edge &e : pack.edges) {
+            if (e.type != t) continue;
+            const QString other = (e.from == focusId) ? e.to
+                                : (e.to == focusId)   ? e.from
+                                                      : QString();
+            if (other.isEmpty() || rankOf.contains(other) || !pack.condition(other)) continue;
+            if (opt.maxPerRank > 0 && int(byRank[0].size()) >= opt.maxPerRank) continue;
+            rankOf.insert(other, 0);
+            // ABOVE the focus, so the focus stays at the bottom of its own column. The detection
+            // lane hangs beneath rank 0 and its edges run straight up into the focus; a partner
+            // stacked below would sit in that path, and the test caught exactly that
+            // (`mLive->focus crosses rival`). Keeping the focus adjacent to its lane is a property
+            // of the ordering, not something the router has to work around.
+            byRank[0].insert(byRank[0].begin(), other);
+        }
+    }
+
     // ── 2. Ordering within each rank — barycentre, sweeping OUTWARD ─────────
     // Each rank is ordered against the rank one step closer to the focus, which by then is fixed.
     // Sweeping outward rather than iterating to convergence keeps it deterministic in one pass, and
@@ -230,7 +263,11 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     std::vector<Route> routes;
     for (int i = 0; i < int(pack.edges.size()); ++i) {
         const Edge &e = pack.edges[size_t(i)];
-        if (e.type != EdgeType::Causes) continue;
+        // Causal edges anywhere in the admitted subgraph; symmetric ones only where they touch the
+        // focus, matching the admission rule above. A corroborates edge between two causes would
+        // otherwise appear as a line with no arrow between two boxes, saying nothing a reader of
+        // THIS page came for.
+        if (e.type != EdgeType::Causes && e.from != focusId && e.to != focusId) continue;
         const auto rf = rankOf.constFind(e.from);
         const auto rt = rankOf.constFind(e.to);
         if (rf == rankOf.constEnd() || rt == rankOf.constEnd()) continue;
@@ -622,8 +659,18 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             e.weight        = src.strength == Strength::Weak ? 1
                             : (src.strength == Strength::Strong ? 3 : 2);
             e.offeredOnly   = offeredOnly;
+            e.relation      = edgeTypeName(src.type);
+            e.symmetric     = (src.type != EdgeType::Causes);
             e.segment       = int(i);
             e.segments      = int(hops.size());
+
+            // Strength is a claim about how OFTEN a cause produces an effect. An exclusion is not a
+            // matter of degree — the pair is incompatible or it is not — so it carries no word and
+            // no weight, and saying "usually" on one would invent a certainty nobody authored.
+            if (src.type == EdgeType::Excludes) {
+                e.strengthLabel.clear();
+                e.weight = 1;
+            }
 
             const double ay = h.a->isWaypoint()
                                   ? h.a->centreY()
@@ -665,7 +712,11 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
 
             // The arrowhead. Which end is the effect is the whole claim of a causal graph, so the
             // triangle is emitted as three points rather than an angle for a delegate to rotate by.
-            if (last) {
+            //
+            // A SYMMETRIC relation gets none. Corroborates and Excludes read the same from either
+            // end — the author may write them whichever way round they think of them — so an arrow
+            // would assert a direction that does not exist, and a reader would take it as causal.
+            if (last && !e.symmetric) {
                 const QPointF tipPt(e.x2, e.y2);
                 const QPointF back = cubicAt(QPointF(e.x1, e.y1), QPointF(e.c1x, e.c1y),
                                              QPointF(e.c2x, e.c2y), tipPt, 0.94);

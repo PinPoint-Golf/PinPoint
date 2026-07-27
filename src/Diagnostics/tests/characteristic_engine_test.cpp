@@ -389,6 +389,75 @@ int main()
               "…but it carries no weight in the ranking score");
     }
 
+    // ── Excludes: two findings that cannot both describe one swing ──────────────
+    //
+    // The pair is resolved BEFORE ranking, because leaving both in would put a contradiction in
+    // front of a coach and let one cause be credited twice for two versions of one event.
+    std::printf("=== excludes ===\n");
+    {
+        CharacteristicPack p = pack;
+        p.edges.push_back(Edge{ QStringLiteral("sway"), QStringLiteral("slide"),
+                                EdgeType::Excludes, Strength::Strong, {} });
+
+        FakeSource src;
+        src.add(QStringLiteral("mSway"),  50.0, 0.0, 10.0, 0.9f);
+        src.add(QStringLiteral("mSlide"), 50.0, 0.0, 10.0, 0.4f);   // the less confident reading
+        const DetectionResult d  = detect(p, src);
+        const Explanation     ex = explain(p, d);
+
+        check(d.fired().contains(QStringLiteral("slide")),
+              "detection still reports both — suppression is the EXPLANATION's job, not the engine's");
+        check(ex.suppressed.size() == 1, "one finding was ruled out");
+        check(ex.suppressed.front().conditionId == QStringLiteral("slide")
+                  && ex.suppressed.front().excludedBy == QStringLiteral("sway"),
+              "the LESS confident reading is the one dropped");
+        check(!ex.suppressed.front().reason.isEmpty(),
+              "…and it says so, rather than the finding silently vanishing");
+        check(!ex.unexplained.contains(QStringLiteral("slide")),
+              "a suppressed finding is not ALSO reported as unexplained — one event, one heading");
+
+        // Symmetry: an author may write the edge from either end and must get the same answer.
+        CharacteristicPack q = pack;
+        q.edges.push_back(Edge{ QStringLiteral("slide"), QStringLiteral("sway"),
+                                EdgeType::Excludes, Strength::Strong, {} });
+        const Explanation exq = explain(q, detect(q, src));
+        check(exq.suppressed.size() == 1
+                  && exq.suppressed.front().conditionId == QStringLiteral("slide"),
+              "the edge means the same written from either end");
+
+        // With no exclusion authored, nothing is suppressed — the negative case, without which the
+        // check above would pass on a resolver that suppressed everything.
+        const Explanation plain = explain(pack, detect(pack, src));
+        check(plain.suppressed.empty(), "no exclusion, no suppression");
+    }
+
+    // ── Corroborates: reported, and a tie-break, never a fabricated weight ──────
+    std::printf("=== corroborates ===\n");
+    {
+        CharacteristicPack p = pack;
+        p.edges.push_back(Edge{ QStringLiteral("sway"), QStringLiteral("slide"),
+                                EdgeType::Corroborates, Strength::Strong, {} });
+
+        FakeSource src;
+        src.add(QStringLiteral("mSway"),  50.0, 0.0, 10.0);
+        src.add(QStringLiteral("mSlide"), 50.0, 0.0, 10.0);
+        const Explanation ex = explain(p, detect(p, src));
+
+        check(ex.corroborations.size() == 2,
+              "both ends of a corroborating pair are reported — it is symmetric in meaning");
+        check(ex.corroborations.front().corroboratedBy.size() == 1,
+              "each names what confirmed it");
+
+        // The scores must be IDENTICAL to the un-corroborated run. Corroboration is evidence a coach
+        // reads, and turning it into a multiplier would mean inventing a number nobody could defend
+        // when asked why one cause outranked another.
+        const Explanation plain = explain(pack, detect(pack, src));
+        check(plain.corroborations.empty(), "no edge, no corroboration reported");
+        check(!ex.roots.empty() && !plain.roots.empty()
+                  && ex.roots.front().score == plain.roots.front().score,
+              "corroboration changes no score");
+    }
+
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
 }

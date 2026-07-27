@@ -470,24 +470,30 @@ Item {
                             anchors.fill: parent
                             preferredRendererType: Shape.CurveRenderer
 
+                            // WHAT KIND OF LINE IT IS, IN COLOUR — not in dashes.
+                            //
+                            // Dashes were doing this job for detection and offered links, and they
+                            // read as noise at this line weight: a dashed cubic on a curved path
+                            // looks like a rendering artefact rather than a distinction somebody
+                            // chose. Colour separates the four kinds cleanly at any weight, and the
+                            // legend below names them, which a dash pattern never could.
                             readonly property color ink:
-                                link.modelData.detects     ? Theme.colorBorderMid
-                              : link.modelData.offeredOnly ? Theme.colorText3
-                              :                              Theme.colorBorderStrong
+                                link.modelData.detects              ? Theme.colorBorderMid
+                              : link.modelData.relation === "excludes"     ? Theme.colorError
+                              : link.modelData.relation === "corroborates" ? Theme.colorGood
+                              : link.modelData.offeredOnly          ? Theme.colorAccentMid
+                              :                                       Theme.colorBorderStrong
 
                             ShapePath {
                                 // Strength is a WEIGHT, drawn as one. It is never a percentage and
-                                // never a number on this surface.
+                                // never a number on this surface. An exclusion has no strength —
+                                // the pair is incompatible or it is not — so it draws thin.
                                 strokeWidth: link.modelData.detects
                                              ? 1 : Math.max(1, link.modelData.weight)
                                 strokeColor: link.ink
                                 fillColor:   "transparent"
                                 capStyle:    ShapePath.RoundCap
-                                // An offered cause draws an offered link: a solid arrow into the
-                                // focus reads as a finding on its own, whatever its box looks like.
-                                strokeStyle: (link.modelData.detects || link.modelData.offeredOnly)
-                                             ? ShapePath.DashLine : ShapePath.SolidLine
-                                dashPattern: [3, 3]
+                                strokeStyle: ShapePath.SolidLine
 
                                 startX: link.modelData.x1
                                 startY: link.modelData.y1
@@ -695,6 +701,59 @@ Item {
             color:          Theme.colorText3
             wrapMode:       Text.WordWrap
             visible:        root._nodes.length > 0
+        }
+
+        // ══ Legend ════════════════════════════════════════════════════════════
+        //
+        // Four kinds of line now say four different things, and colour without a key is decoration.
+        // Only the kinds actually PRESENT are listed: a legend naming a relationship this graph does
+        // not contain teaches the reader to look for something that is not there.
+        Flow {
+            Layout.fillWidth: true
+            spacing: Theme.sp(14)
+            visible: root._nodes.length > 0
+
+            Repeater {
+                model: {
+                    var seen = { causes: false, corroborates: false, excludes: false, detects: false }
+                    for (var i = 0; i < root._edges.length; ++i) {
+                        var e = root._edges[i]
+                        if (e.detects) seen.detects = true
+                        else if (e.relation === "corroborates") seen.corroborates = true
+                        else if (e.relation === "excludes") seen.excludes = true
+                        else seen.causes = true
+                    }
+                    var out = []
+                    if (seen.causes)
+                        out.push({ c: Theme.colorBorderStrong, t: qsTr("causes — the arrow points at the effect") })
+                    if (seen.corroborates)
+                        out.push({ c: Theme.colorGood, t: qsTr("also seen as — the same event, read another way") })
+                    if (seen.excludes)
+                        out.push({ c: Theme.colorError, t: qsTr("cannot also be — one swing cannot be both") })
+                    if (seen.detects)
+                        out.push({ c: Theme.colorBorderMid, t: qsTr("measured by") })
+                    return out
+                }
+
+                delegate: Row {
+                    required property var modelData
+                    spacing: Theme.sp(5)
+
+                    Rectangle {
+                        width:  Theme.sp(14)
+                        height: 2
+                        radius: 1
+                        color:  parent.modelData.c
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text:           parent.modelData.t
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                    }
+                }
+            }
         }
     }
 

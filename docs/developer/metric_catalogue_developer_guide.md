@@ -110,6 +110,16 @@ new one in `src/Analysis/metric_providers.{h,cpp}`:
 - If you add a **new** provider class, register a process-lifetime instance of it in
   `makeMetricCatalogue()` (`metric_catalogue.cpp`) with `cat.addProvider(&yourProvider)`.
 
+**Hardware the user may not own is a REQUIREMENT, not a `planned` flag.** `MetricRequirement` gained
+`launchMonitor` alongside `faceOnCamera` / `clubTrack` / `ballTrack`, matched by
+`ShotContext::hasLaunchMonitor`. The distinction matters in both directions and both mistakes are
+lies: marking a launch-monitor metric `planned` promises work we are not doing, while claiming it
+`Measured` unconditionally reports numbers nobody supplied. Declaring the requirement instead makes
+the absence graceful through the path every other missing input already uses — "needs a launch
+monitor" today, `Measured` the moment a connector sets the flag, with no catalogue change at that
+point. `LaunchMonitorProvider` is that connector's insertion point rather than a stub to delete, and
+the diagnostics pack's matching statement is `MeasureStatus::ExternalDevice`.
+
 Resolution rule (in `metric_resolver.cpp`): over all providers that list the key, the best state wins
 (`Measured` > `Bridged` > `Unavailable`), ties broken by `priority()`. If no provider claims the key,
 it is `Unavailable` with the descriptor requirement rendered as the reason.
