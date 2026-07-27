@@ -44,7 +44,11 @@ namespace {
 
 // A measure the shipped pack carries with a norm on full_swing, so the draft opens seeded.
 const char *kMeasure = "m_leadWristRadUln_p4";
-const char *kContext = "full_swing";
+// The context core carries a row AT, which is the root: the general corridors live at `any` because
+// a full swing is a shot TYPE, not the general case (see norms.json's own comment). Every assertion
+// below is about the editor's mechanics, so what matters is only that this is a context with a
+// shipped row of its own; the inheriting case gets its own block at the end.
+const char *kContext = "any";
 
 double num(const QVariantMap &m, const char *k) { return m.value(QLatin1String(k)).toDouble(); }
 
@@ -415,6 +419,34 @@ int main(int argc, char **argv)
                       QStringLiteral("inherits")),
                   "…and reports that it now INHERITS, not that anything was restored");
         }
+    }
+
+    // FULL SWING is now one of those contexts, and it is the one a user is most likely to open.
+    //
+    // The general corridors live at `any` because a full swing is a shot TYPE — before that, they sat
+    // at full_swing, a SIBLING of partial / bunker / specialty, and a pitch or bunker shot resolved
+    // no corridor at all. The consequence here is that editing "the full swing corridor" now creates
+    // an override on an inheriting context, so the reset promises removal rather than a restore. That
+    // is honest, but it is a change to the common path and it should not drift back silently.
+    std::printf("\nediting a full swing, whose corridor is inherited from the root\n");
+    {
+        NormEditorModel general;
+        check(general.begin(QString::fromLatin1(kMeasure), QStringLiteral("any")),
+              "the general corridor opens at the root");
+        const double generalLo = num(general.draft(), "idealLo");
+
+        NormEditorModel fs;
+        check(fs.begin(QString::fromLatin1(kMeasure), QStringLiteral("full_swing")),
+              "and a full swing opens too");
+        const QVariantMap d = fs.draft();
+
+        near(num(d, "idealLo"), generalLo,
+             "a full swing opens on the INHERITED band, not an empty one");
+        check(!d.value(QStringLiteral("hasShipped")).toBool(),
+              "core carries no row at this exact key — the general corridor is at the root");
+        check(d.value(QStringLiteral("resetLabel")).toString()
+                  == QLatin1String("Remove your override"),
+              "…so the promise is removal, after which the general band resolves again");
     }
 
     // ── Closing ─────────────────────────────────────────────────────────────

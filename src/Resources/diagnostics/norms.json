@@ -21,6 +21,20 @@
     "'unit' MUST match the measure's unit — a mismatch is a load error naming both sides,",
     "never a silent grade.",
     "",
+    "CONTEXT: the GENERAL case is 'any', not 'full_swing'. A full swing is a shot TYPE, with no",
+    "more claim to being the default than a pitch or a bunker shot has, so a corridor that",
+    "applies to every shot is authored at the root. Resolution walks UP the tree from the shot's",
+    "own context and every context descends from 'any', so a row here is reachable from all of",
+    "them; a narrower row (per club, per archetype) still wins because the nearest row wins.",
+    "",
+    "This was NOT true before: the general corridors sat at 'full_swing', which is a sibling of",
+    "'partial' / 'bunker' / 'specialty' rather than an ancestor. A pitch or bunker shot therefore",
+    "resolved NO corridor at all -- every reading came back not measured and no corridor signal",
+    "could fire, for a whole class of shot. Shot type must inform a diagnosis, never gate it.",
+    "",
+    "So 'full_swing' now carries no rows of its own, and that is correct. Author there only when",
+    "something is true of a full swing and NOT of a pitch.",
+    "",
     "The wrist-grid rows below were migrated from the compiled table that used to live in",
     "src/Analysis/reference_bands.cpp. That table, both of its providers and the parity gate",
     "that pinned this file to it are all gone (stage 9): THIS FILE is the only place those",
@@ -34,13 +48,13 @@
     "be a compiled ±10° offset for one DOF (kArchetypeFaceOffsetDeg, kept in",
     "pp_tuned_constants.h only as the frozen record of what they were migrated from).",
     "Bowed styles tolerate more bow and cupped styles more cup, so grading a valid style",
-    "against the neutral corridor would red-flag it. They override full_swing on the",
+    "against the neutral corridor would red-flag it. They override the general row on the",
     "lead-wrist face axis ONLY; every other DOF is archetype-invariant and inherits."
   ],
   "norms": [
     {
       "measure": "m_leadWristFlexExt_p1",
-      "context": "full_swing",
+      "context": "any",
       "mu": 0.0,
       "sigmaLo": 5.0,
       "monitorLo": -10.0,
@@ -50,7 +64,7 @@
     },
     {
       "measure": "m_leadWristFlexExt_p2",
-      "context": "full_swing",
+      "context": "any",
       "mu": 1.0,
       "sigmaLo": 7.0,
       "monitorLo": -11.0,
@@ -60,7 +74,7 @@
     },
     {
       "measure": "m_leadWristFlexExt_p3",
-      "context": "full_swing",
+      "context": "any",
       "mu": 2.0,
       "sigmaLo": 9.0,
       "monitorLo": -12.0,
@@ -70,7 +84,7 @@
     },
     {
       "measure": "m_leadWristFlexExt_p4",
-      "context": "full_swing",
+      "context": "any",
       "mu": 5.0,
       "sigmaLo": 11.0,
       "monitorLo": -11.0,
@@ -80,7 +94,7 @@
     },
     {
       "measure": "m_leadWristFlexExt_p5",
-      "context": "full_swing",
+      "context": "any",
       "mu": 7.5,
       "sigmaLo": 10.5,
       "monitorLo": -8.0,
@@ -90,7 +104,7 @@
     },
     {
       "measure": "m_leadWristFlexExt_p6",
-      "context": "full_swing",
+      "context": "any",
       "mu": 9.5,
       "sigmaLo": 8.5,
       "monitorLo": -4.0,
@@ -100,7 +114,7 @@
     },
     {
       "measure": "m_leadWristFlexExt_p7",
-      "context": "full_swing",
+      "context": "any",
       "mu": 8.0,
       "sigmaLo": 7.0,
       "monitorLo": -4.0,
@@ -110,7 +124,7 @@
     },
     {
       "measure": "m_leadWristFlexExt_p8",
-      "context": "full_swing",
+      "context": "any",
       "mu": 4.0,
       "sigmaLo": 8.0,
       "monitorLo": -9.0,
@@ -120,7 +134,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p1",
-      "context": "full_swing",
+      "context": "any",
       "mu": 0.0,
       "sigmaLo": 3.0,
       "monitorLo": -8.0,
@@ -130,7 +144,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p2",
-      "context": "full_swing",
+      "context": "any",
       "mu": 10.0,
       "sigmaLo": 10.0,
       "monitorLo": -5.0,
@@ -140,7 +154,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p3",
-      "context": "full_swing",
+      "context": "any",
       "mu": 28.0,
       "sigmaLo": 10.0,
       "monitorLo": 13.0,
@@ -150,7 +164,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p4",
-      "context": "full_swing",
+      "context": "any",
       "mu": 38.0,
       "sigmaLo": 12.0,
       "monitorLo": 21.0,
@@ -160,7 +174,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p5",
-      "context": "full_swing",
+      "context": "any",
       "mu": 38.0,
       "sigmaLo": 12.0,
       "monitorLo": 21.0,
@@ -170,7 +184,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p6",
-      "context": "full_swing",
+      "context": "any",
       "mu": 30.0,
       "sigmaLo": 10.0,
       "monitorLo": 15.0,
@@ -180,7 +194,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p7",
-      "context": "full_swing",
+      "context": "any",
       "mu": 8.0,
       "sigmaLo": 10.0,
       "monitorLo": -7.0,
@@ -190,7 +204,7 @@
     },
     {
       "measure": "m_leadWristRadUln_p8",
-      "context": "full_swing",
+      "context": "any",
       "mu": 0.0,
       "sigmaLo": 8.0,
       "monitorLo": -13.0,
@@ -200,7 +214,7 @@
     },
     {
       "measure": "m_leadForearmRot_p1",
-      "context": "full_swing",
+      "context": "any",
       "mu": 0.0,
       "sigmaLo": 4.0,
       "monitorLo": -9.0,
@@ -210,7 +224,7 @@
     },
     {
       "measure": "m_leadForearmRot_p2",
-      "context": "full_swing",
+      "context": "any",
       "mu": -8.0,
       "sigmaLo": 8.0,
       "monitorLo": -21.0,
@@ -220,7 +234,7 @@
     },
     {
       "measure": "m_leadForearmRot_p3",
-      "context": "full_swing",
+      "context": "any",
       "mu": -16.0,
       "sigmaLo": 8.0,
       "monitorLo": -29.0,
@@ -230,7 +244,7 @@
     },
     {
       "measure": "m_leadForearmRot_p4",
-      "context": "full_swing",
+      "context": "any",
       "mu": -20.0,
       "sigmaLo": 9.0,
       "monitorLo": -34.0,
@@ -240,7 +254,7 @@
     },
     {
       "measure": "m_leadForearmRot_p5",
-      "context": "full_swing",
+      "context": "any",
       "mu": -12.0,
       "sigmaLo": 9.0,
       "monitorLo": -26.0,
@@ -250,7 +264,7 @@
     },
     {
       "measure": "m_leadForearmRot_p6",
-      "context": "full_swing",
+      "context": "any",
       "mu": -5.0,
       "sigmaLo": 8.0,
       "monitorLo": -18.0,
@@ -260,7 +274,7 @@
     },
     {
       "measure": "m_leadForearmRot_p7",
-      "context": "full_swing",
+      "context": "any",
       "mu": 0.0,
       "sigmaLo": 8.0,
       "monitorLo": -13.0,
@@ -270,7 +284,7 @@
     },
     {
       "measure": "m_leadForearmRot_p8",
-      "context": "full_swing",
+      "context": "any",
       "mu": 0.0,
       "sigmaLo": 5.0,
       "monitorLo": -10.0,
@@ -280,7 +294,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p1",
-      "context": "full_swing",
+      "context": "any",
       "mu": 1.5,
       "sigmaLo": 4.5,
       "monitorLo": -7.0,
@@ -290,7 +304,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p2",
-      "context": "full_swing",
+      "context": "any",
       "mu": 3.0,
       "sigmaLo": 5.0,
       "monitorLo": -6.0,
@@ -300,7 +314,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p3",
-      "context": "full_swing",
+      "context": "any",
       "mu": 4.0,
       "sigmaLo": 6.0,
       "monitorLo": -6.0,
@@ -310,7 +324,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p4",
-      "context": "full_swing",
+      "context": "any",
       "mu": 5.0,
       "sigmaLo": 7.0,
       "monitorLo": -6.0,
@@ -320,7 +334,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p5",
-      "context": "full_swing",
+      "context": "any",
       "mu": 4.0,
       "sigmaLo": 6.0,
       "monitorLo": -6.0,
@@ -330,7 +344,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p6",
-      "context": "full_swing",
+      "context": "any",
       "mu": 4.0,
       "sigmaLo": 6.0,
       "monitorLo": -6.0,
@@ -340,7 +354,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p7",
-      "context": "full_swing",
+      "context": "any",
       "mu": 5.0,
       "sigmaLo": 7.0,
       "monitorLo": -6.0,
@@ -350,7 +364,7 @@
     },
     {
       "measure": "m_leadElbowFlex_p8",
-      "context": "full_swing",
+      "context": "any",
       "mu": 5.0,
       "sigmaLo": 7.0,
       "monitorLo": -6.0,
@@ -360,7 +374,7 @@
     },
     {
       "measure": "m_trailWristFlexExt_p1",
-      "context": "full_swing",
+      "context": "any",
       "mu": 0.0,
       "sigmaLo": 4.0,
       "monitorLo": -10.0,
@@ -370,7 +384,7 @@
     },
     {
       "measure": "m_trailWristFlexExt_p2",
-      "context": "full_swing",
+      "context": "any",
       "mu": 15.0,
       "sigmaLo": 10.0,
       "monitorLo": -1.0,
@@ -380,7 +394,7 @@
     },
     {
       "measure": "m_trailWristFlexExt_p3",
-      "context": "full_swing",
+      "context": "any",
       "mu": 32.0,
       "sigmaLo": 10.0,
       "monitorLo": 16.0,
@@ -390,7 +404,7 @@
     },
     {
       "measure": "m_trailWristFlexExt_p4",
-      "context": "full_swing",
+      "context": "any",
       "mu": 45.0,
       "sigmaLo": 12.0,
       "monitorLo": 27.0,
@@ -400,7 +414,7 @@
     },
     {
       "measure": "m_trailWristFlexExt_p5",
-      "context": "full_swing",
+      "context": "any",
       "mu": 40.0,
       "sigmaLo": 12.0,
       "monitorLo": 22.0,
@@ -410,7 +424,7 @@
     },
     {
       "measure": "m_trailWristFlexExt_p6",
-      "context": "full_swing",
+      "context": "any",
       "mu": 29.0,
       "sigmaLo": 11.0,
       "monitorLo": 12.0,
@@ -420,7 +434,7 @@
     },
     {
       "measure": "m_trailWristFlexExt_p7",
-      "context": "full_swing",
+      "context": "any",
       "mu": 12.0,
       "sigmaLo": 8.0,
       "monitorLo": -2.0,
@@ -590,7 +604,7 @@
     },
     {
       "measure": "m_tempoRatio",
-      "context": "full_swing",
+      "context": "any",
       "mu": 2.6,
       "sigmaLo": 0.4,
       "unit": "",
@@ -601,7 +615,7 @@
     },
     {
       "measure": "m_leadWristAtImpact",
-      "context": "full_swing",
+      "context": "any",
       "mu": 15.0,
       "sigmaLo": 12.0,
       "unit": "°",
@@ -610,7 +624,7 @@
     },
     {
       "measure": "m_stanceWidth",
-      "context": "full_swing",
+      "context": "any",
       "mu": 102.0,
       "sigmaLo": 12.0,
       "unit": "% shoulder width",
@@ -651,7 +665,7 @@
     },
     {
       "measure": "m_ballPosition",
-      "context": "full_swing",
+      "context": "any",
       "mu": 30.0,
       "sigmaLo": 14.0,
       "unit": "% stance width",
@@ -694,7 +708,7 @@
     },
     {
       "measure": "m_lagAngleDown",
-      "context": "full_swing",
+      "context": "any",
       "mu": 70.0,
       "sigmaLo": 22.0,
       "unit": "",

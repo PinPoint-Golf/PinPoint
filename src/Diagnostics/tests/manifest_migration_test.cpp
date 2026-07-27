@@ -181,8 +181,15 @@ int main()
                                          QStringLiteral("driver"));
             check(full.has_value() && driver.has_value(), key);
             if (full && driver) {
-                check(!full->inherited, "the full-swing row is its own, not inherited");
-                check(!driver->inherited, "the driver row is its own too");
+                // The GENERAL row lives at `any`, not at full_swing — a full swing is a shot type
+                // with no more claim to being the default than a pitch has, and general corridors
+                // sitting on that branch left every partial / bunker / specialty shot resolving
+                // nothing. So a full-swing shot INHERITS the general corridor…
+                check(full->inherited && full->contextId == QLatin1String("any"),
+                      "a full swing inherits the general corridor from the root");
+                // …while a club with its own row does not.
+                check(!driver->inherited && driver->contextId == QLatin1String("driver"),
+                      "the driver row is its own");
                 check(driver->greenLo != full->greenLo || driver->greenHi != full->greenHi,
                       "and it says something different from the general one");
             }

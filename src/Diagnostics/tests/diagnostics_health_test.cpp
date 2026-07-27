@@ -388,6 +388,14 @@ int main()
         for (const ValidationIssue &i : issues)
             std::printf("        [%s] %s\n", qPrintable(i.code), qPrintable(i.subject));
 
+        // THE GATE for "shot type informs a diagnosis, it never gates one". Every context must
+        // resolve corridors: the general rows live at `any`, the root of the tree, so every chain
+        // reaches them. Before that content change they sat at `full_swing` — a SIBLING of partial /
+        // bunker / specialty — and a pitch or bunker shot resolved nothing at all, so every reading
+        // came back not measured and no corridor signal could fire for a whole class of shot.
+        check(countCode(issues, "ungradedContext") == 0,
+              "NO shipped context is graded by nothing — shot type informs, it does not gate");
+
         // No shipped row is anybody's override, so neither personal-layer check may fire.
         check(countCode(issues, "personalNormNoSample") == 0,
               "NOTHING shipped is reported as a personal n = 0 row — this is the 39-item noise gate");

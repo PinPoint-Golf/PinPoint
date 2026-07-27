@@ -274,7 +274,7 @@ int main()
         driver.contextId = QStringLiteral("driver");
         const Band d = shipped.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4, driver);
         check(d.valid && d.greenLo == n.greenLo && d.greenHi == n.greenHi,
-              "driver inherits the full-swing corridor — nothing overrides the wrist DOFs per club");
+              "driver inherits the general corridor — nothing overrides the wrist DOFs per club");
     }
 
     // ── The grade and the RAG cannot drift ─────────────────────────────────

@@ -186,11 +186,15 @@ int main(int argc, char **argv)
         const QVariantMap bp = rowFor(all, "m_ballPosition");
         check(!bp.isEmpty(), "ball position is in the directory");
         check(bp.value(QStringLiteral("hasNorm")).toBool(), "ball position resolves to a norm");
-        check(bp.value(QStringLiteral("defaultContextId")).toString()
-                  == QLatin1String("full_swing"),
-              "a row summarises against the default context");
-        check(!bp.value(QStringLiteral("normInherited")).toBool(),
-              "ball position has its OWN full-swing row, so nothing is inherited");
+        // The row summarises against the DEFAULT context (full swing, which is what a shot that
+        // declares nothing resolves as) — and reports where that actually resolved. The general
+        // corridor lives at `any`, the root, because a full swing is a shot TYPE with no more claim
+        // to being the general case than a pitch has; so the summary is INHERITED, and saying so is
+        // the whole point of carrying the field.
+        check(bp.value(QStringLiteral("defaultContextId")).toString() == QLatin1String("any"),
+              "a row summarises against what resolves for a default shot — the general corridor");
+        check(bp.value(QStringLiteral("normInherited")).toBool(),
+              "…and reports it as inherited, because the general row is not full swing's own");
         check(bp.value(QStringLiteral("ownNormCount")).toInt() == 5,
               "ball position carries five authored rows (full swing + four clubs)");
         check(bp.value(QStringLiteral("weakProvenance")).toBool(),
@@ -250,7 +254,7 @@ int main(int argc, char **argv)
         const QVariantMap bowed = normRowFor(norms, "archetype_bowed");
         check(!bowed.isEmpty(), "an archetype context resolves by inheritance");
         check(bowed.value(QStringLiteral("inherited")).toBool(), "and is marked inherited");
-        check(bowed.value(QStringLiteral("contextId")).toString() == QLatin1String("full_swing"),
+        check(bowed.value(QStringLiteral("contextId")).toString() == QLatin1String("any"),
               "the inherited row names WHERE it came from, so the UI need not guess");
         check(qFuzzyCompare(bowed.value(QStringLiteral("mu")).toDouble(), 30.0),
               "an inherited row shows the ancestor's numbers");
