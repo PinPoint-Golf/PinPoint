@@ -73,6 +73,7 @@ Item {
         root._trail       = root.rootId.length > 0 ? [root.rootId] : []
         root._trailLabels = [""]
         root._depth       = 1
+        root._zoom        = 1.0
         root._clearHover()
         nodeMenu.visible = false
     }
@@ -120,6 +121,58 @@ Item {
         return Math.max(0.75, Math.min(1, avail / root._graphW))
     }
 
+    // ── Zoom ──────────────────────────────────────────────────────────────────
+    //
+    // A multiplier ON TOP of the fit rather than a replacement for it, so 100 % always means "as it
+    // fits in this panel" whatever the panel's width — the number stays meaningful when the window
+    // is resized, which an absolute scale would not.
+    //
+    // The graph is drawn from coordinates C++ computed at one size; zooming SCALES that drawing and
+    // never re-runs the layout. Re-running it with a different character width would reflow the
+    // columns, which is a different picture rather than a closer look at the same one.
+    readonly property real _zoomMin: 0.5
+    readonly property real _zoomMax: 3.0
+    property real _zoom: 1.0
+    readonly property real _scale: root._fit * root._zoom
+
+    function _setZoom(z) {
+        root._zoom = Math.max(root._zoomMin, Math.min(root._zoomMax, z))
+    }
+
+    // A button press zooms about the CENTRE of the view — the only anchor it has, since the pointer
+    // is over the button rather than over the graph. One press equals one wheel notch so the two
+    // routes agree about what a step is.
+    function _zoomStep(dir) {
+        root._zoomAt(root._zoom * Math.pow(1.15, dir), flick.width / 2, flick.height / 2)
+    }
+
+    function _resetZoom() {
+        root._zoom     = 1.0
+        flick.contentX = 0
+        flick.contentY = 0
+    }
+
+    // Zoom about a point, so what is under the pointer stays under it. Zooming about the origin
+    // sends whatever you were looking at off the edge, which is what makes a zoom control feel
+    // broken even when the scale is right.
+    //
+    // Only meaningful once the content overflows: while it fits, the canvas is CENTRED and
+    // contentX/Y are pinned at 0, so there is nothing to preserve and the plain set is correct.
+    function _zoomAt(z, px, py) {
+        var before = root._scale
+        root._setZoom(z)
+        var after = root._scale
+        if (after === before) return
+
+        if (flick.contentWidth > flick.width)
+            flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width,
+                                                  (flick.contentX + px) * after / before - px))
+        if (flick.contentHeight > flick.height)
+            flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height,
+                                                  (flick.contentY + py) * after / before - py))
+    }
+
+
     // ── Hover caption ─────────────────────────────────────────────────────────
     // Where an unavailable node says what is missing. A greyed box with no explanation is
     // indistinguishable from a rendering fault, and the reason is too long to sit inside the box.
@@ -164,6 +217,9 @@ Item {
         root._trail       = t
         root._trailLabels = l
         root._depth       = 1          // a new centre starts local again
+        // A zoom held across a re-centre leaves the new focus off screen, which reads as the tap
+        // having done nothing at all.
+        root._zoom        = 1.0
         nodeMenu.visible  = false
         root._clearHover()
     }
@@ -172,6 +228,7 @@ Item {
         if (root._trail.length <= 1) return
         root._trail       = root._trail.slice(0, root._trail.length - 1)
         root._trailLabels = root._trailLabels.slice(0, root._trailLabels.length - 1)
+        root._zoom        = 1.0
         nodeMenu.visible  = false
         root._clearHover()
     }
@@ -180,6 +237,7 @@ Item {
         if (index < 0 || index >= root._trail.length - 1) return
         root._trail       = root._trail.slice(0, index + 1)
         root._trailLabels = root._trailLabels.slice(0, index + 1)
+        root._zoom        = 1.0
         nodeMenu.visible  = false
         root._clearHover()
     }
@@ -484,8 +542,8 @@ Item {
                 id: flick
                 anchors.fill:    parent
                 anchors.margins: Theme.sp(18)
-                contentWidth:    root._graphW * root._fit
-                contentHeight:   root._graphH * root._fit
+                contentWidth:    root._graphW * root._scale
+                contentHeight:   root._graphH * root._scale
                 boundsBehavior:  Flickable.StopAtBounds
                 flickableDirection: Flickable.HorizontalAndVerticalFlick
                 interactive:     contentWidth > width || contentHeight > height
@@ -498,7 +556,7 @@ Item {
                     y: Math.max(0, (flick.height - flick.contentHeight) / 2)
                     width:  root._graphW
                     height: root._graphH
-                    scale:  root._fit
+                    scale:  root._scale
                     transformOrigin: Item.TopLeft
 
                     // ── Headings ──────────────────────────────────────────────
@@ -741,6 +799,147 @@ Item {
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // ══ Zoom controls ═════════════════════════════════════════════════
+            //
+            // Overlaid on the canvas rather than placed beside it: they belong to the picture, and a
+            // row of controls under the graph would compete with the caption and the legend, which
+            // are what a reader is actually meant to read.
+            //
+            // Muted until the pointer is over the graph. Chrome at full strength all the time reads
+            // as part of the content, and this is a control for a picture that mostly needs none.
+            Rectangle {
+                id: zoomBar
+                anchors.right:   parent.right
+                anchors.bottom:  parent.bottom
+                anchors.margins: Theme.sp(10)
+                visible: root._nodes.length > 0
+
+                implicitWidth:  zoomRow.implicitWidth + Theme.sp(10)
+                implicitHeight: Theme.sp(26)
+                radius: height / 2
+                color:  Theme.colorBg
+                border.width: 1
+                border.color: Theme.colorBorderMid
+                opacity: plotHover.hovered ? 1.0 : 0.35
+                Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+
+                Row {
+                    id: zoomRow
+                    anchors.centerIn: parent
+                    spacing: Theme.sp(2)
+
+                    // One press is one wheel notch, so the two routes agree about what a zoom step
+                    // means. Both zoom about the CENTRE of the view, which is the only anchor a
+                    // button press has — the pointer is over the button, not over the graph.
+                    Rectangle {
+                        width:  Theme.sp(22)
+                        height: Theme.sp(22)
+                        radius: height / 2
+                        color:  outMa.containsMouse && root._zoom > root._zoomMin
+                                ? Theme.colorBg2 : "transparent"
+                        Text {
+                            anchors.centerIn: parent
+                            text:           "\u2212"
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody
+                            color: root._zoom > root._zoomMin ? Theme.colorText2 : Theme.colorText3
+                        }
+                        MouseArea {
+                            id: outMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape:  Qt.PointingHandCursor
+                            onClicked:    root._zoomStep(-1)
+                        }
+                    }
+
+                    // The percentage doubles as the reset. It is where a reader looks to find out
+                    // what the zoom IS, so it is where they look to undo it.
+                    Rectangle {
+                        width:  Theme.sp(46)
+                        height: Theme.sp(22)
+                        radius: Theme.sp(4)
+                        color:  resetMa.containsMouse ? Theme.colorBg2 : "transparent"
+                        Text {
+                            anchors.centerIn: parent
+                            text:           Math.round(root._zoom * 100) + "%"
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                        }
+                        MouseArea {
+                            id: resetMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape:  Qt.PointingHandCursor
+                            onClicked:    root._resetZoom()
+                        }
+                    }
+
+                    Rectangle {
+                        width:  Theme.sp(22)
+                        height: Theme.sp(22)
+                        radius: height / 2
+                        color:  inMa.containsMouse && root._zoom < root._zoomMax
+                                ? Theme.colorBg2 : "transparent"
+                        Text {
+                            anchors.centerIn: parent
+                            text:           "+"
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody
+                            color: root._zoom < root._zoomMax ? Theme.colorText2 : Theme.colorText3
+                        }
+                        MouseArea {
+                            id: inMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape:  Qt.PointingHandCursor
+                            onClicked:    root._zoomStep(+1)
+                        }
+                    }
+                }
+            }
+
+            // Hover state for the whole plot, so the controls can fade in with the pointer without
+            // any of them having to know about the others.
+            HoverHandler { id: plotHover }
+
+            // ══ Ctrl + wheel ══════════════════════════════════════════════════
+            //
+            // On an overlay that covers the whole plot, and LAST so it sits above everything.
+            //
+            // It started as a handler beside the Flickable and only fired in some of the panel:
+            // Flickable handles the wheel itself, so whether the event reached a sibling depended
+            // on what was under the pointer and on whether the content could scroll in that
+            // direction. Which sibling wins is not something to guess at — putting the handler
+            // above the competition removes the question.
+            //
+            // The Item accepts no other input. An Item with only a WheelHandler is transparent to
+            // press and hover, so the nodes below still take their taps and long-presses, and the
+            // zoom buttons still take their clicks. And because the handler declares
+            // `acceptedModifiers`, a BARE wheel is not accepted here either — it falls through to
+            // the Flickable to pan the graph, and past that to the page to scroll it.
+            Item {
+                anchors.fill: parent
+
+                WheelHandler {
+                    acceptedModifiers: Qt.ControlModifier
+                    acceptedDevices:   PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: function (ev) {
+                        // A notch is 120 units; a touchpad sends much smaller ones. Scaling by the
+                        // fraction of a notch stops a trackpad jumping three steps at a time.
+                        var steps = ev.angleDelta.y / 120.0
+                        if (steps === 0) return
+                        // `ev.x` / `ev.y`, NOT `ev.position`. A QML WheelEvent carries the
+                        // coordinates directly; `position` belongs to an EventPoint, and reading it
+                        // threw a TypeError that swallowed the zoom while leaving the handler
+                        // looking perfectly wired up.
+                        var p = plot.mapToItem(flick, ev.x, ev.y)
+                        root._zoomAt(root._zoom * Math.pow(1.15, steps), p.x, p.y)
                     }
                 }
             }
