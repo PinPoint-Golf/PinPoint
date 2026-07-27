@@ -97,6 +97,15 @@ Item {
         function onLibraryChanged() { root._revision++ }
     }
 
+    // Running from a build tree rather than a shipped artefact. This is the app's EXISTING
+    // dev-build signal — the one the updater already computes per platform ($APPIMAGE unset
+    // on Linux, App-Translocation/bundle checks on macOS, the unins000.exe probe on Windows)
+    // and reports to Settings → General. Reused rather than adding a compile-time flag: a
+    // second definition of "is this a developer build" is a second thing to get wrong.
+    // (A macOS/Windows build made without its Sparkle reports "unsupported" instead, and so
+    // reads as shipped here — which is the safe way round.)
+    readonly property bool _developerBuild: updateController.state === "devbuild"
+
     // ── view state ────────────────────────────────────────────────────────────
     property string _groupFilter: ""    // "" = all groups
     property string _reachFilter: ""    // "" = all reaches
@@ -183,52 +192,105 @@ Item {
     // ══ View switcher — persistent, outside every view ════════════════════════
     // Deliberately not inside any of the four views: a control that lives in the view it
     // switches away from vanishes on first use and strands the user wherever they landed.
+    //
+    // Three content views on the left, and the ROADMAP held apart on the right. The roadmap
+    // is not content — it is a work queue for whoever is building the library, and sitting it
+    // in the same run of chips claimed it was another way to read the same material. It is
+    // developer-only, and drawn as an outline rather than a filled chip so it reads as an
+    // aside to the row rather than a fourth peer of it.
     Item {
         id: switcherBar
         anchors.top:   parent.top
         anchors.left:  parent.left
         anchors.right: parent.right
-        // Measured from the Flow, not fixed: the chips WRAP at a narrow panel width, and a fixed
+        // Measured from the row, not fixed: the chips WRAP at a narrow panel width, and a fixed
         // height would let the second row spill over the view below it rather than pushing it down.
-        height:  visible ? switcherFlow.y + switcherFlow.implicitHeight + Theme.sp(10) : 0
+        height:  visible ? switcherRow.y + switcherRow.implicitHeight + Theme.sp(10) : 0
         // Detail and the editor are full-page and carry their own way back, so the bar steps aside.
         visible: root._selectedId === "" && root._selectedMeasureId === "" && !root._editing
                  && !root._corridor
 
-        Flow {
-            id: switcherFlow
+        RowLayout {
+            id: switcherRow
             x:       Theme.sp(32)
             y:       Theme.sp(24)
             width:   parent.width - Theme.sp(64)
-            spacing: Theme.sp(6)
+            spacing: Theme.sp(12)
 
-            Repeater {
-                model: [{ name: "library",  label: qsTr("Characteristics") },
-                        { name: "measures", label: qsTr("Measures & norms") },
-                        { name: "roadmap",  label: qsTr("Roadmap") },
-                        { name: "health",   label: qsTr("Causes & health") }]
-                delegate: Rectangle {
-                    required property var modelData
-                    readonly property bool active: root._view === modelData.name
+            Flow {
+                id: switcherFlow
+                Layout.fillWidth: true
+                spacing: Theme.sp(6)
 
-                    implicitWidth:  vsText.implicitWidth + Theme.sp(22)
-                    implicitHeight: Theme.sp(28)
-                    radius: height / 2
-                    color:  active ? Theme.colorAccent : Theme.colorBg2
+                Repeater {
+                    model: [{ name: "library",  label: qsTr("Characteristics") },
+                            { name: "measures", label: qsTr("Measures & norms") },
+                            { name: "health",   label: qsTr("Causes & health") }]
+                    delegate: Rectangle {
+                        required property var modelData
+                        readonly property bool active: root._view === modelData.name
 
-                    Text {
-                        id: vsText
-                        anchors.centerIn: parent
-                        text:           modelData.label
-                        font.family:    Theme.fontBody
-                        font.pixelSize: Theme.fontSzMicro
-                        color:          parent.active ? Theme.colorBg : Theme.colorText2
+                        implicitWidth:  vsText.implicitWidth + Theme.sp(22)
+                        implicitHeight: Theme.sp(28)
+                        radius: height / 2
+                        color:  active ? Theme.colorAccent : Theme.colorBg2
+
+                        Text {
+                            id: vsText
+                            anchors.centerIn: parent
+                            text:           modelData.label
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          parent.active ? Theme.colorBg : Theme.colorText2
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root._view = modelData.name
+                        }
                     }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root._view = modelData.name
-                    }
+                }
+            }
+
+            // ── Roadmap — developer builds only ────────────────────────────────
+            // Outline, never a fill: quieter than the content chips at every state, but it
+            // keeps a full-strength border and lifts to the accent when selected, so it is
+            // still legibly a control and still legibly the one you are on.
+            // Top-aligned so it stays beside the FIRST row when the chips wrap.
+            Rectangle {
+                id: roadmapChip
+                visible: root._developerBuild
+                Layout.alignment: Qt.AlignRight | Qt.AlignTop
+
+                readonly property bool active: root._view === "roadmap"
+
+                implicitWidth:  rmText.implicitWidth + Theme.sp(22)
+                implicitHeight: Theme.sp(28)
+                radius: height / 2
+                color:  "transparent"
+                border.width: 1
+                border.color: active ? Theme.colorAccent
+                                     : rmMa.containsMouse ? Theme.colorBorderStrong
+                                                          : Theme.colorBorderMid
+                Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
+
+                Text {
+                    id: rmText
+                    anchors.centerIn: parent
+                    text:           qsTr("Roadmap")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          roadmapChip.active ? Theme.colorAccent
+                                                       : rmMa.containsMouse ? Theme.colorText2
+                                                                            : Theme.colorText3
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                }
+                MouseArea {
+                    id: rmMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root._view = "roadmap"
                 }
             }
         }
@@ -436,12 +498,15 @@ Item {
     }
 
     // ══ Roadmap ═══════════════════════════════════════════════════════════════
+    // The developer gate is on the VIEW as well as its chip: it belongs to the feature, not
+    // to one way in, so a future deep link cannot route a shipped build here.
     RoadmapView {
         anchors.top:    switcherBar.bottom
         anchors.left:   parent.left
         anchors.right:  parent.right
         anchors.bottom: parent.bottom
-        visible: root._view === "roadmap" && root._selectedId === "" && !root._editing
+        visible: root._developerBuild && root._view === "roadmap"
+                 && root._selectedId === "" && !root._editing
         library: library
     }
 
