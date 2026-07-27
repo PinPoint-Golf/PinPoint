@@ -85,7 +85,14 @@ Item {
             }
 
             // ── Title ────────────────────────────────────────────────────────
-            PpDisplayText { text: root.detail.label || "" }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(12)
+
+                PpDisplayText { text: root.detail.label || "" }
+                PpTypePill { label: qsTr("Measure") }
+                Item { Layout.fillWidth: true }
+            }
 
             RowLayout {
                 spacing: Theme.sp(8)

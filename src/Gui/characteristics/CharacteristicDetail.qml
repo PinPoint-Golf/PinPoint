@@ -145,6 +145,7 @@ Item {
                 spacing: Theme.sp(12)
 
                 PpDisplayText { text: root.detail.label || "" }
+                PpTypePill { label: qsTr("Characteristic") }
                 Item { Layout.fillWidth: true }
                 PpButton { label: qsTr("Edit"); onClicked: root.edit() }
             }

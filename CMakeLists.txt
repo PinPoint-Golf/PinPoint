@@ -397,6 +397,7 @@ qt_add_qml_module(PinPointStudio
         src/Gui/components/PpStarRating.qml
         src/Gui/components/PpTrace.qml
         src/Gui/components/PpToolPill.qml
+        src/Gui/components/PpTypePill.qml
         src/Gui/components/PpTopoBackground.qml
         src/Gui/review/PpMetricChart.qml
         src/Gui/review/PpChartPlot.qml

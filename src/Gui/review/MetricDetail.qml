@@ -173,10 +173,32 @@ Item {
             // ── Header ─────────────────────────────────────────────────────────
             Eyebrow { text: (d && d.group) ? d.group : "" }
 
-            PpDisplayText {
+            RowLayout {
                 Layout.fillWidth: true
-                text: (d && d.label) ? d.label : ""
-                wrapMode: Text.WordWrap
+                spacing:          Theme.sp(12)
+
+                // Capped rather than filling. A filling title eats the whole row and strands the
+                // pill against the right margin, where it reads as a page-level badge instead of
+                // a label on this title. The cap still lets a long metric name wrap.
+                //
+                // Measured off contentCol, NOT off titleRow: the row's width is derived from its
+                // children, so capping a child against it is a layout cycle — Qt detects it,
+                // gives up after two passes, and leaves the header mis-sized.
+                PpDisplayText {
+                    Layout.maximumWidth: Math.max(Theme.sp(120),
+                                                  contentCol.width - typePill.implicitWidth
+                                                  - Theme.sp(24))
+                    text: (d && d.label) ? d.label : ""
+                    wrapMode: Text.WordWrap
+                }
+                // Top-aligned rather than centred, because this title is the one that wraps: beside
+                // a three-line heading a vertically-centred pill floats free of the words it names.
+                PpTypePill {
+                    id: typePill
+                    Layout.alignment: Qt.AlignTop
+                    label: qsTr("Metric")
+                }
+                Item { Layout.fillWidth: true }
             }
 
             RowLayout {
