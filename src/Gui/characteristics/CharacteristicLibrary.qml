@@ -159,6 +159,18 @@ Item {
         return true
     }
 
+    // Deep link to one paper in the bibliography, from a citation on a characteristic. Leaves the
+    // detail page (`_selectedId`) because References is a sibling view rather than something that
+    // stacks over it — going Back from here returns to the directory, which is the same contract
+    // every other view switch has.
+    function showReference(referenceId) {
+        if (!referenceId || referenceId.length === 0) return false
+        root._selectedId        = ""
+        root._selectedMeasureId = ""
+        root._view              = "references"
+        return referencesView.focusReference(referenceId)
+    }
+
     // Deep link from elsewhere in the app. An unknown id is ignored, so a stale link lands on the
     // directory rather than a blank page.
     function showCharacteristic(conditionId) {
@@ -623,6 +635,7 @@ Item {
 
     // ══ References ════════════════════════════════════════════════════════════
     ReferencesView {
+        id:             referencesView
         anchors.top:    switcherBar.bottom
         anchors.left:   parent.left
         anchors.right:  parent.right
@@ -673,6 +686,10 @@ Item {
             root._selectedId = ""
             root.showMeasure(measureId)
         }
+        // A citation leaves for the paper it names — the row in References, not the top of the
+        // list. "What is this identifier?" is answered by one entry, and a bibliography of
+        // twenty-one restates the question.
+        onOpenReference: function(referenceId) { root.showReference(referenceId) }
         // An edge was added or removed from the graph: the census, the directory rows and this
         // page's own detail map are all now stale.
         //

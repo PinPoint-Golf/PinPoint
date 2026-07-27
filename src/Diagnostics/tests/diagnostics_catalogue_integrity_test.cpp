@@ -477,6 +477,46 @@ int main()
             }
         }
         check(withUrl == refs.size(), "every reference carries an openable doi.org or PubMed URL");
+
+        // The round trip, through the surface QML actually sees. References says "this condition
+        // rests on this paper"; the condition's provenance block has to agree and carry the id it
+        // links BACK to. The detail map ships the citation as a display label, so the view no
+        // longer holds the join key and cannot recover it — if this resolution breaks, the link
+        // affordance silently stops appearing and nothing anywhere reports it.
+        int conditionCites = 0, linkable = 0, pmidChecked = 0;
+        for (const QVariant &v : refs) {
+            const QVariantMap ref   = v.toMap();
+            const QString     refId = ref.value(QStringLiteral("id")).toString();
+            const bool        isPmid = !ref.value(QStringLiteral("pmid")).toString().isEmpty();
+
+            for (const QVariant &cv : ref.value(QStringLiteral("cites")).toList()) {
+                const QVariantMap c = cv.toMap();
+                if (c.value(QStringLiteral("kind")).toString() != QLatin1String("condition"))
+                    continue;
+                ++conditionCites;
+
+                const QVariantMap d = model.detail(c.value(QStringLiteral("fromId")).toString());
+                if (d.value(QStringLiteral("citationReferenceId")).toString() == refId) ++linkable;
+                else std::printf("        condition '%s' appears under '%s' but links back to '%s'\n",
+                                 qPrintable(c.value(QStringLiteral("fromId")).toString()),
+                                 qPrintable(refId),
+                                 qPrintable(d.value(QStringLiteral("citationReferenceId")).toString()));
+
+                // A paper with no DOI reaches the detail page LABELLED. A bare run of digits tells
+                // a reader nothing about what kind of identifier it is.
+                if (isPmid) {
+                    ++pmidChecked;
+                    check(d.value(QStringLiteral("citation")).toString()
+                              .startsWith(QLatin1String("PMID ")),
+                          "a PMID citation reaches the detail page labelled, not as a bare number");
+                }
+            }
+        }
+        std::printf("        (%d condition citations, %d link back, %d PMID-labelled)\n",
+                    conditionCites, linkable, pmidChecked);
+        check(conditionCites > 0 && linkable == conditionCites,
+              "every cited characteristic links back to the paper it appears under");
+        check(pmidChecked > 0, "…including the one identified by PMID rather than DOI");
         check(withCites > 0, "references carry the claims that rest on them");
         check(totalCites > 0 && withTier == totalCites,
               "and every claim row carries its tier label and a target to navigate to");

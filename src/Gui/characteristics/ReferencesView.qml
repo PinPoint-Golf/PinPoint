@@ -41,6 +41,75 @@ Item {
     property int _revision: 0
     readonly property var _refs: (root._revision >= 0) ? root.library.references() : []
 
+    // ── Arriving from a citation elsewhere ───────────────────────────────────
+    //
+    // Deep link to ONE paper. The caller switches the view and calls this in the SAME frame, so the
+    // rows are not laid out yet and `itemAt()` can still be null — hence a deferred retry rather
+    // than a direct scroll. `_focusId` outlives the scroll because the flash binding matches on it.
+    property string _focusId: ""
+    property bool   _flash:   false
+
+    function focusReference(referenceId) {
+        if (!referenceId || referenceId.length === 0) return false
+        if (root._indexOf(referenceId) < 0) return false   // unknown paper: report it, don't jump
+        root._focusId    = referenceId
+        focusTimer._tries = 0
+        focusTimer.restart()
+        return true
+    }
+
+    function _indexOf(referenceId) {
+        for (var i = 0; i < root._refs.length; ++i)
+            if (root._refs[i].id === referenceId) return i
+        return -1
+    }
+
+    Timer {
+        id:       focusTimer
+        interval: 16          // one frame: long enough for the Repeater to have positioned rows
+        repeat:   false
+
+        // Bounded, because "wait for the layout" with no ceiling is a timer that runs for the life
+        // of the panel if the row never appears.
+        property int _tries: 0
+
+        onTriggered: {
+            var i = root._indexOf(root._focusId)
+            if (i < 0) return
+
+            var item = refRepeater.itemAt(i)
+            if (!item) {
+                if (++focusTimer._tries < 10) focusTimer.restart()
+                return
+            }
+
+            // Land the row at the TOP of the viewport. Merely scrolling it into view puts it
+            // anywhere on the page, which leaves the reader hunting for what they just clicked.
+            //
+            // Driven through the attached scrollbar rather than contentItem.contentY: ScrollView
+            // types its contentItem as a bare Item, so reaching for Flickable members there works
+            // at runtime and cannot be checked at build time. `content` is the layout itself and
+            // its height IS the content height.
+            var vbar   = scroller.ScrollBar.vertical
+            var maxTop = Math.max(0, content.height - scroller.height)
+            var top    = Math.max(0, Math.min(item.y, maxTop))
+            if (vbar && content.height > 0) vbar.position = top / content.height
+
+            root._flash = true
+            flashTimer.restart()
+        }
+    }
+
+    // A brief accent on the two lines that identify the paper. The row is already at the top, so
+    // this confirms the landing rather than carrying it — anything stronger would read as a
+    // selection state, and nothing here is selected.
+    Timer {
+        id:       flashTimer
+        interval: 1100
+        repeat:   false
+        onTriggered: root._flash = false
+    }
+
     // healthChanged, not libraryChanged: `libraryChanged` belongs to CharacteristicLibrary.qml,
     // not to the model, and Connections cannot tell an unmatched handler from a typo at compile
     // time — it warns at INSTANTIATION, which for a lazily-loaded settings panel means the first
@@ -71,11 +140,13 @@ Item {
     }
 
     ScrollView {
+        id:              scroller
         anchors.fill:    parent
         anchors.margins: Theme.sp(20)
         clip:            true
 
         ColumnLayout {
+            id:      content
             width:   parent.width
             spacing: Theme.sp(16)
 
@@ -97,11 +168,17 @@ Item {
             }
 
             Repeater {
+                id:    refRepeater
                 model: root._refs
 
                 delegate: ColumnLayout {
                     id: rrow
                     required property var modelData
+
+                    // True only for the row a citation link just landed on, and only while the
+                    // flash runs.
+                    readonly property bool _landed:
+                        root._flash && root._focusId === rrow.modelData.id
 
                     Layout.fillWidth: true
                     spacing:          Theme.sp(4)
@@ -117,8 +194,8 @@ Item {
                             wrapMode:         Text.WordWrap
                             font.family:      Theme.fontBody
                             font.pixelSize:   Theme.fontSzBody
-                            color:            paperMa.containsMouse ? Theme.colorAccent
-                                                                    : Theme.colorText
+                            color:            (paperMa.containsMouse || rrow._landed)
+                                              ? Theme.colorAccent : Theme.colorText
                             Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                         }
 
@@ -156,8 +233,8 @@ Item {
                         wrapMode:         Text.WrapAnywhere
                         font.family:      Theme.fontData
                         font.pixelSize:   Theme.fontSzMicro
-                        color:            paperMa.containsMouse ? Theme.colorAccent
-                                                                : Theme.colorText3
+                        color:            (paperMa.containsMouse || rrow._landed)
+                                          ? Theme.colorAccent : Theme.colorText3
                         Behavior on color { ColorAnimation { duration: Theme.durationFast } }
 
                         MouseArea {

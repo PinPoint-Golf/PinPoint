@@ -42,6 +42,7 @@ Item {
     signal edit()
     signal openCondition(string conditionId)
     signal openMeasure(string measureId)
+    signal openReference(string referenceId)
     signal graphChanged()
 
     readonly property var _measures: detail.measures || []
@@ -492,8 +493,22 @@ Item {
                     color:               Theme.colorText3
                 }
 
+                // The citation, and — where it resolves — the way to the paper behind it. An
+                // identifier a reader cannot follow is the state this whole registry exists to
+                // fix, so it links to the row in References rather than merely to the view: the
+                // question being asked is "what IS this?", and landing on a list of twenty-one
+                // papers restates the question.
+                //
+                // The link affordance is strictly gated on the citation resolving. A citation from
+                // a user layer naming a paper the registry has never heard of renders as plain
+                // text, because a link that lands nowhere is worse than no link.
                 Text {
+                    id: citationText
                     Layout.fillWidth: true
+
+                    readonly property bool _linkable:
+                        (root.detail.citationReferenceId || "").length > 0
+
                     text: (root.detail.citation && root.detail.citation.length > 0)
                           ? root.detail.citation
                           : qsTr("No citation. This entry states a direction and a phase reasoned "
@@ -501,8 +516,25 @@ Item {
                                  + "wherever it appears.")
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzMicro
-                    color:          Theme.colorText3
+                    // Accent AT REST, brightening on hover — the app's link convention. Reserving
+                    // the accent for hover hides the affordance from anyone not already pointing at
+                    // it, which is exactly the reader who does not yet know the identifier leads
+                    // anywhere.
+                    color: !citationText._linkable   ? Theme.colorText3
+                         : citationMa.containsMouse  ? Qt.lighter(Theme.colorAccent, 1.08)
+                                                     : Theme.colorAccent
                     wrapMode:       Text.WordWrap
+
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                    MouseArea {
+                        id:           citationMa
+                        anchors.fill: parent
+                        enabled:      citationText._linkable
+                        hoverEnabled: citationText._linkable
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked:    root.openReference(root.detail.citationReferenceId)
+                    }
                 }
 
                 Text {

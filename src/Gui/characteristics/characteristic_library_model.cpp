@@ -253,6 +253,14 @@ QVariantMap CharacteristicLibraryModel::detail(const QString &conditionId) const
     // Labelled, not raw: the provenance block is the one place a reader meets this identifier, and
     // a bare "30479527" tells them nothing about what kind of thing it is.
     out.insert(QStringLiteral("citation"), citationLabel(c->provenance.citation));
+
+    // The row this citation points at, resolved HERE rather than matched in QML. The view shows a
+    // label, so it no longer holds the join key at all — and the id is the thing the References
+    // view can actually scroll to. Empty when the citation resolves to nothing, which is what the
+    // detail page keys its link affordance off: a link that cannot land anywhere must not look
+    // like one.
+    const Reference *cited = sharedReferenceSet().byCitation(c->provenance.citation);
+    out.insert(QStringLiteral("citationReferenceId"), cited ? cited->id : QString());
     out.insert(QStringLiteral("author"), c->provenance.author);
     out.insert(QStringLiteral("observability"), observabilityName(c->observability));
 
