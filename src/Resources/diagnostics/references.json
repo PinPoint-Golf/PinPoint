@@ -2,7 +2,7 @@
   "id": "core",
   "version": "1.0.0",
   "schemaVersion": 1,
-  "_comment": "The bibliography behind every citation in core.json. The pack stores a DOI; this stores what the DOI IS, so a reader can see the paper without leaving the app. Every record here was resolved against CrossRef and its title, journal, authors and year read off that record -- nothing is recalled, and nothing is added from a reference list without resolving it first. `year` is the issue year, which is what a reader will match against; several of these were online-first the year before. NO commercial organisation, product or certification body may be named in this file: core_pack_test greps content bytes for it, and two of these papers have manufacturer-employed authors -- they are peer-reviewed with DOIs, and only the work is recorded.",
+  "_comment": "The bibliography behind every citation in core.json. The pack stores an identifier; this stores what the identifier IS, so a reader can see the paper without leaving the app. Every record here was resolved against CrossRef (or PubMed, or arXiv) and its title, journal, authors and year read off that record -- nothing is recalled, and nothing is added from a reference list without resolving it first. `year` is the issue year, which is what a reader will match against; several of these were online-first the year before. A record carries a `doi` OR a `pmid`: some journals issue no DOI at all, and refusing them would mean the pack could cite a paper no reader could ever be shown. One record is an arXiv preprint and says so in its journal and establishes fields -- it is here to attribute a widely quoted figure, not to support a claim, and nothing cites it. NO commercial organisation, product or certification body may be named in this file: core_pack_test greps content bytes for it, and two of these papers have manufacturer-employed authors -- they are peer-reviewed with DOIs, and only the work is recorded.",
   "references": [
     {
       "id": "ref.vad2004",
@@ -56,7 +56,7 @@
       "authors": "Watson, Coughlan, Clement, Murray, Murray, Miller",
       "journal": "Journal of Sports Sciences",
       "year": 2023,
-      "establishes": "Mixed and null results: NO significant differences in hip angle, trunk angle or crunch factor in recreational golfers. Elite golfers with low back pain showed shorter transition phases and greater peak lead-side lumbar lateral flexion."
+      "establishes": "Mixed and null results: NO significant differences in hip angle, trunk angle or crunch factor in recreational golfers. Elite golfers with low back pain showed shorter transition phases and greater peak lead-side lumbar lateral flexion. Nothing cites it, and it is the most load-bearing uncited paper here: it is the reason every injury note in the library is phrased as an association with stated uncertainty rather than as a risk, and no note may be strengthened past what it supports."
     },
     {
       "id": "ref.myers2008",
@@ -84,6 +84,33 @@
       "journal": "Sports Biomechanics",
       "year": 2010,
       "establishes": "Significant proximal-to-distal temporal sequencing with a successive increase in peak segment angular speed — across genders, skill levels, and both full and partial shots."
+    },
+    {
+      "id": "ref.meister2011",
+      "doi": "10.1123/jab.27.3.242",
+      "title": "Rotational Biomechanics of the Elite Golf Swing: Benchmarks for Amateurs",
+      "authors": "Meister, Ladd, Butler, Zhao, Rogers, Ray, Rose",
+      "journal": "Journal of Applied Biomechanics",
+      "year": 2011,
+      "establishes": "10 professional and 5 amateur male golfers. Benchmark curves for pelvic rotation, upper-torso rotation and X-factor across the whole swing. In professionals, peak free moment per kilogram, peak X-factor and peak S-factor were highly consistent — coefficients of variation 6.8%, 7.4% and 8.4%. The downswing was initiated by reversal of pelvic rotation followed by reversal of upper-torso rotation, and peak X-factor preceded peak free moment in every swing of every golfer, occurring during the initial downswing. For amateurs, the number of factors falling outside one to two standard deviations of the professional means increased with handicap."
+    },
+    {
+      "id": "ref.steele2018",
+      "doi": "10.5535/arm.2018.42.5.713",
+      "title": "Golf Swing Rotational Velocity: The Essential Follow-Through",
+      "authors": "Steele, Roh, Mahtani, Meister, Ladd, Rose",
+      "journal": "Annals of Rehabilitation Medicine",
+      "year": 2018,
+      "establishes": "11 professionals compared with 5 amateurs. Rotational velocities were highly consistent in professionals through the downswing — coefficients of variation 0.086 for upper torso and 0.079 for pelvis. Peak upper-torso rotational velocity and peak X-prime occurred AFTER impact, in the follow-through, while peak pelvic rotational velocity occurred during the downswing. Pelvic velocity at impact was reduced in amateurs compared with professionals (p=0.019)."
+    },
+    {
+      "id": "ref.zhou2022",
+      "doi": "10.3389/fspor.2022.986281",
+      "title": "The swing performance Index: Developing a single-score index of golf swing rotational biomechanics quantified with 3D kinematics",
+      "authors": "Zhou, Richards, Schadl, Ladd, Rose",
+      "journal": "Frontiers in Sports and Active Living",
+      "year": 2022,
+      "establishes": "Builds a single-score index on the professional benchmark curves, over 11 professionals and 5 amateurs spanning handicap 4 to novice. The selected formula combines three variables: peak pelvic rotational velocity before impact, pelvic rotational velocity AT IMPACT, and peak upper-torso rotational velocity after impact. Professionals standardise to 100 ± 10; amateurs average 82 ± 4. Independent support that pelvic rotational velocity at impact carries skill information."
     },
     {
       "id": "ref.madrid2020",
@@ -138,6 +165,24 @@
       "journal": "Scientific Reports",
       "year": 2021,
       "establishes": "20 professionals, five mediolateral ball positions, SPM analysis. Target-side ball position produced a significantly more open shoulder angle at address, during the downswing and at impact, plus lead-foot weight bias — and a less in-to-out club path at impact. The trend reversed for trail-side positions."
+    },
+    {
+      "id": "ref.kim2018",
+      "pmid": "30479527",
+      "title": "Biomechanical Effects of Ball Position on Address Position Variables of Elite Golfers",
+      "authors": "Kim, Koh, Cho, Lee, Lee, Lee",
+      "journal": "Journal of Sports Science and Medicine",
+      "year": 2018,
+      "establishes": "11 male professional golfers, 3D motion analysis with eight infrared cameras and two force platforms, eight ball positions in the mediolateral and anteroposterior directions. Moving the ball mediolaterally significantly changed shoulder rotation and club-face aim at address and the vertical ground reaction force under the lead foot; at impact it significantly changed club-face aim, club path and angle of attack. The companion to Kim et al. 2021 — that one measures the address end, this one the delivery end. This journal issues no DOI, so the PMID is the identifier."
+    },
+    {
+      "id": "ref.grober2006",
+      "doi": "10.48550/arXiv.physics/0611291",
+      "title": "Towards a Biomechanical Understanding of Tempo in the Golf Swing",
+      "authors": "Grober, Cholewicki",
+      "journal": "arXiv (preprint — NOT peer reviewed)",
+      "year": 2006,
+      "establishes": "PREPRINT, not peer reviewed, and listed here for attribution rather than support. Models the body/club system as a simple harmonic oscillator — a biomechanical clock — accounting for total swing duration, the ratio of backswing to downswing time, and tempo's relative insensitivity to shot length. Shaft-mounted accelerometers at roughly 250 Hz, ten to twenty five-iron swings each, over 12 playing professionals, 13 teaching professionals and good amateurs, and 18 other golfers. The backswing:downswing ratio is centred at 3.0 in all three groups; playing professionals span 2.5 to 3.5 with very small per-golfer standard deviation and swing uniformly faster than the rest. This is the source of the widely quoted 3:1 figure. NOTE THE BASIS: their backswing is measured from the START OF MOTION, not from address, so it is not the same quantity this product's tempo ratio reports."
     },
     {
       "id": "ref.hume2005",

@@ -36,6 +36,13 @@
 // our own words, including where it DISAGREES with another reference. That sentence is the whole
 // reason a reader can tell an `indirect` citation from a `supported` one without opening the PDF.
 //
+// TWO IDENTIFIERS, ONE JOIN. Most records carry a DOI. Some journals issue none at all — not as an
+// oversight, as a policy — and for those the PubMed id is the identifier the world actually uses.
+// Refusing them would mean the pack could cite a paper no reader could ever be shown, which is the
+// exact failure this registry exists to prevent. So `citation` joins against EITHER field, and a
+// record needs one of the two rather than the DOI specifically. Neither is preferred where both
+// exist; a DOI simply resolves more directly, so it wins the URL.
+//
 // PROVENANCE OF THE PROVENANCE. Every record was resolved against CrossRef and its title, journal,
 // authors and year read off that record. Nothing here is recalled from memory, and nothing is
 // copied out of another paper's reference list without resolving it first — a plausible-looking
@@ -53,14 +60,20 @@ namespace pinpoint::analysis {
 struct Reference {
     QString id;           // `ref.*`
     QString doi;          // the join key with Provenance::citation — an exact string match
+    QString pmid;         // the SAME join key, for journals that issue no DOI at all
     QString title;
     QString authors;      // family names in citation order, comma separated
     QString journal;
     int     year = 0;
     QString establishes;  // what it actually shows, and what it does not
 
-    // https://doi.org/<doi> — the one thing a reader wants when they tap the row.
+    // Where the reader goes when they tap the row: doi.org, or PubMed when there is no DOI.
     QString url() const;
+
+    // The identifier as a reader should SEE it. A DOI announces what it is — it starts "10." and
+    // has a slash in it. A bare PubMed id is eight digits that could be anything: a year, a count,
+    // an internal key. So it is labelled, and this is the one place that decides how.
+    QString identifierLabel() const;
 };
 
 struct ReferenceSet {
@@ -72,7 +85,9 @@ struct ReferenceSet {
     std::vector<Reference> references;
 
     const Reference *reference(const QString &id) const;
-    const Reference *byDoi(const QString &doi) const;    // the join the UI actually makes
+
+    // The join the UI actually makes: a Provenance::citation against a DOI *or* a PMID.
+    const Reference *byCitation(const QString &citation) const;
 };
 
 // ── Validation ──────────────────────────────────────────────────────────────
@@ -81,12 +96,24 @@ struct ReferenceSet {
 //   duplicateId         two references share an id
 //   duplicateDoi        two references share a DOI — the join is by DOI, so the second is
 //                       unreachable and the pack would silently resolve to whichever came first
+//   duplicatePmid       the same, for the PMID join key
 //   referenceIdNamespace  an id outside the `ref.` namespace
-//   referenceNoDoi      a reference with no DOI cannot be joined to anything or opened by anyone
+//   referenceNoDoi      a reference with NEITHER a DOI nor a PMID cannot be joined to anything or
+//                       opened by anyone. (The code name predates PMID support and is kept: it is
+//                       the stable contract the health view and tests key off.)
 // WARNINGS:
 //   referenceNoTitle    a row that renders as a bare identifier
 //   referenceNoYear     undated, so a reader cannot judge how current it is
 ValidationReport validateReferenceSet(const ReferenceSet &set);
+
+// The same rule for a citation string with no Reference in hand — every provenance block in the UI
+// shows one of these, not just the bibliography. Resolves against the shared registry so the label
+// is a fact rather than a guess, and falls back to shape when a citation does not resolve (a DOI
+// always starts "10."; a bare run of digits can only be a PubMed id).
+//
+// Returns a string for DISPLAY ONLY. The stored citation stays the bare identifier — it is the
+// join key, and "PMID 30479527" joins to nothing.
+QString citationLabel(const QString &citation);
 
 struct ReferenceLoadResult {
     ReferenceSet     set;

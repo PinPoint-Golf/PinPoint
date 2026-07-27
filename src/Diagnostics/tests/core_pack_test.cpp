@@ -270,16 +270,35 @@ int main()
     // TERMS are common domain and stay; the ATTRIBUTION must not enter the repo in any form — not a
     // citation, not an author, not an explanatory note. Checked against the raw bytes so a comment
     // or a stray field cannot slip past.
+    //
+    // ALL THREE reviewable content files, not just the pack. The rule was always stated over the
+    // content as a whole, but the grep only ever covered core.json — and a vendor name duly sat
+    // unnoticed in a norms.json citation note. A rule enforced over one of three files is a rule
+    // that reads as enforced and is not.
     {
         const char *forbidden[] = { "titleist", "tpi", "trackman", "flightscope", "foresight",
                                     "k-vest", "kvest", "gears", "swingcatalyst", "boditrak",
-                                    "performance institute", "certified" };
+                                    "performance institute", "certified", "hackmotion" };
+        const struct { const char *label; const char *path; } files[] = {
+            { "core.json",       PP_CORE_PACK_PATH },
+            { "norms.json",      PP_CORE_NORMS_PATH },
+            { "references.json", PP_CORE_REFERENCES_PATH },
+        };
+
         bool clean = true;
-        const QString lower = QString::fromUtf8(raw).toLower();
-        for (const char *needle : forbidden) {
-            if (lower.contains(QLatin1String(needle))) {
-                std::printf("        brand token found: '%s'\n", needle);
+        for (const auto &file : files) {
+            QFile cf(QString::fromUtf8(file.path));
+            if (!cf.open(QIODevice::ReadOnly)) {
+                std::printf("        cannot open %s for the brand grep\n", file.label);
                 clean = false;
+                continue;
+            }
+            const QString lower = QString::fromUtf8(cf.readAll()).toLower();
+            for (const char *needle : forbidden) {
+                if (lower.contains(QLatin1String(needle))) {
+                    std::printf("        brand token '%s' found in %s\n", needle, file.label);
+                    clean = false;
+                }
             }
         }
         check(clean, "no commercial organisation, product or certification body is named");
@@ -287,10 +306,33 @@ int main()
 
     // ── Uncited content is honestly badged ──────────────────────────────────────
     {
-        int proposed = 0;
+        // This used to assert `proposed > 0`, as a proxy for "uncited content is not laundered
+        // into a cited tier". That proxy was only ever valid mid-search: `Proposed` means NOBODY
+        // HAS LOOKED, so a search pass that reaches every condition legitimately empties the tier,
+        // and re-adding a proposed row to satisfy the old check would be the dishonesty it was
+        // written to prevent. DO NOT RESTORE IT.
+        //
+        // What it was really protecting is asserted directly instead: the untested majority must
+        // still be recorded as untested. `practice` says the field agrees and has never measured
+        // the named state, which is the true state of most of this library — and a pack where
+        // more content claimed a source than admitted to coaching orthodoxy would be the
+        // laundering worth failing over.
+        int cited = 0, practice = 0;
+        for (const Condition &c : p.conditions) {
+            if (c.provenance.tier == ProvenanceTier::Practice) ++practice;
+            if (citationRequired(c.provenance.tier))           ++cited;
+        }
+        check(practice > cited, "the untested majority is recorded as coaching practice, not as sourced");
+
+        // And the pass actually happened: every condition names the day it was searched. This is
+        // strictly stronger than the check it replaced — that one could pass with 111 conditions
+        // never looked at.
+        bool allSearched = true;
         for (const Condition &c : p.conditions)
-            if (c.provenance.tier == ProvenanceTier::Proposed) ++proposed;
-        check(proposed > 0, "uncited content is tiered as proposed, not laundered");
+            if (!c.provenance.searched()) allSearched = false;
+        check(allSearched, "every condition records the date its search was made");
+
+        std::printf("        (conditions: %d practice, %d cited)\n", practice, cited);
 
         // Keyed on citationRequired(), not on "above proposed". Two tiers are ABOVE proposed and
         // legitimately carry no citation: NoSourceFound asserts the absence of a source, and

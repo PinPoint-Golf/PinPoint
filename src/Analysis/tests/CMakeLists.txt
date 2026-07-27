@@ -473,7 +473,8 @@ pp_add_test(core_pack_test
     SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK} ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json"
-                    -DPP_CORE_NORMS_PATH="${DIAGRES}/norms.json")
+                    -DPP_CORE_NORMS_PATH="${DIAGRES}/norms.json"
+                    -DPP_CORE_REFERENCES_PATH="${DIAGRES}/references.json")
 
 # Detection + explanation passes, DARK: synthetic measure source only, never invoked on a real
 # swing. Asserts the rule the whole library depends on — an absent measure resolves Unavailable and

@@ -198,11 +198,11 @@ int main()
 
     // ── The bibliography ────────────────────────────────────────────────────
     //
-    // The join runs Provenance::citation -> Reference::doi and is an EXACT STRING MATCH into a
-    // separate file, exactly like screenRef and drills. A citation whose DOI is not in the registry
-    // fails silently and in the worst possible way: the edge still loads, still validates, still
-    // renders its tier chip — and the References view simply never mentions the claim, so the
-    // library looks better sourced than it is.
+    // The join runs Provenance::citation -> Reference::doi OR Reference::pmid and is an EXACT
+    // STRING MATCH into a separate file, exactly like screenRef and drills. A citation whose
+    // identifier is not in the registry fails silently and in the worst possible way: the edge
+    // still loads, still validates, still renders its tier chip — and the References view simply
+    // never mentions the claim, so the library looks better sourced than it is.
     std::printf("=== references ===\n");
     const CharacteristicPack pack = shippedPack();
     {
@@ -210,7 +210,10 @@ int main()
         check(validateReferenceSet(refs).ok(), "and validates clean");
 
         QSet<QString> known;
-        for (const Reference &r : refs.references) known.insert(r.doi);
+        for (const Reference &r : refs.references) {
+            if (!r.doi.isEmpty())  known.insert(r.doi);
+            if (!r.pmid.isEmpty()) known.insert(r.pmid);
+        }
 
         int dangling = 0, cited = 0;
         for (const Edge &e : pack.edges) {
@@ -237,29 +240,37 @@ int main()
         check(cited > 0, "the pack cites something");
         check(dangling == 0, "every citation in the pack resolves to a reference");
 
-        // Every reference must be openable and identifiable. A row that renders as a bare DOI is
-        // one a reader cannot judge, and the DOI is also the only route to the paper itself.
+        // Every reference must be openable and identifiable. A row that renders as a bare
+        // identifier is one a reader cannot judge, and the identifier is also the only route to
+        // the paper itself. Either kind counts — some journals issue no DOI at all.
         bool complete = true;
         for (const Reference &r : refs.references)
-            if (r.doi.isEmpty() || r.title.isEmpty() || r.authors.isEmpty() || r.year <= 0)
+            if ((r.doi.isEmpty() && r.pmid.isEmpty()) || r.title.isEmpty() || r.authors.isEmpty()
+                || r.year <= 0)
                 complete = false;
-        check(complete, "every reference carries a DOI, title, authors and year");
+        check(complete, "every reference carries an identifier, title, authors and year");
 
         bool urls = true;
         for (const Reference &r : refs.references)
-            if (!r.url().startsWith(QStringLiteral("https://doi.org/"))) urls = false;
-        check(urls, "and resolves to a doi.org URL the view can open");
+            if (!r.url().startsWith(QStringLiteral("https://doi.org/"))
+                && !r.url().startsWith(QStringLiteral("https://pubmed.ncbi.nlm.nih.gov/")))
+                urls = false;
+        check(urls, "and resolves to a doi.org or PubMed URL the view can open");
 
         // A DOI that is cited by nothing is legitimate and must NOT be pruned: one of them is the
         // paper that contradicts claims the pack does make, and dropping it would leave the
         // bibliography agreeing with itself.
         int uncited = 0;
         for (const Reference &r : refs.references) {
+            const auto cites = [&r](const QString &c) {
+                if (c.isEmpty()) return false;
+                return (!r.doi.isEmpty() && c == r.doi) || (!r.pmid.isEmpty() && c == r.pmid);
+            };
             bool used = false;
             for (const Edge &e : pack.edges)
-                if (e.provenance.citation == r.doi) used = true;
+                if (cites(e.provenance.citation)) used = true;
             for (const Condition &c : pack.conditions)
-                if (c.provenance.citation == r.doi) used = true;
+                if (cites(c.provenance.citation)) used = true;
             if (!used) ++uncited;
         }
         std::printf("        (%d references cited by nothing — kept deliberately)\n", uncited);
@@ -268,17 +279,61 @@ int main()
         check(rr.loaded && rr.set.references.size() == refs.references.size(),
               "a reference set survives save and load");
 
+        // A journal that issues no DOI is not a reason to drop a source. The PMID is the same join
+        // key and reaches the same reader, so it must validate clean and produce a live URL — a
+        // PMID pushed through the doi.org template yields a link that is well-formed and dead.
+        {
+            ReferenceSet pm;
+            pm.references.push_back(Reference{ QStringLiteral("ref.pmidOnly"), QString(),
+                                               QStringLiteral("30479527"), QStringLiteral("T"),
+                                               QStringLiteral("A"), QStringLiteral("J"), 2018,
+                                               QString() });
+            check(validateReferenceSet(pm).ok(),
+                  "a reference identified only by PMID validates — some journals issue no DOI");
+            check(pm.references.front().url()
+                      == QStringLiteral("https://pubmed.ncbi.nlm.nih.gov/30479527/"),
+                  "…and opens at PubMed rather than a well-formed but dead doi.org link");
+            check(pm.byCitation(QStringLiteral("30479527")) != nullptr,
+                  "…and a citation carrying that PMID joins to it");
+        }
+
+        // How an identifier READS. A DOI says what it is; a bare PubMed id is eight digits that
+        // could be a year, a count or an internal key, so it is labelled everywhere it surfaces —
+        // the provenance block on a characteristic, not just the bibliography.
+        {
+            check(citationLabel(QStringLiteral("30479527"))
+                      == QStringLiteral("PMID 30479527"),
+                  "a PMID citation renders labelled, so the number means something");
+            check(citationLabel(QStringLiteral("10.1123/jab.27.3.242"))
+                      == QStringLiteral("10.1123/jab.27.3.242"),
+                  "a DOI renders as itself — it already announces what it is");
+            check(citationLabel(QString()).isEmpty(), "and an absent citation stays absent");
+            // Unresolvable citations still have to render: a user-layer pack may name a paper the
+            // shipped registry has never heard of.
+            check(citationLabel(QStringLiteral("99999999")) == QStringLiteral("PMID 99999999"),
+                  "an unregistered all-digit citation falls back to the PMID label by shape");
+        }
+
         // Validators, in both directions.
         ReferenceSet bad = refs;
         bad.references.front().doi.clear();
+        bad.references.front().pmid.clear();
         check(hasCode(validateReferenceSet(bad), "referenceNoDoi"),
-              "a reference with no DOI is refused — nothing could cite it or open it");
+              "a reference with neither identifier is refused — nothing could cite or open it");
 
         ReferenceSet dup = refs;
         dup.references.push_back(dup.references.front());
         dup.references.back().id = QStringLiteral("ref.other");
         check(hasCode(validateReferenceSet(dup), "duplicateDoi"),
               "two references sharing a DOI are refused — the second is unreachable");
+
+        ReferenceSet dupPmid = refs;
+        dupPmid.references.front().doi.clear();
+        dupPmid.references.front().pmid = QStringLiteral("12345678");
+        dupPmid.references.push_back(dupPmid.references.front());
+        dupPmid.references.back().id = QStringLiteral("ref.otherPmid");
+        check(hasCode(validateReferenceSet(dupPmid), "duplicatePmid"),
+              "and so are two sharing a PMID — the join is by identifier, not by DOI specifically");
 
         ReferenceSet ns = refs;
         ns.references.front().id = QStringLiteral("vad2004");

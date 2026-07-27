@@ -85,7 +85,8 @@ Item {
                 Layout.fillWidth: true
                 text: qsTr("Every source behind a citation in the library, with the claims resting "
                            + "on it and the tier each one earned. Ordered by how much each paper "
-                           + "holds up. Tap a paper to open it at doi.org; tap a claim to go to it. "
+                           + "holds up. Tap a paper to open it at the publisher; tap a claim to go "
+                           + "to it. "
                            + "Most of the library is coaching practice rather than published "
                            + "measurement — where that is so, no source is listed and the claim "
                            + "says as much.")
@@ -112,7 +113,7 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            text:             rrow.modelData.title || rrow.modelData.doi
+                            text:             rrow.modelData.title || rrow.modelData.identifier
                             wrapMode:         Text.WordWrap
                             font.family:      Theme.fontBody
                             font.pixelSize:   Theme.fontSzBody
@@ -151,7 +152,7 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text:             rrow.modelData.doi
+                        text:             rrow.modelData.identifier
                         wrapMode:         Text.WrapAnywhere
                         font.family:      Theme.fontData
                         font.pixelSize:   Theme.fontSzMicro

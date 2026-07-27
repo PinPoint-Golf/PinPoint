@@ -250,7 +250,9 @@ QVariantMap CharacteristicLibraryModel::detail(const QString &conditionId) const
     out.insert(QStringLiteral("consequence"), c->consequence.text());
     out.insert(QStringLiteral("injuryNote"), c->injuryNote.text());
     out.insert(QStringLiteral("screenRef"), c->screenRef);
-    out.insert(QStringLiteral("citation"), c->provenance.citation);
+    // Labelled, not raw: the provenance block is the one place a reader meets this identifier, and
+    // a bare "30479527" tells them nothing about what kind of thing it is.
+    out.insert(QStringLiteral("citation"), citationLabel(c->provenance.citation));
     out.insert(QStringLiteral("author"), c->provenance.author);
     out.insert(QStringLiteral("observability"), observabilityName(c->observability));
 
@@ -656,12 +658,21 @@ QVariantList CharacteristicLibraryModel::references() const
 
     QVariantList out;
     for (const Reference &ref : sharedReferenceSet().references) {
+        // The citation joins against EITHER identifier: a handful of journals issue no DOI, and a
+        // strict DOI match would silently drop every claim resting on those papers — the row would
+        // render "cited by nothing" while the library leaned on it.
+        const auto matches = [&ref](const QString &citation) {
+            if (citation.isEmpty()) return false;
+            return (!ref.doi.isEmpty() && citation == ref.doi)
+                || (!ref.pmid.isEmpty() && citation == ref.pmid);
+        };
+
         // Every claim resting on this paper, and the tier each one earned. An edge cited at
         // `indirect` and one cited at `supported` make very different use of the same source, so
         // the tier travels with the row rather than being averaged away into a count.
         QVariantList cites;
         for (const Edge &e : p.edges) {
-            if (e.provenance.citation != ref.doi) continue;
+            if (!matches(e.provenance.citation)) continue;
             const Condition *from = p.condition(e.from);
             const Condition *to   = p.condition(e.to);
             QVariantMap r;
@@ -676,7 +687,7 @@ QVariantList CharacteristicLibraryModel::references() const
             cites.append(r);
         }
         for (const Condition &c : p.conditions) {
-            if (c.provenance.citation != ref.doi) continue;
+            if (!matches(c.provenance.citation)) continue;
             QVariantMap r;
             r.insert(QStringLiteral("kind"), QStringLiteral("condition"));
             r.insert(QStringLiteral("fromId"), c.id);
@@ -689,6 +700,8 @@ QVariantList CharacteristicLibraryModel::references() const
         QVariantMap r;
         r.insert(QStringLiteral("id"), ref.id);
         r.insert(QStringLiteral("doi"), ref.doi);
+        r.insert(QStringLiteral("pmid"), ref.pmid);
+        r.insert(QStringLiteral("identifier"), ref.identifierLabel());
         r.insert(QStringLiteral("url"), ref.url());
         r.insert(QStringLiteral("title"), ref.title);
         r.insert(QStringLiteral("authors"), ref.authors);

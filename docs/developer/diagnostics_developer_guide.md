@@ -177,8 +177,11 @@ Three distinctions the UI must never blur:
 ### Edge — the causal graph
 
 ```cpp
-struct Edge { QString from, to; EdgeType type; Strength strength; QString citation; };
+struct Edge { QString from, to; EdgeType type; Strength strength; Provenance provenance; };
 // EdgeType: Causes | Corroborates | Excludes      Strength: Weak | Moderate | Strong
+// An edge carries the SAME Provenance as a condition — tier, citation, searchedOn, searchTerms.
+// (A bare `QString citation` is the pre-pass-1 shape; the loader still migrates it, promoting a
+//  legacy top-level citation to Supported. Do not author that form.)
 ```
 
 `Causes` must form a DAG — `validatePack()` refuses a cycle, because the assembled library is re-validated after every merge and one circular edge would fail every characteristic, not just the two involved. `Corroborates` is refused between a pair that already has a causal path either way: the pair would double-count when the explanation is ranked.
@@ -457,10 +460,24 @@ The section to read before assuming anything here runs. "Dormant" means written 
 
 Reducers: 52 `at`, 42 `delta`, 10 `extremum`, 2 `rate`.
 Edges: 164 `Causes`, 9 `Corroborates`, 5 `Excludes` — 69 strong, 94 moderate, 15 weak.
+
+Provenance, after the pass of 2026-07-27 — **no `proposed` remains anywhere, and every condition
+records the date its search was made**:
+
+| tier | conditions | edges | |
+|---|---|---|---|
+| `supported` | 5 | 6 | the defining variable (conditions) or the named pair (edges) is directly measured |
+| `indirect` | 23 | 25 | a source measures the mechanism underneath; the named claim is our reading |
+| `practice` | 84 | 147 | searched, coaching consensus found, no peer-reviewed test of the named claim |
+| `proposed` | **0** | **0** | nobody has looked — the tier a completed search pass empties |
+
+`core_pack_test` no longer asserts `proposed > 0`; that was a mid-search proxy. It asserts
+`practice > cited` plus an all-searched check instead. **Do not restore the old assertion** — adding
+a proposed row back to satisfy it is the laundering it was written to prevent.
 Groups: setup 41, ballFlight 20, armsAndClub 15, impact 9, lateral 8, posture 7, sequence 6,
 release 3, finish 3.
 
-**Norms** (`norms.json`) — 149 rows: 95 at `any`, 8 + 8 at the two archetypes, and 12 / 2 / 12 / 12 at driver / fairway wood / iron / wedge. **Every row is `source: heuristic` with `n = 0`**; 56 carry explicit monitor bounds (the migrated wrist grid + tempo), 7 carry a citation.
+**Norms** (`norms.json`) — 149 rows: 95 at `any`, 8 + 8 at the two archetypes, and 12 / 2 / 12 / 12 at driver / fairway wood / iron / wedge. **Every row is `source: heuristic` with `n = 0`**; 56 carry explicit monitor bounds (the migrated wrist grid + tempo), 30 carry a citation. Those citations are **notes, not identifiers** — `citation` is documented as "DOI/PMID, or the note explaining a provisional figure", and 23 of them name the paper the figure should be re-seated FROM. Nothing moved to `source: literature` in the 2026-07-27 pass, deliberately: that tier asserts the mu and sigma came off a results table, and nobody read one. See `docs/provenance_log.md` §6.
 
 **Contexts** (`contexts.json`) — 13 nodes, one root. 7 have norms at or beneath them; the other 5 (`partial`, `pitch`, `chip`, `bunker`, `specialty`) carry none of their own and inherit from `any`, which the health list reports as harmless.
 
@@ -501,7 +518,13 @@ guide, and ledger `X1` in the content-extension plan.
 The 9 `Composed` measures (facet-built rather than metric-backed) are all `planned` or `noProducer` and none has a norm: the whole Composed path is content-complete and production-dormant.
 
 Condition fields in use: `consequence` 112/112, `provenance` 112/112, `aliases` 86, `drills` 23,
-`screenRef` 13, `injuryNote` 4, `bindings` **0**.
+`screenRef` 13, `injuryNote` 7, `bindings` **0**.
+
+**References** (`references.json`) — 21, joined to the pack by `Provenance::citation` against
+`doi` **or** `pmid` (exact string match, either field). One record carries a PMID and no DOI because
+its journal issues none, and opens at PubMed rather than doi.org. Five are cited by nothing and are
+kept on purpose: two contradict claims the pack makes, one governs the wording of every injury note,
+one is background, and one is an arXiv preprint held for attribution only.
 
 ### 8.5 The honest summary
 

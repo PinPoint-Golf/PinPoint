@@ -31,7 +31,21 @@ namespace pinpoint::analysis {
 
 QString Reference::url() const
 {
-    return doi.isEmpty() ? QString() : QStringLiteral("https://doi.org/") + doi;
+    // A DOI resolves straight to the publisher, so it wins where both exist. Falling back to the
+    // PMID matters more than it looks: building a doi.org URL out of a bare PubMed id yields a
+    // link that is well-formed, clickable, and dead — the worst of the three outcomes, because it
+    // fails only for the reader and never for us.
+    if (!doi.isEmpty())  return QStringLiteral("https://doi.org/") + doi;
+    if (!pmid.isEmpty()) return QStringLiteral("https://pubmed.ncbi.nlm.nih.gov/") + pmid
+                              + QStringLiteral("/");
+    return QString();
+}
+
+QString Reference::identifierLabel() const
+{
+    if (!doi.isEmpty())  return doi;
+    if (!pmid.isEmpty()) return QStringLiteral("PMID ") + pmid;
+    return QString();
 }
 
 const Reference *ReferenceSet::reference(const QString &rid) const
@@ -41,11 +55,12 @@ const Reference *ReferenceSet::reference(const QString &rid) const
     return it == references.end() ? nullptr : &*it;
 }
 
-const Reference *ReferenceSet::byDoi(const QString &d) const
+const Reference *ReferenceSet::byCitation(const QString &c) const
 {
-    if (d.isEmpty()) return nullptr;
-    const auto it = std::find_if(references.begin(), references.end(),
-                                 [&](const Reference &r) { return r.doi == d; });
+    if (c.isEmpty()) return nullptr;
+    const auto it = std::find_if(references.begin(), references.end(), [&](const Reference &r) {
+        return (!r.doi.isEmpty() && r.doi == c) || (!r.pmid.isEmpty() && r.pmid == c);
+    });
     return it == references.end() ? nullptr : &*it;
 }
 
@@ -65,10 +80,25 @@ QString userReferencePath()
 
 } // namespace
 
+QString citationLabel(const QString &citation)
+{
+    const QString c = citation.trimmed();
+    if (c.isEmpty()) return QString();
+
+    // Ask the registry first: it knows which field this string came out of, so the label is a
+    // fact. Everything shipped resolves — `reference_sets_test` fails the build otherwise.
+    if (const Reference *ref = sharedReferenceSet().byCitation(c)) return ref->identifierLabel();
+
+    // A user-layer citation naming a paper the registry has never heard of still has to render as
+    // something. Shape is enough to tell the two apart: a DOI is "10.<registrant>/<suffix>".
+    const bool allDigits = std::all_of(c.begin(), c.end(), [](QChar ch) { return ch.isDigit(); });
+    return allDigits ? QStringLiteral("PMID ") + c : c;
+}
+
 ValidationReport validateReferenceSet(const ReferenceSet &set)
 {
     ValidationReport r;
-    QSet<QString>    ids, dois;
+    QSet<QString>    ids, dois, pmids;
 
     for (const Reference &ref : set.references) {
         if (ids.contains(ref.id))
@@ -80,18 +110,29 @@ ValidationReport validateReferenceSet(const ReferenceSet &set)
             add(r, IssueSeverity::Error, QStringLiteral("referenceIdNamespace"), ref.id,
                 QStringLiteral("Reference id '%1' is outside the 'ref.' namespace.").arg(ref.id));
 
-        if (ref.doi.isEmpty()) {
-            // The DOI is both the join key and the only way a reader reaches the paper. Without
-            // one the row is decoration.
+        // An identifier is both the join key and the only way a reader reaches the paper. Without
+        // one the row is decoration. Either kind will do — some journals issue no DOI at all.
+        if (ref.doi.isEmpty() && ref.pmid.isEmpty())
             add(r, IssueSeverity::Error, QStringLiteral("referenceNoDoi"), ref.id,
-                QStringLiteral("Reference '%1' has no DOI, so nothing can cite it and nobody can "
-                               "open it.").arg(ref.id));
-        } else {
+                QStringLiteral("Reference '%1' has neither a DOI nor a PMID, so nothing can cite "
+                               "it and nobody can open it.").arg(ref.id));
+
+        if (!ref.doi.isEmpty()) {
             if (dois.contains(ref.doi))
                 add(r, IssueSeverity::Error, QStringLiteral("duplicateDoi"), ref.id,
                     QStringLiteral("Two references share the DOI '%1'. The join from a citation is "
-                                   "by DOI, so the second could never be reached.").arg(ref.doi));
+                                   "by identifier, so the second could never be reached.")
+                        .arg(ref.doi));
             dois.insert(ref.doi);
+        }
+
+        if (!ref.pmid.isEmpty()) {
+            if (pmids.contains(ref.pmid))
+                add(r, IssueSeverity::Error, QStringLiteral("duplicatePmid"), ref.id,
+                    QStringLiteral("Two references share the PMID '%1'. The join from a citation is "
+                                   "by identifier, so the second could never be reached.")
+                        .arg(ref.pmid));
+            pmids.insert(ref.pmid);
         }
 
         if (ref.title.isEmpty())
@@ -130,6 +171,7 @@ ReferenceLoadResult loadReferenceSet(const QByteArray &json, const QString &sour
         Reference         ref;
         ref.id          = o.value(QStringLiteral("id")).toString();
         ref.doi         = o.value(QStringLiteral("doi")).toString();
+        ref.pmid        = o.value(QStringLiteral("pmid")).toString();
         ref.title       = o.value(QStringLiteral("title")).toString();
         ref.authors     = o.value(QStringLiteral("authors")).toString();
         ref.journal     = o.value(QStringLiteral("journal")).toString();
@@ -155,7 +197,8 @@ QByteArray saveReferenceSet(const ReferenceSet &set)
     for (const Reference &ref : set.references) {
         QJsonObject o;
         o.insert(QStringLiteral("id"), ref.id);
-        o.insert(QStringLiteral("doi"), ref.doi);
+        if (!ref.doi.isEmpty())         o.insert(QStringLiteral("doi"), ref.doi);
+        if (!ref.pmid.isEmpty())        o.insert(QStringLiteral("pmid"), ref.pmid);
         if (!ref.title.isEmpty())       o.insert(QStringLiteral("title"), ref.title);
         if (!ref.authors.isEmpty())     o.insert(QStringLiteral("authors"), ref.authors);
         if (!ref.journal.isEmpty())     o.insert(QStringLiteral("journal"), ref.journal);

@@ -2308,12 +2308,12 @@
       "consequence": "An exaggerated low-back arch at address pre-tensions the lower back and makes it harder to turn the pelvis without the spine taking the load.",
       "provenance": {
         "tier": "indirect",
-        "citation": "10.1080/02640414.2024.2319443",
+        "citation": "10.1177/0363546503261729",
         "searchedOn": "2026-07-27",
-        "searchTerms": "golf low back pain biomechanical risk factors systematic review"
+        "searchTerms": "lumbar extension hip range of motion golfers"
       },
       "axis": "lumbar_curve",
-      "injuryNote": "A sustained end-range low-back arch under rotational load is associated with lower back discomfort. Worth raising with a clinician if pain is present."
+      "injuryNote": "A sustained end-range low-back arch under rotational load has been investigated as a contributor to lower back pain in golfers, and the findings are mixed — a systematic review found no significant difference in hip angle, trunk angle or crunch factor between recreational golfers with and without pain. Treat it as a loading pattern worth knowing about rather than a demonstrated risk. Worth raising with a clinician if pain is present."
     },
     {
       "id": "c_posture",
@@ -2330,7 +2330,9 @@
       "state": "active",
       "consequence": "A rounded upper back at address reduces the thoracic rotation available, so the backswing turn is shorter and is usually made up for elsewhere.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       },
       "axis": "thoracic_curve",
       "drills": [
@@ -2352,7 +2354,9 @@
       "state": "active",
       "consequence": "Too little forward bend from the hips leaves the arms no room to hang, so the swing tends to become flatter and more around the body.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       },
       "axis": "address_hip_hinge"
     },
@@ -2368,7 +2372,10 @@
       "state": "active",
       "consequence": "An open shoulder line at address points the swing left of the target line before the club has moved.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "30479527",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position address shoulder rotation club face aim elite golfers"
       },
       "axis": "alignment"
     },
@@ -2384,7 +2391,10 @@
       "state": "active",
       "consequence": "A closed shoulder line at address points the swing right of the target line before the club has moved.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "30479527",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position address shoulder rotation club face aim elite golfers"
       },
       "axis": "alignment"
     },
@@ -2400,7 +2410,10 @@
       "state": "active",
       "consequence": "A ball played too far toward the lead foot is met after the low point, which tends to open the shoulders at address to compensate.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "30479527",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position address shoulder rotation club face aim elite golfers"
       },
       "axis": "ball_position"
     },
@@ -2416,7 +2429,10 @@
       "state": "active",
       "consequence": "A ball played too far toward the trail foot is met early and steeply, which tends to close the shoulders at address to compensate.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "30479527",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball position address shoulder rotation club face aim elite golfers"
       },
       "axis": "ball_position"
     },
@@ -2432,7 +2448,9 @@
       "state": "active",
       "consequence": "A wide base resists rotation, so the body tends to move laterally instead of turning.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       },
       "axis": "stance_width"
     },
@@ -2448,7 +2466,9 @@
       "state": "active",
       "consequence": "A narrow base turns easily but gives less to push against and less lateral stability through impact.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       },
       "axis": "stance_width"
     },
@@ -2467,7 +2487,9 @@
       "state": "active",
       "consequence": "Standing too close crowds the arms and steepens the swing.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       },
       "axis": "ball_body_distance",
       "drills": [
@@ -2489,7 +2511,9 @@
       "state": "active",
       "consequence": "Reaching for the ball pulls the shoulders forward and rounds the upper back, even in someone whose standing posture is fine.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       },
       "axis": "ball_body_distance"
     },
@@ -2509,7 +2533,10 @@
       "state": "active",
       "consequence": "Losing the address spine angle during the swing changes the distance to the ball mid-swing, so the low point has to be found by compensation rather than by repetition.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1177/0363546514555698",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "hip internal rotation restriction lumbopelvic kinematics posture golf"
       },
       "drills": [
         "drill.postureRod"
@@ -2532,14 +2559,15 @@
       "consequence": "The pelvis moving toward the ball in the downswing takes away the room the arms need, leaving the hands to rescue the strike.",
       "provenance": {
         "tier": "indirect",
-        "citation": "10.1080/02640414.2024.2319443",
+        "citation": "10.1177/0363546514555698",
         "searchedOn": "2026-07-27",
-        "searchTerms": "golf low back pain biomechanical risk factors systematic review"
+        "searchTerms": "hip internal rotation restriction lumbopelvic kinematics posture golf"
       },
       "drills": [
         "drill.postureRod",
         "drill.standoffCheck"
-      ]
+      ],
+      "injuryNote": "Golfers with restricted hip internal rotation have been measured moving into greater lumbar flexion and pelvic posterior tilt, which is the loading pattern underneath this characteristic. It has been investigated as a possible contributor to lower back pain and the findings are mixed. Worth raising with a clinician if pain is present."
     },
     {
       "id": "reverse_spine",
@@ -2579,7 +2607,9 @@
       "state": "active",
       "consequence": "Shoulders turning too horizontally at the top set the club behind the body, which is commonly recovered by throwing the upper body out at the start of the downswing.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       }
     },
     {
@@ -2597,7 +2627,9 @@
       "state": "active",
       "consequence": "The trail hip rising rather than rotating substitutes a vertical move for a turn and shortens the effective backswing.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       }
     },
     {
@@ -2624,7 +2656,8 @@
       "drills": [
         "drill.trailHipLoad",
         "drill.trailHeelWall"
-      ]
+      ],
+      "injuryNote": "Lateral movement away from the target in the backswing is one of the patterns the low-back-pain literature circles — professionals with pain have been measured showing more lead-side lateral bending in the backswing. It has been investigated as a possible contributor and the findings are mixed. Worth raising with a clinician if pain is present."
     },
     {
       "id": "slide",
@@ -2645,7 +2678,7 @@
         "tier": "indirect",
         "citation": "10.1007/s40279-015-0429-1",
         "searchedOn": "2026-07-27",
-        "searchTerms": "pelvis lateral slide toward target downswing clubhead speed"
+        "searchTerms": "pelvis lateral slide toward target downswing golf"
       }
     },
     {
@@ -2665,7 +2698,10 @@
       "state": "active",
       "consequence": "Weight left on the trail side at impact moves the low point behind the ball, costing compression and adding loft.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1007/s40279-015-0429-1",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis lateral slide toward target downswing golf"
       },
       "drills": [
         "drill.pressureShiftStep",
@@ -2687,7 +2723,10 @@
       "state": "active",
       "consequence": "The upper body moving toward the target ahead of the sequence steepens the attack and narrows the margin for a clean strike.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1007/s40279-015-0429-1",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvis lateral slide toward target downswing golf"
       }
     },
     {
@@ -2705,7 +2744,9 @@
       "state": "active",
       "consequence": "A lead knee collapsing through impact drops the whole body and makes the strike depend on timing.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       }
     },
     {
@@ -2724,7 +2765,9 @@
       "state": "active",
       "consequence": "A trail elbow lifted away from the body at the top disconnects the arms from the turn and requires a re-route to deliver the club.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -2743,7 +2786,9 @@
       "state": "active",
       "consequence": "The lead arm folding through impact shortens the radius exactly where it should be longest, costing speed and consistency of face angle.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -2763,7 +2808,9 @@
       "state": "active",
       "consequence": "The club moving outside the ideal path at the start of the downswing produces an out-to-in strike — a pull or a slice depending on the face.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       },
       "drills": [
         "drill.gateForPath",
@@ -2786,7 +2833,9 @@
       "state": "active",
       "consequence": "The hands collapsing toward the chest in the backswing shortens the arc and removes the space the downswing needs to build speed.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       },
       "drills": [
         "drill.towelUnderArms"
@@ -2813,7 +2862,7 @@
         "tier": "indirect",
         "citation": "10.1080/14763141.2025.2547277",
         "searchedOn": "2026-07-27",
-        "searchTerms": "early wrist release style kinematics elite golfers"
+        "searchTerms": "wrist release style uncocking velocity elite golfers"
       },
       "drills": [
         "drill.wristHold",
@@ -2838,7 +2887,9 @@
       "state": "active",
       "consequence": "Adding loft through impact with the lead wrist means the club is rising at the ball, costing compression and distance control.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "wrist release timing uncocking downswing golf"
       },
       "drills": [
         "drill.wristHold"
@@ -2860,7 +2911,10 @@
       "state": "active",
       "consequence": "Too little wrist angle by the top leaves less stored angle to release, so speed has to come from the body alone.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1080/14763141.2025.2547277",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "wrist release style uncocking velocity elite golfers"
       }
     },
     {
@@ -2902,7 +2956,8 @@
         "citation": "10.1080/02640410701373543",
         "searchedOn": "2026-07-27",
         "searchTerms": "X-factor upper torso pelvis rotation ball velocity golf"
-      }
+      },
+      "injuryNote": "Separation between the torso and pelvis is one of the measures the low-back-pain literature circles, usually asking whether too much of it loads the spine. The evidence is mixed and settles neither direction, and a deficit is more often a mobility or sequencing limitation than a risk in itself. Worth raising with a clinician if pain is present."
     },
     {
       "id": "transition_rush",
@@ -2920,10 +2975,10 @@
       "state": "active",
       "consequence": "Starting down too quickly relative to the backswing leaves the sequence no time to form from the ground up.",
       "provenance": {
-        "tier": "indirect",
-        "citation": "10.1080/14763141.2025.2547277",
+        "tier": "supported",
+        "citation": "10.1123/jab.27.3.242",
         "searchedOn": "2026-07-27",
-        "searchTerms": "transition phase duration downswing golf release"
+        "searchTerms": "downswing initiation pelvis reversal upper torso timing golf"
       },
       "drills": [
         "drill.pumpToDelivery"
@@ -2939,10 +2994,12 @@
       "state": "active",
       "consequence": "The pelvis turns away from the target over a planted trail foot, which requires the trail femur to rotate internally. When it cannot, the turn has to be found elsewhere.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       },
       "injuryNote": {
-        "en": "Rotation the hips cannot supply is usually taken from the lower back, which has very little rotation available. The measured link with low-back pain in golfers has been found for the LEAD hip rather than the trail hip, so treat this as a mechanism worth knowing rather than a demonstrated risk. Worth raising with a clinician if pain is present."
+        "en": "Rotation the hips cannot supply is usually taken from the lower back, which has very little rotation available. That is a mechanism, not a finding: the study that measured hip range against low-back pain history in professional golfers found the association for the LEAD hip and NO significant difference on the trail side. Nothing here says a tight trail hip carries a risk. Worth raising with a clinician if pain is present."
       }
     },
     {
@@ -2972,7 +3029,10 @@
       "state": "active",
       "consequence": "When the pelvis cannot move independently of the chest, the two turn together and no separation can be built or released.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1186/s12938-015-0041-5",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lumbar hip rotational coupling segment contribution golf swing"
       },
       "drills": [
         "drill.pelvicSeparation"
@@ -2988,7 +3048,10 @@
       "state": "active",
       "consequence": "The upper back supplies most of the turn. When it is restricted the shoulders find their range by tilting or by taking it from the lower back.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1186/s12938-015-0041-5",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lumbar hip rotational coupling segment contribution golf swing"
       }
     },
     {
@@ -3001,7 +3064,9 @@
       "state": "active",
       "consequence": "An upper back that cannot straighten holds the golfer in flexion at address.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3014,7 +3079,9 @@
       "state": "active",
       "consequence": "A structurally rounded upper back with tight chest and lat tissue and weak scapular retractors. Present standing upright, not only over the ball — which is what distinguishes it from a setup that merely reaches for the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3027,7 +3094,9 @@
       "state": "active",
       "consequence": "Restricted overhead reach limits how wide the arms can travel.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3040,7 +3109,9 @@
       "state": "active",
       "consequence": "The trail arm needs external rotation to fold under the club at the top; without it the elbow lifts away instead.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3053,7 +3124,9 @@
       "state": "active",
       "consequence": "Restricted ankles reduce how much the golfer can stay in their posture while the pelvis rotates.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3066,7 +3139,10 @@
       "state": "active",
       "consequence": "Short hip flexors hold the pelvis in a forward tilt, which sets the low-back arch at address before the golfer has done anything.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1177/0363546503261729",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "lumbar extension hip range of motion golfers"
       }
     },
     {
@@ -3079,7 +3155,9 @@
       "state": "active",
       "consequence": "Restricted wrists limit how much angle can be set and held.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3092,7 +3170,9 @@
       "state": "active",
       "consequence": "Without a stable middle, the posture set at address is not held under the loads of the swing.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3105,7 +3185,9 @@
       "state": "active",
       "consequence": "The downswing is balanced over one leg. When that is difficult, the golfer widens the base or avoids moving onto the lead side at all.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "range of motion screening golf swing physical limitation"
       }
     },
     {
@@ -3117,7 +3199,9 @@
       "state": "active",
       "consequence": "A club that is short for the golfer makes them reach down and forward for the ball. Club length is measured; fitting it to the golfer needs a reference this product does not capture.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3129,7 +3213,9 @@
       "state": "active",
       "consequence": "An intent to help the ball into the air produces the opposite of the motion that does.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3141,7 +3227,9 @@
       "state": "active",
       "consequence": "A perceptual bias that sets the body left of where the golfer believes it is.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3153,7 +3241,9 @@
       "state": "active",
       "consequence": "A perceptual bias that sets the body right of where the golfer believes it is.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3165,7 +3255,9 @@
       "state": "active",
       "consequence": "A habitual rhythm carried between shots and clubs.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3177,7 +3269,9 @@
       "state": "active",
       "consequence": "A stance width the golfer has settled on and repeats without thinking about it.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3197,7 +3291,9 @@
       "state": "draft",
       "consequence": "Feet aimed left of the target for a right-handed golfer. The body will tend to swing along the line it is set up on, so the club arrives travelling left and the ball starts there unless something else compensates.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3217,7 +3313,9 @@
       "state": "draft",
       "consequence": "Feet aimed right of the target for a right-handed golfer. The swing tends to follow, so the club arrives travelling right and the ball starts there.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3236,7 +3334,9 @@
       "state": "draft",
       "consequence": "The pelvis already points left of the target at address, so part of the turn through the ball has been spent before the swing starts and there is less left to give.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3255,7 +3355,9 @@
       "state": "draft",
       "consequence": "The pelvis points right of the target at address, which encourages the club to travel out to the right through impact.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3274,7 +3376,9 @@
       "state": "draft",
       "consequence": "Too much knee bend at address drops the whole swing centre and leaves the legs with nowhere to go — the golfer has spent the flex they needed for the downswing before the club has moved.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3294,7 +3398,9 @@
       "state": "draft",
       "consequence": "Straight legs at address take the lower body out of the swing. Without knee flex there is nothing to push against, so the arms and shoulders end up supplying the speed.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3311,7 +3417,9 @@
       "state": "draft",
       "consequence": "The hands are rotated away from the target on the club, which tends to return the face closed. It is not a fault on its own — it becomes one when the rest of the swing is built for a neutral face.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3328,7 +3436,9 @@
       "state": "draft",
       "consequence": "The hands are rotated toward the target on the club, which tends to return the face open. Again not a fault in itself, but it decides what the rest of the swing has to do to square the face.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3343,7 +3453,9 @@
       "state": "draft",
       "consequence": "Starting with the weight already back on the trail side leaves the golfer with further to travel to reach the lead side, and makes hanging back the path of least resistance.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3364,7 +3476,9 @@
       "state": "draft",
       "consequence": "The club is dragged behind the hands early, so the arms and body have to re-route it to get back to the ball — usually by throwing it out and over, or by getting stuck underneath.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3384,7 +3498,9 @@
       "state": "draft",
       "consequence": "The club is pushed away from the body early, putting it above the plane before the swing has properly begun. From there the most natural way down is over the top.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     },
     {
@@ -3403,7 +3519,9 @@
       "state": "draft",
       "consequence": "The lead forearm rotates the face open in the takeaway, which has to be undone before impact. The face arrives late unless the hands do something about it on the way down.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3422,7 +3540,9 @@
       "state": "draft",
       "consequence": "The shaft climbs above the plane it started on, which sets up a steep, out-to-in delivery unless the downswing shallows it deliberately.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3442,7 +3562,9 @@
       "state": "draft",
       "consequence": "The shaft drops below the plane it started on, which makes it easy to get stuck behind the body coming down and to need the hands to save the shot.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3462,7 +3584,9 @@
       "state": "draft",
       "consequence": "At the top the club points right of the target rather than parallel to it. The most common recovery is to throw the club out and over on the way down.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3481,7 +3605,9 @@
       "state": "draft",
       "consequence": "At the top the club points left of the target. It tends to arrive from too far inside, which leaves the face with a lot to do in very little time.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3500,7 +3626,9 @@
       "state": "draft",
       "consequence": "The shaft travels well past parallel at the top, usually because something collapsed to let it — the lead arm, the wrists or the trail knee. Length past the point of control costs accuracy without adding speed.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3519,7 +3647,9 @@
       "state": "draft",
       "consequence": "The lead elbow folds in the backswing, which shortens the arc. A narrower backswing gives the downswing less room to build speed and makes the low point harder to control.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3537,7 +3667,9 @@
       "state": "draft",
       "consequence": "The trail knee loses its flex on the way back, which lets the hips slide instead of turn. It usually shows up alongside a sway off the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       },
       "drills": [
         "drill.trailHipLoad"
@@ -3560,7 +3692,9 @@
       "state": "draft",
       "consequence": "The swing centre lowers on the way back, so it has to come back up before impact or the club bottoms out behind the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       }
     },
     {
@@ -3579,7 +3713,9 @@
       "state": "draft",
       "consequence": "The swing centre lifts on the way back, and whatever went up has to come down again in time for impact — which is a timing problem rather than a technique one.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       }
     },
     {
@@ -3598,7 +3734,9 @@
       "state": "draft",
       "consequence": "The head moves laterally away from the target in the backswing. The swing centre has moved, so the arc has moved with it and has to be returned exactly before impact.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       }
     },
     {
@@ -3616,7 +3754,9 @@
       "state": "draft",
       "consequence": "A lifting lead heel is a legitimate way to make more turn, and many fine players use one. It becomes a problem only when the heel has to find the ground again in time — the more it lifts, the more precise that has to be.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
       }
     },
     {
@@ -3635,7 +3775,9 @@
       "state": "draft",
       "consequence": "The chest does not turn far enough by the top, so the swing has less coil to work with. This is a question of absolute turn, which is different from having no separation between the chest and the pelvis.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       }
     },
     {
@@ -3655,7 +3797,9 @@
       "state": "draft",
       "consequence": "The lead upper arm runs away from the chest in the backswing, so the arms and body are no longer moving as one unit. The arms then have to time their arrival rather than being delivered by the turn.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       },
       "drills": [
         "drill.towelUnderArms"
@@ -3679,7 +3823,9 @@
       "state": "draft",
       "consequence": "The shaft is steeper than the plane it started on as it comes into delivery. This is the club-domain view of the same event over-the-top describes at the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       },
       "drills": [
         "drill.pumpToDelivery"
@@ -3703,7 +3849,9 @@
       "state": "draft",
       "consequence": "The club drops well under the plane coming down and the body outruns it, so the arms are trapped behind. Everything after that is a save — usually the hands flipping the face closed, or a block right when they do not.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "swing plane shaft position backswing top of swing golf"
       },
       "drills": [
         "drill.gateForPath"
@@ -3725,7 +3873,9 @@
       "state": "draft",
       "consequence": "The pelvis opens early without shifting toward the target first, so the lower body turns out of the way instead of leading. The club is left behind and the strike moves toward the heel.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "kinematic sequence timing pelvis torso downswing golf"
       }
     },
     {
@@ -3744,7 +3894,10 @@
       "state": "draft",
       "consequence": "The pelvis stops turning before impact. Something still has to deliver the clubhead, so the hands take over — which is where a flip through impact comes from.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "supported",
+        "citation": "10.5535/arm.2018.42.5.713",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "pelvic rotational velocity impact professional amateur golf"
       }
     },
     {
@@ -3763,7 +3916,10 @@
       "state": "draft",
       "consequence": "The hands are slowing down before the ball rather than after it. Speed lost before impact is speed the ball never sees, and a decelerating strike is an inconsistent one.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1080/02640414.2010.507249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "wrist release style uncocking velocity elite golfers"
       }
     },
     {
@@ -3782,7 +3938,10 @@
       "state": "draft",
       "consequence": "The hands are not ahead of the clubhead at impact, so the club presents more loft than it was built with. With an iron that costs compression, distance and control of the flight.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "angle of attack loft launch conditions club ball impact physics"
       },
       "drills": [
         "drill.wristHold"
@@ -3804,7 +3963,9 @@
       "state": "draft",
       "consequence": "The arc bottoms out before it reaches the ball. Two centimetres either way is the difference between a heavy strike and a thin one, which is why the same error produces both misses.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "impact position low point axis tilt golf swing"
       },
       "drills": [
         "drill.lowPointDivot"
@@ -3826,7 +3987,10 @@
       "state": "draft",
       "consequence": "The clubhead is travelling too far downward at impact for the club in hand. It costs speed, adds spin, and with a teed driver invites the ball off the top of the face.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "angle of attack loft launch conditions club ball impact physics"
       }
     },
     {
@@ -3846,7 +4010,10 @@
       "state": "draft",
       "consequence": "The clubhead is travelling too flat or too upward for the club in hand, which moves the strike up the face and takes the compression out of an iron.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.1088/0034-4885/66/2/202",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "angle of attack loft launch conditions club ball impact physics"
       }
     },
     {
@@ -3865,7 +4032,10 @@
       "state": "draft",
       "consequence": "At impact the face points right of where the club is travelling, which is what puts left-to-right curve on the ball. How much it curves depends on how big that gap is.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.3390/proceedings2060249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "club face angle club path launch direction golf impact"
       }
     },
     {
@@ -3885,7 +4055,10 @@
       "state": "draft",
       "consequence": "At impact the face points left of where the club is travelling, which puts right-to-left curve on the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "indirect",
+        "citation": "10.3390/proceedings2060249",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "club face angle club path launch direction golf impact"
       }
     },
     {
@@ -3904,7 +4077,9 @@
       "state": "draft",
       "consequence": "The pelvis has not opened far enough by impact, so the body is still in the way of the arms. The club has to find room somewhere, and it usually finds it by the hands taking over.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "impact position low point axis tilt golf swing"
       }
     },
     {
@@ -3924,7 +4099,9 @@
       "state": "draft",
       "consequence": "The upper body is not leaning away from the target enough at impact. The club then arrives too steeply, and with a driver there is no room left to hit up on the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "impact position low point axis tilt golf swing"
       }
     },
     {
@@ -3944,7 +4121,9 @@
       "state": "draft",
       "consequence": "The upper body leans too far away from the target at impact, which hangs the weight back and moves the low point behind the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "impact position low point axis tilt golf swing"
       }
     },
     {
@@ -3963,7 +4142,9 @@
       "state": "draft",
       "consequence": "The golfer finishes without being able to stand still in it. A finish that cannot be held is the end of a swing that was not in balance earlier — it is a symptom worth reading backwards.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "finish position balance follow through golf swing"
       },
       "drills": [
         "drill.holdTheFinish"
@@ -3985,7 +4166,9 @@
       "state": "draft",
       "consequence": "The pressure never reached the lead side. The strike has almost always suffered before the finish shows it, but the finish is where it becomes obvious to the eye.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "finish position balance follow through golf swing"
       },
       "drills": [
         "drill.holdTheFinish"
@@ -4007,7 +4190,9 @@
       "state": "draft",
       "consequence": "The turn stops early after impact. Sometimes it is a deliberate control shot; when it is not, it usually means the swing was decelerating well before the ball.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "finish position balance follow through golf swing"
       }
     },
     {
@@ -4027,7 +4212,9 @@
       "state": "draft",
       "consequence": "Starts left of the target and flies straight — the face and the path were both left at impact. It is a miss that feels solid, which is why it survives so long.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4049,7 +4236,9 @@
       "state": "draft",
       "consequence": "Starts right of the target and flies straight — the face and the path were both right. A push that came from swinging too far in-to-out with the face matching is what a coach calls a BLOCK: the ball never comes back.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4069,7 +4258,9 @@
       "state": "draft",
       "consequence": "The ball leaves lower than the club should send it. It runs out rather than stopping, and into any wind it will not hold its line.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4090,7 +4281,9 @@
       "state": "draft",
       "consequence": "The ball climbs higher than the club should send it, which trades carry for height and leaves the flight at the mercy of the wind.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4109,7 +4302,9 @@
       "state": "draft",
       "consequence": "The ball leaves slower than this golfer normally sends it with this club — energy went somewhere other than into the ball, which is usually the strike rather than the swing.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4130,7 +4325,9 @@
       "state": "draft",
       "consequence": "Curves hard to the right in flight, because the face was open to the path it was travelling on. The playable version of the same shape is a FADE — the difference is how much, and whether it was intended.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4151,7 +4348,9 @@
       "state": "draft",
       "consequence": "Curves hard to the left, because the face was closed to the path. The playable version is a DRAW. A severe one is a snap hook or duck hook.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4167,7 +4366,9 @@
       "state": "draft",
       "consequence": "Starts left AND curves further left — the smother. The face was closed to the target and closed to the path, so nothing was pointing anywhere near where the ball was meant to go.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4182,7 +4383,9 @@
       "state": "draft",
       "consequence": "Starts right and curves further right. The path went right and the face was open even to that, so there was nothing at impact aimed at the target at all.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4200,7 +4403,9 @@
       "state": "draft",
       "consequence": "The ground was struck before the ball. Most of the clubhead speed goes into the turf, so the ball comes up well short however good the swing looked.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       },
       "drills": [
         "drill.lowPointDivot"
@@ -4221,7 +4426,9 @@
       "state": "draft",
       "consequence": "The leading edge caught the ball around its equator. It screams away low with almost normal speed but no height and no spin, so it will not stop.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       },
       "drills": [
         "drill.lowPointDivot"
@@ -4240,7 +4447,9 @@
       "state": "draft",
       "consequence": "The club bottomed out above the ball's equator and the ball dribbles forward along the ground.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4257,7 +4466,9 @@
       "state": "draft",
       "consequence": "A teed ball struck high on the crown from too steep an attack. Very high, very short, and usually a mark on the top of the driver to remember it by.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4274,7 +4485,9 @@
       "state": "draft",
       "consequence": "Struck off the hosel, so the ball shoots sharply right and low. The most feared miss in the game, and almost always a standoff problem: the club is further from the body at impact than it was at address.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       },
       "drills": [
         "drill.standoffCheck"
@@ -4296,7 +4509,9 @@
       "state": "draft",
       "consequence": "Contact out toward the toe. Gear effect puts draw spin on it and the strike bleeds ball speed, so it curves left and comes up short.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4315,7 +4530,9 @@
       "state": "draft",
       "consequence": "Contact in toward the heel. Gear effect puts fade spin on it and, like the toe, it costs ball speed.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4333,7 +4550,9 @@
       "state": "draft",
       "consequence": "The ball is slow for the clubhead speed that was delivered — energy lost to an off-centre strike. It separates a speed problem from a contact problem, which look identical on the scorecard.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4353,7 +4572,9 @@
       "state": "draft",
       "consequence": "More spin than the club should produce, which balloons the flight and costs carry.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4373,7 +4594,9 @@
       "state": "draft",
       "consequence": "Less spin than the club should produce. The ball knuckles, will not hold its line, and with a short iron will not stop on the green.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     },
     {
@@ -4391,7 +4614,9 @@
       "state": "draft",
       "consequence": "The ball carries less than this golfer normally carries this club.",
       "provenance": {
-        "tier": "proposed"
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
     }
   ],
@@ -6128,8 +6353,8 @@
       "type": "causes",
       "strength": "moderate",
       "provenance": {
-        "tier": "indirect",
-        "citation": "10.1038/s41598-020-79091-7",
+        "tier": "supported",
+        "citation": "30479527",
         "searchedOn": "2026-07-27",
         "searchTerms": "ball position club path impact launch direction golf"
       }
@@ -6140,8 +6365,8 @@
       "type": "causes",
       "strength": "moderate",
       "provenance": {
-        "tier": "indirect",
-        "citation": "10.1038/s41598-020-79091-7",
+        "tier": "supported",
+        "citation": "30479527",
         "searchedOn": "2026-07-27",
         "searchTerms": "ball position club path impact launch direction golf"
       }

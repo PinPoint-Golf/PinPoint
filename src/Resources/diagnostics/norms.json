@@ -611,7 +611,7 @@
       "source": "heuristic",
       "monitorLo": 1.8,
       "monitorHi": 3.6,
-      "citation": "Measured from address to the top, then top to impact. Published tour figures are measured from the TAKEAWAY instead, so this metric reads a little higher than the 3:1 benchmark and a band cut for that basis sits slightly low for this one -- by the (small, structurally bounded, so far UNMEASURED) Address->Takeaway gap. Provisional until re-centred on a corpus. NB the low-side Watch band is empty: 1.8 is exactly -2 sigma, so a rushed transition goes Good -> Action at 1.8. Deliberate for now; revisit with the literature review."
+      "citation": "Measured from address to the top, then top to impact. Published tour figures are measured from the TAKEAWAY instead, so this metric reads a little higher than the 3:1 benchmark and a band cut for that basis sits slightly low for this one -- by the (small, structurally bounded, so far UNMEASURED) Address->Takeaway gap. Provisional until re-centred on a corpus. NB the low-side Watch band is empty: 1.8 is exactly -2 sigma, so a rushed transition goes Good -> Action at 1.8. Deliberate for now; revisit with the literature review. The 3.0 centre is reported in 10.48550/arXiv.physics/0611291 (ratio centred at 3.0 across all three golfer groups, with markedly smaller variance in playing professionals). NOTE that source is an arXiv preprint, not peer reviewed, AND measures from the start of motion rather than from address. Source stays heuristic for both reasons."
     },
     {
       "measure": "m_leadWristAtImpact",
@@ -620,7 +620,7 @@
       "sigmaLo": 12.0,
       "unit": "°",
       "source": "heuristic",
-      "citation": "Migrated from the swing scorer's own impact band (pp_tuned_constants.h kFlexExtMu = 15.0, kFlexExtSigma = 12.0), which grades the ABSOLUTE sample at impact and is locked against HackMotion in Corpus 2. The scorer penalises only BELOW mu (cupping), which is exactly what sig_scooping detects; the two-sided corridor here is the conservative reading of the same figure. NB the sibling delta reduction (m_leadWristFlexExt_p7, the wrist-grid cell) carries mu 8.0, while this metric's howToRead implies a delta near 22.5 — see C1 in the implementation plan. That disagreement is about the DELTA and does not touch this absolute row."
+      "citation": "Migrated from the swing scorer's own impact band (pp_tuned_constants.h kFlexExtMu = 15.0, kFlexExtSigma = 12.0), which grades the ABSOLUTE sample at impact and was locked against a commercial wrist-sensor reference in Corpus 2. The scorer penalises only BELOW mu (cupping), which is exactly what sig_scooping detects; the two-sided corridor here is the conservative reading of the same figure. NB the sibling delta reduction (m_leadWristFlexExt_p7, the wrist-grid cell) carries mu 8.0, while this metric's howToRead implies a delta near 22.5 — see C1 in the implementation plan. That disagreement is about the DELTA and does not touch this absolute row."
     },
     {
       "measure": "m_stanceWidth",
@@ -670,7 +670,7 @@
       "sigmaLo": 14.0,
       "unit": "% stance width",
       "source": "heuristic",
-      "citation": "Club unknown, so a deliberately wide corridor spanning driver-to-wedge territory. The per-club rows below are the ones that should normally resolve."
+      "citation": "Club unknown, so a deliberately wide corridor spanning driver-to-wedge territory. The per-club rows below are the ones that should normally resolve. Provisional. PMID 30479527 and 10.1038/s41598-020-79091-7 quantify the address and impact consequences of ball-position shifts of about one ball radius — useful for sigma, not for mu."
     },
     {
       "measure": "m_ballPosition",
@@ -679,7 +679,7 @@
       "sigmaLo": 8.0,
       "unit": "% stance width",
       "source": "heuristic",
-      "citation": "Off the lead heel. Negative values are normal and legal here — forward of the lead heel is a real driver setup."
+      "citation": "Off the lead heel. Negative values are normal and legal here — forward of the lead heel is a real driver setup. Provisional. PMID 30479527 and 10.1038/s41598-020-79091-7 quantify the address and impact consequences of ball-position shifts of about one ball radius — useful for sigma, not for mu."
     },
     {
       "measure": "m_ballPosition",
@@ -687,7 +687,8 @@
       "mu": 18.0,
       "sigmaLo": 9.0,
       "unit": "% stance width",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. PMID 30479527 and 10.1038/s41598-020-79091-7 quantify the address and impact consequences of ball-position shifts of about one ball radius — useful for sigma, not for mu."
     },
     {
       "measure": "m_ballPosition",
@@ -695,7 +696,8 @@
       "mu": 33.0,
       "sigmaLo": 10.0,
       "unit": "% stance width",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. PMID 30479527 and 10.1038/s41598-020-79091-7 quantify the address and impact consequences of ball-position shifts of about one ball radius — useful for sigma, not for mu."
     },
     {
       "measure": "m_ballPosition",
@@ -704,7 +706,7 @@
       "sigmaLo": 10.0,
       "unit": "% stance width",
       "source": "heuristic",
-      "citation": "The middle of the stance."
+      "citation": "The middle of the stance. Provisional. PMID 30479527 and 10.1038/s41598-020-79091-7 quantify the address and impact consequences of ball-position shifts of about one ball radius — useful for sigma, not for mu."
     },
     {
       "measure": "m_lagAngleDown",
@@ -721,7 +723,8 @@
       "mu": 40.0,
       "sigmaLo": 8.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. PMID 30479527 reports trunk flexion at address in elite golfers on a C7 to mid-PSIS definition in the global sagittal plane; this measure is bend FROM VERTICAL. Reconcile datum and sign before adopting any published figure."
     },
     {
       "measure": "m_spineBendLoss",
@@ -850,7 +853,8 @@
       "sigmaLo": 3.0,
       "sigmaHi": 4.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_clubPathAtImpact",
@@ -858,7 +862,8 @@
       "mu": 0.0,
       "sigmaLo": 3.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_feetAlignment",
@@ -955,7 +960,8 @@
       "mu": 90.0,
       "sigmaLo": 12.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_thoraxRotP4",
@@ -963,7 +969,8 @@
       "mu": 95.0,
       "sigmaLo": 12.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_thoraxRotP4",
@@ -971,7 +978,8 @@
       "mu": 88.0,
       "sigmaLo": 12.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_thoraxRotP4",
@@ -979,7 +987,8 @@
       "mu": 80.0,
       "sigmaLo": 12.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_pelvisRotP5",
@@ -987,7 +996,8 @@
       "mu": 25.0,
       "sigmaLo": 8.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_pelvisRotP7",
@@ -995,7 +1005,8 @@
       "mu": 40.0,
       "sigmaLo": 10.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_pelvisRotP7",
@@ -1003,7 +1014,8 @@
       "mu": 45.0,
       "sigmaLo": 10.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_pelvisRotP7",
@@ -1011,7 +1023,8 @@
       "mu": 38.0,
       "sigmaLo": 10.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_pelvisRotP7",
@@ -1019,7 +1032,8 @@
       "mu": 30.0,
       "sigmaLo": 10.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281."
     },
     {
       "measure": "m_pelvisRotRateP6P7",
@@ -1027,7 +1041,8 @@
       "mu": 250.0,
       "sigmaLo": 100.0,
       "unit": "°/s",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from 10.5535/arm.2018.42.5.713, noting that the source reports PEAK pelvic rotational velocity in the downswing while this reducer is a rate over p6 to p7. Related, not identical — do not adopt their figure directly."
     },
     {
       "measure": "m_axisTiltImpact",
@@ -1203,7 +1218,8 @@
       "mu": 0.0,
       "sigmaLo": 3.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_attackAngle",
@@ -1211,7 +1227,8 @@
       "mu": 2.0,
       "sigmaLo": 3.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_attackAngle",
@@ -1219,7 +1236,8 @@
       "mu": -4.0,
       "sigmaLo": 2.5,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_attackAngle",
@@ -1227,7 +1245,8 @@
       "mu": -5.0,
       "sigmaLo": 3.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_handSpeedP6P7",
@@ -1235,7 +1254,8 @@
       "mu": 20.0,
       "sigmaLo": 40.0,
       "unit": "mph/s",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "ESTIMATE, and a poor one: sigma is twice mu, which is not a corridor. Flagged for re-seating from a corpus. Do NOT attempt to source this from literature — the accessible figures are vendor and robot-test material, which this repo does not cite."
     },
     {
       "measure": "m_faceToPath",
@@ -1243,7 +1263,8 @@
       "mu": 0.0,
       "sigmaLo": 2.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_launchDirection",
@@ -1251,7 +1272,8 @@
       "mu": 0.0,
       "sigmaLo": 2.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_launchAngle",
@@ -1339,7 +1361,8 @@
       "mu": 5000.0,
       "sigmaLo": 2000.0,
       "unit": "rpm",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Club unknown, so a deliberate no-op fallback: this corridor spans driver (about 2600) to wedge (about 9000) and is far too wide to ever fire. The per-club rows below are the ones that should resolve. Kept rather than deleted so an unknown club degrades to silence instead of to a missing norm."
     },
     {
       "measure": "m_spinRate",

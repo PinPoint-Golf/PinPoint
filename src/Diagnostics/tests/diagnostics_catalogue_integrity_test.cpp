@@ -457,7 +457,12 @@ int main()
         int withUrl = 0, withCites = 0, withTier = 0, totalCites = 0;
         for (const QVariant &v : refs) {
             const QVariantMap r = v.toMap();
-            if (r.value(QStringLiteral("url")).toString().startsWith(QLatin1String("https://doi.org/")))
+            // doi.org OR PubMed: a handful of journals issue no DOI, and those records join and
+            // open on their PMID instead. What matters is that the row goes SOMEWHERE — a marshaller
+            // that emitted an empty url renders a paper the reader cannot reach.
+            const QString url = r.value(QStringLiteral("url")).toString();
+            if (url.startsWith(QLatin1String("https://doi.org/"))
+                || url.startsWith(QLatin1String("https://pubmed.ncbi.nlm.nih.gov/")))
                 ++withUrl;
             const QVariantList cites = r.value(QStringLiteral("cites")).toList();
             if (!cites.isEmpty()) ++withCites;
@@ -471,7 +476,7 @@ int main()
                     ++withTier;
             }
         }
-        check(withUrl == refs.size(), "every reference carries an openable doi.org URL");
+        check(withUrl == refs.size(), "every reference carries an openable doi.org or PubMed URL");
         check(withCites > 0, "references carry the claims that rest on them");
         check(totalCites > 0 && withTier == totalCites,
               "and every claim row carries its tier label and a target to navigate to");

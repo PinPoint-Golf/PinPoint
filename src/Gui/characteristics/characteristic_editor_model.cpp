@@ -533,12 +533,21 @@ void CharacteristicEditorModel::setInjuryNote(const QString &v)
 
 void CharacteristicEditorModel::setCitation(const QString &v)
 {
-    if (m_draft.provenance.citation == v) return;
-    m_draft.provenance.citation = v;
+    // The stored citation is the BARE identifier — it is the join key into the reference registry,
+    // and "PMID 30479527" joins to nothing. The detail view renders that label, so somebody copying
+    // what they see back into this field is the likely case rather than the exotic one, and it
+    // would fail silently: the claim still loads, still validates, and simply stops appearing under
+    // its paper in the References view.
+    QString cleaned = v.trimmed();
+    if (cleaned.startsWith(QStringLiteral("PMID "), Qt::CaseInsensitive))
+        cleaned = cleaned.mid(5).trimmed();
+
+    if (m_draft.provenance.citation == cleaned) return;
+    m_draft.provenance.citation = cleaned;
     // A tier is only as good as its citation: clearing the citation demotes the claim rather than
     // leaving a tier the content no longer supports.
     m_draft.provenance.tier =
-        v.trimmed().isEmpty() ? ProvenanceTier::Proposed : ProvenanceTier::Supported;
+        cleaned.isEmpty() ? ProvenanceTier::Proposed : ProvenanceTier::Supported;
     touch();
 }
 
