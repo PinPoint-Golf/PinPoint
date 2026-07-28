@@ -48,12 +48,16 @@ QString nameOf(const Row<E> (&rows)[N], E v)
     return QString::fromLatin1(rows[0].name);
 }
 
+// fromUtf8 on the LABEL and fromLatin1 on the token, and the asymmetry is not an oversight. A token
+// is ASCII by contract — it is a JSON key that must never change. A label is prose, and the age-band
+// labels carry an en dash ("18–54"); read as Latin-1 that becomes three mojibake characters on
+// screen, with nothing failing anywhere to say so.
 template <typename E, size_t N>
 QString labelOf(const Row<E> (&rows)[N], E v)
 {
     for (const auto &r : rows)
-        if (r.value == v) return QString::fromLatin1(r.label);
-    return QString::fromLatin1(rows[0].label);
+        if (r.value == v) return QString::fromUtf8(r.label);
+    return QString::fromUtf8(rows[0].label);
 }
 
 template <typename E, size_t N>
@@ -83,6 +87,31 @@ const Row<Grade> kGrades[] = {
     { Grade::NotMeasured, "notMeasured", "Not measured" },
 };
 
+// The cohort vocabulary. Both token columns are part of the FILE FORMAT and must never change once a
+// norm set has shipped with them.
+const Row<Sex> kSexes[] = {
+    { Sex::Male,   "male",   "men" },
+    { Sex::Female, "female", "women" },
+};
+
+// The labels are plain age ranges rather than words like "adults", because they are read BOTH alone
+// ("55–64") and after a sex ("men 55–64"), and "men adults" does not survive the second reading.
+const Row<AgeBand> kAgeBands[] = {
+    { AgeBand::Junior,      "junior",       "under 18" },
+    { AgeBand::Adult,       "adult",        "18+" },
+    { AgeBand::Adult18_54,  "adult_18_54",  "18–54" },
+    { AgeBand::Adult55_64,  "adult_55_64",  "55–64" },
+    { AgeBand::Adult65Plus, "adult_65plus", "65+" },
+};
+
+template <typename E, size_t N>
+QString tokenList(const Row<E> (&rows)[N])
+{
+    QStringList out;
+    for (const auto &r : rows) out << QString::fromLatin1(r.name);
+    return out.join(QStringLiteral(", "));
+}
+
 } // namespace
 
 QString normSourceName(NormSource s) { return nameOf(kNormSources, s); }
@@ -92,6 +121,58 @@ QString normSourceLabel(NormSource s) { return labelOf(kNormSources, s); }
 QString gradeName(Grade g) { return nameOf(kGrades, g); }
 bool    gradeFromName(const QString &s, Grade &out) { return fromName(kGrades, s, out); }
 QString gradeLabel(Grade g) { return labelOf(kGrades, g); }
+
+QString sexName(Sex s) { return nameOf(kSexes, s); }
+bool    sexFromName(const QString &s, Sex &out) { return fromName(kSexes, s, out); }
+QString sexLabel(Sex s) { return labelOf(kSexes, s); }
+
+QString ageBandName(AgeBand b) { return nameOf(kAgeBands, b); }
+bool    ageBandFromName(const QString &s, AgeBand &out) { return fromName(kAgeBands, s, out); }
+QString ageBandLabel(AgeBand b) { return labelOf(kAgeBands, b); }
+
+QString sexTokenList()     { return tokenList(kSexes); }
+QString ageBandTokenList() { return tokenList(kAgeBands); }
+
+QString cohortLabel(const Cohort &c)
+{
+    // Empty for the unqualified cohort, deliberately — see the declaration.
+    if (c.isUnqualified()) return QString();
+    if (c.sex.has_value() && c.age.has_value())
+        return QObject::tr("%1 %2").arg(sexLabel(*c.sex), ageBandLabel(*c.age));
+    return c.sex.has_value() ? sexLabel(*c.sex) : ageBandLabel(*c.age);
+}
+
+std::vector<Cohort> cohortProbeOrder(const Cohort &athlete)
+{
+    std::vector<Cohort> out;
+
+    // Never probe one key twice. An athlete whose band is `Adult` — which a date of birth cannot
+    // produce, but a caller can pass — would otherwise collide probes 1 with 2 and 3 with 4, and a
+    // repeated probe is a second linear scan for an answer the first one already refused.
+    const auto push = [&out](std::optional<Sex> s, std::optional<AgeBand> a) {
+        Cohort c;
+        c.sex = s;
+        c.age = a;
+        for (const Cohort &e : out)
+            if (e == c) return;
+        out.push_back(c);
+    };
+
+    const bool haveSex = athlete.sex.has_value();
+    // The `adult` parent is probed only for an athlete who is IN one of its sub-bands. A junior must
+    // never match it: an 18+ corridor describes a population a 14-year-old is not part of, and
+    // grading them against it would be a wrong answer wearing a right answer's clothes.
+    const bool underAdult = athlete.age.has_value() && ageBandIsAdultSubBand(*athlete.age);
+
+    if (haveSex && athlete.age.has_value()) push(athlete.sex, athlete.age);        // 1
+    if (haveSex && underAdult)              push(athlete.sex, AgeBand::Adult);     // 2
+    if (athlete.age.has_value())            push(std::nullopt, athlete.age);       // 3
+    if (underAdult)                         push(std::nullopt, AgeBand::Adult);    // 4
+    if (haveSex)                            push(athlete.sex, std::nullopt);       // 5
+    push(std::nullopt, std::nullopt);                                              // 6
+
+    return out;
+}
 
 // ── Saying what a corridor is, in words ─────────────────────────────────────
 
@@ -204,38 +285,41 @@ QString normWeakReason(const Norm &n)
 
 // ── NormPack ────────────────────────────────────────────────────────────────
 
-const Norm *NormPack::find(const QString &measureId, const QString &contextId) const
+const Norm *NormPack::find(const QString &measureId, const QString &contextId,
+                           const Cohort &cohort) const
 {
     for (const Norm &n : norms)
-        if (n.measureId == measureId && n.contextId == contextId) return &n;
+        if (n.measureId == measureId && n.contextId == contextId && n.cohort == cohort) return &n;
     return nullptr;
 }
 
-bool NormPack::contains(const QString &measureId, const QString &contextId) const
+bool NormPack::contains(const QString &measureId, const QString &contextId,
+                        const Cohort &cohort) const
 {
-    return find(measureId, contextId) != nullptr;
+    return find(measureId, contextId, cohort) != nullptr;
 }
 
 QStringList NormPack::contextsFor(const QString &measureId) const
 {
     QStringList out;
     for (const Norm &n : norms)
-        if (n.measureId == measureId) out.append(n.contextId);
+        if (n.measureId == measureId && !out.contains(n.contextId)) out.append(n.contextId);
     return out;
 }
 
 void NormPack::upsert(const Norm &norm)
 {
     for (Norm &n : norms) {
-        if (n.measureId == norm.measureId && n.contextId == norm.contextId) { n = norm; return; }
+        if (n.measureId == norm.measureId && n.contextId == norm.contextId
+            && n.cohort == norm.cohort) { n = norm; return; }
     }
     norms.push_back(norm);
 }
 
-bool NormPack::remove(const QString &measureId, const QString &contextId)
+bool NormPack::remove(const QString &measureId, const QString &contextId, const Cohort &cohort)
 {
     const auto it = std::find_if(norms.begin(), norms.end(), [&](const Norm &n) {
-        return n.measureId == measureId && n.contextId == contextId;
+        return n.measureId == measureId && n.contextId == contextId && n.cohort == cohort;
     });
     if (it == norms.end())
         return false;
@@ -243,16 +327,47 @@ bool NormPack::remove(const QString &measureId, const QString &contextId)
     return true;
 }
 
-// ── Validation ──────────────────────────────────────────────────────────────
+// ── The norm key, as one string ─────────────────────────────────────────────
 
 namespace {
+// The cohort term is fenced off by a separator no id can contain: context ids are lowercase tokens
+// (`driver`, `full_swing`) and measure ids are `m_*`, so neither an '@' nor a ' · ' can appear
+// inside one. That is what lets splitNormKey() be an exact inverse rather than a heuristic.
+//
+// A function rather than a QLatin1String constant, because the separator is not ASCII — as Latin-1
+// its two UTF-8 bytes would read back as two characters, and the key would still round-trip through
+// splitNormKey while showing mojibake on every health row.
+QString cohortSep() { return QStringLiteral(" · "); }
+} // namespace
 
-QString normKeyLabel(const Norm &n)
+QString normKeyLabel(const QString &measureId, const QString &contextId, const Cohort &cohort)
 {
-    return QStringLiteral("%1 @ %2").arg(n.measureId, n.contextId);
+    const QString base = QStringLiteral("%1 @ %2").arg(measureId, contextId);
+    const QString who  = cohortLabel(cohort);
+    return who.isEmpty() ? base : base + cohortSep() + who;
 }
 
-} // namespace
+QString normKeyLabel(const Norm &n) { return normKeyLabel(n.measureId, n.contextId, n.cohort); }
+
+void splitNormKey(const QString &key, QString &measureId, QString &contextId)
+{
+    measureId.clear();
+    contextId.clear();
+
+    const int at = key.indexOf(QLatin1Char('@'));
+    if (at <= 0)
+        return;
+
+    measureId = key.left(at).trimmed();
+
+    QString rest = key.mid(at + 1);
+    const int sep = rest.indexOf(cohortSep());
+    if (sep >= 0)
+        rest = rest.left(sep);
+    contextId = rest.trimmed();
+}
+
+// ── Validation ──────────────────────────────────────────────────────────────
 
 ValidationReport validateNormPack(const NormPack &pack)
 {
@@ -274,6 +389,9 @@ ValidationReport validateNormPack(const NormPack &pack)
             continue;
         }
 
+        // The key carries the cohort, so a male row and a female row at one (measure, context) are
+        // two rows and not a duplicate — that is the point of the axis. Two rows on the SAME cohort
+        // still collide, and unqualified is a cohort like any other.
         if (seen.contains(key))
             err(QStringLiteral("duplicateNorm"), key,
                 QStringLiteral("Two norms share the key '%1'.").arg(key));
@@ -486,11 +604,60 @@ void readOptionalDouble(const QJsonObject &o, const QString &key, std::optional<
         out = v.toDouble();
 }
 
-Norm readNorm(const QJsonObject &o)
+// Absent ⇒ unqualified, which is what every row authored before cohorts existed means.
+//
+// An unknown token DROPS THE ROW rather than falling back, and returns false to say so. The
+// asymmetry with `unknownShape` — which leaves the measure at Target and keeps it — is deliberate
+// and is about which way the default is wrong: Target grades both tails, so a misread shape is
+// conservative, while unqualified matches EVERYONE, so a misread cohort would apply one segment's
+// numbers to the whole population. A row nobody can place is a row nobody should be graded by.
+bool readCohort(const QJsonObject &o, const QString &key, Cohort &out, ValidationReport &rep)
+{
+    const QJsonValue v = o.value(QStringLiteral("cohort"));
+    if (!v.isObject())
+        return true;
+
+    const QJsonObject c = v.toObject();
+    auto err = [&rep, &key](const QString &message) {
+        rep.issues.push_back(ValidationIssue{ IssueSeverity::Error,
+                                              QStringLiteral("unknownCohort"), key, message });
+    };
+
+    if (c.contains(QStringLiteral("sex"))) {
+        const QString token = c.value(QStringLiteral("sex")).toString();
+        Sex           s{};
+        if (!sexFromName(token, s)) {
+            err(QStringLiteral("Norm '%1' declares sex '%2'; the values are %3. The row was dropped "
+                               "— a corridor nobody can place would otherwise grade everyone.")
+                    .arg(key, token, sexTokenList()));
+            return false;
+        }
+        out.sex = s;
+    }
+
+    if (c.contains(QStringLiteral("age"))) {
+        const QString token = c.value(QStringLiteral("age")).toString();
+        AgeBand       b{};
+        if (!ageBandFromName(token, b)) {
+            err(QStringLiteral("Norm '%1' declares age band '%2'; the bands are %3. The row was "
+                               "dropped — a corridor nobody can place would otherwise grade "
+                               "everyone.")
+                    .arg(key, token, ageBandTokenList()));
+            return false;
+        }
+        out.age = b;
+    }
+
+    return true;
+}
+
+std::optional<Norm> readNorm(const QJsonObject &o, ValidationReport &rep)
 {
     Norm n;
     n.measureId = o.value(QStringLiteral("measure")).toString();
     n.contextId = o.value(QStringLiteral("context")).toString();
+    if (!readCohort(o, normKeyLabel(n.measureId, n.contextId), n.cohort, rep))
+        return std::nullopt;
     n.mu        = o.value(QStringLiteral("mu")).toDouble();
 
     // sigmaHi defaults to sigmaLo when absent, so a symmetric norm is written once rather than
@@ -546,6 +713,16 @@ QJsonObject writeNorm(const Norm &n)
     QJsonObject o;
     o.insert(QStringLiteral("measure"), n.measureId);
     o.insert(QStringLiteral("context"), n.contextId);
+    // Omitted entirely when unqualified, so every row authored before cohorts existed round-trips
+    // byte-identically and the shipped set's diff stays empty. Each field is written only when it is
+    // set: "sex only" and "sex plus a band" are different keys, and an unset axis written as null
+    // would be a third spelling of the same absence.
+    if (!n.cohort.isUnqualified()) {
+        QJsonObject co;
+        if (n.cohort.sex.has_value()) co.insert(QStringLiteral("sex"), sexName(*n.cohort.sex));
+        if (n.cohort.age.has_value()) co.insert(QStringLiteral("age"), ageBandName(*n.cohort.age));
+        o.insert(QStringLiteral("cohort"), co);
+    }
     o.insert(QStringLiteral("mu"),      n.mu);
     o.insert(QStringLiteral("sigmaLo"), n.sigmaLo);
     if (n.sigmaHi != n.sigmaLo)
@@ -600,11 +777,19 @@ NormPackLoadResult loadFrom(const QJsonObject &root, const QString &sourceLabel)
 
     const QJsonArray arr = root.value(QStringLiteral("norms")).toArray();
     out.pack.norms.reserve(size_t(arr.size()));
-    for (const QJsonValue &v : arr)
-        out.pack.norms.push_back(readNorm(v.toObject()));
+    // The parse report is built FIRST and the validator's findings appended to it, so a row dropped
+    // for an unreadable cohort is reported even though the set that survives validates clean. A
+    // report that lost the reason for the drop would leave a corridor silently missing.
+    ValidationReport parseReport;
+    for (const QJsonValue &v : arr) {
+        if (std::optional<Norm> n = readNorm(v.toObject(), parseReport))
+            out.pack.norms.push_back(std::move(*n));
+    }
 
     out.parsed = true;
-    out.report = validateNormPack(out.pack);
+    out.report = parseReport;
+    for (const ValidationIssue &i : validateNormPack(out.pack).issues)
+        out.report.issues.push_back(i);
     out.loaded = out.report.ok();
     return out;
 }
@@ -632,6 +817,13 @@ NormPackLoadResult loadNormPack(const QByteArray &json, const QString &sourceLab
     return loadFrom(doc.object(), sourceLabel);
 }
 
+int requiredNormSchemaVersion(const NormPack &pack)
+{
+    for (const Norm &n : pack.norms)
+        if (!n.cohort.isUnqualified()) return 2;
+    return 1;
+}
+
 QJsonObject saveNormPack(const NormPack &pack)
 {
     QJsonArray arr;
@@ -639,9 +831,12 @@ QJsonObject saveNormPack(const NormPack &pack)
         arr.append(writeNorm(n));
 
     QJsonObject root;
-    root.insert(QStringLiteral("id"),            pack.id);
-    root.insert(QStringLiteral("version"),       pack.version);
-    root.insert(QStringLiteral("schemaVersion"), pack.schemaVersion);
+    root.insert(QStringLiteral("id"),      pack.id);
+    root.insert(QStringLiteral("version"), pack.version);
+    // What the CONTENT needs, not what the pack was loaded as and not this build's ceiling — see
+    // requiredNormSchemaVersion(). `pack.schemaVersion` records what was declared on the way in and
+    // is deliberately not what goes back out.
+    root.insert(QStringLiteral("schemaVersion"), requiredNormSchemaVersion(pack));
     root.insert(QStringLiteral("norms"),         arr);
     return root;
 }

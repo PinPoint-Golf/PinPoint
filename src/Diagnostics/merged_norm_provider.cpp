@@ -94,17 +94,19 @@ public:
     // The shipped row, from the core layer only. Null when core carries nothing at this key — the
     // case where dropping a user override means "inherit from the parent" rather than "go back to
     // what shipped", which is a different promise for a button to make.
-    const Norm *shippedNorm(const QString &measureId, const QString &contextId) const override
+    const Norm *shippedNorm(const QString &measureId, const QString &contextId,
+                            const Cohort &cohort) const override
     {
-        return m_core ? m_core->norms().find(measureId, contextId) : nullptr;
+        return m_core ? m_core->norms().find(measureId, contextId, cohort) : nullptr;
     }
 
     // Recorded at merge time, not derived by comparing values: a user row holding exactly the
     // shipped numbers is still the user's row, and a value comparison would quietly un-mark it the
     // moment someone dragged a handle back to where it started.
-    bool isOverridden(const QString &measureId, const QString &contextId) const override
+    bool isOverridden(const QString &measureId, const QString &contextId,
+                      const Cohort &cohort) const override
     {
-        return m_overridden.contains(key(measureId, contextId));
+        return m_overridden.contains(key(measureId, contextId, cohort));
     }
 
     // The CHILDREN, shipped first — never this object. "merged" is an implementation word, and a
@@ -122,9 +124,16 @@ public:
     }
 
 private:
-    static QString key(const QString &measureId, const QString &contextId)
+    // A machine key, not a label — '\n' cannot occur in an id, so nothing needs escaping. The cohort
+    // is part of it: a user row qualified to one cohort overrides the shipped row for THAT cohort,
+    // and marking the unqualified row beside it as overridden would put "you changed this" on a
+    // corridor nobody touched.
+    static QString key(const QString &measureId, const QString &contextId, const Cohort &cohort)
     {
-        return measureId + QLatin1Char('\n') + contextId;
+        return measureId + QLatin1Char('\n') + contextId + QLatin1Char('\n')
+               + (cohort.sex.has_value() ? sexName(*cohort.sex) : QString())
+               + QLatin1Char('\n')
+               + (cohort.age.has_value() ? ageBandName(*cohort.age) : QString());
     }
 
     // A provider is disabled when EVERY layer it reports is disabled. Written against layers()
@@ -149,18 +158,16 @@ private:
             if (n.measureId.isEmpty() || n.contextId.isEmpty())
                 continue;
 
-            const bool collides = m_norms.contains(n.measureId, n.contextId);
+            const bool collides = m_norms.contains(n.measureId, n.contextId, n.cohort);
             if (collides && !isLocal) {
                 m_report.issues.push_back(ValidationIssue{
-                    IssueSeverity::Warning, QStringLiteral("duplicateNorm"),
-                    QStringLiteral("%1 @ %2").arg(n.measureId, n.contextId),
-                    QStringLiteral("A community norm set redefines the norm for '%1' in context "
-                                   "'%2'; the shipped norm wins.")
-                        .arg(n.measureId, n.contextId) });
+                    IssueSeverity::Warning, QStringLiteral("duplicateNorm"), normKeyLabel(n),
+                    QStringLiteral("A community norm set redefines the norm '%1'; the shipped norm "
+                                   "wins.").arg(normKeyLabel(n)) });
                 continue;
             }
             m_norms.upsert(n);   // replaces in place, preserving order
-            if (isLocal) m_overridden.insert(key(n.measureId, n.contextId));
+            if (isLocal) m_overridden.insert(key(n.measureId, n.contextId, n.cohort));
         }
     }
 

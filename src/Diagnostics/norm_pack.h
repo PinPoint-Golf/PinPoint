@@ -36,9 +36,13 @@
 
 namespace pinpoint::analysis {
 
-// The schema version this build writes. A pack declaring a HIGHER version is refused rather than
-// partially read — same contract as kPackSchemaVersion.
-inline constexpr int kNormPackSchemaVersion = 1;
+// The schema version this build UNDERSTANDS. A pack declaring a HIGHER version is refused rather
+// than partially read — same contract as kPackSchemaVersion.
+//
+// 2 adds the optional `cohort` on a norm row. The bump is what stops an older build from silently
+// dropping the key and grading everyone against a row that describes women over 65 — precisely the
+// failure `schemaTooNew` exists to prevent.
+inline constexpr int kNormPackSchemaVersion = 2;
 
 struct NormPack {
     QString id;                 // "core", or a community pack's namespace
@@ -49,19 +53,48 @@ struct NormPack {
 
     std::vector<Norm> norms;
 
-    // Exact match only. Resolution up the context tree is the provider's job, because it needs the
-    // tree; this is the primitive it is built from.
-    const Norm *find(const QString &measureId, const QString &contextId) const;
-    bool        contains(const QString &measureId, const QString &contextId) const;
+    // Exact match on the FULL key, cohort included. Resolution up the context tree — and through the
+    // cohort probe order — is the provider's job, because it needs the tree and the athlete; this is
+    // the primitive both are built from.
+    //
+    // The cohort defaults to unqualified, which is what every caller predating cohorts meant and
+    // what every shipped row is. It is a real term of the key and not a filter: a qualified row and
+    // an unqualified one at the same (measure, context) are two different rows, and an upsert of
+    // one must never replace the other.
+    const Norm *find(const QString &measureId, const QString &contextId,
+                     const Cohort &cohort = {}) const;
+    bool        contains(const QString &measureId, const QString &contextId,
+                         const Cohort &cohort = {}) const;
 
-    // Every context this measure has its own row for, in pack order.
+    // Every context this measure has a row for, in pack order, ONCE EACH. Cohorts make one context
+    // legitimately carry several rows, and this answers "which contexts", not "how many rows".
     QStringList contextsFor(const QString &measureId) const;
 
-    // Insert or replace by (measureId, contextId), preserving pack order on replace so a norm set
-    // does not reshuffle when one row is edited.
+    // Insert or replace by (measureId, contextId, cohort), preserving pack order on replace so a
+    // norm set does not reshuffle when one row is edited.
     void        upsert(const Norm &norm);
-    bool        remove(const QString &measureId, const QString &contextId);
+    bool        remove(const QString &measureId, const QString &contextId,
+                       const Cohort &cohort = {});
 };
+
+// ── The norm key, as one string ─────────────────────────────────────────────
+//
+// ONE spelling, here, because four places wrote it and two of them disagreed: `norm_pack` used
+// "%1 @ %2" and `diagnostics_health` used measureId + '@' + contextId with no spaces, while
+// `CharacteristicLibraryModel` split the result on the first '@' to build the health view's
+// deep-link — so half the deep-links carried a leading space into the context id. A subject string
+// that is both rendered to a user and parsed back by a view has to be produced and consumed by one
+// pair of functions.
+//
+// The cohort is appended only when the row carries one, so every unqualified row — which is all of
+// them today — reads exactly as it always did.
+QString normKeyLabel(const QString &measureId, const QString &contextId, const Cohort &cohort = {});
+QString normKeyLabel(const Norm &n);
+
+// The inverse, for the deep-link. Recovers the measure and the context; the cohort term is not
+// parsed back, because what the link opens is a corridor at a (measure, context) and the editor
+// resolves the rest.
+void     splitNormKey(const QString &key, QString &measureId, QString &contextId);
 
 // ── Validation ──────────────────────────────────────────────────────────────
 //
@@ -69,8 +102,18 @@ struct NormPack {
 // legitimately references measures and contexts it does not itself contain, so referential checks
 // are only meaningful on the ASSEMBLED library.
 //
+// PARSE (loadNormPack) — ERRORS:
+//   unknownCohort        a `cohort` object naming a sex or an age band this build does not know.
+//                        The ROW IS DROPPED, which is where this differs from `unknownShape`:
+//                        falling back to the default there means Target, a corridor that grades
+//                        both tails — conservative. Falling back here would mean UNQUALIFIED, a
+//                        corridor that applies to everybody, and applying a segment's numbers to
+//                        the whole population is the one outcome worse than having no row
+//
 // STANDALONE (validateNormPack) — ERRORS:
-//   duplicateNorm        two rows share (measureId, contextId)
+//   duplicateNorm        two rows share (measureId, contextId, cohort). The cohort is part of the
+//                        key, so a male row and a female row at one context are two rows, not a
+//                        duplicate
 //   emptyNormKey         a row with no measureId or no contextId
 //   negativeSigma        a tolerance below zero
 //   monitorOrder         monitorLo > monitorHi
@@ -119,6 +162,16 @@ struct NormPackLoadResult {
 
 NormPackLoadResult loadNormPack(const QJsonObject &root, const QString &sourceLabel = QString());
 NormPackLoadResult loadNormPack(const QByteArray &json, const QString &sourceLabel = QString());
+
+// The version a reader must understand to read this pack FAITHFULLY — 2 when any row carries a
+// cohort, 1 otherwise. `saveNormPack` writes this rather than `pack.schemaVersion`.
+//
+// Content-driven on purpose, and it is the same argument as omitting `"shape"` when it is Target. A
+// flat bump would make every user set unreadable by an older build over a feature none of them used;
+// stamping the loaded version back would let a set that GAINED a cohort row keep declaring 1, which
+// is exactly the silent-drop this version exists to prevent. Writing what the content needs is the
+// only one of the three that is true in both directions.
+int         requiredNormSchemaVersion(const NormPack &pack);
 
 QJsonObject saveNormPack(const NormPack &pack);
 

@@ -220,6 +220,12 @@ bool NormEditorModel::begin(const QString &measureId, const QString &contextId)
 
     // Seed from what resolves TODAY — an own row if there is one, otherwise the inherited corridor,
     // so "override for this context" starts from the thing being overridden rather than from zero.
+    //
+    // Resolved with NO ATHLETE COHORT, deliberately, and the draft below is unqualified for the same
+    // reason: this editor edits the corridor everyone is graded against. Passing a cohort here would
+    // let a segment's row seed a draft that then SAVES at the unqualified key — one population's
+    // numbers quietly promoted to the whole population. Cohort becomes part of the row identity this
+    // editor holds when the surfaces that can display it land; until then, unqualified end to end.
     const NormResolution res = m_norms->resolve(measureId, contextId);
     m_hadOwnRow = res.found() && !res.inherited;
 

@@ -34,13 +34,11 @@ ValidationIssue warn(const QString &code, const QString &subject, const QString 
     return { IssueSeverity::Warning, code, subject, message };
 }
 
-// A norm key, as one string, for a health row's subject. The subject is what the view groups and
-// deep-links on, so it has to name BOTH halves — a measure id alone cannot identify which of five
-// per-club rows is at fault.
-QString normKey(const QString &measureId, const QString &contextId)
-{
-    return measureId + QLatin1Char('@') + contextId;
-}
+// There WAS a local `normKey()` here, spelling the health row's subject with no spaces around the
+// '@' while norm_pack spelled the same key with them — and CharacteristicLibraryModel split whatever
+// arrived on the first '@' to build the view's deep-link, so half the links carried a leading space
+// into the context id. It now uses norm_pack's `normKeyLabel` / `splitNormKey`: a subject string
+// that is both rendered to a user and parsed back by a view needs one pair of functions.
 
 // Does this metric's own prose say the number depends on the club?
 //
@@ -216,9 +214,9 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
     // shipped numbers is still the user's.
     for (const Norm &n : set.norms) {
         if (n.n > 0) continue;
-        if (!norms.isOverridden(n.measureId, n.contextId)) continue;   // shipped rows are not this
+        if (!norms.isOverridden(n.measureId, n.contextId, n.cohort)) continue;   // not shipped rows
         if (n.source == NormSource::Literature) continue;              // noProvenance covers that
-        out.push_back(warn(QStringLiteral("personalNormNoSample"), normKey(n.measureId, n.contextId),
+        out.push_back(warn(QStringLiteral("personalNormNoSample"), normKeyLabel(n),
                            QObject::tr("Your corridor for %1 was typed rather than seated — it "
                                        "records no swings behind it. Fine as a starting figure; "
                                        "seat it from the library when you have a sample.")
@@ -237,6 +235,91 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                        "for it sits at full swing or above — a driver and a wedge "
                                        "are being graded against the same band. Add per-club rows.")
                                .arg(d->label.isEmpty() ? d->key : d->label)));
+    }
+
+    // ── Cohort coverage ─────────────────────────────────────────────────────
+    //
+    // Two nudges about the SHAPE of a norm set's cohort rows, both silent on every unqualified set —
+    // which is all of them today. Neither is a load error: an incomplete cohort grid grades
+    // correctly, it just grades some golfers against a broader row than the author probably meant.
+    {
+        // Grouped by (measure, context), because that is the node the probe order runs at. A vector
+        // with a linear find rather than a map: norm sets are ~150 rows, and this keeps the health
+        // list in pack order instead of in hash order.
+        struct Group {
+            QString                   measureId;
+            QString                   contextId;
+            std::vector<const Norm *> rows;
+        };
+        std::vector<Group> groups;
+        for (const Norm &n : set.norms) {
+            Group *g = nullptr;
+            for (Group &e : groups)
+                if (e.measureId == n.measureId && e.contextId == n.contextId) { g = &e; break; }
+            if (g == nullptr) {
+                groups.push_back(Group{ n.measureId, n.contextId, {} });
+                g = &groups.back();
+            }
+            g->rows.push_back(&n);
+        }
+
+        const auto has = [](const Group &g, const Cohort &c) {
+            for (const Norm *n : g.rows)
+                if (n->cohort == c) return true;
+            return false;
+        };
+        const auto cohortOf = [](std::optional<Sex> s, std::optional<AgeBand> a) {
+            Cohort c;
+            c.sex = s;
+            c.age = a;
+            return c;
+        };
+
+        for (const Group &g : groups) {
+            // A sex-only row beside a band-only row, with the combination unauthored. The probe
+            // order puts age ahead of sex at equal specificity, so a woman of 60 resolves the 55–64
+            // row and the `female` row never applies to her at all — which is a defensible default
+            // and is very unlikely to be what the author had in mind.
+            QStringList sexesOnly;
+            QStringList bandsOnly;
+            bool        anyCombined = false;
+            for (const Norm *n : g.rows) {
+                if (n->cohort.sex.has_value() && n->cohort.age.has_value()) anyCombined = true;
+                else if (n->cohort.sex.has_value()) sexesOnly << sexLabel(*n->cohort.sex);
+                else if (n->cohort.age.has_value()) bandsOnly << ageBandLabel(*n->cohort.age);
+            }
+            if (!anyCombined && !sexesOnly.isEmpty() && !bandsOnly.isEmpty())
+                out.push_back(warn(QStringLiteral("cohortGap"),
+                                   normKeyLabel(g.measureId, g.contextId),
+                                   QObject::tr("%1 has corridors for %2 and for %3, and none for a "
+                                               "combination of the two. Age is probed ahead of sex, "
+                                               "so a golfer who is both resolves the age row and the "
+                                               "sex row never applies to them. Author the combined "
+                                               "rows, or drop one axis.")
+                                       .arg(g.measureId, sexesOnly.join(QStringLiteral(" and ")),
+                                            bandsOnly.join(QStringLiteral(" and ")))));
+
+            // An `adult` row under a complete set of its own sub-bands can never resolve. `adult` is
+            // the PARENT band and is reached only when the exact band misses, so filling in all
+            // three beneath it retires it — and a corridor sitting in the pack looking authoritative
+            // while grading nobody is the same mistake as a monitor bound on an open tail. (No date
+            // of birth resolves to the parent band; see cohortProbeOrder.)
+            const std::optional<Sex> sexes[] = { std::nullopt, Sex::Male, Sex::Female };
+            for (const std::optional<Sex> &s : sexes) {
+                if (!has(g, cohortOf(s, AgeBand::Adult))) continue;
+                if (!has(g, cohortOf(s, AgeBand::Adult18_54))
+                    || !has(g, cohortOf(s, AgeBand::Adult55_64))
+                    || !has(g, cohortOf(s, AgeBand::Adult65Plus)))
+                    continue;
+                out.push_back(warn(QStringLiteral("shadowedCohort"),
+                                   normKeyLabel(g.measureId, g.contextId, cohortOf(s, AgeBand::Adult)),
+                                   QObject::tr("The %1 corridor for %2 can never resolve: every age "
+                                               "band beneath it is authored, and the exact band is "
+                                               "always tried first. Remove it, or remove one of the "
+                                               "bands it was meant to cover.")
+                                       .arg(cohortLabel(cohortOf(s, AgeBand::Adult)), g.measureId)));
+            }
+        }
     }
 
     // ── Contexts nothing resolves for ───────────────────────────────────────
@@ -286,8 +369,8 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
     // which is correct, because for those we genuinely do not know.
     for (const Norm &mine : set.norms) {
         if (!mine.basedOn.has_value()) continue;
-        if (!norms.isOverridden(mine.measureId, mine.contextId)) continue;
-        const Norm *theirs = norms.shippedNorm(mine.measureId, mine.contextId);
+        if (!norms.isOverridden(mine.measureId, mine.contextId, mine.cohort)) continue;
+        const Norm *theirs = norms.shippedNorm(mine.measureId, mine.contextId, mine.cohort);
         if (theirs == nullptr) continue;                 // core no longer carries a row here
 
         const NormBasis &base = *mine.basedOn;
@@ -306,7 +389,7 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
         if (!corridorMoved && !capsMoved) continue;
 
         out.push_back(warn(QStringLiteral("overrideCoreChanged"),
-                           normKey(mine.measureId, mine.contextId),
+                           normKeyLabel(mine),
                            corridorMoved
                                ? QObject::tr("You overrode %1 when the shipped corridor was %2. It "
                                              "has since been revised to %3. Yours is still what "
@@ -358,7 +441,7 @@ std::vector<ValidationIssue> corpusShareHealth(const std::vector<CorpusGradeCoun
                               "centre and its unit before trusting it");
 
             out.push_back({ IssueSeverity::Warning, QStringLiteral("oneBandCorpus"),
-                            normKey(c.measureId, c.contextId),
+                            normKeyLabel(c.measureId, c.contextId),
                             QObject::tr("%1 grades %2 of %3 drawn swings as %4 — %5.")
                                 .arg(c.measureId)
                                 .arg(b.n)

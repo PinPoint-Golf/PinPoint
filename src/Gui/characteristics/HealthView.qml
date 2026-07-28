@@ -124,12 +124,15 @@ Item {
         case "unknownNormMeasure": return qsTr("Corridor on a measure the library does not have")
         case "unknownNormContext": return qsTr("Corridor in a context the tree does not have")
         case "normNotCapturable":  return qsTr("Corridor on something no sensor can ever produce")
+        case "unknownCohort":      return qsTr("Names a cohort this build does not know — the corridor was dropped")
 
         // The assembled-library checks.
         case "signalNoNorm":           return qsTr("Nothing to compare against — the signal cannot fire")
         case "signalOnOpenTail":       return qsTr("Watching a tail this measure never grades")
         case "personalNormNoSample":   return qsTr("Your corridor, seated on no swings")
         case "clubDependentNoContext": return qsTr("Club-dependent, but graded by one corridor")
+        case "cohortGap":              return qsTr("Corridors for a sex and for an age band, none for both")
+        case "shadowedCohort":         return qsTr("A cohort corridor no golfer can ever resolve")
         case "emptyContext":           return qsTr("A context that changes no grade")
         case "ungradedContext":        return qsTr("A context graded by nothing at all")
         case "overrideCoreChanged":    return qsTr("The shipped corridor has been revised since you changed it")

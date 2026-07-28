@@ -35,11 +35,15 @@
 // in a measure's facets (Series::reference, CharacteristicEditorModel::referencesFor). A second
 // meaning for the same word would collide in the API, the JSON and the UI at once.
 //
-// ALL NORMS ARE POPULATION NORMS. There is no per-athlete norm and no personal baseline here. A
-// norm is never keyed by athlete id, and nothing in this header should ever gain one — a norm that
-// differs per player is a different feature with different storage and a different UI. Seating a
-// norm from a selected set of swings (the editor's "seat from swings" route) records `n` and the
-// selection scope in provenance, but the result still applies to everyone using that norm set.
+// ALL NORMS ARE POPULATION NORMS. The inviolable rule is that a norm is NEVER KEYED BY ATHLETE ID,
+// and nothing in this header should ever gain one — a norm that differs per player is a different
+// feature with different storage and a different UI. Seating a norm from a selected set of swings
+// (the editor's "seat from swings" route) records `n` and the selection scope in provenance, but the
+// result still applies to everyone using that norm set.
+//
+// It used to read "one population for everyone", which the optional `Cohort` on the key retires: a
+// cohort is a SEGMENTED population — men 55–64 — not a person. The rule that survives is the one
+// about athlete ids, and it is the one that mattered.
 
 namespace pinpoint::analysis {
 
@@ -113,6 +117,106 @@ struct NormBasis {
     std::optional<double> plausibleHi;
 };
 
+// ── Cohort: the optional third term of the norm key ─────────────────────────
+//
+// A norm may be qualified by the POPULATION SEGMENT it describes. This is not a per-athlete norm and
+// must never become one (see the header comment): a cohort names a group, the group is resolved from
+// the athlete record at grading time, and the corridor still applies to everyone in it.
+//
+// Cohort is deliberately NOT a context node. The context tree describes the SHOT — club, shot type,
+// archetype — while age and sex are properties of the ATHLETE. Folding one into the other would push
+// the cross-product (senior × driver × female × …) through a single-inheritance walk that cannot
+// express two orthogonal dimensions without duplicating every row on both.
+
+enum class Sex { Male, Female };
+
+// The age vocabulary is CLOSED and hierarchical: a fixed enum, stable tokens, changed only by a
+// schema version bump and NEVER extended by pack content. That is the whole point. The model is
+// community-maintained and the literature bands age every way imaginable, so a free numeric range
+// would put study-specific arithmetic into the key, where nothing can reconcile it across packs. A
+// study whose range does not match a band is mapped by the AUTHOR to the nearest one, with the
+// study's actual range recorded verbatim in `citation` — the key stays comparable, the provenance
+// stays honest.
+//
+// Half-open, gapless, total:
+//
+//     junior                under 18
+//     adult                 18+           — a parent, and authorable in its own right
+//       adult_18_54
+//       adult_55_64
+//       adult_65plus
+//
+// 55 is the seniors threshold in UK club practice, so a golfer already knows which side of it they
+// are on and a coach does not have to explain the band. It sits ABOVE the point where the
+// trunk-rotation decline literature usually pivots, and that is deliberate: a boundary set later
+// than the physiological one means a 55+ row describes a population that has unambiguously started
+// to decline, rather than one straddling the onset.
+//
+// `junior` is one band and is the weakest of them — a 9-year-old and a 17-year-old are barely one
+// population — but there is no junior corpus to split against. If one arrives it splits at peak
+// height velocity (~14), as a version bump.
+//
+// `adult` is AUTHORABLE, not merely a parent, because most provenance is no better than "adult male"
+// or "adult female". Without it the common case would force three duplicate rows that then drift.
+enum class AgeBand {
+    Junior,        // under 18
+    Adult,         // 18+ — the parent band; never an athlete's OWN band, see cohortProbeOrder()
+    Adult18_54,
+    Adult55_64,
+    Adult65Plus,
+};
+
+// The three bands beneath `adult`. An athlete derived from a date of birth always lands in one of
+// these (or in Junior); `Adult` itself is a thing an AUTHOR can claim, never a thing a birthday
+// produces.
+inline bool ageBandIsAdultSubBand(AgeBand b)
+{
+    return b == AgeBand::Adult18_54 || b == AgeBand::Adult55_64 || b == AgeBand::Adult65Plus;
+}
+
+// Either field, both, or neither. Both absent ⇒ UNQUALIFIED, which matches everyone and is what
+// every shipped row is.
+struct Cohort {
+    std::optional<Sex>     sex;
+    std::optional<AgeBand> age;
+
+    bool isUnqualified() const { return !sex.has_value() && !age.has_value(); }
+
+    bool operator==(const Cohort &o) const { return sex == o.sex && age == o.age; }
+    bool operator!=(const Cohort &o) const { return !(*this == o); }
+};
+
+// The cohort keys to try, most specific first, for an athlete whose own cohort is `athlete`.
+//
+// ONE walk, CONTEXT-MAJOR: the caller probes this whole list at each node of the upward context walk
+// and moves up the tree only when none of them is present. That ordering has two intended
+// consequences — an unqualified `driver` row beats a senior row at `any` for a driver shot (stance
+// width is club-mechanical; if senior-driver matters, author it), and a senior row at `any` resolves
+// for a senior wherever no club-specific row exists, which is the ROM family, exactly where cohorts
+// matter.
+//
+//     1. sex + exact age band       (female, adult_55_64)
+//     2. sex + adult                (female, adult)        — skipped for a junior
+//     3. exact age band             (adult_55_64)
+//     4. adult                      (adult)                — skipped for a junior
+//     5. sex                        (female)
+//     6. unqualified
+//
+// A FIXED order rather than a specificity score with a tie rule: a community pack must never fail to
+// load, or resolve unpredictably, because two rows came out equally specific. Age band sits ahead of
+// sex at equal specificity (3 before 5) because the age effect on the ROM measures where cohorts
+// matter is larger and monotone, while sex differences are partly absorbed by the body-normalised
+// units the setup measures already use.
+//
+// An axis the athlete has no answer on is SKIPPED, never guessed: unknown date of birth, unknown sex
+// or a declined answer means only rows unqualified on that axis can match — and the reading STILL
+// GRADES, against the universal corridor. "We don't know your age" and "we could not assess this"
+// are different statements.
+//
+// An athlete with neither answer therefore yields exactly ONE probe, the unqualified one, so
+// resolution costs precisely what it cost before cohorts existed.
+std::vector<Cohort> cohortProbeOrder(const Cohort &athlete);
+
 struct Norm {
     // Keys on the MEASURE (post-reducer), never the metric key. A measure carries its reducer and
     // its phase, so "Δ-from-address at P4" and "absolute at impact" are different measures and
@@ -120,6 +224,9 @@ struct Norm {
     // to say the same thing, and a flag can be ignored where a distinct key cannot.
     QString measureId;
     QString contextId;        // a node in the context tree; resolution walks upward from here
+
+    // The third term of the key, and the only optional one. Absent on every shipped row.
+    Cohort  cohort;
 
     double  mu      = 0.0;
     // Asymmetric by design, not as an option. Ball position forward is tolerated far more than back,
@@ -448,6 +555,28 @@ QString normWeakReason(const Norm &n);
 // ── Enum <-> string (the JSON spelling) ─────────────────────────────────────
 QString    normSourceName(NormSource s);
 bool       normSourceFromName(const QString &s, NormSource &out);
+
+QString    sexName(Sex s);
+bool       sexFromName(const QString &s, Sex &out);
+QString    sexLabel(Sex s);                    // "men" / "women"
+
+QString    ageBandName(AgeBand b);
+bool       ageBandFromName(const QString &s, AgeBand &out);
+QString    ageBandLabel(AgeBand b);            // "under 18" · "18+" · "55–64" · "65+"
+
+// A cohort as words: "" (unqualified) · "men" · "55–64" · "men 55–64".
+//
+// Empty for the unqualified cohort ON PURPOSE, so a caller can append it unconditionally and a row
+// that applies to everyone says nothing rather than saying "everyone". Every surface that will name
+// a cohort — the norm row, the corridor editor, a health notice — renders it through here, for the
+// reason normSourceLabel exists: four surfaces spelling one segment three ways is how "men 55–64"
+// and "male, 55-64" end up on the same screen.
+QString    cohortLabel(const Cohort &c);
+
+// The legal tokens, for an error message that has to name what WOULD have been accepted. Generated
+// from the same tables the parser reads, so a vocabulary change cannot leave the message behind.
+QString    sexTokenList();
+QString    ageBandTokenList();
 
 // The user-facing words for a norm's provenance. WITH the enum, not in a façade: the measures view
 // and the metric detail page both render it, and two copies of four strings is how they drift.

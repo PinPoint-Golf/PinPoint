@@ -77,8 +77,24 @@ public:
         norm.n         = n;
         norm.unit      = QLatin1String(unit);
         m_norms.upsert(norm);
-        if (mine) m_mine.insert(QLatin1String(measure) + QLatin1Char('@') + QLatin1String(context));
+        if (mine) m_mine.insert(normKeyLabel(norm));
         else      m_shipped.upsert(norm);
+    }
+
+    // The same, qualified to a cohort. Separate rather than a defaulted argument on add(), because
+    // the cohort is part of the KEY and a caller passing it should be seen to be doing so.
+    void addFor(const Cohort &cohort, const char *measure, const char *context, double mu,
+                double sigma)
+    {
+        Norm norm;
+        norm.measureId = QLatin1String(measure);
+        norm.contextId = QLatin1String(context);
+        norm.cohort    = cohort;
+        norm.mu        = mu;
+        norm.sigmaLo = norm.sigmaHi = sigma;
+        norm.unit      = QStringLiteral("°");
+        m_norms.upsert(norm);
+        m_shipped.upsert(norm);
     }
 
     // Give a user row a base, and move the shipped row out from under it.
@@ -130,13 +146,15 @@ public:
     QString                 label() const override    { return QStringLiteral("fake"); }
     PackOrigin              origin() const override   { return PackOrigin::Core; }
 
-    const Norm *shippedNorm(const QString &measureId, const QString &contextId) const override
+    const Norm *shippedNorm(const QString &measureId, const QString &contextId,
+                            const Cohort &cohort) const override
     {
-        return m_shipped.find(measureId, contextId);
+        return m_shipped.find(measureId, contextId, cohort);
     }
-    bool isOverridden(const QString &measureId, const QString &contextId) const override
+    bool isOverridden(const QString &measureId, const QString &contextId,
+                      const Cohort &cohort) const override
     {
-        return m_mine.contains(measureId + QLatin1Char('@') + contextId);
+        return m_mine.contains(normKeyLabel(measureId, contextId, cohort));
     }
 
 private:
@@ -318,12 +336,79 @@ int main()
         const auto issues = diagnosticsHealth(pack, norms, cat);
         check(countCode(issues, "personalNormNoSample") == 1,
               "exactly one row — the user's own");
-        check(hasSubject(issues, "personalNormNoSample", QStringLiteral("m_normed@full_swing")),
+        check(hasSubject(issues, "personalNormNoSample", QStringLiteral("m_normed @ full_swing")),
               "…and it names the norm, both halves of the key");
 
         // The load-bearing one: a shipped row at n = 0 is normal and must be silent.
-        check(!hasSubject(issues, "personalNormNoSample", QStringLiteral("m_unnormed@full_swing")),
+        check(!hasSubject(issues, "personalNormNoSample", QStringLiteral("m_unnormed @ full_swing")),
               "a SHIPPED n = 0 row is not reported — 39 of those exist and were fine yesterday");
+    }
+
+    // ── Cohort coverage ─────────────────────────────────────────────────────
+    //
+    // Both nudges must be SILENT on an unqualified set, which is every set that exists today. A
+    // health list that opened with rows about a feature nobody had used would be the same mistake
+    // `observableNoSignal` made.
+    std::printf("=== cohort coverage: sex and age authored apart ===\n");
+    {
+        const auto cohortOf = [](std::optional<Sex> s, std::optional<AgeBand> a) {
+            Cohort c;
+            c.sex = s;
+            c.age = a;
+            return c;
+        };
+
+        {
+            const CharacteristicPack pack = fakePack();
+            FakeNorms norms;
+            norms.add("m_normed",   "full_swing", 10.0, 2.0);
+            norms.add("m_unnormed", "full_swing", 10.0, 2.0);
+            check(countCode(diagnosticsHealth(pack, norms, cat), "cohortGap") == 0,
+                  "an unqualified set says nothing about cohorts");
+        }
+
+        {
+            const CharacteristicPack pack = fakePack();
+            FakeNorms norms;
+            norms.add("m_unnormed", "full_swing", 10.0, 2.0);
+            norms.add("m_normed",   "full_swing", 10.0, 2.0);
+            norms.addFor(cohortOf(Sex::Female, std::nullopt), "m_normed", "full_swing", 9.0, 2.0);
+            norms.addFor(cohortOf(std::nullopt, AgeBand::Adult55_64), "m_normed", "full_swing",
+                         8.0, 2.0);
+
+            const auto issues = diagnosticsHealth(pack, norms, cat);
+            check(countCode(issues, "cohortGap") == 1,
+                  "a sex-only row beside an age-only row, with no combination, is one nudge");
+            check(hasSubject(issues, "cohortGap", QStringLiteral("m_normed @ full_swing")),
+                  "…named at the (measure, context) the probe order runs at");
+
+            // The negative case, and the one that decides whether this check is worth having: adding
+            // the combined row must silence it.
+            norms.addFor(cohortOf(Sex::Female, AgeBand::Adult55_64), "m_normed", "full_swing",
+                         7.0, 2.0);
+            check(countCode(diagnosticsHealth(pack, norms, cat), "cohortGap") == 0,
+                  "…and authoring the combination silences it");
+        }
+
+        // A parent band under a complete set of its own sub-bands can never resolve.
+        {
+            const CharacteristicPack pack = fakePack();
+            FakeNorms norms;
+            norms.add("m_unnormed", "full_swing", 10.0, 2.0);
+            norms.add("m_normed",   "full_swing", 10.0, 2.0);
+            norms.addFor(cohortOf(std::nullopt, AgeBand::Adult), "m_normed", "full_swing", 9.0, 2.0);
+            norms.addFor(cohortOf(std::nullopt, AgeBand::Adult18_54), "m_normed", "full_swing",
+                         8.0, 2.0);
+            norms.addFor(cohortOf(std::nullopt, AgeBand::Adult55_64), "m_normed", "full_swing",
+                         7.0, 2.0);
+            check(countCode(diagnosticsHealth(pack, norms, cat), "shadowedCohort") == 0,
+                  "with one sub-band still unauthored the parent row is reachable, and silent");
+
+            norms.addFor(cohortOf(std::nullopt, AgeBand::Adult65Plus), "m_normed", "full_swing",
+                         6.0, 2.0);
+            check(countCode(diagnosticsHealth(pack, norms, cat), "shadowedCohort") == 1,
+                  "…and once all three are authored the parent can never resolve, so it is reported");
+        }
     }
 
     // ── Contexts nothing resolves for ───────────────────────────────────────
@@ -383,9 +468,9 @@ int main()
         norms.rebase("m_unnormed", "full_swing", /*base*/ 10.0, /*shipped now*/ 10.0);
 
         const auto issues = diagnosticsHealth(pack, norms, cat);
-        check(hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_normed@full_swing")),
+        check(hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_normed @ full_swing")),
               "the shipped row moved away from the base → reported");
-        check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed@full_swing")),
+        check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed @ full_swing")),
               "the shipped row still matches the base → not reported, however much yours differs");
     }
     {
@@ -404,9 +489,9 @@ int main()
         norms.rebaseCapOnly("m_unnormed", "full_swing", 15.0,         15.0);   // same cap as before
 
         const auto issues = diagnosticsHealth(pack, norms, cat);
-        check(hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_normed@full_swing")),
+        check(hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_normed @ full_swing")),
               "a shipped row that gained a cap is reported, corridor unchanged or not");
-        check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed@full_swing")),
+        check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed @ full_swing")),
               "…and an unchanged cap is still silent, so the check has not become noise");
 
         // …and it must not CALL it a corridor revision, because it is not one and the two numbers
@@ -414,7 +499,7 @@ int main()
         QString msg;
         for (const ValidationIssue &i : issues)
             if (i.code == QLatin1String("overrideCoreChanged")
-                && i.subject == QLatin1String("m_normed@full_swing"))
+                && i.subject == QLatin1String("m_normed @ full_swing"))
                 msg = i.message;
         check(!msg.isEmpty(), "the notice has a message");
         check(msg.contains(QLatin1String("BELIEVE")),
@@ -457,19 +542,19 @@ int main()
         counts.push_back(tiny);
 
         const auto issues = corpusShareHealth(counts);
-        check(hasSubject(issues, "oneBandCorpus", QStringLiteral("m_stanceWidth@full_swing")),
+        check(hasSubject(issues, "oneBandCorpus", QStringLiteral("m_stanceWidth @ full_swing")),
               "everything Action is reported");
-        check(hasSubject(issues, "oneBandCorpus", QStringLiteral("m_wide@full_swing")),
+        check(hasSubject(issues, "oneBandCorpus", QStringLiteral("m_wide @ full_swing")),
               "everything Ideal is reported too — a corridor that can never report a deviation");
-        check(!hasSubject(issues, "oneBandCorpus", QStringLiteral("m_ok@full_swing")),
+        check(!hasSubject(issues, "oneBandCorpus", QStringLiteral("m_ok @ full_swing")),
               "a spread distribution is not reported");
-        check(!hasSubject(issues, "oneBandCorpus", QStringLiteral("m_tiny@full_swing")),
+        check(!hasSubject(issues, "oneBandCorpus", QStringLiteral("m_tiny @ full_swing")),
               "too few readings to mean anything is not reported");
         check(countCode(issues, "oneBandCorpus") == 2, "one row per corridor, not one per band");
 
         // The two failures have opposite fixes, so the message has to distinguish them.
         for (const ValidationIssue &i : issues) {
-            if (i.subject != QLatin1String("m_wide@full_swing")) continue;
+            if (i.subject != QLatin1String("m_wide @ full_swing")) continue;
             check(i.message.contains(QStringLiteral("cannot report a deviation")),
                   "the too-wide case says what is wrong with it, not just which band won");
         }

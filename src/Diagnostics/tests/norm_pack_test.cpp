@@ -51,6 +51,16 @@ static Norm makeNorm(const char *measure, const char *context, double mu, double
     return n;
 }
 
+// A cohort, terse enough to write a probe table with. `std::nullopt` on either axis is "no answer",
+// which is a real state and not a placeholder — see cohortProbeOrder().
+static Cohort coh(std::optional<Sex> s = std::nullopt, std::optional<AgeBand> a = std::nullopt)
+{
+    Cohort c;
+    c.sex = s;
+    c.age = a;
+    return c;
+}
+
 static ContextTree sampleTree()
 {
     return ContextTree(std::vector<ContextNode>{
@@ -681,6 +691,364 @@ int main()
         }
     }
 
+    // ── Cohort: the optional third term of the key ──────────────────────────
+    //
+    // Every assertion below is paired against an UNQUALIFIED control wherever one exists, because
+    // the gate for this stage is that nothing an unqualified set does has changed — and all 149
+    // shipped rows are unqualified.
+
+    std::printf("=== cohort: the key ===\n");
+    {
+        NormPack p;
+        Norm men = makeNorm("m_thoraxRotation", "full_swing", 50.0, 8.0);
+        men.cohort = coh(Sex::Male);
+        Norm seniors = makeNorm("m_thoraxRotation", "full_swing", 42.0, 8.0);
+        seniors.cohort = coh(std::nullopt, AgeBand::Adult55_64);
+
+        p.upsert(makeNorm("m_thoraxRotation", "full_swing", 46.0, 8.0));   // unqualified
+        p.upsert(men);
+        p.upsert(seniors);
+        check(p.norms.size() == 3,
+              "a qualified row and an unqualified one at the same (measure, context) are two rows");
+
+        check(p.find(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing")) != nullptr
+                  && near(p.find(QStringLiteral("m_thoraxRotation"),
+                                 QStringLiteral("full_swing"))->mu, 46.0),
+              "find with no cohort answers the UNQUALIFIED row, not merely the first one");
+        check(near(p.find(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing"),
+                          coh(Sex::Male))->mu, 50.0),
+              "…and find with a cohort answers that cohort's row");
+        check(p.find(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing"),
+                     coh(Sex::Female)) == nullptr,
+              "a cohort with no row resolves to nothing here — the probe order is the provider's job");
+
+        // The upsert hazard: replacing by (measure, context) alone would have silently eaten one of
+        // the two cohort rows the moment a second one was authored.
+        Norm menMoved = men;
+        menMoved.mu   = 51.0;
+        p.upsert(menMoved);
+        check(p.norms.size() == 3 && near(p.find(QStringLiteral("m_thoraxRotation"),
+                                                 QStringLiteral("full_swing"),
+                                                 coh(Sex::Male))->mu, 51.0),
+              "upsert replaces within one cohort and leaves the others standing");
+
+        check(p.contextsFor(QStringLiteral("m_thoraxRotation"))
+                  == QStringList({ QStringLiteral("full_swing") }),
+              "contextsFor names a context ONCE however many cohort rows sit at it");
+
+        check(p.remove(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing"),
+                       coh(Sex::Male)),
+              "remove takes the cohort's own row");
+        check(p.norms.size() == 2
+                  && p.contains(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing")),
+              "…and leaves the unqualified row alone");
+    }
+
+    std::printf("=== cohort: persistence ===\n");
+    {
+        NormPack in;
+        in.id = QStringLiteral("core");
+        Norm qualified = makeNorm("m_thoraxRotation", "full_swing", 42.0, 8.0);
+        qualified.cohort = coh(Sex::Female, AgeBand::Adult55_64);
+        in.norms.push_back(qualified);
+        in.norms.push_back(makeNorm("m_stanceWidth", "full_swing", 100.0, 10.0, "%"));
+
+        const QJsonObject root = saveNormPack(in);
+        check(root.value(QStringLiteral("schemaVersion")).toInt() == 2,
+              "a set carrying a cohort declares schema 2");
+
+        const QJsonArray rows = root.value(QStringLiteral("norms")).toArray();
+        check(rows.at(0).toObject().contains(QStringLiteral("cohort")),
+              "the qualified row writes its cohort");
+        check(!rows.at(1).toObject().contains(QStringLiteral("cohort")),
+              "…and the unqualified row writes no cohort key at all, so it round-trips unchanged");
+
+        const NormPackLoadResult res = loadNormPack(root);
+        check(res.loaded, "it loads clean");
+        const Norm *back = res.pack.find(QStringLiteral("m_thoraxRotation"),
+                                         QStringLiteral("full_swing"),
+                                         coh(Sex::Female, AgeBand::Adult55_64));
+        check(back != nullptr, "the cohort survives the round-trip as part of the key");
+
+        // Content-driven, not a flat bump: a set nobody has qualified stays readable by an older
+        // build, and a set that GAINS a cohort row stops being.
+        NormPack plain;
+        plain.norms.push_back(makeNorm("m_stanceWidth", "full_swing", 100.0, 10.0, "%"));
+        check(requiredNormSchemaVersion(plain) == 1
+                  && saveNormPack(plain).value(QStringLiteral("schemaVersion")).toInt() == 1,
+              "a set with no cohort still declares schema 1");
+        check(requiredNormSchemaVersion(in) == 2, "…and one with a cohort declares 2");
+
+        // Single-axis rows: each field is written only when set, so "sex only" and "sex plus band"
+        // stay distinguishable in the file.
+        NormPack oneAxis;
+        Norm sexOnly = makeNorm("m_a", "any", 1.0, 1.0);
+        sexOnly.cohort = coh(Sex::Male);
+        oneAxis.norms.push_back(sexOnly);
+        const QJsonObject co =
+            saveNormPack(oneAxis).value(QStringLiteral("norms")).toArray().at(0).toObject()
+                .value(QStringLiteral("cohort")).toObject();
+        check(co.contains(QStringLiteral("sex")) && !co.contains(QStringLiteral("age")),
+              "an unset axis is absent rather than written as a null");
+    }
+
+    std::printf("=== cohort: an unknown token drops the row ===\n");
+    {
+        // The asymmetry with `unknownShape` is the point: falling back there means Target, which
+        // grades both tails and is conservative. Falling back here would mean UNQUALIFIED, which
+        // would grade EVERYONE against a row meant for one segment.
+        const NormPackLoadResult res = loadNormPack(QByteArray(R"({
+            "id": "x", "schemaVersion": 2, "norms": [
+              { "measure": "m_a", "context": "any", "mu": 1.0, "sigmaLo": 1.0,
+                "cohort": { "sex": "mail" } },
+              { "measure": "m_b", "context": "any", "mu": 1.0, "sigmaLo": 1.0 }
+            ] })"));
+        check(hasCode(res.report, "unknownCohort"), "an unreadable sex is a named load error");
+        check(!res.loaded, "…and the set does not load clean");
+        check(res.pack.norms.size() == 1
+                  && res.pack.contains(QStringLiteral("m_b"), QStringLiteral("any")),
+              "the row is DROPPED, not silently promoted to matching everyone");
+
+        for (const ValidationIssue &i : res.report.issues) {
+            if (i.code != QLatin1String("unknownCohort")) continue;
+            check(i.message.contains(QLatin1String("mail"))
+                      && i.message.contains(QLatin1String("female")),
+                  "…and the message names both the token and the vocabulary it was measured against");
+        }
+
+        const NormPackLoadResult ages = loadNormPack(QByteArray(R"({
+            "id": "x", "schemaVersion": 2, "norms": [
+              { "measure": "m_a", "context": "any", "mu": 1.0, "sigmaLo": 1.0,
+                "cohort": { "age": "veteran" } }
+            ] })"));
+        check(hasCode(ages.report, "unknownCohort") && ages.pack.norms.empty(),
+              "the same for an age band outside the closed vocabulary");
+    }
+
+    std::printf("=== cohort: the key as one string ===\n");
+    {
+        check(normKeyLabel(QStringLiteral("m_a"), QStringLiteral("driver"))
+                  == QLatin1String("m_a @ driver"),
+              "an unqualified key reads exactly as it always did");
+        check(normKeyLabel(QStringLiteral("m_a"), QStringLiteral("driver"),
+                           coh(Sex::Female, AgeBand::Adult55_64))
+                  .startsWith(QLatin1String("m_a @ driver")),
+              "a qualified key extends it rather than reshaping it");
+
+        // Every character in the key must be the character it was authored as. The label tables and
+        // the separator carry an en dash and a middle dot, and reading either as Latin-1 turns one
+        // authored character into two or three mojibake ones — which nothing else here would notice,
+        // because the key would still split and still round-trip.
+        check(ageBandLabel(AgeBand::Adult55_64).size() == 5
+                  && ageBandLabel(AgeBand::Adult55_64).contains(QChar(0x2013)),
+              "the age labels decode as UTF-8, en dash included");
+        check(normKeyLabel(QStringLiteral("m_a"), QStringLiteral("driver"), coh(Sex::Male))
+                  .endsWith(cohortLabel(coh(Sex::Male))),
+              "…and the key ends with exactly the cohort label, not a re-encoding of it");
+
+        // The half that had been a guess: the health view splits the subject back apart to build a
+        // deep-link, and the spaced spelling used to leave a leading space on the context id.
+        QString m, c;
+        splitNormKey(normKeyLabel(QStringLiteral("m_a"), QStringLiteral("driver")), m, c);
+        check(m == QLatin1String("m_a") && c == QLatin1String("driver"),
+              "splitNormKey is the exact inverse — no stray whitespace on the context");
+
+        splitNormKey(normKeyLabel(QStringLiteral("m_a"), QStringLiteral("driver"),
+                                  coh(Sex::Male, AgeBand::Adult65Plus)), m, c);
+        check(m == QLatin1String("m_a") && c == QLatin1String("driver"),
+              "…and the cohort term does not leak into the context id");
+
+        splitNormKey(QStringLiteral("sig_something"), m, c);
+        check(m.isEmpty() && c.isEmpty(),
+              "a subject that is a plain id yields no measure and no context, rather than half a key");
+    }
+
+    std::printf("=== cohort: the probe order ===\n");
+    {
+        const auto names = [](const std::vector<Cohort> &v) {
+            QStringList out;
+            for (const Cohort &c : v)
+                out << (c.isUnqualified() ? QStringLiteral("-") : cohortLabel(c));
+            return out.join(QStringLiteral(" | "));
+        };
+
+        // The full six, most specific first. Age ahead of sex at equal specificity.
+        const std::vector<Cohort> full = cohortProbeOrder(coh(Sex::Female, AgeBand::Adult55_64));
+        check(full.size() == 6, "a fully-known athlete probes six keys");
+        check(full[0] == coh(Sex::Female, AgeBand::Adult55_64)
+                  && full[1] == coh(Sex::Female, AgeBand::Adult)
+                  && full[2] == coh(std::nullopt, AgeBand::Adult55_64)
+                  && full[3] == coh(std::nullopt, AgeBand::Adult)
+                  && full[4] == coh(Sex::Female)
+                  && full[5] == coh(),
+              "…in the fixed order: sex+band, sex+adult, band, adult, sex, unqualified");
+        if (full.size() != 6) std::printf("    (order was: %s)\n", qPrintable(names(full)));
+
+        // A junior is not an adult, and `adult` is an 18+ corridor.
+        const std::vector<Cohort> junior = cohortProbeOrder(coh(Sex::Male, AgeBand::Junior));
+        check(junior.size() == 4, "a junior skips both `adult` probes");
+        for (const Cohort &c : junior)
+            check(!(c.age.has_value() && *c.age == AgeBand::Adult),
+                  "…so no probe of a junior's ever names the adult band");
+
+        // An axis with no answer is skipped, never guessed.
+        const std::vector<Cohort> noSex = cohortProbeOrder(coh(std::nullopt, AgeBand::Adult65Plus));
+        check(noSex.size() == 3 && noSex[0] == coh(std::nullopt, AgeBand::Adult65Plus)
+                  && noSex[1] == coh(std::nullopt, AgeBand::Adult) && noSex[2] == coh(),
+              "an athlete who declined to say their sex probes only the age-qualified keys");
+
+        const std::vector<Cohort> noAge = cohortProbeOrder(coh(Sex::Male));
+        check(noAge.size() == 2 && noAge[0] == coh(Sex::Male) && noAge[1] == coh(),
+              "an athlete with no date of birth probes only the sex-qualified keys");
+
+        // The control, and the reason resolution costs what it always did.
+        const std::vector<Cohort> unknown = cohortProbeOrder(coh());
+        check(unknown.size() == 1 && unknown[0] == coh(),
+              "an athlete we know nothing about probes exactly ONE key — the unqualified one");
+
+        // `adult` is not a band a birthday produces, but a caller can pass it; the collapsed probes
+        // must not be repeated.
+        const std::vector<Cohort> parent = cohortProbeOrder(coh(Sex::Male, AgeBand::Adult));
+        check(parent.size() == 4, "an athlete passed the parent band probes each key once");
+    }
+
+    std::printf("=== cohort: resolution, exhaustively at one node ===\n");
+    {
+        const Cohort athlete = coh(Sex::Female, AgeBand::Adult55_64);
+
+        // Six rows, one per probe, each with a distinguishing mu. Removing them one at a time from
+        // the most specific end must walk the probe order exactly.
+        struct Row { Cohort who; double mu; };
+        const Row rows[] = {
+            { coh(Sex::Female, AgeBand::Adult55_64), 1.0 },
+            { coh(Sex::Female, AgeBand::Adult),      2.0 },
+            { coh(std::nullopt, AgeBand::Adult55_64), 3.0 },
+            { coh(std::nullopt, AgeBand::Adult),      4.0 },
+            { coh(Sex::Female),                       5.0 },
+            { coh(),                                  6.0 },
+        };
+
+        for (size_t drop = 0; drop <= 6; ++drop) {
+            NormPack core;
+            for (size_t i = drop; i < 6; ++i) {
+                Norm n  = makeNorm("m_thoraxRotation", "full_swing", rows[i].mu, 5.0);
+                n.cohort = rows[i].who;
+                core.upsert(n);
+            }
+            const auto prov = makeMergedNormProvider(fake(core, PackOrigin::Core), {});
+            const NormResolution r =
+                prov->resolve(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing"),
+                              athlete);
+            if (drop == 6)
+                check(!r.found(), "with no row at all, nothing resolves");
+            else
+                check(r.found() && near(r.norm->mu, rows[drop].mu),
+                      "the first present probe wins, and only it");
+        }
+
+        // A male golfer must never resolve a female row, whatever else is missing.
+        {
+            NormPack core;
+            Norm f  = makeNorm("m_thoraxRotation", "full_swing", 1.0, 5.0);
+            f.cohort = coh(Sex::Female, AgeBand::Adult55_64);
+            core.upsert(f);
+            const auto prov = makeMergedNormProvider(fake(core, PackOrigin::Core), {});
+            check(!prov->resolve(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing"),
+                                 coh(Sex::Male, AgeBand::Adult55_64)).found(),
+                  "a cohort row is never a fallback for a different cohort");
+        }
+
+        // A junior against an adult-banded set: both `adult` probes are skipped, so only the
+        // unqualified row can answer — and it DOES answer, because an unknown or unmatched cohort
+        // degrades to the universal corridor rather than to NotMeasured.
+        {
+            NormPack core;
+            Norm adult  = makeNorm("m_thoraxRotation", "full_swing", 1.0, 5.0);
+            adult.cohort = coh(std::nullopt, AgeBand::Adult);
+            core.upsert(adult);
+            core.upsert(makeNorm("m_thoraxRotation", "full_swing", 9.0, 5.0));
+            const auto prov = makeMergedNormProvider(fake(core, PackOrigin::Core), {});
+            const NormResolution r =
+                prov->resolve(QStringLiteral("m_thoraxRotation"), QStringLiteral("full_swing"),
+                              coh(std::nullopt, AgeBand::Junior));
+            check(r.found() && near(r.norm->mu, 9.0),
+                  "a junior falls past the adult row to the unqualified one, and still GRADES");
+        }
+    }
+
+    std::printf("=== cohort: context-major, not cohort-major ===\n");
+    {
+        // The consequence to hold on to: stance width at the driver is club-mechanical, and a senior
+        // corridor at `any` must not displace it. If senior-driver matters, it gets authored.
+        NormPack core;
+        Norm senior  = makeNorm("m_stanceWidth", "any", 90.0, 8.0, "%");
+        senior.cohort = coh(std::nullopt, AgeBand::Adult55_64);
+        core.upsert(senior);
+        core.upsert(makeNorm("m_stanceWidth", "driver", 105.0, 8.0, "%"));   // unqualified, narrow
+
+        const auto prov = makeMergedNormProvider(fake(core, PackOrigin::Core), {});
+        const NormResolution r =
+            prov->resolve(QStringLiteral("m_stanceWidth"), QStringLiteral("driver"),
+                          coh(std::nullopt, AgeBand::Adult55_64));
+        check(r.found() && near(r.norm->mu, 105.0) && r.contextId == QLatin1String("driver"),
+              "an unqualified narrow-context row beats a cohort-qualified broad-context one");
+
+        // The other half of the same rule, and the reason it is worth having: where no club row
+        // exists, the senior row DOES answer — which is the ROM family, exactly where cohorts matter.
+        const NormResolution wedge =
+            prov->resolve(QStringLiteral("m_stanceWidth"), QStringLiteral("wedge"),
+                          coh(std::nullopt, AgeBand::Adult55_64));
+        check(wedge.found() && near(wedge.norm->mu, 90.0) && wedge.inherited,
+              "…and the cohort row answers wherever no narrower row exists");
+    }
+
+    std::printf("=== cohort: layering and duplicates ===\n");
+    {
+        // A user row qualified to one cohort overrides the shipped row for THAT cohort, and marks
+        // nothing else as edited.
+        NormPack core;
+        core.upsert(makeNorm("m_a", "full_swing", 10.0, 1.0));
+        Norm coreMen  = makeNorm("m_a", "full_swing", 12.0, 1.0);
+        coreMen.cohort = coh(Sex::Male);
+        core.upsert(coreMen);
+
+        NormPack user;
+        Norm mine  = makeNorm("m_a", "full_swing", 13.0, 1.0);
+        mine.cohort = coh(Sex::Male);
+        user.upsert(mine);
+
+        std::vector<std::unique_ptr<INormProvider>> layers;
+        layers.push_back(fake(user, PackOrigin::LocalUser));
+        const auto prov = makeMergedNormProvider(fake(core, PackOrigin::Core), std::move(layers));
+
+        check(prov->isOverridden(QStringLiteral("m_a"), QStringLiteral("full_swing"),
+                                 coh(Sex::Male)),
+              "the cohort row is marked overridden");
+        check(!prov->isOverridden(QStringLiteral("m_a"), QStringLiteral("full_swing")),
+              "…and the unqualified row beside it is NOT — nobody touched it");
+        check(prov->shippedNorm(QStringLiteral("m_a"), QStringLiteral("full_swing"),
+                                coh(Sex::Male)) != nullptr
+                  && near(prov->shippedNorm(QStringLiteral("m_a"), QStringLiteral("full_swing"),
+                                            coh(Sex::Male))->mu, 12.0),
+              "…and 'reset to shipped' finds that cohort's shipped row, not the unqualified one");
+
+        // Duplicate detection is on the FULL key.
+        NormPack twoCohorts;
+        Norm men = makeNorm("m_a", "any", 1.0, 1.0);
+        men.cohort = coh(Sex::Male);
+        Norm women = makeNorm("m_a", "any", 2.0, 1.0);
+        women.cohort = coh(Sex::Female);
+        twoCohorts.norms.push_back(men);
+        twoCohorts.norms.push_back(women);
+        twoCohorts.norms.push_back(makeNorm("m_a", "any", 3.0, 1.0));
+        check(!hasCode(validateNormPack(twoCohorts), "duplicateNorm"),
+              "three cohorts at one (measure, context) are three rows, not a duplicate");
+
+        twoCohorts.norms.push_back(women);
+        check(hasCode(validateNormPack(twoCohorts), "duplicateNorm"),
+              "…and two rows on the SAME cohort still collide");
+    }
+
     std::printf("=== norm provider: the SHIPPED norm set ===\n");
     {
         // Reached via PINPOINT_CORE_NORMS / PINPOINT_CORE_CONTEXTS — the Qt resource exists only
@@ -690,6 +1058,26 @@ int main()
         check(prov->contexts().contains(kDefaultContextId()),
               "the shipped tree carries the default context");
         check(prov->norms().readOnly, "the shipped norm set is marked read-only");
+
+        // THE REGRESSION GATE for cohort keying, stated over real content rather than a fixture:
+        // every shipped row is unqualified, so every resolution must answer identically for a golfer
+        // we know everything about and one we know nothing about. If this ever fails, a cohort has
+        // reached shipped content — which is a decision, not an accident, and it should fail here.
+        bool     allSame     = true;
+        bool     allUnqual   = true;
+        for (const Norm &n : prov->norms().norms) {
+            if (!n.cohort.isUnqualified()) { allUnqual = false; continue; }
+            const NormResolution plain = prov->resolve(n.measureId, n.contextId);
+            for (const Cohort &who : { coh(Sex::Female, AgeBand::Adult65Plus),
+                                       coh(Sex::Male, AgeBand::Junior),
+                                       coh(Sex::Male),
+                                       coh(std::nullopt, AgeBand::Adult18_54) }) {
+                const NormResolution seg = prov->resolve(n.measureId, n.contextId, who);
+                if (seg.norm != plain.norm || seg.contextId != plain.contextId) allSame = false;
+            }
+        }
+        check(allUnqual, "every shipped row is unqualified — this stage adds no content");
+        check(allSame, "…so every shipped resolution answers identically for any athlete");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

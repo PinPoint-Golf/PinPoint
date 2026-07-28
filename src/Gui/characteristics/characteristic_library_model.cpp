@@ -923,8 +923,14 @@ QVariantList CharacteristicLibraryModel::causeCoverage() const
 
 namespace {
 
-// A health row. `subject` is either an id or a "measure@context" norm key, and the two halves are
-// split out when it is the latter so the view can act on the row rather than only describe it.
+// A health row. `subject` is either a plain id or a norm key, and the norm key's parts are split out
+// so the view can ACT on the row rather than only describe it.
+//
+// Through splitNormKey(), which is the inverse of the one function that builds the key. This used to
+// split on the first '@' here, against a key two different files spelled two different ways — one
+// with spaces around the '@' and one without — so half the deep-links carried a leading space into
+// the context id and opened nothing. A key that is both rendered and parsed needs one pair of
+// functions, not a producer and a guess.
 QVariantMap healthRow(const ValidationIssue &i)
 {
     QVariantMap r;
@@ -934,14 +940,11 @@ QVariantMap healthRow(const ValidationIssue &i)
     r.insert(QStringLiteral("severity"),
              i.severity == IssueSeverity::Error ? QStringLiteral("error") : QStringLiteral("warning"));
 
-    const int at = i.subject.indexOf(QLatin1Char('@'));
-    if (at > 0) {
-        r.insert(QStringLiteral("measureId"), i.subject.left(at));
-        r.insert(QStringLiteral("contextId"), i.subject.mid(at + 1));
-    } else {
-        r.insert(QStringLiteral("measureId"), QString());
-        r.insert(QStringLiteral("contextId"), QString());
-    }
+    QString measureId;
+    QString contextId;
+    splitNormKey(i.subject, measureId, contextId);
+    r.insert(QStringLiteral("measureId"), measureId);
+    r.insert(QStringLiteral("contextId"), contextId);
     return r;
 }
 

@@ -27,7 +27,8 @@ namespace pinpoint::analysis {
 // ── The shared resolution rule ──────────────────────────────────────────────
 // Non-virtual on the interface, defined once here, so every provider resolves identically.
 
-NormResolution INormProvider::resolve(const QString &measureId, const QString &contextId) const
+NormResolution INormProvider::resolve(const QString &measureId, const QString &contextId,
+                                      const Cohort &athlete) const
 {
     NormResolution out;
     if (measureId.isEmpty())
@@ -45,15 +46,24 @@ NormResolution INormProvider::resolve(const QString &measureId, const QString &c
     if (chain.isEmpty())
         return out;
 
+    // CONTEXT-MAJOR, and the nesting order is the whole rule. The cohort probes run INSIDE the
+    // context walk, so an unqualified driver row beats a senior row at `any` for a driver shot —
+    // stance width is club-mechanical, and if senior-driver matters it gets authored. Inverting the
+    // loops would make every cohort row shadow every club row beneath it.
+    const std::vector<Cohort> probes = cohortProbeOrder(athlete);
+
     for (const QString &ctx : chain) {
-        if (const Norm *n = norms().find(measureId, ctx)) {
+        for (const Cohort &who : probes) {
+            const Norm *n = norms().find(measureId, ctx, who);
+            if (n == nullptr) continue;
+
             out.norm       = n;
             out.contextId  = ctx;
             out.inherited  = (ctx != requested);
-            // Where the row that WON came from, keyed on the context it was actually found at —
-            // not on the one asked for. A driver inheriting a shipped full-swing corridor is not
-            // edited, and a driver inheriting the user's full-swing override is.
-            out.overridden = isOverridden(measureId, ctx);
+            // Where the row that WON came from, keyed on the context AND cohort it was actually
+            // found at — not on the ones asked for. A driver inheriting a shipped full-swing
+            // corridor is not edited, and a driver inheriting the user's full-swing override is.
+            out.overridden = isOverridden(measureId, ctx, who);
             return out;
         }
     }
@@ -65,23 +75,30 @@ QStringList INormProvider::overriddenContextsFor(const QString &measureId) const
     QStringList out;
     if (measureId.isEmpty())
         return out;
+
+    // Cohort-blind on purpose: this answers "which contexts does this measure have rows of its own
+    // at", and a context carrying a male row and a female row is still one entry in an indented
+    // list of contexts. contextsFor() already returns each context once.
+    const QStringList own = norms().contextsFor(measureId);
+
     // Tree order, not pack order — this drives an indented list, and a list that jumps around as
     // rows are added would be unreadable.
     for (const QString &ctx : contexts().inOrder())
-        if (norms().contains(measureId, ctx)) out.append(ctx);
+        if (own.contains(ctx)) out.append(ctx);
     return out;
 }
 
-const Norm *INormProvider::shippedNorm(const QString &measureId, const QString &contextId) const
+const Norm *INormProvider::shippedNorm(const QString &measureId, const QString &contextId,
+                                       const Cohort &cohort) const
 {
     // A leaf provider IS one layer, so it answers for itself: a core leaf carries the shipped row,
     // a user leaf carries nothing shipped at all. Only the merged provider has to look further.
     if (origin() != PackOrigin::Core)
         return nullptr;
-    return norms().find(measureId, contextId);
+    return norms().find(measureId, contextId, cohort);
 }
 
-bool INormProvider::isOverridden(const QString &, const QString &) const
+bool INormProvider::isOverridden(const QString &, const QString &, const Cohort &) const
 {
     // Same reasoning inverted: a leaf's rows all come from its own layer, so a core leaf overrides
     // nothing and a user leaf's rows are, by definition, the user's.

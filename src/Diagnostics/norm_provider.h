@@ -90,7 +90,17 @@ public:
     // is responsible for marking the finding inferred; see the engine's confidence demotion. That
     // fallback is deliberate and narrow: it applies to the SHOT not declaring a context, never to a
     // context the tree does not recognise, which resolves to nothing.
-    NormResolution resolve(const QString &measureId, const QString &contextId) const;
+    //
+    // `athlete` is the cohort of the GOLFER — their sex and the age band their date of birth put
+    // them in on the day of the swing. The walk is CONTEXT-MAJOR: at each node of the context chain
+    // the whole cohort probe order is tried, most specific first, and only when none of them is
+    // present does it move up the tree. See cohortProbeOrder() for the order and why it is fixed.
+    //
+    // Defaults to unqualified, which is the honest answer until the athlete record carries the two
+    // fields — and which yields a single probe, so an athlete we know nothing about resolves exactly
+    // as everyone did before cohorts existed.
+    NormResolution resolve(const QString &measureId, const QString &contextId,
+                           const Cohort &athlete = {}) const;
 
     // Every context beneath (and including) `contextId` where this measure has its OWN row. Drives
     // the "overridden" markers in the norms-by-context list.
@@ -108,14 +118,18 @@ public:
     //   * A user row holding the same numbers as the shipped one is still a user row. Deriving
     //     "edited" from a value comparison would silently un-mark it.
 
-    // The CORE row at this exact (measureId, contextId), ignoring every user layer. Null when core
-    // carries nothing there — which is exactly when a reset means "inherit from the parent" rather
-    // than "go back to what shipped". No tree walk: this is about one key, not about resolution.
-    virtual const Norm *shippedNorm(const QString &measureId, const QString &contextId) const;
+    // The CORE row at this exact (measureId, contextId, cohort), ignoring every user layer. Null
+    // when core carries nothing there — which is exactly when a reset means "inherit from the
+    // parent" rather than "go back to what shipped". No tree walk and no cohort probe: this is about
+    // one key, not about resolution. A user row qualified to one cohort overrides the SHIPPED row
+    // for that cohort, never the unqualified one beside it.
+    virtual const Norm *shippedNorm(const QString &measureId, const QString &contextId,
+                                    const Cohort &cohort = {}) const;
 
     // True when a NON-CORE layer supplies the row at this exact key. False for a leaf core
     // provider, true for a leaf user provider, and tracked per key by the merged provider.
-    virtual bool isOverridden(const QString &measureId, const QString &contextId) const;
+    virtual bool isOverridden(const QString &measureId, const QString &contextId,
+                              const Cohort &cohort = {}) const;
 
     // The layers behind this provider, shipped first. The default reports THIS provider as its own
     // single layer, which is right for every leaf; only the merged provider overrides it.

@@ -53,6 +53,17 @@
 //                          the personal layer through the provider's own override tracking, so the
 //                          39 migrated shipped rows never appear here — unscoped, this check opens
 //                          with 39 items of noise about content that was fine yesterday.
+//   cohortGap              A (measure, context) carrying a sex-only corridor and an age-only one,
+//                          with no corridor for the combination. Age is probed ahead of sex, so a
+//                          golfer who is both resolves the age row and the sex row never applies to
+//                          them — defensible as a default, almost certainly not what was meant.
+//                          Author the combined rows, or drop one axis. A NUDGE: the set still loads
+//                          and still grades.
+//   shadowedCohort         An `adult` corridor at a node where all three of its sub-bands are
+//                          authored. The exact band is always tried first, so the parent can never
+//                          resolve for anyone — a corridor sitting in the pack looking authoritative
+//                          and grading nobody, which is the same mistake as a monitor bound on a
+//                          tail that does not grade.
 //   clubDependentNoContext The metric's own `howToRead` says the number is club-dependent, and every
 //                          norm for it sits at full swing or above. One corridor is grading a driver
 //                          and a wedge against the same band, which the descriptor already says is
