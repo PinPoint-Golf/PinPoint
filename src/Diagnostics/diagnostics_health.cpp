@@ -75,6 +75,15 @@ bool sameOptional(const std::optional<double> &a, const std::optional<double> &b
     return !a.has_value() || sameNumber(*a, *b);
 }
 
+// The measure's shape, or Target when the pack no longer carries it. A norm row can outlive its
+// measure — that is what `unknownNormMeasure` reports — and a health notice must still be able to
+// name the corridor rather than crashing on the way to saying so.
+Shape shapeOf(const CharacteristicPack &pack, const QString &measureId)
+{
+    const Measure *m = pack.measure(measureId);
+    return m ? m->shape : Shape::Target;
+}
+
 // A plausibility pair as a verb phrase — "believes anything", "stops believing above 1.56",
 // "believes between 0.8 and 1.56". Written out rather than rendered as "%1 to %2" because either
 // bound may be absent and a missing one is not a zero: "0 to 1.56" on a row that caps only above
@@ -299,16 +308,18 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
         out.push_back(warn(QStringLiteral("overrideCoreChanged"),
                            normKey(mine.measureId, mine.contextId),
                            corridorMoved
-                               ? QObject::tr("You overrode %1 when the shipped corridor was %2 to "
-                                             "%3. It has since been revised to %4 to %5. Yours is "
-                                             "still what grades — keep it, or take theirs.")
-                                     .arg(mine.measureId)
-                                     .arg(base.mu - base.sigmaLo, 0, 'g', 3)
-                                     .arg(base.mu + base.sigmaHi, 0, 'g', 3)
-                                     // Claims on both sides — this compares two assertions about
-                                     // the population, and the grade policy is not part of either.
-                                     .arg(theirs->claimLo(), 0, 'g', 3)
-                                     .arg(theirs->claimHi(), 0, 'g', 3)
+                               ? QObject::tr("You overrode %1 when the shipped corridor was %2. It "
+                                             "has since been revised to %3. Yours is still what "
+                                             "grades — keep it, or take theirs.")
+                                     .arg(mine.measureId,
+                                          // Claims on both sides — this compares two assertions
+                                          // about the population, and the grade policy is not part
+                                          // of either. Shape-aware, so a floor reads "was at least
+                                          // 1.4" rather than naming an upper bound core never set.
+                                          rangePhrase(base.mu - base.sigmaLo, base.mu + base.sigmaHi,
+                                                      base.mu, shapeOf(pack, mine.measureId)),
+                                          rangePhrase(theirs->claimLo(), theirs->claimHi(),
+                                                      theirs->mu, shapeOf(pack, mine.measureId)))
                                : QObject::tr("The shipped corridor for %1 is unchanged, but what it "
                                              "will BELIEVE is not: it now %2, where it %3 when you "
                                              "overrode it. Yours is still what grades — keep it, "

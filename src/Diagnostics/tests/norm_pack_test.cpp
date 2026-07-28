@@ -183,15 +183,18 @@ int main()
         check(hasCode(validateNormPack(ordered), "monitorOrder"),
               "monitorLo above monitorHi is an error");
 
-        // The subtle one: a monitor band that does not contain its own ideal band means a value
-        // sitting inside its tolerance grades Action. That reads as a detection but is a typo.
+        // monitorExcludesIdeal has MOVED to validateNormsAgainst for the same reason
+        // partialMonitor did, and the reason is worth stating: it was gated on
+        // hasExplicitMonitor(), which without a shape demands BOTH bounds — so on a one-sided row,
+        // where one bound is the whole legal monitor band, the check silently did not run at all.
+        // It refused nothing and checked nothing on exactly the rows shapes introduced.
         NormPack excl;
         Norm     en  = makeNorm("m_a", "full_swing", 0.0, 10.0);
         en.monitorLo = -2.0;
         en.monitorHi = 2.0;
         excl.norms.push_back(en);
-        check(hasCode(validateNormPack(excl), "monitorExcludesIdeal"),
-              "a monitor band inside the ideal band is an error");
+        check(!hasCode(validateNormPack(excl), "monitorExcludesIdeal"),
+              "containment is not decidable without the measure's shape either");
 
         NormPack empty;
         empty.norms.push_back(makeNorm("", "full_swing", 0.0, 1.0));
@@ -344,6 +347,43 @@ int main()
               "half a monitor band on a TARGET is half a rule");
         check(!hasCode(validateNormsAgainst(gradedMonitor, pack, tree), "partialMonitor"),
               "…and the same row on a FLOOR is complete");
+
+        // ── monitorExcludesIdeal, likewise now that the shape is in hand ────
+        //
+        // A monitor band that does not contain its own tolerance means a value sitting inside that
+        // tolerance grades Action: it reads as a detection and is a typo. On a one-sided row the
+        // check exists on ONE side only, and the side it does not exist on must stay silent — that
+        // is the case the standalone validator could not see and therefore never tested at all.
+        NormPack exclTarget;
+        exclTarget.norms.push_back(makeNorm("m_ballPosition", "driver", 12.0, 4.0, "%"));
+        exclTarget.norms[0].monitorLo = 13.0;      // inside mu - sigma (8)
+        exclTarget.norms[0].monitorHi = 30.0;
+        check(hasCode(validateNormsAgainst(exclTarget, pack, tree), "monitorExcludesIdeal"),
+              "a fault edge set inside the tolerance is an error on a target");
+
+        NormPack exclFloor;
+        exclFloor.norms.push_back(makeNorm("m_smash", "driver", 1.48, 0.05, "ratio"));
+        exclFloor.norms[0].monitorLo = 1.46;       // inside mu - sigma (1.43)
+        check(hasCode(validateNormsAgainst(exclFloor, pack, tree), "monitorExcludesIdeal"),
+              "…and on a FLOOR's graded side, which the standalone validator could not reach");
+
+        NormPack okFloor;
+        okFloor.norms.push_back(makeNorm("m_smash", "driver", 1.48, 0.05, "ratio"));
+        okFloor.norms[0].monitorLo = 1.30;         // outside the tolerance, as it should be
+        check(!hasCode(validateNormsAgainst(okFloor, pack, tree), "monitorExcludesIdeal"),
+              "…while a fault edge outside it is fine, so the check has not become noise");
+
+        // The message names the two EDGES, not two bands. "A monitor band of at least 1.46 does
+        // not contain a tolerance of at least 1.48" would read as false on its face.
+        QString exclMsg;
+        for (const ValidationIssue &i : validateNormsAgainst(exclFloor, pack, tree).issues)
+            if (i.code == QLatin1String("monitorExcludesIdeal")) exclMsg = i.message;
+        check(exclMsg.contains(QLatin1String("below 1.46")),
+              "the message names the fault edge and which way it faces");
+        check(exclMsg.contains(QLatin1String("1.43")),
+              "…and the tolerance edge it cuts into");
+        check(!exclMsg.contains(QLatin1String("above")),
+              "…and never names the open tail, which has no fault edge at all");
 
         // ── Plausibility must not cut into the corridor ─────────────────────
         //

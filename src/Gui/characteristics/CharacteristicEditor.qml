@@ -91,15 +91,24 @@ Item {
     // nothing but its own signal — a handler written on a composite type (PpPressable, which
     // declares its own `id: root`) cannot see this file's `root` from inside a delegate, which is
     // how the first version of this control threw ReferenceError the moment it was clicked.
+    //
+    // `available` is false for a tail the MEASURE's shape leaves ungraded. Offered greyed rather
+    // than removed: hiding it would leave one chip where there were two with nothing saying a
+    // choice had existed, and the mistake this prevents — pointing a signal at a tail that can
+    // never fire — is one an author makes precisely because they believe the tail is there. The
+    // REASON goes in a caption beside the chips, never inside one; a greyed box with no
+    // explanation is indistinguishable from a rendering fault.
     component TailChip: Rectangle {
-        property string label:  ""
-        property bool   chosen: false
+        property string label:     ""
+        property bool   chosen:    false
+        property bool   available: true
         signal picked()
 
         implicitWidth:  tcText.implicitWidth + Theme.sp(18)
         implicitHeight: Theme.sp(22)
         radius: height / 2
-        color:  chosen ? Theme.colorAccent : Theme.colorBg
+        color:   chosen ? Theme.colorAccent : Theme.colorBg
+        opacity: available ? 1.0 : 0.4
 
         Text {
             id: tcText
@@ -107,11 +116,12 @@ Item {
             text:           parent.label
             font.family:    Theme.fontBody
             font.pixelSize: Theme.fontSzMicro
+            font.strikeout: !parent.available
             color:          parent.chosen ? Theme.colorBg : Theme.colorText2
         }
         MouseArea {
             anchors.fill: parent
-            enabled:      !parent.chosen
+            enabled:      !parent.chosen && parent.available
             cursorShape:  enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked:    parent.picked()
         }
@@ -383,18 +393,39 @@ Item {
                                     spacing: Theme.sp(6)
 
                                     readonly property var tails:
-                                        root.editor.directionOptions(sigDelegate.modelData.highMeans || "")
+                                        root.editor.directionOptions(
+                                            sigDelegate.modelData.highMeans || "",
+                                            sigDelegate.modelData.measureId || "")
 
                                     TailChip {
-                                        label:  tailRow.tails[0].label
-                                        chosen: sigDelegate.modelData.direction === "high"
+                                        label:     tailRow.tails[0].label
+                                        chosen:    sigDelegate.modelData.direction === "high"
+                                        available: tailRow.tails[0].enabled !== false
                                         onPicked: root._flipTail(sigDelegate.modelData.id, "high")
                                     }
                                     TailChip {
-                                        label:  tailRow.tails[1].label
-                                        chosen: sigDelegate.modelData.direction === "low"
+                                        label:     tailRow.tails[1].label
+                                        chosen:    sigDelegate.modelData.direction === "low"
+                                        available: tailRow.tails[1].enabled !== false
                                         onPicked: root._flipTail(sigDelegate.modelData.id, "low")
                                     }
+                                }
+
+                                // WHY the greyed tail is greyed. Beside the chips rather than
+                                // inside one, per DagView's rule for its own disabled boxes: a
+                                // reason has to fit as a sentence, and a chip is a word.
+                                Text {
+                                    readonly property string _why:
+                                        (tailRow.tails[0].enabled === false ? tailRow.tails[0].reason
+                                       : tailRow.tails[1].enabled === false ? tailRow.tails[1].reason
+                                       : "") || ""
+                                    Layout.fillWidth: true
+                                    visible:        _why.length > 0
+                                    text:           _why
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorText3
+                                    wrapMode:       Text.WordWrap
                                 }
 
                                 // Blast radius, shown BEFORE the edit rather than explained after.

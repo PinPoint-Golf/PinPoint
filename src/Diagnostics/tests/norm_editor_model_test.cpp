@@ -828,6 +828,41 @@ int main(int argc, char **argv)
         check(pe.draft().value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
               "outside the widest preset's edge is accepted");
 
+        // ── An implausible reading is a THIRD answer, and this is its live surface ───────────
+        //
+        // The engine that carries the `implausible` flag is dormant, but this list grades real
+        // swings today, and grade() returns NotMeasured for a reading outside the caps. Rendered
+        // as "Not measured" it would be indistinguishable from a swing the corridor never reached
+        // — a mis-tracked ball wearing the appearance of an absence.
+        //
+        // Worse in the RUNNING COUNT, which is the safety mechanism: NotMeasured falls through the
+        // switch without incrementing anything, so a capped corridor would quietly drop swings out
+        // of "31 Ideal · 8 Watch · 3 Action" with nothing saying so.
+        pe.clearPlausibleLo();
+        pe.setPlausibleHi(1.56);
+        pe.setAspiration(1.48);
+        pe.setTolerance(0.05);
+        const QVariantMap gc = pe.gradeCounts();
+        check(gc.contains(QStringLiteral("implausible")), "the counts carry an implausible tally");
+        check(gc.value(QStringLiteral("total")).toInt()
+                  == gc.value(QStringLiteral("ideal")).toInt() + gc.value(QStringLiteral("good")).toInt()
+                     + gc.value(QStringLiteral("watch")).toInt() + gc.value(QStringLiteral("action")).toInt()
+                     + gc.value(QStringLiteral("implausible")).toInt(),
+              "…and the total accounts for every band including it, so the line cannot silently "
+              "under-report the swings it was given");
+
+        // The sample rows carry the distinction too, so the list beside the plot says which of the
+        // two reasons applies rather than one word for both.
+        for (const char *k : { "implausible", "implausibleNote" }) {
+            bool present = true;
+            const QVariantList rows = pe.samples();
+            for (const QVariant &rv : rows)
+                if (!rv.toMap().contains(QLatin1String(k))) present = false;
+            // With no library there are no rows, which is itself the case that must not crash. The
+            // key contract is asserted over whatever rows exist.
+            check(present, k);
+        }
+
         // ── A bound the editor SHOWS must survive a round trip through it ────
         //
         // Unlike the monitor bounds, which begin() drops on purpose because nothing renders them.

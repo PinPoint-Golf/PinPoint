@@ -15,6 +15,7 @@
 #include "../norm.h"
 
 #include <cstdio>
+#include <limits>
 
 using namespace pinpoint::analysis;
 
@@ -401,6 +402,66 @@ int main()
               gradeLabel(Grade::Action) == QLatin1String("Action") &&
               gradeLabel(Grade::NotMeasured) == QLatin1String("Not measured"),
               "the user-facing labels are the agreed words");
+    }
+
+    // ── Saying what a corridor is, in words ─────────────────────────────────
+    //
+    // Six surfaces render a corridor as a sentence. The rule lives here so they cannot drift, and
+    // is gated here because a phrase built inside a QML binding is a phrase nothing can test.
+    std::printf("\nphrasing\n");
+    {
+        // FAITHFUL numbers. The pack is mostly authored at one decimal, which is why every surface
+        // was fixed there; the ratios are not, and at one decimal smash factor's Ideal and Good
+        // edges (1.43, 1.38) render as the same "1.4".
+        check(normNumber(1.5)  == QLatin1String("1.5"),  "a one-decimal figure stays one decimal");
+        check(normNumber(20.0) == QLatin1String("20.0"), "…and a whole number keeps its decimal");
+        check(normNumber(1.48) == QLatin1String("1.48"), "a two-decimal figure is not rounded away");
+        check(normNumber(0.05) == QLatin1String("0.05"), "…nor a small tolerance, where it doubles it");
+        check(normNumber(1.48 - 0.05) == QLatin1String("1.43"),
+              "…and float noise off a subtraction does not force a fourth decimal");
+        // QStringLiteral, not QLatin1String: the dash is U+2014 and QLatin1String would compare its
+        // three UTF-8 bytes as three Latin-1 characters.
+        check(normNumber(std::numeric_limits<double>::quiet_NaN()) == QStringLiteral("—"),
+              "a non-finite number is a dash, never a rendered NaN");
+        check(normNumber(std::numeric_limits<double>::infinity()) == QStringLiteral("—"),
+              "…infinity too, which is what an unguarded open edge used to produce");
+
+        // A one-sided corridor has NO second bound, so naming one states a limit on the very side
+        // the norm refuses to grade.
+        check(rangePhrase(1.43, 1.53, 1.48, Shape::Target) == QLatin1String("1.43 to 1.53"),
+              "a target corridor names both bounds");
+        check(rangePhrase(1.43, 1.53, 1.48, Shape::Floor) == QLatin1String("at least 1.48"),
+              "a floor names the aspiration and nothing above it");
+        check(rangePhrase(1.43, 1.53, 1.48, Shape::Ceiling) == QLatin1String("no more than 1.48"),
+              "a ceiling mirrors it");
+
+        // mu, not the pair, on a one-sided norm — which is the whole reason mu is a parameter.
+        // A CLAIM's high edge on a floor is mu + a tolerance nothing grades; a BAND's is already
+        // collapsed onto mu. Both callers are correct without either knowing which it holds.
+        check(rangePhrase(1.43, 1.48, 1.48, Shape::Floor)
+                  == rangePhrase(1.43, 1.53, 1.48, Shape::Floor),
+              "a collapsed band and an uncollapsed claim phrase identically on a floor");
+
+        check(actionPhrase(1.33, 1.63, Shape::Target) == QLatin1String("action beyond 1.33 to 1.63"),
+              "a target norm faults on both tails");
+        check(actionPhrase(1.33, 1.48, Shape::Floor) == QLatin1String("action below 1.33"),
+              "a floor faults below and never 'beyond' — the open tail has no edge to be beyond");
+        check(actionPhrase(1.48, 1.63, Shape::Ceiling) == QLatin1String("action above 1.63"),
+              "…and a ceiling above");
+
+        // An implausible reading is a THIRD statement, not a grade and not an absence. The reading
+        // is shown, because hiding it is what makes a mis-tracked ball look like a capture gap.
+        check(implausibleLabel() != gradeLabel(Grade::NotMeasured),
+              "'not believed' is not the same word as 'not measured'");
+        check(implausibleLabel() != gradeLabel(Grade::Action),
+              "…nor the same word as a swing fault");
+        const QString note = implausibleNote(1.62, QStringLiteral("ratio"));
+        check(note.contains(QLatin1String("1.62")), "the note SHOWS the reading");
+        check(note.contains(QLatin1String("ratio")), "…in its unit");
+        check(note.contains(QLatin1String("Check the capture")),
+              "…and points at the capture rather than the swing");
+        check(!implausibleNote(1.62, QString()).contains(QLatin1String("  ")),
+              "a measure with no unit leaves no double space behind it");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

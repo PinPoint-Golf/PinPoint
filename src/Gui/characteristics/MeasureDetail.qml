@@ -304,10 +304,12 @@ Item {
                                 // it is what the two editor handles will bind to. The unit trails
                                 // quieter so the figures stay scannable down the column — with a
                                 // unit like "% stance width" it would otherwise dominate the row.
+                                // Composed in C++ (normAt.bandPhrase): a one-sided corridor reads
+                                // "at least 1.48", never "1.48 to 1.53" — the second number there
+                                // is mu plus a tolerance nothing grades, so naming it states a
+                                // bound on the side the norm explicitly refuses to grade.
                                 Text {
-                                    text: qsTr("%1 to %2")
-                                            .arg(root._num(modelData.idealLo))
-                                            .arg(root._num(modelData.idealHi))
+                                    text:               modelData.bandPhrase || ""
                                     font.family:        Theme.fontData
                                     font.pixelSize:     Theme.fontSzDataSm
                                     font.weight:        Font.Light
@@ -342,9 +344,8 @@ Item {
                                 Text {
                                     visible: modelData.overridden === true
                                     text: modelData.hasShipped
-                                            ? qsTr("· edited, ships %1 to %2")
-                                                .arg(root._num(modelData.shippedClaimLo))
-                                                .arg(root._num(modelData.shippedClaimHi))
+                                            ? qsTr("· edited, ships %1")
+                                                .arg(modelData.shippedPhrase || "")
                                             : qsTr("· added by you")
                                     font.family:    Theme.fontBody
                                     font.pixelSize: Theme.fontSzMicro
@@ -363,14 +364,15 @@ Item {
                                     color:          Theme.colorAccent
                                 }
 
+                                // "action below 1.33" on a floor, never "beyond 1.33 to 1.48":
+                                // the open tail has no fault edge to be beyond. The parenthetical
+                                // stays here because it is about WHERE the edge came from, which
+                                // is a fact about this row and not about the measure.
                                 Text {
                                     text: modelData.explicitMonitor
-                                            ? qsTr("· action beyond %1 to %2")
-                                                .arg(root._num(modelData.watchLo))
-                                                .arg(root._num(modelData.watchHi))
-                                            : qsTr("· action beyond %1 to %2 (from the grade policy)")
-                                                .arg(root._num(modelData.watchLo))
-                                                .arg(root._num(modelData.watchHi))
+                                            ? qsTr("· %1").arg(modelData.actionPhrase || "")
+                                            : qsTr("· %1 (from the grade policy)")
+                                                .arg(modelData.actionPhrase || "")
                                     font.family:    Theme.fontBody
                                     font.pixelSize: Theme.fontSzMicro
                                     color:          Theme.colorText3

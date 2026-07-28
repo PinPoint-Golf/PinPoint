@@ -667,10 +667,12 @@ Item {
                                     visible: modelData.hasNorm
                                     spacing: Theme.sp(4)
 
+                                    // Composed in C++ (NormModel.bandPhrase): a one-sided measure
+                                    // reads "at least 1.48" rather than naming a second bound it
+                                    // does not have. Also faithfully formatted — at one decimal a
+                                    // ratio measure's edges collapse onto each other.
                                     Text {
-                                        text: qsTr("%1 – %2")
-                                                .arg(Number(modelData.idealLo).toFixed(1))
-                                                .arg(Number(modelData.idealHi).toFixed(1))
+                                        text:               modelData.bandPhrase || ""
                                         font.family:        Theme.fontData
                                         font.pixelSize:     Theme.fontSzMicro
                                         font.letterSpacing: Theme.trackingData

@@ -47,24 +47,11 @@ GradePolicy policyFor(const QString &name)
 // strings — the measures view and the metric detail page render them too.
 QString sourceLabel(NormSource s) { return normSourceLabel(s); }
 
-// Enough decimals to be FAITHFUL — one to four, and never more than the number needs.
-//
-// Every readout on this screen was fixed at one decimal, on the reasoning that one decimal is the
-// resolution the pack is authored at. That is true of the degree measures and false of the ratios.
-// Smash factor is authored mu 1.48 with a tolerance of 0.05, and at one decimal its policy line
-// read "Ideal from 1.4 · good from 1.4" — two different edges rendering as one number — while the
-// tolerance drew as 0.1, twice its real width. Found while building the one-sided fields, which is
-// where it stops being cosmetic: a tolerance is a small number by nature, so rounding it to a
-// tenth is the difference between a corridor and double a corridor.
-QString fmtNum(double v)
-{
-    if (!std::isfinite(v)) return QStringLiteral("—");
-    for (int dp = 1; dp <= 4; ++dp) {
-        const QString s = QString::number(v, 'f', dp);
-        if (std::fabs(s.toDouble() - v) < 1e-9) return s;
-    }
-    return QString::number(v, 'f', 4);
-}
+// Enough decimals to be FAITHFUL, and now a forward to the one in norm.h rather than a second
+// copy of it. It arrived here in A4c because this screen was where the rounding did damage; six
+// surfaces render a corridor as a sentence and every one of them needs the same rule, so it moved
+// to sit with the vocabulary it formats.
+QString fmtNum(double v) { return normNumber(v); }
 
 // How many swings one scan will look at. A cap, not a sample size — and it is REPORTED when it
 // bites (sampleSummary.truncated), because a silent cap reads as "that is the whole library".
@@ -180,13 +167,7 @@ Shape NormEditorModel::shape() const
 // floor is mu + a tolerance nothing grades, which is a number that should never reach a reader.
 QString NormEditorModel::claimPhrase(const Norm &n) const
 {
-    const auto &f = fmtNum;
-    switch (shape()) {
-    case Shape::Floor:   return tr("at least %1").arg(f(n.mu));
-    case Shape::Ceiling: return tr("no more than %1").arg(f(n.mu));
-    case Shape::Target:  break;
-    }
-    return tr("%1 to %2").arg(f(n.claimLo()), f(n.claimHi()));
+    return rangePhrase(n.claimLo(), n.claimHi(), n.mu, shape());
 }
 
 const Measure *NormEditorModel::measure() const
@@ -1207,6 +1188,12 @@ QVariantList NormEditorModel::samples() const
     QVariantList out;
     for (const Sample *s : visible()) {
         const Grade g = grade(s->value, m_draft, p, sh);
+        // NotMeasured has TWO causes here and they are not the same answer. A swing the corridor
+        // simply did not reach is one thing; a reading the norm does not believe is another, and
+        // rendering both as "Not measured" makes a mis-tracked ball look like an absence. This is
+        // the first LIVE surface for the distinction — the engine that carries the flag is still
+        // dormant, but this list grades real swings today.
+        const bool implausible = m_draft.isImplausible(s->value);
 
         QVariantMap r;
         r.insert(QStringLiteral("swingDir"),   s->swingDir);
@@ -1217,7 +1204,10 @@ QVariantList NormEditorModel::samples() const
         r.insert(QStringLiteral("value"),      s->value);
         r.insert(QStringLiteral("included"),   s->included);
         r.insert(QStringLiteral("grade"),      gradeName(g));
-        r.insert(QStringLiteral("gradeLabel"), gradeLabel(g));
+        r.insert(QStringLiteral("gradeLabel"), implausible ? implausibleLabel() : gradeLabel(g));
+        r.insert(QStringLiteral("implausible"), implausible);
+        r.insert(QStringLiteral("implausibleNote"),
+                 implausible ? implausibleNote(s->value, unitOf()) : QString());
         out.append(r);
     }
     return out;
@@ -1319,10 +1309,17 @@ QVariantMap NormEditorModel::gradeCounts() const
 {
     const GradePolicy p = policy();
     const Shape       sh = shape();
-    int ideal = 0, good = 0, watch = 0, action = 0;
+    int ideal = 0, good = 0, watch = 0, action = 0, implausible = 0;
 
     for (const Sample *s : visible()) {
         if (!s->included) continue;
+        // Counted SEPARATELY, and this is the reason the count exists at all: an implausible
+        // reading grades NotMeasured, and NotMeasured falls through the switch below without
+        // incrementing anything. A capped corridor would therefore quietly drop swings out of the
+        // running line — "31 Ideal · 8 Watch · 3 Action" over 45 marked swings, with three
+        // unaccounted for and nothing saying so. The line is the safety mechanism; a safety
+        // mechanism that silently under-reports is worse than none.
+        if (m_draft.isImplausible(s->value)) { ++implausible; continue; }
         switch (grade(s->value, m_draft, p, sh)) {
         case Grade::Ideal:  ++ideal;  break;
         case Grade::Good:   ++good;   break;
@@ -1336,7 +1333,11 @@ QVariantMap NormEditorModel::gradeCounts() const
     out.insert(QStringLiteral("ideal"),  ideal);
     out.insert(QStringLiteral("good"),   good);
     out.insert(QStringLiteral("watch"),  watch);
-    out.insert(QStringLiteral("action"), action);
-    out.insert(QStringLiteral("total"),  ideal + good + watch + action);
+    out.insert(QStringLiteral("action"),      action);
+    out.insert(QStringLiteral("implausible"), implausible);
+    // `total` is every marked swing the line accounts for, implausible ones included — it is what
+    // "45 swings drawn" has to add up to, and leaving them out is exactly the silent shortfall
+    // this count was added to prevent.
+    out.insert(QStringLiteral("total"),  ideal + good + watch + action + implausible);
     return out;
 }

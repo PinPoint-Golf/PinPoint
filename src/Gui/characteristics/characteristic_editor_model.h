@@ -145,7 +145,14 @@ public:
     // fix is that the control says "further back, toward the trail foot" where it used to say
     // "Too much". With no `highMeans` to work from it falls back to Too much / Too little and the
     // caller is expected to ask for the missing sentence — see setMeasureHighMeans().
-    Q_INVOKABLE QVariantList directionOptions(const QString &highMeans) const;
+    // Rows are { name, label, means, sentence, enabled, reason }. `enabled` is false for a tail the
+    // measure's SHAPE leaves ungraded — a signal there can never fire, whatever the swing does —
+    // and `reason` says which, because a greyed option with no explanation is indistinguishable
+    // from a rendering fault (the doctrine DagView states for its own disabled boxes). Pass
+    // `measureId` where one exists; without it every tail is offered, which is right for a measure
+    // that does not exist yet and is what this returned before shapes.
+    Q_INVOKABLE QVariantList directionOptions(const QString &highMeans,
+                                              const QString &measureId = QString()) const;
 
     // Change which tail fires, after the fact. Attaching a measure was the only way to set this
     // until 2026-07-26, which meant correcting an inverted signal required deleting it and adding

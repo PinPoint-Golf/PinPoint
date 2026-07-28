@@ -675,18 +675,49 @@ bool CharacteristicEditorModel::undoBindingChange()
 
 // ── Signals ─────────────────────────────────────────────────────────────────
 
-QVariantList CharacteristicEditorModel::directionOptions(const QString &highMeans) const
+QVariantList CharacteristicEditorModel::directionOptions(const QString &highMeans,
+                                                         const QString &measureId) const
 {
     // The phrasing rule lives in the pack layer (directionPhrase, characteristic.h) because the
     // read-only detail page has to say exactly the same words as the control that sets it.
+    //
+    // A tail the measure's shape leaves UNGRADED is offered disabled rather than hidden. Hiding it
+    // would leave one chip where there had been two, with nothing saying a choice had ever
+    // existed; and the mistake this prevents — pointing a signal at a tail that can never fire —
+    // is one an author makes precisely because they think the tail is there. Refuse at the moment
+    // of the mistake, the same way the facet picker refuses an impossible combination, rather than
+    // letting them build it and reporting `signalOnOpenTail` in the health list afterwards.
+    // The DRAFT measure wins where there is one, exactly as measureHighMeans resolves: an author
+    // editing a measure in this session must see the tails its shape implies now, not the ones the
+    // saved pack still says.
+    Shape shape = Shape::Target;
+    if (!measureId.isEmpty()) {
+        bool found = false;
+        for (const Measure &m : m_draftMeasures)
+            if (m.id == measureId) { shape = m.shape; found = true; break; }
+        if (!found)
+            if (const Measure *m = m_provider->pack().measure(measureId))
+                shape = m->shape;
+    }
+
     QVariantList out;
     for (Direction d : { Direction::High, Direction::Low }) {
         const DirectionPhrase p = directionPhrase(d, highMeans);
-        QVariantMap           m;
+        // Floor: the HIGH tail is open — everything above the aspiration grades Ideal.
+        // Ceiling mirrors. A target grades both, so both stay live.
+        const bool open = (shape == Shape::Floor    && d == Direction::High)
+                          || (shape == Shape::Ceiling && d == Direction::Low);
+
+        QVariantMap m;
         m.insert(QStringLiteral("name"), directionName(d));
         m.insert(QStringLiteral("label"), p.label);
         m.insert(QStringLiteral("means"), p.means);
         m.insert(QStringLiteral("sentence"), p.sentence);
+        m.insert(QStringLiteral("enabled"), !open);
+        m.insert(QStringLiteral("reason"),
+                 open ? tr("%1, so there is no fault on this side and a signal here could never "
+                           "fire.").arg(shapeLabel(shape))
+                      : QString());
         out.append(m);
     }
     return out;
@@ -1626,7 +1657,7 @@ QVariantMap CharacteristicEditorModel::draft() const
         // sentence belongs to which tail is a statement about sign conventions, and a statement
         // about correctness written in QML is a statement nothing can test.
         const QString      hm   = m ? m->highMeans : QString();
-        const QVariantList opts = directionOptions(hm);
+        const QVariantList opts = directionOptions(hm, mid);
         const bool         isHigh =
             !s.direction.has_value() || *s.direction == Direction::High;
         const QVariantMap chosen = opts.value(isHigh ? 0 : 1).toMap();

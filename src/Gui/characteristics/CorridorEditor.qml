@@ -631,6 +631,12 @@ Item {
                             if (g.good)   bits.push(qsTr("%1 Good").arg(g.good))
                             if (g.watch)  bits.push(qsTr("%1 Watch").arg(g.watch))
                             if (g.action) bits.push(qsTr("%1 Action").arg(g.action))
+                            // Not a fifth grade — a count of swings that were not graded at all,
+                            // and it is here so the line still adds up to what was marked. Without
+                            // it a capped corridor drops swings out of the running total in
+                            // silence, which is the one thing the safety line must never do.
+                            if (g.implausible)
+                                bits.push(qsTr("%1 not believed").arg(g.implausible))
                             return bits.join("  ·  ")
                         }
                         font.family:    Theme.fontBody

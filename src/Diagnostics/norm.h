@@ -459,4 +459,44 @@ bool       gradeFromName(const QString &s, Grade &out);
 // monotone ramp where the top band says what to do rather than describing a boundary.
 QString    gradeLabel(Grade g);
 
+// ── Saying what a corridor is, in words ─────────────────────────────────────
+//
+// WITH the vocabulary and not in any one façade, for the reason normSourceLabel is: six surfaces
+// render a corridor as a sentence — the measures list, the measure detail rows, the catalogue, the
+// corridor editor, its import list, the health notices — and six copies of "%1 to %2" is how a
+// floor ends up reading "1.48 to 1.53" on five of them.
+//
+// A one-sided corridor has no second bound to name. Saying one anyway is not a cosmetic slip: it
+// states a limit the norm does not have, on the side it explicitly refuses to grade.
+
+// Enough decimals to be FAITHFUL — one to four, never more than the number needs.
+//
+// The pack is MOSTLY authored at one decimal, which is why every surface was fixed there. The
+// ratios are not: smash factor is mu 1.48 with a tolerance of 0.05, and at one decimal its Ideal
+// and Good edges (1.43, 1.38) render as the same "1.4".
+QString    normNumber(double v);
+
+// A corridor as a fragment: "1.4 to 1.5" · "at least 1.48" · "no more than 12".
+//
+// Takes `mu` as well as the pair, and uses ONLY mu on a one-sided norm. That is not an economy —
+// it is the difference between the two things a caller might be holding. On a floor, a BAND's high
+// edge is already collapsed onto mu by bandEdgesOf, but a CLAIM's is mu + a tolerance nothing
+// grades. Passing mu explicitly makes both callers correct without either having to know which it
+// is holding.
+QString    rangePhrase(double lo, double hi, double mu, Shape shape);
+
+// Where Action begins: "action beyond 1.3 to 1.6" · "action below 1.33" · "action above 12.5".
+// Never "beyond" on a one-sided norm — the open tail has no fault edge to be beyond.
+QString    actionPhrase(double watchLo, double watchHi, Shape shape);
+
+// A reading the norm does not believe, in its own register — NOT a grade and NOT "not measured".
+//
+// The three are different statements and the difference is the point (norm.h's opening argument,
+// one level further out). "Not measured" is a capture GAP: nothing arrived. Action is a swing
+// FINDING: something arrived and it was poor. This is a capture FAULT: something arrived, and it
+// is not a number this instrument can produce. The reading is SHOWN rather than hidden, because
+// hiding it is what makes a mis-tracked ball look like an absence.
+QString    implausibleLabel();
+QString    implausibleNote(double value, const QString &unit);
+
 } // namespace pinpoint::analysis

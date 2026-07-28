@@ -16,6 +16,9 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStandardPaths>
 
 #include <cstdio>
@@ -27,6 +30,41 @@ static void check(bool c, const char *label)
 {
     std::printf("  [%s] %s\n", c ? "PASS" : "FAIL", label);
     if (!c) ++g_fail;
+}
+
+// A copy of the shipped pack with ONE measure given a shape, handed to the next model through the
+// PINPOINT_CORE_PACK seam that already exists for tooling (resource_pack_provider reads it per
+// construction). Patching the real pack rather than hand-writing a fixture, so the assertions run
+// against the measure the seed conversion will really change — the same approach
+// norm_editor_model_test takes, and for the same reason.
+static QString packWithShape(const char *shape)
+{
+    QFile in(QString::fromLocal8Bit(qgetenv("PINPOINT_CORE_PACK")));
+    if (!in.open(QIODevice::ReadOnly))
+        return QString();
+
+    QJsonObject doc = QJsonDocument::fromJson(in.readAll()).object();
+    QJsonArray  ms  = doc.value(QStringLiteral("measures")).toArray();
+    bool        hit = false;
+    for (int i = 0; i < ms.size(); ++i) {
+        QJsonObject m = ms.at(i).toObject();
+        if (m.value(QStringLiteral("id")).toString() != QLatin1String("m_smashFactor"))
+            continue;
+        m.insert(QStringLiteral("shape"), QLatin1String(shape));
+        ms.replace(i, m);
+        hit = true;
+    }
+    if (!hit)
+        return QString();                 // the measure was renamed: fail loudly, not quietly
+    doc.insert(QStringLiteral("measures"), ms);
+
+    const QString path =
+        QDir::temp().filePath(QStringLiteral("pp_chareditor_%1_pack.json").arg(QLatin1String(shape)));
+    QFile out(path);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return QString();
+    out.write(QJsonDocument(doc).toJson());
+    return path;
 }
 
 static QVariantMap facets(const char *what, const char *quantity, const char *reference,
@@ -486,6 +524,63 @@ int main(int argc, char **argv)
               "the high sentence carries the measure's own words");
         check(opts.last().toMap().value(QStringLiteral("sentence")).toString().contains(hm),
               "so does the low one — the SAME words, stated as the other end, never an invented opposite");
+
+        // ── A tail the measure's SHAPE never grades ─────────────────────────
+        //
+        // Offered DISABLED, not hidden. Hiding it would leave one chip where there were two with
+        // nothing saying a choice had existed, and the mistake this prevents — pointing a signal
+        // at a tail that can never fire — is one an author makes precisely because they believe
+        // the tail is there. It is the same rejection the facet picker makes at the moment of the
+        // mistake, rather than letting them build it and reporting signalOnOpenTail afterwards.
+        check(bare.first().toMap().value(QStringLiteral("enabled")).toBool()
+                  && bare.last().toMap().value(QStringLiteral("enabled")).toBool(),
+              "with no measure named, both tails are live — which is right for one not minted yet");
+        check(bare.first().toMap().value(QStringLiteral("reason")).toString().isEmpty(),
+              "…and an available tail carries no reason to explain");
+
+        // A real shipped measure, still a target: nothing changes for the 105 that are.
+        const QVariantList tgt = ed.directionOptions(hm, QStringLiteral("m_smashFactor"));
+        check(tgt.first().toMap().value(QStringLiteral("enabled")).toBool()
+                  && tgt.last().toMap().value(QStringLiteral("enabled")).toBool(),
+              "a TARGET measure grades both tails, so both stay live");
+
+        // …and one that is not. The shape is injected through the same PINPOINT_CORE_PACK seam the
+        // norm editor test uses, so this runs against the real measure the seed conversion changes.
+        {
+            const QString fp = packWithShape("floor");
+            check(!fp.isEmpty(), "built a scratch pack carrying a floor measure");
+            const QByteArray realPack = qgetenv("PINPOINT_CORE_PACK");
+            qputenv("PINPOINT_CORE_PACK", fp.toLocal8Bit());
+
+            CharacteristicEditorModel fe;
+            fe.beginNew();
+            const QVariantList fo = fe.directionOptions(hm, QStringLiteral("m_smashFactor"));
+            check(!fo.first().toMap().value(QStringLiteral("enabled")).toBool(),
+                  "on a FLOOR the high tail is open, so it cannot be chosen");
+            check(fo.last().toMap().value(QStringLiteral("enabled")).toBool(),
+                  "…while the graded low tail stays live");
+            const QString why = fo.first().toMap().value(QStringLiteral("reason")).toString();
+            check(!why.isEmpty(),
+                  "a greyed option carries its reason — one without is indistinguishable from a "
+                  "rendering fault");
+            check(why.contains(QLatin1String("Higher is better")),
+                  "…which names the shape in words rather than the enum token");
+            check(why.contains(QLatin1String("never fire")),
+                  "…and says what would actually happen");
+            check(fo.last().toMap().value(QStringLiteral("reason")).toString().isEmpty(),
+                  "…and the live tail explains nothing, so the caption has one thing to say");
+
+            const QString cp = packWithShape("ceiling");
+            qputenv("PINPOINT_CORE_PACK", cp.toLocal8Bit());
+            CharacteristicEditorModel ce;
+            ce.beginNew();
+            const QVariantList co = ce.directionOptions(hm, QStringLiteral("m_smashFactor"));
+            check(co.first().toMap().value(QStringLiteral("enabled")).toBool()
+                      && !co.last().toMap().value(QStringLiteral("enabled")).toBool(),
+                  "a CEILING mirrors it — the low tail is the open one");
+
+            qputenv("PINPOINT_CORE_PACK", realPack);
+        }
 
         // A minted measure carries the convention it was authored with, and the signal row then
         // renders it instead of "too much".

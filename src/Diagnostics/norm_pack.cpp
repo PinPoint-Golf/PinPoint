@@ -93,6 +93,51 @@ QString gradeName(Grade g) { return nameOf(kGrades, g); }
 bool    gradeFromName(const QString &s, Grade &out) { return fromName(kGrades, s, out); }
 QString gradeLabel(Grade g) { return labelOf(kGrades, g); }
 
+// ── Saying what a corridor is, in words ─────────────────────────────────────
+
+QString normNumber(double v)
+{
+    if (!std::isfinite(v)) return QStringLiteral("—");
+    for (int dp = 1; dp <= 4; ++dp) {
+        const QString s = QString::number(v, 'f', dp);
+        if (std::fabs(s.toDouble() - v) < 1e-9) return s;
+    }
+    return QString::number(v, 'f', 4);
+}
+
+QString rangePhrase(double lo, double hi, double mu, Shape shape)
+{
+    switch (shape) {
+    case Shape::Floor:   return QObject::tr("at least %1").arg(normNumber(mu));
+    case Shape::Ceiling: return QObject::tr("no more than %1").arg(normNumber(mu));
+    case Shape::Target:  break;
+    }
+    return QObject::tr("%1 to %2").arg(normNumber(lo), normNumber(hi));
+}
+
+QString actionPhrase(double watchLo, double watchHi, Shape shape)
+{
+    switch (shape) {
+    case Shape::Floor:   return QObject::tr("action below %1").arg(normNumber(watchLo));
+    case Shape::Ceiling: return QObject::tr("action above %1").arg(normNumber(watchHi));
+    case Shape::Target:  break;
+    }
+    return QObject::tr("action beyond %1 to %2").arg(normNumber(watchLo), normNumber(watchHi));
+}
+
+QString implausibleLabel() { return QObject::tr("Not believed"); }
+
+QString implausibleNote(double value, const QString &unit)
+{
+    // The reading is the first thing in the sentence. A capture fault is diagnosed by LOOKING at
+    // the number — 1.62 says "mis-tracked ball" to anyone who knows the measure — so a message
+    // that withholds it leaves the reader with nothing to act on.
+    const QString shown = unit.isEmpty() ? normNumber(value)
+                                         : QObject::tr("%1 %2").arg(normNumber(value), unit);
+    return QObject::tr("%1 is outside the plausible range for this measure, so it was not graded. "
+                       "Check the capture rather than the swing.").arg(shown);
+}
+
 // ── Grade-policy presets ────────────────────────────────────────────────────
 //
 // The label and hint are marked for translation in the "NormModel" context because that panel is
@@ -248,29 +293,26 @@ ValidationReport validateNormPack(const NormPack &pack)
             err(QStringLiteral("plausibleOrder"), key,
                 QStringLiteral("Norm '%1' has plausibleLo above plausibleHi.").arg(key));
 
-        if (n.hasExplicitMonitor()) {
-            if (*n.monitorLo > *n.monitorHi)
-                err(QStringLiteral("monitorOrder"), key,
-                    QStringLiteral("Norm '%1' has monitorLo above monitorHi.").arg(key));
-            // The explicit band bounds the Watch/Action edge, so it MUST contain the Ideal band.
-            // If it does not, a value sitting inside its own tolerance grades Action — which reads
-            // as a detection but is a data-entry error.
-            // Against the norm's own CLAIM, never the policy's Ideal band: validation runs at load
-            // with no policy in hand, and a row that failed to load under `strict` but passed under
-            // `lenient` would make a shared pack's validity depend on the reader's settings.
-            else if (*n.monitorLo > n.claimLo() || *n.monitorHi < n.claimHi())
-                err(QStringLiteral("monitorExcludesIdeal"), key,
-                    QStringLiteral("Norm '%1' has a monitor band (%2..%3) that does not contain its "
-                                   "own tolerance (%4..%5).")
-                        .arg(key)
-                        .arg(*n.monitorLo).arg(*n.monitorHi)
-                        .arg(n.claimLo()).arg(n.claimHi()));
-        }
+        // Order needs BOTH bounds to mean anything, so this is the one monitor rule that can stay
+        // here: a one-sided row may legally carry only one, and one bound cannot be out of order
+        // with itself. `monitorExcludesIdeal` MOVED to validateNormsAgainst — it has to know which
+        // tails grade, and deciding it here refused nothing and checked nothing on a one-sided row.
+        if (n.monitorLo.has_value() && n.monitorHi.has_value() && *n.monitorLo > *n.monitorHi)
+            err(QStringLiteral("monitorOrder"), key,
+                QStringLiteral("Norm '%1' has monitorLo above monitorHi.").arg(key));
 
-        if (!(n.sigmaLo > 0.0) || !(n.sigmaHi > 0.0))
+        if (!(n.sigmaLo > 0.0) || !(n.sigmaHi > 0.0)) {
+            // Which case it is, because they are different mistakes. Both zero is a row that
+            // grades everything but its exact centre as a fault; one zero is an asymmetry that may
+            // well be deliberate on a target norm and is impossible on a one-sided one, where the
+            // two are held equal.
+            const bool both = !(n.sigmaLo > 0.0) && !(n.sigmaHi > 0.0);
             warn(QStringLiteral("zeroSigma"), key,
-                 QStringLiteral("Norm '%1' has no tolerance on one side, so only its exact centre "
-                                "grades Ideal.").arg(key));
+                 both ? QStringLiteral("Norm '%1' has no tolerance at all, so only its exact centre "
+                                       "grades Ideal.").arg(key)
+                      : QStringLiteral("Norm '%1' has no tolerance on one side, so on that side "
+                                       "only its exact centre grades Ideal.").arg(key));
+        }
 
         if (n.source == NormSource::Literature && n.citation.isEmpty())
             warn(QStringLiteral("noProvenance"), key,
@@ -355,6 +397,48 @@ ValidationReport validateNormsAgainst(const NormPack           &norms,
             err(QStringLiteral("partialMonitor"), key,
                 QStringLiteral("Norm '%1' sets only one side of its monitor band, and measure '%2' "
                                "grades both tails; set both or neither.").arg(key, m->id));
+        }
+
+        // ── The monitor band must contain the norm's own tolerance ──────────
+        //
+        // MOVED here from validateNormPack, for the reason partialMonitor was: the standalone
+        // validator cannot see the measure, so `hasExplicitMonitor()` there answers for a Target
+        // and a legal one-sided monitor — one bound, on the graded tail — reads as no monitor at
+        // all. The check then silently did not run on exactly the rows shapes introduced.
+        //
+        // The band bounds the Watch/Action edge, so it MUST contain the tolerance. If it does not,
+        // a value sitting inside its own tolerance grades Action, which reads as a detection and
+        // is a data-entry error. Against the norm's own CLAIM and never a policy's Ideal band:
+        // validation has no policy in hand, and a row that failed under `strict` but passed under
+        // `lenient` would make a shared pack's validity depend on the reader's settings.
+        // Naming the two EDGES rather than the two bands, because a band phrased one-sided cannot
+        // express the comparison: "a monitor band of at least 1.5 does not contain a tolerance of
+        // at least 1.48" reads as false on its face, when what is wrong is that the fault edge
+        // (1.5) has been set inside the tolerance (down to 1.43).
+        if (n.hasExplicitMonitor(m->shape)) {
+            const bool loBad = m->shape != Shape::Ceiling && n.monitorLo.has_value()
+                               && *n.monitorLo > n.claimLo();
+            const bool hiBad = m->shape != Shape::Floor && n.monitorHi.has_value()
+                               && *n.monitorHi < n.claimHi();
+            if (loBad && hiBad)
+                err(QStringLiteral("monitorExcludesIdeal"), key,
+                    QStringLiteral("Norm '%1' calls readings a fault outside %2..%3, but its own "
+                                   "tolerance runs %4..%5 — a value inside its own tolerance would "
+                                   "grade Action.")
+                        .arg(key).arg(*n.monitorLo).arg(*n.monitorHi)
+                        .arg(n.claimLo()).arg(n.claimHi()));
+            else if (loBad)
+                err(QStringLiteral("monitorExcludesIdeal"), key,
+                    QStringLiteral("Norm '%1' calls readings a fault below %2, but its own "
+                                   "tolerance reaches down to %3 — a value inside its own "
+                                   "tolerance would grade Action.")
+                        .arg(key, normNumber(*n.monitorLo), normNumber(n.claimLo())));
+            else if (hiBad)
+                err(QStringLiteral("monitorExcludesIdeal"), key,
+                    QStringLiteral("Norm '%1' calls readings a fault above %2, but its own "
+                                   "tolerance reaches up to %3 — a value inside its own "
+                                   "tolerance would grade Action.")
+                        .arg(key, normNumber(*n.monitorHi), normNumber(n.claimHi())));
         }
 
         // ── Plausibility against the corridor ───────────────────────────────

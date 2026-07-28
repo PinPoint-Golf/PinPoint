@@ -389,9 +389,11 @@ QVariantList NormModel::measures(const QVariantMap &filters) const
             // The band this row is GRADED against, not the norm's bare claim — the catalogue's
             // summary figure has to be the one the app acts on. Under `standard` they are the same
             // number; under `strict` or `lenient` they are not. See norm.h.
-            const NormBandEdges e = bandEdgesOf(*res.norm, policy());
+            const NormBandEdges e = bandEdgesOf(*res.norm, policy(), -1.0, m.shape);
             r.insert(QStringLiteral("idealLo"),             e.idealLo);
             r.insert(QStringLiteral("idealHi"),             e.idealHi);
+            r.insert(QStringLiteral("bandPhrase"),
+                     rangePhrase(e.idealLo, e.idealHi, res.norm->mu, m.shape));
             r.insert(QStringLiteral("weakProvenance"),      normIsWeak(*res.norm));
         } else {
             r.insert(QStringLiteral("defaultContextId"),    QString());
@@ -399,6 +401,9 @@ QVariantList NormModel::measures(const QVariantMap &filters) const
             r.insert(QStringLiteral("normInherited"),       false);
             r.insert(QStringLiteral("idealLo"),             0.0);
             r.insert(QStringLiteral("idealHi"),             0.0);
+            // Written on both branches, so a row with no norm reads as an EMPTY phrase rather
+            // than as a missing key that a `|| "0 to 0"` fallback would have to invent.
+            r.insert(QStringLiteral("bandPhrase"),          QString());
             r.insert(QStringLiteral("weakProvenance"),      false);
         }
         out.append(r);
@@ -425,6 +430,11 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     const Norm       &n  = *res.norm;
     const GradePolicy pol = policy();
     const ContextNode *cn = m_norms->contexts().node(res.contextId);
+    // The MEASURE's shape, which decides what these numbers can be SAID to mean. A one-sided
+    // corridor has no second bound to name, and naming one anyway states a limit on the very side
+    // the norm refuses to grade.
+    const Measure    *me = m_pack->pack().measure(measureId);
+    const Shape       sh = me ? me->shape : Shape::Target;
 
     out.insert(QStringLiteral("contextId"),     res.contextId);
     out.insert(QStringLiteral("contextLabel"),  cn ? cn->label : res.contextId);
@@ -437,16 +447,28 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     // (explicit monitor bounds DOMINATE the z-derived edge, exactly as grade() applies them) is
     // stated. Showing the z edge while grading on the monitor would render a corridor the app does
     // not use.
-    const NormBandEdges edges = bandEdgesOf(n, pol);
+    const NormBandEdges edges = bandEdgesOf(n, pol, -1.0, sh);
 
     out.insert(QStringLiteral("mu"),      n.mu);
     out.insert(QStringLiteral("idealLo"), edges.idealLo);
     out.insert(QStringLiteral("idealHi"), edges.idealHi);
-    out.insert(QStringLiteral("goodLo"),  n.mu - pol.goodMaxZ * n.sigmaLo);
-    out.insert(QStringLiteral("goodHi"),  n.mu + pol.goodMaxZ * n.sigmaHi);
+    // Collapsed by shape like every other drawn edge — Good is the pair computed by hand here
+    // rather than by bandEdgesOf, so it is the one that would quietly run past the aspiration.
+    out.insert(QStringLiteral("goodLo"),  edges.lowOpen  ? n.mu : (n.mu - pol.goodMaxZ * n.sigmaLo));
+    out.insert(QStringLiteral("goodHi"),  edges.highOpen ? n.mu : (n.mu + pol.goodMaxZ * n.sigmaHi));
     out.insert(QStringLiteral("watchLo"), edges.watchLo);
     out.insert(QStringLiteral("watchHi"), edges.watchHi);
-    out.insert(QStringLiteral("explicitMonitor"), n.hasExplicitMonitor());
+    out.insert(QStringLiteral("explicitMonitor"), n.hasExplicitMonitor(sh));
+
+    // ── The row, in words ───────────────────────────────────────────────────
+    //
+    // Composed here rather than in the delegate, for the reason the editor's are: which of the
+    // three forms applies is a statement about the measure, not a formatting choice, and there are
+    // no QML tests in this repo to catch it going wrong inside a binding.
+    out.insert(QStringLiteral("shape"),       shapeName(sh));
+    out.insert(QStringLiteral("oneSided"),    shapeIsOneSided(sh));
+    out.insert(QStringLiteral("bandPhrase"),  rangePhrase(edges.idealLo, edges.idealHi, n.mu, sh));
+    out.insert(QStringLiteral("actionPhrase"), actionPhrase(edges.watchLo, edges.watchHi, sh));
 
     out.insert(QStringLiteral("unit"),        n.unit);
     out.insert(QStringLiteral("n"),           n.n);
@@ -474,6 +496,11 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     out.insert(QStringLiteral("hasShipped"),     shipped != nullptr);
     out.insert(QStringLiteral("shippedClaimLo"), shipped ? shipped->claimLo() : 0.0);
     out.insert(QStringLiteral("shippedClaimHi"), shipped ? shipped->claimHi() : 0.0);
+    // A CLAIM, so it passes mu: on a floor claimHi is mu plus a tolerance nothing grades, and
+    // "ships 1.48 to 1.53" would name a bound core does not assert.
+    out.insert(QStringLiteral("shippedPhrase"),
+               shipped ? rangePhrase(shipped->claimLo(), shipped->claimHi(), shipped->mu, sh)
+                       : QString());
     return out;
 }
 
