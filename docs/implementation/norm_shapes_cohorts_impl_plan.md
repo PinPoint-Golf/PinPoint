@@ -29,7 +29,7 @@ rule in there survives this work.
 | A3 | Engine + health checks | ☑ complete — 79/79 | 2026-07-28 |
 | — | **review gate · expect context clear here** | | |
 | A4a | Rewire `oneSided` from the unit sniff to shape | ☑ complete — 79/79; **one rail changes appearance**, see N12 | 2026-07-28 |
-| A4b | One-sided domain rules for the bars | ☐ not started | |
+| A4b | One-sided domain rules for the bars | ☑ complete — 79/79, +26 assertions | 2026-07-28 |
 | A4c | Corridor editor — handles, readouts, diff rows | ☐ not started | |
 | A4d | Corridor editor — plausibility fields and plot regions | ☐ not started | |
 | A4e | Wording pass + signal direction picker | ☐ not started | |
@@ -55,6 +55,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-28 | A2 | Grading is shape-aware end to end: `normZ`/`withinBand`/`grade`/`bandEdgesOf` take a `Shape`, `hasExplicitMonitor(Shape)` and a new `outsideMonitor(value, Shape)` close N10, `plausibleLo/Hi` land on the row with `isImplausible()` outranking even the monitor band, `NormBandEdges` and `MetricCorridor` carry `lowOpen/highOpen` with **`mu` on the open side** (never a sentinel), and `NormBasis` gains the plausibility pair so a shipped row that acquires a cap does not compare as unmoved. `partialMonitor` MOVED to `validateNormsAgainst`; `plausibleOrder` and `plausibleInsideCorridor` are new, the latter measured against the **widest** preset so a pack's validity cannot depend on the reader's settings. `withinBand`'s degenerate early-return deleted as provably redundant under the computed-edge form. 79/79 with ~90 new assertions, incl. floor/ceiling tables, continuity at mu, per-preset edge sweeps, a one-sided monitor, plausibility precedence and corridor propagation over a hand-built floor. App builds; headless clean. Next: A3. |
 | 2026-07-28 | A3 | `MeasureReading` carries `lowOpen`/`highOpen`/`implausible`; `NormMeasureSource` takes an optional `CharacteristicPack*` for the shape (null-safe, Target without it). A signal on the OPEN tail cannot fire — explicit in `evaluate()` for both `OutsideCorridor` and `Ratio`, rather than left as a coincidence of two other rules. **An implausible reading makes the finding `Unavailable`, not `NotFired`** — it was never assessed, and reporting it as "looked and fine" would be a false negative wearing a clean bill of health. New health code `signalOnOpenTail`, deliberately NOT scoped to Live (unlike `signalNoNorm`): no producer will ever give a floor an upper fault, so it is an authoring mistake, not a backlog row. Header table + `HealthView._codeLabel` updated in the same change. Both guards kept on purpose — runtime makes the answer right, health makes the mistake visible. Gated in both directions. 79/79; app builds; headless clean. Next: A4a. |
 | 2026-07-28 | A4a | `_isOneSided()`'s unit sniff **deleted**. Shape flows `Measure` → `MetricCorridor` → `metric_catalog.cpp` (per-corridor `lowOpen`/`highOpen`/`shape`, plus a metric-level `shape`/`oneSided` requiring unanimity across phases, falling back to `target`) → `PpBandRail`. Openness now travels **per checkpoint** on `RailCorridor`/`RailPoint`, so `railRange`'s `oneSided` bool is **gone entirely** rather than becoming a shape — with `mu` on the open side there is nothing aspirational left to drop, and the ceiling mirror comes free (see the stage note). `PpBandRail`'s ribbon substitutes the plot edge per side, so a ceiling is representable for the first time. 79/79; app builds; headless clean. **One rail changes appearance — N12.** Next: A4b. |
+| 2026-07-28 | A4b | `barDomain()` in `dashboard_reductions.h` + a `ChartMetrics::barDomain` façade; **both** bars now call it instead of computing a domain inside a binding (fact 16). **The defect was not the one the brief predicted** — A2 put `mu` on the open side, so the amber span is a healthy k×sigma and the domain never was degenerate. What actually broke: the domain STOPPED at `mu`, so every Ideal reading above a floor's aspiration clamped to the last pixel of the track and sat on a hard band edge reading as a bound. The open side now runs past the furthest of (aspiration, reading) by 35% of the graded span, and green runs off that end as a horizontal fade — **additive**, so two-sided bars are pixel-identical and the two-sided numbers are pinned exactly. Amber is deliberately untouched: on a floor it genuinely ends at `mu`, because above `mu` the grade is Ideal and the colour is green. Open-side tick labels re-position under the aspiration rather than pinning to the track end. `NormativeBar` gained the finite guards it never had (fact 13) and hides its bands on an invalid domain instead of collapsing them onto the left edge. `PpDashboardSetupZone` threads openness through; the `orientationLabel` audit became a one-term guard (N13). 79/79 with 26 new assertions, every one-sided case paired with a two-sided counterpart. App builds; headless clean; all six bar states rendered offscreen — see the stage note on what that does and does not prove. Next: A4c. |
 
 ---
 
@@ -438,6 +439,35 @@ zone) both derive their axis domain from the amber span, which is open on a one-
 for any `target` norm; a one-sided norm draws a bar that runs off its open end instead of a
 collapsed or absurd one.
 
+**The predicted failure mode did not happen, and the real one is worse.** The brief expected
+the amber span to be OPEN on a one-sided norm and the domain to come out degenerate or
+absurd. It does not: A2 put `mu` on the open side, so `amberHi − amberLo` is a healthy
+k×sigma and every existing line of domain arithmetic returns a perfectly finite answer. What
+is actually wrong is quieter. The domain STOPS at `mu` — so on a floor, every reading above
+the aspiration (all of which grade **Ideal**) clamps to the last pixel of the track, 1.55 and
+5.0 land in the same place, and both sit against a hard band edge that reads *"the corridor
+ends here, you are outside it"*. The exact inverse of the grade. A degenerate domain would at
+least have looked broken.
+
+**Two decisions worth not relitigating:**
+
+- **The open tail is drawn as an ADDITIVE element**, not by widening the existing band. A
+  two-sided bar therefore renders the same two rectangles it always did, which is what makes
+  "105 of 106 measures are pixel-identical" a structural claim rather than a hope.
+- **Amber is not extended and does not fade.** On a floor the amber band genuinely ENDS at
+  `mu`, because above `mu` the grade is Ideal and the colour there is green. Only green runs
+  off the open end. The small step where the solid green (over amber) meets the fade (over
+  bare track) falls exactly on `mu`, and is the only thing marking the aspiration on the
+  track — kept, not smoothed away.
+
+**On verification.** The domain rule is C++ and gated by `dashboard_reductions_test`. The
+PAINTING was checked by rendering both components offscreen against a mock `ChartMetrics`
+(scratchpad only, no committed file touched) in all six states — two-sided control, floor
+below the aspiration, floor above it, ceiling, and both compact tiles. That proves the
+geometry and the fade direction; it does not exercise the real façade, which `qmllint`
+resolves statically instead. Note the consequence for later stages: both bars now depend on a
+C++-registered type, so the pure-QML standalone harness needs that mock to render them at all.
+
 ### A4c — Corridor editor: handles, readouts, diff rows
 
 The bulk of the work. The blocker is fact 14.
@@ -803,3 +833,5 @@ resolved with the stage that closed it.
 | N10 | **`partialMonitor` will fire on a legal one-sided monitor.** It lives in `validateNormPack` (standalone), which cannot see the measure and so cannot know a floor carrying only `monitorLo` is complete. `hasExplicitMonitor()` has the same blindness (fact 3). | A1 | ☑ **closed in A2** — `hasExplicitMonitor(Shape)` is shape-aware, and `partialMonitor` moved to `validateNormsAgainst`, where the measure is in hand. Both directions gated |
 | N12 | **`handSpeed` is the one rail whose appearance changes**, and it exposes a content defect. It is the only catalogue metric that both matched the old unit sniff (`mph`) and carries a corridor: `m_handSpeedP6P7 @ any` is `mu 20, sigmaLo 40`, whose own citation says *"sigma is twice mu, which is not a corridor"*. It was drawn as a floor and now draws as the two-sided norm that actually grades it, so its domain widens to roughly −100…140 and the trace squashes. That is the heuristic being deleted doing its job — the rail was hiding a bad norm, not compensating for a good one. **Fix by re-seating the norm, never by restoring a unit sniff.** `m_clubheadSpeedImpact` and `m_ballSpeed` carry no norm at all, so their rails are sparklines and are unaffected. | A4a | open — content, belongs with the corpus re-seat |
 | N11 | `bandEdgesOf`'s signature is now `(norm, policy, marginOverride, shape)` — shape is the FOURTH argument, so a caller wanting shape must also pass `marginOverride = -1.0`. Only `reference_bands.cpp` passes a margin. Tolerable; revisit if a third caller wants shape without a margin. | A2 | open — cosmetic |
+| N13 | The Setup zone's orientation glyph now falls back to a bar on a one-sided corridor. `orientationLabel()` itself is unchanged and still cannot see openness — the guard is at the call site, where the corridor is in hand. Every alignment measure is `target`, so the branch is unreachable today; it exists so that changing one's shape degrades visibly instead of labelling a floor's best possible reading "open". If a one-sided alignment measure is ever authored, decide then whether the glyph grows a one-sided vocabulary or the guard becomes permanent. | A4b | open by design |
+| N14 | `PpRangeBar`'s **non-compact** form has no instantiation anywhere — the Verdict zone's tempo tile is absent until tempo has a producer, and the Setup zone is compact. So its tick row, and the one-sided tick placement in it, are unexercised. `NormativeBar`'s tick row does exercise the same rule. Not a defect; noted so a later reader does not read the code as covered. | A4b | open — latent surface |

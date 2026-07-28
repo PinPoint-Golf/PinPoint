@@ -114,9 +114,24 @@ Item {
 
             var desc = catalog.descriptor(keys[k], shotCtx)
             var cor  = _corridorAt(desc, _phaseAddress)
+            // Which tail does not grade, from the MEASURE's shape (A4a threaded it onto
+            // every corridor map). Read once here and handed to the bar; nothing on this
+            // screen re-derives it.
+            var loOpen = cor ? cor.lowOpen  === true : false
+            var hiOpen = cor ? cor.highOpen === true : false
             // Alignment angles read as an orientation word; everything else as a bar.
             // The glyph carries its own unknown state, so it still serves an NA tile.
+            //
+            // A ONE-SIDED corridor falls back to the bar. Every alignment measure is
+            // `target` today and orientationLabel() is two-sided by construction — its
+            // whole vocabulary is open / square / closed around a corridor with two real
+            // edges. On a floor the high edge is mu, so a good reading above it would be
+            // labelled "open", i.e. a fault word for the best possible answer. This is the
+            // same fall-back-to-a-bar the degenerate-corridor case already takes, and it
+            // makes the audit enforceable rather than a comment: change an alignment
+            // measure's shape and the tile degrades visibly instead of inverting silently.
             var glyph = (row.group === "Alignment" || keys[k] === "toeLineAngle")
+                        && !loOpen && !hiOpen
             out.push({ key: keys[k],
                        label: (row.shortLabel && row.shortLabel.length) ? row.shortLabel : row.label,
                        unit: row.unit,
@@ -131,6 +146,7 @@ Item {
                                     ? cm.orientationLabel(samp.value, cor.greenLo, cor.greenHi) : "",
                        greenLo: cor ? cor.greenLo : 0, greenHi: cor ? cor.greenHi : 0,
                        amberLo: cor ? cor.amberLo : 0, amberHi: cor ? cor.amberHi : 0,
+                       lowOpen: loOpen, highOpen: hiOpen,
                        hasCorridor: cor !== null })
         }
         return out
@@ -284,6 +300,7 @@ Item {
                     band: data_.band || ""
                     greenLo: data_.greenLo; greenHi: data_.greenHi
                     amberLo: data_.amberLo; amberHi: data_.amberHi
+                    lowOpen: data_.lowOpen === true; highOpen: data_.highOpen === true
                 }
             }
         }

@@ -372,6 +372,23 @@ double ChartMetrics::valueAtUs(const QVariantList &tUs, const QVariantList &valu
     return pinpoint::analysis::interpolateAtUs(t, v, us);
 }
 
+QVariantMap ChartMetrics::barDomain(double greenLo, double greenHi,
+                                    double amberLo, double amberHi,
+                                    bool lowOpen, bool highOpen,
+                                    double value, bool hasValue) const
+{
+    // Flat scalars rather than a corridor map: PpRangeBar carries its bounds as four
+    // separate properties (it is fed by a caller that assembles them, not by a norm
+    // set), so a map-taking signature would force one of the two bars to build a map
+    // purely to hand it straight back.
+    const pinpoint::analysis::BarDomain d =
+        pinpoint::analysis::barDomain(greenLo, greenHi, amberLo, amberHi,
+                                      lowOpen, highOpen, value, hasValue);
+    return QVariantMap{ { QStringLiteral("lo"),    d.lo },
+                        { QStringLiteral("hi"),    d.hi },
+                        { QStringLiteral("valid"), d.valid } };
+}
+
 QVariantList ChartMetrics::scoreSegments(const QVariantMap &buckets) const
 {
     std::vector<pinpoint::analysis::ScoreSegment> segs;

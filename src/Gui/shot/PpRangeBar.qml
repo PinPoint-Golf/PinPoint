@@ -35,6 +35,10 @@ Item {
     property real   greenHi: 0
     property real   amberLo: 0
     property real   amberHi: 0
+    // Which tail does not grade, from the MEASURE's shape — set by the caller off the
+    // corridor it already has, never re-derived here from `unit` or a metric key.
+    property bool   lowOpen: false
+    property bool   highOpen: false
     property string band: ""            // "green" | "yellow" | "red" | ""  → marker/value tint
     property string unit: ""
     property bool   compact: false       // true = Setup mini-bar (short, no axis labels)
@@ -55,27 +59,40 @@ Item {
 
     readonly property color _markerColor: _bandColor(band)
 
-    // Domain = amber band padded 12% each side so the amber band reads as a band,
-    // not the whole track (mirrors NormativeBar's corridor read). Falls back to the
-    // green band when amber is degenerate (zero/negative span — the unconfigured
-    // default), then to value±1 when both are degenerate. Never zero-span, never NaN.
-    readonly property real _amberSpan:  amberHi - amberLo
-    readonly property bool _amberValid: isFinite(_amberSpan) && _amberSpan > 1e-9
-    readonly property real _greenSpan:  greenHi - greenLo
-    readonly property bool _greenValid: isFinite(_greenSpan) && _greenSpan > 1e-9
+    ChartMetrics { id: cm }
 
-    readonly property real _baseLo:   _amberValid ? amberLo : (_greenValid ? greenLo : value - 1)
-    readonly property real _baseHi:   _amberValid ? amberHi : (_greenValid ? greenHi : value + 1)
-    readonly property real _baseSpan: Math.max(1e-6, _baseHi - _baseLo)
-    readonly property real _pad:      _baseSpan * 0.12
-    readonly property real _domLo:    _baseLo - _pad
-    readonly property real _domHi:    _baseHi + _pad
+    // Domain = amber band padded 12% each side so the amber band reads as a band, not the
+    // whole track (mirrors NormativeBar's corridor read), falling back to the green band
+    // when amber is degenerate — the unconfigured default — and then to value±1. On a
+    // ONE-SIDED corridor the open side instead runs past the furthest of (aspiration,
+    // reading), leaving room for the band to fade out into: the norm collapses that side's
+    // edges onto mu, so without the extra room every Ideal reading past the aspiration
+    // clamps to the last pixel of the track and sits on a hard edge that reads as a bound.
+    //
+    // The rule itself is C++ (ChartMetrics.barDomain → dashboard_reductions.h) rather than
+    // the four lines of QML it replaces, because it is shared with NormativeBar and because
+    // there are no QML tests in this repo: a domain rule left in a binding is a rule nothing
+    // can gate.
+    readonly property var  _dom:      cm.barDomain(greenLo, greenHi, amberLo, amberHi,
+                                                   lowOpen, highOpen, value, hasValue)
+    readonly property bool _domValid: _dom.valid === true
+    readonly property real _domLo:    _dom.lo
+    readonly property real _domHi:    _dom.hi
     readonly property real _domSpan:  Math.max(1e-6, _domHi - _domLo)
 
     // Domain value → 0..1 fraction, clamped — this is what keeps the marker pinned
     // inside the corridor even when `value` sits outside the configured bounds.
     function _fx(v) {
         return isFinite(v) ? Math.max(0, Math.min(1, (v - _domLo) / _domSpan)) : 0
+    }
+
+    // A tick label's x. Anchored to its end of the track normally; on the OPEN side the
+    // number is the aspiration, which sits somewhere in the middle of the domain, so it is
+    // centred under where it actually falls. Pinned to the edge it would put the corridor's
+    // last number under a stretch of track the corridor does not bound.
+    function _tickX(v, w, open, rightEdge) {
+        if (!open) return rightEdge ? Math.max(0, width - w) : 0
+        return Math.max(0, Math.min(width - w, width * _fx(v) - w / 2))
     }
 
     // ── Value + unit read, above the marker (non-compact only) ────────────────
@@ -110,9 +127,11 @@ Item {
             color:  Theme.colorBg2
         }
 
+        // The amber band needs no shape treatment: on a floor its high edge IS mu, and the
+        // corridor really does end there — above mu the grade is Ideal, so the colour is green.
         Rectangle {
             id: amberBand
-            visible: root.hasValue
+            visible: root.hasValue && root._domValid
             x:      parent.width * root._fx(root.amberLo)
             width:  Math.max(0, parent.width * (root._fx(root.amberHi) - root._fx(root.amberLo)))
             height: parent.height
@@ -122,7 +141,7 @@ Item {
 
         Rectangle {
             id: greenBand
-            visible: root.hasValue
+            visible: root.hasValue && root._domValid
             x:      parent.width * root._fx(root.greenLo)
             width:  Math.max(0, parent.width * (root._fx(root.greenHi) - root._fx(root.greenLo)))
             height: parent.height
@@ -130,11 +149,45 @@ Item {
             color:  Theme.colorBandGreen
         }
 
+        // The open tail, ADDITIVE so a two-sided bar draws exactly the two bands above and
+        // nothing else. Green runs from the aspiration to the end of the track and fades:
+        // the grade continues, and the track's end is the plot's limit rather than the norm's.
+        Rectangle {
+            visible: root.hasValue && root._domValid && root.highOpen
+            x:      parent.width * root._fx(root.greenHi)
+            width:  Math.max(0, parent.width - x)
+            height: parent.height
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: Theme.colorBandGreen }
+                GradientStop { position: 1.0
+                               color: Qt.rgba(Theme.colorBandGreen.r, Theme.colorBandGreen.g,
+                                              Theme.colorBandGreen.b, 0.0) }
+            }
+        }
+
+        // The ceiling mirror.
+        Rectangle {
+            visible: root.hasValue && root._domValid && root.lowOpen
+            x:      0
+            width:  Math.max(0, parent.width * root._fx(root.greenLo))
+            height: parent.height
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0
+                               color: Qt.rgba(Theme.colorBandGreen.r, Theme.colorBandGreen.g,
+                                              Theme.colorBandGreen.b, 0.0) }
+                GradientStop { position: 1.0; color: Theme.colorBandGreen }
+            }
+        }
+
         // ── Marker — vertical stroke at the current value, nested in the track's
-        // local coordinate space so its x math needs no extra offset.
+        // local coordinate space so its x math needs no extra offset. A non-finite value
+        // would land at _fx()'s 0, i.e. the LEFT edge — a position, and a position is a
+        // claim — so it is gated on being finite rather than merely on hasValue.
         Shape {
             id: marker
-            visible: root.hasValue
+            visible: root.hasValue && root._domValid && isFinite(root.value)
             preferredRendererType: Shape.CurveRenderer
             width:  Theme.sp(2)
             height: track.height + Theme.sp(6)
@@ -167,7 +220,7 @@ Item {
 
         Text {
             id: loTick
-            anchors.left: parent.left
+            x: root._tickX(root.greenLo, width, root.lowOpen, false)
             text: root._fmtVal(root.greenLo)
             font.family:      Theme.fontData
             font.pixelSize:   Theme.fontSzMicro
@@ -175,7 +228,7 @@ Item {
             color: Theme.colorText3
         }
         Text {
-            anchors.right: parent.right
+            x: root._tickX(root.greenHi, width, root.highOpen, true)
             text: root._fmtVal(root.greenHi)
             font.family:      Theme.fontData
             font.pixelSize:   Theme.fontSzMicro

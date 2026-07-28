@@ -126,6 +126,21 @@ public:
     Q_INVOKABLE double valueAtUs(const QVariantList &tUs, const QVariantList &value,
                                  qint64 us) const;
 
+    // ── Corridor-bar backing (dashboard_reductions.h) ───────────────────────────
+
+    // The value→x domain of ONE corridor bar (NormativeBar, PpRangeBar):
+    //   { lo, hi, valid }
+    // Two-sided: the amber band padded 12% each side, falling back to green then to
+    // value±1. One-sided: the open side runs past the furthest of (aspiration, reading)
+    // by 35% of the graded span, leaving the room the caller fades the band across —
+    // without it a floor's Ideal readings all clamp to the last pixel of the track.
+    // valid=false when there is neither a corridor nor a finite reading; the bar then
+    // draws its rail and no bands, rather than a band pinned to the left edge.
+    Q_INVOKABLE QVariantMap barDomain(double greenLo, double greenHi,
+                                      double amberLo, double amberHi,
+                                      bool lowOpen, bool highOpen,
+                                      double value, bool hasValue) const;
+
     // Score contribution buckets (analysisDetail.perRegion / .perPhase — a
     // {name → 0..100} map) as an ORDERED list for the Verdict donut's hover
     // breakdown: [{ label, value }], weakest first, so the thing costing the most

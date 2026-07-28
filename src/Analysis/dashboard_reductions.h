@@ -21,7 +21,10 @@
 // Dashboard band-rail reductions — pure, header-only, no Qt-GUI. The maths behind
 // PpBandRail: joining a metric's measured phase samples to the catalogue's normative
 // corridors, deciding the value→y domain, and interpolating the curve at the replay
-// playhead. Sibling of kinematic_sequence.h and kept out of QML JS by the same rule
+// playhead. Plus the same domain question for the horizontal corridor BARS
+// (NormativeBar, PpRangeBar), which is here rather than in a header of its own because
+// it is the same question and both are reached through the same ChartMetrics façade.
+// Sibling of kinematic_sequence.h and kept out of QML JS by the same rule
 // (analysis pipeline guide §6.2): QML positions and paints, C++ decides the numbers.
 //
 // The join is BY PHASE, not by index — a metric may be sampled at phases the
@@ -173,6 +176,72 @@ inline RailRange railRange(const std::vector<RailPoint> &points, double padFrac 
     r.hi    = hi + pad;
     r.valid = true;
     return r;
+}
+
+// ── Corridor bars ───────────────────────────────────────────────────────────────
+//
+// The value→x domain of a horizontal CORRIDOR BAR — NormativeBar (metric detail, one
+// bar per phase) and PpRangeBar (dashboard Setup tiles and the Verdict call-out). The
+// rail above is a vertical strip through time; these are a single reading against a
+// single corridor, so they share nothing but the arithmetic being kept out of QML.
+struct BarDomain {
+    double lo    = 0.0;
+    double hi    = 0.0;
+    bool   valid = false;          // false ⇒ nothing finite to draw; the caller hides the bands
+};
+
+// Domain for one corridor bar.
+//
+// TWO-SIDED, which is 105 of the 106 shipped measures: the amber band padded by
+// `padFrac` each side, so the corridor reads as a band rather than as the whole track.
+// Falling back to the green band when amber is degenerate (the unconfigured default),
+// then to value±1 when both are. This is exactly what the two bars did between them
+// before shapes existed, and it must stay bit-identical — the one-sided rule is an
+// addition, not a replacement.
+//
+// ONE-SIDED is the new case, and the failure it fixes is NOT the one the brief
+// predicted. The brief expected the amber span to be open and the domain to come out
+// degenerate or absurd. It does not: the open side's numeric edge is `mu` (the norm
+// decided that, not this function), so the amber span is a healthy k×sigma and the
+// domain is perfectly finite. What is wrong is subtler and worse. On a floor at
+// mu = 1.48, every reading above 1.48 grades IDEAL, but the domain would stop dead at
+// 1.48 — so a smash of 1.55 clamps to the last pixel of the track, indistinguishable
+// from 5.0, sitting on a hard band edge that reads "the corridor ends here, you are
+// outside it". The exact opposite of what it means.
+//
+// So the open side is anchored past the FURTHEST of (the aspiration, the reading) by
+// `openFrac` of the graded span, leaving room the caller fades the band out across.
+// The closed side keeps the ordinary pad, and the reading does not participate in it —
+// a bad reading clamps to the graded edge there, exactly as it always has.
+inline BarDomain barDomain(double greenLo, double greenHi,
+                           double amberLo, double amberHi,
+                           bool lowOpen, bool highOpen,
+                           double value, bool hasValue,
+                           double padFrac = 0.12, double openFrac = 0.35)
+{
+    const double amberSpan  = amberHi - amberLo;
+    const double greenSpan  = greenHi - greenLo;
+    const bool   amberOk    = std::isfinite(amberSpan) && amberSpan > 1e-9;
+    const bool   greenOk    = std::isfinite(greenSpan) && greenSpan > 1e-9;
+    const bool   valueOk    = hasValue && std::isfinite(value);
+
+    double baseLo = 0.0, baseHi = 0.0;
+    if (amberOk)      { baseLo = amberLo;     baseHi = amberHi; }
+    else if (greenOk) { baseLo = greenLo;     baseHi = greenHi; }
+    else if (valueOk) { baseLo = value - 1.0; baseHi = value + 1.0; }
+    else              return {};               // no corridor and no reading: nothing to scale to
+
+    const double span = std::max(1e-9, baseHi - baseLo);
+
+    BarDomain d;
+    d.lo = lowOpen  ? (valueOk ? std::min(baseLo, value) : baseLo) - openFrac * span
+                    : baseLo - padFrac * span;
+    d.hi = highOpen ? (valueOk ? std::max(baseHi, value) : baseHi) + openFrac * span
+                    : baseHi + padFrac * span;
+
+    if (!std::isfinite(d.lo) || !std::isfinite(d.hi) || !(d.hi > d.lo)) return {};
+    d.valid = true;
+    return d;
 }
 
 // The curve's value at `us`, linearly interpolated between bracketing samples.
