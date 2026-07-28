@@ -63,10 +63,13 @@ class NormEditorModel : public QObject
 
     // The draft, flattened for rendering:
     //   { measureId, measureLabel, unit, highMeans, contextId, contextLabel,
-    //     route, mu, idealLo, idealHi, goodLo, goodHi, watchLo, watchHi,
+    //     route, mu, claimLo, claimHi, idealLo, idealHi, goodLo, goodHi, watchLo, watchHi,
     //     n, source, sourceLabel, author, citation, setOn, weak, weakReason,
-    //     own, inherited, inheritedFrom, parentIdealLo, parentIdealHi,
+    //     own, inherited, inheritedFrom, parentClaimLo, parentClaimHi,
     //     dirty, canSave, whyNot, refused, refusedReason }
+    //
+    // `claimLo/claimHi` is what the handles drag; `idealLo/idealHi` is what the green band draws.
+    // They are equal under `standard` and deliberately not under the other presets — see draft().
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
 
     // Which authoring route the segmented control is on: "hand" | "seat" | "import".
@@ -136,13 +139,17 @@ public:
     Q_INVOKABLE void cancel();
 
     // ── Set by hand ─────────────────────────────────────────────────────────
-    // The two handles bind the IDEAL band: centre becomes mu, each half-width becomes sigmaLo /
-    // sigmaHi. Dragging them apart asymmetrically produces an asymmetric tolerance with no
-    // statistics vocabulary anywhere in the interaction. See norm.h — idealLo()/idealHi() are
+    // The two handles bind the norm's own CLAIM: centre becomes mu, each half-width becomes
+    // sigmaLo / sigmaHi. Dragging them apart asymmetrically produces an asymmetric tolerance with
+    // no statistics vocabulary anywhere in the interaction. See norm.h — claimLo()/claimHi() are
     // documented as exactly what these bind to.
-    Q_INVOKABLE void setIdealBand(double lo, double hi);
-    Q_INVOKABLE void nudgeIdealLo(double to);
-    Q_INVOKABLE void nudgeIdealHi(double to);
+    //
+    // NOT the Ideal band, which is the claim scaled by the active grade policy and is drawn rather
+    // than dragged. A handle that moved when a user changed a sensitivity setting would be a
+    // control editing its own scale.
+    Q_INVOKABLE void setClaimBand(double lo, double hi);
+    Q_INVOKABLE void nudgeClaimLo(double to);
+    Q_INVOKABLE void nudgeClaimHi(double to);
 
     // ── The axis must not move while a handle is being dragged ──────────────
     //

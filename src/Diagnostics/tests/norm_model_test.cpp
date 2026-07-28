@@ -299,9 +299,15 @@ int main(int argc, char **argv)
                                             QStringLiteral("driver"));
         check(qFuzzyCompare(strict.value(QStringLiteral("watchHi")).toDouble(), 115.0 + 2.25 * 10.0),
               "a stricter policy pulls the Watch edge in");
-        check(qFuzzyCompare(strict.value(QStringLiteral("idealHi")).toDouble(),
-                            std_.value(QStringLiteral("idealHi")).toDouble()),
-              "but the Ideal band does not move — it is the norm's tolerance, not the policy's");
+        // The Ideal edge moves with the policy too — it is a GRADE, not the norm's tolerance. The
+        // tolerance is `mu +/- sigma` and is reported separately as the claim. Asserting these
+        // equal is what let bandEdgesOf() and grade() disagree about the green band under every
+        // preset but `standard`.
+        check(qFuzzyCompare(strict.value(QStringLiteral("idealHi")).toDouble(), 115.0 + 0.75 * 10.0),
+              "a stricter policy pulls the Ideal edge in too");
+        check(strict.value(QStringLiteral("idealHi")).toDouble()
+                  < std_.value(QStringLiteral("idealHi")).toDouble(),
+              "…so it is strictly inside the standard one");
 
         // A monitor-bearing norm must be immune to the policy on its outer edge, or migrated
         // content would silently re-band the moment someone changed a setting.

@@ -250,8 +250,10 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                .arg(mine.measureId)
                                .arg(base.mu - base.sigmaLo, 0, 'g', 3)
                                .arg(base.mu + base.sigmaHi, 0, 'g', 3)
-                               .arg(theirs->idealLo(), 0, 'g', 3)
-                               .arg(theirs->idealHi(), 0, 'g', 3)));
+                               // Claims on both sides — this compares two assertions about the
+                               // population, and the grade policy is not part of either.
+                               .arg(theirs->claimLo(), 0, 'g', 3)
+                               .arg(theirs->claimHi(), 0, 'g', 3)));
     }
 
     return out;

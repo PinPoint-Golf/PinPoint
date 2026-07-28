@@ -386,8 +386,12 @@ QVariantList NormModel::measures(const QVariantMap &filters) const
             r.insert(QStringLiteral("defaultContextId"),    res.contextId);
             r.insert(QStringLiteral("defaultContextLabel"), cn ? cn->label : res.contextId);
             r.insert(QStringLiteral("normInherited"),       res.inherited);
-            r.insert(QStringLiteral("idealLo"),             res.norm->idealLo());
-            r.insert(QStringLiteral("idealHi"),             res.norm->idealHi());
+            // The band this row is GRADED against, not the norm's bare claim — the catalogue's
+            // summary figure has to be the one the app acts on. Under `standard` they are the same
+            // number; under `strict` or `lenient` they are not. See norm.h.
+            const NormBandEdges e = bandEdgesOf(*res.norm, policy());
+            r.insert(QStringLiteral("idealLo"),             e.idealLo);
+            r.insert(QStringLiteral("idealHi"),             e.idealHi);
             r.insert(QStringLiteral("weakProvenance"),      normIsWeak(*res.norm));
         } else {
             r.insert(QStringLiteral("defaultContextId"),    QString());
@@ -461,11 +465,15 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     // still a user row, and a value comparison would quietly un-mark it. `overridden` follows the
     // RESOLUTION, so a context inheriting the user's override reads as edited too — it is being
     // graded by the user's corridor, and saying otherwise would be false.
+    //
+    // A DIFF, so it takes the norm's own CLAIM rather than the policy's Ideal band: "PinPoint ships
+    // 8 to 15" is a statement about what core asserts, and it must not change wording because the
+    // reader moved a sensitivity slider. Both sides of the comparison are claims.
     const Norm *shipped = m_norms->shippedNorm(measureId, res.contextId);
     out.insert(QStringLiteral("overridden"),     res.overridden);
     out.insert(QStringLiteral("hasShipped"),     shipped != nullptr);
-    out.insert(QStringLiteral("shippedIdealLo"), shipped ? shipped->idealLo() : 0.0);
-    out.insert(QStringLiteral("shippedIdealHi"), shipped ? shipped->idealHi() : 0.0);
+    out.insert(QStringLiteral("shippedClaimLo"), shipped ? shipped->claimLo() : 0.0);
+    out.insert(QStringLiteral("shippedClaimHi"), shipped ? shipped->claimHi() : 0.0);
     return out;
 }
 

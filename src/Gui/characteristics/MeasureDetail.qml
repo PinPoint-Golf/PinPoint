@@ -343,8 +343,8 @@ Item {
                                     visible: modelData.overridden === true
                                     text: modelData.hasShipped
                                             ? qsTr("· edited, ships %1 to %2")
-                                                .arg(root._num(modelData.shippedIdealLo))
-                                                .arg(root._num(modelData.shippedIdealHi))
+                                                .arg(root._num(modelData.shippedClaimLo))
+                                                .arg(root._num(modelData.shippedClaimHi))
                                             : qsTr("· added by you")
                                     font.family:    Theme.fontBody
                                     font.pixelSize: Theme.fontSzMicro

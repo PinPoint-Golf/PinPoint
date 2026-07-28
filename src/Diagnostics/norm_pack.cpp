@@ -250,13 +250,16 @@ ValidationReport validateNormPack(const NormPack &pack)
             // The explicit band bounds the Watch/Action edge, so it MUST contain the Ideal band.
             // If it does not, a value sitting inside its own tolerance grades Action — which reads
             // as a detection but is a data-entry error.
-            else if (*n.monitorLo > n.idealLo() || *n.monitorHi < n.idealHi())
+            // Against the norm's own CLAIM, never the policy's Ideal band: validation runs at load
+            // with no policy in hand, and a row that failed to load under `strict` but passed under
+            // `lenient` would make a shared pack's validity depend on the reader's settings.
+            else if (*n.monitorLo > n.claimLo() || *n.monitorHi < n.claimHi())
                 err(QStringLiteral("monitorExcludesIdeal"), key,
                     QStringLiteral("Norm '%1' has a monitor band (%2..%3) that does not contain its "
-                                   "own ideal band (%4..%5).")
+                                   "own tolerance (%4..%5).")
                         .arg(key)
                         .arg(*n.monitorLo).arg(*n.monitorHi)
-                        .arg(n.idealLo()).arg(n.idealHi()));
+                        .arg(n.claimLo()).arg(n.claimHi()));
         }
 
         if (!(n.sigmaLo > 0.0) || !(n.sigmaHi > 0.0))

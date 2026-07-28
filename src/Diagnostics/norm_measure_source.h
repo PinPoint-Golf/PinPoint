@@ -90,9 +90,16 @@ public:
         if (!res.found())
             return r;                     // no norm on the chain — same outcome, reported honestly
 
+        // The POLICY's Ideal band, not the norm's bare claim. The engine tests `onTail` against
+        // these edges and `deviated` against grade(), and those two must derive from one scale or
+        // a reading can be a deviation that is on neither tail. They agreed before this only
+        // because every shipped preset has goodMaxZ >= 1 — an accident, now an asserted invariant
+        // (gradePolicyIsOrdered, norm.h).
+        const NormBandEdges e = bandEdgesOf(*res.norm, m_policy);
+
         r.hasCorridor     = true;
-        r.greenLo         = res.norm->idealLo();
-        r.greenHi         = res.norm->idealHi();
+        r.greenLo         = e.idealLo;
+        r.greenHi         = e.idealHi;
         r.grade           = grade(v->value, *res.norm, m_policy);
         r.normContextId   = res.contextId;
         r.contextInferred = m_contextId.isEmpty();

@@ -135,7 +135,7 @@ int main()
         n.monitorLo = 1.8;
         n.monitorHi = 3.6;
 
-        check(near(n.idealLo(), 2.2) && near(n.idealHi(), 3.0), "ideal band is the old green band");
+        check(near(n.claimLo(), 2.2) && near(n.claimHi(), 3.0), "the claim is the old green band");
         check(grade(2.6, n) == Grade::Ideal,  "centre -> Ideal");
         check(grade(2.2, n) == Grade::Ideal,  "green lower edge -> Ideal");
         check(grade(3.0, n) == Grade::Ideal,  "green upper edge -> Ideal");
@@ -156,13 +156,74 @@ int main()
               "the monitor band is asymmetric about the centre");
     }
 
-    std::printf("=== norm: ideal band edges ===\n");
+    std::printf("=== norm: the claim, and the Ideal band it is NOT ===\n");
     {
         Norm n = symmetric(10.0, 0.0);
         n.sigmaLo = 2.0;
         n.sigmaHi = 5.0;
-        check(near(n.idealLo(), 8.0),  "idealLo = mu - sigmaLo");
-        check(near(n.idealHi(), 15.0), "idealHi = mu + sigmaHi");
+        check(near(n.claimLo(), 8.0),  "claimLo = mu - sigmaLo");
+        check(near(n.claimHi(), 15.0), "claimHi = mu + sigmaHi");
+
+        // The claim is policy-free by construction — it reads no policy at all. The Ideal band is
+        // the claim scaled by idealMaxZ, and the two are equal ONLY under `standard`. Asserting
+        // both here is what stops a future author reading claimLo() as "the green edge".
+        for (const GradePolicyPreset &p : gradePolicyPresets()) {
+            const NormBandEdges e = bandEdgesOf(n, p.policy);
+            check(near(e.idealLo, 10.0 - p.policy.idealMaxZ * 2.0)
+                  && near(e.idealHi, 10.0 + p.policy.idealMaxZ * 5.0),
+                  "the drawn Ideal band scales with idealMaxZ");
+        }
+        check(near(bandEdgesOf(n, gradePolicyByName(QStringLiteral("standard"))).idealLo,
+                   n.claimLo()),
+              "…and coincides with the claim under standard, which is why this hid for so long");
+        check(!near(bandEdgesOf(n, gradePolicyByName(QStringLiteral("strict"))).idealLo,
+                    n.claimLo()),
+              "…and does not under strict");
+    }
+
+    std::printf("=== norm: the drawn Ideal edge is the graded Ideal edge, per preset ===\n");
+    {
+        // THE regression gate for the divergence. bandEdgesOf() drew mu +/- sigma while grade()
+        // applied policy.idealMaxZ, so under `strict` a value at 0.9 sigma was inside the drawn
+        // green band and graded Good — and ragOf(Good) is Amber. Green band, amber chip, one
+        // number. The edge is now computed the same way on both paths, so they agree by
+        // construction; this sweeps every preset at the edge and either side of it to prove it.
+        //
+        // mu = 1.40, sigmaLo = 0.08 is the exact float case norm.h's own comment calls out.
+        const Norm rows[] = { symmetric(1.40, 0.08), symmetric(0.0, 5.0), symmetric(65.0, 10.0) };
+
+        for (const GradePolicyPreset &p : gradePolicyPresets()) {
+            for (const Norm &n : rows) {
+                const NormBandEdges e = bandEdgesOf(n, p.policy);
+                for (double eps : { 0.0, -1e-9, -1e-3 }) {
+                    check(grade(e.idealLo - eps, n, p.policy) == Grade::Ideal,
+                          "inside the drawn low Ideal edge grades Ideal");
+                    check(grade(e.idealHi + eps, n, p.policy) == Grade::Ideal,
+                          "inside the drawn high Ideal edge grades Ideal");
+                }
+                // And a value inside the drawn green band never carries an Amber chip — the
+                // user-visible form of the same claim.
+                check(ragOf(grade(e.idealLo, n, p.policy)) == PpRag::Green
+                      && ragOf(grade(e.idealHi, n, p.policy)) == PpRag::Green
+                      && ragOf(grade(n.mu, n, p.policy)) == PpRag::Green,
+                      "a value inside the drawn green band is never Amber");
+            }
+        }
+    }
+
+    std::printf("=== norm: the grade policy presets nest ===\n");
+    {
+        // The engine depends on this and nothing asserted it: `onTail` compares against the Ideal
+        // edge while `deviated` comes from grade(), so a preset with goodMaxZ < idealMaxZ would
+        // admit a reading that is a deviation and on neither tail — a signal that can never fire,
+        // for a reason nothing reports. It held only because three hand-written presets happened
+        // to be ordered.
+        for (const GradePolicyPreset &p : gradePolicyPresets())
+            check(gradePolicyIsOrdered(p.policy), p.name);
+
+        check(!gradePolicyIsOrdered(GradePolicy{ 2.0, 1.0, 3.0 }), "good below ideal is refused");
+        check(!gradePolicyIsOrdered(GradePolicy{ 1.0, 3.0, 2.0 }), "watch below good is refused");
+        check(!gradePolicyIsOrdered(GradePolicy{ 0.0, 2.0, 3.0 }), "a zero ideal cap is refused");
     }
 
     std::printf("=== norm: NotMeasured is never a pass ===\n");

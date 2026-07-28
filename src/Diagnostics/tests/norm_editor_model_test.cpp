@@ -3,9 +3,14 @@
 //
 // Its whole job is that QML holds no rules, so every rule it hides is asserted here or nowhere:
 //
-//   1. The two handles bind the IDEAL band — mu +/- sigma, per side. That is what norm.h documents
-//      idealLo()/idealHi() as, and the plan carried "the Good band" in its stage-6 text until
-//      2026-07-26, which is exactly the kind of drift a test has to stop.
+//   1. The two handles bind the norm's own CLAIM — mu +/- sigma, per side. That is what norm.h
+//      documents claimLo()/claimHi() as, and the plan carried "the Good band" in its stage-6 text
+//      until 2026-07-26, which is exactly the kind of drift a test has to stop.
+//   1b. The CLAIM and the IDEAL band are different objects. The claim is fixed; the Ideal band is
+//      the claim scaled by the active grade policy. They coincide under `standard` only. This test
+//      asserted the opposite until 2026-07-28 — "a policy change does not move the IDEAL band" —
+//      which is how the divergence survived: the drawing path ignored idealMaxZ while grade()
+//      applied it, so under `strict` a value at 0.9 sigma drew green and graded Good (amber chip).
 //   2. Hand-editing DROPS a Seated provenance. Leaving "seated, n = 42" attached to numbers a hand
 //      has since moved is a claim the norm no longer supports.
 //   3. Seating fits a PER-SIDE tolerance, so an asymmetric sample yields an asymmetric corridor.
@@ -81,17 +86,36 @@ int main(int argc, char **argv)
     check(!d.value(QStringLiteral("canSave")).toBool(), "…and cannot be saved unchanged");
 
     // Seeded from the shipped row, not from zero.
-    const double seededLo = num(d, "idealLo"), seededHi = num(d, "idealHi");
+    const double seededLo = num(d, "claimLo"), seededHi = num(d, "claimHi");
     check(seededHi > seededLo, "seeded from the resolved corridor, not a degenerate point");
 
-    // ── The handles bind the IDEAL band ─────────────────────────────────────
+    // ── The key contract with CorridorEditor.qml ────────────────────────────
+    //
+    // A field can be complete on both sides and reach nothing: QML reads a missing key as
+    // `undefined`, every `|| 0` fallback turns that into a corridor at zero, and no binding, test
+    // or screenshot says a word. So the keys the view binds to are named here, and a rename that
+    // does not reach the .qml fails HERE rather than on somebody's screen.
+    for (const char *k : { "claimLo", "claimHi", "idealLo", "idealHi", "goodLo", "goodHi",
+                           "watchLo", "watchHi", "mu", "unit", "highMeans", "explicitMonitor",
+                           "parentClaimLo", "parentClaimHi", "hasParent", "inheritedFrom",
+                           "shippedClaimLo", "shippedClaimHi", "hasShipped", "editedNote",
+                           "resetLabel", "canReset", "canSave", "canDiscard", "refused" })
+        check(d.contains(QLatin1String(k)), k);
+
+    // ── The handles bind the norm's own CLAIM ───────────────────────────────
     std::printf("\nthe two handles\n");
-    ed.setIdealBand(10.0, 30.0);
+    ed.setClaimBand(10.0, 30.0);
     d = ed.draft();
-    near(num(d, "idealLo"), 10.0, "idealLo is the low handle");
-    near(num(d, "idealHi"), 30.0, "idealHi is the high handle");
+    near(num(d, "claimLo"), 10.0, "claimLo is the low handle");
+    near(num(d, "claimHi"), 30.0, "claimHi is the high handle");
     near(num(d, "mu"),      20.0, "mu is the centre between them");
     check(d.value(QStringLiteral("dirty")).toBool(), "moving a handle dirties the draft");
+
+    // Under `standard` idealMaxZ is 1.0, so the Ideal band lands exactly on the handles. That is
+    // the coincidence that hid the divergence for nine stages — asserted here so it reads as a
+    // property of this preset rather than as a law.
+    near(num(d, "idealLo"), 10.0, "under standard the Ideal band sits on the claim (lo)");
+    near(num(d, "idealHi"), 30.0, "under standard the Ideal band sits on the claim (hi)");
 
     // Under the standard policy Good is |z| <= 2 and Watch <= 3, so the drawn edges are exactly
     // twice and three times the half-widths. This is the assertion that stops "the handles bind
@@ -102,29 +126,46 @@ int main(int argc, char **argv)
     near(num(d, "watchHi"),  50.0, "watchHi = mu + 3*sigmaHi");
 
     // Asymmetric drag -> asymmetric tolerance, with no statistics vocabulary in the interaction.
-    ed.setIdealBand(10.0, 40.0);
+    ed.setClaimBand(10.0, 40.0);
     d = ed.draft();
     near(num(d, "mu"), 25.0, "an asymmetric band still centres between the handles");
     near(num(d, "goodLo"), 10.0 - 15.0, "…and the low tail widens by ITS own sigma");
     near(num(d, "goodHi"), 40.0 + 15.0, "…and the high tail by its own");
 
     // A crossed drag must not produce a negative tolerance.
-    ed.setIdealBand(50.0, 20.0);
+    ed.setClaimBand(50.0, 20.0);
     d = ed.draft();
-    near(num(d, "idealLo"), 20.0, "a crossed drag is ordered, not negated (lo)");
-    near(num(d, "idealHi"), 50.0, "a crossed drag is ordered, not negated (hi)");
+    near(num(d, "claimLo"), 20.0, "a crossed drag is ordered, not negated (lo)");
+    near(num(d, "claimHi"), 50.0, "a crossed drag is ordered, not negated (hi)");
 
-    // ── The grade policy governs the drawn edges ────────────────────────────
+    // ── The grade policy governs the drawn edges — ALL THREE of them ────────
+    //
+    // The claim is what the author asserted and must not move when a reader changes a sensitivity
+    // setting. Every DRAWN band is a consequence of that setting, Ideal included. Until 2026-07-28
+    // this section asserted "a policy change does not move the IDEAL band", which was the defect
+    // written down as a requirement.
     std::printf("\ngrade policy\n");
-    ed.setIdealBand(10.0, 30.0);
+    ed.setClaimBand(10.0, 30.0);
     ed.setGradePolicy(QStringLiteral("strict"));
     d = ed.draft();
-    near(num(d, "idealLo"), 10.0, "a policy change does not move the IDEAL band");
+    near(num(d, "claimLo"), 10.0, "a policy change does not move the CLAIM (lo)");
+    near(num(d, "claimHi"), 30.0, "a policy change does not move the CLAIM (hi)");
+    near(num(d, "idealLo"), 20.0 - 0.75 * 10.0, "strict pulls the Ideal edge in (0.75 sigma)");
+    near(num(d, "idealHi"), 20.0 + 0.75 * 10.0, "…on both sides");
     near(num(d, "goodHi"),  20.0 + 1.5 * 10.0, "strict pulls the Good edge in (1.5 sigma)");
     near(num(d, "watchHi"), 20.0 + 2.25 * 10.0, "…and the Watch edge with it");
+
+    // Lenient pushes it the other way, so the Ideal band is WIDER than the claim. A surface that
+    // assumed the green band could never exceed mu +/- sigma would be wrong here.
+    ed.setGradePolicy(QStringLiteral("lenient"));
+    d = ed.draft();
+    near(num(d, "claimHi"), 30.0, "…still the claim under lenient");
+    near(num(d, "idealHi"), 20.0 + 1.5 * 10.0, "lenient pushes the Ideal edge out (1.5 sigma)");
+
     ed.setGradePolicy(QStringLiteral("wat"));
     d = ed.draft();
     near(num(d, "goodHi"), 40.0, "an unknown policy name resolves to standard, never persists");
+    near(num(d, "idealHi"), 30.0, "…and standard puts Ideal back on the claim");
 
     // ── The axis must not move under a drag ─────────────────────────────────
     //
@@ -137,18 +178,18 @@ int main(int argc, char **argv)
     {
         NormEditorModel a;
         check(a.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext)), "opens");
-        a.setIdealBand(10.0, 30.0);
+        a.setClaimBand(10.0, 30.0);
 
         const double freeLo = a.sampleSummary().value(QStringLiteral("axisLo")).toDouble();
         const double freeHi = a.sampleSummary().value(QStringLiteral("axisHi")).toDouble();
 
         // Unlatched, the axis follows the corridor — which is right between gestures, and is
         // exactly what must NOT happen during one.
-        a.setIdealBand(10.0, 300.0);
+        a.setClaimBand(10.0, 300.0);
         check(a.sampleSummary().value(QStringLiteral("axisHi")).toDouble() > freeHi,
               "between gestures the axis re-fits to the corridor");
 
-        a.setIdealBand(10.0, 30.0);
+        a.setClaimBand(10.0, 30.0);
         a.beginHandleDrag();
         const double lockLo = a.sampleSummary().value(QStringLiteral("axisLo")).toDouble();
         const double lockHi = a.sampleSummary().value(QStringLiteral("axisHi")).toDouble();
@@ -157,7 +198,7 @@ int main(int argc, char **argv)
 
         // Simulate the gesture: several nudges, as a real drag delivers.
         for (int i = 0; i < 8; ++i) {
-            a.nudgeIdealHi(30.0 + 5.0 * i);
+            a.nudgeClaimHi(30.0 + 5.0 * i);
             near(a.sampleSummary().value(QStringLiteral("axisLo")).toDouble(), lockLo,
                  "axis low stays put mid-drag");
             near(a.sampleSummary().value(QStringLiteral("axisHi")).toDouble(), lockHi,
@@ -175,7 +216,7 @@ int main(int argc, char **argv)
         {
             NormEditorModel b;
             b.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext));
-            b.setIdealBand(10.0, 30.0);
+            b.setClaimBand(10.0, 30.0);
             b.beginHandleDrag();
 
             const QVariantMap ax = b.sampleSummary();
@@ -190,10 +231,10 @@ int main(int argc, char **argv)
                 const double axLo = now.value(QStringLiteral("axisLo")).toDouble();
                 const double axHi = now.value(QStringLiteral("axisHi")).toDouble();
                 const double v    = axLo + (px / W) * (axHi - axLo);
-                b.nudgeIdealHi(v);
+                b.nudgeClaimHi(v);
                 if (i == 0) first = v;
             }
-            near(b.draft().value(QStringLiteral("idealHi")).toDouble(), first,
+            near(b.draft().value(QStringLiteral("claimHi")).toDouble(), first,
                  "20 events at ONE pixel leave the corridor exactly where the first put it", 1e-9);
             near(first, lo + (px / W) * (hi - lo),
                  "…and that place is the value the pixel maps to, once");
@@ -203,9 +244,9 @@ int main(int argc, char **argv)
         // A latch must not survive the editor being re-opened or closed under it.
         a.beginHandleDrag();
         a.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext));
-        a.setIdealBand(10.0, 300.0);
+        a.setClaimBand(10.0, 300.0);
         const double reopened = a.sampleSummary().value(QStringLiteral("axisHi")).toDouble();
-        a.setIdealBand(10.0, 30.0);
+        a.setClaimBand(10.0, 30.0);
         check(a.sampleSummary().value(QStringLiteral("axisHi")).toDouble() < reopened,
               "re-opening clears a latch left behind by an interrupted drag");
     }
@@ -275,6 +316,9 @@ int main(int argc, char **argv)
             QVariantMap a = imp.draft();
             check(a.value(QStringLiteral("source")).toString() == QLatin1String("imported"),
                   "adopting marks the source Imported");
+            // The candidate row publishes the band it would GRADE as (`idealLo`), so it reads on
+            // the same scale as the plot beside it; the draft's own `idealLo` is the same
+            // projection of the same numbers once adopted.
             near(num(a, "idealLo"), num(c, "idealLo"), "…and takes the adopted band");
             check(!a.value(QStringLiteral("citation")).toString().isEmpty(),
                   "…and records where it came from");
@@ -282,7 +326,7 @@ int main(int argc, char **argv)
             // A hand edit after an adopt (or a seat) must DROP the borrowed provenance: leaving
             // "Imported" or "Seated · n = 42" attached to numbers a hand has since moved is a claim
             // the norm no longer supports.
-            imp.setIdealBand(1.0, 2.0);
+            imp.setClaimBand(1.0, 2.0);
             a = imp.draft();
             check(a.value(QStringLiteral("source")).toString() == QLatin1String("heuristic"),
                   "a hand edit drops an adopted provenance");
@@ -320,7 +364,7 @@ int main(int argc, char **argv)
             const QVariantMap g = ed2.draft();
             check(g.value(QStringLiteral("refused")).toBool(), "…but is refused");
             check(!g.value(QStringLiteral("refusedReason")).toString().isEmpty(), "…with a reason");
-            ed2.setIdealBand(1.0, 2.0);
+            ed2.setClaimBand(1.0, 2.0);
             check(!ed2.draft().value(QStringLiteral("canSave")).toBool(),
                   "…and cannot be saved however it is dragged");
         }
@@ -355,11 +399,11 @@ int main(int argc, char **argv)
               "resetting a shipped row is refused rather than deleting anything");
 
         // Discard: unsaved changes only, nothing written.
-        r.setIdealBand(11.0, 33.0);
+        r.setClaimBand(11.0, 33.0);
         check(r.draft().value(QStringLiteral("canDiscard")).toBool(), "dragging enables discard");
         const QVariantMap disc = r.discardChanges();
         check(disc.value(QStringLiteral("ok")).toBool(), "discard succeeds");
-        near(num(r.draft(), "idealLo"), seededLo, "…and puts the band back where it was found");
+        near(num(r.draft(), "claimLo"), seededLo, "…and puts the band back where it was found");
         check(!r.draft().value(QStringLiteral("dirty")).toBool(), "…leaving the draft clean");
         check(!r.draft().value(QStringLiteral("overridden")).toBool(),
               "…and having written NOTHING — the row is still the shipped one");
@@ -367,7 +411,7 @@ int main(int argc, char **argv)
               "discarding an unchanged draft is a no-op, and says so");
 
         // Reset: only once there is a saved override.
-        r.setIdealBand(11.0, 33.0);
+        r.setClaimBand(11.0, 33.0);
         const QVariantMap saved = r.save();
         check(saved.value(QStringLiteral("ok")).toBool(), "an edited row saves to the user set");
         if (saved.value(QStringLiteral("ok")).toBool()) {
@@ -377,8 +421,8 @@ int main(int argc, char **argv)
             check(d1.value(QStringLiteral("editedNote")).toString().contains(
                       QStringLiteral("PinPoint ships")),
                   "…and says what the shipped corridor was, which is what a reset goes back TO");
-            near(num(d1, "shippedIdealLo"), seededLo, "…quoting the real shipped low edge");
-            near(num(d1, "idealLo"), 11.0, "the saved band is what resolves");
+            near(num(d1, "shippedClaimLo"), seededLo, "…quoting the real shipped low edge");
+            near(num(d1, "claimLo"), 11.0, "the saved band is what resolves");
 
             const QVariantMap rev = r.resetToDefault();
             check(rev.value(QStringLiteral("ok")).toBool(), "reset drops it");
@@ -386,7 +430,7 @@ int main(int argc, char **argv)
                   "…and the offer goes away with it");
             check(!r.draft().value(QStringLiteral("overridden")).toBool(),
                   "…and the row is shipped again");
-            near(num(r.draft(), "idealLo"), seededLo,
+            near(num(r.draft(), "claimLo"), seededLo,
                  "…leaving the SHIPPED corridor resolving again, untouched");
         }
     }
@@ -408,7 +452,7 @@ int main(int argc, char **argv)
                   == QLatin1String("Remove your override"),
               "…so the label promises removal, NOT a restore of something that never shipped");
 
-        r.setIdealBand(70.0, 90.0);
+        r.setClaimBand(70.0, 90.0);
         if (r.save().value(QStringLiteral("ok")).toBool()) {
             check(r.draft().value(QStringLiteral("editedNote")).toString().contains(
                       QStringLiteral("ships no corridor")),
@@ -433,14 +477,14 @@ int main(int argc, char **argv)
         NormEditorModel general;
         check(general.begin(QString::fromLatin1(kMeasure), QStringLiteral("any")),
               "the general corridor opens at the root");
-        const double generalLo = num(general.draft(), "idealLo");
+        const double generalLo = num(general.draft(), "claimLo");
 
         NormEditorModel fs;
         check(fs.begin(QString::fromLatin1(kMeasure), QStringLiteral("full_swing")),
               "and a full swing opens too");
         const QVariantMap d = fs.draft();
 
-        near(num(d, "idealLo"), generalLo,
+        near(num(d, "claimLo"), generalLo,
              "a full swing opens on the INHERITED band, not an empty one");
         check(!d.value(QStringLiteral("hasShipped")).toBool(),
               "core carries no row at this exact key — the general corridor is at the root");

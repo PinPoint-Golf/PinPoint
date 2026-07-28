@@ -34,11 +34,19 @@ import PinPointStudio
 // heard of a standard deviation — that is the whole point, and it is why this view is not just two
 // number fields.
 //
-// ── The handles bind the IDEAL band ────────────────────────────────────────────────────────────
+// ── The handles bind the norm's own CLAIM ──────────────────────────────────────────────────────
 //
-// Not the Good band. norm.h:111 is authoritative: idealLo()/idealHi() are "what the corridor
-// editor's two handles bind to". The Good and Watch edges follow from the grade policy and are
-// DRAWN, not dragged — they are a consequence of the setting, not a second setting.
+// `_d.claimLo` / `_d.claimHi` — mu +/- one tolerance either side, which is what THIS NORM asserts.
+// norm.h's claimLo()/claimHi() are authoritative and their comment says exactly this.
+//
+// The three bands DRAWN beneath them — Ideal, Good, Watch — are all consequences of the active
+// grade policy, not second settings. Under `standard` the Ideal band lands exactly on the handles.
+// Under `strict` it is narrower and the handles sit outside it; under `lenient`, wider. That is the
+// policy visibly making more or less of the corridor than Ideal, and it is stated rather than
+// hidden — before this, the Ideal band was drawn at the claim on every preset while grade() scaled
+// it, so one number could produce a green band and an amber chip.
+//
+// All arithmetic is in NormEditorModel. This file maps values to pixels and back.
 //
 // All arithmetic is in NormEditorModel. This file maps values to pixels and back, and holds no
 // rule about what a corridor means.
@@ -279,8 +287,8 @@ Item {
                             id: handle
                             required property var modelData
                             readonly property bool isLo: modelData.which === "lo"
-                            readonly property real value: isLo ? (root._d.idealLo || 0)
-                                                               : (root._d.idealHi || 0)
+                            readonly property real value: isLo ? (root._d.claimLo || 0)
+                                                               : (root._d.claimHi || 0)
                             readonly property bool lit: plot.grabbed === modelData.which
                                                         || plot.hovered === modelData.which
 
@@ -331,8 +339,8 @@ Item {
                         // enough. Half the 44 pt target either side; the nearer wins a tie so a
                         // narrow corridor is still separable.
                         function pick(px) {
-                            var dLo = Math.abs(px - plot.xOf(root._d.idealLo || 0))
-                            var dHi = Math.abs(px - plot.xOf(root._d.idealHi || 0))
+                            var dLo = Math.abs(px - plot.xOf(root._d.claimLo || 0))
+                            var dHi = Math.abs(px - plot.xOf(root._d.claimHi || 0))
                             var r   = Theme.sp(22)
                             if (dLo > r && dHi > r) return ""
                             return dLo <= dHi ? "lo" : "hi"
@@ -342,14 +350,14 @@ Item {
                             if (plot.grabbed === "") { plot.hovered = pick(mouse.x); return }
 
                             var v = plot.valOf(mouse.x)
-                            if (plot.grabbed === "lo") root.editor.nudgeIdealLo(v)
-                            else                       root.editor.nudgeIdealHi(v)
+                            if (plot.grabbed === "lo") root.editor.nudgeClaimLo(v)
+                            else                       root.editor.nudgeClaimHi(v)
 
                             // Dragging one handle through the other swaps them in C++. Follow the
                             // swap, or the pointer would carry on pushing the edge it no longer
                             // holds and the corridor would collapse to a point.
-                            var dLo = Math.abs(v - (root._d.idealLo || 0))
-                            var dHi = Math.abs(v - (root._d.idealHi || 0))
+                            var dLo = Math.abs(v - (root._d.claimLo || 0))
+                            var dHi = Math.abs(v - (root._d.claimHi || 0))
                             plot.grabbed = dLo <= dHi ? "lo" : "hi"
                         }
                         onExited: plot.hovered = ""
@@ -427,7 +435,10 @@ Item {
                 ColumnLayout {
                     spacing: Theme.sp(3)
                     Text {
-                        text:                qsTr("IDEAL FROM")
+                        // The field edits the norm's own claim, which is what the handle beside it
+                        // drags. "NORMAL FROM … TO" rather than "IDEAL FROM": the Ideal band is a
+                        // grade, and this control does not set a grade.
+                        text:                qsTr("NORMAL FROM")
                         font.family:         Theme.fontBody
                         font.pixelSize:      Theme.fontSzMicro
                         font.letterSpacing:  Theme.trackingMicro
@@ -438,11 +449,11 @@ Item {
                         id: loField
                         Layout.preferredWidth: Theme.sp(110)
                         enabled: root._d.refused !== true
-                        text:    root._num(root._d.idealLo || 0)
+                        text:    root._num(root._d.claimLo || 0)
                         onEditingFinished: {
                             var v = parseFloat(text)
-                            if (!isNaN(v)) root.editor.nudgeIdealLo(v)
-                            text = root._num(root._d.idealLo || 0)
+                            if (!isNaN(v)) root.editor.nudgeClaimLo(v)
+                            text = root._num(root._d.claimLo || 0)
                         }
                     }
                 }
@@ -461,11 +472,11 @@ Item {
                         id: hiField
                         Layout.preferredWidth: Theme.sp(110)
                         enabled: root._d.refused !== true
-                        text:    root._num(root._d.idealHi || 0)
+                        text:    root._num(root._d.claimHi || 0)
                         onEditingFinished: {
                             var v = parseFloat(text)
-                            if (!isNaN(v)) root.editor.nudgeIdealHi(v)
-                            text = root._num(root._d.idealHi || 0)
+                            if (!isNaN(v)) root.editor.nudgeClaimHi(v)
+                            text = root._num(root._d.claimHi || 0)
                         }
                     }
                 }
@@ -484,11 +495,18 @@ Item {
 
                 // What the grade policy makes of it. Read-only on purpose — these edges are a
                 // consequence of the setting above, not a second setting.
+                //
+                // The IDEAL edge is quoted here alongside Good and Watch, and it has to be: under
+                // any preset but `standard` it is not where the handles are, and an author who
+                // could see Good and Watch move with the policy but not Ideal would reasonably
+                // conclude the green band was fixed. It is not, and it never was — it was only
+                // ever drawn as though it were.
                 Text {
                     Layout.alignment: Qt.AlignBottom
                     Layout.bottomMargin: Theme.sp(8)
-                    text: qsTr("Good to %1 – %2 · action beyond %3 – %4")
-                            .arg(root._num(root._d.goodLo || 0)).arg(root._num(root._d.goodHi || 0))
+                    text: qsTr("Ideal %1 – %2 · good to %3 – %4 · action beyond %5 – %6")
+                            .arg(root._num(root._d.idealLo || 0)).arg(root._num(root._d.idealHi || 0))
+                            .arg(root._num(root._d.goodLo  || 0)).arg(root._num(root._d.goodHi  || 0))
                             .arg(root._num(root._d.watchLo || 0)).arg(root._num(root._d.watchHi || 0))
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzMicro
@@ -861,16 +879,20 @@ Item {
 
                 // The inheritance line, with the delta. "You are 37 wider than the full swing" is
                 // the sentence that tells an author whether the override is worth having.
+                //
+                // CLAIM against CLAIM on both sides. Comparing policy-scaled bands would multiply
+                // both widths by the same factor and change the sentence without changing anything
+                // the author could act on.
                 Text {
                     Layout.fillWidth: true
                     visible: root._d.hasParent === true
                     text: qsTr("%1 sets %2 to %3. This corridor is %4 %5 wide against its %6.")
                             .arg(root._d.inheritedFrom || "")
-                            .arg(root._num(root._d.parentIdealLo || 0))
-                            .arg(root._num(root._d.parentIdealHi || 0))
-                            .arg(root._num(((root._d.idealHi || 0) - (root._d.idealLo || 0))))
+                            .arg(root._num(root._d.parentClaimLo || 0))
+                            .arg(root._num(root._d.parentClaimHi || 0))
+                            .arg(root._num(((root._d.claimHi || 0) - (root._d.claimLo || 0))))
                             .arg(root._unit)
-                            .arg(root._num(((root._d.parentIdealHi || 0) - (root._d.parentIdealLo || 0))))
+                            .arg(root._num(((root._d.parentClaimHi || 0) - (root._d.parentClaimLo || 0))))
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzMicro
                     color:          Theme.colorText3

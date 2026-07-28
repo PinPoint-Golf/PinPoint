@@ -126,7 +126,7 @@ public:
     //   { found, contextId, contextLabel, inherited, inheritedFrom, own,
     //     mu, idealLo, idealHi, goodLo, goodHi, watchLo, watchHi, explicitMonitor,
     //     unit, n, source, sourceLabel, author, citation, setOn, weak, weakReason,
-    //     overridden, hasShipped, shippedIdealLo, shippedIdealHi }
+    //     overridden, hasShipped, shippedClaimLo, shippedClaimHi }
     Q_INVOKABLE QVariantMap normAt(const QString &measureId, const QString &contextId) const;
 
     // The metric -> measure join, marshalled for QML. `phase` is the Phase enum as an int, which

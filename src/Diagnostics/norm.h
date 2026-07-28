@@ -149,11 +149,36 @@ struct Norm {
 
     bool hasExplicitMonitor() const { return monitorLo.has_value() && monitorHi.has_value(); }
 
-    // The Ideal band's edges, in the measure's own units. This is what the corridor editor's two
-    // handles bind to, and what projects into a reference Band for the wrist grid.
-    double idealLo() const { return mu - sigmaLo; }
-    double idealHi() const { return mu + sigmaHi; }
+    // THE NORM'S OWN CLAIM, in the measure's own units: mu +/- one tolerance either side.
+    //
+    // This is NOT the Ideal band, and the two must never share a name again. The Ideal band is
+    // `mu +/- idealMaxZ * sigma` — it MOVES when the user changes the grade policy. The claim does
+    // not: it is what this norm asserts about the population, and a sensitivity setting has no
+    // business editing an assertion.
+    //
+    // They coincide under the `standard` preset (idealMaxZ = 1.0), which is exactly why calling
+    // both of them "ideal" survived for nine stages. Under `strict` (0.75) a value at 0.9 sigma was
+    // DRAWN inside the green band and GRADED Good — and ragOf(Good) is Amber, so one number
+    // produced a green band and an amber chip. `withinBand`'s comment below exists to eliminate
+    // that class of disagreement at float-epsilon scale; this was the same disagreement at
+    // whole-band scale.
+    //
+    // Use the claim for AUTHORING and DIFF — the corridor editor's handles, the comparison against
+    // a shipped or parent row, the validator. Use `bandEdgesOf()` for anything that RENDERS or
+    // GRADES. Those are no longer interchangeable, and each call site is a deliberate choice.
+    double claimLo() const { return mu - sigmaLo; }
+    double claimHi() const { return mu + sigmaHi; }
 };
+
+// The grade policy's bands must nest. Asserted rather than left as a property of three
+// hand-written presets, because the engine silently depends on it: `onTail` compares a value
+// against the Ideal edge while `deviated` comes from grade(), so a policy with goodMaxZ < idealMaxZ
+// would let a reading be a deviation that is not on either tail — a signal that can never fire, for
+// a reason nothing reports.
+inline bool gradePolicyIsOrdered(const GradePolicy &p)
+{
+    return p.idealMaxZ > 0.0 && p.goodMaxZ >= p.idealMaxZ && p.watchMaxZ >= p.goodMaxZ;
+}
 
 // Signed distance from the norm, in tolerances, computed PER SIDE so an asymmetric norm grades
 // asymmetrically. A zero tolerance on the relevant side yields infinity rather than a division by
@@ -231,10 +256,19 @@ inline bool isDeviation(Grade g) { return g == Grade::Watch || g == Grade::Actio
 // not use: the Watch edge is `monitorLo/Hi` when the norm states them and z-derived when it does
 // not, and that precedence has to be stated once.
 //
-// The Ideal band is policy-INDEPENDENT (it is mu ± sigma, the norm's own claim). Only the Watch
-// edge moves with the grade policy, and then only for a norm with no explicit monitor band.
+// EVERY edge here is policy-DEPENDENT. The Ideal edge is `mu -/+ idealMaxZ * sigma` and the Watch
+// edge is `mu -/+ watchMaxZ * sigma` (or the explicit monitor band, which dominates). One edge,
+// computed one way, on both the drawing path and the grading path.
+//
+// This was not always true. Until the fix, `idealLo/idealHi` here were `mu -/+ sigma` — the norm's
+// own claim — while grade() applied `policy.idealMaxZ`. Under `standard` the two coincide; under
+// `strict` and `lenient` they do not, and the band a surface drew was not the band the app graded.
+//
+// If you want the norm's own claim — for the editor's handles, or a diff against a shipped or
+// parent row — that is `Norm::claimLo()/claimHi()`, and it is a DIFFERENT question. See the comment
+// on those.
 struct NormBandEdges {
-    double idealLo = 0.0, idealHi = 0.0;   // mu −/+ sigma
+    double idealLo = 0.0, idealHi = 0.0;   // mu −/+ idealMaxZ * sigma
     double watchLo = 0.0, watchHi = 0.0;   // where Action begins
 };
 
@@ -246,8 +280,11 @@ inline NormBandEdges bandEdgesOf(const Norm &n, const GradePolicy &policy = {},
                                  double marginOverride = -1.0)
 {
     NormBandEdges e;
-    e.idealLo = n.idealLo();
-    e.idealHi = n.idealHi();
+    // Computed the same way withinBand() computes it, so the drawn edge and the graded edge agree
+    // by construction at every magnitude — the float-edge doctrine, applied to the band it had
+    // never been applied to.
+    e.idealLo = n.mu - policy.idealMaxZ * n.sigmaLo;
+    e.idealHi = n.mu + policy.idealMaxZ * n.sigmaHi;
     if (marginOverride >= 0.0) {
         e.watchLo = e.idealLo - marginOverride;
         e.watchHi = e.idealHi + marginOverride;

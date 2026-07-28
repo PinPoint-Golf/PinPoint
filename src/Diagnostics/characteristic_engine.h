@@ -46,7 +46,11 @@ namespace pinpoint::analysis {
 struct MeasureReading {
     double value       = 0.0;
     bool   hasCorridor = false;
-    double greenLo     = 0.0;    // the Ideal band, in the measure's own units
+    // The POLICY's Ideal band, in the measure's own units — `mu -/+ idealMaxZ * sigma`, the same
+    // edge bandEdgesOf() draws and grade() applies. NOT the norm's bare claim: `onTail` below
+    // compares against these while `deviated` comes from the grade, and two scales would let a
+    // reading be a deviation on neither tail.
+    double greenLo     = 0.0;
     double greenHi     = 0.0;
     float  confidence  = 1.0f;   // 0..1; propagates into the finding
 
@@ -69,9 +73,14 @@ struct MeasureReading {
     //
     // Use this rather than setting hasCorridor by hand: a reading with a corridor and a default
     // NotMeasured grade silently never fires, which looks exactly like "nothing was wrong" and is
-    // the one failure mode this whole module exists to prevent. The band is read as +/-1 sigma
-    // about its midpoint — the same conversion the migrated corridors use — so a value inside the
-    // band grades Ideal and the numbers mean the same thing on both paths.
+    // the one failure mode this whole module exists to prevent.
+    //
+    // The band handed in is an IDEAL band, so inverting it back to a Norm has to undo the same
+    // scaling bandEdgesOf() applied: the half-width is `idealMaxZ * sigma`, not sigma. Dividing by
+    // 2 alone was right only while the Ideal band was drawn at mu +/- sigma on every preset, which
+    // is exactly the defect this stage removed — under `strict` it would have produced a norm with
+    // three-quarters of the real tolerance and graded every reading harder than the corridor it
+    // was built from.
     static MeasureReading fromCorridor(double value, double greenLo, double greenHi,
                                        float confidence = 1.0f, const GradePolicy &policy = {})
     {
@@ -82,9 +91,12 @@ struct MeasureReading {
         r.greenLo     = greenLo;
         r.greenHi     = greenHi;
 
+        const double halfWidth = (greenHi - greenLo) / 2.0;
+        const double k         = policy.idealMaxZ > 0.0 ? policy.idealMaxZ : 1.0;
+
         Norm n;
         n.mu      = (greenLo + greenHi) / 2.0;
-        n.sigmaLo = n.sigmaHi = (greenHi - greenLo) / 2.0;
+        n.sigmaLo = n.sigmaHi = halfWidth / k;
         // Qualified: the `grade` MEMBER shadows the free grade() inside this scope.
         r.grade   = ::pinpoint::analysis::grade(value, n, policy);
         return r;

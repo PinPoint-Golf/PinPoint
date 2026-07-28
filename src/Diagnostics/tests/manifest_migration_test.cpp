@@ -231,8 +231,12 @@ int main()
         if (s && l) {
             check(s->amberLo > l->amberLo && s->amberHi < l->amberHi,
                   "a z-derived Watch edge tightens under a stricter policy");
-            check(s->greenLo == l->greenLo && s->greenHi == l->greenHi,
-                  "…and the Ideal band does not move: it is the norm's own claim");
+            // EVERY drawn edge moves with the policy, Ideal included. This asserted the opposite
+            // until 2026-07-28, which is how the divergence survived: bandEdgesOf() drew
+            // mu +/- sigma while grade() applied idealMaxZ, so under `strict` a value could sit
+            // inside the drawn green band and carry an Amber chip.
+            check(s->greenLo > l->greenLo && s->greenHi < l->greenHi,
+                  "…and so does the Ideal band — it is a grade, not the norm's claim");
         }
 
         // The tempo norm states its monitor bounds, so the policy must NOT move its amber edge.

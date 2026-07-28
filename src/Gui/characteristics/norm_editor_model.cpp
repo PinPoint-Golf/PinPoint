@@ -233,7 +233,7 @@ void NormEditorModel::setRoute(const QString &r)
 
 // ── Set by hand ─────────────────────────────────────────────────────────────
 
-void NormEditorModel::setIdealBand(double lo, double hi)
+void NormEditorModel::setClaimBand(double lo, double hi)
 {
     if (hi < lo) std::swap(lo, hi);
 
@@ -255,8 +255,8 @@ void NormEditorModel::setIdealBand(double lo, double hi)
     emit sampleChanged();
 }
 
-void NormEditorModel::nudgeIdealLo(double to) { setIdealBand(to, m_draft.idealHi()); }
-void NormEditorModel::nudgeIdealHi(double to) { setIdealBand(m_draft.idealLo(), to); }
+void NormEditorModel::nudgeClaimLo(double to) { setClaimBand(to, m_draft.claimHi()); }
+void NormEditorModel::nudgeClaimHi(double to) { setClaimBand(m_draft.claimLo(), to); }
 
 void NormEditorModel::beginHandleDrag()
 {
@@ -556,8 +556,11 @@ QVariantList NormEditorModel::importCandidates() const
         r.insert(QStringLiteral("contextId"),    cid);
         r.insert(QStringLiteral("contextLabel"), contextLabel(cid));
         r.insert(QStringLiteral("mu"),           n->mu);
-        r.insert(QStringLiteral("idealLo"),      n->idealLo());
-        r.insert(QStringLiteral("idealHi"),      n->idealHi());
+        // A preview of what adopting this row would GRADE as Ideal, so it reads on the same scale
+        // as the plot beside it rather than on the row's bare claim.
+        const NormBandEdges ce = bandEdgesOf(*n, policy());
+        r.insert(QStringLiteral("idealLo"),      ce.idealLo);
+        r.insert(QStringLiteral("idealHi"),      ce.idealHi);
         r.insert(QStringLiteral("sourceLabel"),  sourceLabel(n->source));
         r.insert(QStringLiteral("n"),            n->n);
         out.append(r);
@@ -759,6 +762,20 @@ QVariantMap NormEditorModel::draft() const
     const NormBandEdges e = bandEdgesOf(m_draft, p);
 
     out.insert(QStringLiteral("mu"),      m_draft.mu);
+
+    // TWO different pairs, and the editor is the one screen where the difference is visible.
+    //
+    //   claimLo/claimHi  — mu +/- sigma, what THIS NORM asserts. The handles bind here, the
+    //                      numeric fields edit here, and neither moves when the grade policy
+    //                      changes: a sensitivity setting must not edit an assertion.
+    //   idealLo/idealHi  — mu +/- idealMaxZ * sigma, what the ACTIVE POLICY grades as Ideal. The
+    //                      green band on the plot is drawn from these.
+    //
+    // Under `standard` they are the same numbers, which is why one pair sufficed for nine stages.
+    // Under `strict` the handles now sit OUTSIDE the drawn green core, and that is the point: it is
+    // the policy visibly making more of the corridor than Ideal, stated rather than hidden.
+    out.insert(QStringLiteral("claimLo"), m_draft.claimLo());
+    out.insert(QStringLiteral("claimHi"), m_draft.claimHi());
     out.insert(QStringLiteral("idealLo"), e.idealLo);
     out.insert(QStringLiteral("idealHi"), e.idealHi);
     out.insert(QStringLiteral("goodLo"),  m_draft.mu - p.goodMaxZ * m_draft.sigmaLo);
@@ -786,8 +803,11 @@ QVariantMap NormEditorModel::draft() const
         parentId.isEmpty() ? NormResolution{} : m_norms->resolve(m_measureId, parentId);
     out.insert(QStringLiteral("inherited"),     !m_hadOwnRow);
     out.insert(QStringLiteral("inheritedFrom"), par.found() ? contextLabel(par.contextId) : QString());
-    out.insert(QStringLiteral("parentIdealLo"), par.found() ? par.norm->idealLo() : 0.0);
-    out.insert(QStringLiteral("parentIdealHi"), par.found() ? par.norm->idealHi() : 0.0);
+    // A DIFF against the parent row, so both sides are CLAIMS. "You are 37 wider than the full
+    // swing" compares two assertions; running it through the grade policy would scale both by the
+    // same factor and change the sentence for no reason the reader could act on.
+    out.insert(QStringLiteral("parentClaimLo"), par.found() ? par.norm->claimLo() : 0.0);
+    out.insert(QStringLiteral("parentClaimHi"), par.found() ? par.norm->claimHi() : 0.0);
     out.insert(QStringLiteral("hasParent"),     par.found());
 
     out.insert(QStringLiteral("dirty"),          m_dirty);
@@ -807,8 +827,9 @@ QVariantMap NormEditorModel::draft() const
     out.insert(QStringLiteral("overridden"), overridden);
     out.insert(QStringLiteral("canReset"),   overridden);
     out.insert(QStringLiteral("hasShipped"), shipped != nullptr);
-    out.insert(QStringLiteral("shippedIdealLo"), shipped ? shipped->idealLo() : 0.0);
-    out.insert(QStringLiteral("shippedIdealHi"), shipped ? shipped->idealHi() : 0.0);
+    // Also a diff, also both sides claims — see parentClaimLo above.
+    out.insert(QStringLiteral("shippedClaimLo"), shipped ? shipped->claimLo() : 0.0);
+    out.insert(QStringLiteral("shippedClaimHi"), shipped ? shipped->claimHi() : 0.0);
     out.insert(QStringLiteral("resetLabel"),
                shipped ? tr("Reset to shipped") : tr("Remove your override"));
 
@@ -818,8 +839,8 @@ QVariantMap NormEditorModel::draft() const
     QString editedNote;
     if (overridden && shipped)
         editedNote = tr("You changed this. PinPoint ships %1 to %2 %3.")
-                         .arg(QString::number(shipped->idealLo(), 'f', 1),
-                              QString::number(shipped->idealHi(), 'f', 1), unitOf());
+                         .arg(QString::number(shipped->claimLo(), 'f', 1),
+                              QString::number(shipped->claimHi(), 'f', 1), unitOf());
     else if (overridden)
         editedNote = tr("You added this. PinPoint ships no corridor for %1 — without yours it "
                         "would inherit.").arg(contextLabel(m_contextId));

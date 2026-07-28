@@ -195,8 +195,13 @@ struct Norm {
     std::optional<double> monitorLo, monitorHi;   // absolute Watch bounds — migrated content only
     int        n;  NormSource source;  QString unit, author, citation;  QDate setOn;
     std::optional<NormBasis> basedOn;  // what an override was made against (user rows only)
+
+    double claimLo() const;            // mu - sigmaLo — the norm's OWN claim, policy-free
+    double claimHi() const;            // mu + sigmaHi
 };
 ```
+
+`claimLo()/claimHi()` are **not** the Ideal band. The Ideal band is `mu ± idealMaxZ × sigma` and comes from `bandEdgesOf()`; it moves with the grade policy and the claim does not. See §5.
 
 **All norms are population norms.** There is no per-athlete norm and nothing here should ever gain one — a norm that differs per player is a different feature with different storage and a different UI. Seating from a chosen set of swings records `n` and the scope in provenance; the result still applies to everyone using that norm set.
 
@@ -299,7 +304,13 @@ struct NormBandEdges { double idealLo, idealHi, watchLo, watchHi; };
 NormBandEdges bandEdgesOf(norm, policy = {}, marginOverride = -1.0);
 ```
 
-The Ideal band is policy-**independent** (it is the norm's own claim, mu ± sigma). Only the Watch edge moves with the policy, and only for a norm with no explicit monitor band. `bandEdgesOf()` is the single definition of that precedence, consumed by `NormBandProvider` (the wrist grid), `NormModel::normAt` (the measures view) and `metric_corridor.h` (metric detail + dashboard). It replaced three copies, one of which — the corridor editor's — was drawing the wrong Watch edge for all 56 migrated rows.
+**Every edge here is policy-dependent, Ideal included.** `bandEdgesOf()` is the single definition of that precedence, consumed by `NormBandProvider` (the wrist grid), `NormModel::normAt` (the measures view) and `metric_corridor.h` (metric detail + dashboard). It replaced three copies, one of which — the corridor editor's — was drawing the wrong Watch edge for all 56 migrated rows.
+
+**The norm's own claim is a different object and does not live here.** `Norm::claimLo()/claimHi()` is `mu ± sigma` — what the norm asserts about the population — and it never moves when a user changes the grade policy. Use it for **authoring and diff** (the corridor editor's handles, a comparison against a shipped or parent row, the validator); use `bandEdgesOf()` for anything that **renders or grades**. The two are not interchangeable, and every call site is a deliberate choice between them.
+
+They were interchangeable until 2026-07-28, wrongly. `bandEdgesOf()` set `idealLo = mu − sigmaLo` while `grade()` applied `policy.idealMaxZ`; under `standard` (idealMaxZ = 1.0) those coincide, which is why nothing caught it for nine stages. Under `strict` (0.75) a value at 0.9σ was **drawn inside the green band and graded `Good`** — and `ragOf(Good)` is Amber, so one number produced a green band and an amber chip. Under `lenient` (1.5) a value at 1.3σ was drawn outside green and graded Ideal. This is exactly the disagreement `withinBand`'s own comment exists to eliminate, at whole-band scale rather than float-epsilon scale.
+
+`norm_test` now sweeps both Ideal edges under every preset, and asserts `gradePolicyIsOrdered()` — `idealMaxZ > 0`, `goodMaxZ ≥ idealMaxZ`, `watchMaxZ ≥ goodMaxZ`. The engine silently depends on that ordering: `onTail` compares against the Ideal edge while `deviated` comes from `grade()`, so a preset with `goodMaxZ < idealMaxZ` would admit a reading that is a deviation on neither tail — a signal that can never fire, for a reason nothing reports. It held only because three hand-written presets happened to be ordered.
 
 `marginOverride` is the SwingLab `bands.*` sweep. It exists because half the norms do not store their Watch edge as a margin at all, so sweeping "the margin" without it would silently do nothing on those.
 
@@ -638,7 +649,7 @@ All in the analyzer suite: `cmake -S src/Analysis/tests -B build/analyzer-tests`
 | `characteristic_pack_test` | load, save, validation, every error and warning code |
 | `core_pack_test` | the SHIPPED pack: ids, referential integrity, that every live corridor signal can fire, and that **everything which can fire can also be explained** — a condition detectable today with no cause is a defect, not a backlog item |
 | `axis_direction_test` | every corridor signal points the way its own condition claims. The fixture carries the catalogue quote that decides each row, so a new signal with no fixture row **fails** |
-| `norm_test` | the grade rule: per-side z, and monitor bounds dominating in both directions |
+| `norm_test` | the grade rule: per-side z, monitor bounds dominating in both directions, the drawn Ideal edge agreeing with the graded one **under every preset**, and the preset ordering invariant |
 | `norm_pack_test` | persistence, validation, layering — and that context specificity beats layer precedence |
 | `context_tree_test` | upward resolution, the unknown-context rule, the shipped tree |
 | `measure_facets_test`, `anatomy_vocabulary_test` | the Composed vocabulary and its validity table |
@@ -674,6 +685,7 @@ Each of these is a bug that shipped or nearly shipped. They are here because non
 9. **Inside a Repeater delegate, only the component root id resolves** — and a handler on a composite type that declares its own `id: root` cannot see even that. It throws only on click, so no binding, test or screenshot will show it. At file scope, `root.x` inside a composite is fine.
 10. **A `const Condition *` dies when `save()` reloads the provider.** Copy what you need out first.
 11. **Text links are `Theme.colorAccent` at rest**, body font, trailing arrow, cursor change only (`ScreenHome.qml`'s `switchLink`). Muted-until-hover is for secondary chrome, not for a way out of the page.
+12. **A default setting can hide a whole-band defect, and the tests will agree with it.** The Ideal band was drawn at `mu ± sigma` and graded at `mu ± idealMaxZ × sigma` for nine stages. Under `standard` those are the same number, so nothing failed — and three separate tests had written the defect down as a requirement ("a policy change does not move the IDEAL band"). **When a value is a default, sweep the non-defaults**: `norm_test` and `norm_editor_model_test` now assert under every shipped preset, not only the shipped one.
 
 ---
 
