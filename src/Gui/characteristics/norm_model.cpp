@@ -418,11 +418,22 @@ QVariantList NormModel::measures(const QVariantMap &filters) const
 
 // ── One norm, resolved ──────────────────────────────────────────────────────
 
-QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId) const
+QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId,
+                              const QVariantMap &athlete) const
 {
     QVariantMap out;
 
-    const NormResolution res = m_norms->resolve(measureId, contextId);
+    // An unreadable cohort resolves NOTHING rather than falling back to unqualified. The fallback
+    // would silently answer with the corridor for everyone when the caller asked about a segment,
+    // and a row that grades the whole population is exactly what a mis-spelled cohort must not
+    // produce — the same reason the parser drops such a row instead of keeping it.
+    Cohort who;
+    if (!cohortFromMap(athlete, who)) {
+        out.insert(QStringLiteral("found"), false);
+        return out;
+    }
+
+    const NormResolution res = m_norms->resolve(measureId, contextId, who);
     out.insert(QStringLiteral("found"), res.found());
     if (!res.found())
         return out;
@@ -442,6 +453,13 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     out.insert(QStringLiteral("own"),           !res.inherited);
     out.insert(QStringLiteral("inheritedFrom"), res.inherited ? (cn ? cn->label : res.contextId)
                                                               : QString());
+
+    // WHICH POPULATION answered — the row's own cohort, not the one asked for, because a `female`
+    // row can answer for a woman of 60 when nothing more specific exists and the corridor grading
+    // her is the one that must be named. Empty label ⇒ unqualified, so a surface appends it
+    // unconditionally and a universal corridor says nothing rather than saying "everyone".
+    out.insert(QStringLiteral("cohort"),      cohortToMap(res.cohort()));
+    out.insert(QStringLiteral("cohortLabel"), cohortLabel(res.cohort()));
 
     // The Watch edge — where Action begins — comes from bandEdgesOf(), the one place the precedence
     // (explicit monitor bounds DOMINATE the z-derived edge, exactly as grade() applies them) is
@@ -491,7 +509,11 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     // A DIFF, so it takes the norm's own CLAIM rather than the policy's Ideal band: "PinPoint ships
     // 8 to 15" is a statement about what core asserts, and it must not change wording because the
     // reader moved a sensitivity slider. Both sides of the comparison are claims.
-    const Norm *shipped = m_norms->shippedNorm(measureId, res.contextId);
+    // Keyed on the context AND cohort the row was actually found at, exactly as `overridden` is. A
+    // cohort-qualified override compared against the UNQUALIFIED shipped row would say "ships 8 to
+    // 15" about a corridor core never authored for that segment — two different populations quoted
+    // as one revision.
+    const Norm *shipped = m_norms->shippedNorm(measureId, res.contextId, res.cohort());
     out.insert(QStringLiteral("overridden"),     res.overridden);
     out.insert(QStringLiteral("hasShipped"),     shipped != nullptr);
     out.insert(QStringLiteral("shippedClaimLo"), shipped ? shipped->claimLo() : 0.0);
@@ -553,23 +575,44 @@ QVariantMap NormModel::measureDetail(const QString &measureId) const
     const ContextTree &tree = m_norms->contexts();
     QVariantList       norms;
     for (const QString &cid : tree.inOrder()) {
-        QVariantMap row = normAt(measureId, cid);
-        if (!row.value(QStringLiteral("found")).toBool()) continue;
-
         const ContextNode *cn = tree.node(cid);
-        row.insert(QStringLiteral("askedContextId"),    cid);
-        row.insert(QStringLiteral("askedContextLabel"), cn ? cn->label : cid);
-        row.insert(QStringLiteral("depth"),             tree.depth(cid));
-        norms.append(row);
+
+        auto append = [&](QVariantMap row, const QVariantMap &askedCohort) {
+            if (!row.value(QStringLiteral("found")).toBool()) return;
+            row.insert(QStringLiteral("askedContextId"),    cid);
+            row.insert(QStringLiteral("askedContextLabel"), cn ? cn->label : cid);
+            row.insert(QStringLiteral("askedCohort"),       askedCohort);
+            row.insert(QStringLiteral("depth"),             tree.depth(cid));
+            norms.append(row);
+        };
+
+        // The universal corridor first: what grades a shot here for a golfer whose demographics we
+        // do not have, which is everyone today.
+        append(normAt(measureId, cid), QVariantMap{});
+
+        // Then one row per SEGMENTED corridor authored at this exact context. Own rows only, and
+        // that is a deliberate line: cohort inheritance is a resolution behaviour, and rendering it
+        // would multiply thirteen contexts by six cohort keys into a list nobody could read. What
+        // this list has to guarantee is that every authored row is REACHABLE — a corridor that
+        // exists in the file and appears in no view is one nothing can open, edit or delete.
+        for (const Cohort &who : m_norms->norms().cohortsFor(measureId, cid)) {
+            const QVariantMap asked = cohortToMap(who);
+            append(normAt(measureId, cid, asked), asked);
+        }
     }
     out.insert(QStringLiteral("norms"),    norms);
     out.insert(QStringLiteral("hasNorm"),  !norms.isEmpty());
-    out.insert(QStringLiteral("ownNormCount"),
-               int(m_norms->overriddenContextsFor(measureId).size()));
 
-    int editedRows = 0;
-    for (const QString &cid : m_norms->overriddenContextsFor(measureId))
-        if (m_norms->isOverridden(measureId, cid)) ++editedRows;
+    // Counted over ROWS, not over contexts. The two were the same number while one context held at
+    // most one row; a cohort-qualified row is a corridor of its own, and a count that skipped it
+    // would say "2 of its own" about a measure carrying three.
+    int ownRows = 0, editedRows = 0;
+    for (const Norm &n : m_norms->norms().norms) {
+        if (n.measureId != measureId) continue;
+        ++ownRows;
+        if (m_norms->isOverridden(n.measureId, n.contextId, n.cohort)) ++editedRows;
+    }
+    out.insert(QStringLiteral("ownNormCount"),    ownRows);
     out.insert(QStringLiteral("editedNormCount"), editedRows);
 
     // ── Used by ──────────────────────────────────────────────────────────────

@@ -71,6 +71,11 @@ Item {
         if (n.contextLabel)
             parts.push(n.inherited === true ? qsTr("Inherited from %1").arg(n.contextLabel)
                                             : n.contextLabel)
+        // Which population the corridor describes, second — right after where it came from, because
+        // both answer "whose corridor is this". Absent on a universal corridor, which is every
+        // shipped row: cohortLabel is empty there on purpose, so this term simply does not appear.
+        if (n.cohortLabel)
+            parts.push(qsTr("graded against %1").arg(n.cohortLabel))
         if (n.sourceLabel)
             parts.push(n.n > 0 ? qsTr("%1, n = %2").arg(n.sourceLabel).arg(n.n) : n.sourceLabel)
         if (n.overridden === true)

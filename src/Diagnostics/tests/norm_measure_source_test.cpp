@@ -51,11 +51,13 @@ public:
             { QStringLiteral("wedge"),      QStringLiteral("Wdg"),   QStringLiteral("full_swing") },
         });
     }
-    void add(const char *measure, const char *context, double mu, double sigma)
+    void add(const char *measure, const char *context, double mu, double sigma,
+             Cohort cohort = {})
     {
         Norm n;
         n.measureId = QLatin1String(measure);
         n.contextId = QLatin1String(context);
+        n.cohort    = cohort;
         n.mu        = mu;
         n.sigmaLo = n.sigmaHi = sigma;
         m_norms.upsert(n);
@@ -258,6 +260,53 @@ int main()
         check(inf && dec && inf->state == FindingState::Fired
                   && inf->confidence < dec->confidence,
               "an inferred context fires the same finding at LOWER confidence");
+    }
+
+    // ── Which population graded it, on the reading itself ───────────────────
+    //
+    // The engine is dormant, so this is the only place the field can be exercised — and a field
+    // nothing sets is a field that reads `undefined` at whatever surface eventually shows it.
+    std::printf("=== the answering cohort reaches the reading ===\n");
+    {
+        Cohort women;
+        women.sex = Sex::Female;
+        Cohort seniorWomen;
+        seniorWomen.sex = Sex::Female;
+        seniorWomen.age = AgeBand::Adult55_64;
+
+        auto segmented = std::make_shared<FakeNorms>();
+        segmented->add("m_ballPosition", "full_swing", 50.0, 10.0);              // universal
+        segmented->add("m_ballPosition", "full_swing", 30.0, 10.0, women);       // segmented
+
+        FakeValues v;
+        v.set(QStringLiteral("m_ballPosition"), 30.0);
+
+        // An athlete we know nothing about is graded by the universal corridor, and the reading says
+        // so by carrying an unqualified cohort — which is an answer, not a blank.
+        const NormMeasureSource anon(v, segmented, QStringLiteral("full_swing"));
+        const auto ra = anon.read(QStringLiteral("m_ballPosition"));
+        check(ra && ra->normCohort.isUnqualified() && ra->greenLo == 40.0,
+              "an athlete with no demographics reads the universal corridor, cohort unqualified");
+        check(ra && ra->grade == Grade::Good,
+              "…and 30 is two tolerances out of it");
+
+        // The same swing, the same number, a golfer the pack has a corridor for.
+        const NormMeasureSource hers(v, segmented, QStringLiteral("full_swing"), GradePolicy{},
+                                     nullptr, women);
+        const auto rh = hers.read(QStringLiteral("m_ballPosition"));
+        check(rh && rh->normCohort == women,
+              "a segmented corridor names ITS OWN cohort on the reading");
+        check(rh && rh->grade == Grade::Ideal,
+              "…and the grade improves because the corridor became right for her, which is exactly "
+              "what the surface has to be able to explain");
+
+        // Broader than asked for: nothing exists for her band, so the sex row answers — and the
+        // reading names the row that GRADED, not the question that was asked.
+        const NormMeasureSource senior(v, segmented, QStringLiteral("full_swing"), GradePolicy{},
+                                       nullptr, seniorWomen);
+        const auto rs = senior.read(QStringLiteral("m_ballPosition"));
+        check(rs && rs->normCohort == women,
+              "a broader row answering names the broader cohort, not the athlete's");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

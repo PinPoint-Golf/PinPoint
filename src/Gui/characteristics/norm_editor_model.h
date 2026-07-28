@@ -159,10 +159,18 @@ public:
     // be the band edges that grade, so the editor cannot hold its own idea of the policy.
     Q_INVOKABLE void setGradePolicy(const QString &name);
 
-    // Open a draft for (measureId, contextId). Returns false when the measure is unknown or cannot
-    // hold a norm at all — a NotCapturable measure is refused rather than given an editor that
-    // produces a corridor no sensor can ever feed. `draft.refused` carries the reason for display.
-    Q_INVOKABLE bool begin(const QString &measureId, const QString &contextId);
+    // Open a draft for (measureId, contextId, cohort). Returns false when the measure is unknown or
+    // cannot hold a norm at all — a NotCapturable measure is refused rather than given an editor
+    // that produces a corridor no sensor can ever feed. `draft.refused` carries the reason for
+    // display.
+    //
+    // The COHORT IS PART OF THE ROW IDENTITY, spelled as the JSON spells it and defaulting to
+    // unqualified. Everything the draft keys on follows it: what it seeds from, what `save()`
+    // upserts, what `resetToDefault()` removes and which shipped row the basis is stamped against.
+    // An unreadable cohort is REFUSED outright rather than dropped to unqualified — a segment's
+    // editor silently becoming the editor for everyone is the one outcome worth failing over.
+    Q_INVOKABLE bool begin(const QString &measureId, const QString &contextId,
+                           const QVariantMap &cohort = {});
     Q_INVOKABLE void cancel();
 
     // ── Set by hand ─────────────────────────────────────────────────────────
@@ -328,6 +336,7 @@ private:
     bool                        m_open = false;
     QString                     m_measureId;
     QString                     m_contextId;
+    pinpoint::analysis::Cohort  m_cohort;              // the third term of the row identity
     QString                     m_route;
     pinpoint::analysis::Norm    m_draft;
     pinpoint::analysis::Norm    m_original;

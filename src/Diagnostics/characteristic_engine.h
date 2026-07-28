@@ -76,6 +76,10 @@ struct MeasureReading {
     // Where the norm came from, for the UI's "inherited from full swing" line. Empty when none
     // resolved.
     QString normContextId;
+    // WHICH POPULATION graded it. Unqualified for every shipped corridor, and unqualified is not a
+    // missing answer — it is "this corridor describes everyone". A finding that names its cohort is
+    // how a golfer reads an improved grade as the corridor becoming right for them.
+    Cohort  normCohort;
     // The shot did not declare a context, so it was graded against the default. The finding's
     // confidence is demoted for this — see the engine.
     bool    contextInferred = false;

@@ -194,15 +194,24 @@ QString NormEditorModel::contextLabel(const QString &id) const
 
 // ── Opening a draft ─────────────────────────────────────────────────────────
 
-bool NormEditorModel::begin(const QString &measureId, const QString &contextId)
+bool NormEditorModel::begin(const QString &measureId, const QString &contextId,
+                            const QVariantMap &cohort)
 {
     const Measure *m = m_pack->pack().measure(measureId);
     if (!m || contextId.isEmpty() || !m_norms->contexts().node(contextId))
         return false;
 
+    // Refused, not coerced. A cohort this build cannot read would fall back to unqualified, and the
+    // author would then be editing the corridor for EVERYONE on a screen they opened to edit one
+    // segment — a save that looks routine and rewrites the wrong row.
+    Cohort who;
+    if (!cohortFromMap(cohort, who))
+        return false;
+
     m_open       = true;
     m_measureId  = measureId;
     m_contextId  = contextId;
+    m_cohort     = who;
     m_route      = QStringLiteral("hand");
     m_dirty      = false;
     m_axisLocked = false;      // a drag interrupted by re-opening must not leave the axis latched
@@ -218,20 +227,21 @@ bool NormEditorModel::begin(const QString &measureId, const QString &contextId)
                         : m->gapReason;
     }
 
-    // Seed from what resolves TODAY — an own row if there is one, otherwise the inherited corridor,
-    // so "override for this context" starts from the thing being overridden rather than from zero.
-    //
-    // Resolved with NO ATHLETE COHORT, deliberately, and the draft below is unqualified for the same
-    // reason: this editor edits the corridor everyone is graded against. Passing a cohort here would
-    // let a segment's row seed a draft that then SAVES at the unqualified key — one population's
-    // numbers quietly promoted to the whole population. Cohort becomes part of the row identity this
-    // editor holds when the surfaces that can display it land; until then, unqualified end to end.
-    const NormResolution res = m_norms->resolve(measureId, contextId);
-    m_hadOwnRow = res.found() && !res.inherited;
+    // Seed from what resolves TODAY for THIS COHORT — its own row if there is one, otherwise
+    // whatever grades that population here, so "override for this context" starts from the thing
+    // being overridden rather than from zero. Resolving with the row's own cohort as the athlete
+    // always finds its own row first when one exists (probe 1), which is what makes one call serve
+    // both the edit and the create case.
+    const NormResolution res = m_norms->resolve(measureId, contextId, who);
+    // An OWN row is the row at this exact key — same context AND same cohort. A broader cohort's row
+    // at the same context is being inherited from just as surely as an ancestor context's is, and
+    // calling it "own" would offer a reset that drops a row this editor never opened.
+    m_hadOwnRow = res.found() && !res.inherited && res.cohort() == who;
 
     m_draft = Norm{};
     m_draft.measureId = measureId;
     m_draft.contextId = contextId;
+    m_draft.cohort    = who;
     m_draft.unit      = unitOf();
     if (res.found()) {
         const Norm &n   = *res.norm;
@@ -855,7 +865,8 @@ QVariantMap NormEditorModel::save()
     // make, because "yours differs from theirs" is also just what an override is. Re-stamped on every
     // save, so re-editing an override re-bases it against what core says today; that is right,
     // because the author has just looked at the shipped band beside their own.
-    if (const Norm *shipped = m_norms ? m_norms->shippedNorm(m_measureId, m_contextId) : nullptr) {
+    if (const Norm *shipped = m_norms ? m_norms->shippedNorm(m_measureId, m_contextId, m_cohort)
+                                     : nullptr) {
         NormBasis basis;
         basis.mu        = shipped->mu;
         basis.sigmaLo   = shipped->sigmaLo;
@@ -946,10 +957,10 @@ QVariantMap NormEditorModel::resetToDefault()
 
     // Read BEFORE the drop: afterwards there is no override left to describe, and the message has
     // to say which of the two outcomes actually happened.
-    const bool hadShipped = m_norms->shippedNorm(m_measureId, m_contextId) != nullptr;
+    const bool hadShipped = m_norms->shippedNorm(m_measureId, m_contextId, m_cohort) != nullptr;
 
     NormPack pack = readUserPack();
-    if (!pack.remove(m_measureId, m_contextId)) {
+    if (!pack.remove(m_measureId, m_contextId, m_cohort)) {
         // Nothing of the user's to remove. The shipped row is NOT deleted — the core set is
         // read-only by design, and resetting means dropping your override, never editing what
         // shipped.
@@ -995,6 +1006,17 @@ QVariantMap NormEditorModel::draft() const
     out.insert(QStringLiteral("highMeans"),    m ? m->highMeans : QString());
     out.insert(QStringLiteral("contextId"),    m_contextId);
     out.insert(QStringLiteral("contextLabel"), contextLabel(m_contextId));
+    // WHICH POPULATION this draft is for. It has to be on screen: a segmented corridor and the
+    // universal one are edited on an identical panel, and an author who cannot see which they have
+    // open will eventually save one believing it was the other. `cohortNote` is the whole sentence
+    // because that decision — segment or everyone — is not a formatting choice.
+    out.insert(QStringLiteral("cohort"),       cohortToMap(m_cohort));
+    out.insert(QStringLiteral("cohortLabel"),  cohortLabel(m_cohort));
+    out.insert(QStringLiteral("cohortNote"),
+               m_cohort.isUnqualified()
+                   ? QString()
+                   : tr("This corridor grades %1 only. Everyone else is graded by the corridor "
+                        "beside it.").arg(cohortLabel(m_cohort)));
     out.insert(QStringLiteral("route"),        m_route);
 
     // The Watch edge through bandEdgesOf(), so the editor draws the edge that GRADES. It matters for
@@ -1119,7 +1141,7 @@ QVariantMap NormEditorModel::draft() const
     const ContextNode *node = m_norms->contexts().node(m_contextId);
     const QString parentId  = node ? node->parentId : QString();
     const NormResolution par =
-        parentId.isEmpty() ? NormResolution{} : m_norms->resolve(m_measureId, parentId);
+        parentId.isEmpty() ? NormResolution{} : m_norms->resolve(m_measureId, parentId, m_cohort);
     out.insert(QStringLiteral("inherited"),     !m_hadOwnRow);
     out.insert(QStringLiteral("inheritedFrom"), par.found() ? contextLabel(par.contextId) : QString());
     // A DIFF against the parent row, so both sides are CLAIMS. "You are 37 wider than the full
@@ -1160,8 +1182,8 @@ QVariantMap NormEditorModel::draft() const
     // Only the USER's own override can be reset. `own`/m_hadOwnRow is true for a SHIPPED row too,
     // so keying off that would offer an action that can only fail. And what the reset PROMISES
     // depends on whether core carries a row at this exact key — see resetToDefault().
-    const bool  overridden = m_norms->isOverridden(m_measureId, m_contextId);
-    const Norm *shipped    = m_norms->shippedNorm(m_measureId, m_contextId);
+    const bool  overridden = m_norms->isOverridden(m_measureId, m_contextId, m_cohort);
+    const Norm *shipped    = m_norms->shippedNorm(m_measureId, m_contextId, m_cohort);
 
     out.insert(QStringLiteral("overridden"), overridden);
     out.insert(QStringLiteral("canReset"),   overridden);

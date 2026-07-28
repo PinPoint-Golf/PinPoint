@@ -340,6 +340,53 @@ int main()
               "a phase no measure reads gets no corridor");
     }
 
+    // ── Which population the corridor describes ─────────────────────────────
+    //
+    // The metric surfaces render `cohortLabel` straight from this field, so it has to be the
+    // ANSWERING row's cohort and not the athlete's — those differ whenever the pack has nothing as
+    // specific as the golfer, which will be the normal case for a long time.
+    std::printf("=== the answering cohort reaches the corridor ===\n");
+    {
+        Cohort men;
+        men.sex = Sex::Male;
+        Cohort youngMen;
+        youngMen.sex = Sex::Male;
+        youngMen.age = AgeBand::Adult18_54;
+
+        // Two rows on a shipped measure at the default context: the universal one and a segmented
+        // one. Built as a fixture rather than authored into norms.json — no cohort content ships,
+        // and a test that needed some would be pinning content this stage deliberately does not add.
+        NormPack fixture;
+        for (const Norm &n : norms->norms().norms)
+            if (n.measureId == QLatin1String("m_ballPosition")) fixture.upsert(n);
+        Norm segmented = *fixture.find(QStringLiteral("m_ballPosition"), QStringLiteral("any"));
+        segmented.cohort = men;
+        segmented.mu     = 12.0;
+        fixture.upsert(segmented);
+
+        const FixedNorms fixed(fixture, norms->contexts());
+
+        const std::optional<MetricCorridor> anon =
+            corridorForMetricAtPhase(pack, fixed, QStringLiteral("ballPosition"), Phase::Address,
+                                     QStringLiteral("any"));
+        check(anon.has_value() && anon->cohort.isUnqualified(),
+              "an athlete with no demographics resolves the universal row, and the corridor says so");
+
+        const std::optional<MetricCorridor> his =
+            corridorForMetricAtPhase(pack, fixed, QStringLiteral("ballPosition"), Phase::Address,
+                                     QStringLiteral("any"), GradePolicy{}, men);
+        check(his.has_value() && his->cohort == men,
+              "a segmented row answering carries its cohort onto the corridor");
+        check(his.has_value() && anon.has_value() && his->greenLo != anon->greenLo,
+              "…and it is a DIFFERENT corridor, not the same numbers relabelled");
+
+        const std::optional<MetricCorridor> young =
+            corridorForMetricAtPhase(pack, fixed, QStringLiteral("ballPosition"), Phase::Address,
+                                     QStringLiteral("any"), GradePolicy{}, youngMen);
+        check(young.has_value() && young->cohort == men,
+              "a broader row answering names the row's cohort, never the athlete's");
+    }
+
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");
     return g_fail == 0 ? 0 : 1;
 }

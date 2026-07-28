@@ -68,13 +68,21 @@ public:
     // and null-safe: without it every measure reads as a Target, which is what this source did
     // before shapes existed and is right for 105 of the 106 shipped measures. A caller that has a
     // pack should pass it — a floor graded as a target penalises its good tail.
+    //
+    // `athlete` is the GOLFER's cohort — their sex and the age band their date of birth puts them in
+    // on the day of the swing. Unqualified by default, which resolves exactly as everything did
+    // before cohorts existed and is the honest answer while the athlete record carries neither
+    // field. An axis with no answer is skipped rather than guessed, and the reading STILL GRADES,
+    // against the universal corridor: a demographics gap is not a capture gap.
     NormMeasureSource(const IMeasureValueSource          &values,
                       std::shared_ptr<const INormProvider> norms,
                       QString                              contextId = QString(),
                       GradePolicy                          policy    = {},
-                      const CharacteristicPack            *pack      = nullptr)
+                      const CharacteristicPack            *pack      = nullptr,
+                      Cohort                               athlete   = {})
         : m_values(values), m_norms(std::move(norms)),
-          m_contextId(std::move(contextId)), m_policy(policy), m_pack(pack)
+          m_contextId(std::move(contextId)), m_policy(policy), m_pack(pack),
+          m_athlete(athlete)
     {
     }
 
@@ -91,7 +99,7 @@ public:
         if (!m_norms)
             return r;                     // no norms wired: hasCorridor stays false, engine greys it
 
-        const NormResolution res = m_norms->resolve(measureId, m_contextId);
+        const NormResolution res = m_norms->resolve(measureId, m_contextId, m_athlete);
         if (!res.found())
             return r;                     // no norm on the chain — same outcome, reported honestly
 
@@ -113,6 +121,7 @@ public:
         r.grade           = grade(v->value, *res.norm, m_policy, shape);
         r.implausible     = res.norm->isImplausible(v->value);
         r.normContextId   = res.contextId;
+        r.normCohort      = res.cohort();
         r.contextInferred = m_contextId.isEmpty();
         return r;
     }
@@ -123,6 +132,7 @@ private:
     QString                              m_contextId;
     GradePolicy                          m_policy;
     const CharacteristicPack            *m_pack = nullptr;   // shape only; may be null
+    Cohort                               m_athlete;          // unqualified => the universal corridor
 };
 
 } // namespace pinpoint::analysis

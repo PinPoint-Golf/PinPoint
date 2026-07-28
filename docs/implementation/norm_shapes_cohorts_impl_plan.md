@@ -36,7 +36,7 @@ rule in there survives this work.
 | A5 | Seed conversion — smash factor becomes a floor | ☑ complete — **80**/80, +1 suite | 2026-07-28 |
 | — | **merge gate · Part B does not begin until Part A is merged and green** | ☑ Part A complete, 80/80 | |
 | B1 | Cohort schema, parse, validation, resolution | ☑ complete — 80/80, +53 assertion sites | 2026-07-28 |
-| B2 | Cohort provenance threading + surfaces | ☐ not started | |
+| B2 | Cohort provenance threading + surfaces | ☑ complete — 80/80, +46 assertion sites | 2026-07-28 |
 | B3 | Athlete DOB and sex, age at swing date | ☐ not started | |
 | B4 | norms.json header — no cohort content, and why | ☐ not started | |
 
@@ -61,6 +61,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-28 | A4e | The phrasing moved to **norm.h**, beside the vocabulary it formats — `normNumber` / `rangePhrase` / `actionPhrase` / `implausibleLabel` / `implausibleNote` — because six surfaces render a corridor as a sentence and six copies of `"%1 to %2"` is how a floor ends up reading "1.48 to 1.53" on five of them. `rangePhrase` takes **mu as well as the pair** and uses only mu one-sided, which is what lets a collapsed BAND edge and an uncollapsed CLAIM edge both phrase correctly without either caller knowing which it holds. Rewired: MeasureDetail's norm row, its shipped-diff and its action line, MeasureCatalogue's row, `overrideCoreChanged`, and the editor's own `fmtNum`/`claimPhrase`, which are now forwards. ⚠ **`monitorExcludesIdeal` MOVED to `validateNormsAgainst`** — it was gated on `hasExplicitMonitor()`, which without a shape demands BOTH bounds, so on a one-sided row it refused nothing and checked nothing; the same blindness A2 found in `partialMonitor`, in the check beside it. Its message now names the two EDGES, not two bands. **A live surface for implausibility turned up**: `grade()` returns NotMeasured for a capped reading, so the editor's swing list said "Not measured" for a mis-tracked ball, and — worse — `gradeCounts` let it fall through the switch entirely, so the running safety line silently under-reported. Both fixed, with `total` now accounting for every marked swing. Direction picker: `directionOptions` gains `enabled`+`reason` and takes a measureId; `TailChip` gained the disabled state it never had, with the reason in a caption beside the chips per DagView's doctrine. 79/79, +43 assertions; app builds; headless clean; qmllint unchanged or better on all four files. Next: A5. |
 | 2026-07-28 | A5 | **Part A's first and only content change.** `m_smashFactor` ships as a `floor`; the four rows keep their mu/sigma and gain per-context `plausibleHi` caps (1.56 / 1.56 / 1.45 / 1.32) with the physics-of-loft reasoning in `citation` and no commercial sources. The norms.json header records where shape lives and why, what plausibility is FOR, the five candidates deliberately not converted with their reasons, and that cohort-relative bigger-is-better measures get no norm at all. New `seed_conversion_test` (**the suite goes 79 → 80**) gates the behavioural delta on shipped content: 1.55 Good → **Ideal**, 1.62 Watch → **NotMeasured + implausible**, 1.30 Action either way — plus that shape ships on exactly ONE measure, that the caps fall with loft, and that the shipped set still validates. It pins no mu or sigma: those are heuristics meant to move. ⚠ **Three suites failed on the content change and each was right to** — `reference_bands_test`'s parity sweep over-claimed (a `Band` cannot express a plausibility cap; it now states its domain and asserts no wrist cell is excluded, which is the guard the non-goals wanted from `NormBandProvider`), and two tests used smash factor as their two-sided control, which stopped controlling the moment it became a floor. Next: **Part B is now unblocked** — B1. |
 | 2026-07-28 | B1 | `Cohort{optional<Sex>, optional<AgeBand>}` on the norm row; the age vocabulary is a closed enum with the boundary reasoning in `norm.h`. Key, parse, write, layering and resolution all carry it: `find`/`contains`/`upsert`/`remove` take a cohort, `contextsFor` DEDUPES (one context, several cohort rows), and `isOverridden`/`shippedNorm` key on the triple so a qualified override cannot mark the unqualified row beside it as edited. Resolution is **context-major** — `cohortProbeOrder()` is a free function returning the six keys, probed inside the context walk — and an athlete we know nothing about yields **exactly one probe**, so resolution costs what it always did. norm.h's doctrine reworded to "never keyed by athlete id". ⚠ **The three planned validations resolved to two and neither landed where the plan put them** — see the stage table: unknown token is a PARSE error that **drops the row** (the fallback is UNQUALIFIED, which grades everyone), duplicate-on-the-triple fell out of the key, and junior+adult-sub-band is unrepresentable, so `shadowedCohort` replaces it. Schema is 2, written **content-driven**. Fact 21 / N4 closed: one `normKeyLabel`/`splitNormKey` pair, deep-link fixed. ⚠ **`labelOf` was reading UTF-8 labels as Latin-1** — invisible while every label was ASCII, mojibake the moment an en dash arrived. 80/80, +53 assertion sites incl. the probe order exhaustively, the six-row drop-one-at-a-time walk, context-major precedence both ways, and a regression sweep asserting every shipped resolution answers identically for any athlete. App builds; headless clean. Next: B2. |
+| 2026-07-28 | B2 | `NormResolution::cohort()` is an ACCESSOR over the answering row, not a second copy of it; `MetricCorridor` and `MeasureReading` each gain the answering cohort, and `corridorForMetricAtPhase` / `NormMeasureSource` each gain a defaulted `athlete` — read, testable, and the opposite of the A1 dead-parameter case, because without them the two new fields could only ever answer "unqualified". Marshalled at `metric_catalog` (per corridor and metric-wide), `normAt` and the editor's `draft()`, as BOTH a machine map and a label: `cohortLabel` lives with the vocabulary for the reason `normSourceLabel` does. **The measure-detail list now carries per-cohort rows** — the plan's own ⚠ about `editCorridor` only means something if a row can carry a non-default cohort, and without it an authored cohort row would appear in no view while still grading people. Own rows only; cohort inheritance is deliberately not rendered. The editor holds the cohort as row identity end to end (seed, `m_hadOwnRow`, save, basis, reset) and **refuses** an unreadable one; `CorridorEditor` states which population it is editing in a whole accented sentence, because the two panels are otherwise identical. ⚠ **Fixed in passing: `normAt` diffed a cohort row against the UNQUALIFIED shipped row.** ⚠ **`norm_model_test` had no isolated XDG_DATA_HOME** — it was reading the developer's own user norm set; it has one now, and the new block writes through the real layering path rather than a fixture. 80/80, +46 assertion sites across five suites. App builds; headless clean; qmllint deltas are `[unqualified]` Theme cascade only. Next: B3. |
 
 ---
 
@@ -909,6 +910,54 @@ the app going soft.
 **Screen:** one more `· `-separated term on the MeasureDetail norm row and the MetricDetail
 provenance line, empty for every shipped row.
 
+**`NormResolution` gained an ACCESSOR, not a field.** The answering row already states its own
+cohort, so a copy on the resolution would be a second source of truth for one fact — and a value
+type carrying one answer twice is a value type where the two can disagree. `contextId` is a field
+because it genuinely is not on the norm: a row does not know it was reached from a descendant. There
+is deliberately no `cohortBroadened` flag either: with an unqualified pack it would be true on every
+resolution and say nothing, which is trap 3.
+
+**Two parameters were added that no production caller passes yet, and that is the opposite of the
+A1 deviation rather than a repeat of it.** `corridorForMetricAtPhase(…, athlete)` and
+`NormMeasureSource(…, athlete)` are read — they flow straight into `resolve()`, which has real
+branches — and a test passes them directly. Without them the two NEW FIELDS would be the untestable
+dead weight instead: every answer would be unqualified, and the stage's own gate item ("the
+answering cohort reaches `MetricCorridor` and `MeasureReading` intact") could only be verified
+against a value that cannot vary. B3 supplies the values.
+
+**The measure-detail list gained per-cohort rows, and it had to.** The plan's own ⚠ about
+`editCorridor` carrying the cohort only means something if some row can carry a non-default one —
+otherwise the signal change is ceremony. Without it a cohort row would be authored into a file and
+appear in no view: a corridor nobody can open, edit or delete, still grading people. The list is now
+the universal row per context (exactly as before) plus one row per SEGMENTED row authored at that
+exact context.
+
+**Own rows only — cohort inheritance is not rendered.** Showing which cohort would answer at each
+context for each of six probe keys would multiply thirteen contexts into a list nobody could read.
+What the list has to guarantee is REACHABILITY of what was authored, not a rendering of the
+resolution algorithm. `ownNormCount`/`editedNormCount` moved from counting contexts to counting
+ROWS in the same change — the same number until a context could hold two.
+
+**The corridor editor says which population it is editing, in a whole sentence.** A segmented
+corridor and the universal one are edited on an identical panel, so without that line every control
+below is editing the wrong row while looking right. Accented, not muted: it is not chrome. And
+`begin()` REFUSES an unreadable cohort rather than dropping to unqualified — a segment's editor
+silently becoming the editor for everyone is the one outcome worth failing over.
+
+**`m_hadOwnRow` needed the cohort too.** A broader cohort's row at the same context is being
+inherited from just as surely as an ancestor context's is, and calling it "own" would offer a reset
+that drops a row the editor never opened.
+
+**Fixed in passing: `normAt` compared against the wrong shipped row.** It keyed `shippedNorm` on the
+context the row was found at but not on the cohort, so a cohort-qualified override would have been
+diffed against the unqualified shipped row — "ships 8 to 15" about a corridor core never authored
+for that segment, two populations quoted as one revision.
+
+**`norm_model_test` gained an isolated `XDG_DATA_HOME`, which it should always have had.** Without
+one the suite reads the DEVELOPER's own user norm set, so a corridor somebody overrode by hand could
+fail it for them and nobody else. The cohort block also writes a user set, and it must land in a
+scratch directory rather than in a real profile.
+
 ### B3 — Athlete DOB and sex, age at swing date
 
 - DOB and sex as **optional** fields on the athlete record (fact 18). Extend
@@ -1030,6 +1079,9 @@ resolved with the stage that closed it.
 | N16 | The corridor editor now depends on `NormEditorModel` and the bars on `ChartMetrics`, so the pure-QML standalone render harness needs a mock of each to draw them at all. Both mocks are hand transcriptions and can drift from the C++ silently — they verify PAINTING only, never a rule. Do not let an assertion migrate into one. | A4c | open by design |
 | N22 | **The planned "a `junior` row combined with an adult sub-band" validation cannot be written.** `Cohort::age` is one optional token, so the combination has no spelling in the schema. `shadowedCohort` was written instead, in the same family (*a row that can never resolve*). If the age axis ever becomes a list — it should not — this row comes back. | B1 | closed by other means |
 | N23 | **`shadowedCohort` and `cohortGap` cannot fire on any content that exists.** Both need cohort rows, and every shipped row is unqualified; `shadowedCohort` additionally needs four rows at one node. Gated in both directions in `diagnostics_health_test` against fixtures, which is the only gate they can have until B4's content arrives. Noted so a later reader does not read them as exercised. | B1 | open by design |
-| N24 | **The corridor editor is unqualified end to end.** `begin()` resolves with no athlete cohort and the draft is left at the default, so save/reset/basis all key on the unqualified row. That is correct for B1 and is exactly what B2 changes — and the hazard B2 must not walk into is seeding a draft from a cohort row and saving it at the unqualified key. The guard today is a comment on the resolve line. | B1 | open — B2 |
+| N24 | **The corridor editor is unqualified end to end.** `begin()` resolves with no athlete cohort and the draft is left at the default, so save/reset/basis all key on the unqualified row. That is correct for B1 and is exactly what B2 changes — and the hazard B2 must not walk into is seeding a draft from a cohort row and saving it at the unqualified key. The guard today is a comment on the resolve line. | B1 | ☑ **closed in B2** — `begin(measureId, contextId, cohort)` seeds by resolving FOR that cohort, so its own row wins at probe 1 when one exists; the hazard is closed by the draft carrying the same cohort it was seeded for |
+| N26 | **A cohort-qualified override records no `NormBasis`.** `save()` stamps the base from `shippedNorm` at the EXACT key, and core carries no cohort rows — so a new segmented override has no base and `overrideCoreChanged` is permanently silent for it. Correct today (there is no shipped cohort row that could move) and it is "as today" in the most literal reading of the plan. Revisit when B4's content lands: the alternative is a basis that records WHICH key it was seeded from, which is a schema change. | B2 | open — revisit at B4 |
+| N27 | **The editor's import list and `adoptFrom` are unqualified-only.** Both walk `overriddenContextsFor` and then `find(measureId, cid)`, so a context carrying ONLY a segmented row contributes no candidate (skipped safely, no crash). Adopting numbers across cohorts is a second UI decision — the rows would need a cohort label and `adoptFrom` a cohort argument — and nothing can exercise it until cohort content exists. | B2 | open — with the content |
+| N28 | **The editor's parent note models context inheritance only.** Dropping a `{female}@driver` row falls back to `{}@driver` — a broader COHORT at the same context — before it falls back to the parent context, and the note does not say that. It now resolves the parent for the draft's own cohort, which is the right population; the fallback ORDER it describes is still context-only. | B2 | open — with the content |
 | N25 | **The diagnostics developer guide's `Norm` snippet is stale.** It predates `shape`, `plausibleLo/Hi` and now `cohort`, and §4's resolution description says nothing about the cohort probe order. Not corrected per stage (A1–A5 did not either); sweep it once at the end of the package, with §12's suite table. | B1 | open — sweep at package close |
 | N14 | `PpRangeBar`'s **non-compact** form has no instantiation anywhere — the Verdict zone's tempo tile is absent until tempo has a producer, and the Setup zone is compact. So its tick row, and the one-sided tick placement in it, are unexercised. `NormativeBar`'s tick row does exercise the same rule. Not a defect; noted so a later reader does not read the code as covered. | A4b | open — latent surface |

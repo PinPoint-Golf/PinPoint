@@ -126,8 +126,15 @@ public:
     //   { found, contextId, contextLabel, inherited, inheritedFrom, own,
     //     mu, idealLo, idealHi, goodLo, goodHi, watchLo, watchHi, explicitMonitor,
     //     unit, n, source, sourceLabel, author, citation, setOn, weak, weakReason,
-    //     overridden, hasShipped, shippedClaimLo, shippedClaimHi }
-    Q_INVOKABLE QVariantMap normAt(const QString &measureId, const QString &contextId) const;
+    //     overridden, hasShipped, shippedClaimLo, shippedClaimHi,
+    //     cohort, cohortLabel }
+    //
+    // `athlete` is the cohort to resolve FOR — the golfer's own sex and age band — spelled as the
+    // JSON spells it, `{ sex, age }`, and defaulting to unqualified, which is what every caller
+    // predating cohorts meant. `cohort` in the RESULT is a different thing: the cohort of the row
+    // that actually answered, which may be broader than the one asked for.
+    Q_INVOKABLE QVariantMap normAt(const QString &measureId, const QString &contextId,
+                                   const QVariantMap &athlete = {}) const;
 
     // The metric -> measure join, marshalled for QML. `phase` is the Phase enum as an int, which
     // is how metric_catalog.cpp already passes phases across the boundary.

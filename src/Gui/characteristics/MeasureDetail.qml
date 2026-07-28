@@ -48,7 +48,10 @@ Item {
     // Open the corridor editor for one (measure, context). A row that already has its own norm
     // edits it; an inherited row overrides it — the same gesture, because "override for this
     // context" IS opening the editor seeded from what it inherits.
-    signal editCorridor(string measureId, string contextId)
+    // `cohort` is the row identity's third term, spelled as the JSON spells it ({} = unqualified).
+    // It has to travel: two rows can now sit at one context, and an editor opened without it would
+    // silently edit the universal corridor while the row that was clicked describes one segment.
+    signal editCorridor(string measureId, string contextId, var cohort)
 
     readonly property var _norms:  detail.norms  || []
     readonly property var _usedBy: detail.usedBy || []
@@ -275,7 +278,8 @@ Item {
                             hoverEnabled: true
                             cursorShape:  Qt.PointingHandCursor
                             onClicked: root.editCorridor(root.detail.id || "",
-                                                         modelData.askedContextId)
+                                                         modelData.askedContextId,
+                                                         modelData.askedCohort || ({}))
                         }
 
                         ColumnLayout {
@@ -296,6 +300,20 @@ Item {
                                     font.family:    Theme.fontBody
                                     font.pixelSize: Theme.fontSzBody2
                                     color:          modelData.own ? Theme.colorText : Theme.colorText2
+                                }
+
+                                // Which population this row grades. Absent — not blank — on a
+                                // universal corridor, so the common row reads exactly as it always
+                                // did rather than gaining an empty column. The words come from
+                                // C++ (normAt.cohortLabel): "men 55–64" is one segment's name and
+                                // assembling it from two tokens in a binding is how two surfaces
+                                // end up spelling it differently.
+                                Text {
+                                    visible:        (modelData.cohortLabel || "").length > 0
+                                    text:           modelData.cohortLabel || ""
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorText2
                                 }
 
                                 Item { Layout.fillWidth: true }

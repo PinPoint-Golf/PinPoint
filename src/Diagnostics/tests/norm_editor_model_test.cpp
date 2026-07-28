@@ -941,6 +941,80 @@ int main(int argc, char **argv)
         near(num(te.draft(), "claimLo"), 1.40, "…nor nudgeGradedEdge");
     }
 
+    // ── The cohort is part of the row identity ──────────────────────────────
+    //
+    // The whole point of this block is that the two rows do not touch each other. A segmented
+    // corridor is edited on a panel identical to the universal one, so every key the editor writes
+    // through — save, reset, the basis stamp, the "is this yours" flag — has to carry the cohort or
+    // an author editing one population silently rewrites the corridor for everybody.
+    std::printf("\ncohort as row identity\n");
+    {
+        QVariantMap women;
+        women.insert(QStringLiteral("sex"), QStringLiteral("female"));
+
+        NormEditorModel ce;
+        check(!ce.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext),
+                        QVariantMap{ { QStringLiteral("sex"), QStringLiteral("mail") } }),
+              "a cohort this build cannot read is REFUSED, not quietly dropped to unqualified");
+
+        check(ce.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext), women),
+              "a segmented draft opens");
+        QVariantMap d = ce.draft();
+        check(d.value(QStringLiteral("cohortLabel")).toString() == QLatin1String("women"),
+              "…and says which population it is for");
+        check(!d.value(QStringLiteral("cohortNote")).toString().isEmpty(),
+              "…in a whole sentence, because that decision is not a formatting choice");
+        check(!d.value(QStringLiteral("own")).toBool(),
+              "core carries no row for that cohort, so this is a new row and not an edit of one");
+        check(!d.value(QStringLiteral("hasShipped")).toBool(),
+              "…and there is no shipped row at this key to reset back to");
+
+        // Seeded from what grades that population today, which is the universal corridor.
+        NormEditorModel ue;
+        check(ue.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext)),
+              "the universal row opens");
+        near(num(d, "mu"), num(ue.draft(), "mu"),
+             "a new segmented draft starts from the corridor it would override");
+
+        // Moved with setClaimBand, because this measure is a TARGET: setAspiration and setTolerance
+        // are the one-sided operations and are no-ops here, which would have left the draft
+        // unchanged and made the assertions below pass for the wrong reason.
+        const double baseMu = num(d, "mu");
+        ce.setClaimBand(baseMu + 1.0, baseMu + 5.0);          // centre lands at baseMu + 3
+        check(ce.save().value(QStringLiteral("ok")).toBool(), "it saves");
+
+        // THE ASSERTION THIS BLOCK EXISTS FOR: the universal row is untouched.
+        NormEditorModel after;
+        check(after.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext)),
+              "the universal row still opens");
+        check(!after.draft().value(QStringLiteral("overridden")).toBool(),
+              "…and is still the shipped one — a segmented save did not rewrite it");
+        near(num(after.draft(), "mu"), num(ue.draft(), "mu"),
+             "…with its numbers exactly where they were");
+
+        NormEditorModel mine;
+        check(mine.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext), women),
+              "the segmented row re-opens");
+        check(mine.draft().value(QStringLiteral("overridden")).toBool(),
+              "…marked as yours");
+        check(mine.draft().value(QStringLiteral("own")).toBool(),
+              "…and as a row of its own, not something inherited");
+        near(num(mine.draft(), "mu"), baseMu + 3.0, "…holding what was saved");
+
+        // Reset drops the segmented row and nothing else.
+        check(mine.resetToDefault().value(QStringLiteral("ok")).toBool(),
+              "resetting drops your segmented override");
+        NormEditorModel gone;
+        gone.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext), women);
+        check(!gone.draft().value(QStringLiteral("overridden")).toBool(),
+              "…and it is gone");
+        NormEditorModel still;
+        still.begin(QString::fromLatin1(kMeasure), QString::fromLatin1(kContext));
+        check(!still.draft().value(QStringLiteral("overridden")).toBool()
+                  && std::fabs(num(still.draft(), "mu") - num(ue.draft(), "mu")) < 1e-9,
+              "…with the universal row still exactly as it shipped, having never been involved");
+    }
+
     // ── Closing ─────────────────────────────────────────────────────────────
     std::printf("\nclosing\n");
     ed.cancel();

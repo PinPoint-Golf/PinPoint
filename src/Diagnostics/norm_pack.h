@@ -25,6 +25,7 @@
 #include <QByteArray>
 #include <QJsonObject>
 #include <QString>
+#include <QVariantMap>
 
 #include <vector>
 
@@ -70,6 +71,13 @@ struct NormPack {
     // legitimately carry several rows, and this answers "which contexts", not "how many rows".
     QStringList contextsFor(const QString &measureId) const;
 
+    // The QUALIFIED cohorts with a row at this exact (measure, context), in pack order. The
+    // unqualified row is deliberately excluded: it is the one every existing surface already shows,
+    // and this exists so a surface can list the segmented rows BESIDE it. Without it a cohort row
+    // would be authored into a file and be invisible in every view — reachable by resolution and by
+    // nothing a user can click.
+    std::vector<Cohort> cohortsFor(const QString &measureId, const QString &contextId) const;
+
     // Insert or replace by (measureId, contextId, cohort), preserving pack order on replace so a
     // norm set does not reshuffle when one row is edited.
     void        upsert(const Norm &norm);
@@ -95,6 +103,19 @@ QString normKeyLabel(const Norm &n);
 // parsed back, because what the link opens is a corridor at a (measure, context) and the editor
 // resolves the rest.
 void     splitNormKey(const QString &key, QString &measureId, QString &contextId);
+
+// ── A cohort across the C++/QML boundary ────────────────────────────────────
+//
+// Spelled exactly as the JSON spells it — `{ "sex": "female", "age": "adult_55_64" }`, each key
+// present only when that axis is set — so a cohort has ONE spelling in the file, in C++ and in QML.
+// A second shape for the boundary would be a second thing to keep in step with the vocabulary.
+//
+// `cohortFromMap` REFUSES an unreadable token rather than dropping that axis, and its caller must
+// refuse with it. Dropping an axis silently would broaden the key — a corridor for one segment
+// quietly becoming the corridor for everyone — which is the same failure `unknownCohort` drops a
+// row to prevent.
+bool        cohortFromMap(const QVariantMap &map, Cohort &out);
+QVariantMap cohortToMap(const Cohort &cohort);
 
 // ── Validation ──────────────────────────────────────────────────────────────
 //

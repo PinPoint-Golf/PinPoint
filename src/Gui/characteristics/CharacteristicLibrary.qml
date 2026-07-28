@@ -127,8 +127,8 @@ Item {
     property bool   _corridor:    false // the corridor editor is open, over the measure detail
     property string _view:        "library"   // "library" | "measures" | "roadmap" | "health"
 
-    function _openCorridor(measureId, contextId) {
-        if (normEditor.begin(measureId, contextId)) root._corridor = true
+    function _openCorridor(measureId, contextId, cohort) {
+        if (normEditor.begin(measureId, contextId, cohort || ({}))) root._corridor = true
     }
 
     // Settings-search hook (ScreenSettings.navigateToResult): return to the directory and report
@@ -716,7 +716,9 @@ Item {
             root._view              = "library"
             root.showCharacteristic(conditionId)
         }
-        onEditCorridor: function(measureId, contextId) { root._openCorridor(measureId, contextId) }
+        onEditCorridor: function(measureId, contextId, cohort) {
+            root._openCorridor(measureId, contextId, cohort)
+        }
     }
 
     // ══ Corridor editor ═══════════════════════════════════════════════════════

@@ -307,6 +307,17 @@ QStringList NormPack::contextsFor(const QString &measureId) const
     return out;
 }
 
+std::vector<Cohort> NormPack::cohortsFor(const QString &measureId, const QString &contextId) const
+{
+    std::vector<Cohort> out;
+    for (const Norm &n : norms) {
+        if (n.measureId != measureId || n.contextId != contextId) continue;
+        if (n.cohort.isUnqualified()) continue;      // the row every surface already shows
+        out.push_back(n.cohort);
+    }
+    return out;
+}
+
 void NormPack::upsert(const Norm &norm)
 {
     for (Norm &n : norms) {
@@ -365,6 +376,40 @@ void splitNormKey(const QString &key, QString &measureId, QString &contextId)
     if (sep >= 0)
         rest = rest.left(sep);
     contextId = rest.trimmed();
+}
+
+// ── A cohort across the C++/QML boundary ────────────────────────────────────
+
+bool cohortFromMap(const QVariantMap &map, Cohort &out)
+{
+    Cohort c;
+
+    const QString sex = map.value(QStringLiteral("sex")).toString();
+    if (!sex.isEmpty()) {
+        Sex s{};
+        if (!sexFromName(sex, s)) return false;
+        c.sex = s;
+    }
+
+    const QString age = map.value(QStringLiteral("age")).toString();
+    if (!age.isEmpty()) {
+        AgeBand b{};
+        if (!ageBandFromName(age, b)) return false;
+        c.age = b;
+    }
+
+    out = c;
+    return true;
+}
+
+QVariantMap cohortToMap(const Cohort &cohort)
+{
+    QVariantMap m;
+    // Absent rather than empty-string, so the map round-trips through cohortFromMap and reads the
+    // same way the JSON does: an unset axis is a key that is not there.
+    if (cohort.sex.has_value()) m.insert(QStringLiteral("sex"), sexName(*cohort.sex));
+    if (cohort.age.has_value()) m.insert(QStringLiteral("age"), ageBandName(*cohort.age));
+    return m;
 }
 
 // ── Validation ──────────────────────────────────────────────────────────────

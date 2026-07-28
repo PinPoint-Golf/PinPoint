@@ -24,9 +24,15 @@
 #include "norm_model.h"
 
 #include "../characteristic_pack.h"
+#include "../norm_provider.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
 
+#include <cmath>
 #include <cstdio>
 
 using namespace pinpoint::analysis;
@@ -422,6 +428,91 @@ int main(int argc, char **argv)
               "…and its row names both bounds");
         check(t.value(QStringLiteral("actionPhrase")).toString().contains(QLatin1String("beyond")),
               "…and faults on both tails");
+    }
+
+    // ── A segmented corridor is REACHABLE ───────────────────────────────────
+    //
+    // The list is what makes a cohort row exist as far as a user is concerned. Authored into a file
+    // and absent from every view, it would be a corridor nobody can open, edit or delete — and it
+    // would still be grading people. Written into the isolated XDG_DATA_HOME the CMake entry gives
+    // this suite, then read back through a fresh provider, so it is the real layering path and not a
+    // fixture standing in for one.
+    std::printf("=== a segmented corridor reaches the list ===\n");
+    {
+        const QString path = userNormPath();
+        check(!path.isEmpty(), "the user norm set has a path");
+
+        QDir().mkpath(QFileInfo(path).absolutePath());
+
+        // Two rows at one context: the universal one core already ships, plus a segmented override.
+        const QByteArray json = R"({
+            "id": "user", "version": "1", "schemaVersion": 2, "norms": [
+              { "measure": "m_ballPosition", "context": "driver", "mu": 9.0, "sigmaLo": 4.0,
+                "unit": "% stance width", "source": "heuristic",
+                "cohort": { "sex": "female", "age": "adult_55_64" } }
+            ] })";
+        QFile f(path);
+        check(f.open(QIODevice::WriteOnly | QIODevice::Truncate), "…and is writable");
+        f.write(json);
+        f.close();
+
+        resetSharedNormProvider();
+        NormModel seg;
+
+        const QVariantMap detail = seg.measureDetail(QStringLiteral("m_ballPosition"));
+        const QVariantList rows  = detail.value(QStringLiteral("norms")).toList();
+
+        int atDriver = 0, labelled = 0;
+        QVariantMap segRow;
+        for (const QVariant &v : rows) {
+            const QVariantMap r = v.toMap();
+            if (r.value(QStringLiteral("askedContextId")).toString() != QLatin1String("driver"))
+                continue;
+            ++atDriver;
+            if (!r.value(QStringLiteral("cohortLabel")).toString().isEmpty()) {
+                ++labelled;
+                segRow = r;
+            }
+        }
+        check(atDriver == 2, "the driver context now lists TWO rows: the universal one and the segmented one");
+        check(labelled == 1, "…exactly one of which names a population");
+        check(segRow.value(QStringLiteral("cohortLabel")).toString().contains(QLatin1String("women")),
+              "…in words, from C++, not assembled from tokens in a binding");
+
+        // The row has to carry the key the editor will be opened with, or the click opens the wrong
+        // corridor — which is the failure that looks like nothing at all until a save lands.
+        const QVariantMap asked = segRow.value(QStringLiteral("askedCohort")).toMap();
+        check(asked.value(QStringLiteral("sex")).toString() == QLatin1String("female")
+                  && asked.value(QStringLiteral("age")).toString() == QLatin1String("adult_55_64"),
+              "…and the cohort the editor must be opened with");
+        check(std::fabs(segRow.value(QStringLiteral("mu")).toDouble() - 9.0) < 1e-9,
+              "…and it is the segmented row's own numbers, not the universal row's");
+        check(segRow.value(QStringLiteral("overridden")).toBool(),
+              "…marked as the user's, since a user layer supplied it");
+
+        // The universal row beside it is untouched and still reads as shipped.
+        for (const QVariant &v : rows) {
+            const QVariantMap r = v.toMap();
+            if (r.value(QStringLiteral("askedContextId")).toString() != QLatin1String("driver")) continue;
+            if (!r.value(QStringLiteral("cohortLabel")).toString().isEmpty()) continue;
+            check(!r.value(QStringLiteral("overridden")).toBool(),
+                  "the universal row beside it is still the shipped one");
+        }
+
+        // Counted over ROWS. Counting contexts would have said one where there are two.
+        check(detail.value(QStringLiteral("editedNormCount")).toInt() == 1,
+              "the edited count sees the segmented row");
+
+        // An athlete this build cannot place resolves NOTHING rather than being answered with the
+        // corridor for everyone.
+        QVariantMap bad;
+        bad.insert(QStringLiteral("sex"), QStringLiteral("mail"));
+        check(!seg.normAt(QStringLiteral("m_ballPosition"), QStringLiteral("driver"), bad)
+                   .value(QStringLiteral("found")).toBool(),
+              "an unreadable cohort resolves nothing, never the universal corridor");
+
+        QFile::remove(path);
+        resetSharedNormProvider();
     }
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "PASSED", g_fail,

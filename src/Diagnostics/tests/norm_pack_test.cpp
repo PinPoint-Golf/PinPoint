@@ -863,6 +863,64 @@ int main()
               "a subject that is a plain id yields no measure and no context, rather than half a key");
     }
 
+    std::printf("=== cohort: across the C++/QML boundary ===\n");
+    {
+        // ONE spelling, the JSON's, so a cohort cannot mean one thing in the file and another in a
+        // façade. An unset axis is an ABSENT key, not an empty string — otherwise "no answer" and
+        // "the empty answer" would be two spellings of one state.
+        const QVariantMap m = cohortToMap(coh(Sex::Female, AgeBand::Adult55_64));
+        check(m.value(QStringLiteral("sex")).toString() == QLatin1String("female")
+                  && m.value(QStringLiteral("age")).toString() == QLatin1String("adult_55_64"),
+              "a cohort maps to the tokens the JSON uses");
+
+        Cohort back;
+        check(cohortFromMap(m, back) && back == coh(Sex::Female, AgeBand::Adult55_64),
+              "…and round-trips exactly");
+
+        check(cohortToMap(coh()).isEmpty(),
+              "the unqualified cohort is an EMPTY map, so an unset axis is an absent key");
+        check(cohortFromMap(QVariantMap{}, back) && back.isUnqualified(),
+              "…and an empty map reads back as unqualified");
+
+        const QVariantMap sexOnly = cohortToMap(coh(Sex::Male));
+        check(sexOnly.size() == 1 && !sexOnly.contains(QStringLiteral("age")),
+              "an unset axis is absent rather than written empty");
+
+        // REFUSED, not dropped. Dropping the axis would broaden the key — a caller asking about one
+        // segment silently answered about everyone.
+        QVariantMap bad;
+        bad.insert(QStringLiteral("sex"), QStringLiteral("mail"));
+        check(!cohortFromMap(bad, back), "an unreadable token is refused, never dropped to unqualified");
+        bad.clear();
+        bad.insert(QStringLiteral("age"), QStringLiteral("veteran"));
+        check(!cohortFromMap(bad, back), "…on either axis");
+    }
+
+    std::printf("=== cohort: the segmented rows at one key ===\n");
+    {
+        NormPack p;
+        p.upsert(makeNorm("m_a", "any", 1.0, 1.0));                       // unqualified
+        Norm men = makeNorm("m_a", "any", 2.0, 1.0);
+        men.cohort = coh(Sex::Male);
+        p.upsert(men);
+        Norm seniorWomen = makeNorm("m_a", "any", 3.0, 1.0);
+        seniorWomen.cohort = coh(Sex::Female, AgeBand::Adult55_64);
+        p.upsert(seniorWomen);
+        p.upsert(makeNorm("m_a", "driver", 4.0, 1.0));
+
+        const std::vector<Cohort> qualified = p.cohortsFor(QStringLiteral("m_a"), QStringLiteral("any"));
+        check(qualified.size() == 2 && qualified[0] == coh(Sex::Male)
+                  && qualified[1] == coh(Sex::Female, AgeBand::Adult55_64),
+              "cohortsFor lists the SEGMENTED rows at that key, in pack order");
+        check(p.cohortsFor(QStringLiteral("m_a"), QStringLiteral("driver")).empty(),
+              "…and says nothing about a context carrying only the universal row");
+
+        // The exclusion is the point: this exists so a surface can list the segmented rows BESIDE
+        // the universal one it already shows, not instead of it.
+        for (const Cohort &c : qualified)
+            check(!c.isUnqualified(), "the unqualified row is never in the list");
+    }
+
     std::printf("=== cohort: the probe order ===\n");
     {
         const auto names = [](const std::vector<Cohort> &v) {

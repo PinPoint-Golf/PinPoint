@@ -69,6 +69,11 @@ struct MetricCorridor {
     QString contextId;
     bool    inherited  = false;
     bool    overridden = false;          // a non-core layer supplied it: the user's own corridor
+
+    // Which POPULATION the corridor describes. Unqualified — matching everyone — for every shipped
+    // row, and a surface renders it through `cohortLabel()` so an unqualified corridor says nothing
+    // rather than saying "everyone".
+    Cohort  cohort;
 };
 
 // Resolve the corridor for `metricKey` at `phase`, in `contextId`.
@@ -84,15 +89,21 @@ struct MetricCorridor {
 // Returns nothing — never a zeroed corridor — when no measure reads that metric at that phase, or
 // when none of them has a norm anywhere on the context chain. That is a different fact from "the
 // corridor is 0 to 0", and a caller drawing the latter would invent a band the pack does not hold.
+// `athlete` is the golfer's own cohort — the sex and age band the corridor should be resolved FOR.
+// Defaulted to unqualified, which is what every caller means until the athlete record carries the
+// two fields, and which resolves exactly as it did before cohorts existed. It is a parameter rather
+// than something read here because this header is free-standing and knows nothing about athletes:
+// the caller that holds the record supplies it, the same way it supplies the context.
 inline std::optional<MetricCorridor> corridorForMetricAtPhase(const CharacteristicPack &pack,
                                                               const INormProvider      &norms,
                                                               const QString            &metricKey,
                                                               Phase                     phase,
                                                               const QString            &contextId,
-                                                              const GradePolicy        &policy = {})
+                                                              const GradePolicy        &policy = {},
+                                                              const Cohort             &athlete = {})
 {
     for (const Measure *m : measuresForMetricAtPhase(pack, metricKey, phase)) {
-        const NormResolution res = norms.resolve(m->id, contextId);
+        const NormResolution res = norms.resolve(m->id, contextId, athlete);
         if (!res.found())
             continue;
 
@@ -112,6 +123,7 @@ inline std::optional<MetricCorridor> corridorForMetricAtPhase(const Characterist
         c.contextId        = res.contextId;
         c.inherited        = res.inherited;
         c.overridden       = res.overridden;
+        c.cohort           = res.cohort();
         return c;
     }
     return std::nullopt;

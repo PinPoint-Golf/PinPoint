@@ -50,6 +50,20 @@ struct NormResolution {
     {
         return norm ? pinpoint::analysis::grade(value, *norm, policy) : Grade::NotMeasured;
     }
+
+    // WHICH COHORT ANSWERED — the third half of the same provenance `contextId` and `overridden`
+    // carry, and a surface must be able to say it: a golfer whose grades improve after entering
+    // their date of birth has to read that as the corridor becoming right for them, not as the app
+    // going soft on them.
+    //
+    // An ACCESSOR and not a field, deliberately. The answering row already states its own cohort, so
+    // a copy here would be a second source of truth for one fact — and a value type that carries the
+    // same answer twice is a value type where the two can disagree. `contextId` is a field because
+    // it is genuinely not on the norm: a row does not know it was reached from a descendant.
+    //
+    // Unqualified when nothing resolved, which is the same answer as "this corridor applies to
+    // everyone" and is correct in both readings: nothing was segmented.
+    Cohort cohort() const { return norm ? norm->cohort : Cohort{}; }
 };
 
 // One layer in an assembled norm set, for the census the UI shows and — from the corridor editor

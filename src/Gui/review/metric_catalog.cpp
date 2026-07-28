@@ -229,6 +229,9 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
     QString      normContextId, normSource, normSourceWords, normCitation, normWeakWhy, normMeasureId;
     bool         anyOverridden = false, anyWeak = false, anyInherited = false;
     int          normN = 0;
+    // The metric-wide summary describes the FIRST corridor that resolved, exactly as the named
+    // provenance fields beside it do. Not OR-ed like the flags: "which population" has no union.
+    Cohort       normCohort;
 
     for (Phase p : d->phases) {
         const std::optional<MetricCorridor> c =
@@ -254,6 +257,13 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
         cm.insert(QStringLiteral("contextId"),        c->contextId);
         cm.insert(QStringLiteral("inherited"),        c->inherited);
         cm.insert(QStringLiteral("overridden"),       c->overridden);
+        // Which population this corridor describes. The MAP is the machine form and the LABEL is the
+        // sentence — both written, because a surface that wanted to say "men 55–64" would otherwise
+        // have to assemble it from two tokens in a binding, and the words for a cohort live with the
+        // vocabulary for the same reason a norm's source words do. Empty label ⇒ unqualified, which
+        // is every shipped row.
+        cm.insert(QStringLiteral("cohort"),           cohortToMap(c->cohort));
+        cm.insert(QStringLiteral("cohortLabel"),      cohortLabel(c->cohort));
 
         // Named, not just keyed — the detail page offers a link through to where this corridor is
         // DEFINED so it can be edited, and a link has to say where it goes. Per corridor rather than
@@ -277,6 +287,7 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
         if (normContextId.isEmpty()) {
             normContextId = c->contextId;
             normMeasureId = c->measureId;
+            normCohort    = c->cohort;
             if (const Norm *n = m_norms->resolve(c->measureId, contextId).norm) {
                 normSource      = normSourceName(n->source);
                 normSourceWords = normSourceLabel(n->source);
@@ -315,6 +326,8 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
     normative.insert(QStringLiteral("n"),          normN);
     normative.insert(QStringLiteral("weak"),       anyWeak);
     normative.insert(QStringLiteral("weakReason"), normWeakWhy);
+    normative.insert(QStringLiteral("cohort"),      cohortToMap(normCohort));
+    normative.insert(QStringLiteral("cohortLabel"), cohortLabel(normCohort));
     // The metric-level answer a rail binds to. THE ONLY SOURCE of one-sidedness for any surface:
     // `PpDashboardMotionZone` used to decide this by string-matching the unit, which is a
     // presentation-layer heuristic standing in for a semantic property of the measure. Anything

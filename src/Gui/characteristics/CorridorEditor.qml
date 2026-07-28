@@ -142,6 +142,25 @@ Item {
                 wrapMode:       Text.WordWrap
             }
 
+            // ── Which population ─────────────────────────────────────────────
+            //
+            // A segmented corridor and the universal one are edited on an identical panel, so
+            // without this line an author has no way to tell which they have open — and every
+            // control below would then be editing the wrong row while looking right. Accented
+            // rather than muted for that reason: it is not chrome, it is what the screen is about.
+            //
+            // Absent on a universal corridor. `cohortNote` is empty there, so the common case reads
+            // exactly as it did before cohorts existed rather than gaining a line saying "everyone".
+            Text {
+                Layout.fillWidth: true
+                visible:        (root._d.cohortNote || "").length > 0
+                text:           root._d.cohortNote || ""
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzBody2
+                color:          Theme.colorAccent
+                wrapMode:       Text.WordWrap
+            }
+
             // ── Refusal ──────────────────────────────────────────────────────
             //
             // A capture gap opens so the reason is readable, and refuses to save. A corridor on a

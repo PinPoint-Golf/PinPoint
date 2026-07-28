@@ -717,8 +717,12 @@ pp_add_test(norm_model_test
     INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics
     LINK    Qt6::Qml
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+# XDG_DATA_HOME is isolated for the same reason norm_editor_model_test's is, and it was missing here:
+# without it the user norm set on the DEVELOPER's machine takes part in every assertion below, so a
+# corridor somebody overrode by hand could fail this suite for them and nobody else. The cohort block
+# also writes a user set, and it must land in a scratch directory rather than in a real profile.
 set_tests_properties(norm_model_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/norm_model_scratch")
 
 # The corridor editor's model. Same contract as norm_model_test — QML holds no rules, so every rule
 # this hides is asserted here or nowhere. The load-bearing one is that the two handles bind the
