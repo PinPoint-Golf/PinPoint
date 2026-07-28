@@ -19,6 +19,7 @@
 #pragma once
 
 #include "../Analysis/wrist_assessment_types.h"   // PpRag
+#include "characteristic.h"                       // Shape — a property of the MEASURE
 
 #include <QDate>
 #include <QString>
@@ -105,6 +106,11 @@ struct NormBasis {
     double                sigmaHi = 0.0;
     std::optional<double> monitorLo;
     std::optional<double> monitorHi;
+    // The plausibility bounds are part of the base too. Without them a shipped row that GAINED a
+    // cap — which changes a reading from Action to NotMeasured, a large change — would compare as
+    // unmoved and the "core has been revised" notice would stay silent.
+    std::optional<double> plausibleLo;
+    std::optional<double> plausibleHi;
 };
 
 struct Norm {
@@ -135,6 +141,27 @@ struct Norm {
     std::optional<double> monitorLo;
     std::optional<double> monitorHi;
 
+    // OUTSIDE THESE THE READING IS NOT BELIEVED, at any grade.
+    //
+    // A different question from every other number on this row. The corridor asks "is this swing
+    // good?"; this asks "is this reading real?", and the two must never be merged. A driver smash
+    // of 1.62 is not a swing finding — it is a mis-tracked ball — so grading it, in EITHER
+    // direction, would launder a capture fault into a confident diagnosis. Outside these bounds the
+    // grade is NotMeasured and the reading carries a distinct `implausible` flag, so a surface can
+    // say "reading outside the plausible range — check the capture" instead of "not measured".
+    // Those are different statements and nothing may collapse them, exactly as NotMeasured must
+    // never collapse into a passing grade.
+    //
+    // On the norm row rather than the measure — unlike `Shape` — because the physical cap IS
+    // context-dependent: smash is bounded by loft, so a driver, an iron and a wedge cap differently
+    // while all three are the same one-sided quantity. They parse like the monitor bounds and may
+    // appear singly.
+    //
+    // This is also the far edge of an open tail: a floor is open above UP TO PLAUSIBILITY, never to
+    // infinity.
+    std::optional<double> plausibleLo;
+    std::optional<double> plausibleHi;
+
     int        n      = 0;                        // sample size behind it; 0 for a heuristic
     NormSource source = NormSource::Heuristic;
     QString    unit;                              // MUST match the measure's unit; load fails if not
@@ -147,7 +174,39 @@ struct Norm {
     // unknown rather than answered no.
     std::optional<NormBasis> basedOn;
 
-    bool hasExplicitMonitor() const { return monitorLo.has_value() && monitorHi.has_value(); }
+    // Does this norm state its Watch edge outright, rather than deriving it from the policy?
+    //
+    // SHAPE-AWARE, and it has to be. Requiring both bounds is right for a Target and wrong for
+    // everything else: a floor's high tail is open, so `monitorLo` alone is a COMPLETE monitor
+    // band there. Answering false would make grade() and bandEdgesOf() silently ignore a bound the
+    // author wrote down — the corridor would look authored and grade as though it were not.
+    bool hasExplicitMonitor(Shape shape = Shape::Target) const
+    {
+        switch (shape) {
+        case Shape::Floor:   return monitorLo.has_value();
+        case Shape::Ceiling: return monitorHi.has_value();
+        case Shape::Target:  break;
+        }
+        return monitorLo.has_value() && monitorHi.has_value();
+    }
+
+    // Past the explicit Watch edge on a tail that grades. The open tail is never outside it,
+    // whatever a stray bound says — `normShapeMonitor` refuses one, but a pack that loaded with
+    // errors must not then grade against the thing that was refused.
+    bool outsideMonitor(double value, Shape shape = Shape::Target) const
+    {
+        if (shape != Shape::Ceiling && monitorLo.has_value() && value < *monitorLo) return true;
+        if (shape != Shape::Floor   && monitorHi.has_value() && value > *monitorHi) return true;
+        return false;
+    }
+
+    // Outside what this norm is willing to believe. Shape-INDEPENDENT: an open tail is open up to
+    // plausibility, and a capture fault is a capture fault on either side of any shape.
+    bool isImplausible(double value) const
+    {
+        return (plausibleLo.has_value() && value < *plausibleLo)
+            || (plausibleHi.has_value() && value > *plausibleHi);
+    }
 
     // THE NORM'S OWN CLAIM, in the measure's own units: mu +/- one tolerance either side.
     //
@@ -184,8 +243,18 @@ inline bool gradePolicyIsOrdered(const GradePolicy &p)
 // asymmetrically. A zero tolerance on the relevant side yields infinity rather than a division by
 // zero: a norm with no tolerance admits only its own centre, which is a degenerate but well-defined
 // statement, and the validator warns about it separately.
-inline double normZ(double value, const Norm &norm)
+//
+// On the UNGRADED side of a one-sided norm the answer is exactly 0, not a positive distance. A
+// future 0-100 characteristic score built on z must not reward overshooting a floor: a smash of
+// 1.60 is not twice as good as 1.48, it is the same answer — "the strike is efficient" — and a
+// score that climbed past the aspiration would invent a target nobody set.
+//
+// Continuous at mu by construction: both formulations give 0 there.
+inline double normZ(double value, const Norm &norm, Shape shape = Shape::Target)
 {
+    if (shape == Shape::Floor   && value >= norm.mu) return 0.0;
+    if (shape == Shape::Ceiling && value <= norm.mu) return 0.0;
+
     const double sigma = (value < norm.mu) ? norm.sigmaLo : norm.sigmaHi;
     if (!(sigma > 0.0))
         return (value == norm.mu) ? 0.0 : std::numeric_limits<double>::infinity();
@@ -209,13 +278,20 @@ inline double normZ(double value, const Norm &norm)
 // samples that the band still excludes, which is the same disagreement with the sign flipped. What
 // removes the whole class is computing the edge the SAME WAY on both paths and comparing inclusively
 // against it — then the two agree by construction, at every magnitude, with no fudge factor.
-inline bool withinBand(double value, const Norm &norm, double threshold)
+// The one-sided shapes INHERIT that doctrine rather than reproducing it: a floor's single computed
+// edge is `mu - threshold * sigmaLo`, compared inclusively, exactly as a target's low edge is. The
+// open side is admitted outright, so the good side of a floor is inside every band at every
+// threshold — Ideal by construction, at every policy.
+inline bool withinBand(double value, const Norm &norm, double threshold,
+                       Shape shape = Shape::Target)
 {
-    const double sigma = (value < norm.mu) ? norm.sigmaLo : norm.sigmaHi;
-    if (!(sigma > 0.0))
-        return value == norm.mu;      // a norm admitting only its own centre; the validator warns
-    return (value >= norm.mu - threshold * norm.sigmaLo)
-        && (value <= norm.mu + threshold * norm.sigmaHi);
+    // The degenerate case needs no branch of its own, and used to have one. With sigma = 0 the
+    // computed edge is `mu - threshold * 0 == mu`, so the inclusive comparison already says
+    // "only its own centre" — the same answer the old early return gave, by the same arithmetic
+    // the rest of the function uses. One expression, no second path to keep in step.
+    const bool okLo = (shape == Shape::Ceiling) || value >= norm.mu - threshold * norm.sigmaLo;
+    const bool okHi = (shape == Shape::Floor)   || value <= norm.mu + threshold * norm.sigmaHi;
+    return okLo && okHi;
 }
 
 // Grade a value against a norm.
@@ -228,19 +304,27 @@ inline bool withinBand(double value, const Norm &norm, double threshold)
 // the explicit monitor bounds are strictly tighter than 3 sigma, so a value inside them can never
 // legitimately reach Action by z alone — and a value outside them was RED under the old classifier
 // regardless of how few tolerances out it was. Both halves of the rule are needed to reproduce that.
-inline Grade grade(double value, const Norm &norm, const GradePolicy &policy = {})
+// PLAUSIBILITY OUTRANKS EVERYTHING, including the monitor band. A reading the norm does not believe
+// is not graded at all — not Action, not Ideal. Grading it either way would answer a question about
+// the swing using a number that describes the capture, and the more confident the answer looked the
+// worse it would be. See Norm::plausibleLo.
+inline Grade grade(double value, const Norm &norm, const GradePolicy &policy = {},
+                   Shape shape = Shape::Target)
 {
-    if (norm.hasExplicitMonitor()) {
-        if (value < *norm.monitorLo || value > *norm.monitorHi)
+    if (norm.isImplausible(value))
+        return Grade::NotMeasured;
+
+    if (norm.hasExplicitMonitor(shape)) {
+        if (norm.outsideMonitor(value, shape))
             return Grade::Action;
-        if (withinBand(value, norm, policy.idealMaxZ)) return Grade::Ideal;
-        if (withinBand(value, norm, policy.goodMaxZ))  return Grade::Good;
+        if (withinBand(value, norm, policy.idealMaxZ, shape)) return Grade::Ideal;
+        if (withinBand(value, norm, policy.goodMaxZ, shape))  return Grade::Good;
         return Grade::Watch;                      // capped: inside the monitor band is never Action
     }
 
-    if (withinBand(value, norm, policy.idealMaxZ)) return Grade::Ideal;
-    if (withinBand(value, norm, policy.goodMaxZ))  return Grade::Good;
-    if (withinBand(value, norm, policy.watchMaxZ)) return Grade::Watch;
+    if (withinBand(value, norm, policy.idealMaxZ, shape)) return Grade::Ideal;
+    if (withinBand(value, norm, policy.goodMaxZ, shape))  return Grade::Good;
+    if (withinBand(value, norm, policy.watchMaxZ, shape)) return Grade::Watch;
     return Grade::Action;
 }
 
@@ -270,6 +354,16 @@ inline bool isDeviation(Grade g) { return g == Grade::Watch || g == Grade::Actio
 struct NormBandEdges {
     double idealLo = 0.0, idealHi = 0.0;   // mu −/+ idealMaxZ * sigma
     double watchLo = 0.0, watchHi = 0.0;   // where Action begins
+
+    // This tail does not grade — the corridor runs off the end of the plot rather than stopping.
+    //
+    // The numeric edge on an open side is `mu`, the ASPIRATION POINT, and never a sentinel:
+    // infinity and NaN must not cross into QML, where `.toDouble()` on a missing key already
+    // yields 0.0 and every `|| 0` fallback would turn a sentinel into a corridor at the origin. mu
+    // is the only number the norm actually states on that side, everything beyond it is Ideal by
+    // construction, and a surface that ignores these flags therefore still draws something TRUE:
+    // green up to the aspiration, amber out to the watch edge, which reads as "get to 1.48".
+    bool   lowOpen = false, highOpen = false;
 };
 
 // `marginOverride` is the SwingLab `bands.*` sweep (negative ⇒ not set), which replaces the Watch
@@ -277,9 +371,12 @@ struct NormBandEdges {
 // the shipped norms do not store their Watch edge as a margin at all, so sweeping "the margin"
 // without it would silently do nothing on those.
 inline NormBandEdges bandEdgesOf(const Norm &n, const GradePolicy &policy = {},
-                                 double marginOverride = -1.0)
+                                 double marginOverride = -1.0, Shape shape = Shape::Target)
 {
     NormBandEdges e;
+    e.lowOpen  = (shape == Shape::Ceiling);
+    e.highOpen = (shape == Shape::Floor);
+
     // Computed the same way withinBand() computes it, so the drawn edge and the graded edge agree
     // by construction at every magnitude — the float-edge doctrine, applied to the band it had
     // never been applied to.
@@ -288,13 +385,21 @@ inline NormBandEdges bandEdgesOf(const Norm &n, const GradePolicy &policy = {},
     if (marginOverride >= 0.0) {
         e.watchLo = e.idealLo - marginOverride;
         e.watchHi = e.idealHi + marginOverride;
-    } else if (n.hasExplicitMonitor()) {
-        e.watchLo = *n.monitorLo;
-        e.watchHi = *n.monitorHi;
+    } else if (n.hasExplicitMonitor(shape)) {
+        // value_or, not a dereference: on a one-sided norm the open side's bound is legitimately
+        // absent, and hasExplicitMonitor() has already said the graded side's is there.
+        e.watchLo = n.monitorLo.value_or(n.mu - policy.watchMaxZ * n.sigmaLo);
+        e.watchHi = n.monitorHi.value_or(n.mu + policy.watchMaxZ * n.sigmaHi);
     } else {
         e.watchLo = n.mu - policy.watchMaxZ * n.sigmaLo;
         e.watchHi = n.mu + policy.watchMaxZ * n.sigmaHi;
     }
+
+    // The open side collapses to the aspiration point, AFTER any margin sweep — so marginOverride
+    // widens the graded side only, which is what sweeping "the margin" on a one-sided norm can
+    // mean. See NormBandEdges for why mu rather than a sentinel.
+    if (e.highOpen) e.idealHi = e.watchHi = n.mu;
+    if (e.lowOpen)  e.idealLo = e.watchLo = n.mu;
     return e;
 }
 

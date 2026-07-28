@@ -226,6 +226,140 @@ int main()
         check(!gradePolicyIsOrdered(GradePolicy{ 0.0, 2.0, 3.0 }), "a zero ideal cap is refused");
     }
 
+    std::printf("=== norm: a FLOOR grades one tail ===\n");
+    {
+        // Smash factor, driver. There is no upper fault in this quantity: a golfer approaching
+        // perfect energy transfer is not deviating from anything.
+        const Norm n = symmetric(1.48, 0.05);
+        const Shape f = Shape::Floor;
+
+        check(grade(1.48, n, {}, f) == Grade::Ideal, "the aspiration itself is Ideal");
+        check(grade(1.55, n, {}, f) == Grade::Ideal, "above it is Ideal — this was Good before");
+        check(grade(9.99, n, {}, f) == Grade::Ideal, "…however far above; the tail does not grade");
+        check(grade(1.43, n, {}, f) == Grade::Ideal, "one tolerance below is still Ideal");
+        check(grade(1.40, n, {}, f) == Grade::Good,  "…two below is ordinary variation");
+        check(grade(1.35, n, {}, f) == Grade::Watch, "…three below is a deviation");
+        check(grade(1.30, n, {}, f) == Grade::Action, "…beyond that is Action");
+
+        // z is 0 on the good side, not a positive distance. A 0-100 score built on this must not
+        // reward overshooting a floor.
+        check(near(normZ(1.48, n, f), 0.0), "z is 0 AT the aspiration");
+        check(near(normZ(1.60, n, f), 0.0), "…and 0 above it, never a reward");
+        check(near(normZ(1.43, n, f), -1.0), "…and the ordinary per-side z below it");
+
+        // Continuity at mu: both formulations agree there, which is what makes the piecewise
+        // definition a function rather than a pair of them.
+        check(near(normZ(1.48 - 1e-12, n, f), 0.0, 1e-9) && near(normZ(1.48, n, f), 0.0),
+              "continuous at mu, from both sides");
+
+        // The good side is Ideal AT EVERY POLICY, by construction — there is no threshold for it
+        // to fall outside of.
+        for (const GradePolicyPreset &p : gradePolicyPresets())
+            check(grade(2.0, n, p.policy, f) == Grade::Ideal, p.name);
+
+        // The single computed edge obeys the float-edge doctrine exactly as a target's does.
+        for (const GradePolicyPreset &p : gradePolicyPresets()) {
+            const NormBandEdges e = bandEdgesOf(n, p.policy, -1.0, f);
+            check(e.highOpen && !e.lowOpen, "a floor is open above and graded below");
+            check(near(e.idealHi, n.mu) && near(e.watchHi, n.mu),
+                  "…and its open-side edges are mu, never a sentinel");
+            check(grade(e.idealLo, n, p.policy, f) == Grade::Ideal, "ON the drawn edge is Ideal");
+            check(grade(e.idealLo + 1e-9, n, p.policy, f) == Grade::Ideal, "…and just inside");
+            check(grade(e.watchLo - 1e-9, n, p.policy, f) == Grade::Action, "…just outside Watch");
+        }
+
+        // The SwingLab margin sweep widens the GRADED side only. Applied to the open side it would
+        // push a number past the aspiration and invent a ceiling the norm does not hold.
+        const NormBandEdges swept = bandEdgesOf(n, {}, 0.10, f);
+        check(near(swept.watchLo, (n.mu - n.sigmaLo) - 0.10), "a margin sweep widens the low tail");
+        check(near(swept.watchHi, n.mu) && swept.highOpen,
+              "…and leaves the open tail at the aspiration");
+    }
+
+    std::printf("=== norm: a CEILING is the mirror ===\n");
+    {
+        // A magnitude whose domain is [0, inf) and whose ideal is zero.
+        const Norm n = symmetric(0.0, 2.0);
+        const Shape c = Shape::Ceiling;
+
+        check(grade(0.0,  n, {}, c) == Grade::Ideal, "zero is Ideal");
+        check(grade(-9.0, n, {}, c) == Grade::Ideal, "below is Ideal — the tail does not grade");
+        check(grade(2.0,  n, {}, c) == Grade::Ideal, "one tolerance above is still Ideal");
+        check(grade(4.0,  n, {}, c) == Grade::Good,  "…two above is ordinary variation");
+        check(grade(6.0,  n, {}, c) == Grade::Watch, "…three above is a deviation");
+        check(grade(6.1,  n, {}, c) == Grade::Action, "…beyond that is Action");
+
+        check(near(normZ(-5.0, n, c), 0.0), "z is 0 on the good side");
+        check(near(normZ(2.0, n, c), 1.0),  "…and the ordinary per-side z above it");
+
+        const NormBandEdges e = bandEdgesOf(n, {}, -1.0, c);
+        check(e.lowOpen && !e.highOpen, "a ceiling is open below and graded above");
+        check(near(e.idealLo, n.mu) && near(e.watchLo, n.mu), "…with mu on the open side");
+    }
+
+    std::printf("=== norm: a one-sided monitor is a COMPLETE monitor ===\n");
+    {
+        // hasExplicitMonitor() wants both bounds on a Target and exactly one on a one-sided
+        // measure. Answering the Target way for a floor would make grade() ignore a bound the
+        // author wrote down — authored corridor, unauthored grading.
+        Norm n      = symmetric(1.48, 0.05);
+        n.monitorLo = 1.30;
+
+        check(!n.hasExplicitMonitor(), "half a band is not a monitor on a Target");
+        check(n.hasExplicitMonitor(Shape::Floor), "…and IS one on a Floor");
+
+        // Monitor precedence survives on the graded tail: outside is Action, inside is capped at
+        // Watch however many tolerances out.
+        check(grade(1.29, n, {}, Shape::Floor) == Grade::Action, "below the monitor is Action");
+        check(grade(1.31, n, {}, Shape::Floor) == Grade::Watch,
+              "…and inside it is capped at Watch, though 1.31 is 3.4 tolerances out");
+        check(grade(2.00, n, {}, Shape::Floor) == Grade::Ideal, "the open tail is untouched by it");
+    }
+
+    std::printf("=== norm: a reading nobody believes is not a grade ===\n");
+    {
+        // A driver smash of 1.62 is a mis-tracked ball, not a swing finding. Grading it in EITHER
+        // direction would launder a capture fault into a confident diagnosis.
+        Norm n        = symmetric(1.48, 0.05);
+        n.plausibleHi = 1.56;
+
+        check(grade(1.55, n, {}, Shape::Floor) == Grade::Ideal, "inside the cap, graded normally");
+        check(grade(1.62, n, {}, Shape::Floor) == Grade::NotMeasured, "outside it, not graded");
+        check(n.isImplausible(1.62) && !n.isImplausible(1.55), "…and the reading says which it is");
+
+        // NotMeasured, never Action — and never a pass either. It is the third state.
+        check(!isDeviation(grade(1.62, n, {}, Shape::Floor)),
+              "an implausible reading is not a deviation");
+        check(ragOf(grade(1.62, n, {}, Shape::Floor)) == PpRag::Grey, "…and renders Grey");
+
+        // It outranks the monitor band, which is otherwise the strongest rule in grade().
+        Norm m        = symmetric(10.0, 1.0);
+        m.monitorLo   = 5.0;
+        m.monitorHi   = 15.0;
+        m.plausibleHi = 40.0;
+        check(grade(20.0, m) == Grade::Action,      "past the monitor is Action");
+        check(grade(50.0, m) == Grade::NotMeasured, "…but past belief is not graded at all");
+
+        // Bounds may appear singly: a floor caps above and says nothing below.
+        Norm lo        = symmetric(10.0, 1.0);
+        lo.plausibleLo = 0.0;
+        check(grade(-1.0, lo) == Grade::NotMeasured && grade(99.0, lo) == Grade::Action,
+              "a lone low bound disbelieves below and still grades above");
+    }
+
+    std::printf("=== norm: a degenerate one-sided norm ===\n");
+    {
+        // Zero tolerance on the graded side admits only mu there; the open side is still open.
+        // withinBand has no special case for this any more — the computed edge mu - t*0 == mu
+        // gives the same answer through the same arithmetic as everything else.
+        const Norm n = symmetric(1.0, 0.0);
+        check(grade(1.0, n, {}, Shape::Floor) == Grade::Ideal,  "the centre grades Ideal");
+        check(grade(5.0, n, {}, Shape::Floor) == Grade::Ideal,  "…so does the whole open side");
+        check(grade(0.9, n, {}, Shape::Floor) == Grade::Action, "…and anything below is Action");
+        check(grade(0.9, n) == Grade::Action && grade(1.1, n) == Grade::Action,
+              "…while a degenerate TARGET refuses both sides, as it always did");
+    }
+
     std::printf("=== norm: NotMeasured is never a pass ===\n");
     {
         // The enum's contract, asserted so a future refactor cannot quietly fold NotMeasured into

@@ -149,12 +149,31 @@ int main()
         neg.norms.push_back(n);
         check(hasCode(validateNormPack(neg), "negativeSigma"), "a negative tolerance is an error");
 
+        // partialMonitor is NOT decidable here any more and has moved to validateNormsAgainst —
+        // one bound is a COMPLETE monitor band on a one-sided measure, and this validator cannot
+        // see the measure. Asserted silent in both directions so the move cannot be undone by
+        // accident.
         NormPack partial;
         Norm     pn  = makeNorm("m_a", "full_swing", 0.0, 1.0);
         pn.monitorLo = -5.0;                 // no monitorHi
         partial.norms.push_back(pn);
-        check(hasCode(validateNormPack(partial), "partialMonitor"),
-              "one monitor bound without the other is an error");
+        check(!hasCode(validateNormPack(partial), "partialMonitor"),
+              "half a monitor band is not decidable without the measure's shape");
+
+        // Plausibility order needs no shape — it is a claim about capture, not about grading.
+        NormPack badPlaus;
+        Norm     bp    = makeNorm("m_a", "full_swing", 0.0, 1.0);
+        bp.plausibleLo = 9.0;
+        bp.plausibleHi = 1.0;
+        badPlaus.norms.push_back(bp);
+        check(hasCode(validateNormPack(badPlaus), "plausibleOrder"),
+              "plausibleLo above plausibleHi is an error");
+
+        NormPack onePlaus;
+        Norm     op    = makeNorm("m_a", "full_swing", 0.0, 1.0);
+        op.plausibleHi = 9.0;                // a cap above and nothing below
+        onePlaus.norms.push_back(op);
+        check(validateNormPack(onePlaus).ok(), "…but a bound stated singly is legal");
 
         NormPack ordered;
         Norm     on  = makeNorm("m_a", "full_swing", 0.0, 1.0);
@@ -313,6 +332,51 @@ int main()
                 namesBoth = i.message.contains(QLatin1String("m_smash"))
                             && i.message.contains(shapeLabel(Shape::Floor));
         check(namesBoth, "the message names the measure and what its shape means");
+
+        // ── partialMonitor, now that the shape is in hand ───────────────────
+        //
+        // The same row is an error on a Target and correct on a Floor, which is exactly why the
+        // check could not stay in the standalone validator.
+        NormPack halfOnTarget;
+        halfOnTarget.norms.push_back(makeNorm("m_ballPosition", "driver", 12.0, 4.0, "%"));
+        halfOnTarget.norms[0].monitorLo = 0.0;
+        check(hasCode(validateNormsAgainst(halfOnTarget, pack, tree), "partialMonitor"),
+              "half a monitor band on a TARGET is half a rule");
+        check(!hasCode(validateNormsAgainst(gradedMonitor, pack, tree), "partialMonitor"),
+              "…and the same row on a FLOOR is complete");
+
+        // ── Plausibility must not cut into the corridor ─────────────────────
+        //
+        // Otherwise a reading is graded Action and disbelieved at the same time, and which answer
+        // surfaces depends on the order two checks happen to run in.
+        NormPack biting;
+        biting.norms.push_back(makeNorm("m_ballPosition", "driver", 12.0, 4.0, "%"));
+        biting.norms[0].plausibleHi = 13.0;      // well inside mu + 3.5 sigma
+        check(hasCode(validateNormsAgainst(biting, pack, tree), "plausibleInsideCorridor"),
+              "a plausible cap inside the Watch edge is refused");
+
+        NormPack roomy;
+        roomy.norms.push_back(makeNorm("m_ballPosition", "driver", 12.0, 4.0, "%"));
+        roomy.norms[0].plausibleHi = 100.0;
+        roomy.norms[0].plausibleLo = -100.0;
+        check(validateNormsAgainst(roomy, pack, tree).ok(),
+              "…and one outside it is fine");
+
+        // Measured against the WIDEST preset, so a pack cannot be valid for one reader and not
+        // another. mu + 3.5 sigma is 26 under `lenient`; 3 sigma is 24 under `standard`.
+        NormPack betweenPresets;
+        betweenPresets.norms.push_back(makeNorm("m_ballPosition", "driver", 12.0, 4.0, "%"));
+        betweenPresets.norms[0].plausibleHi = 25.0;
+        check(hasCode(validateNormsAgainst(betweenPresets, pack, tree), "plausibleInsideCorridor"),
+              "a cap outside `standard` but inside `lenient` is still refused");
+
+        // The OPEN tail has no Watch edge to cut into, so a cap there is always fine — which is
+        // the whole point of plausibility on a floor.
+        NormPack floorCap;
+        floorCap.norms.push_back(makeNorm("m_smash", "driver", 1.48, 0.05, "ratio"));
+        floorCap.norms[0].plausibleHi = 1.56;
+        check(validateNormsAgainst(floorCap, pack, tree).ok(),
+              "a cap on a floor's OPEN tail is always fine — that is what it is for");
     }
 
     std::printf("=== norm pack: schema gate ===\n");

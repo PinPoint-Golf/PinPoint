@@ -238,10 +238,15 @@ ValidationReport validateNormPack(const NormPack &pack)
             err(QStringLiteral("negativeSigma"), key,
                 QStringLiteral("Norm '%1' has a negative tolerance.").arg(key));
 
-        if (n.monitorLo.has_value() != n.monitorHi.has_value())
-            err(QStringLiteral("partialMonitor"), key,
-                QStringLiteral("Norm '%1' sets only one side of its monitor band; set both or "
-                               "neither.").arg(key));
+        // `partialMonitor` used to live here and had to move to validateNormsAgainst: one side of a
+        // monitor band is COMPLETE on a one-sided measure, and this validator cannot see the
+        // measure. Deciding it here would refuse the correct authoring of every floor and ceiling.
+
+        // Plausibility is a claim about capture, not about grading, so it needs no shape to check.
+        if (n.plausibleLo.has_value() && n.plausibleHi.has_value()
+            && *n.plausibleLo > *n.plausibleHi)
+            err(QStringLiteral("plausibleOrder"), key,
+                QStringLiteral("Norm '%1' has plausibleLo above plausibleHi.").arg(key));
 
         if (n.hasExplicitMonitor()) {
             if (*n.monitorLo > *n.monitorHi)
@@ -341,6 +346,45 @@ ValidationReport validateNormsAgainst(const NormPack           &norms,
                         .arg(m->id, shapeLabel(m->shape), key,
                              m->shape == Shape::Floor ? QStringLiteral("monitorHi")
                                                       : QStringLiteral("monitorLo")));
+        } else if (n.monitorLo.has_value() != n.monitorHi.has_value()) {
+            // MOVED here from validateNormPack, which cannot see the measure. On a TARGET both
+            // sides grade, so half a monitor band is half a rule: hasExplicitMonitor() answers
+            // false, grade() falls back to the z-derived edge, and the bound the author wrote sits
+            // in the file doing nothing. On a one-sided measure the same row is correct and
+            // complete, which is why the check could not stay where it was.
+            err(QStringLiteral("partialMonitor"), key,
+                QStringLiteral("Norm '%1' sets only one side of its monitor band, and measure '%2' "
+                               "grades both tails; set both or neither.").arg(key, m->id));
+        }
+
+        // ── Plausibility against the corridor ───────────────────────────────
+        //
+        // A corridor must never extend into territory the norm does not believe. Where a plausible
+        // bound and a Watch edge both exist on a side, the bound must lie at or outside the edge —
+        // otherwise a reading would be graded Action and disbelieved at the same time, and which
+        // answer surfaced would depend on the order the two checks happened to run in.
+        //
+        // Measured against the WIDEST shipped preset, or against an explicit monitor bound where
+        // one exists. Validation has no policy in hand, and a row that loaded under `standard` and
+        // failed under `lenient` would make a shared pack's validity depend on the reader's
+        // settings.
+        {
+            const GradePolicy widest = gradePolicyByName(QStringLiteral("lenient"));
+            const NormBandEdges e = bandEdgesOf(n, widest, -1.0, m->shape);
+
+            if (n.plausibleLo.has_value() && !e.lowOpen && *n.plausibleLo > e.watchLo)
+                err(QStringLiteral("plausibleInsideCorridor"), key,
+                    QStringLiteral("Norm '%1' stops believing readings below %2, but its own "
+                                   "corridor reaches down to %3. A corridor cannot extend into "
+                                   "implausible territory.")
+                        .arg(key).arg(*n.plausibleLo).arg(e.watchLo));
+
+            if (n.plausibleHi.has_value() && !e.highOpen && *n.plausibleHi < e.watchHi)
+                err(QStringLiteral("plausibleInsideCorridor"), key,
+                    QStringLiteral("Norm '%1' stops believing readings above %2, but its own "
+                                   "corridor reaches up to %3. A corridor cannot extend into "
+                                   "implausible territory.")
+                        .arg(key).arg(*n.plausibleHi).arg(e.watchHi));
         }
     }
 
@@ -374,6 +418,8 @@ Norm readNorm(const QJsonObject &o)
 
     readOptionalDouble(o, QStringLiteral("monitorLo"), n.monitorLo);
     readOptionalDouble(o, QStringLiteral("monitorHi"), n.monitorHi);
+    readOptionalDouble(o, QStringLiteral("plausibleLo"), n.plausibleLo);
+    readOptionalDouble(o, QStringLiteral("plausibleHi"), n.plausibleHi);
 
     n.n    = o.value(QStringLiteral("n")).toInt();
     n.unit = o.value(QStringLiteral("unit")).toString();
@@ -402,6 +448,8 @@ Norm readNorm(const QJsonObject &o)
                                 : basis.sigmaLo;
             readOptionalDouble(b, QStringLiteral("monitorLo"), basis.monitorLo);
             readOptionalDouble(b, QStringLiteral("monitorHi"), basis.monitorHi);
+            readOptionalDouble(b, QStringLiteral("plausibleLo"), basis.plausibleLo);
+            readOptionalDouble(b, QStringLiteral("plausibleHi"), basis.plausibleHi);
             n.basedOn = basis;
         }
     }
@@ -420,6 +468,9 @@ QJsonObject writeNorm(const Norm &n)
         o.insert(QStringLiteral("sigmaHi"), n.sigmaHi);
     if (n.monitorLo.has_value()) o.insert(QStringLiteral("monitorLo"), *n.monitorLo);
     if (n.monitorHi.has_value()) o.insert(QStringLiteral("monitorHi"), *n.monitorHi);
+    // Singly is legal: a floor caps above and says nothing below.
+    if (n.plausibleLo.has_value()) o.insert(QStringLiteral("plausibleLo"), *n.plausibleLo);
+    if (n.plausibleHi.has_value()) o.insert(QStringLiteral("plausibleHi"), *n.plausibleHi);
     if (n.n != 0)                o.insert(QStringLiteral("n"), n.n);
     if (!n.unit.isEmpty())       o.insert(QStringLiteral("unit"), n.unit);
     o.insert(QStringLiteral("source"), normSourceName(n.source));
@@ -435,6 +486,8 @@ QJsonObject writeNorm(const Norm &n)
         if (b.sigmaHi != b.sigmaLo) bo.insert(QStringLiteral("sigmaHi"), b.sigmaHi);
         if (b.monitorLo.has_value()) bo.insert(QStringLiteral("monitorLo"), *b.monitorLo);
         if (b.monitorHi.has_value()) bo.insert(QStringLiteral("monitorHi"), *b.monitorHi);
+        if (b.plausibleLo.has_value()) bo.insert(QStringLiteral("plausibleLo"), *b.plausibleLo);
+        if (b.plausibleHi.has_value()) bo.insert(QStringLiteral("plausibleHi"), *b.plausibleHi);
         o.insert(QStringLiteral("basedOn"), bo);
     }
     return o;

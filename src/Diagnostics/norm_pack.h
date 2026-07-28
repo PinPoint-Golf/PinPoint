@@ -76,7 +76,7 @@ struct NormPack {
 //   monitorOrder         monitorLo > monitorHi
 //   monitorExcludesIdeal the explicit monitor band does not contain the Ideal band — the value
 //                        would grade Action while sitting inside its own tolerance
-//   partialMonitor       one of monitorLo/monitorHi set without the other
+//   plausibleOrder       plausibleLo > plausibleHi
 // STANDALONE — WARNINGS:
 //   zeroSigma            a norm with no tolerance on a side; only its exact centre grades Ideal
 //   noProvenance         Literature source with no citation
@@ -93,6 +93,12 @@ struct NormPack {
 //                        them describes a tail that does not grade
 //   normShapeMonitor     a monitor bound on the OPEN side of a one-sided measure — an edge nothing
 //                        grades against, sitting in the pack looking authoritative
+//   partialMonitor       one of monitorLo/monitorHi without the other, on a measure that grades
+//                        BOTH tails. MOVED here from the standalone validator: half a monitor band
+//                        is a complete one on a one-sided measure, and only this layer knows which
+//   plausibleInsideCorridor  a plausible bound sits inside the Watch edge, so a reading would be
+//                        graded Action and disbelieved at once. Measured against the WIDEST shipped
+//                        preset, so the answer cannot depend on the reader's grade-policy setting
 //
 // Shape checks live HERE and not in the standalone validator for the same reason normUnitMismatch
 // does: shape is a property of the MEASURE (see characteristic.h), a norm row carries only numbers,

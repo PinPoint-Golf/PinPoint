@@ -35,6 +35,27 @@ static void checkNear(const char *label, double got, double want)
     if (!ok) ++g_fail;
 }
 
+// A norm set held by value, over the SHIPPED context tree. `resolve()` is non-virtual on the
+// interface, so this inherits the one resolution rule rather than restating it — which is the whole
+// reason that function is not virtual.
+namespace {
+class FixedNorms final : public INormProvider {
+public:
+    FixedNorms(NormPack pack, const ContextTree &tree) : m_pack(std::move(pack)), m_tree(tree) {}
+
+    const NormPack         &norms() const override    { return m_pack; }
+    const ContextTree      &contexts() const override { return m_tree; }
+    const ValidationReport &report() const override   { return m_report; }
+    QString                 label() const override    { return QStringLiteral("fixture"); }
+    PackOrigin              origin() const override   { return PackOrigin::Core; }
+
+private:
+    NormPack         m_pack;
+    ContextTree      m_tree;
+    ValidationReport m_report;
+};
+} // namespace
+
 int main()
 {
     const std::unique_ptr<ICharacteristicPackProvider> packProv = makeCharacteristicPackProvider();
@@ -207,6 +228,61 @@ int main()
             corridorForMetricAtPhase(pack, *norms, QStringLiteral("stanceWidth"), Phase::Address,
                                      QStringLiteral("hovercraft"));
         check(!bogus.has_value(), "an unrecognised context yields NO corridor, never a fallback");
+    }
+
+    // ── Shape reaches the corridor, so no surface has to guess ──────────────
+    //
+    // One-sidedness was decided by string-matching a unit in QML before this. Every surface now
+    // reads it from the corridor, and the corridor reads it from the MEASURE — one decision, made
+    // once. Any surface re-deriving it from a unit, a metric key or a label is a bug.
+    std::printf("=== shape and openness reach the corridor ===\n");
+    {
+        const std::optional<MetricCorridor> two =
+            corridorForMetricAtPhase(pack, *norms, QStringLiteral("stanceWidth"), Phase::Address,
+                                     kFull);
+        check(two.has_value(), "stance width resolves");
+        if (two)
+            check(two->shape == Shape::Target && !two->lowOpen && !two->highOpen,
+                  "…and every shipped measure is a Target with two graded tails today");
+
+        // Everything below runs against a hand-built floor, because no shipped measure is one-sided
+        // until the seed conversion. Held here rather than deferred: the propagation is what the
+        // surfaces will bind to, and a stage that lands it untested lands it unverifiable.
+        CharacteristicPack fp;
+        Measure fm;
+        fm.id            = QStringLiteral("m_fakeSmash");
+        fm.kind          = MeasureKind::Provided;
+        fm.metricKey     = QStringLiteral("fakeSmash");
+        fm.unit          = QStringLiteral("ratio");
+        fm.status        = MeasureStatus::Live;
+        fm.shape         = Shape::Floor;
+        fm.reducer.kind  = ReducerKind::At;
+        fm.reducer.anchor = Phase::Impact;
+        fp.measures.push_back(fm);
+
+        NormPack fn;
+        Norm row;
+        row.measureId = fm.id;
+        row.contextId = QStringLiteral("any");
+        row.mu        = 1.48;
+        row.sigmaLo   = 0.05;
+        row.sigmaHi   = 0.05;
+        row.unit      = QStringLiteral("ratio");
+        fn.norms.push_back(row);
+
+        FixedNorms fnp(fn, norms->contexts());
+        const std::optional<MetricCorridor> f =
+            corridorForMetricAtPhase(fp, fnp, QStringLiteral("fakeSmash"), Phase::Impact,
+                                     QStringLiteral("any"));
+        check(f.has_value(), "a floor measure resolves a corridor");
+        if (f) {
+            check(f->shape == Shape::Floor, "the corridor carries the measure's shape");
+            check(f->highOpen && !f->lowOpen, "…and says which tail is open");
+            check(std::fabs(f->greenHi - 1.48) < 1e-9 && std::fabs(f->amberHi - 1.48) < 1e-9,
+                  "…with mu on the open side, never a sentinel — inf must not reach QML");
+            check(f->greenLo < f->greenHi && f->amberLo < f->greenLo,
+                  "…and an ordinary graded band below it");
+        }
     }
 
     // ── The grade policy reaches the corridor ───────────────────────────────

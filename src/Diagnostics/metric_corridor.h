@@ -42,8 +42,19 @@ namespace pinpoint::analysis {
 // from, not the shape anything draws.
 struct MetricCorridor {
     Phase  phase   = Phase::Impact;
-    double greenLo = 0.0, greenHi = 0.0;   // the Ideal band — the norm's own claim, policy-free
+    double greenLo = 0.0, greenHi = 0.0;   // the Ideal band under the active grade policy
     double amberLo = 0.0, amberHi = 0.0;   // out to where Action begins
+
+    // Which way this corridor is open, from the MEASURE's shape. Threaded rather than re-derived,
+    // and that is the whole point: one-sidedness was previously decided by string-matching the
+    // unit in `PpDashboardMotionZone._isOneSided()`, a presentation-layer heuristic standing in for
+    // a semantic property. Any surface that re-derives it from a unit, a metric key or a label is
+    // a bug.
+    //
+    // The numeric edge on an open side is `mu` — a defined, sane value, never a sentinel. See
+    // NormBandEdges.
+    bool   lowOpen = false, highOpen = false;
+    Shape  shape   = Shape::Target;
 
     // True when the measure behind it is a change from address rather than an absolute reading.
     // Two corridors on ONE metric can now differ here — the Δ-from-address cell measure at the top
@@ -85,7 +96,7 @@ inline std::optional<MetricCorridor> corridorForMetricAtPhase(const Characterist
         if (!res.found())
             continue;
 
-        const NormBandEdges e = bandEdgesOf(*res.norm, policy);
+        const NormBandEdges e = bandEdgesOf(*res.norm, policy, -1.0, m->shape);
 
         MetricCorridor c;
         c.phase            = phase;
@@ -93,6 +104,9 @@ inline std::optional<MetricCorridor> corridorForMetricAtPhase(const Characterist
         c.greenHi          = e.idealHi;
         c.amberLo          = e.watchLo;
         c.amberHi          = e.watchHi;
+        c.lowOpen          = e.lowOpen;
+        c.highOpen         = e.highOpen;
+        c.shape            = m->shape;
         c.deltaFromAddress = measureIsDeltaFromAddress(*m);
         c.measureId        = m->id;
         c.contextId        = res.contextId;
