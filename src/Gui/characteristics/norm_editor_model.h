@@ -199,6 +199,21 @@ public:
     Q_INVOKABLE void setTolerance(double tolerance);
     Q_INVOKABLE void nudgeGradedEdge(double edgeValue);
 
+    // ── Plausibility ────────────────────────────────────────────────────────
+    // A DIFFERENT QUESTION FROM EVERYTHING ELSE ON THIS SCREEN. The corridor asks whether the
+    // swing is good; these ask whether the reading is real. A driver smash of 1.62 is not a swing
+    // finding, it is a mis-tracked ball, and grading it in either direction launders a capture
+    // fault into a confident diagnosis (norm.h).
+    //
+    // Optional, independently — a floor caps above and says nothing below — so each has a clear as
+    // well as a set. Unlike the monitor bounds, these ARE carried into a draft by begin(): a bound
+    // the editor exposes must survive a round trip through it, or opening a capped row and saving
+    // it would silently drop the cap.
+    Q_INVOKABLE void setPlausibleLo(double v);
+    Q_INVOKABLE void setPlausibleHi(double v);
+    Q_INVOKABLE void clearPlausibleLo();
+    Q_INVOKABLE void clearPlausibleHi();
+
     // ── The axis must not move while a handle is being dragged ──────────────
     //
     // NOT a view detail — a correctness rule, and the defect it prevents is violent. The axis is
@@ -281,6 +296,17 @@ private:
     // from the unit. Target when no measure resolves, which is what every path here did before
     // shapes existed and is right for 105 of the 106 shipped measures.
     pinpoint::analysis::Shape shape() const;
+
+    // Why this draft's plausibility bounds are not authorable as they stand, per side, or empty
+    // when they are. ONE function, consulted by draft() for the inline message and by save() for
+    // the refusal, so the editor cannot bless a row the pack validator will reject.
+    //
+    // Measured against the WIDEST shipped preset (`lenient`), NOT the active one — deliberately
+    // the same reference validateNormsAgainst uses. An editor validating against the reader's own
+    // sensitivity setting would let an author on `strict` save a row that fails to load for
+    // everyone on `lenient`.
+    QString plausibleLoProblem() const;
+    QString plausibleHiProblem() const;
 
     // "1.4 to 1.5" / "at least 1.5" / "no more than 12.0" — the ONE place a corridor's claim
     // becomes a sentence. Built here and not in a delegate for the reason `editedNote` already

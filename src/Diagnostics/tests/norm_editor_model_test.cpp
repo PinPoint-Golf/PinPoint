@@ -751,6 +751,106 @@ int main(int argc, char **argv)
         near(num(ce.draft(), "tolerance"), 0.30, "…while the high nudge routes to the edge");
     }
 
+    // ── Plausibility ────────────────────────────────────────────────────────
+    //
+    // A different question from everything else here: not "was the swing good" but "was the
+    // reading real". Gated on a FLOOR because that is where the seed conversion puts the first
+    // one — a floor is open above, and the cap is the only thing stopping that open tail from
+    // believing 1.62.
+    std::printf("\nplausibility\n");
+    {
+        const QString fp = packWithShape("floor");
+        qputenv("PINPOINT_CORE_PACK", fp.toLocal8Bit());
+
+        NormEditorModel pe;
+        check(pe.begin(QStringLiteral("m_smashFactor"), QStringLiteral("driver")), "opens");
+        QVariantMap d2 = pe.draft();
+
+        for (const char *k : { "hasPlausibleLo", "hasPlausibleHi", "plausibleLo", "plausibleHi",
+                               "plausibleLoError", "plausibleHiError" })
+            check(d2.contains(QLatin1String(k)), k);
+
+        // ABSENT IS NOT ZERO. A shipped smash row carries no cap, and `.toDouble()` on a missing
+        // key yields 0.0 — so without the has* flags every uncapped row in the pack would read as
+        // "stops believing readings below zero".
+        check(!d2.value(QStringLiteral("hasPlausibleLo")).toBool()
+                  && !d2.value(QStringLiteral("hasPlausibleHi")).toBool(),
+              "a shipped row starts uncapped, and says so with a flag rather than a zero");
+        check(d2.value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
+              "…and an absent bound cannot be wrong");
+
+        // The seed conversion's own number: driver smash caps at 1.56, ABOVE, on the open side.
+        pe.setPlausibleHi(1.56);
+        d2 = pe.draft();
+        check(d2.value(QStringLiteral("hasPlausibleHi")).toBool(), "a cap can be set");
+        near(num(d2, "plausibleHi"), 1.56, "…to what was asked");
+        check(d2.value(QStringLiteral("plausibleHiError")).toString().isEmpty(),
+              "a cap on the OPEN side is never inside the corridor, so it is always legal there");
+        check(d2.value(QStringLiteral("dirty")).toBool(), "…and it dirties the draft");
+
+        // Order. Both bounds present and crossed is refused on BOTH sides, so whichever field the
+        // author is looking at says something.
+        pe.setPlausibleLo(1.70);
+        d2 = pe.draft();
+        check(!d2.value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
+              "a lower bound above the upper one is refused");
+        check(!d2.value(QStringLiteral("plausibleHiError")).toString().isEmpty(),
+              "…and the other field says so too, so the message is where the author is looking");
+        QVariantMap saved = pe.save();
+        check(!saved.value(QStringLiteral("ok")).toBool(), "…and the save is refused");
+
+        // Inside the corridor, on the GRADED side. This is the rule that matters: a reading there
+        // would be called a fault and disbelieved at once, and which answer surfaced would depend
+        // on the order two checks happened to run in.
+        pe.clearPlausibleLo();
+        check(!pe.draft().value(QStringLiteral("hasPlausibleLo")).toBool(), "a bound can be cleared");
+        pe.setPlausibleLo(1.45);          // mu 1.48, sigma 0.05 — well inside even standard's watch
+        check(!pe.draft().value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
+              "a bound INSIDE the graded corridor is refused");
+        saved = pe.save();
+        check(!saved.value(QStringLiteral("ok")).toBool(),
+              "…and save refuses it, because validateNormPack alone would not: that check needs "
+              "the measure, so it lives in validateNormsAgainst and never runs on this path");
+
+        // MEASURED AGAINST THE WIDEST PRESET, NOT THE ACTIVE ONE. A cap outside standard's 3 sigma
+        // but inside lenient's 3.5 must be refused, or an author on `standard` could save a row
+        // that fails to load for a reader on `lenient` — the pack's validity would depend on the
+        // reader's sensitivity setting.
+        pe.setPlausibleLo(1.48 - 3.2 * 0.05);
+        check(!pe.draft().value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
+              "outside standard's watch edge but inside lenient's is still refused");
+        pe.setGradePolicy(QStringLiteral("strict"));
+        check(!pe.draft().value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
+              "…and switching the reader's own policy does not make it legal");
+        pe.setGradePolicy(QStringLiteral("standard"));
+
+        pe.setPlausibleLo(1.48 - 3.6 * 0.05);
+        check(pe.draft().value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
+              "outside the widest preset's edge is accepted");
+
+        // ── A bound the editor SHOWS must survive a round trip through it ────
+        //
+        // Unlike the monitor bounds, which begin() drops on purpose because nothing renders them.
+        // Dropping a cap silently would turn readings the norm had stopped believing back into
+        // confident diagnoses.
+        pe.clearPlausibleLo();
+        pe.setPlausibleHi(1.56);
+        saved = pe.save();
+        check(saved.value(QStringLiteral("ok")).toBool(), "a legal cap saves");
+
+        NormEditorModel re;
+        re.begin(QStringLiteral("m_smashFactor"), QStringLiteral("driver"));
+        check(re.draft().value(QStringLiteral("hasPlausibleHi")).toBool(),
+              "…and re-opening the row finds the cap still there");
+        near(num(re.draft(), "plausibleHi"), 1.56, "…unchanged");
+
+        // Clean up: this test writes to the user norm set, and the sections after it read the
+        // resolved corridor. resetToDefault drops the override.
+        re.resetToDefault();
+        check(!re.draft().value(QStringLiteral("hasPlausibleHi")).toBool(),
+              "dropping the override drops the cap with it");
+    }
+
     // ── …and none of it reaches a target norm ───────────────────────────────
     //
     // The other half of every assertion above. Restored to the real pack, the same measure is an

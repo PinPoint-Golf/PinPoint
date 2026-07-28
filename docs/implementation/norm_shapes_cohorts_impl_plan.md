@@ -31,7 +31,7 @@ rule in there survives this work.
 | A4a | Rewire `oneSided` from the unit sniff to shape | ☑ complete — 79/79; **one rail changes appearance**, see N12 | 2026-07-28 |
 | A4b | One-sided domain rules for the bars | ☑ complete — 79/79, +26 assertions | 2026-07-28 |
 | A4c | Corridor editor — handles, readouts, diff rows | ☑ complete — 79/79, +89 assertions | 2026-07-28 |
-| A4d | Corridor editor — plausibility fields and plot regions | ☐ not started | |
+| A4d | Corridor editor — plausibility fields and plot regions | ☑ complete — 79/79, +33 assertions | 2026-07-28 |
 | A4e | Wording pass + signal direction picker | ☐ not started | |
 | A5 | Seed conversion — smash factor becomes a floor | ☐ not started | |
 | — | **merge gate · Part B does not begin until Part A is merged and green** | | |
@@ -57,6 +57,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-28 | A4a | `_isOneSided()`'s unit sniff **deleted**. Shape flows `Measure` → `MetricCorridor` → `metric_catalog.cpp` (per-corridor `lowOpen`/`highOpen`/`shape`, plus a metric-level `shape`/`oneSided` requiring unanimity across phases, falling back to `target`) → `PpBandRail`. Openness now travels **per checkpoint** on `RailCorridor`/`RailPoint`, so `railRange`'s `oneSided` bool is **gone entirely** rather than becoming a shape — with `mu` on the open side there is nothing aspirational left to drop, and the ceiling mirror comes free (see the stage note). `PpBandRail`'s ribbon substitutes the plot edge per side, so a ceiling is representable for the first time. 79/79; app builds; headless clean. **One rail changes appearance — N12.** Next: A4b. |
 | 2026-07-28 | A4b | `barDomain()` in `dashboard_reductions.h` + a `ChartMetrics::barDomain` façade; **both** bars now call it instead of computing a domain inside a binding (fact 16). **The defect was not the one the brief predicted** — A2 put `mu` on the open side, so the amber span is a healthy k×sigma and the domain never was degenerate. What actually broke: the domain STOPPED at `mu`, so every Ideal reading above a floor's aspiration clamped to the last pixel of the track and sat on a hard band edge reading as a bound. The open side now runs past the furthest of (aspiration, reading) by 35% of the graded span, and green runs off that end as a horizontal fade — **additive**, so two-sided bars are pixel-identical and the two-sided numbers are pinned exactly. Amber is deliberately untouched: on a floor it genuinely ends at `mu`, because above `mu` the grade is Ideal and the colour is green. Open-side tick labels re-position under the aspiration rather than pinning to the track end. `NormativeBar` gained the finite guards it never had (fact 13) and hides its bands on an invalid domain instead of collapsing them onto the left edge. `PpDashboardSetupZone` threads openness through; the `orientationLabel` audit became a one-term guard (N13). 79/79 with 26 new assertions, every one-sided case paired with a two-sided counterpart. App builds; headless clean; all six bar states rendered offscreen — see the stage note on what that does and does not prove. Next: A4c. |
 | 2026-07-28 | A4c | Fact 14 closed: `setClaimBand` is **refused** on a one-sided draft rather than left to caller discipline, and `setAspiration` / `setTolerance` / `nudgeGradedEdge` land beside it — mu and the tolerance are INDEPENDENT numbers there, not two ends of a span. `nudgeClaimLo/Hi` became shape-aware routers so a caller holding "the low field" keeps working on all three shapes. The centre mark is draggable and is the headline; the handle `Repeater` is **one element**, and the dead handle is ABSENT. No swap-follow one-sided — `nudgeGradedEdge` clamps ON the centre rather than reflecting, so nothing can cross anything. `goodLo/goodHi`, the one pair computed outside `bandEdgesOf`, gained the shape collapse it was escaping: all THREE drawn bands now end at the aspiration. Wording moved into the model (`claimPhrase`, `policyNote`, `parentNote`, `shapeNote`, `openEndLabel`, import `rangeText`) per fact 16. Seat-from-swings is a median + 16th/84th percentile through a free-standing `fitOneSided()` — gateable without a swing library — with **no borrow fallback**. Monitor editing needed nothing: the editor never carries monitor bounds into a draft (`begin()` drops them on purpose). ⚠ **A defect found rather than planned — every readout was fixed at one decimal**, so smash factor's 1.48 ± 0.05 read "1.5" / "0.1" and its policy line named two different edges as one number; and a FIELD commits what it shows, so tabbing past an untouched corridor would have saved the rounding. Fixed with a faithful formatter on both sides (N15). 79/79 with 89 new assertions, every one-sided case paired with a two-sided control. App builds; headless clean; all three shapes rendered offscreen. Next: A4d. |
+| 2026-07-28 | A4d | An **Implausible beyond** group with an optional bound per side, and two hatched plot regions covering the bands AND the bars — drawn after both and before the handles, because a reading out there is not graded at all. Deliberately NOT in the fault colour: Action is already drawn out here as bare track, and "the swing was poor" and "the reading was never believed" must not share one. Inline validation mirrors the pack validator's arithmetic exactly and reads the **widest** preset, never the active one — an editor validating against the reader's own sensitivity would let an author on `strict` save a row that fails to load on `lenient`. `save()` refuses on it too, because the call it already makes is `validateNormPack`, the standalone one, which cannot see the measure and so carries `plausibleOrder` but NOT `plausibleInsideCorridor`. **Two half-landed A2 items closed**: `begin()` now carries the bounds into the draft (a bound the editor SHOWS must survive a round trip, unlike the monitor bounds it deliberately drops), and `NormBasis`'s plausibility pair — on the struct since A2 but written by nothing and compared by nothing — is now stamped in `save()` and read in `overrideCoreChanged`, with a **second message** for the caps-only case so the notice never claims a corridor revision whose two quoted numbers would be identical. 79/79, +33 assertions; app builds; headless clean; the floor and the illegal target case both rendered offscreen. Next: A4e. |
 
 ---
 
@@ -559,6 +560,37 @@ them.
 **Screen:** a new field group in the corridor editor, below the numeric readouts; two new
 shaded regions at the extremes of the plot.
 
+**Hatched, and deliberately NOT in the fault colour.** Action is *already* drawn out at the
+extremes — as the bare track beyond the amber band — so a red region would merge two answers
+that must stay apart: Action says the swing was poor, this says the reading was never believed.
+The regions cover the bands AND the histogram bars, and sit under the handles: a reading out
+there is not graded at all, and these are not a control.
+
+**The inline check reads the WIDEST preset, not the active one.** `validateNormsAgainst` has no
+policy in hand and uses `lenient`, so an editor validating against the reader's own sensitivity
+would let an author on `strict` save a row that fails to load for everyone on `lenient` — the
+pack's validity would depend on who opened it. One function (`plausibleLoProblem` /
+`plausibleHiProblem`) serves both the inline message and the save refusal.
+
+**`save()` had to refuse it explicitly.** The validation it already ran is `validateNormPack` —
+the standalone one, which cannot see the measure, so it carries `plausibleOrder` but **not**
+`plausibleInsideCorridor`. Without the refusal the editor would write a row the referential
+validator flags at the next load: trap 2, a rule that exists, is tested, and never runs where
+the mistake is made.
+
+**Two half-landed A2 items closed here, because this is the stage that makes them reachable:**
+
+- `begin()` now carries the plausibility bounds INTO the draft. The monitor bounds are dropped
+  on purpose (nothing renders them), but a bound the editor *shows* must survive a round trip
+  through it — otherwise opening a capped row and saving it silently drops the cap, turning
+  readings the norm had stopped believing back into confident diagnoses.
+- **`NormBasis`'s plausibility pair was written by nothing and compared by nothing.** A2 put it
+  on the struct and taught `norm_pack` to persist it; neither `save()`'s basis stamp nor
+  `overrideCoreChanged`'s `moved` test ever read it — trap 1 exactly. Both closed, and
+  `overrideCoreChanged` gained a **second message** for the caps-only case: the corridor numbers
+  are identical either side of a cap change, and *"was 10 to 12, has since been revised to 10 to
+  12"* is a notice nobody can act on.
+
 ### A4e — Wording pass + signal direction picker
 
 Eleven format strings assume two finite edges:
@@ -868,6 +900,7 @@ resolved with the stage that closed it.
 | N12 | **`handSpeed` is the one rail whose appearance changes**, and it exposes a content defect. It is the only catalogue metric that both matched the old unit sniff (`mph`) and carries a corridor: `m_handSpeedP6P7 @ any` is `mu 20, sigmaLo 40`, whose own citation says *"sigma is twice mu, which is not a corridor"*. It was drawn as a floor and now draws as the two-sided norm that actually grades it, so its domain widens to roughly −100…140 and the trace squashes. That is the heuristic being deleted doing its job — the rail was hiding a bad norm, not compensating for a good one. **Fix by re-seating the norm, never by restoring a unit sniff.** `m_clubheadSpeedImpact` and `m_ballSpeed` carry no norm at all, so their rails are sparklines and are unaffected. | A4a | open — content, belongs with the corpus re-seat |
 | N11 | `bandEdgesOf`'s signature is now `(norm, policy, marginOverride, shape)` — shape is the FOURTH argument, so a caller wanting shape must also pass `marginOverride = -1.0`. Only `reference_bands.cpp` passes a margin. Tolerable; revisit if a third caller wants shape without a margin. | A2 | open — cosmetic |
 | N13 | The Setup zone's orientation glyph now falls back to a bar on a one-sided corridor. `orientationLabel()` itself is unchanged and still cannot see openness — the guard is at the call site, where the corridor is in hand. Every alignment measure is `target`, so the branch is unreachable today; it exists so that changing one's shape degrades visibly instead of labelling a floor's best possible reading "open". If a one-sided alignment measure is ever authored, decide then whether the glyph grows a one-sided vocabulary or the guard becomes permanent. | A4b | open by design |
+| N17 | The corridor editor's numeric fields ASSIGN `text` in their `onEditingFinished` handler, which permanently breaks the declarative binding — so after one edit a field only updates through its own handler, and a `discardChanges()` would not refresh it. Pre-existing on the two claim fields; A4c and A4d matched the pattern rather than diverging from it mid-stage. | A4d | open — pre-existing |
 | N15 | **The corridor editor's readouts were fixed at one decimal**, which understated every measure authored finer — smash factor's policy line rendered its Ideal and Good edges (1.43 / 1.38) as the same "1.4". Fixed in A4c on both sides with a faithful formatter. The wider question is open: `MeasureDetail`, `MeasureCatalogue` and `norm_pack`'s validation messages all format at one decimal too, and A4e is the natural place to sweep them. | A4c | open — sweep in A4e |
 | N16 | The corridor editor now depends on `NormEditorModel` and the bars on `ChartMetrics`, so the pure-QML standalone render harness needs a mock of each to draw them at all. Both mocks are hand transcriptions and can drift from the C++ silently — they verify PAINTING only, never a rule. Do not let an assertion migrate into one. | A4c | open by design |
 | N14 | `PpRangeBar`'s **non-compact** form has no instantiation anywhere — the Verdict zone's tempo tile is absent until tempo has a producer, and the Setup zone is compact. So its tick row, and the one-sided tick placement in it, are unexercised. `NormativeBar`'s tick row does exercise the same rule. Not a defect; noted so a later reader does not read the code as covered. | A4b | open — latent surface |

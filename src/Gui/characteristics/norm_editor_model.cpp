@@ -256,6 +256,14 @@ bool NormEditorModel::begin(const QString &measureId, const QString &contextId)
         m_draft.author  = m_hadOwnRow ? n.author : QString();
         m_draft.citation = m_hadOwnRow ? n.citation : QString();
         m_draft.setOn   = m_hadOwnRow ? n.setOn : QDate();
+        // The plausibility bounds ARE carried in, and the contrast with the monitor bounds below is
+        // the whole reason: a bound the editor SHOWS must survive a round trip through it, or
+        // opening a capped row and saving it would silently drop the cap — turning readings the
+        // norm had stopped believing back into confident diagnoses. Inherited too, on purpose: a
+        // cap is a statement about what the instrument can produce, and the override starts from
+        // the thing it is overriding.
+        m_draft.plausibleLo = n.plausibleLo;
+        m_draft.plausibleHi = n.plausibleHi;
         // The explicit monitor bounds are NEVER carried into a draft, even from a migrated row the
         // draft is overriding. The editor does not expose them (norm.h), and silently preserving a
         // bound the user cannot see would make the Action edge disagree with the one drawn.
@@ -357,6 +365,68 @@ void NormEditorModel::setTolerance(double tolerance)
     m_draft.sigmaLo = t;
     m_draft.sigmaHi = t;
     dropDerivedProvenance();
+}
+
+void NormEditorModel::setPlausibleLo(double v)
+{
+    if (!std::isfinite(v)) return;
+    m_draft.plausibleLo = v;
+    dropDerivedProvenance();
+}
+
+void NormEditorModel::setPlausibleHi(double v)
+{
+    if (!std::isfinite(v)) return;
+    m_draft.plausibleHi = v;
+    dropDerivedProvenance();
+}
+
+void NormEditorModel::clearPlausibleLo()
+{
+    if (!m_draft.plausibleLo.has_value()) return;
+    m_draft.plausibleLo.reset();
+    dropDerivedProvenance();
+}
+
+void NormEditorModel::clearPlausibleHi()
+{
+    if (!m_draft.plausibleHi.has_value()) return;
+    m_draft.plausibleHi.reset();
+    dropDerivedProvenance();
+}
+
+// The two rules, mirroring validateNormPack's `plausibleOrder` and validateNormsAgainst's
+// `plausibleInsideCorridor` exactly. Duplicated in the sense that the words differ — these are
+// addressed to an author mid-gesture, not to a reader of a load report — but never in the sense
+// that the arithmetic differs, which is why both read the same lenient edge.
+QString NormEditorModel::plausibleLoProblem() const
+{
+    if (!m_draft.plausibleLo.has_value()) return QString();
+
+    if (m_draft.plausibleHi.has_value() && *m_draft.plausibleLo > *m_draft.plausibleHi)
+        return tr("The lower bound is above the upper one.");
+
+    const NormBandEdges e =
+        bandEdgesOf(m_draft, gradePolicyByName(QStringLiteral("lenient")), -1.0, shape());
+    if (!e.lowOpen && *m_draft.plausibleLo > e.watchLo)
+        return tr("The corridor grades down to %1, so a reading there would be called a fault and "
+                  "disbelieved at once. Move this to %1 or below.").arg(fmtNum(e.watchLo));
+    return QString();
+}
+
+QString NormEditorModel::plausibleHiProblem() const
+{
+    if (!m_draft.plausibleHi.has_value()) return QString();
+
+    if (m_draft.plausibleLo.has_value() && *m_draft.plausibleLo > *m_draft.plausibleHi)
+        return tr("The upper bound is below the lower one.");
+
+    const NormBandEdges e =
+        bandEdgesOf(m_draft, gradePolicyByName(QStringLiteral("lenient")), -1.0, shape());
+    if (!e.highOpen && *m_draft.plausibleHi < e.watchHi)
+        return tr("The corridor grades up to %1, so a reading there would be called a fault and "
+                  "disbelieved at once. Move this to %1 or above.").arg(fmtNum(e.watchHi));
+    return QString();
 }
 
 void NormEditorModel::nudgeGradedEdge(double edgeValue)
@@ -774,6 +844,16 @@ QVariantMap NormEditorModel::save()
         out.insert(QStringLiteral("message"), tr("A corridor cannot have a negative tolerance."));
         return out;
     }
+    // Refused HERE and not left to the pack validation below, because that call is
+    // validateNormPack — the standalone one, which cannot see the measure and therefore carries
+    // `plausibleOrder` but NOT `plausibleInsideCorridor`. Without this the editor would happily
+    // write a row that the referential validator flags at the next load: a rule that exists, is
+    // tested, and never runs where the mistake is made.
+    for (const QString &why : { plausibleLoProblem(), plausibleHiProblem() }) {
+        if (why.isEmpty()) continue;
+        out.insert(QStringLiteral("message"), why);
+        return out;
+    }
 
     // The unit is re-read at save time, not trusted from the draft: norm_pack's referential
     // validator refuses a norm whose unit is not its measure's, and a draft opened before a pack
@@ -795,6 +875,12 @@ QVariantMap NormEditorModel::save()
         basis.sigmaHi   = shipped->sigmaHi;
         basis.monitorLo = shipped->monitorLo;
         basis.monitorHi = shipped->monitorHi;
+        // A2 put these on NormBasis and taught the pack to persist them, but nothing ever WROTE
+        // them here — so the base recorded against a capped shipped row was silently uncapped, and
+        // the "core has been revised" notice could never fire on a cap. A field complete on both
+        // sides, reaching nothing.
+        basis.plausibleLo = shipped->plausibleLo;
+        basis.plausibleHi = shipped->plausibleHi;
         m_draft.basedOn = basis;
     } else {
         m_draft.basedOn.reset();      // nothing shipped here: there is no base to record
@@ -998,6 +1084,18 @@ QVariantMap NormEditorModel::draft() const
 
     // What this corridor claims, as a fragment: "1.4 to 1.5" / "at least 1.5" / "no more than 12.0".
     out.insert(QStringLiteral("claimPhrase"), claimPhrase(m_draft));
+
+    // ── Plausibility ────────────────────────────────────────────────────────
+    //
+    // `has*` separately from the value, because absent and zero are different answers and a
+    // QVariantMap double cannot tell them apart — `.toDouble()` on a missing key yields 0.0, which
+    // would read as "stops believing readings below zero" on every uncapped row in the pack.
+    out.insert(QStringLiteral("hasPlausibleLo"), m_draft.plausibleLo.has_value());
+    out.insert(QStringLiteral("hasPlausibleHi"), m_draft.plausibleHi.has_value());
+    out.insert(QStringLiteral("plausibleLo"),    m_draft.plausibleLo.value_or(0.0));
+    out.insert(QStringLiteral("plausibleHi"),    m_draft.plausibleHi.value_or(0.0));
+    out.insert(QStringLiteral("plausibleLoError"), plausibleLoProblem());
+    out.insert(QStringLiteral("plausibleHiError"), plausibleHiProblem());
 
     // What the ACTIVE POLICY makes of it. Read-only, and quoted with the Ideal edge alongside Good
     // and Watch because under any preset but `standard` Ideal is not where the handles are — an

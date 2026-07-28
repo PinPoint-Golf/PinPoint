@@ -305,6 +305,12 @@ Item {
 
                     // …and it is said in words as well as drawn. A fade is a convention, and a
                     // convention nobody has been taught is decoration.
+                    //
+                    // Kept OUT of the implausible region when there is one on this side. "No upper
+                    // limit" and "not believed above 1.56" are both true and they are not the same
+                    // statement — the grade is unbounded, belief is not (norm.h says exactly this:
+                    // a floor is open above UP TO PLAUSIBILITY, never to infinity) — so letting
+                    // the words sit on the hatching would read as a caption for it.
                     Text {
                         visible: plot.oneSided
                         text:    root._d.openEndLabel || ""
@@ -313,8 +319,19 @@ Item {
                         font.italic:    true
                         color:          Theme.colorText3
                         y:              plot.bandTop + plot.bandHeight + Theme.sp(3)
-                        x:              plot.highOpen ? Math.max(0, plot.width - width)
-                                                      : 0
+                        x: {
+                            if (plot.highOpen) {
+                                var right = root._d.hasPlausibleHi === true
+                                              ? plot.xOf(root._d.plausibleHi || 0) - Theme.sp(6)
+                                              : plot.width
+                                return Math.max(0, Math.min(plot.width, right) - width)
+                            }
+                            return root._d.hasPlausibleLo === true
+                                     ? Math.min(plot.width - width,
+                                                Math.max(0, plot.xOf(root._d.plausibleLo || 0)
+                                                            + Theme.sp(6)))
+                                     : 0
+                        }
                     }
 
                     // ── Histogram ────────────────────────────────────────────
@@ -344,6 +361,68 @@ Item {
                             radius:  Theme.sp(1)
 
                             Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                        }
+                    }
+
+                    // ── Implausible regions ──────────────────────────────────
+                    //
+                    // Drawn AFTER the bands and the bars and BEFORE the handles, which is the
+                    // whole statement: they cover the corridor and the swings alike, because a
+                    // reading out here is not graded at all — and they sit under the controls,
+                    // because they are not one.
+                    //
+                    // Hatched rather than tinted, and deliberately not in the fault colour. Action
+                    // is already drawn out here — as bare track beyond the amber band — and these
+                    // two answer different questions: Action says the swing was poor, this says
+                    // the reading was never believed. Sharing a colour would merge them.
+                    Repeater {
+                        model: [{ side: "lo" }, { side: "hi" }]
+                        delegate: Item {
+                            id: region
+                            required property var modelData
+                            readonly property bool isLo: modelData.side === "lo"
+                            readonly property real bound: isLo ? (root._d.plausibleLo || 0)
+                                                               : (root._d.plausibleHi || 0)
+                            visible: isLo ? (root._d.hasPlausibleLo === true)
+                                          : (root._d.hasPlausibleHi === true)
+                            clip: true
+
+                            x:      isLo ? 0 : plot.xOf(bound)
+                            width:  Math.max(0, isLo ? plot.xOf(bound) : (plot.width - x))
+                            y:      plot.barsTop
+                            height: plot.bandTop + plot.bandHeight - plot.barsTop
+
+                            // A scrim first, so a histogram bar standing in this region reads as
+                            // discounted rather than merely striped.
+                            Rectangle {
+                                anchors.fill: parent
+                                color:   Theme.colorBg2
+                                opacity: 0.55
+                            }
+
+                            Repeater {
+                                model: Math.min(140, Math.ceil((region.width + region.height) / 9))
+                                delegate: Rectangle {
+                                    required property int index
+                                    width:   1
+                                    height:  region.height * 2
+                                    x:       -region.height + index * 9
+                                    y:       -region.height / 2
+                                    rotation: 45
+                                    transformOrigin: Item.Center
+                                    color:   Theme.colorText3
+                                    opacity: 0.30
+                                }
+                            }
+
+                            // The bound itself, so the edge of belief is a line and not just where
+                            // the hatching happens to start.
+                            Rectangle {
+                                x:      region.isLo ? parent.width - 1 : 0
+                                width:  1
+                                height: parent.height
+                                color:  Theme.colorText3
+                            }
                         }
                     }
 
@@ -680,6 +759,142 @@ Item {
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzMicro
                     color:          Theme.colorText3
+                }
+            }
+
+            // ── Implausible beyond ───────────────────────────────────────────
+            //
+            // SEPARATED FROM THE CORRIDOR ON PURPOSE, by a divider and by its own heading, because
+            // it answers a different question. The handles above ask whether the swing was good.
+            // These ask whether the reading was real — and a driver smash of 1.62 is not a swing
+            // finding, it is a mis-tracked ball. Grading it in either direction would launder a
+            // capture fault into a confident diagnosis (norm.h).
+            //
+            // Optional per side, independently: a floor caps above and says nothing below. An
+            // empty field means no bound, not zero.
+            PpDivider { Layout.fillWidth: true }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(4)
+                visible: root._d.refused !== true
+
+                Text {
+                    text:                qsTr("IMPLAUSIBLE BEYOND")
+                    font.family:         Theme.fontBody
+                    font.pixelSize:      Theme.fontSzMicro
+                    font.letterSpacing:  Theme.trackingMicro
+                    font.capitalization: Font.AllUppercase
+                    color:               Theme.colorText3
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("Readings past these are not graded at all — they are treated as a "
+                               + "capture fault rather than as a swing. Leave a side empty when "
+                               + "nothing physically limits it.")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzBody2
+                    color:          Theme.colorText2
+                    wrapMode:       Text.WordWrap
+                    bottomPadding:  Theme.sp(4)
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.sp(12)
+
+                    ColumnLayout {
+                        spacing: Theme.sp(3)
+                        Text {
+                            text:                qsTr("BELOW")
+                            font.family:         Theme.fontBody
+                            font.pixelSize:      Theme.fontSzMicro
+                            font.letterSpacing:  Theme.trackingMicro
+                            font.capitalization: Font.AllUppercase
+                            color:               Theme.colorText3
+                        }
+                        PpTextField {
+                            id: plausLoField
+                            // Empty is a VALUE here — "no bound" — so the text is empty rather
+                            // than "0", which would state a limit at the origin on every row that
+                            // does not have one.
+                            readonly property string _shown:
+                                root._d.hasPlausibleLo === true ? root._fieldNum(root._d.plausibleLo)
+                                                                : ""
+                            Layout.preferredWidth: Theme.sp(110)
+                            text: _shown
+                            onEditingFinished: {
+                                var t = text.trim()
+                                if (t.length === 0) root.editor.clearPlausibleLo()
+                                else {
+                                    var v = parseFloat(t)
+                                    if (!isNaN(v)) root.editor.setPlausibleLo(v)
+                                }
+                                text = _shown
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: Theme.sp(3)
+                        Text {
+                            text:                qsTr("ABOVE")
+                            font.family:         Theme.fontBody
+                            font.pixelSize:      Theme.fontSzMicro
+                            font.letterSpacing:  Theme.trackingMicro
+                            font.capitalization: Font.AllUppercase
+                            color:               Theme.colorText3
+                        }
+                        PpTextField {
+                            id: plausHiField
+                            readonly property string _shown:
+                                root._d.hasPlausibleHi === true ? root._fieldNum(root._d.plausibleHi)
+                                                                : ""
+                            Layout.preferredWidth: Theme.sp(110)
+                            text: _shown
+                            onEditingFinished: {
+                                var t = text.trim()
+                                if (t.length === 0) root.editor.clearPlausibleHi()
+                                else {
+                                    var v = parseFloat(t)
+                                    if (!isNaN(v)) root.editor.setPlausibleHi(v)
+                                }
+                                text = _shown
+                            }
+                        }
+                    }
+
+                    Text {
+                        Layout.alignment: Qt.AlignBottom
+                        Layout.bottomMargin: Theme.sp(8)
+                        visible:        root._unit.length > 0
+                        text:           root._unit
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzBody2
+                        color:          Theme.colorText3
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                // Inline, at the moment of the mistake — the same treatment the facet picker gives
+                // an impossible combination, and for the same reason: the alternative is letting
+                // the author finish and then refusing the save. The rule is the model's
+                // (plausibleLoProblem), measured against the WIDEST preset, so what this screen
+                // accepts is exactly what the pack validator will.
+                Repeater {
+                    model: [root._d.plausibleLoError || "", root._d.plausibleHiError || ""]
+                    delegate: Text {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        visible:        modelData.length > 0
+                        text:           modelData
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzBody2
+                        color:          Theme.colorRagFault
+                        wrapMode:       Text.WordWrap
+                    }
                 }
             }
 

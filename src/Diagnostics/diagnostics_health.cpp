@@ -75,6 +75,22 @@ bool sameOptional(const std::optional<double> &a, const std::optional<double> &b
     return !a.has_value() || sameNumber(*a, *b);
 }
 
+// A plausibility pair as a verb phrase — "believes anything", "stops believing above 1.56",
+// "believes between 0.8 and 1.56". Written out rather than rendered as "%1 to %2" because either
+// bound may be absent and a missing one is not a zero: "0 to 1.56" on a row that caps only above
+// states a floor at the origin that nobody authored.
+QString believeClause(const std::optional<double> &lo, const std::optional<double> &hi)
+{
+    const auto f = [](double v) { return QString::number(v, 'g', 3); };
+    if (lo.has_value() && hi.has_value())
+        return QObject::tr("believes readings between %1 and %2").arg(f(*lo), f(*hi));
+    if (hi.has_value())
+        return QObject::tr("stops believing readings above %1").arg(f(*hi));
+    if (lo.has_value())
+        return QObject::tr("stops believing readings below %1").arg(f(*lo));
+    return QObject::tr("believes any reading");
+}
+
 } // namespace
 
 std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
@@ -266,25 +282,40 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
         if (theirs == nullptr) continue;                 // core no longer carries a row here
 
         const NormBasis &base = *mine.basedOn;
-        const bool moved = !sameNumber(base.mu, theirs->mu)
-                           || !sameNumber(base.sigmaLo, theirs->sigmaLo)
-                           || !sameNumber(base.sigmaHi, theirs->sigmaHi)
-                           || !sameOptional(base.monitorLo, theirs->monitorLo)
-                           || !sameOptional(base.monitorHi, theirs->monitorHi);
-        if (!moved) continue;
+        const bool corridorMoved = !sameNumber(base.mu, theirs->mu)
+                                   || !sameNumber(base.sigmaLo, theirs->sigmaLo)
+                                   || !sameNumber(base.sigmaHi, theirs->sigmaHi)
+                                   || !sameOptional(base.monitorLo, theirs->monitorLo)
+                                   || !sameOptional(base.monitorHi, theirs->monitorHi);
+        // The plausibility pair is part of the base, and a change to it is worth reporting on its
+        // own: gaining a cap turns readings from Action into NotMeasured, which is a large change
+        // to stay silent about. But it is NOT a corridor revision, and it must not be described as
+        // one — the corridor numbers can be identical either side of it, and a notice reading
+        // "was 1.4 to 1.6, has since been revised to 1.4 to 1.6" is a notice nobody can act on.
+        const bool capsMoved = !sameOptional(base.plausibleLo, theirs->plausibleLo)
+                               || !sameOptional(base.plausibleHi, theirs->plausibleHi);
+        if (!corridorMoved && !capsMoved) continue;
 
         out.push_back(warn(QStringLiteral("overrideCoreChanged"),
                            normKey(mine.measureId, mine.contextId),
-                           QObject::tr("You overrode %1 when the shipped corridor was %2 to %3. It "
-                                       "has since been revised to %4 to %5. Yours is still what "
-                                       "grades — keep it, or take theirs.")
-                               .arg(mine.measureId)
-                               .arg(base.mu - base.sigmaLo, 0, 'g', 3)
-                               .arg(base.mu + base.sigmaHi, 0, 'g', 3)
-                               // Claims on both sides — this compares two assertions about the
-                               // population, and the grade policy is not part of either.
-                               .arg(theirs->claimLo(), 0, 'g', 3)
-                               .arg(theirs->claimHi(), 0, 'g', 3)));
+                           corridorMoved
+                               ? QObject::tr("You overrode %1 when the shipped corridor was %2 to "
+                                             "%3. It has since been revised to %4 to %5. Yours is "
+                                             "still what grades — keep it, or take theirs.")
+                                     .arg(mine.measureId)
+                                     .arg(base.mu - base.sigmaLo, 0, 'g', 3)
+                                     .arg(base.mu + base.sigmaHi, 0, 'g', 3)
+                                     // Claims on both sides — this compares two assertions about
+                                     // the population, and the grade policy is not part of either.
+                                     .arg(theirs->claimLo(), 0, 'g', 3)
+                                     .arg(theirs->claimHi(), 0, 'g', 3)
+                               : QObject::tr("The shipped corridor for %1 is unchanged, but what it "
+                                             "will BELIEVE is not: it now %2, where it %3 when you "
+                                             "overrode it. Yours is still what grades — keep it, "
+                                             "or take theirs.")
+                                     .arg(mine.measureId,
+                                          believeClause(theirs->plausibleLo, theirs->plausibleHi),
+                                          believeClause(base.plausibleLo, base.plausibleHi))));
     }
 
     return out;

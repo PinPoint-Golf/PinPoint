@@ -100,6 +100,30 @@ public:
         m_shipped.upsert(shipped);
     }
 
+    // The corridor is left EXACTLY where it was; only the plausibility cap moves. That is the
+    // case the message split exists for: a notice reading "was 10 to 12, has since been revised to
+    // 10 to 12" is a notice nobody can act on.
+    void rebaseCapOnly(const char *measure, const char *context,
+                       std::optional<double> baseCap, std::optional<double> shippedCap)
+    {
+        const QString mid = QLatin1String(measure), cid = QLatin1String(context);
+        for (Norm &n : m_norms.norms) {
+            if (n.measureId != mid || n.contextId != cid) continue;
+            NormBasis b;
+            b.mu = 10.0; b.sigmaLo = b.sigmaHi = 1.0;
+            b.plausibleHi = baseCap;
+            n.basedOn = b;
+        }
+        Norm shipped;
+        shipped.measureId   = mid;
+        shipped.contextId   = cid;
+        shipped.mu          = 10.0;
+        shipped.sigmaLo     = shipped.sigmaHi = 1.0;
+        shipped.plausibleHi = shippedCap;
+        shipped.unit        = QStringLiteral("°");
+        m_shipped.upsert(shipped);
+    }
+
     const NormPack         &norms() const override    { return m_norms; }
     const ContextTree      &contexts() const override { return m_contexts; }
     const ValidationReport &report() const override   { return m_report; }
@@ -363,6 +387,44 @@ int main()
               "the shipped row moved away from the base → reported");
         check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed@full_swing")),
               "the shipped row still matches the base → not reported, however much yours differs");
+    }
+    {
+        // ── A shipped row that GAINED a cap, with its corridor untouched ────
+        //
+        // NormBasis has carried the plausibility pair since A2, but nothing compared it and the
+        // editor never wrote it — so acquiring a cap, which turns readings from Action into
+        // NotMeasured, compared as unmoved and this notice stayed silent. A field complete on both
+        // sides, reaching nothing.
+        const CharacteristicPack pack = fakePack();
+        FakeNorms norms;
+        norms.add("m_normed",   "full_swing", 20.0, 1.0, 0, /*mine*/ true);
+        norms.add("m_unnormed", "full_swing", 20.0, 1.0, 0, /*mine*/ true);
+
+        norms.rebaseCapOnly("m_normed",   "full_swing", std::nullopt, 15.0);   // gained a cap
+        norms.rebaseCapOnly("m_unnormed", "full_swing", 15.0,         15.0);   // same cap as before
+
+        const auto issues = diagnosticsHealth(pack, norms, cat);
+        check(hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_normed@full_swing")),
+              "a shipped row that gained a cap is reported, corridor unchanged or not");
+        check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed@full_swing")),
+              "…and an unchanged cap is still silent, so the check has not become noise");
+
+        // …and it must not CALL it a corridor revision, because it is not one and the two numbers
+        // it would quote are identical.
+        QString msg;
+        for (const ValidationIssue &i : issues)
+            if (i.code == QLatin1String("overrideCoreChanged")
+                && i.subject == QLatin1String("m_normed@full_swing"))
+                msg = i.message;
+        check(!msg.isEmpty(), "the notice has a message");
+        check(msg.contains(QLatin1String("BELIEVE")),
+              "…which says what actually changed: what the row will believe");
+        check(!msg.contains(QLatin1String("has since been revised")),
+              "…and never claims a corridor revision that did not happen");
+        check(msg.contains(QLatin1String("15")),
+              "…naming the new cap");
+        check(msg.contains(QLatin1String("any reading")),
+              "…and saying there was none before, rather than printing a zero for the absence");
     }
 
     // ── The corpus-share check ──────────────────────────────────────────────
