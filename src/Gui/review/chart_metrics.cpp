@@ -299,6 +299,11 @@ QVariantList ChartMetrics::railCheckpoints(const QVariantList &phaseSamples,
         c.greenHi = m.value(QStringLiteral("greenHi")).toDouble();
         c.amberLo = m.value(QStringLiteral("amberLo")).toDouble();
         c.amberHi = m.value(QStringLiteral("amberHi")).toDouble();
+        // Explicit booleans, never an absent key: `.toDouble()`/`.toBool()` on a missing
+        // QVariantMap entry yields 0/false silently, so openness has to be written at every hop
+        // or a floor quietly becomes a two-sided corridor somewhere along the chain.
+        c.lowOpen  = m.value(QStringLiteral("lowOpen")).toBool();
+        c.highOpen = m.value(QStringLiteral("highOpen")).toBool();
         cors.push_back(std::move(c));
     }
 
@@ -313,12 +318,14 @@ QVariantList ChartMetrics::railCheckpoints(const QVariantList &phaseSamples,
             { QStringLiteral("greenLo"),     p.greenLo },
             { QStringLiteral("greenHi"),     p.greenHi },
             { QStringLiteral("amberLo"),     p.amberLo },
-            { QStringLiteral("amberHi"),     p.amberHi } });
+            { QStringLiteral("amberHi"),     p.amberHi },
+            { QStringLiteral("lowOpen"),     p.lowOpen },
+            { QStringLiteral("highOpen"),    p.highOpen } });
     }
     return out;
 }
 
-QVariantMap ChartMetrics::railRange(const QVariantList &points, bool oneSided) const
+QVariantMap ChartMetrics::railRange(const QVariantList &points) const
 {
     using namespace pinpoint::analysis;
 
@@ -339,10 +346,12 @@ QVariantMap ChartMetrics::railRange(const QVariantList &points, bool oneSided) c
         p.greenHi     = m.value(QStringLiteral("greenHi")).toDouble();
         p.amberLo     = m.value(QStringLiteral("amberLo")).toDouble();
         p.amberHi     = m.value(QStringLiteral("amberHi")).toDouble();
+        p.lowOpen     = m.value(QStringLiteral("lowOpen")).toBool();
+        p.highOpen    = m.value(QStringLiteral("highOpen")).toBool();
         pts.push_back(std::move(p));
     }
 
-    const RailRange r = pinpoint::analysis::railRange(pts, oneSided);
+    const RailRange r = pinpoint::analysis::railRange(pts);
     return QVariantMap{ { QStringLiteral("lo"),    r.lo },
                         { QStringLiteral("hi"),    r.hi },
                         { QStringLiteral("valid"), r.valid } };

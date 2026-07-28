@@ -28,7 +28,7 @@ rule in there survives this work.
 | A2 | Grading semantics, edges, plausibility | ☑ complete — 79/79, +~90 assertions | 2026-07-28 |
 | A3 | Engine + health checks | ☑ complete — 79/79 | 2026-07-28 |
 | — | **review gate · expect context clear here** | | |
-| A4a | Rewire `oneSided` from the unit sniff to shape | ☐ not started | |
+| A4a | Rewire `oneSided` from the unit sniff to shape | ☑ complete — 79/79; **one rail changes appearance**, see N12 | 2026-07-28 |
 | A4b | One-sided domain rules for the bars | ☐ not started | |
 | A4c | Corridor editor — handles, readouts, diff rows | ☐ not started | |
 | A4d | Corridor editor — plausibility fields and plot regions | ☐ not started | |
@@ -54,6 +54,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-28 | A1 | `Shape{Target,Floor,Ceiling}` on `Measure`, tables in `characteristic.cpp`, `"shape"` parsed and written (omitted when Target, so 105/106 measures round-trip byte-identically), `unknownShape` a named load error. Two referential rules in `validateNormsAgainst` — `normShapeTolerance` and `normShapeMonitor` — both gated in BOTH directions. **`norm.h` untouched**; the shape parameter and its branches arrive together in A2 rather than as a dead defaulted argument (see the stage note). 79/79 **unchanged**, which is the gate. Found and logged N10. Next: A2. |
 | 2026-07-28 | A2 | Grading is shape-aware end to end: `normZ`/`withinBand`/`grade`/`bandEdgesOf` take a `Shape`, `hasExplicitMonitor(Shape)` and a new `outsideMonitor(value, Shape)` close N10, `plausibleLo/Hi` land on the row with `isImplausible()` outranking even the monitor band, `NormBandEdges` and `MetricCorridor` carry `lowOpen/highOpen` with **`mu` on the open side** (never a sentinel), and `NormBasis` gains the plausibility pair so a shipped row that acquires a cap does not compare as unmoved. `partialMonitor` MOVED to `validateNormsAgainst`; `plausibleOrder` and `plausibleInsideCorridor` are new, the latter measured against the **widest** preset so a pack's validity cannot depend on the reader's settings. `withinBand`'s degenerate early-return deleted as provably redundant under the computed-edge form. 79/79 with ~90 new assertions, incl. floor/ceiling tables, continuity at mu, per-preset edge sweeps, a one-sided monitor, plausibility precedence and corridor propagation over a hand-built floor. App builds; headless clean. Next: A3. |
 | 2026-07-28 | A3 | `MeasureReading` carries `lowOpen`/`highOpen`/`implausible`; `NormMeasureSource` takes an optional `CharacteristicPack*` for the shape (null-safe, Target without it). A signal on the OPEN tail cannot fire — explicit in `evaluate()` for both `OutsideCorridor` and `Ratio`, rather than left as a coincidence of two other rules. **An implausible reading makes the finding `Unavailable`, not `NotFired`** — it was never assessed, and reporting it as "looked and fine" would be a false negative wearing a clean bill of health. New health code `signalOnOpenTail`, deliberately NOT scoped to Live (unlike `signalNoNorm`): no producer will ever give a floor an upper fault, so it is an authoring mistake, not a backlog row. Header table + `HealthView._codeLabel` updated in the same change. Both guards kept on purpose — runtime makes the answer right, health makes the mistake visible. Gated in both directions. 79/79; app builds; headless clean. Next: A4a. |
+| 2026-07-28 | A4a | `_isOneSided()`'s unit sniff **deleted**. Shape flows `Measure` → `MetricCorridor` → `metric_catalog.cpp` (per-corridor `lowOpen`/`highOpen`/`shape`, plus a metric-level `shape`/`oneSided` requiring unanimity across phases, falling back to `target`) → `PpBandRail`. Openness now travels **per checkpoint** on `RailCorridor`/`RailPoint`, so `railRange`'s `oneSided` bool is **gone entirely** rather than becoming a shape — with `mu` on the open side there is nothing aspirational left to drop, and the ceiling mirror comes free (see the stage note). `PpBandRail`'s ribbon substitutes the plot edge per side, so a ceiling is representable for the first time. 79/79; app builds; headless clean. **One rail changes appearance — N12.** Next: A4b. |
 
 ---
 
@@ -395,16 +396,28 @@ The smallest and most valuable of the surface stages, because it *deletes* a heu
 - Feed one-sidedness from the measure's shape through `MetricCorridor` →
   `metric_catalog.cpp:227-262` (`normative.corridors`, plus the metric-level `normative` block
   at `:285-301`) → `PpBandRail.oneSided`.
-- `railRange()`'s parameter becomes a shape rather than a bool, and gains the **ceiling
-  mirror** (fact 10). Same for `PpBandRail.qml:314-317`, which substitutes `_rHi` for the high
-  edges and never touches the low ones.
 - Where a metric's corridors at different phases disagree on shape, the rail falls back to
-  `target` and the disagreement is a health finding — never a silent choice.
+  `target`: drawing an open tail that one phase *does* grade would state a freedom that phase
+  lacks, which is the more dangerous of the two errors.
 - `SwingScorer` stays frozen (fact 12).
 
-**Screen:** the post-shot dashboard Motion zone. Speed rails keep the exact rendering they
-have today — they simply arrive at it from the measure instead of from a string comparison —
-and any speed metric whose unit is spelled differently stops being silently two-sided.
+**Deviation from the brief, deliberate.** The brief has `railRange()`'s parameter become a
+shape and gain a ceiling mirror. It has **no parameter at all** now. That parameter existed to
+drop an *aspirational* upper bound — a two-sided norm's high edge, far above anything an
+athlete produced, which crushed the trace into the bottom of the tile. Both halves of that
+premise are gone: one-sidedness comes from the measure, and the open side's numeric edge is
+`mu`, the aspiration itself — precisely the number the rail exists to show. Dropping it would
+hide the target. So every finite bound participates in the domain, openness travels **per
+checkpoint** on `RailCorridor`/`RailPoint`, and it changes only how the ribbon is painted. The
+ceiling mirror falls out of that for free rather than being a second special case, and
+`PpBandRail` can represent a ceiling for the first time — the old code substituted `_rHi` for
+the high edges and never touched the low ones.
+
+**Screen:** the post-shot dashboard Motion zone. Rails with no corridor (`clubheadSpeed`,
+`ballSpeed`) are sparklines and unaffected. ⚠ **`handSpeed` changes** — it was the only metric
+matching both the unit sniff and a corridor, and it now draws as the two-sided norm that
+actually grades it. See ledger N12: the rail was hiding a bad norm, not compensating for a
+good one.
 
 ### A4b — One-sided domain rules for the bars
 
@@ -788,4 +801,5 @@ resolved with the stage that closed it.
 | N8 | `normZ()` has no production caller. It is made shape-aware for the future 0–100 score; nothing verifies it end to end today. | A2 | open by design |
 | N9 | The engine (`detect()`, `NormMeasureSource`) is dormant, so A3 has no live verification. | A3 | open — belongs to *Diagnosis execution, V&V* |
 | N10 | **`partialMonitor` will fire on a legal one-sided monitor.** It lives in `validateNormPack` (standalone), which cannot see the measure and so cannot know a floor carrying only `monitorLo` is complete. `hasExplicitMonitor()` has the same blindness (fact 3). | A1 | ☑ **closed in A2** — `hasExplicitMonitor(Shape)` is shape-aware, and `partialMonitor` moved to `validateNormsAgainst`, where the measure is in hand. Both directions gated |
+| N12 | **`handSpeed` is the one rail whose appearance changes**, and it exposes a content defect. It is the only catalogue metric that both matched the old unit sniff (`mph`) and carries a corridor: `m_handSpeedP6P7 @ any` is `mu 20, sigmaLo 40`, whose own citation says *"sigma is twice mu, which is not a corridor"*. It was drawn as a floor and now draws as the two-sided norm that actually grades it, so its domain widens to roughly −100…140 and the trace squashes. That is the heuristic being deleted doing its job — the rail was hiding a bad norm, not compensating for a good one. **Fix by re-seating the norm, never by restoring a unit sniff.** `m_clubheadSpeedImpact` and `m_ballSpeed` carry no norm at all, so their rails are sparklines and are unaffected. | A4a | open — content, belongs with the corpus re-seat |
 | N11 | `bandEdgesOf`'s signature is now `(norm, policy, marginOverride, shape)` — shape is the FOURTH argument, so a caller wanting shape must also pass `marginOverride = -1.0`. Only `reference_bands.cpp` passes a margin. Tolerable; revisit if a third caller wants shape without a margin. | A2 | open — cosmetic |

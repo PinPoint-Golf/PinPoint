@@ -111,10 +111,13 @@ public:
     // The rail's value→y domain over `points` (the railCheckpoints result):
     //   { lo, hi, valid }
     // Spans every dot, every corridor bound in play, and the 0 reference line the
-    // rail always draws, padded by 8%. `oneSided` is the speeds case — the corridor
-    // is a floor/target whose upper bound would otherwise crush the trace, so only
-    // the lower bounds participate. valid=false for an empty rail.
-    Q_INVOKABLE QVariantMap railRange(const QVariantList &points, bool oneSided) const;
+    // rail always draws, padded by 8%. valid=false for an empty rail.
+    //
+    // No one-sidedness parameter: a corridor's open edge is `mu`, the aspiration, which
+    // belongs in the domain rather than being dropped from it. Openness travels ON the
+    // points and changes only how the ribbon is painted. See railRange() in
+    // dashboard_reductions.h for why the old parameter existed and why it does not now.
+    Q_INVOKABLE QVariantMap railRange(const QVariantList &points) const;
 
     // The curve's value at `us`, linearly interpolated between bracketing samples and
     // clamped to the endpoints outside the sampled span (the playhead legitimately

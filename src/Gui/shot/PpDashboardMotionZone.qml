@@ -19,9 +19,10 @@
 // Motion zone — a grid of PpBandRail tiles, one per time-series metric. The rail is
 // the primary read (see PpBandRail): checkpoints in position order against their
 // normative corridor, which answers "was it in bounds, and where did it leave" —
-// the question a post-shot glance actually has. Speeds pass oneSided, so their
-// floor/target corridor is drawn as a zone rather than a band with an aspirational
-// ceiling that would crush the trace. A metric with no corridor yet degrades to the
+// the question a post-shot glance actually has. A one-sided corridor is drawn as a
+// zone running off the end of the plot rather than as a band with an edge it does not
+// hold — and WHICH corridors those are comes from the measure's shape, resolved in
+// C++, never from the unit string. A metric with no corridor yet degrades to the
 // rail's phase-anchored sparkline; nothing here ever renders as a bare number.
 //
 // The metric set is SWING-AGNOSTIC: the zone shows its CONFIGURED metrics (the pinned
@@ -66,14 +67,6 @@ Item {
         return null
     }
 
-    // Speeds are floor/target metrics: there is a number you want to EXCEED, not a
-    // band you want to sit inside. Keyed off the unit rather than the key name so a
-    // new speed metric picks it up without editing this list.
-    function _isOneSided(row, series) {
-        var u = (series && series.unit) ? series.unit : (row ? row.unit : "")
-        return u === "m/s" || u === "mph" || u === "°/s" || u === "deg/s"
-    }
-
     // The zone's CONFIGURED metric set, each joined to the current swing. Queried
     // WITHOUT availableOnly — the config is a swing-agnostic template, so a metric
     // stays on the grid whether or not this particular rig could measure it.
@@ -108,7 +101,15 @@ Item {
                        series: has ? s : null,
                        corridors: (desc && desc.normative && desc.normative.corridors)
                                   ? desc.normative.corridors : [],
-                       oneSided: _isOneSided(row, s) })
+                       // From the MEASURE's shape, resolved in C++. There was a
+                       // _isOneSided() here that string-matched the unit against
+                       // m/s, mph, °/s and deg/s — a presentation-layer heuristic
+                       // standing in for a semantic property, which got the answer
+                       // right only by coincidence and silently missed any metric
+                       // whose unit was spelled differently. Shape is decided once,
+                       // on the measure, and every surface reads it from there.
+                       oneSided: (desc && desc.normative
+                                  && desc.normative.oneSided === true) })
         }
         return out
     }

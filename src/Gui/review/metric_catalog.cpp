@@ -225,6 +225,7 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
     const GradePolicy         policy    = gradePolicyByName(m_policyName);
 
     QVariantList corridors;
+    Shape        railShape = Shape::Target;
     QString      normContextId, normSource, normSourceWords, normCitation, normWeakWhy, normMeasureId;
     bool         anyOverridden = false, anyWeak = false, anyInherited = false;
     int          normN = 0;
@@ -242,6 +243,13 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
         cm.insert(QStringLiteral("amberLo"),          c->amberLo);
         cm.insert(QStringLiteral("amberHi"),          c->amberHi);
         cm.insert(QStringLiteral("deltaFromAddress"), c->deltaFromAddress);
+        // Which tail does not grade, and the shape it came from. Written explicitly on every
+        // corridor including two-sided ones: QML reads a missing key as `undefined`, so an omitted
+        // flag is indistinguishable from `false` and the one place a bug could hide is the place
+        // nobody looks.
+        cm.insert(QStringLiteral("lowOpen"),          c->lowOpen);
+        cm.insert(QStringLiteral("highOpen"),         c->highOpen);
+        cm.insert(QStringLiteral("shape"),            shapeName(c->shape));
         cm.insert(QStringLiteral("measureId"),        c->measureId);
         cm.insert(QStringLiteral("contextId"),        c->contextId);
         cm.insert(QStringLiteral("inherited"),        c->inherited);
@@ -280,6 +288,15 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
         }
         anyOverridden = anyOverridden || c->overridden;
         anyInherited  = anyInherited  || c->inherited;
+
+        // A rail is ONE strip, so it needs one answer about its shape. Different phases of a
+        // metric are different measures and could in principle disagree — in practice they are the
+        // same quantity read at different moments, so they do not. Unanimity is required and a
+        // disagreement falls back to `target`: drawing an open tail the norm at one phase does
+        // grade would state a freedom that phase does not have, which is the more dangerous of the
+        // two errors.
+        if (corridors.size() == 1) railShape = c->shape;
+        else if (railShape != c->shape) railShape = Shape::Target;
     }
 
     QVariantMap normative;
@@ -298,6 +315,12 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
     normative.insert(QStringLiteral("n"),          normN);
     normative.insert(QStringLiteral("weak"),       anyWeak);
     normative.insert(QStringLiteral("weakReason"), normWeakWhy);
+    // The metric-level answer a rail binds to. THE ONLY SOURCE of one-sidedness for any surface:
+    // `PpDashboardMotionZone` used to decide this by string-matching the unit, which is a
+    // presentation-layer heuristic standing in for a semantic property of the measure. Anything
+    // re-deriving it from a unit, a metric key or a label is a bug.
+    normative.insert(QStringLiteral("shape"),      shapeName(railShape));
+    normative.insert(QStringLiteral("oneSided"),   shapeIsOneSided(railShape));
     m.insert(QStringLiteral("normative"), normative);
 
     // Requirement (rendered for the "How it's measured" section).

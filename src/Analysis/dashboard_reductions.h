@@ -56,6 +56,10 @@ struct RailCorridor {
     int    phase   = -1;
     double greenLo = 0.0, greenHi = 0.0;
     double amberLo = 0.0, amberHi = 0.0;
+    // This tail does not grade — from the MEASURE's shape, carried all the way here rather than
+    // re-derived. See MetricCorridor. The numeric edge on an open side is mu, so these flags change
+    // how a ribbon is DRAWN and never what the numbers mean.
+    bool   lowOpen = false, highOpen = false;
 };
 
 // A checkpoint ready to paint: the measurement plus whatever corridor applies to it.
@@ -67,6 +71,7 @@ struct RailPoint {
     bool    hasCorridor = false;
     double  greenLo = 0.0, greenHi = 0.0;
     double  amberLo = 0.0, amberHi = 0.0;
+    bool    lowOpen = false, highOpen = false;
 };
 
 // The value→y domain of a rail.
@@ -107,6 +112,7 @@ inline std::vector<RailPoint> railCheckpoints(const std::vector<RailSample>   &s
             p.hasCorridor = true;
             p.greenLo = c->greenLo; p.greenHi = c->greenHi;
             p.amberLo = c->amberLo; p.amberHi = c->amberHi;
+            p.lowOpen = c->lowOpen; p.highOpen = c->highOpen;
         }
         out.push_back(p);
     }
@@ -119,15 +125,23 @@ inline std::vector<RailPoint> railCheckpoints(const std::vector<RailSample>   &s
 // The value→y domain covering every player dot, every corridor bound in play, and the
 // 0 reference line the rail always draws — padded by `padFrac` of the raw span.
 //
-// `oneSided` is the speeds case: the corridor is a FLOOR/target, whose upper bound is
-// either absent or an aspirational number far above anything an athlete produced.
-// Including it would crush the actual trace into the bottom of the tile, so only the
-// lower bounds participate in the domain there.
+// THE `oneSided` PARAMETER IS GONE, and its absence is the point.
+//
+// It existed because a one-sided corridor used to be decided by string-matching a unit
+// in QML, and the "upper bound" it then dropped was a two-sided norm's aspirational
+// high edge — a number far above anything an athlete produced, which crushed the trace
+// into the bottom of the tile. Both halves of that are now false. One-sidedness comes
+// from the measure's shape, and the numeric edge on an open side is `mu`, the
+// ASPIRATION — a value you positively want in the domain, because it is the target the
+// rail exists to show. Dropping it would hide the number the golfer is aiming at.
+//
+// So every finite bound participates, and openness only changes how the ribbon is
+// PAINTED (PpBandRail substitutes the plot edge on the open side). The ceiling case
+// needs no mirror here for the same reason the floor case needs no special case.
 //
 // Returns valid=false for an empty rail. A degenerate span (every value identical)
 // widens to ±1 so the caller never divides by zero.
-inline RailRange railRange(const std::vector<RailPoint> &points, bool oneSided,
-                           double padFrac = 0.08)
+inline RailRange railRange(const std::vector<RailPoint> &points, double padFrac = 0.08)
 {
     RailRange r;
     if (points.empty()) return r;
@@ -146,10 +160,8 @@ inline RailRange railRange(const std::vector<RailPoint> &points, bool oneSided,
         if (!p.hasCorridor) continue;
         take(p.amberLo);
         take(p.greenLo);
-        if (!oneSided) {                        // see note above
-            take(p.amberHi);
-            take(p.greenHi);
-        }
+        take(p.amberHi);
+        take(p.greenHi);
     }
     if (lo > hi) return r;                      // nothing finite at all
 

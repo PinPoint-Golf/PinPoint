@@ -31,12 +31,14 @@ static RailSample smp(int phase, int64_t t, double v, const char *band = "")
     s.band  = QString::fromLatin1(band);
     return s;
 }
-static RailCorridor cor(int phase, double gLo, double gHi, double aLo, double aHi)
+static RailCorridor cor(int phase, double gLo, double gHi, double aLo, double aHi,
+                        bool highOpen = false, bool lowOpen = false)
 {
     RailCorridor c;
     c.phase = phase;
     c.greenLo = gLo; c.greenHi = gHi;
     c.amberLo = aLo; c.amberHi = aHi;
+    c.highOpen = highOpen; c.lowOpen = lowOpen;
     return c;
 }
 
@@ -89,7 +91,7 @@ int main()
         // Values 12..18, corridor 5..25 ⇒ raw span [0,25] (0 line included), pad 8%.
         std::vector<RailPoint> pts = railCheckpoints({ smp(0, 0, 12.0), smp(5, 100000, 18.0) },
                                                      { cor(5, 10, 20, 5, 25) });
-        const RailRange r = railRange(pts, /*oneSided*/false);
+        const RailRange r = railRange(pts);
         check(r.valid, "range valid for a populated rail");
         check(near(r.lo, 0.0 - 25.0 * 0.08, 1e-9), "lo = 0 (reference line) minus pad");
         check(near(r.hi, 25.0 + 25.0 * 0.08, 1e-9), "hi = corridor amberHi plus pad");
@@ -97,26 +99,45 @@ int main()
     {
         // Negative excursion must widen the domain downward past 0.
         std::vector<RailPoint> pts = railCheckpoints({ smp(0, 0, -30.0), smp(5, 100000, 4.0) }, {});
-        const RailRange r = railRange(pts, false);
+        const RailRange r = railRange(pts);
         check(r.lo < -30.0 && r.hi > 0.0, "negative values widen below 0, 0 still inside");
     }
     {
-        // One-sided (speeds): the aspirational upper bound must not crush the trace.
-        std::vector<RailPoint> pts = railCheckpoints({ smp(5, 0, 30.0) },
-                                                    { cor(5, 25, 999, 20, 999) });
-        const RailRange twoSided = railRange(pts, false);
-        const RailRange oneSided = railRange(pts, true);
-        check(twoSided.hi > 900.0, "two-sided range includes the huge upper bound");
-        check(oneSided.hi < 40.0, "one-sided range ignores the upper bound");
-        check(near(oneSided.lo, 0.0 - 30.0 * 0.08, 1e-9),
-              "one-sided range still keeps 0 and the lower bound");
+        // ── The open tail's edge belongs IN the domain ──────────────────────────
+        //
+        // railRange used to take a `oneSided` bool and drop the upper bounds, because
+        // one-sidedness was decided by string-matching a unit and the bound it dropped
+        // was a two-sided norm's aspirational high edge. Both halves of that are gone.
+        // A one-sided corridor's open edge is `mu` — the ASPIRATION — and hiding the
+        // number the golfer is aiming at is the opposite of what the rail is for.
+        //
+        // So a floor at mu = 100 keeps 100 in the domain, and openness changes only how
+        // the ribbon is painted.
+        std::vector<RailPoint> pts =
+            railCheckpoints({ smp(5, 0, 85.0) },
+                            { cor(5, /*gLo*/95, /*gHi*/100, /*aLo*/85, /*aHi*/100, true) });
+        const RailRange r = railRange(pts);
+        check(r.hi > 100.0 && r.hi < 120.0,
+              "the aspiration is in the domain, padded — not dropped, not crushing the trace");
+        check(pts.front().highOpen && !pts.front().lowOpen,
+              "…and openness travels on the checkpoint, per side, for the ribbon to read");
+    }
+    {
+        // The ceiling mirror, which had no representation at all before: the old code
+        // substituted the high edges and never the low ones.
+        std::vector<RailPoint> pts =
+            railCheckpoints({ smp(5, 0, 3.0) },
+                            { cor(5, 0, 2, 0, 6, false, true) });
+        check(pts.front().lowOpen && !pts.front().highOpen, "a ceiling is open BELOW");
+        const RailRange r = railRange(pts);
+        check(r.valid && r.hi > 6.0, "…and its graded high edge still bounds the domain");
     }
     {
         // Degenerate: a single value equal to 0 ⇒ widen to ±1 rather than divide by zero.
         std::vector<RailPoint> pts = railCheckpoints({ smp(0, 0, 0.0) }, {});
-        const RailRange r = railRange(pts, false);
+        const RailRange r = railRange(pts);
         check(r.valid && r.hi > r.lo, "degenerate span widens instead of collapsing");
-        check(!railRange({}, false).valid, "empty rail → invalid range");
+        check(!railRange({}).valid, "empty rail → invalid range");
     }
 
     // ── interpolateAtUs: linear between samples, clamped outside ────────────────

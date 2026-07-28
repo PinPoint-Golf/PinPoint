@@ -53,7 +53,11 @@ Item {
     property var    curveV:      []      // series.value
     property int    impactPhase:  5      // Phase::Impact
     property int    addressPhase: 0      // Phase::Address
-    property bool   oneSided:    false   // speeds: corridor is a floor/target
+    // Kept for the caller's benefit only — openness travels ON the checkpoints now
+    // (lowOpen/highOpen, from the measure's shape) and the ribbon reads it there. This
+    // says whether the METRIC as a whole is one-sided, which is a labelling fact, not a
+    // geometry one. Never derive it from a unit.
+    property bool   oneSided:    false
 
     // ── Interaction (window only; the wall cast leaves these at their defaults) ──
     property real   playheadUs: -1       // -1 = idle
@@ -68,7 +72,7 @@ Item {
 
     // ── Reductions (C++) ────────────────────────────────────────────────────────
     readonly property var _pts:   cm.railCheckpoints(phaseValues || [], corridors || [])
-    readonly property var _range: cm.railRange(_pts, oneSided)
+    readonly property var _range: cm.railRange(_pts)
     readonly property int _n:     _pts.length
 
     readonly property bool _hasCurve: (curveT && curveT.length > 1
@@ -308,13 +312,24 @@ Item {
                 readonly property var b: root._pts[index + 1]
                 visible: a.hasCorridor && b.hasCorridor
 
-                // One-sided (speeds): the corridor is a FLOOR, so each zone runs from
-                // its lower bound up to the top of the plot. Green over amber then
-                // yields red below amberLo, amber up to greenLo, green above it.
-                readonly property real aHiA: root.oneSided ? root._rHi : a.amberHi
-                readonly property real bHiA: root.oneSided ? root._rHi : b.amberHi
-                readonly property real aHiG: root.oneSided ? root._rHi : a.greenHi
-                readonly property real bHiG: root.oneSided ? root._rHi : b.greenHi
+                // An OPEN tail runs off the end of the plot rather than stopping, so the
+                // corridor never terminates in a hard edge that reads as a bound it does
+                // not hold. Per checkpoint, from the corridor — not from a rail-wide flag,
+                // and never from the unit.
+                //
+                // FLOOR (open above): each zone runs from its lower bound to the top, so
+                // red is below amberLo, amber up to greenLo, green above it.
+                // CEILING (open below) is the mirror, and it had no representation at all
+                // before this — the old code substituted the high edges and never the low
+                // ones, so an aspirational floor was handled and its opposite was not.
+                readonly property real aHiA: a.highOpen ? root._rHi : a.amberHi
+                readonly property real bHiA: b.highOpen ? root._rHi : b.amberHi
+                readonly property real aHiG: a.highOpen ? root._rHi : a.greenHi
+                readonly property real bHiG: b.highOpen ? root._rHi : b.greenHi
+                readonly property real aLoA: a.lowOpen  ? root._rLo : a.amberLo
+                readonly property real bLoA: b.lowOpen  ? root._rLo : b.amberLo
+                readonly property real aLoG: a.lowOpen  ? root._rLo : a.greenLo
+                readonly property real bLoG: b.lowOpen  ? root._rLo : b.greenLo
 
                 Shape {
                     anchors.fill: parent
@@ -324,16 +339,16 @@ Item {
                         strokeColor: "transparent"
                         startX: root._x(seg.index);     startY: root._y(seg.aHiA)
                         PathLine { x: root._x(seg.index + 1); y: root._y(seg.bHiA) }
-                        PathLine { x: root._x(seg.index + 1); y: root._y(seg.b.amberLo) }
-                        PathLine { x: root._x(seg.index);     y: root._y(seg.a.amberLo) }
+                        PathLine { x: root._x(seg.index + 1); y: root._y(seg.bLoA) }
+                        PathLine { x: root._x(seg.index);     y: root._y(seg.aLoA) }
                     }
                     ShapePath {   // green core
                         fillColor: Theme.colorBandGreen
                         strokeColor: "transparent"
                         startX: root._x(seg.index);     startY: root._y(seg.aHiG)
                         PathLine { x: root._x(seg.index + 1); y: root._y(seg.bHiG) }
-                        PathLine { x: root._x(seg.index + 1); y: root._y(seg.b.greenLo) }
-                        PathLine { x: root._x(seg.index);     y: root._y(seg.a.greenLo) }
+                        PathLine { x: root._x(seg.index + 1); y: root._y(seg.bLoG) }
+                        PathLine { x: root._x(seg.index);     y: root._y(seg.aLoG) }
                     }
                 }
             }
