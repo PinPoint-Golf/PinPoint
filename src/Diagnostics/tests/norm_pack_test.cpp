@@ -233,6 +233,88 @@ int main()
               "a norm on a not-capturable measure is refused");
     }
 
+    std::printf("=== norm pack: a norm's numbers against the measure's SHAPE ===\n");
+    {
+        // Shape is on the MEASURE and the norm carries only numbers, so this join is the only
+        // place the two can be checked against each other — exactly like normUnitMismatch.
+        CharacteristicPack pack;
+        Measure target;
+        target.id     = QStringLiteral("m_ballPosition");
+        target.unit   = QStringLiteral("%");
+        target.status = MeasureStatus::Live;
+        pack.measures.push_back(target);
+
+        Measure floor;
+        floor.id     = QStringLiteral("m_smash");
+        floor.unit   = QStringLiteral("ratio");
+        floor.status = MeasureStatus::Live;
+        floor.shape  = Shape::Floor;
+        pack.measures.push_back(floor);
+
+        Measure ceiling;
+        ceiling.id     = QStringLiteral("m_heelLift");
+        ceiling.unit   = QStringLiteral("cm");
+        ceiling.status = MeasureStatus::Live;
+        ceiling.shape  = Shape::Ceiling;
+        pack.measures.push_back(ceiling);
+
+        const ContextTree tree = sampleTree();
+
+        // ── STAYS SILENT ────────────────────────────────────────────────────
+        // Half the value of this test is the negative cases: a check that cannot stay quiet is
+        // worse than no check.
+        NormPack terseFloor;
+        terseFloor.norms.push_back(makeNorm("m_smash", "driver", 1.48, 0.05, "ratio"));
+        check(validateNormsAgainst(terseFloor, pack, tree).ok(),
+              "a floor stating ONE tolerance validates clean");
+
+        // An explicitly-equal sigmaHi is indistinguishable from the parse default (readNorm mirrors
+        // sigmaLo when sigmaHi is absent), so it must not be an error — it is the terse form.
+        NormPack equalSigmas = terseFloor;
+        equalSigmas.norms[0].sigmaHi = equalSigmas.norms[0].sigmaLo;
+        check(validateNormsAgainst(equalSigmas, pack, tree).ok(),
+              "…and so does one stating the same value twice");
+
+        // The GRADED side's monitor is legal on a floor: it is the low tail that grades.
+        NormPack gradedMonitor = terseFloor;
+        gradedMonitor.norms[0].monitorLo = 1.20;
+        check(!hasCode(validateNormsAgainst(gradedMonitor, pack, tree), "normShapeMonitor"),
+              "a monitorLo on a FLOOR is the graded tail and is legal");
+
+        NormPack asymTarget;
+        asymTarget.norms.push_back(makeNorm("m_ballPosition", "driver", 12.0, 4.0, "%"));
+        asymTarget.norms[0].sigmaHi = 9.0;
+        check(validateNormsAgainst(asymTarget, pack, tree).ok(),
+              "an asymmetric TARGET is normal, not exotic — nothing fires");
+
+        // ── FIRES ───────────────────────────────────────────────────────────
+        NormPack asymFloor = terseFloor;
+        asymFloor.norms[0].sigmaHi = 0.30;
+        check(hasCode(validateNormsAgainst(asymFloor, pack, tree), "normShapeTolerance"),
+              "a floor with two DIFFERENT tolerances is refused");
+
+        NormPack floorHiMonitor = terseFloor;
+        floorHiMonitor.norms[0].monitorHi = 1.90;
+        check(hasCode(validateNormsAgainst(floorHiMonitor, pack, tree), "normShapeMonitor"),
+              "a monitorHi on a floor names a tail nothing grades");
+
+        NormPack ceilLoMonitor;
+        ceilLoMonitor.norms.push_back(makeNorm("m_heelLift", "driver", 0.0, 2.0, "cm"));
+        ceilLoMonitor.norms[0].monitorLo = -5.0;
+        check(hasCode(validateNormsAgainst(ceilLoMonitor, pack, tree), "normShapeMonitor"),
+              "…and the ceiling mirrors it: monitorLo is the open tail there");
+
+        // The message has to name the measure AND what its shape means, because the author is
+        // reading it without the pack open beside them.
+        const ValidationReport sr = validateNormsAgainst(asymFloor, pack, tree);
+        bool namesBoth = false;
+        for (const ValidationIssue &i : sr.issues)
+            if (i.code == QLatin1String("normShapeTolerance"))
+                namesBoth = i.message.contains(QLatin1String("m_smash"))
+                            && i.message.contains(shapeLabel(Shape::Floor));
+        check(namesBoth, "the message names the measure and what its shape means");
+    }
+
     std::printf("=== norm pack: schema gate ===\n");
     {
         const NormPackLoadResult res =

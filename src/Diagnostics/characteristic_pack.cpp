@@ -776,6 +776,17 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         if (o.contains(QStringLiteral("status")))
             measureStatusFromName(o.value(QStringLiteral("status")).toString(), m.status);
 
+        // Absent => Target, which is what every measure authored before shapes existed means. An
+        // unknown token is an ERROR rather than a silent fall back to Target: a pack that meant
+        // "floor" and typed "flooor" would grade the good tail as a fault, confidently, with no
+        // sign anywhere that a word had been misread.
+        if (o.contains(QStringLiteral("shape"))
+            && !shapeFromName(o.value(QStringLiteral("shape")).toString(), m.shape))
+            err(r, QStringLiteral("unknownShape"), m.id,
+                QStringLiteral("Measure '%1' declares shape '%2'; the shapes are target, floor and "
+                               "ceiling.")
+                    .arg(m.id, o.value(QStringLiteral("shape")).toString()));
+
         // A composed measure naming a spinal role cannot come from the pose SKELETON, and the
         // loader stamps that rather than trusting the author to remember — a measure claiming to
         // be live on a role with no keypoint would silently never produce a value.
@@ -978,6 +989,9 @@ QJsonObject savePack(const CharacteristicPack &pack)
         if (!m.highMeans.isEmpty()) o.insert(QStringLiteral("highMeans"), m.highMeans);
         o.insert(QStringLiteral("viewNeeded"), viewNeededName(m.viewNeeded));
         o.insert(QStringLiteral("status"), measureStatusName(m.status));
+        // Omitted when Target, so 105 of 106 shipped measures round-trip byte-identically and the
+        // key appears only where somebody actually said something.
+        if (m.shape != Shape::Target) o.insert(QStringLiteral("shape"), shapeName(m.shape));
         measures.append(o);
     }
     root.insert(QStringLiteral("measures"), measures);

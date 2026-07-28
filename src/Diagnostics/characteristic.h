@@ -68,6 +68,32 @@ enum class MeasureStatus {
     ExternalDevice, // a producer is intended, but it reads from hardware the user may not own
 };
 
+// Which way a measure's corridor is open.
+//
+// ON THE MEASURE, NOT THE NORM, and that is the load-bearing decision. One-sidedness is semantics
+// of the QUANTITY and invariant across contexts: smash factor has no upper fault with a driver and
+// none with a wedge either, only a different implausibility. If shape sat on the norm, a driver row
+// and an iron row could disagree about the shape of one measure and the corridor editor could flip
+// shape per context — so a norm row carries only NUMBERS, and validateNormsAgainst checks those
+// numbers against the measure's shape exactly the way it already checks `unit`.
+//
+// This changes which values reach which band. It does NOT add a band: Ideal/Good/Watch/Action/
+// NotMeasured and ragOf() are untouched, and a one-sided norm consults the same z ladder on its one
+// graded tail.
+//
+// The open tail is open UP TO PLAUSIBILITY, not to infinity — see Norm::plausibleLo/plausibleHi. A
+// driver smash of 1.62 is not a swing finding, it is a mis-tracked ball, and grading it either way
+// would launder a capture fault into a confident diagnosis.
+//
+// `Floor` is for self-normalising ratios and mechanically-universal thresholds ONLY. Cohort-relative
+// bigger-is-better outcomes — ball speed, club speed, carry — get no norm at all: a population floor
+// on those grades a golfer Action for their age. They are benchmarks, a different feature.
+enum class Shape {
+    Target,    // the default and ~90% of the catalogue: a corridor, both tails grade
+    Floor,     // higher is better. mu is the aspiration; only the LOW tail grades
+    Ceiling,   // lower is better. Mirror of Floor; only the HIGH tail grades
+};
+
 // The distinction between NoProducer and NotCapturable is the whole reason the roadmap can be
 // trusted as a work queue. NoProducer means "we could build this"; NotCapturable means "a different
 // sensor or view is required, and listing it as missing pipeline work would mislead every reader".
@@ -98,6 +124,10 @@ struct Measure {
     ViewNeeded    viewNeeded = ViewNeeded::Any;
     MeasureStatus status     = MeasureStatus::NoProducer;
     QString       gapReason;                            // NotCapturable: why, in one line, for the UI
+
+    // Which way this quantity's corridor is open. See Shape. Absent in JSON => Target, so every
+    // measure authored before shapes existed keeps grading exactly as it did.
+    Shape         shape      = Shape::Target;
 
     // What a HIGH value of this measure means, in the measure's own words — "further back, toward
     // the trail foot". Rendered wherever a signal's direction is chosen, INSTEAD of High/Low.
@@ -331,6 +361,13 @@ bool    measureKindFromName(const QString &s, MeasureKind &out);
 QString measureStatusName(MeasureStatus s);
 QString measureStatusLabel(MeasureStatus s);   // "Live", "No producer", … — the UI's own words
 bool    measureStatusFromName(const QString &s, MeasureStatus &out);
+QString shapeName(Shape s);
+QString shapeLabel(Shape s);                   // "Higher is better", … — never the bare enum word
+bool    shapeFromName(const QString &s, Shape &out);
+
+// True when only ONE tail of this shape grades, so a signal watching the other can never fire and a
+// corridor drawn with two hard edges would state a bound the norm does not hold.
+inline bool shapeIsOneSided(Shape s) { return s != Shape::Target; }
 QString signalTestName(SignalTest t);
 bool    signalTestFromName(const QString &s, SignalTest &out);
 QString directionName(Direction d);

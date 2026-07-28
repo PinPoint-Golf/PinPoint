@@ -22,9 +22,9 @@ rule in there survives this work.
 
 | # | Stage | State | Landed |
 |---|---|---|---|
-| 0 | Ideal-band policy divergence — **land before anything else** | ☑ complete — 79/79 green | 2026-07-28 · uncommitted |
-| — | **commit gate · Part A does not begin until Part 0 is in** | | |
-| A1 | Shape enum, measure field, parse, validation | ☐ not started | |
+| 0 | Ideal-band policy divergence — **land before anything else** | ☑ complete — 79/79 green | 2026-07-28 · a82671a |
+| — | **commit gate · Part A does not begin until Part 0 is in** | ☑ passed | |
+| A1 | Shape enum, measure field, parse, validation | ☑ complete — 79/79 **untouched**, which is the gate | 2026-07-28 |
 | A2 | Grading semantics, edges, plausibility | ☐ not started | |
 | A3 | Engine + health checks | ☐ not started | |
 | — | **review gate · expect context clear here** | | |
@@ -51,6 +51,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 |---|---|---|
 | 2026-07-28 | — | Plan written and verified against the tree. Brief copied to `docs/design/norm_shapes.md`. Baseline: analyzer suite 79/79 green at `ba7b360`. |
 | 2026-07-28 | 0 | Stage 0 landed. `bandEdgesOf()` now scales the Ideal edge by `idealMaxZ`; `Norm::idealLo/idealHi` → `claimLo/claimHi`; all 22 call sites split into rendering vs authoring/diff; `MeasureReading::greenLo/Hi` policy-scaled and `fromCorridor()`'s inversion divisor follows; `gradePolicyIsOrdered()` added and asserted. **Three tests had written the defect down as a requirement** — `norm_editor_model_test` ("a policy change does not move the IDEAL band"), `norm_model_test` and `manifest_migration_test` — all three now assert the opposite, plus a per-preset edge sweep and a QML key-contract check. 79/79 green; app builds; headless launch clean. Next: A1. |
+| 2026-07-28 | A1 | `Shape{Target,Floor,Ceiling}` on `Measure`, tables in `characteristic.cpp`, `"shape"` parsed and written (omitted when Target, so 105/106 measures round-trip byte-identically), `unknownShape` a named load error. Two referential rules in `validateNormsAgainst` — `normShapeTolerance` and `normShapeMonitor` — both gated in BOTH directions. **`norm.h` untouched**; the shape parameter and its branches arrive together in A2 rather than as a dead defaulted argument (see the stage note). 79/79 **unchanged**, which is the gate. Found and logged N10. Next: A2. |
 
 ---
 
@@ -320,9 +321,16 @@ is true of the drawing path and false of the grading path.
   at `:173-174`).
 - `Measure::shape`; JSON key `"shape"` on the measure entry in `core.json`; absent ⇒
   `target`.
-- **Every grading function takes `Shape shape = Shape::Target` as a trailing parameter**, so
-  `reference_bands_test` and the whole existing suite pass UNTOUCHED. That is the gate: this
-  stage adds vocabulary and changes no behaviour.
+- **The whole existing suite passes UNTOUCHED.** That is the gate: this stage adds vocabulary
+  and changes no behaviour.
+
+  **Deviation from the brief, deliberate.** The brief has A1 thread `Shape shape = Target`
+  through the grading functions and A2 implement the branches. That leaves a defaulted
+  parameter no caller passes and no branch reads — dead weight nothing can test, and a
+  compiler warning to suppress. A1 therefore touches `norm.h` not at all; the parameter and
+  its branches arrive together in A2. The regression gate is unchanged and is arguably
+  stronger: 79/79 passing with `characteristic.h`, `characteristic_pack.cpp` and
+  `norm_pack.cpp` all modified proves the vocabulary is inert.
 - `validateNormsAgainst` gains shape rules, in the existing style (both sides named): a floor
   norm whose `sigmaHi ≠ sigmaLo` is an error; a `monitorHi` on a floor is an error; an unknown
   shape token is an error. Mirror for ceiling.
@@ -777,3 +785,4 @@ resolved with the stage that closed it.
 | N7 | The 16 male-only-sample rows (Meister 2011, Kim 2018) are the natural first cohort content, deferred to the ROM literature review by decision 6 of the brief. | B4 | open by design |
 | N8 | `normZ()` has no production caller. It is made shape-aware for the future 0–100 score; nothing verifies it end to end today. | A2 | open by design |
 | N9 | The engine (`detect()`, `NormMeasureSource`) is dormant, so A3 has no live verification. | A3 | open — belongs to *Diagnosis execution, V&V* |
+| N10 | **`partialMonitor` will fire on a legal one-sided monitor.** It lives in `validateNormPack` (standalone), which cannot see the measure and so cannot know a floor carrying only `monitorLo` is complete. `hasExplicitMonitor()` has the same blindness (fact 3). Both need the shape, so the check has to move to — or be duplicated in — `validateNormsAgainst`. Not yet triggered: no shipped one-sided norm carries a monitor bound. | A1 | open — **must close in A2**, before A5 makes a one-sided row real |

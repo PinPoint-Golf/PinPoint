@@ -89,6 +89,14 @@ struct NormPack {
 //                        percentage produces a confident, plausible, wrong answer.
 //   normNotCapturable    a norm on a NotCapturable measure — no sensor can ever produce a value for
 //                        it, so a corridor on it can never do anything but mislead
+//   normShapeTolerance   a one-sided measure's norm states different tolerances either side. One of
+//                        them describes a tail that does not grade
+//   normShapeMonitor     a monitor bound on the OPEN side of a one-sided measure — an edge nothing
+//                        grades against, sitting in the pack looking authoritative
+//
+// Shape checks live HERE and not in the standalone validator for the same reason normUnitMismatch
+// does: shape is a property of the MEASURE (see characteristic.h), a norm row carries only numbers,
+// and only the assembled library can join the two.
 ValidationReport validateNormPack(const NormPack &pack);
 
 ValidationReport validateNormsAgainst(const NormPack               &norms,

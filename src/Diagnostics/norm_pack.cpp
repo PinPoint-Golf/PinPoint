@@ -312,6 +312,36 @@ ValidationReport validateNormsAgainst(const NormPack           &norms,
             err(QStringLiteral("normNotCapturable"), key,
                 QStringLiteral("Measure '%1' can never be captured, so a norm on it can only "
                                "mislead.").arg(m->id));
+
+        // ── The norm's numbers against the measure's SHAPE ──────────────────
+        //
+        // Here rather than in validateNormPack for the same reason normUnitMismatch is: only the
+        // assembled library knows what the measure claims. A norm row carries numbers and nothing
+        // else — shape lives on the measure — so this is where the two are joined.
+        if (shapeIsOneSided(m->shape)) {
+            // One side of the tolerance is meaningless on a one-sided norm, and a row stating two
+            // different values has said something about a tail that does not grade. Equal values
+            // are fine and indistinguishable from the parse default: readNorm mirrors sigmaLo into
+            // sigmaHi when absent, so the terse form a one-sided row should use lands here anyway.
+            if (!qFuzzyCompare(1.0 + n.sigmaLo, 1.0 + n.sigmaHi))
+                err(QStringLiteral("normShapeTolerance"), key,
+                    QStringLiteral("Measure '%1' is '%2', so only one tail grades — but norm '%3' "
+                                   "states different tolerances either side (%4 and %5). State one.")
+                        .arg(m->id, shapeLabel(m->shape), key)
+                        .arg(n.sigmaLo).arg(n.sigmaHi));
+
+            // A monitor bound on the OPEN side names an edge the norm never grades against. Left
+            // to load it would sit in the pack looking authoritative and doing nothing.
+            const bool openSideMonitor = (m->shape == Shape::Floor)   ? n.monitorHi.has_value()
+                                                                      : n.monitorLo.has_value();
+            if (openSideMonitor)
+                err(QStringLiteral("normShapeMonitor"), key,
+                    QStringLiteral("Measure '%1' is '%2', so norm '%3' cannot carry a %4 bound — "
+                                   "that tail is open and nothing grades against it.")
+                        .arg(m->id, shapeLabel(m->shape), key,
+                             m->shape == Shape::Floor ? QStringLiteral("monitorHi")
+                                                      : QStringLiteral("monitorLo")));
+        }
     }
 
     return rep;

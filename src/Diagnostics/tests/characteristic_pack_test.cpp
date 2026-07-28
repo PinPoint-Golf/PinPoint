@@ -330,6 +330,56 @@ int main()
               "an author's weaker status is not overridden upward");
     }
 
+    // ── Shape: which way the corridor is open ──────────────────────────────────
+    //
+    // Shape decides which values reach which band, so a token that loaded as something other than
+    // what it says would grade the good tail as a fault, confidently, on every swing. Both
+    // directions of the round-trip and the refusal are gated here.
+    {
+        CharacteristicPack p = goodPack();
+        check(p.measures.front().shape == Shape::Target,
+              "a measure that says nothing about shape is a Target");
+
+        const PackLoadResult plain = loadPack(savePack(p), QStringLiteral("shape-default"));
+        const Measure       *pm    = plain.pack.measure(QStringLiteral("stanceWidth"));
+        check(pm && pm->shape == Shape::Target, "…and stays one across a round-trip");
+        check(!savePack(p).value(QStringLiteral("measures")).toArray().at(0).toObject()
+                   .contains(QStringLiteral("shape")),
+              "…with no key written, so 105 of 106 shipped measures round-trip byte-identically");
+
+        for (Shape s : { Shape::Floor, Shape::Ceiling }) {
+            CharacteristicPack q = goodPack();
+            q.measures.front().shape = s;
+            const PackLoadResult res = loadPack(savePack(q), QStringLiteral("shape"));
+            const Measure       *m   = res.pack.measure(QStringLiteral("stanceWidth"));
+            check(m && m->shape == s, shapeName(s).toUtf8().constData());
+            check(res.report.ok(), "…and a stated shape loads clean");
+        }
+
+        // An unknown token is an ERROR, never a silent fall back to Target. A pack that meant
+        // "floor" and typed "flooor" would otherwise grade its good tail as a fault with nothing
+        // anywhere reporting that a word had been misread.
+        QJsonObject root     = savePack(goodPack());
+        QJsonArray  measures = root.value(QStringLiteral("measures")).toArray();
+        QJsonObject first    = measures.at(0).toObject();
+        first.insert(QStringLiteral("shape"), QStringLiteral("flooor"));
+        measures.replace(0, first);
+        root.insert(QStringLiteral("measures"), measures);
+
+        const PackLoadResult bad = loadPack(root, QStringLiteral("shape-typo"));
+        check(hasError(bad.report, "unknownShape"), "an unknown shape token is refused");
+        bool namesBoth = false;
+        for (const ValidationIssue &i : bad.report.issues)
+            if (i.code == QLatin1String("unknownShape"))
+                namesBoth = i.message.contains(QLatin1String("flooor"))
+                            && i.message.contains(QLatin1String("floor"));
+        check(namesBoth, "…and the message names the typo AND the legal vocabulary");
+
+        check(!shapeIsOneSided(Shape::Target) && shapeIsOneSided(Shape::Floor)
+                  && shapeIsOneSided(Shape::Ceiling),
+              "shapeIsOneSided is the one place 'has an open tail' is decided");
+    }
+
     // ── ExternalDevice: roadmap work gated on hardware, not a capture gap ───────
     //
     // The three statuses answer three different questions and the UI renders each differently, so

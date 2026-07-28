@@ -73,6 +73,15 @@ const Row<MeasureStatus> kMeasureStatuses[] = {
     { MeasureStatus::ExternalDevice, "externalDevice", "Needs a launch monitor" },
 };
 
+// The label is what an AUTHOR reads beside the measure's own `highMeans` sentence, so it says what
+// the shape means rather than naming the enum: "higher is better: more of the clubhead speed
+// reaching the ball" is a sentence somebody can check. "Floor" is not.
+const Row<Shape> kShapes[] = {
+    { Shape::Target,  "target",  "A range to sit inside" },
+    { Shape::Floor,   "floor",   "Higher is better" },
+    { Shape::Ceiling, "ceiling", "Lower is better" },
+};
+
 const Row<SignalTest> kSignalTests[] = {
     { SignalTest::OutsideCorridor, "outsideCorridor", "outside its normal range" },
     { SignalTest::Threshold,       "threshold",       "past a threshold" },
@@ -169,6 +178,10 @@ bool    measureKindFromName(const QString &s, MeasureKind &out) { return fromNam
 QString measureStatusName(MeasureStatus s) { return nameOf(kMeasureStatuses, s); }
 QString measureStatusLabel(MeasureStatus s) { return labelOf(kMeasureStatuses, s); }
 bool    measureStatusFromName(const QString &s, MeasureStatus &out) { return fromName(kMeasureStatuses, s, out); }
+
+QString shapeName(Shape s)  { return nameOf(kShapes, s); }
+QString shapeLabel(Shape s) { return labelOf(kShapes, s); }
+bool    shapeFromName(const QString &s, Shape &out) { return fromName(kShapes, s, out); }
 
 QString signalTestName(SignalTest t) { return nameOf(kSignalTests, t); }
 bool    signalTestFromName(const QString &s, SignalTest &out) { return fromName(kSignalTests, s, out); }
