@@ -101,6 +101,25 @@ export PATH="$(brew --prefix qt@6)/bin:$PATH"
 
 No additional GPU SDK installation is needed on Apple Silicon — CoreML and Metal are part of the OS.
 
+### 4. Dev Code Signing (recommended)
+
+```bash
+tools/setup_dev_signing.sh
+```
+
+Run once per machine. Without it the dev bundle is left **unsigned** and the build prints a warning; everything still compiles and runs, but **camera / microphone / speech / Bluetooth permissions have to be granted again after every rebuild**. macOS keys those grants (TCC) to the binary's code signature, and an unsigned build has no durable identity to match — the app shows as "enabled" in System Settings while every entitled API returns Denied.
+
+The script creates a self-signed `PinPoint Dev` identity in a **dedicated keychain** (`~/Library/Keychains/pinpoint-dev.keychain-db`, password in `~/.config/pinpoint/dev-keychain.pass`, mode 0600) and `cmake/DevCodesign.cmake` signs the finished bundle with it at POST_BUILD.
+
+The dedicated keychain is the point, not an implementation detail. The login keychain unlocks only by **prompting**, so any build not driven from a desktop session — an agent or CI job over SSH, which launchd reports as session `Background` rather than `Aqua` — cannot use it, and codesign fails `errSecInternalComponent` with no way to ask. A keychain whose password is on disk unlocks with no interaction, which is the same reason fastlane ships `create_keychain`/`setup_ci`.
+
+> **Moving an identity that already has grants.** TCC matches the *designated requirement*, which pins the certificate (`certificate leaf = H"…"`), so a new cert silently resets every permission. To keep them, export the old identity and adopt it: `tools/setup_dev_signing.sh --p12 <file>`. The export itself must run from **Terminal.app on the machine** — exporting a private key always requires GUI approval and no ACL or partition list covers it:
+> ```bash
+> security export -t identities -f pkcs12 -P <pass> -o /tmp/pp.p12
+> ```
+
+Troubleshooting: `codesign` resolves `-s <name>` through the keychain **search list, in order** (its `--keychain` flag does *not* affect identity lookup — it reports `no identity found`), so `pinpoint-dev.keychain-db` must come first in `security list-keychains -d user`. A stale copy of the same identity in an earlier keychain shadows it and fails. This is entirely separate from the release path in `tools/package_macos.sh`, which signs with a Developer ID cert from the login keychain in a real desktop session.
+
 ---
 
 ## Windows
