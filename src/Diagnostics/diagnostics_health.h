@@ -48,6 +48,19 @@
 //                          that the condition is undetectable by design. NOT scoped to Live: this is
 //                          an author's misreading of the measure, not a backlog item, and it should
 //                          be visible the moment it is written rather than when a producer lands.
+//   ungradedTail           The exact mirror of signalOnOpenTail: a tail that DOES grade with no
+//                          signal watching it. A Target measure with a norm grades both sides —
+//                          sigmaHi defaults to sigmaLo — so a corridor authored with one condition
+//                          on it still puts a Watch or an Action on the dashboard for the other
+//                          side, with no fault name, no consequence and no drill behind it. Three
+//                          correct answers, and picking the wrong one is the whole risk: author the
+//                          condition when the tail carries a real fault; set `shape` when the
+//                          quantity is one-sided and that tail should stop grading; set
+//                          `unwatchedTail` + `unwatchedReason` when the tail genuinely grades and
+//                          there is still nothing to name. Do NOT reach for the first by default —
+//                          a shape is a deletion of false grading rather than an addition to the
+//                          model. Not scoped to Live, for signalOnOpenTail's reason: a producer
+//                          landing would make this WORSE, not better.
 //   personalNormNoSample   A corridor of YOUR OWN, seated on nothing (n = 0). Fine as a starting
 //                          figure; worth knowing you typed it rather than measured it. Scoped to
 //                          the personal layer through the provider's own override tracking, so the

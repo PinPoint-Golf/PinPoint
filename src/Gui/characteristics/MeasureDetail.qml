@@ -627,6 +627,20 @@ Item {
                     color:          Theme.colorText3
                     wrapMode:       Text.WordWrap
                 }
+
+                // A tail that grades and is deliberately not watched. The reason is the point — the
+                // flag on its own would read as an unexplained assertion.
+                Text {
+                    Layout.fillWidth: true
+                    visible:        (root.detail.unwatchedReason || "").length > 0
+                    text:           qsTr("The %1 tail is deliberately unwatched: %2")
+                                        .arg(root.detail.unwatchedTail || "")
+                                        .arg(root.detail.unwatchedReason || "")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorText3
+                    wrapMode:       Text.WordWrap
+                }
             }
 
             Item { Layout.fillWidth: true; implicitHeight: Theme.sp(24) }

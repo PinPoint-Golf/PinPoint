@@ -286,7 +286,11 @@ int main()
         }
         check(pelvisSwayRows == 1, "a series with several reducers is ONE roadmap row");
         check(pelvisSwaySamples == 4, "that row knows it carries four reducers");
-        check(pelvisSwayBlocks == 4, "and that it unblocks four characteristics");
+        // Six, not four, and the gap between the two numbers is the point being made: the four
+        // reducers are unchanged, but the unwatched-tails pass gave two of them their second tail,
+        // so ONE producer now unblocks six faults rather than four. Updated deliberately, never
+        // loosened to a `>=`.
+        check(pelvisSwayBlocks == 6, "and that it unblocks six characteristics");
 
         check(!rows.isEmpty()
                   && rows.first().toMap().value(QStringLiteral("blocks")).toInt() >= pelvisSwayBlocks,

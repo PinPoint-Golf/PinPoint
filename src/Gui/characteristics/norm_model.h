@@ -113,7 +113,8 @@ public:
 
     // Full detail for the detail page. Empty map when the id is unknown, so a stale deep link
     // lands on the catalogue rather than a blank page.
-    //   { …row fields…, kind, reducerLabel, seriesLabel, gapReason, viewNeeded,
+    //   { …row fields…, kind, reducerLabel, seriesLabel, gapReason, unwatchedTail,
+    //     unwatchedReason, viewNeeded,
     //     norms[], usedBy[], availability }
     //
     // `norms[]` is EVERY context in tree order that resolves to something, each row marked either

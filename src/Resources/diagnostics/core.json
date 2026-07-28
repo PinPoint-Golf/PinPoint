@@ -83,7 +83,9 @@
       "status": "live",
       "label": "Tempo ratio",
       "unit": ":1",
-      "highMeans": "a longer backswing relative to the downswing, a slower transition"
+      "highMeans": "a longer backswing relative to the downswing, a slower transition",
+      "unwatchedTail": "high",
+      "unwatchedReason": "The corridor is centred on an address-to-top basis (2.6) while the published 3:1 figure is measured from the takeaway, and this norm's own citation says so. A tour-standard tempo therefore already reads about a tolerance high, so the high tail here is a mis-centred corridor rather than a fault. Re-centre it from a corpus and revisit."
     },
     {
       "id": "m_shoulderAlignment",
@@ -125,7 +127,7 @@
         "anchor": "p1"
       },
       "status": "planned",
-      "label": "Spine forward bend, peak P4 to P7 from P1",
+      "label": "Spine forward bend, change from address",
       "unit": "°",
       "highMeans": "more forward bend than at address during the swing, a dip"
     },
@@ -405,6 +407,7 @@
         "sense": "max"
       },
       "status": "planned",
+      "shape": "ceiling",
       "label": "",
       "metricKey": "leadKneeFlexion",
       "highMeans": "more lead-knee bend through impact",
@@ -445,6 +448,7 @@
         ]
       },
       "status": "planned",
+      "shape": "ceiling",
       "label": "",
       "metricKey": "leadArmToTorso",
       "highMeans": "the lead arm further from the torso after impact",
@@ -463,6 +467,7 @@
         "anchor": "p4"
       },
       "status": "planned",
+      "shape": "floor",
       "label": "",
       "metricKey": "leadHandWidth",
       "highMeans": "the hands further from the body at the top, a wider arc",
@@ -1144,6 +1149,7 @@
         "anchor": "p4"
       },
       "status": "live",
+      "shape": "ceiling",
       "label": "Lead heel lift, at the top",
       "unit": "cm",
       "highMeans": "the lead heel further off the ground"
@@ -1161,6 +1167,7 @@
         ]
       },
       "status": "live",
+      "shape": "floor",
       "label": "Hand speed, rate of change from delivery to impact",
       "unit": "mph/s",
       "highMeans": "the hands still accelerating into the ball"
@@ -1217,6 +1224,7 @@
         ]
       },
       "status": "planned",
+      "shape": "floor",
       "label": "Trail knee flexion, change from address to the top",
       "unit": "°",
       "highMeans": "the trail knee gaining flex through the backswing rather than losing it"
@@ -1273,6 +1281,7 @@
         ]
       },
       "status": "planned",
+      "shape": "floor",
       "label": "Pelvis rotation rate, delivery to impact",
       "unit": "°/s",
       "highMeans": "the pelvis still turning hard into impact rather than stalling"
@@ -1329,6 +1338,7 @@
         "anchor": "finish"
       },
       "status": "planned",
+      "shape": "ceiling",
       "label": "Pelvis centre from the lead ankle, at the finish",
       "unit": "% stance width",
       "highMeans": "the body further from being stacked over the lead foot"
@@ -1355,6 +1365,7 @@
         "anchor": "finish"
       },
       "status": "planned",
+      "shape": "floor",
       "label": "Chest rotation, at the finish",
       "unit": "°",
       "highMeans": "a fuller turn through to the finish"
@@ -1812,7 +1823,7 @@
       "direction": "high"
     },
     {
-      "id": "sig_overTheTop",
+      "id": "sig_outToInPath",
       "test": "outsideCorridor",
       "measures": [
         "m_clubPathAtImpact"
@@ -2290,6 +2301,238 @@
         "m_carryDistance"
       ],
       "direction": "low"
+    },
+    {
+      "id": "sig_hangingBackPelvisDown",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayDown"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_slidePelvisImpact",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayImpact"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_offBalanceFinishSway",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayFinish"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_hangingBackThoraxDrift",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_thoraxDrift"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_postureTooBent",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spineBendAtAddress"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_flatLumbarSpine",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_lumbarCurve"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_flatThoracicSpine",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_thoracicCurve"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_diving",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_spineBendLoss"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_steepShoulderPlane",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shoulderPlane"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_excessiveAxisTiltTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_axisTiltAtTop"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_backingOffTheBall",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisThrustDown"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_pelvisDriftLeadBackswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisSwayBack"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_pelvisSinkBackswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisLiftTop"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_inToOutPath",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_clubPathAtImpact"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_trailElbowDeep",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_trailElbowRise"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_overRotationAtTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_thoraxRotP4"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_clubShortOfParallel",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_shaftAngleP4"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_faceHeldShutTakeaway",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadForearmRot_p2"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_armsOverConnected",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadUpperArmToChest"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_lockedLeadArm",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadElbowFlex_p4"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_excessiveLag",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_lagAngleDown"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_overSet",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadWristRadUln_p4"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_bowedLeadWrist",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadWristAtImpact"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_excessiveShaftLean",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_impactShaftLean"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_lowPointTooFarAhead",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_lowPointAhead"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_hipsTooOpenAtImpact",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisRotP7"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_latePelvisRotation",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisRotP5"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_excessiveSeparationStretch",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_xFactorStretch"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_headDriftLeadBackswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_headSwayBack"
+      ],
+      "direction": "low"
     }
   ],
   "conditions": [
@@ -2541,7 +2784,8 @@
       },
       "drills": [
         "drill.postureRod"
-      ]
+      ],
+      "axis": "spine_bend_change"
     },
     {
       "id": "early_extension",
@@ -2568,7 +2812,8 @@
         "drill.postureRod",
         "drill.standoffCheck"
       ],
-      "injuryNote": "Golfers with restricted hip internal rotation have been measured moving into greater lumbar flexion and pelvic posterior tilt, which is the loading pattern underneath this characteristic. It has been investigated as a possible contributor to lower back pain and the findings are mixed. Worth raising with a clinician if pain is present."
+      "injuryNote": "Golfers with restricted hip internal rotation have been measured moving into greater lumbar flexion and pelvic posterior tilt, which is the loading pattern underneath this characteristic. It has been investigated as a possible contributor to lower back pain and the findings are mixed. Worth raising with a clinician if pain is present.",
+      "axis": "pelvis_thrust"
     },
     {
       "id": "reverse_spine",
@@ -2591,7 +2836,8 @@
         "searchedOn": "2026-07-27",
         "searchTerms": "reverse spine angle lateral bending golf low back pain"
       },
-      "injuryNote": "Combined end-range extension and rotation is the loading pattern most often linked with lower back pain in golfers. Worth raising with a clinician if pain is present."
+      "injuryNote": "Combined end-range extension and rotation is the loading pattern most often linked with lower back pain in golfers. Worth raising with a clinician if pain is present.",
+      "axis": "axis_tilt_top"
     },
     {
       "id": "flat_shoulder_plane",
@@ -2611,7 +2857,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
-      }
+      },
+      "axis": "shoulder_plane"
     },
     {
       "id": "trail_hip_hike",
@@ -2631,7 +2878,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
-      }
+      },
+      "axis": "pelvis_height_top"
     },
     {
       "id": "sway",
@@ -2658,7 +2906,8 @@
         "drill.trailHipLoad",
         "drill.trailHeelWall"
       ],
-      "injuryNote": "Lateral movement away from the target in the backswing is one of the patterns the low-back-pain literature circles — professionals with pain have been measured showing more lead-side lateral bending in the backswing. It has been investigated as a possible contributor and the findings are mixed. Worth raising with a clinician if pain is present."
+      "injuryNote": "Lateral movement away from the target in the backswing is one of the patterns the low-back-pain literature circles — professionals with pain have been measured showing more lead-side lateral bending in the backswing. It has been investigated as a possible contributor and the findings are mixed. Worth raising with a clinician if pain is present.",
+      "axis": "pelvis_sway_backswing"
     },
     {
       "id": "slide",
@@ -2671,7 +2920,8 @@
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
-        "sig_slide"
+        "sig_slide",
+        "sig_slidePelvisImpact"
       ],
       "state": "active",
       "consequence": "Excess lateral movement toward the target in the downswing outruns the rotation and leaves the face open at impact.",
@@ -2694,7 +2944,9 @@
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
-        "sig_hangingBack"
+        "sig_hangingBack",
+        "sig_hangingBackPelvisDown",
+        "sig_hangingBackThoraxDrift"
       ],
       "state": "active",
       "consequence": "Weight left on the trail side at impact moves the low point behind the ball, costing compression and adding loft.",
@@ -2769,7 +3021,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "swing plane shaft position backswing top of swing golf"
-      }
+      },
+      "axis": "trail_elbow_height"
     },
     {
       "id": "chicken_wing",
@@ -2797,17 +3050,13 @@
       "label": "Over the top",
       "aliases": [
         "coming over it",
-        "out-to-in",
         "OTT"
       ],
       "group": "armsAndClub",
-      "observability": "observable",
-      "confirmedBy": "measured",
-      "detectedBy": [
-        "sig_overTheTop"
-      ],
+      "observability": "latent",
+      "confirmedBy": "asserted",
       "state": "active",
-      "consequence": "The club moving outside the ideal path at the start of the downswing produces an out-to-in strike — a pull or a slice depending on the face.",
+      "consequence": "The club moving outside the plane at the start of the downswing has to come back across the ball to reach it, which is where the leftward path comes from. It is the move behind the number rather than the number itself.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
@@ -2868,7 +3117,8 @@
       "drills": [
         "drill.wristHold",
         "drill.pumpToDelivery"
-      ]
+      ],
+      "axis": "lag_retention"
     },
     {
       "id": "scooping",
@@ -2894,7 +3144,8 @@
       },
       "drills": [
         "drill.wristHold"
-      ]
+      ],
+      "axis": "lead_wrist_impact"
     },
     {
       "id": "insufficient_set",
@@ -2916,7 +3167,8 @@
         "citation": "10.1080/14763141.2025.2547277",
         "searchedOn": "2026-07-27",
         "searchTerms": "wrist release style uncocking velocity elite golfers"
-      }
+      },
+      "axis": "wrist_set"
     },
     {
       "id": "sequence_order",
@@ -2958,7 +3210,8 @@
         "searchedOn": "2026-07-27",
         "searchTerms": "X-factor upper torso pelvis rotation ball velocity golf"
       },
-      "injuryNote": "Separation between the torso and pelvis is one of the measures the low-back-pain literature circles, usually asking whether too much of it loads the spine. The evidence is mixed and settles neither direction, and a deficit is more often a mobility or sequencing limitation than a risk in itself. Worth raising with a clinician if pain is present."
+      "injuryNote": "Separation between the torso and pelvis is one of the measures the low-back-pain literature circles, usually asking whether too much of it loads the spine. The evidence is mixed and settles neither direction, and a deficit is more often a mobility or sequencing limitation than a risk in itself. Worth raising with a clinician if pain is present.",
+      "axis": "xfactor_stretch"
     },
     {
       "id": "transition_rush",
@@ -3523,7 +3776,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "swing plane shaft position backswing top of swing golf"
-      }
+      },
+      "axis": "takeaway_face_roll"
     },
     {
       "id": "steep_backswing_plane",
@@ -3630,7 +3884,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "swing plane shaft position backswing top of swing golf"
-      }
+      },
+      "axis": "shaft_angle_top"
     },
     {
       "id": "bent_lead_arm",
@@ -3651,7 +3906,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "swing plane shaft position backswing top of swing golf"
-      }
+      },
+      "axis": "lead_elbow_top"
     },
     {
       "id": "trail_knee_straighten",
@@ -3738,7 +3994,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
-      }
+      },
+      "axis": "head_sway_backswing"
     },
     {
       "id": "excessive_heel_lift",
@@ -3762,7 +4019,7 @@
     },
     {
       "id": "short_backswing",
-      "label": "Short backswing",
+      "label": "Restricted body turn",
       "aliases": [
         "no turn",
         "short of the top"
@@ -3779,7 +4036,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "swing plane shaft position backswing top of swing golf"
-      }
+      },
+      "axis": "thorax_rotation_top"
     },
     {
       "id": "disconnection",
@@ -3804,7 +4062,8 @@
       },
       "drills": [
         "drill.towelUnderArms"
-      ]
+      ],
+      "axis": "lead_arm_connection"
     },
     {
       "id": "steep_downswing_shaft",
@@ -3877,7 +4136,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "kinematic sequence timing pelvis torso downswing golf"
-      }
+      },
+      "axis": "pelvis_rotation_early"
     },
     {
       "id": "hip_stall",
@@ -3927,8 +4187,7 @@
       "id": "insufficient_shaft_lean",
       "label": "Not enough shaft lean",
       "aliases": [
-        "no forward lean",
-        "adding loft"
+        "no forward lean"
       ],
       "group": "impact",
       "observability": "observable",
@@ -3946,7 +4205,8 @@
       },
       "drills": [
         "drill.wristHold"
-      ]
+      ],
+      "axis": "shaft_lean"
     },
     {
       "id": "low_point_behind_ball",
@@ -3970,7 +4230,8 @@
       },
       "drills": [
         "drill.lowPointDivot"
-      ]
+      ],
+      "axis": "low_point"
     },
     {
       "id": "attack_too_steep",
@@ -4081,7 +4342,8 @@
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "impact position low point axis tilt golf swing"
-      }
+      },
+      "axis": "pelvis_rotation_impact"
     },
     {
       "id": "insufficient_axis_tilt_impact",
@@ -4109,7 +4371,6 @@
       "id": "excessive_axis_tilt_impact",
       "label": "Too much tilt at impact",
       "aliases": [
-        "falling back",
         "too much tilt"
       ],
       "axis": "axis_tilt_impact",
@@ -4138,7 +4399,8 @@
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
-        "sig_offBalanceFinish"
+        "sig_offBalanceFinish",
+        "sig_offBalanceFinishSway"
       ],
       "state": "draft",
       "consequence": "The golfer finishes without being able to stand still in it. A finish that cannot be held is the end of a swing that was not in balance earlier — it is a symptom worth reading backwards.",
@@ -4155,7 +4417,6 @@
       "id": "weight_back_at_finish",
       "label": "Weight still back at the finish",
       "aliases": [
-        "hanging back",
         "stuck on the back foot"
       ],
       "group": "finish",
@@ -4179,7 +4440,6 @@
       "id": "abbreviated_finish",
       "label": "Follow-through cut short",
       "aliases": [
-        "quitting on it",
         "no follow-through"
       ],
       "group": "finish",
@@ -4619,6 +4879,616 @@
         "searchedOn": "2026-07-27",
         "searchTerms": "ball flight laws start line curvature strike quality golf"
       }
+    },
+    {
+      "id": "limited_hamstring_length",
+      "label": "Limited hamstring length",
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.hamstringLength",
+      "state": "active",
+      "consequence": "Short hamstrings limit how far the pelvis can tilt forward over the hips, so the forward bend has to come from the lower back instead. The address position then starts from a shape the backswing has to work around.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "hamstring length passive straight leg raise lumbar pelvic rhythm"
+      }
+    },
+    {
+      "id": "trying_to_hit_down",
+      "label": "Trying to hit down on it",
+      "aliases": [
+        "hitting down on it",
+        "chopping down"
+      ],
+      "group": "setup",
+      "observability": "latent",
+      "confirmedBy": "asserted",
+      "state": "active",
+      "consequence": "Aiming to strike downward as an action in itself, rather than as a consequence of where the low point falls, drives the upper body and the hands down toward the ball. The steepness it produces is usually more than the shot asked for.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "hitting down on the ball intent divot angle of attack coaching"
+      }
+    },
+    {
+      "id": "posture_too_bent",
+      "label": "Bent over too much at address",
+      "aliases": [
+        "too much hinge",
+        "reaching down at it"
+      ],
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_postureTooBent"
+      ],
+      "state": "active",
+      "consequence": "Standing over the ball more than the club length asks for puts the hands low and the swing on a steeper plane from the first move. The body then has to make room through impact that it did not need at address.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "golf address posture spine angle forward bend hip hinge setup"
+      },
+      "axis": "address_hip_hinge"
+    },
+    {
+      "id": "flat_lumbar_spine",
+      "label": "Flat lower back at address",
+      "aliases": [
+        "no arch at address",
+        "tucked pelvis"
+      ],
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_flatLumbarSpine"
+      ],
+      "state": "active",
+      "consequence": "With the pelvis tucked and the natural low-back curve flattened, the hips have less room to rotate underneath the trunk. The turn that the pelvis cannot make gets taken out of the spine instead.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lumbar flexion posterior pelvic tilt golf setup rotation range"
+      },
+      "axis": "lumbar_curve",
+      "injuryNote": "Rotating under load from a flattened lumbar spine loads the discs rather than the facet joints, which is the opposite loading pattern to S-posture and not a milder version of it. The evidence in golfers specifically is thin and mixed. Treat it as a loading pattern worth knowing about rather than a demonstrated risk, and worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "flat_thoracic_spine",
+      "label": "Flat upper back at address",
+      "aliases": [
+        "too straight through the chest"
+      ],
+      "group": "setup",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_flatThoracicSpine"
+      ],
+      "state": "active",
+      "consequence": "A thoracic spine held flatter than its natural curve is a spine already at the end of its extension, and rotation and extension share that range. The chest turn runs out earlier than the golfer expects it to.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "thoracic extension flat back rotation coupling golf posture"
+      },
+      "axis": "thoracic_curve",
+      "injuryNote": "Holding the upper back at the end of its extension range through a rotational swing concentrates the movement into fewer segments than it was meant to be shared across. As with the other spinal shapes here this is a loading observation rather than a demonstrated risk, and it is worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "diving",
+      "label": "Diving into the ball",
+      "aliases": [
+        "dropping into it",
+        "getting closer through the ball"
+      ],
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_diving"
+      ],
+      "state": "active",
+      "consequence": "Gaining forward bend on the way down moves the whole swing centre nearer the ball than it was at address, which takes the low point down and back. The club arrives steeper than it was ever set up to.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "loss of posture diving spine angle increase downswing golf"
+      },
+      "axis": "spine_bend_change"
+    },
+    {
+      "id": "steep_shoulder_plane",
+      "label": "Steep shoulder plane",
+      "aliases": [
+        "shoulders turning too upright",
+        "tilting rather than turning"
+      ],
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_steepShoulderPlane"
+      ],
+      "state": "active",
+      "consequence": "A shoulder turn that tips toward the vertical sends the hands and the club up rather than around, so the downswing starts from above the plane the address position set. What comes down is steeper than what went back.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shoulder plane angle steep upright turn golf swing plane"
+      },
+      "axis": "shoulder_plane"
+    },
+    {
+      "id": "excessive_axis_tilt_top",
+      "label": "Too much tilt away at the top",
+      "aliases": [
+        "leaning away from the target",
+        "hanging the upper body back"
+      ],
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_excessiveAxisTiltTop"
+      ],
+      "state": "active",
+      "consequence": "Tilting the upper body further from the target than the shot needs leaves the weight on the trail side with nowhere to go but backwards. The strike arrives on the way up, with the low point behind where it should be.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "secondary axis tilt at top excessive side bend golf swing"
+      },
+      "axis": "axis_tilt_top"
+    },
+    {
+      "id": "backing_off_the_ball",
+      "label": "Backing away from the ball",
+      "aliases": [
+        "pulling away from it",
+        "standing off the ball"
+      ],
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_backingOffTheBall"
+      ],
+      "state": "active",
+      "consequence": "The pelvis moving away from the ball in the downswing takes the whole swing arc with it, so the club reaches impact further from the golfer than it was at address. Contact drifts toward the toe and the strike thins.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis moving away from ball downswing standing off golf"
+      },
+      "axis": "pelvis_thrust"
+    },
+    {
+      "id": "pelvis_drift_lead_backswing",
+      "label": "Pelvis drifts to the lead side going back",
+      "aliases": [
+        "pelvis on the lead side at the top",
+        "sliding toward the target going back"
+      ],
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_pelvisDriftLeadBackswing"
+      ],
+      "state": "active",
+      "consequence": "The pelvis moving toward the target during the backswing leaves the weight on the lead side with the trail side never loaded. There is nothing to shift from, so the downswing has to start by going backwards.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis lateral displacement backswing toward target reverse weight shift golf"
+      },
+      "axis": "pelvis_sway_backswing"
+    },
+    {
+      "id": "pelvis_sink_backswing",
+      "label": "Pelvis sinks during the backswing",
+      "aliases": [
+        "squatting going back",
+        "settling into the backswing"
+      ],
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_pelvisSinkBackswing"
+      ],
+      "state": "active",
+      "consequence": "Losing pelvis height on the way back drops the whole swing centre before the downswing has started, and the height has to be found again on the way through. What the golfer sees is a strike that changes depth from swing to swing rather than one that is consistently heavy or thin.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis vertical displacement backswing squat golf swing centre height"
+      },
+      "axis": "pelvis_height_top"
+    },
+    {
+      "id": "in_to_out_path",
+      "label": "Path too far in-to-out",
+      "aliases": [
+        "swinging out to the right",
+        "too much from the inside"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_inToOutPath"
+      ],
+      "state": "active",
+      "consequence": "A club travelling out to the right of the target through impact starts the ball there and curves it according to where the face points. It also brings the hosel closer to the ball than the centre of the face is.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "club path in to out impact ball flight laws golf"
+      },
+      "axis": "club_path"
+    },
+    {
+      "id": "trail_elbow_deep",
+      "label": "Trail elbow behind the body",
+      "aliases": [
+        "elbow behind the body",
+        "trail arm too deep"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_trailElbowDeep"
+      ],
+      "state": "active",
+      "consequence": "A trail elbow that drops behind the torso rather than staying in front of it takes the hands too far inside, and the club has to be rerouted to reach the ball at all. Whatever the rerouting costs is paid in the last foot.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail elbow position backswing deep behind body golf"
+      },
+      "axis": "trail_elbow_height"
+    },
+    {
+      "id": "over_rotation_at_top",
+      "label": "Turning past control",
+      "aliases": [
+        "over-turning",
+        "turning further than it can be held"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_overRotationAtTop"
+      ],
+      "state": "active",
+      "consequence": "A chest turn beyond what the golfer can hold posture through is a turn the lower body has to give ground for. The extra range arrives as movement somewhere it was not wanted rather than as separation to release.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "thoracic rotation top of backswing excessive turn control golf"
+      },
+      "axis": "thorax_rotation_top"
+    },
+    {
+      "id": "club_short_of_parallel",
+      "label": "Club never reaches the top",
+      "aliases": [
+        "club well short at the top",
+        "backswing stops early"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_clubShortOfParallel"
+      ],
+      "state": "active",
+      "consequence": "A shaft that stops well short of horizontal has less arc to accelerate through, and the speed has to be found in a shorter distance. What is missing at the top usually shows up as distance rather than as direction.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shaft angle top of backswing short of parallel swing length golf"
+      },
+      "axis": "shaft_angle_top"
+    },
+    {
+      "id": "face_held_shut_takeaway",
+      "label": "Face held shut in the takeaway",
+      "aliases": [
+        "hooded takeaway",
+        "face turned down going back"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_faceHeldShutTakeaway"
+      ],
+      "state": "active",
+      "consequence": "A face kept closed relative to the arc through the takeaway arrives at the top already shut, and there is no time left to open it. The ball starts left of the path and keeps turning that way.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "takeaway face rotation forearm hooded closed face golf"
+      },
+      "axis": "takeaway_face_roll"
+    },
+    {
+      "id": "arms_over_connected",
+      "label": "Arms pinned to the chest",
+      "aliases": [
+        "arms stuck to the body",
+        "no width in the arms"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_armsOverConnected"
+      ],
+      "state": "active",
+      "consequence": "Arms held tight against a turning chest have no independent path to travel, so the club goes wherever the body sends it. The swing runs out of room inside rather than outside.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lead arm connection chest arms too connected golf swing"
+      },
+      "axis": "lead_arm_connection"
+    },
+    {
+      "id": "locked_lead_arm",
+      "label": "Lead arm locked straight at the top",
+      "aliases": [
+        "lead arm rigid",
+        "elbow locked out going back"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_lockedLeadArm"
+      ],
+      "state": "active",
+      "consequence": "An elbow held rigidly straight makes the arm's length the limit on the turn, so the backswing stops where the shoulder runs out rather than where the body does. The tension it takes to hold it there costs speed as well.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lead arm straight locked elbow extension top of backswing golf"
+      },
+      "axis": "lead_elbow_top"
+    },
+    {
+      "id": "excessive_lag",
+      "label": "Holding the angle too long",
+      "aliases": [
+        "holding the angle",
+        "handle drag",
+        "too much lag"
+      ],
+      "group": "release",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_excessiveLag"
+      ],
+      "state": "active",
+      "consequence": "An angle held past the point where it can still be released leaves the clubface open and the shaft leaning forward more than the loft can afford. The ball goes right and low, and the speed that was being saved never arrives.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lag retention downswing wrist angle release timing golf"
+      },
+      "axis": "lag_retention"
+    },
+    {
+      "id": "over_set",
+      "label": "Over-set at the top",
+      "aliases": [
+        "too much hinge at the top",
+        "over-cocked"
+      ],
+      "group": "release",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_overSet"
+      ],
+      "state": "active",
+      "consequence": "A wrist hinged further than the arms can support at the top gives the club further to travel before it catches up, and the easiest way to start it moving is to let the angle go early. Extra set bought at the top is often spent immediately.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "wrist set radial deviation top of backswing excessive hinge golf"
+      },
+      "axis": "wrist_set"
+    },
+    {
+      "id": "bowed_lead_wrist",
+      "label": "Lead wrist bowed at impact",
+      "aliases": [
+        "bowed wrist",
+        "too much forward bow"
+      ],
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_bowedLeadWrist"
+      ],
+      "state": "active",
+      "consequence": "A lead wrist bowed further than the shot needs takes loft off the face and closes it at the same time. The flight comes out low and turning left, and the margin for a slightly early strike disappears.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lead wrist flexion bowed impact face angle dynamic loft golf"
+      },
+      "axis": "lead_wrist_impact"
+    },
+    {
+      "id": "excessive_shaft_lean",
+      "label": "Too much shaft lean at impact",
+      "aliases": [
+        "hands way ahead",
+        "delofting it too much"
+      ],
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_excessiveShaftLean"
+      ],
+      "state": "active",
+      "consequence": "Hands far ahead of the clubhead take loft off the face beyond what the club was built for, so the ball comes out lower and with less spin than it needs to hold its line. The strike also moves toward the leading edge.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shaft lean impact hand position dynamic loft delofting golf"
+      },
+      "axis": "shaft_lean",
+      "injuryNote": "Delivering the club with the lead wrist held in sustained flexion under load concentrates force at the wrist rather than sharing it through the forearm. The golf-specific evidence is limited, so treat it as a loading pattern worth knowing about rather than a demonstrated risk, and worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "low_point_too_far_ahead",
+      "label": "Low point too far ahead of the ball",
+      "aliases": [
+        "bottoming out too late",
+        "digging past it"
+      ],
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_lowPointTooFarAhead"
+      ],
+      "state": "active",
+      "consequence": "An arc bottoming out well past the ball meets it while the club is still descending steeply, which takes a deep divot and sends more of the strike into the ground than into the ball.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "low point location ahead of ball divot attack angle golf"
+      },
+      "axis": "low_point"
+    },
+    {
+      "id": "hips_too_open_at_impact",
+      "label": "Hips too open at impact",
+      "aliases": [
+        "hips way past it",
+        "over-cleared"
+      ],
+      "group": "impact",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hipsTooOpenAtImpact"
+      ],
+      "state": "active",
+      "consequence": "A pelvis further open at impact than the arms have kept up with leaves the chest and the club behind it, and the upper body takes over to square the face. This is the AMOUNT of rotation at impact, not how early it started.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis rotation impact over rotation open hips golf"
+      },
+      "axis": "pelvis_rotation_impact"
+    },
+    {
+      "id": "late_pelvis_rotation",
+      "label": "Pelvis slow to start turning",
+      "aliases": [
+        "late with the hips",
+        "hips never get going"
+      ],
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_latePelvisRotation"
+      ],
+      "state": "active",
+      "consequence": "A pelvis still square when the downswing has started leaves the arms and the chest to begin it, which is the sequence running backwards. This is the START of the downswing, where the hip stall is the rate at the end of it.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis rotation early downswing sequence kinematic chain golf"
+      },
+      "axis": "pelvis_rotation_early"
+    },
+    {
+      "id": "excessive_separation_stretch",
+      "label": "Separation stretched past control",
+      "aliases": [
+        "over-stretching in transition",
+        "too much separation"
+      ],
+      "group": "sequence",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_excessiveSeparationStretch"
+      ],
+      "state": "active",
+      "consequence": "Separation added faster than the golfer can sequence out of arrives as a chest still turning when the pelvis has already stopped, so the release has to happen against the body rather than with it. Stretch beyond what can be returned is stored where nothing can use it.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "x factor stretch transition separation excessive golf lumbar load"
+      },
+      "axis": "xfactor_stretch",
+      "injuryNote": "Peak separation between the chest and the pelvis is also peak rotational load on the lumbar spine, and the stretch is added at the moment the downswing reverses direction. The golf literature on this is mixed and mostly cross-sectional, so treat it as a loading pattern worth knowing about rather than a demonstrated risk, and worth raising with a clinician if pain is present."
+    },
+    {
+      "id": "head_drift_lead_backswing",
+      "label": "Head drifts toward the target going back",
+      "aliases": [
+        "head moving forward going back",
+        "head toward the target in the backswing"
+      ],
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_headDriftLeadBackswing"
+      ],
+      "state": "active",
+      "consequence": "A head moving toward the target during the backswing puts the swing centre ahead of where the ball will be struck from, and it has to come back before impact. What returns it is usually the whole upper body, late.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "head lateral displacement backswing toward target reverse pivot golf"
+      },
+      "axis": "head_sway_backswing"
+    },
+    {
+      "id": "out_to_in_path",
+      "label": "Path too far out-to-in",
+      "aliases": [
+        "out-to-in",
+        "path too far left",
+        "cutting across it"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "state": "active",
+      "consequence": "A club travelling left of the target through impact starts the ball there and curves it according to where the face points. The path is what the number says; what produced it is a separate question.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "club path out to in impact ball flight laws golf"
+      },
+      "axis": "club_path",
+      "detectedBy": [
+        "sig_outToInPath"
+      ]
     }
   ],
   "edges": [
@@ -5294,7 +6164,7 @@
     },
     {
       "from": "alignment_open",
-      "to": "over_the_top",
+      "to": "out_to_in_path",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -5817,7 +6687,7 @@
       }
     },
     {
-      "from": "over_the_top",
+      "from": "out_to_in_path",
       "to": "pull",
       "type": "causes",
       "strength": "strong",
@@ -5829,7 +6699,7 @@
       }
     },
     {
-      "from": "over_the_top",
+      "from": "out_to_in_path",
       "to": "slice",
       "type": "causes",
       "strength": "strong",
@@ -6581,6 +7451,1084 @@
       "strength": "strong",
       "provenance": {
         "tier": "practice"
+      }
+    },
+    {
+      "from": "club_too_short",
+      "to": "posture_too_bent",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "club length lie angle address posture golf"
+      }
+    },
+    {
+      "from": "ball_too_close",
+      "to": "posture_too_bent",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "ball position distance from body address posture golf"
+      }
+    },
+    {
+      "from": "posture_too_bent",
+      "to": "steep_shoulder_plane",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "spine angle shoulder plane relationship golf"
+      }
+    },
+    {
+      "from": "posture_too_bent",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "address posture early extension standing up golf"
+      }
+    },
+    {
+      "from": "posture_too_bent",
+      "to": "shank",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "posture hosel strike distance to ball golf"
+      }
+    },
+    {
+      "from": "limited_hamstring_length",
+      "to": "flat_lumbar_spine",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "hamstring length posterior pelvic tilt setup golf"
+      }
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "flat_lumbar_spine",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "core stability neutral spine address golf"
+      }
+    },
+    {
+      "from": "flat_lumbar_spine",
+      "to": "short_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lumbar flexion rotation restriction turn golf"
+      }
+    },
+    {
+      "from": "flat_lumbar_spine",
+      "to": "reverse_spine",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "posterior pelvic tilt reverse spine angle golf"
+      }
+    },
+    {
+      "from": "limited_thoracic_extension",
+      "to": "flat_thoracic_spine",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "thoracic extension range posture golf"
+      }
+    },
+    {
+      "from": "flat_thoracic_spine",
+      "to": "short_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "thoracic extension rotation coupling turn golf"
+      }
+    },
+    {
+      "from": "flat_thoracic_spine",
+      "to": "s_posture",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "flat thoracic compensatory lumbar extension golf"
+      }
+    },
+    {
+      "from": "transition_rush",
+      "to": "diving",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "rushed transition upper body dive downswing golf"
+      }
+    },
+    {
+      "from": "trying_to_hit_down",
+      "to": "diving",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "hitting down intent steep attack golf"
+      }
+    },
+    {
+      "from": "diving",
+      "to": "attack_too_steep",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "increase spine bend downswing attack angle golf"
+      }
+    },
+    {
+      "from": "diving",
+      "to": "chunk",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "diving low point behind ball fat strike golf"
+      }
+    },
+    {
+      "from": "s_posture",
+      "to": "steep_shoulder_plane",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lumbar extension shoulder plane steep golf"
+      }
+    },
+    {
+      "from": "steep_shoulder_plane",
+      "to": "steep_downswing_shaft",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shoulder plane shaft plane downswing golf"
+      }
+    },
+    {
+      "from": "steep_shoulder_plane",
+      "to": "attack_too_steep",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "steep shoulder turn attack angle golf"
+      }
+    },
+    {
+      "from": "steep_shoulder_plane",
+      "to": "pull",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "steep plane out to in path pull golf"
+      }
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "excessive_axis_tilt_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "core stability trunk side bend top of backswing golf"
+      }
+    },
+    {
+      "from": "excessive_axis_tilt_top",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "secondary axis tilt weight shift hanging back golf"
+      }
+    },
+    {
+      "from": "excessive_axis_tilt_top",
+      "to": "launch_high",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "axis tilt upward strike launch angle golf"
+      }
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "backing_off_the_ball",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "core stability pelvis position downswing golf"
+      }
+    },
+    {
+      "from": "backing_off_the_ball",
+      "to": "strike_toe",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "moving away from ball toe strike golf"
+      }
+    },
+    {
+      "from": "backing_off_the_ball",
+      "to": "thin",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "increasing distance to ball thin strike golf"
+      }
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "pelvis_drift_lead_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "single leg balance trail hip loading backswing golf"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "pelvis_drift_lead_backswing",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail hip internal rotation loading backswing golf"
+      }
+    },
+    {
+      "from": "pelvis_drift_lead_backswing",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "reverse weight shift hanging back golf"
+      }
+    },
+    {
+      "from": "pelvis_drift_lead_backswing",
+      "to": "low_point_behind_ball",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "weight on trail side low point behind ball golf"
+      }
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "pelvis_sink_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "core stability pelvis height backswing golf"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "pelvis_sink_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail hip loading pelvis vertical displacement golf"
+      }
+    },
+    {
+      "from": "pelvis_sink_backswing",
+      "to": "loss_of_posture",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis height change loss of posture golf"
+      }
+    },
+    {
+      "from": "pelvis_sink_backswing",
+      "to": "low_point_behind_ball",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "swing centre height change low point golf"
+      }
+    },
+    {
+      "from": "pelvis_drift_lead_backswing",
+      "to": "reverse_spine",
+      "type": "corroborates",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lateral pelvis displacement reverse spine angle same pattern golf"
+      }
+    },
+    {
+      "from": "under_plane_stuck",
+      "to": "in_to_out_path",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "stuck under plane club path in to out golf"
+      }
+    },
+    {
+      "from": "trail_elbow_deep",
+      "to": "in_to_out_path",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail elbow deep club path from the inside golf"
+      }
+    },
+    {
+      "from": "hips_closed_at_impact",
+      "to": "in_to_out_path",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "hips under rotated impact club path inside golf"
+      }
+    },
+    {
+      "from": "excessive_axis_tilt_top",
+      "to": "in_to_out_path",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "axis tilt shallow path in to out golf"
+      }
+    },
+    {
+      "from": "in_to_out_path",
+      "to": "push",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "club path start line push golf ball flight"
+      }
+    },
+    {
+      "from": "in_to_out_path",
+      "to": "hook",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "club path face to path hook golf ball flight"
+      }
+    },
+    {
+      "from": "in_to_out_path",
+      "to": "shank",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "in to out path hosel strike shank golf"
+      }
+    },
+    {
+      "from": "limited_shoulder_external_rotation",
+      "to": "trail_elbow_deep",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail shoulder external rotation elbow position backswing golf"
+      }
+    },
+    {
+      "from": "trail_elbow_deep",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail elbow behind body stuck downswing golf"
+      }
+    },
+    {
+      "from": "trail_elbow_deep",
+      "to": "laid_off",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail elbow deep shaft laid off top golf"
+      }
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "over_rotation_at_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis thorax separation over rotation top of backswing golf"
+      }
+    },
+    {
+      "from": "over_rotation_at_top",
+      "to": "loss_of_posture",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "over rotation posture loss backswing golf"
+      }
+    },
+    {
+      "from": "over_rotation_at_top",
+      "to": "sway",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "over turning lateral displacement backswing golf"
+      }
+    },
+    {
+      "from": "over_rotation_at_top",
+      "to": "overswing",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "body turn club position past parallel golf"
+      }
+    },
+    {
+      "from": "short_backswing",
+      "to": "club_short_of_parallel",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "body turn swing length shaft position top golf"
+      }
+    },
+    {
+      "from": "bent_lead_arm",
+      "to": "club_short_of_parallel",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lead arm collapse swing arc length golf"
+      }
+    },
+    {
+      "from": "club_short_of_parallel",
+      "to": "ball_speed_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "swing length arc speed ball speed golf"
+      }
+    },
+    {
+      "from": "club_short_of_parallel",
+      "to": "carry_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "swing length distance carry golf"
+      }
+    },
+    {
+      "from": "grip_strong",
+      "to": "face_held_shut_takeaway",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "strong grip closed face takeaway golf"
+      }
+    },
+    {
+      "from": "face_held_shut_takeaway",
+      "to": "closed_face_to_path",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shut face takeaway face to path impact golf"
+      }
+    },
+    {
+      "from": "face_held_shut_takeaway",
+      "to": "hook",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "closed face hook ball flight golf"
+      }
+    },
+    {
+      "from": "limited_shoulder_flexion",
+      "to": "arms_over_connected",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shoulder flexion arm travel connection golf"
+      }
+    },
+    {
+      "from": "arms_over_connected",
+      "to": "in_to_out_path",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "arms tight to body path from the inside golf"
+      }
+    },
+    {
+      "from": "arms_over_connected",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "arms connected trapped behind body golf"
+      }
+    },
+    {
+      "from": "limited_shoulder_flexion",
+      "to": "locked_lead_arm",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shoulder flexion lead arm elbow extension golf"
+      }
+    },
+    {
+      "from": "trying_to_hit_down",
+      "to": "locked_lead_arm",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "hitting down intent arm tension golf"
+      }
+    },
+    {
+      "from": "locked_lead_arm",
+      "to": "short_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "rigid lead arm turn length backswing golf"
+      }
+    },
+    {
+      "from": "trail_elbow_deep",
+      "to": "excessive_lag",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail elbow deep lag retention downswing golf"
+      }
+    },
+    {
+      "from": "excessive_lag",
+      "to": "push",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "held angle open face start line right golf"
+      }
+    },
+    {
+      "from": "excessive_lag",
+      "to": "launch_low",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "delayed release dynamic loft launch angle golf"
+      }
+    },
+    {
+      "from": "excessive_lag",
+      "to": "low_point_too_far_ahead",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lag retention low point forward golf"
+      }
+    },
+    {
+      "from": "bent_lead_arm",
+      "to": "over_set",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lead arm collapse wrist set top golf"
+      }
+    },
+    {
+      "from": "over_set",
+      "to": "casting",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "excessive set early release transition golf"
+      }
+    },
+    {
+      "from": "grip_strong",
+      "to": "bowed_lead_wrist",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "strong grip lead wrist flexion impact golf"
+      }
+    },
+    {
+      "from": "bowed_lead_wrist",
+      "to": "closed_face_to_path",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "bowed wrist face angle impact golf"
+      }
+    },
+    {
+      "from": "bowed_lead_wrist",
+      "to": "hook",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "closed face hook ball flight golf"
+      }
+    },
+    {
+      "from": "bowed_lead_wrist",
+      "to": "launch_low",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "wrist flexion dynamic loft launch golf"
+      }
+    },
+    {
+      "from": "excessive_lag",
+      "to": "excessive_shaft_lean",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lag retention shaft lean impact golf"
+      }
+    },
+    {
+      "from": "ball_back",
+      "to": "excessive_shaft_lean",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "ball position back shaft lean impact golf"
+      }
+    },
+    {
+      "from": "excessive_shaft_lean",
+      "to": "launch_low",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shaft lean dynamic loft launch angle golf"
+      }
+    },
+    {
+      "from": "excessive_shaft_lean",
+      "to": "carry_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "delofting launch carry distance golf"
+      }
+    },
+    {
+      "from": "excessive_shaft_lean",
+      "to": "low_point_too_far_ahead",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shaft lean low point ahead of ball golf"
+      }
+    },
+    {
+      "from": "low_point_too_far_ahead",
+      "to": "carry_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "steep descending strike energy loss carry golf"
+      }
+    },
+    {
+      "from": "low_point_too_far_ahead",
+      "to": "launch_low",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "low point ahead descending blow launch golf"
+      }
+    },
+    {
+      "from": "hip_spin_out",
+      "to": "hips_too_open_at_impact",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "early pelvis rotation open at impact golf"
+      }
+    },
+    {
+      "from": "slide",
+      "to": "hips_too_open_at_impact",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lateral drive pelvis rotation impact golf"
+      }
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "hips_too_open_at_impact",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lead hip internal rotation pelvis clearing impact golf"
+      }
+    },
+    {
+      "from": "hips_too_open_at_impact",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "hips ahead of arms upper body takeover golf"
+      }
+    },
+    {
+      "from": "hips_too_open_at_impact",
+      "to": "pull",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "over cleared hips path left pull golf"
+      }
+    },
+    {
+      "from": "transition_rush",
+      "to": "late_pelvis_rotation",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "rushed transition upper body first sequence golf"
+      }
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "late_pelvis_rotation",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "lead hip internal rotation pelvis rotation downswing golf"
+      }
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "late_pelvis_rotation",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "pelvis thorax separation downswing initiation golf"
+      }
+    },
+    {
+      "from": "late_pelvis_rotation",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "late hips upper body takeover over the top golf"
+      }
+    },
+    {
+      "from": "late_pelvis_rotation",
+      "to": "sequence_order",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "downswing initiation kinematic sequence order golf"
+      }
+    },
+    {
+      "from": "late_pelvis_rotation",
+      "to": "hips_closed_at_impact",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "late pelvis rotation under rotated impact golf"
+      }
+    },
+    {
+      "from": "transition_rush",
+      "to": "excessive_separation_stretch",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "rushed transition x factor stretch golf"
+      }
+    },
+    {
+      "from": "excessive_separation_stretch",
+      "to": "hip_stall",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "separation pelvis deceleration impact golf"
+      }
+    },
+    {
+      "from": "excessive_separation_stretch",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "chest leading transition upper body golf"
+      }
+    },
+    {
+      "from": "head_drift_lead_backswing",
+      "to": "pelvis_drift_lead_backswing",
+      "type": "corroborates",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "head and pelvis lateral displacement backswing same pattern golf"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "head_drift_lead_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "trail hip internal rotation loading backswing head position golf"
+      }
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "head_drift_lead_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "single leg balance trail side loading backswing golf"
+      }
+    },
+    {
+      "from": "over_the_top",
+      "to": "out_to_in_path",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "over the top downswing plane club path relationship golf"
+      }
+    },
+    {
+      "from": "steep_shoulder_plane",
+      "to": "over_the_top",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "steep shoulder plane over the top downswing same pattern golf"
       }
     }
   ]

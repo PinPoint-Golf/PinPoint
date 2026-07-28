@@ -380,6 +380,16 @@ ValidationReport validatePack(const CharacteristicPack &pack)
     const QSet<QString> signalSet(signalIds.begin(), signalIds.end());
     const QSet<QString> conditionSet(conditionIds.begin(), conditionIds.end());
 
+    // Which tails a corridor signal already watches, per measure. Built up here rather than inside
+    // the signals loop below because the measure that CLAIMS a tail is unwatched is checked against
+    // it, and splitting one three-rule family across two loops reads worse than one early pass.
+    QHash<QString, QSet<int>> watchedTails;
+    for (const Signal &s : pack.signalDefs) {
+        if (s.test != SignalTest::OutsideCorridor || !s.direction.has_value()) continue;
+        for (const QString &mid : s.measures)
+            watchedTails[mid].insert(static_cast<int>(*s.direction));
+    }
+
     // --- measures ------------------------------------------------------------
     for (const Measure &m : pack.measures) {
         if (m.kind == MeasureKind::Composed) {
@@ -406,6 +416,36 @@ ValidationReport validatePack(const CharacteristicPack &pack)
             warn(r, QStringLiteral("externalDeviceNoReason"), m.id,
                  QStringLiteral("Measure '%1' reads from an external device but does not say which. "
                                 "Name it — the roadmap and the measure page both quote this.").arg(m.id));
+
+        // --- a deliberately unwatched tail ----------------------------------
+        //
+        // The reason is a WARNING and the two contradictions are ERRORS, and the split is about what
+        // each one means. A missing reason is a claim nobody wrote down — annoying, recoverable, and
+        // the same shape as externalDeviceNoReason above. The other two are the field asserting
+        // something the pack itself says is false, and loading them would leave `ungradedTail`
+        // silenced on a tail that either never graded or is watched perfectly well — a check turned
+        // off by a statement that was never true.
+        if (m.unwatchedTail.has_value()) {
+            if (m.unwatchedReason.isEmpty())
+                warn(r, QStringLiteral("unwatchedTailNoReason"), m.id,
+                     QStringLiteral("Measure '%1' says its %2 tail is deliberately unwatched but "
+                                    "does not say why. Without the reason it is indistinguishable "
+                                    "from a tail nobody has got to.")
+                         .arg(m.id, directionName(*m.unwatchedTail)));
+
+            if (shapeIsOneSided(m.shape))
+                err(r, QStringLiteral("unwatchedTailShaped"), m.id,
+                    QStringLiteral("Measure '%1' is '%2', so neither tail can be 'deliberately "
+                                   "unwatched' — the shape already says which one does not grade. "
+                                   "Remove one of the two.")
+                        .arg(m.id, shapeLabel(m.shape)));
+
+            if (watchedTails.value(m.id).contains(static_cast<int>(*m.unwatchedTail)))
+                err(r, QStringLiteral("unwatchedTailWatched"), m.id,
+                    QStringLiteral("Measure '%1' says its %2 tail is unwatched, and a corridor "
+                                   "signal watches exactly that tail. One of the two is wrong.")
+                        .arg(m.id, directionName(*m.unwatchedTail)));
+        }
     }
 
     // --- signals -------------------------------------------------------------
@@ -768,6 +808,21 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         m.gapReason = o.value(QStringLiteral("gapReason")).toString();
         m.highMeans = o.value(QStringLiteral("highMeans")).toString();
 
+        m.unwatchedReason = o.value(QStringLiteral("unwatchedReason")).toString();
+
+        // Unknown token is an ERROR for the reason `shape` below is: a measure that meant "high" and
+        // typed "hgih" would silently keep reporting the tail it was written to explain away.
+        if (o.contains(QStringLiteral("unwatchedTail"))) {
+            Direction d = Direction::High;
+            if (directionFromName(o.value(QStringLiteral("unwatchedTail")).toString(), d))
+                m.unwatchedTail = d;
+            else
+                err(r, QStringLiteral("unknownDirection"), m.id,
+                    QStringLiteral("Measure '%1' says its '%2' tail is deliberately unwatched; the "
+                                   "tails are high and low.")
+                        .arg(m.id, o.value(QStringLiteral("unwatchedTail")).toString()));
+        }
+
         if (o.contains(QStringLiteral("viewNeeded")))
             viewNeededFromName(o.value(QStringLiteral("viewNeeded")).toString(), m.viewNeeded);
         else if (m.kind == MeasureKind::Composed)
@@ -992,6 +1047,10 @@ QJsonObject savePack(const CharacteristicPack &pack)
         // Omitted when Target, so 105 of 106 shipped measures round-trip byte-identically and the
         // key appears only where somebody actually said something.
         if (m.shape != Shape::Target) o.insert(QStringLiteral("shape"), shapeName(m.shape));
+        if (m.unwatchedTail.has_value())
+            o.insert(QStringLiteral("unwatchedTail"), directionName(*m.unwatchedTail));
+        if (!m.unwatchedReason.isEmpty())
+            o.insert(QStringLiteral("unwatchedReason"), m.unwatchedReason);
         measures.append(o);
     }
     root.insert(QStringLiteral("measures"), measures);

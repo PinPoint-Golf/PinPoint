@@ -106,6 +106,12 @@ enum class Shape {
 // (MetricRequirement::launchMonitor): a user with no launch monitor gets "needs a launch monitor"
 // through the same path a missing face-on camera already takes, which is what makes the absence
 // graceful rather than a hole. `gapReason` is required here exactly as it is for NotCapturable.
+// Which tail of the corridor a signal watches, or a measure deliberately does not. Required for the
+// corridor and threshold tests: a condition is one tail of one measure, so a signal without a
+// direction cannot identify a condition. Declared here rather than beside Signal because Measure
+// needs it too — see `unwatchedTail`.
+enum class Direction { High, Low };
+
 struct Measure {
     QString       id;                                   // stable, never reused
     MeasureKind   kind   = MeasureKind::Composed;
@@ -139,6 +145,25 @@ struct Measure {
     // trail foot" cannot make that mistake in the same way. See
     // docs/design/pinpoint_sign_conventions.md.
     QString       highMeans;
+
+    // A tail that GRADES and is deliberately not watched, with the reason it is not.
+    //
+    // Same contract as `gapReason` for NotCapturable: the field says something is intentional, the
+    // reason says what, and the UI quotes the reason. It exists because there are three correct
+    // answers to a tail with no condition behind it and `shape` only expresses two of them. Author
+    // the condition when the tail carries a fault; set `shape` when the quantity is one-sided and
+    // the tail should stop grading altogether; set this when the tail genuinely grades, the reading
+    // out there is real, and there is still no fault to name — the corridor is mis-centred, or the
+    // deviation is a known artefact of how the number is measured. Silences `ungradedTail` for that
+    // tail ONLY; the other tail is unaffected.
+    //
+    // NOT a quiet way to dismiss a tail. On a one-sided measure it is a contradiction (that tail
+    // does not grade, so there is nothing to be unwatched) and on a tail a signal already watches it
+    // is the opposite of true — both are load ERRORS, not judgements. And an unwatchedTail with no
+    // reason is indistinguishable from a tail nobody got to, which is what `unwatchedTailNoReason`
+    // is for.
+    std::optional<Direction> unwatchedTail;
+    QString                  unwatchedReason;
 };
 
 // ── Signal ──────────────────────────────────────────────────────────────────
@@ -151,9 +176,7 @@ enum class SignalTest {
     Ratio,             // two measures, a ratio (tempo)
 };
 
-// Which tail of the corridor fired. Required for the corridor and threshold tests: a condition is
-// one tail of one measure, so a signal without a direction cannot identify a condition.
-enum class Direction { High, Low };
+// (`Direction` is declared above `Measure`, which needs it for `unwatchedTail`.)
 
 struct Signal {
     QString                  id;

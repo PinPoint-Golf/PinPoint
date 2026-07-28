@@ -143,6 +143,16 @@
       "passAtLeast": 25.0,
       "unit": "s",
       "note": "Read the two sides together. A golfer who is steady on the trail leg and not on the lead one has a reason not to move onto it."
+    },
+    {
+      "id": "screen.hamstringLength",
+      "label": "Hamstring length",
+      "bodyRegion": "Hip",
+      "protocol": "Passive straight-leg raise: supine, one leg flat, the other lifted with the knee straight and the pelvis held down. Read the angle at which the pelvis starts to tilt rather than the angle the leg reaches.",
+      "passCriterion": "At least 70 degrees before the pelvis begins to rotate backwards.",
+      "passAtLeast": 70.0,
+      "unit": "deg",
+      "note": "The reading that matters is where the PELVIS gives way, not where the leg stops — short hamstrings tether the pelvis, and it is that tether the address position has to work around."
     }
   ]
 }

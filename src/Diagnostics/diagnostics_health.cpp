@@ -174,6 +174,47 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                     shapeLabel(m->shape))));
     }
 
+    // ── A tail that grades with nothing behind it ───────────────────────────
+    //
+    // The exact mirror of signalOnOpenTail above: that one is a signal watching a tail that cannot
+    // grade, this one is a tail that grades with no signal watching it. Here rather than in
+    // validatePack() because only the assembled library knows the tail grades at all — a pack
+    // carries no numbers, and a measure with no norm anywhere grades on NEITHER tail, so the same
+    // authoring gap is a roadmap item there and a live defect here.
+    //
+    // Scoped to Target, because that is the shape that grades both tails: sigmaHi defaults to
+    // sigmaLo (norm_pack.cpp), so a corridor authored once is symmetric whether or not its author
+    // thought about the far side. An empty direction set is left to `unusedMeasure` — a measure
+    // nothing watches at all is a different row about a different omission, and reporting both would
+    // rank one gap twice.
+    for (const Measure &m : pack.measures) {
+        if (m.shape != Shape::Target) continue;
+        if (!measuresWithNorms.contains(m.id)) continue;
+
+        QSet<int> dirs;
+        for (const Signal &s : pack.signalDefs) {
+            if (s.test != SignalTest::OutsideCorridor || !s.direction.has_value()) continue;
+            if (s.measures.contains(m.id)) dirs.insert(static_cast<int>(*s.direction));
+        }
+        if (dirs.size() != 1) continue;
+
+        const Direction watched  = static_cast<Direction>(*dirs.cbegin());
+        const Direction ungraded = (watched == Direction::High) ? Direction::Low : Direction::High;
+
+        // Authored as deliberate, with a reason validatePack() insists on. Silences THIS tail only.
+        if (m.unwatchedTail.has_value() && *m.unwatchedTail == ungraded) continue;
+
+        out.push_back(warn(QStringLiteral("ungradedTail"), m.id,
+                           QObject::tr("The %2 tail of '%1' grades but nothing explains it: a "
+                                       "reading out there shows a colour with no fault behind it. "
+                                       "Author the condition for that tail, set the measure's shape "
+                                       "so the tail stops grading, or record why it is deliberately "
+                                       "unwatched.")
+                               .arg(m.label.isEmpty() ? m.id : m.label,
+                                    ungraded == Direction::High ? QObject::tr("high")
+                                                                : QObject::tr("low"))));
+    }
+
     // ── A screen or drill reference pointing at nothing ─────────────────────
     //
     // Both joins are exact string matches into a separate registry, so a typo or a renamed row

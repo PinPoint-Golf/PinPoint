@@ -305,11 +305,92 @@ int main()
               "a planned measure is reported too — this is not a producer backlog");
     }
 
+    // ── A tail that grades with nothing behind it ───────────────────────────
+    std::printf("=== the ungraded tail of a two-sided measure is reported ===\n");
+    {
+        // The exact mirror of signalOnOpenTail above. A Target measure with a norm grades BOTH
+        // tails — sigmaHi defaults to sigmaLo — so a corridor carrying one condition still puts a
+        // colour on the dashboard for the other side with no fault behind it.
+        CharacteristicPack pack = fakePack();
+
+        // Fields are set BEFORE the push_back: holding a reference into the vector across a later
+        // push_back would dangle the moment it reallocates.
+        auto measure = [&](const char *id, MeasureStatus st, Shape sh,
+                           std::optional<Direction> unwatched = {},
+                           const char              *reason    = "") {
+            Measure m;
+            m.id              = QString::fromLatin1(id);
+            m.label           = QString::fromLatin1(id);
+            m.kind            = MeasureKind::Provided;
+            m.status          = st;
+            m.shape           = sh;
+            m.unwatchedTail   = unwatched;
+            m.unwatchedReason = QString::fromLatin1(reason);
+            pack.measures.push_back(m);
+        };
+        auto sig = [&](const char *id, const char *mid, Direction d) {
+            Signal s;
+            s.id        = QString::fromLatin1(id);
+            s.test      = SignalTest::OutsideCorridor;
+            s.measures  = { QString::fromLatin1(mid) };
+            s.direction = d;
+            pack.signalDefs.push_back(s);
+        };
+
+        measure("m_oneTail",    MeasureStatus::Planned, Shape::Target);  // reported
+        measure("m_shaped",     MeasureStatus::Live,    Shape::Floor);   // shape answers it
+        measure("m_noCorridor", MeasureStatus::Live,    Shape::Target);  // no norm — nothing grades
+        measure("m_declared",   MeasureStatus::Live,    Shape::Target, Direction::Low,
+                "The low tail is bounded by arm length.");
+        measure("m_wrongTail",  MeasureStatus::Live,    Shape::Target, Direction::High,
+                "Declared on the tail a signal already watches.");
+
+        sig("sig_oneTail",     "m_oneTail",     Direction::High);   // low tail ungraded
+        sig("sig_shaped",      "m_shaped",      Direction::Low);    // high tail does not grade
+        sig("sig_noCorridor",  "m_noCorridor",  Direction::High);   // neither tail grades
+        sig("sig_declared",    "m_declared",    Direction::High);   // low tail declared unwatched
+        sig("sig_wrongTail",   "m_wrongTail",   Direction::High);   // declared the WATCHED tail
+
+        FakeNorms norms;
+        norms.add("m_normed",    "full_swing", 10.0, 2.0);
+        norms.add("m_unnormed",  "full_swing", 10.0, 2.0);
+        norms.add("m_oneTail",   "full_swing", 10.0, 2.0);
+        norms.add("m_shaped",    "full_swing", 1.48, 0.05);
+        norms.add("m_declared",  "full_swing", 10.0, 2.0);
+        norms.add("m_wrongTail", "full_swing", 10.0, 2.0);
+        // m_noCorridor deliberately gets none.
+
+        const auto issues = diagnosticsHealth(pack, norms, cat);
+
+        check(hasSubject(issues, "ungradedTail", QStringLiteral("m_oneTail")),
+              "a Target measure with a norm and ONE direction is reported");
+        check(!hasSubject(issues, "ungradedTail", QStringLiteral("m_normed")),
+              "a measure with both tails authored is not");
+        check(!hasSubject(issues, "ungradedTail", QStringLiteral("m_shaped")),
+              "a FLOOR is not — the shape already stopped that tail grading");
+        check(countCode(issues, "signalOnOpenTail") == 0,
+              "…and the mirror check is untouched by any of this");
+        check(!hasSubject(issues, "ungradedTail", QStringLiteral("m_noCorridor")),
+              "a measure with no norm anywhere is not — NEITHER tail grades, so there is no "
+              "colour on the dashboard to explain");
+        check(!hasSubject(issues, "ungradedTail", QStringLiteral("m_noProducer")),
+              "…which is why the producer-less fixture measure is silent too");
+        check(!hasSubject(issues, "ungradedTail", QStringLiteral("m_declared")),
+              "a tail declared deliberately unwatched, with a reason, is silenced");
+        check(hasSubject(issues, "ungradedTail", QStringLiteral("m_wrongTail")),
+              "…but declaring the tail a signal ALREADY watches silences nothing — the ungraded "
+              "tail is still ungraded, and validatePack refuses the declaration separately");
+
+        // m_unnormed carries a norm here and one direction, so it is the fourth legitimate row.
+        check(countCode(issues, "ungradedTail") == 3,
+              "exactly m_oneTail, m_wrongTail and the fixture's own single-tail measure");
+    }
+
     // ── The single-tail axis must stay silent ───────────────────────────────
     std::printf("=== the unread edge of a single-tail axis is NOT reported ===\n");
     {
         // c_bothTails is the only condition on axis_single, and its measure has a two-sided norm.
-        // Nothing in the health list may argue for the tail nobody authored.
+        // Nothing in the health list may argue for the AXIS nobody finished.
         const CharacteristicPack pack = fakePack();
         FakeNorms norms;
         norms.add("m_normed",   "full_swing", 10.0, 2.0);
@@ -317,12 +398,21 @@ int main()
 
         const auto issues = diagnosticsHealth(pack, norms, cat);
         for (const ValidationIssue &i : issues)
-            if (i.message.contains(QStringLiteral("tail"), Qt::CaseInsensitive))
+            if (i.code != QLatin1String("ungradedTail")
+                && i.message.contains(QStringLiteral("tail"), Qt::CaseInsensitive))
                 std::printf("      unexpected tail row: %s\n", qPrintable(i.message));
         check(countCode(issues, "singleTailAxis") == 0,
               "diagnosticsHealth does not duplicate the pack validator's axis check");
         check(countCode(issues, "signalNoNorm") == 0,
               "and with both measures normed, nothing claims a missing corridor");
+
+        // The two are about different things and both are correct on this fixture: axis_single is
+        // an AXIS with one tail declared (the pack validator's business, and c_bothTails is not on
+        // it twice), while m_unnormed is a MEASURE whose second tail grades unexplained. Keying the
+        // new check on the measure rather than the axis is what keeps them from colliding — most
+        // ungraded tails belong to measures nobody ever gave an axis.
+        check(hasSubject(issues, "ungradedTail", QStringLiteral("m_unnormed")),
+              "…while the ungraded tail of a MEASURE is reported, which is a different claim");
     }
 
     // ── Your own corridors, seated on nothing ───────────────────────────────
@@ -603,6 +693,18 @@ int main()
         // came back not measured and no corridor signal could fire for a whole class of shot.
         check(countCode(issues, "ungradedContext") == 0,
               "NO shipped context is graded by nothing — shot type informs, it does not gate");
+
+        // THE GATE for "every tail that grades has a fault behind it, or a stated reason why it
+        // does not". This one shipped at 37 the day the check was written: 37 corridors were
+        // putting a Watch or an Action on the dashboard for a tail with no fault name, no
+        // consequence and no drill behind it, and nothing reported it because a half-authored
+        // corridor looks exactly like a finished one. Unlike the debts printed above, a new row
+        // here is not a backlog item — it is a colour a golfer can already see with nothing to say
+        // about it, so it is gated rather than listed.
+        check(countCode(issues, "ungradedTail") == 0,
+              "NO shipped corridor grades a tail that nothing explains");
+        check(countCode(issues, "signalOnOpenTail") == 0,
+              "…and its mirror stays clean: nothing watches a tail that never grades");
 
         // No shipped row is anybody's override, so neither personal-layer check may fire.
         check(countCode(issues, "personalNormNoSample") == 0,

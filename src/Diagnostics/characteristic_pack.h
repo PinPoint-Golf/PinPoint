@@ -80,6 +80,12 @@ struct ValidationReport {
 //   axisMismatch         two tails share an axis id but not a series — then they are not tails
 //   badFacets            a measure's series fails the validity table
 //   badReducer           a measure's reducer is malformed
+//   unknownShape         a measure declares a shape that is not target/floor/ceiling. An error
+//                        rather than a fall back to Target: "flooor" would grade the good tail
+//   unknownDirection     a measure's unwatchedTail is not high or low — same reasoning
+//   unwatchedTailShaped  a one-sided measure claiming a tail is "deliberately unwatched". The shape
+//                        already says which tail does not grade; the two cannot both be true
+//   unwatchedTailWatched a measure claiming a tail is unwatched that a corridor signal watches
 //
 // WARNINGS — the pack works, but the health list should show it:
 //   observableNoSignal   an Observable and Measured condition nothing can detect. Scoped to
@@ -100,6 +106,9 @@ struct ValidationReport {
 //                        first in the file, so the term silently leads to the wrong page
 //   externalDeviceNoReason  an ExternalDevice measure that does not name the device. The status says
 //                        something is in the way; only the reason says what, and two surfaces quote it
+//   unwatchedTailNoReason  a measure declaring a tail deliberately unwatched without saying why.
+//                        The declaration silences `ungradedTail`; without the reason it is
+//                        indistinguishable from a tail nobody has got to
 //
 // The checks that span the pack, the norm set, the context tree and the metric catalogue at once —
 // "can this signal ever fire?" — live in `diagnostics_health.h`, because no single pack can answer

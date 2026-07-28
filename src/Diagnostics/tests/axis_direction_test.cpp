@@ -202,6 +202,110 @@ static const Expect kExpected[] = {
     { "sig_spinExcess",    Direction::High, "spinRate: 'HIGHER IS MORE SPIN'" },
     { "sig_spinDeficit",   Direction::Low,  "…and a knuckleball is the low end" },
     { "sig_carryDeficit",  Direction::Low,  "carryDistance: 'HIGHER IS FURTHER'" },
+
+    // ── unwatched tails: the second tail of a corridor that already graded ──
+    //
+    // Every row below closes a tail that was producing a colour on the dashboard with no fault
+    // behind it. They are the most inversion-prone rows in the fixture, because each one is the
+    // OPPOSITE of a signal that already shipped and reads naturally as "the same thing again" —
+    // so each `why` quotes the measure's own highMeans and then says which end of it this is.
+
+    // Second signals on conditions that already existed (resolution C).
+    { "sig_hangingBackPelvisDown",  Direction::Low,
+      "m_pelvisSwayDown highMeans 'the pelvis further toward the lead side during the downswing'; "
+      "hanging back is the pelvis NOT going there, the low end" },
+    { "sig_slidePelvisImpact",      Direction::High,
+      "m_pelvisSwayImpact highMeans 'the pelvis further toward the lead side at impact than at "
+      "address'; a slide is too much of it" },
+    { "sig_offBalanceFinishSway",   Direction::High,
+      "m_pelvisSwayFinish highMeans 'the pelvis further toward the target at the finish'; falling "
+      "through it is the high end, where sig_weightBackFinish takes the low" },
+    { "sig_hangingBackThoraxDrift", Direction::Low,
+      "m_thoraxDrift highMeans 'the chest further toward the lead side by early downswing'; the "
+      "chest staying back is the low end, where sig_forwardLunge takes the high" },
+
+    // Setup, posture and lateral.
+    { "sig_postureTooBent",         Direction::High,
+      "m_spineBendAtAddress highMeans 'more forward bend from the hips, standing over the ball "
+      "more'; too bent is the high end, where sig_postureUpright takes the low" },
+    { "sig_flatLumbarSpine",        Direction::Low,
+      "m_lumbarCurve highMeans 'a more arched lower back'; a flat lumbar spine is less arch" },
+    { "sig_flatThoracicSpine",      Direction::Low,
+      "m_thoracicCurve highMeans 'a more rounded upper back'; a flat thoracic spine is less round" },
+    { "sig_diving",                 Direction::High,
+      "m_spineBendLoss highMeans 'more forward bend than at address during the swing, a dip'; "
+      "diving IS that dip, so it is the high end" },
+    { "sig_steepShoulderPlane",     Direction::High,
+      "m_shoulderPlane highMeans 'a steeper, more vertical shoulder turn'; steep is the high end, "
+      "where sig_flatShoulderPlane takes the low" },
+    { "sig_excessiveAxisTiltTop",   Direction::High,
+      "m_axisTiltAtTop highMeans 'more tilt away from the target at the top'; excessive tilt is the "
+      "high end, where sig_reverseSpine (too little) takes the low" },
+    { "sig_backingOffTheBall",      Direction::Low,
+      "m_pelvisThrustDown highMeans 'the pelvis further toward the ball during the downswing'; "
+      "backing away is the pelvis going the other way, the low end" },
+    { "sig_pelvisDriftLeadBackswing", Direction::High,
+      "m_pelvisSwayBack highMeans 'the pelvis further toward the lead side during the backswing'; "
+      "drifting lead-side going back is the high end, where sig_sway (toward the trail side) takes "
+      "the low" },
+    { "sig_pelvisSinkBackswing",    Direction::Low,
+      "m_pelvisLiftTop highMeans 'the pelvis higher than at address by the top'; sinking is lower "
+      "than at address, the low end, where sig_trailHipHike takes the high" },
+    { "sig_headDriftLeadBackswing", Direction::Low,
+      "m_headSwayBack highMeans 'the head further from the ball line, off the ball' — i.e. toward "
+      "the TRAIL side; drifting toward the target is the low end" },
+
+    // Arms and club.
+    { "sig_inToOutPath",            Direction::High,
+      "m_clubPathAtImpact highMeans 'a more in-to-out path through impact', so in-to-out is the "
+      "high end" },
+    { "sig_outToInPath",            Direction::Low,
+      "…and out-to-in is the low end of the same range. This is the tail sig_overTheTop used to "
+      "read: the path is measured, the over-the-top MOVE is now inferred from it" },
+    { "sig_trailElbowDeep",         Direction::Low,
+      "m_trailElbowRise highMeans 'the trail elbow higher above the shoulder line'; an elbow behind "
+      "and below the body is the low end, where sig_flyingElbow takes the high" },
+    { "sig_overRotationAtTop",      Direction::High,
+      "m_thoraxRotP4 highMeans 'a bigger shoulder turn at the top'; over-turning is the high end, "
+      "where sig_shortBackswing takes the low" },
+    { "sig_clubShortOfParallel",    Direction::Low,
+      "m_shaftAngleP4 highMeans 'the shaft further past parallel — a longer backswing'; short of "
+      "the top is the low end, where sig_overswing takes the high" },
+    { "sig_faceHeldShutTakeaway",   Direction::Low,
+      "m_leadForearmRot_p2 highMeans 'the lead forearm rotated further away from the target — the "
+      "face opening in the takeaway'; a face held shut is less of that rotation, the low end" },
+    { "sig_armsOverConnected",      Direction::Low,
+      "m_leadUpperArmToChest highMeans 'the lead arm running further from the chest — less "
+      "connected'; arms pinned to the chest is the low end, where sig_disconnection takes the high" },
+    { "sig_lockedLeadArm",          Direction::Low,
+      "m_leadElbowFlex_p4 highMeans 'more bend in the lead elbow at the top'; an arm locked straight "
+      "is the least bend, the low end, where sig_bentLeadArm takes the high" },
+
+    // Release, impact and the transition stretch.
+    { "sig_excessiveLag",           Direction::High,
+      "m_lagAngleDown highMeans 'more angle retained between the lead arm and the shaft in the "
+      "downswing'; holding it too long is the high end, where sig_casting takes the low" },
+    { "sig_overSet",                Direction::High,
+      "m_leadWristRadUln_p4 highMeans 'more wrist set at the top, the club hinged further up from "
+      "address'; over-set is the high end, where sig_insufficientSet takes the low" },
+    { "sig_bowedLeadWrist",         Direction::High,
+      "m_leadWristAtImpact highMeans 'a more bowed lead wrist at impact, less cupped'; bowed is the "
+      "high end, where sig_scooping (cupped) takes the low" },
+    { "sig_excessiveShaftLean",     Direction::High,
+      "m_impactShaftLean highMeans 'the hands further ahead of the clubhead at impact — more "
+      "forward lean'; too much lean is the high end, where sig_insufficientShaftLean takes the low" },
+    { "sig_lowPointTooFarAhead",    Direction::High,
+      "m_lowPointAhead highMeans 'the arc bottoming out further ahead of the ball, toward the "
+      "target'; too far ahead is the high end, where sig_lowPointBehind takes the low" },
+    { "sig_hipsTooOpenAtImpact",    Direction::High,
+      "m_pelvisRotP7 highMeans 'the pelvis further open at impact'; over-cleared is the high end, "
+      "where sig_hipsClosedImpact takes the low" },
+    { "sig_latePelvisRotation",     Direction::Low,
+      "m_pelvisRotP5 highMeans 'the pelvis already further open in early downswing'; a pelvis slow "
+      "to start is the low end, where sig_hipSpinOut (too early) takes the high" },
+    { "sig_excessiveSeparationStretch", Direction::High,
+      "m_xFactorStretch highMeans 'more separation added between chest and pelvis through "
+      "transition'; stretching past control is the high end, where sig_xfactorDeficit takes the low" },
 };
 
 // Signals whose metric states NO sign convention anywhere, so their direction cannot be checked

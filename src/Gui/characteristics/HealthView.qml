@@ -114,6 +114,11 @@ Item {
         case "drillNoTarget":      return qsTr("A drill that does not say what it is trying to change")
         case "drillIdNamespace":   return qsTr("A drill id outside the drill. namespace")
         case "externalDeviceNoReason": return qsTr("Reads from an external device but does not say which")
+        case "unwatchedTailNoReason": return qsTr("A tail called deliberately unwatched, with no reason given")
+        case "unwatchedTailShaped":   return qsTr("A one-sided measure claiming a tail is unwatched — the shape already says so")
+        case "unwatchedTailWatched":  return qsTr("A tail called unwatched that a signal watches")
+        case "unknownDirection":      return qsTr("A tail that is neither high nor low")
+        case "unknownShape":          return qsTr("A shape that is not target, floor or ceiling")
 
         // The norm side. These reached this list for the first time at stage 10: the norm set's own
         // warnings were promised to be part of it and were not, and the referential checks below had
@@ -129,6 +134,7 @@ Item {
         // The assembled-library checks.
         case "signalNoNorm":           return qsTr("Nothing to compare against — the signal cannot fire")
         case "signalOnOpenTail":       return qsTr("Watching a tail this measure never grades")
+        case "ungradedTail":           return qsTr("One side of the range grades with nothing to explain it")
         case "personalNormNoSample":   return qsTr("Your corridor, seated on no swings")
         case "clubDependentNoContext": return qsTr("Club-dependent, but graded by one corridor")
         case "cohortGap":              return qsTr("Corridors for a sex and for an age band, none for both")

@@ -573,6 +573,12 @@ QVariantMap NormModel::measureDetail(const QString &measureId) const
     out.insert(QStringLiteral("metricKey"),    m->metricKey);
     out.insert(QStringLiteral("gapReason"),    m->gapReason);
     out.insert(QStringLiteral("viewNeeded"),   viewNeededName(m->viewNeeded));
+    // A tail deliberately left unwatched. Both halves reach QML because the UI quotes the REASON —
+    // the flag alone would render as an unexplained assertion, which is the state the reason exists
+    // to prevent. Empty string, not absent, when there is none: QML tests it with `.length`.
+    out.insert(QStringLiteral("unwatchedTail"),
+               m->unwatchedTail.has_value() ? directionName(*m->unwatchedTail) : QString());
+    out.insert(QStringLiteral("unwatchedReason"), m->unwatchedReason);
     out.insert(QStringLiteral("reducerLabel"), reducerLabel(m->reducer));
     out.insert(QStringLiteral("aliases"),      m->aliases);
 

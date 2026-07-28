@@ -150,7 +150,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("assessment:wrist"),
                     QStringLiteral("chart:review"),
                     QStringLiteral("score:wrist"),
-                    QStringLiteral("characteristic:scooping") },
+                    QStringLiteral("characteristic:scooping"),
+                    QStringLiteral("characteristic:bowed_lead_wrist") },
     });
 
     cat.addDescriptor({
@@ -177,7 +178,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("assessment:wrist"),
                     QStringLiteral("chart:review"),
                     QStringLiteral("score:wrist"),
-                    QStringLiteral("characteristic:insufficient_set") },
+                    QStringLiteral("characteristic:insufficient_set"),
+                    QStringLiteral("characteristic:over_set") },
     });
 
     cat.addDescriptor({
@@ -205,7 +207,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("assessment:wrist"),
                     QStringLiteral("chart:review"),
                     QStringLiteral("score:wrist"),
-                    QStringLiteral("characteristic:early_face_roll") },
+                    QStringLiteral("characteristic:early_face_roll"),
+                    QStringLiteral("characteristic:face_held_shut_takeaway") },
     });
 
     cat.addDescriptor({
@@ -232,7 +235,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("assessment:wrist"),
                     QStringLiteral("chart:review"),
                     QStringLiteral("score:wrist"),
-                    QStringLiteral("characteristic:bent_lead_arm") },
+                    QStringLiteral("characteristic:bent_lead_arm"),
+                    QStringLiteral("characteristic:locked_lead_arm") },
     });
 
     cat.addDescriptor({
@@ -292,7 +296,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("characteristic:hip_spin_out"),
                     QStringLiteral("characteristic:hip_stall"),
                     QStringLiteral("characteristic:hips_closed_at_impact"),
-                    QStringLiteral("characteristic:sequence_order") },
+                    QStringLiteral("characteristic:sequence_order"),
+                    QStringLiteral("characteristic:hips_too_open_at_impact"),
+                    QStringLiteral("characteristic:late_pelvis_rotation") },
     });
 
     cat.addDescriptor({
@@ -316,7 +322,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .requirement = { .imuRoles = { R::Thorax } },
         .usedBy = { QStringLiteral("characteristic:abbreviated_finish"),
                     QStringLiteral("characteristic:sequence_order"),
-                    QStringLiteral("characteristic:short_backswing") },
+                    QStringLiteral("characteristic:short_backswing"),
+                    QStringLiteral("characteristic:over_rotation_at_top") },
     });
 
     cat.addDescriptor({
@@ -361,7 +368,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Transition, P::Downswing },
         .planned = true,
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
-        .usedBy = { QStringLiteral("characteristic:xfactor_deficit") },
+        .usedBy = { QStringLiteral("characteristic:xfactor_deficit"),
+                    QStringLiteral("characteristic:excessive_separation_stretch") },
     });
 
     cat.addDescriptor({
@@ -409,7 +417,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .planned = true,
         .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
         .usedBy = { QStringLiteral("characteristic:loss_of_posture"),
-                    QStringLiteral("characteristic:posture_too_upright") },
+                    QStringLiteral("characteristic:posture_too_upright"),
+                    QStringLiteral("characteristic:posture_too_bent"),
+                    QStringLiteral("characteristic:diving") },
     });
 
     cat.addDescriptor({
@@ -456,7 +466,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:excessive_axis_tilt_impact"),
                     QStringLiteral("characteristic:insufficient_axis_tilt_impact"),
-                    QStringLiteral("characteristic:reverse_spine") },
+                    QStringLiteral("characteristic:reverse_spine"),
+                    QStringLiteral("characteristic:excessive_axis_tilt_top") },
     });
 
     cat.addDescriptor({
@@ -482,7 +493,9 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("characteristic:hanging_back"),
                     QStringLiteral("characteristic:slide"),
                     QStringLiteral("characteristic:sway"),
-                    QStringLiteral("characteristic:weight_back_at_finish") },
+                    QStringLiteral("characteristic:weight_back_at_finish"),
+                    QStringLiteral("characteristic:off_balance_finish"),
+                    QStringLiteral("characteristic:pelvis_drift_lead_backswing") },
     });
 
     cat.addDescriptor({
@@ -506,7 +519,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Downswing, P::Impact },
         .planned = true,
         .requirement = { .faceOnCamera = true, .minTier = ReconstructionTier::Stereo3D },
-        .usedBy = { QStringLiteral("characteristic:early_extension") },
+        .usedBy = { QStringLiteral("characteristic:early_extension"),
+                    QStringLiteral("characteristic:backing_off_the_ball") },
     });
 
     cat.addDescriptor({
@@ -529,7 +543,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Impact },
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:trail_hip_hike") },
+        .usedBy = { QStringLiteral("characteristic:trail_hip_hike"),
+                    QStringLiteral("characteristic:pelvis_sink_backswing") },
     });
 
     // ------------------------------------------------------- Club & speed (face-on club track, 2D)
@@ -598,7 +613,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Downswing, P::Impact },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("chart:review"),
-                    QStringLiteral("characteristic:casting") },
+                    QStringLiteral("characteristic:casting"),
+                    QStringLiteral("characteristic:excessive_lag") },
     });
 
     cat.addDescriptor({
@@ -620,7 +636,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Impact },
         .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("chart:review"),
-                    QStringLiteral("characteristic:insufficient_shaft_lean") },
+                    QStringLiteral("characteristic:insufficient_shaft_lean"),
+                    QStringLiteral("characteristic:excessive_shaft_lean") },
     });
 
     // ------------------------------------------------ Club delivery (PLANNED — club track / DTL)
@@ -671,7 +688,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Impact },
         .planned = true,
         .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
-        .usedBy = { QStringLiteral("characteristic:over_the_top") },
+        .usedBy = { QStringLiteral("characteristic:in_to_out_path"),
+                    QStringLiteral("characteristic:out_to_in_path") },
     });
 
     cat.addDescriptor({
@@ -746,7 +764,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Impact },
         .planned = true,
         .requirement = { .faceOnCamera = true, .clubTrack = true, .ballTrack = true },
-        .usedBy = { QStringLiteral("characteristic:low_point_behind_ball") },
+        .usedBy = { QStringLiteral("characteristic:low_point_behind_ball"),
+                    QStringLiteral("characteristic:low_point_too_far_ahead") },
     });
 
     // --------------------------------------------- Tempo & sequence (phase events / fused)
@@ -1112,7 +1131,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review"),
-                    QStringLiteral("characteristic:excessive_head_sway") },
+                    QStringLiteral("characteristic:excessive_head_sway"),
+                    QStringLiteral("characteristic:head_drift_lead_backswing") },
     });
 
     cat.addDescriptor({
@@ -1193,7 +1213,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "makes it a producer worth building rather than a gap that can never close."),
         .phases = { P::Address },
         .planned = true,
-        .usedBy = { QStringLiteral("characteristic:c_posture") },
+        .usedBy = { QStringLiteral("characteristic:c_posture"),
+                    QStringLiteral("characteristic:flat_thoracic_spine") },
     });
 
     cat.addDescriptor({
@@ -1214,7 +1235,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "down-the-line silhouette."),
         .phases = { P::Address },
         .planned = true,
-        .usedBy = { QStringLiteral("characteristic:s_posture") },
+        .usedBy = { QStringLiteral("characteristic:s_posture"),
+                    QStringLiteral("characteristic:flat_lumbar_spine") },
     });
 
     cat.addDescriptor({
@@ -1237,7 +1259,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top },
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:flat_shoulder_plane") },
+        .usedBy = { QStringLiteral("characteristic:flat_shoulder_plane"),
+                    QStringLiteral("characteristic:steep_shoulder_plane") },
     });
 
     cat.addDescriptor({
@@ -1334,7 +1357,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Address, P::ArmParallelDown },
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:forward_lunge") },
+        .usedBy = { QStringLiteral("characteristic:forward_lunge"),
+                    QStringLiteral("characteristic:hanging_back") },
     });
 
     cat.addDescriptor({
@@ -1356,7 +1380,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top },
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:flying_elbow") },
+        .usedBy = { QStringLiteral("characteristic:flying_elbow"),
+                    QStringLiteral("characteristic:trail_elbow_deep") },
     });
 
     cat.addDescriptor({
@@ -1458,7 +1483,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top },
         .planned = true,
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:disconnection") },
+        .usedBy = { QStringLiteral("characteristic:disconnection"),
+                    QStringLiteral("characteristic:arms_over_connected") },
     });
 
     // ---------------------------------------------------- Shaft geometry (club track, DTL)
@@ -1509,7 +1535,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .phases = { P::Top },
         .planned = true,
         .requirement = { .faceOnCamera = true, .clubTrack = true },
-        .usedBy = { QStringLiteral("characteristic:overswing") },
+        .usedBy = { QStringLiteral("characteristic:overswing"),
+                    QStringLiteral("characteristic:club_short_of_parallel") },
     });
 
     // ---------------------------------------------------- Ball flight (ball track, face-on)

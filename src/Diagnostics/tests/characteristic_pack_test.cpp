@@ -14,6 +14,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include <algorithm>
 #include <cstdio>
 
 using namespace pinpoint::analysis;
@@ -400,6 +401,74 @@ int main()
         p.measures.front().gapReason.clear();
         check(hasWarning(validatePack(p), "externalDeviceNoReason"),
               "an external-device measure that does not say WHICH device warns");
+    }
+
+    // ── unwatchedTail: a graded tail deliberately left alone ────────────────────
+    //
+    // The third answer to a tail with no condition behind it, and the only one that admits the tail
+    // still grades. It SILENCES a health check, so every way of writing it that is not true has to
+    // be refused here — a declaration that loaded quietly would turn ungradedTail off for a measure
+    // nobody had actually thought about.
+    //
+    // goodPack's one measure carries both tails, so each case below removes a signal first.
+    {
+        CharacteristicPack p = goodPack();
+        // Free the low tail: the signal, the condition it detects, and the edge into that condition
+        // all have to go, or the pack fails on unknownSignal/unknownCondition instead.
+        p.signalDefs.pop_back();                                   // sigNarrow
+        p.conditions.erase(p.conditions.begin() + 1);              // stanceNarrow
+        p.edges.erase(std::remove_if(p.edges.begin(), p.edges.end(),
+                                     [](const Edge &e) {
+                                         return e.to == QLatin1String("stanceNarrow");
+                                     }),
+                      p.edges.end());
+        p.measures.front().unwatchedTail   = Direction::Low;
+        p.measures.front().unwatchedReason = QStringLiteral("A stance narrower than the corridor is "
+                                                            "a preference, not a fault.");
+
+        const PackLoadResult res = loadPack(savePack(p), QStringLiteral("unwatched"));
+        const Measure       *m   = res.pack.measure(QStringLiteral("stanceWidth"));
+        check(m && m->unwatchedTail.has_value() && *m->unwatchedTail == Direction::Low,
+              "an unwatched tail survives a save/load round-trip");
+        check(m && !m->unwatchedReason.isEmpty(), "…and carries its reason with it");
+        check(res.report.ok() && !hasWarning(validatePack(p), "unwatchedTailNoReason"),
+              "…and a declaration with a reason loads clean");
+
+        // Absent means absent: 105 of 106 shipped measures must not gain a key.
+        check(!savePack(goodPack()).value(QStringLiteral("measures")).toArray().at(0).toObject()
+                   .contains(QStringLiteral("unwatchedTail")),
+              "a measure that says nothing writes no key");
+
+        p.measures.front().unwatchedReason.clear();
+        check(hasWarning(validatePack(p), "unwatchedTailNoReason"),
+              "a tail called unwatched with no reason warns — without it the declaration is "
+              "indistinguishable from a tail nobody got to");
+
+        // The two contradictions are ERRORS, not warnings: each is the field asserting something
+        // the rest of the pack says is false, and loading either would silence ungradedTail over a
+        // statement that was never true.
+        CharacteristicPack shaped = p;
+        shaped.measures.front().shape           = Shape::Ceiling;
+        shaped.measures.front().unwatchedReason = QStringLiteral("Stated twice.");
+        check(hasError(validatePack(shaped), "unwatchedTailShaped"),
+              "a one-sided measure cannot ALSO call a tail unwatched — the shape already said it");
+
+        CharacteristicPack watched = goodPack();                   // both tails still signalled
+        watched.measures.front().unwatchedTail   = Direction::Low;
+        watched.measures.front().unwatchedReason = QStringLiteral("Contradicted by sigNarrow.");
+        check(hasError(validatePack(watched), "unwatchedTailWatched"),
+              "…and neither can a measure whose signal watches exactly the tail it calls unwatched");
+
+        // An unknown token is refused for the reason unknownShape is: "hgih" would silently keep
+        // reporting the tail the author wrote the declaration to explain away.
+        QJsonObject root     = savePack(p);
+        QJsonArray  measures = root.value(QStringLiteral("measures")).toArray();
+        QJsonObject first    = measures.at(0).toObject();
+        first.insert(QStringLiteral("unwatchedTail"), QStringLiteral("hgih"));
+        measures.replace(0, first);
+        root.insert(QStringLiteral("measures"), measures);
+        check(hasError(loadPack(root, QStringLiteral("tail-typo")).report, "unknownDirection"),
+              "an unknown tail token is refused rather than silently defaulted");
     }
 
     // ── One coach term, one condition ───────────────────────────────────────────
