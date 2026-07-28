@@ -51,6 +51,12 @@ int main()
                                                              {QStringLiteral("orientationFilter"), QStringLiteral("Madgwick")},
                                                              {QStringLiteral("placementSlot"), QStringLiteral("B")} }} } };
     manifest[QStringLiteral("clock")]   = QJsonObject{ {QStringLiteral("wallclock"), QStringLiteral("2026-06-08T16:00:00.000")} };
+    // WHO swung it. The exporter has written this block since its first version; the reader dropped
+    // it, which is the read-back gap norm cohorts closed — the uuid plus the wallclock are what a
+    // cohort is derived from, and without the uuid an offline re-analysis would resolve a different
+    // one from the live path on the same swing.
+    manifest[QStringLiteral("athlete")] = QJsonObject{ {QStringLiteral("name"), QStringLiteral("A Golfer")},
+                                                       {QStringLiteral("uuid"), QStringLiteral("uuid-1234")} };
     manifest[QStringLiteral("capture")] = QJsonObject{
         {QStringLiteral("sessionType"), 1},
         {QStringLiteral("shotSource"),  1},
@@ -384,6 +390,14 @@ int main()
         check(!ps.thumbnailPath.isEmpty(), "thumbnail path resolved");
         check(ps.timestampLabel == QStringLiteral("16:00:00"), "timestamp from wallclock");
         check(ps.score == 82, "score == 82");
+        // The athlete block survives read-back. It is what a norm cohort is resolved through: the
+        // uuid finds the record that holds the date of birth, wallclockMs says which day, and the
+        // age band is derived from the two. Dropped here for as long as the reader existed, so an
+        // offline re-analysis and the live path could have graded one swing two ways with nothing
+        // reporting the disagreement.
+        check(ps.athleteUuid == QStringLiteral("uuid-1234"), "the athlete uuid survives read-back");
+        check(ps.athleteName == QStringLiteral("A Golfer"), "…and the display name with it");
+        check(ps.wallclockMs != 0, "…alongside the absolute instant the band is read at");
         const QVariantMap fe = ps.metrics.value(QStringLiteral("leadWristFlexExt")).toMap();
         check(fe.value(QStringLiteral("value")).toString() == QStringLiteral("-8°"), "flat metric value -8 deg");
         // Non-degree metrics format in their OWN unit — this reader used to

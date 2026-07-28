@@ -217,6 +217,32 @@ struct Cohort {
 // resolution costs precisely what it cost before cohorts existed.
 std::vector<Cohort> cohortProbeOrder(const Cohort &athlete);
 
+// The band a date of birth puts someone in ON A GIVEN DAY.
+//
+// DERIVED AT THE SWING DATE AND NEVER STORED. An athlete ages across their own history, so a band
+// written down at capture time — or worse, computed from today whenever a swing is opened — would
+// grade a swing from four years ago against the corridor for who they are now. The date of birth is
+// the fact; the band is a reading of it, and it has to be taken on the day the swing happened.
+//
+// Absent when the date of birth is unknown, when the day is unknown, or when the date of birth is in
+// the FUTURE — a nonsense record must resolve nothing rather than grading somebody as a junior.
+// Absent means only rows unqualified on the age axis can match, and the reading STILL GRADES against
+// the universal corridor: a demographics gap is not a capture gap.
+//
+// It never returns `Adult`. That band is a parent an AUTHOR may claim; no birthday produces it, and
+// cohortProbeOrder() depends on that being true (it probes the parent only for someone already in
+// one of its sub-bands).
+std::optional<AgeBand> ageBandFor(const QDate &dob, const QDate &on);
+
+// The whole cohort for one person on one day, from the two fields the athlete record stores.
+//
+// `sexToken` is the stored string, and ANYTHING it does not recognise — empty, "declined", a value
+// from a newer build — leaves the axis unset. That is the opposite of the norm parser's rule and
+// deliberately so: an unreadable token on a NORM row would silently widen a corridor's scope to the
+// whole population, while an unreadable one here means only "we do not know", which is a state the
+// resolution already handles correctly and grades through.
+Cohort cohortFor(const QDate &dob, const QString &sexToken, const QDate &on);
+
 struct Norm {
     // Keys on the MEASURE (post-reducer), never the metric key. A measure carries its reducer and
     // its phase, so "Δ-from-address at P4" and "absolute at impact" are different measures and

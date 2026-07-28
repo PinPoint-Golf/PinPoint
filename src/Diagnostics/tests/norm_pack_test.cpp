@@ -970,6 +970,86 @@ int main()
         check(parent.size() == 4, "an athlete passed the parent band probes each key once");
     }
 
+    std::printf("=== cohort: the band a birthday puts you in ===\n");
+    {
+        const QDate dob(1970, 6, 15);
+
+        // The band is read ON A DAY, and the day is the SWING's. An athlete ages across their own
+        // history, so the same date of birth answers differently either side of a boundary — which
+        // is the whole reason this is derived rather than stored.
+        check(ageBandFor(dob, QDate(1988, 6, 14)) == AgeBand::Junior,
+              "the day before an 18th birthday is still a junior");
+        check(ageBandFor(dob, QDate(1988, 6, 15)) == AgeBand::Adult18_54,
+              "…and the birthday itself crosses the boundary");
+        check(ageBandFor(dob, QDate(2025, 6, 14)) == AgeBand::Adult18_54,
+              "the day before a 55th birthday is still 18–54");
+        check(ageBandFor(dob, QDate(2025, 6, 15)) == AgeBand::Adult55_64,
+              "…and the birthday itself moves them up a band");
+        check(ageBandFor(dob, QDate(2035, 6, 14)) == AgeBand::Adult55_64, "the day before 65");
+        check(ageBandFor(dob, QDate(2035, 6, 15)) == AgeBand::Adult65Plus, "…and 65 itself");
+
+        // ONE date of birth, TWO swings, two different rows. This is the assertion the whole
+        // derive-at-the-swing-date rule exists for.
+        check(ageBandFor(dob, QDate(2025, 6, 14)) != ageBandFor(dob, QDate(2025, 6, 15)),
+              "two swings a day apart across a boundary resolve DIFFERENT bands");
+
+        // It never produces the parent band. cohortProbeOrder depends on that: it probes `adult`
+        // only for somebody already in one of its sub-bands, so a derived `Adult` would make probes
+        // 1 and 2 collapse and quietly change the order.
+        for (int y = 1930; y <= 2030; y += 1) {
+            const std::optional<AgeBand> b = ageBandFor(QDate(y, 3, 1), QDate(2026, 7, 28));
+            if (b.has_value() && *b == AgeBand::Adult)
+                check(false, "a birthday never derives the parent band");
+        }
+        check(true, "no birthday over a century of years derives the parent `adult` band");
+
+        // The three ways it declines to answer, each of which means the universal corridor grades.
+        check(!ageBandFor(QDate(), QDate(2026, 7, 28)).has_value(),
+              "no date of birth, no band");
+        check(!ageBandFor(dob, QDate()).has_value(),
+              "no swing date, no band — never silently substituting today");
+        check(!ageBandFor(QDate(2030, 1, 1), QDate(2026, 7, 28)).has_value(),
+              "born after the swing is nonsense, and resolves nothing rather than a junior");
+
+        // A leap-day birthday falls on 28 February in a non-leap year, which is QDate::addYears'
+        // clamping and one of the two readings jurisdictions actually use (the other is 1 March).
+        // Pinned so the behaviour is a decision rather than an accident — the disagreement is one
+        // day, once every four years, at a band boundary that is itself a round number.
+        check(ageBandFor(QDate(2008, 2, 29), QDate(2026, 2, 27)) == AgeBand::Junior,
+              "a leap-day birthday has not occurred on 27 February");
+        check(ageBandFor(QDate(2008, 2, 29), QDate(2026, 2, 28)) == AgeBand::Adult18_54,
+              "…and is taken to occur on the 28th in a non-leap year");
+    }
+
+    std::printf("=== cohort: from the two fields an athlete record holds ===\n");
+    {
+        const QDate dob(1960, 1, 1);
+        const QDate on(2026, 7, 28);
+
+        check(cohortFor(dob, QStringLiteral("female"), on) == coh(Sex::Female, AgeBand::Adult65Plus),
+              "both fields known gives both axes");
+
+        // Every way of not answering lands on the same place: the axis is unset, and unset RESOLVES
+        // — against the corridor for everyone. It is never "not measured".
+        check(cohortFor(dob, QString(), on) == coh(std::nullopt, AgeBand::Adult65Plus),
+              "an unanswered sex leaves that axis unset and keeps the age");
+        check(cohortFor(dob, QStringLiteral("declined"), on)
+                  == cohortFor(dob, QString(), on),
+              "…and a DECLINED answer resolves identically to an unanswered one");
+        check(cohortFor(dob, QStringLiteral("from-a-newer-build"), on)
+                  == cohortFor(dob, QString(), on),
+              "…as does a token this build does not know: unknown means unknown, not wrong");
+        check(cohortFor(QDate(), QStringLiteral("male"), on) == coh(Sex::Male),
+              "no date of birth leaves the age unset and keeps the sex");
+        check(cohortFor(QDate(), QString(), on).isUnqualified(),
+              "neither answered is the unqualified cohort — which matches everyone");
+
+        // And that unqualified cohort is exactly the one probe order that costs what resolution
+        // always cost, which is what makes "we know nothing about you" free rather than a penalty.
+        check(cohortProbeOrder(cohortFor(QDate(), QString(), on)).size() == 1,
+              "…and it probes one key, so knowing nothing costs nothing");
+    }
+
     std::printf("=== cohort: resolution, exhaustively at one node ===\n");
     {
         const Cohort athlete = coh(Sex::Female, AgeBand::Adult55_64);

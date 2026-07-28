@@ -20,6 +20,8 @@
 
 #include "pp_settings.h"
 #include "club_vocabulary.h"
+#include "../../Diagnostics/norm_pack.h"   // Cohort, cohortFor(), cohortToMap()
+#include <QDate>
 #include <QUuid>
 #include <QDateTime>
 #include <algorithm>
@@ -36,6 +38,11 @@ static constexpr auto kHandicap      = "handicap";
 static constexpr auto kPrimaryClub   = "primaryClub";
 static constexpr auto kSpeedTarget   = "speedTarget";
 static constexpr auto kNotes         = "notes";
+// Demographics, both optional, both absent on every record written before norm cohorts
+// existed. Stored as strings: an ISO date and a stable token, so a value this build does
+// not recognise degrades to "unknown" rather than to a wrong answer.
+static constexpr auto kDob           = "dob";
+static constexpr auto kSex           = "sex";
 static constexpr auto kCreatedAt     = "createdAt";
 static constexpr auto kLastSessionAt = "lastSessionAt";
 static constexpr auto kSessionCount  = "sessionCount";
@@ -118,6 +125,8 @@ void AthleteController::reload()
         m[QStringLiteral("primaryClub")]   = normalizeClubId(s.value(kPrimaryClub, QStringLiteral("DRIVER")).toString());
         m[QStringLiteral("speedTarget")]   = s.value(kSpeedTarget,  0.0).toDouble();
         m[QStringLiteral("notes")]         = s.value(kNotes,        QString()).toString();
+        m[QStringLiteral("dob")]           = s.value(kDob,          QString()).toString();
+        m[QStringLiteral("sex")]           = s.value(kSex,          QString()).toString();
         m[QStringLiteral("createdAt")]     = s.value(kCreatedAt,    0LL).toLongLong();
         m[QStringLiteral("lastSessionAt")] = s.value(kLastSessionAt,0LL).toLongLong();
         m[QStringLiteral("sessionCount")]  = s.value(kSessionCount, 0).toInt();
@@ -267,6 +276,59 @@ QString AthleteController::createAthlete(
                        heightValue, heightUnit,
                        weightValue, weightUnit,
                        handicap, primaryClub, speedTarget, notes);
+}
+
+// ── Demographics, for norm cohorts ──────────────────────────────────────────
+
+QVariantMap AthleteController::cohortFor(const QString &uuid, const QString &onIsoDate) const
+{
+    using namespace pinpoint::analysis;
+
+    for (const QVariant &v : m_athletes) {
+        const QVariantMap a = v.toMap();
+        if (a.value(QStringLiteral("uuid")).toString() != uuid) continue;
+
+        // Both dates parsed rather than defaulted. An unparseable or absent swing date yields an
+        // invalid QDate, and ageBandFor answers "unknown" for it — which is right: substituting
+        // today would grade an old swing against the band this golfer is in NOW, and that is the
+        // one mistake deriving-at-the-swing-date exists to prevent.
+        const QDate dob = QDate::fromString(a.value(QStringLiteral("dob")).toString(), Qt::ISODate);
+        const QDate on  = QDate::fromString(onIsoDate, Qt::ISODate);
+
+        // Qualified: this member has the same name, so unqualified lookup would find it in class
+        // scope, stop there, and suppress ADL.
+        return cohortToMap(
+            pinpoint::analysis::cohortFor(dob, a.value(QStringLiteral("sex")).toString(), on));
+    }
+    return {};                     // no such athlete: unqualified, which grades against everyone
+}
+
+QString AthleteController::cohortLabelFor(const QString &dobIsoDate, const QString &sex,
+                                          const QString &onIsoDate) const
+{
+    using namespace pinpoint::analysis;
+    // Qualified for the reason cohortFor() above is: the member of the same name is found by
+    // ordinary lookup in class scope, which stops the search and suppresses ADL.
+    return cohortLabel(pinpoint::analysis::cohortFor(
+        QDate::fromString(dobIsoDate, Qt::ISODate), sex,
+        QDate::fromString(onIsoDate, Qt::ISODate)));
+}
+
+QVariantList AthleteController::sexOptions() const
+{
+    // "Prefer not to say" is stored as its own token rather than as an empty string. The two mean
+    // the same thing to a norm — only rows unqualified on that axis can match — but they do not
+    // mean the same thing to the person: an answer they gave has to survive re-opening the form,
+    // and a blank field would read as never having been asked.
+    auto opt = [](const char *value, const char *label) {
+        QVariantMap m;
+        m.insert(QStringLiteral("value"), QString::fromLatin1(value));
+        m.insert(QStringLiteral("label"), label ? QObject::tr(label) : QString());
+        return QVariant(m);
+    };
+    return { opt("female",   QT_TR_NOOP("Female")),
+             opt("male",     QT_TR_NOOP("Male")),
+             opt("declined", QT_TR_NOOP("Prefer not to say")) };
 }
 
 bool AthleteController::updateAthlete(const QString &uuid, const QString &fieldName, const QVariant &value)

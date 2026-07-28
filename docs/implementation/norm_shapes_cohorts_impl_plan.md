@@ -37,7 +37,7 @@ rule in there survives this work.
 | — | **merge gate · Part B does not begin until Part A is merged and green** | ☑ Part A complete, 80/80 | |
 | B1 | Cohort schema, parse, validation, resolution | ☑ complete — 80/80, +53 assertion sites | 2026-07-28 |
 | B2 | Cohort provenance threading + surfaces | ☑ complete — 80/80, +46 assertion sites | 2026-07-28 |
-| B3 | Athlete DOB and sex, age at swing date | ☐ not started | |
+| B3 | Athlete DOB and sex, age at swing date | ☑ complete — 80/80, +24 assertion sites | 2026-07-28 |
 | B4 | norms.json header — no cohort content, and why | ☐ not started | |
 
 State vocabulary: ☐ not started · ◐ in progress · ☑ complete (gate green) · ⚠ blocked.
@@ -62,6 +62,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-28 | A5 | **Part A's first and only content change.** `m_smashFactor` ships as a `floor`; the four rows keep their mu/sigma and gain per-context `plausibleHi` caps (1.56 / 1.56 / 1.45 / 1.32) with the physics-of-loft reasoning in `citation` and no commercial sources. The norms.json header records where shape lives and why, what plausibility is FOR, the five candidates deliberately not converted with their reasons, and that cohort-relative bigger-is-better measures get no norm at all. New `seed_conversion_test` (**the suite goes 79 → 80**) gates the behavioural delta on shipped content: 1.55 Good → **Ideal**, 1.62 Watch → **NotMeasured + implausible**, 1.30 Action either way — plus that shape ships on exactly ONE measure, that the caps fall with loft, and that the shipped set still validates. It pins no mu or sigma: those are heuristics meant to move. ⚠ **Three suites failed on the content change and each was right to** — `reference_bands_test`'s parity sweep over-claimed (a `Band` cannot express a plausibility cap; it now states its domain and asserts no wrist cell is excluded, which is the guard the non-goals wanted from `NormBandProvider`), and two tests used smash factor as their two-sided control, which stopped controlling the moment it became a floor. Next: **Part B is now unblocked** — B1. |
 | 2026-07-28 | B1 | `Cohort{optional<Sex>, optional<AgeBand>}` on the norm row; the age vocabulary is a closed enum with the boundary reasoning in `norm.h`. Key, parse, write, layering and resolution all carry it: `find`/`contains`/`upsert`/`remove` take a cohort, `contextsFor` DEDUPES (one context, several cohort rows), and `isOverridden`/`shippedNorm` key on the triple so a qualified override cannot mark the unqualified row beside it as edited. Resolution is **context-major** — `cohortProbeOrder()` is a free function returning the six keys, probed inside the context walk — and an athlete we know nothing about yields **exactly one probe**, so resolution costs what it always did. norm.h's doctrine reworded to "never keyed by athlete id". ⚠ **The three planned validations resolved to two and neither landed where the plan put them** — see the stage table: unknown token is a PARSE error that **drops the row** (the fallback is UNQUALIFIED, which grades everyone), duplicate-on-the-triple fell out of the key, and junior+adult-sub-band is unrepresentable, so `shadowedCohort` replaces it. Schema is 2, written **content-driven**. Fact 21 / N4 closed: one `normKeyLabel`/`splitNormKey` pair, deep-link fixed. ⚠ **`labelOf` was reading UTF-8 labels as Latin-1** — invisible while every label was ASCII, mojibake the moment an en dash arrived. 80/80, +53 assertion sites incl. the probe order exhaustively, the six-row drop-one-at-a-time walk, context-major precedence both ways, and a regression sweep asserting every shipped resolution answers identically for any athlete. App builds; headless clean. Next: B2. |
 | 2026-07-28 | B2 | `NormResolution::cohort()` is an ACCESSOR over the answering row, not a second copy of it; `MetricCorridor` and `MeasureReading` each gain the answering cohort, and `corridorForMetricAtPhase` / `NormMeasureSource` each gain a defaulted `athlete` — read, testable, and the opposite of the A1 dead-parameter case, because without them the two new fields could only ever answer "unqualified". Marshalled at `metric_catalog` (per corridor and metric-wide), `normAt` and the editor's `draft()`, as BOTH a machine map and a label: `cohortLabel` lives with the vocabulary for the reason `normSourceLabel` does. **The measure-detail list now carries per-cohort rows** — the plan's own ⚠ about `editCorridor` only means something if a row can carry a non-default cohort, and without it an authored cohort row would appear in no view while still grading people. Own rows only; cohort inheritance is deliberately not rendered. The editor holds the cohort as row identity end to end (seed, `m_hadOwnRow`, save, basis, reset) and **refuses** an unreadable one; `CorridorEditor` states which population it is editing in a whole accented sentence, because the two panels are otherwise identical. ⚠ **Fixed in passing: `normAt` diffed a cohort row against the UNQUALIFIED shipped row.** ⚠ **`norm_model_test` had no isolated XDG_DATA_HOME** — it was reading the developer's own user norm set; it has one now, and the new block writes through the real layering path rather than a fixture. 80/80, +46 assertion sites across five suites. App builds; headless clean; qmllint deltas are `[unqualified]` Theme cascade only. Next: B3. |
+| 2026-07-28 | B3 | `ageBandFor(dob, on)` and `cohortFor(dob, sexToken, on)` land in **norm.h**, beside the vocabulary whose boundaries they implement — derived at the SWING date and never stored, and never producing the parent `adult` band, which `cohortProbeOrder` depends on. The athlete record gains optional `dob` + `sex`, written through the generic `updateAthlete` rather than as arguments twelve and thirteen of `saveAthlete`. `sex` stores **`declined`** as its own token: identical to unanswered for a norm, different to the person, and a blank field would read as never having been asked. Every way of not answering — empty, declined, a token from a newer build — leaves the axis unset and **still grades**, and the unqualified cohort is the one-probe case, so knowing nothing costs nothing. ⚠ **Ledger N6 / fact 19 closed**: `PersistedShot` now carries `athleteUuid`/`athleteName`, which the reader had dropped for its whole existence — the uuid plus `wallclockMs` are what a cohort is derived from, and without them offline re-analysis and the live path could grade one swing two ways with nothing reporting the disagreement. NOT added to `SwingSummary`: it grades nothing, so the field would ride in the sidecar with no reader. **Screen: the athlete form's Recommended section gains both fields, and a live line saying what they resolve to** — "Today this places you in: women 55–64" — which is what gives `cohortFor` a real caller and makes the band boundaries discoverable instead of buried in a header comment. 80/80, +24 assertion sites: both sides of all three band boundaries, two swings a day apart resolving DIFFERENT bands, a leap-day birthday pinned to the 28th, and every not-answered path. App builds; headless clean; qmllint delta is the Theme cascade only. Next: B4. |
 
 ---
 
@@ -978,6 +979,38 @@ scratch directory rather than in a real profile.
 **Screen:** two new optional fields in the athlete form's Recommended section — date of birth
 and sex, the latter with a decline option. Nothing else, until cohort content exists.
 
+**The derivation lives in `norm.h`, not in the athlete controller.** `ageBandFor(dob, on)` and
+`cohortFor(dob, sexToken, on)` are the vocabulary's own semantics — the boundaries they implement
+are documented on `AgeBand` three lines above them — and putting them in the controller would make
+the one rule that decides which corridor grades somebody a property of a QSettings-backed QML
+façade. The controller's `cohortFor(uuid, date)` is a six-line lookup that forwards.
+
+**`declined` is stored as its own token.** It means the same thing to a norm as an unanswered
+question — only rows unqualified on that axis can match — but not to the person: an answer they gave
+has to survive re-opening the form, and a blank field reads as never having been asked.
+
+**Every unreadable sex token leaves the axis unset, which is the OPPOSITE of the norm parser's
+rule.** An unreadable token on a norm row would silently widen a corridor's scope to the whole
+population, so B1 drops the row. Here it means only "we do not know", which is a state resolution
+already handles correctly and grades through. Same word, different failure, different answer.
+
+**A LIVE LINE IN THE FORM, and it is the reason `cohortFor` has a caller at all.** Two fields whose
+only consequence is invisible would be two fields nobody fills in — and the band boundaries would be
+discoverable only by reading a header comment. The form now says *"Today this places you in: women
+55–64"* under the picker. It says **today** out loud, because the band is derived at the swing date:
+this is a preview of now, and a swing from four years ago resolves the band they were in then.
+
+**⚠ `SwingSummary` deliberately did NOT get the athlete block**, though fact 19 names it alongside
+`PersistedShot`. It is the session-picker row and it grades nothing, so a field on it would ride in
+the sidecar with no reader — and every sidecar written before today would carry a blank one until
+its `swing.json` happened to change. `PersistedShot` is the reload path that feeds anything which
+could grade, and it is the one the fix belongs to.
+
+**Leap-day birthdays fall on 28 February in a non-leap year** — `QDate::addYears`' clamping, and one
+of the two readings jurisdictions actually use (the other is 1 March). Pinned by a test so it is a
+decision rather than an accident. The disagreement is one day, once every four years, at a band
+boundary that is itself a round number.
+
 ### B4 — norms.json header
 
 Record in the header that cohort rows arrive with the ROM literature review (thorax rotation,
@@ -1062,7 +1095,9 @@ resolved with the stage that closed it.
 | N3 | `m_handSpeedP6P7` sign convention — deceleration vs release-drag — unresolved. | A5 | open |
 | N4 | The two `@` norm-key spellings, and the whitespace they leave on the health view's deep-link. | B1 | ☑ **closed in B1** — one `normKeyLabel(measureId, contextId, cohort)` / `splitNormKey()` pair in `norm_pack.h`, used by all four sites. The cohort term is fenced behind ` · `, which no id can contain, so the split is an exact inverse rather than a heuristic |
 | N5 | `contextFromMap()` never sets `band.contextId`, so every live UI norm lookup resolves at `full_swing`. Not caused by this work; it caps what cohort provenance can show. | B2 | open — belongs to *Diagnosis execution, V&V* |
-| N6 | `SwingSummary`/`PersistedShot` drop the athlete block on read-back. | B3 | open — fix in B3 |
+| N6 | `SwingSummary`/`PersistedShot` drop the athlete block on read-back. | B3 | ☑ **closed in B3 for `PersistedShot`** — `athleteUuid`/`athleteName` are read and gated in `swing_doc_test`. `SwingSummary` deliberately NOT changed: it grades nothing, so the field would ride in the sidecar with no reader and every existing sidecar would carry a blank one |
+| N29 | **`AthleteController::cohortFor(uuid, date)` has no caller.** The last hop — shot → athlete uuid + wallclock → cohort → `MetricCatalog` → `corridorForMetricAtPhase(…, athlete)` — needs `addPersistedShot` to carry the uuid through to a QML role and into `shotCtx`, which is the same shot-context plumbing N5 already blocks. Half of it would leave a second half-wired path. `cohortLabelFor` (the form's live preview) IS called, so the derivation itself is exercised end to end. | B3 | open — with N5, *Diagnosis execution, V&V* |
+| N30 | **A swing does not record the athlete's demographics at capture time.** The cohort is derived from the CURRENT record plus the swing's date, which is right for a date of birth (it does not change) and questionable for offline tools: `swinglab_run` re-analyses with no QSettings, so it can resolve no cohort at all. Deliberately not added to `swing.json` — it is per-swing personal data with one consumer that does not exist yet. Revisit if offline grading needs a cohort. | B3 | open by design |
 | N7 | The 16 male-only-sample rows (Meister 2011, Kim 2018) are the natural first cohort content, deferred to the ROM literature review by decision 6 of the brief. | B4 | open by design |
 | N8 | `normZ()` has no production caller. It is made shape-aware for the future 0–100 score; nothing verifies it end to end today. | A2 | open by design |
 | N9 | The engine (`detect()`, `NormMeasureSource`) is dormant, so A3 has no live verification. | A3 | open — belongs to *Diagnosis execution, V&V* |

@@ -30,10 +30,43 @@ Item {
 
     // ── Form state ────────────────────────────────────────────────────────────
     property bool   nameError:      false
+    property bool   dobError:       false
     property string handedness:     "Right"
     property string heightUnit:     "ft"
     property string weightUnit:     "lb"
     property string primaryClub:    "DRIVER"
+    // "" (never answered) | "female" | "male" | "declined". The tokens come from C++ and are never
+    // spelled here — see sexOptions below.
+    property string sex:            ""
+
+    // The sex picker's vocabulary, from the controller: {value, label} per option. QML maps between
+    // the two over THIS list, so the stored token exists in exactly one place.
+    readonly property var    sexOptions: athleteController.sexOptions()
+    readonly property var    sexLabels:  root.sexOptions.map(function (o) { return o.label })
+
+    function sexLabelFor(value) {
+        for (var i = 0; i < root.sexOptions.length; ++i)
+            if (root.sexOptions[i].value === value) return root.sexOptions[i].label
+        return ""
+    }
+    function sexValueFor(label) {
+        for (var i = 0; i < root.sexOptions.length; ++i)
+            if (root.sexOptions[i].label === label) return root.sexOptions[i].value
+        return ""
+    }
+
+    // Blank is VALID — both fields are optional and unset is a real answer. Only a non-empty value
+    // that is not a real date is an error, so a half-typed date does not accuse anybody of anything
+    // until they leave the field.
+    function dobOk(text) {
+        var t = String(text).trim()
+        if (t.length === 0) return true
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return false
+        var d = new Date(t + "T00:00:00")
+        if (isNaN(d.getTime())) return false
+        // Round-trip: "2026-02-31" parses in JS by rolling over into March.
+        return d.toISOString().slice(0, 10) === t
+    }
 
     // "" = create mode; a uuid = edit that athlete.
     property string editUuid: ""
@@ -66,7 +99,10 @@ Item {
         primaryClub        = "DRIVER"
         speedField.text    = ""
         notesField.text    = ""
+        dobField.text      = ""
+        sex                = ""
         nameError          = false
+        dobError           = false
     }
 
     function loadForEdit() {
@@ -98,12 +134,17 @@ Item {
                                    : a.weightValue.toFixed(1))
             : ""
 
+        dobField.text = a.dob || ""
+        sex           = a.sex || ""
+
         nameError = false
+        dobError  = false
     }
 
     function validate(): bool {
         nameError = nameField.text.trim() === ""
-        return !nameError
+        dobError  = !root.dobOk(dobField.text)
+        return !nameError && !dobError
     }
 
     function doSave(): string {
@@ -113,7 +154,7 @@ Item {
         const handicap = isNaN(hcp) ? -999.0 : hcp
         const speed = parseFloat(speedField.text) || 0.0
 
-        return athleteController.saveAthlete(
+        const uuid = athleteController.saveAthlete(
             root.editUuid,            // "" creates, uuid updates
             nameField.text.trim(),
             handedness,
@@ -124,6 +165,16 @@ Item {
             speed,
             notesField.text.trim()
         )
+
+        // Written through the generic field setter rather than as two more positional arguments on
+        // a call that already takes eleven. They are demographics for norm cohorts and nothing else
+        // reads them, so they do not belong in the signature every caller of saveAthlete has to
+        // thread through.
+        if (uuid !== "") {
+            athleteController.updateAthlete(uuid, "dob", dobField.text.trim())
+            athleteController.updateAthlete(uuid, "sex", root.sex)
+        }
+        return uuid
     }
 
     ScrollView {
@@ -463,6 +514,95 @@ Item {
                                         target: root
                                         function onPrimaryClubChanged() { primaryClubCombo.syncFromValue() }
                                     }
+                                }
+                            }
+
+                            // ── Date of birth and sex ────────────────────────
+                            //
+                            // Both OPTIONAL, and the caption says so and says why. Asking somebody
+                            // for their sex without stating what it is used for is worse than not
+                            // asking; and unset has to read as a legitimate answer, because it is —
+                            // a golfer who leaves both blank is graded by the corridor that
+                            // describes everyone, never "not measured".
+                            Column {
+                                width:   parent.width
+                                spacing: Theme.sp(4)
+                                Text {
+                                    text:               qsTr("DATE OF BIRTH")
+                                    font.family:        Theme.fontData
+                                    font.pixelSize:     Theme.fontSzMicro
+                                    font.letterSpacing: Theme.trackingLabel
+                                    color:              Theme.colorText3
+                                }
+                                PpTextField {
+                                    id: dobField
+                                    width:           Theme.sp(140)
+                                    placeholderText: "YYYY-MM-DD"
+                                    hasError:        root.dobError
+                                    onTextChanged:   if (root.dobError && root.dobOk(text)) root.dobError = false
+                                    onEditingFinished: root.dobError = !root.dobOk(text)
+                                }
+                                Text {
+                                    visible:        root.dobError
+                                    height:         root.dobError ? implicitHeight : 0
+                                    text:           qsTr("Use YYYY-MM-DD, or leave it blank")
+                                    font.family:    Theme.fontData
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorWarn
+                                }
+                            }
+
+                            Column {
+                                width:   parent.width
+                                spacing: Theme.sp(4)
+                                Text {
+                                    text:               qsTr("SEX")
+                                    font.family:        Theme.fontData
+                                    font.pixelSize:     Theme.fontSzMicro
+                                    font.letterSpacing: Theme.trackingLabel
+                                    color:              Theme.colorText3
+                                }
+                                // The chips show labels and carry TOKENS. Both come from C++
+                                // (athleteController.sexOptions), so the stored spelling exists in
+                                // one place — QML maps between the two over that list and never
+                                // writes a token itself.
+                                PpChipGroup {
+                                    options:  root.sexLabels
+                                    selected: root.sexLabelFor(root.sex)
+                                    onSelectionChanged: function(v) { root.sex = root.sexValueFor(v) }
+                                }
+                                Text {
+                                    width:          parent.width
+                                    text:           qsTr("Optional. Used only to pick the normative corridor a reading is graded against — leave either blank and you are graded against the general one.")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorText3
+                                    wrapMode:       Text.WordWrap
+                                }
+
+                                // What the two fields above actually RESOLVE to, live. Without it a
+                                // date and a word have no visible consequence, and the band
+                                // boundaries are discoverable only by reading a header comment.
+                                //
+                                // "Today" is said out loud because the band is derived at the SWING
+                                // date, not stored — so this is a preview of now, and a swing from
+                                // four years ago will resolve the band this golfer was in then.
+                                Text {
+                                    width:   parent.width
+                                    visible: text.length > 0
+                                    text: {
+                                        if (root.dobError) return ""
+                                        var who = athleteController.cohortLabelFor(
+                                            dobField.text.trim(), root.sex,
+                                            new Date().toISOString().slice(0, 10))
+                                        return who.length > 0
+                                            ? qsTr("Today this places you in: %1").arg(who)
+                                            : ""
+                                    }
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorAccent
+                                    wrapMode:       Text.WordWrap
                                 }
                             }
                         }

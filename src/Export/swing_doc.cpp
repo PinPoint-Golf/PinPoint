@@ -676,6 +676,15 @@ PersistedShot SwingDocReader::readSwingJson(const QString &swingDir)
     ps.thumbnailPath  = sum.thumbnailPath;
     ps.score          = sum.score;
 
+    // WHO swung it. Read here and NOT into SwingSummary: the summary is the session-picker row and
+    // it grades nothing, so a field on it would ride in the sidecar with no reader — and an old
+    // sidecar would carry a blank one until swing.json happened to change. Both are absent on a
+    // document written before the exporter recorded them, which reads as "unknown athlete" and
+    // resolves the universal corridor.
+    const QJsonObject athlete = root[QStringLiteral("athlete")].toObject();
+    ps.athleteUuid    = athlete[QStringLiteral("uuid")].toString();
+    ps.athleteName    = athlete[QStringLiteral("name")].toString();
+
     // Only video presence is reconstructed here. imu / pose streams and the raw
     // sidecar are not parsed on reload yet — see the "Reload & replay consumer
     // contract" in docs/developer/swing_export_developer_guide.md for the shapes a future

@@ -77,6 +77,36 @@ public:
 
     Q_INVOKABLE bool updateAthlete(const QString &uuid, const QString &fieldName, const QVariant &value);
 
+    // ── Demographics, for norm cohorts ──────────────────────────────────────
+    //
+    // `dob` ("YYYY-MM-DD") and `sex` ("male" | "female" | "declined" | "") ride on the record as two
+    // more fields, written through updateAthlete rather than by growing saveAthlete's positional
+    // signature to twelve arguments. BOTH ARE OPTIONAL and unset is a first-class answer: a norm
+    // resolves against whatever axes are known, and a golfer who has told us nothing is graded by
+    // the corridor that describes everyone. Never NotMeasured — "we don't know your age" and "we
+    // could not assess this" are different statements.
+    //
+    // The COHORT for this athlete on a given day, spelled as the norm set spells it
+    // ({ sex, age }, each key present only when known). `onIsoDate` is the SWING's date, and passing
+    // it is the whole point: an athlete ages across their own history, so a swing from four years
+    // ago must resolve the band they were in then. An empty date yields no age band at all rather
+    // than silently substituting today — a caller that does not know when the swing happened must
+    // not be answered as though it were now.
+    Q_INVOKABLE QVariantMap cohortFor(const QString &uuid, const QString &onIsoDate) const;
+
+    // The same answer in words — "women 55–64", or EMPTY when neither field is known — from raw
+    // values rather than from a saved record, so the form can show it while it is being typed.
+    //
+    // The form is where these two fields are otherwise abstract: a date and a word, with no visible
+    // consequence. Rendering what they resolve to says what they are FOR in the reader's own
+    // numbers, and it makes the band boundaries discoverable instead of buried in a header comment.
+    // Empty is a real answer and reads as one — nothing known, graded against everyone.
+    Q_INVOKABLE QString cohortLabelFor(const QString &dobIsoDate, const QString &sex,
+                                       const QString &onIsoDate) const;
+
+    // The stable tokens the form's picker offers, so QML never spells them itself.
+    Q_INVOKABLE QVariantList sexOptions() const;
+
     // Per-athlete club records (Settings live under athletes/<uuid>/clubs as a
     // QVariantMap keyed by the canonical club-vocabulary name — the same id
     // markup writes to truth.json meta.club). Record shape:

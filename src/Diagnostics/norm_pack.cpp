@@ -174,6 +174,39 @@ std::vector<Cohort> cohortProbeOrder(const Cohort &athlete)
     return out;
 }
 
+std::optional<AgeBand> ageBandFor(const QDate &dob, const QDate &on)
+{
+    if (!dob.isValid() || !on.isValid())
+        return std::nullopt;
+
+    // Whole years completed, birthday-aware. addYears() clamps 29 February to the 28th in a
+    // non-leap year, which is the ordinary legal reading of a leap-day birthday and is the one
+    // behaviour here that is worth not reinventing.
+    int age = on.year() - dob.year();
+    if (on < dob.addYears(age))
+        --age;
+
+    if (age < 0)
+        return std::nullopt;        // born after the swing: nonsense, and not a junior
+
+    if (age < 18) return AgeBand::Junior;
+    if (age < 55) return AgeBand::Adult18_54;
+    if (age < 65) return AgeBand::Adult55_64;
+    return AgeBand::Adult65Plus;
+}
+
+Cohort cohortFor(const QDate &dob, const QString &sexToken, const QDate &on)
+{
+    Cohort c;
+
+    Sex s{};
+    if (sexFromName(sexToken, s))
+        c.sex = s;                  // anything else — empty, "declined", unknown — leaves it unset
+
+    c.age = ageBandFor(dob, on);
+    return c;
+}
+
 // ── Saying what a corridor is, in words ─────────────────────────────────────
 
 QString normNumber(double v)

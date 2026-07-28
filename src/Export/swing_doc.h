@@ -60,6 +60,16 @@ struct PersistedShot {
     int         ordinal = 0;
     QString     timestampLabel;     // hh:mm:ss from clock.wallclock
     qint64      wallclockMs = 0;    // absolute instant from clock.wallclock (epoch ms; 0 = unknown)
+    // WHO swung it. swing.json has carried these since the exporter's first version and the reader
+    // dropped them, so a reloaded shot knew when it happened and not who it belonged to.
+    //
+    // The uuid is what a norm COHORT is resolved through: the athlete record holds the date of
+    // birth, `wallclockMs` holds the day, and the band is derived from the two at read time — never
+    // stored, because an athlete ages across their own history. Without the uuid here, an offline
+    // re-analysis and the live path would resolve different cohorts for the same swing and grade it
+    // two ways, with nothing anywhere reporting a disagreement.
+    QString     athleteUuid;
+    QString     athleteName;        // display only; the uuid is the key
     QString     club;
     bool        hasVideo = false;
     QString     thumbnailPath;      // absolute, empty if none
