@@ -1933,6 +1933,34 @@ if(ESPEAK_FOUND)
     target_link_directories(PinPointStudio PRIVATE ${ESPEAK_LIBRARY_DIRS})
     target_compile_definitions(PinPointStudio PRIVATE HAVE_ESPEAK_NG)
     message(STATUS "espeak-ng ${ESPEAK_VERSION}: system")
+
+    if(APPLE)
+        # PhonemeTokenizer.cpp passes <bundle>/Contents/Resources to espeak_Initialize
+        # unconditionally on macOS, so the phoneme tables must be there even when we
+        # link the *system* library — otherwise espeak fails with
+        # "Error processing file '.../Resources/phontab'" and TTS never initialises.
+        # Homebrew keeps them in <prefix>/share/espeak-ng-data; the source-built path
+        # below does the equivalent copy from ${espeak_ng_BINARY_DIR}.
+        find_path(ESPEAK_NG_DATA_DIR
+            NAMES phontab
+            HINTS "${ESPEAK_PREFIX}" "${_brew_espeak}" "${ESPEAK_LIBRARY_DIRS}/.."
+            PATH_SUFFIXES espeak-ng-data share/espeak-ng-data
+        )
+        if(ESPEAK_NG_DATA_DIR)
+            add_custom_command(TARGET PinPointStudio POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${ESPEAK_NG_DATA_DIR}"
+                    "$<TARGET_BUNDLE_CONTENT_DIR:PinPointStudio>/Resources/espeak-ng-data"
+                COMMENT "Bundling system espeak-ng data into app"
+            )
+            message(STATUS "espeak-ng data: ${ESPEAK_NG_DATA_DIR}")
+        else()
+            message(WARNING
+                "espeak-ng data (phontab) not found near ${ESPEAK_PREFIX} — TTS will fail "
+                "at runtime with \"Error processing file '.../Resources/phontab'\". "
+                "Set -DESPEAK_NG_DATA_DIR=<dir containing phontab>.")
+        endif()
+    endif()
 else()
     # 1.52.0 is the first espeak-ng release with a CMake build system.
     # PATCH_COMMAND changes the espeak-include link from PUBLIC to PRIVATE so
