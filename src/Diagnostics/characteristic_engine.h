@@ -62,6 +62,17 @@ struct MeasureReading {
     // a diagnosis's clothes. Good (|z| <= 2) is ordinary variation and says so.
     Grade grade = Grade::NotMeasured;
 
+    // Which tail of this corridor does not grade, from the MEASURE's shape. A signal pointing at an
+    // open tail can never fire, and says so here rather than being discovered by arithmetic.
+    bool  lowOpen  = false;
+    bool  highOpen = false;
+
+    // The value fell outside what the norm is willing to believe, so `grade` is NotMeasured. A
+    // THIRD state, and it must not be folded into either neighbour: "we could not assess this"
+    // (no producer, no corridor) and "this reading is not real — check the capture" call for
+    // different actions, and neither is "this is fine". See Norm::plausibleLo.
+    bool  implausible = false;
+
     // Where the norm came from, for the UI's "inherited from full swing" line. Empty when none
     // resolved.
     QString normContextId;

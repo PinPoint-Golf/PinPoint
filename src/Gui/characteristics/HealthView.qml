@@ -127,6 +127,7 @@ Item {
 
         // The assembled-library checks.
         case "signalNoNorm":           return qsTr("Nothing to compare against — the signal cannot fire")
+        case "signalOnOpenTail":       return qsTr("Watching a tail this measure never grades")
         case "personalNormNoSample":   return qsTr("Your corridor, seated on no swings")
         case "clubDependentNoContext": return qsTr("Club-dependent, but graded by one corridor")
         case "emptyContext":           return qsTr("A context that changes no grade")

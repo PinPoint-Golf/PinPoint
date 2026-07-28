@@ -112,14 +112,33 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
             v.missing << sig.measures.value(0);
             return v;
         }
+        // A reading the norm does not believe was NOT ASSESSED, and the finding must say so. It is
+        // not "we looked and this is fine" — the value is a capture fault, and reporting it as
+        // NotFired would be a false negative wearing a clean bill of health. Unavailable is the
+        // state that exists for exactly this, and `implausible` is what lets the UI say which of
+        // the two reasons applies.
+        if (r.implausible) {
+            v.available = false;
+            v.missing << sig.measures.value(0);
+            return v;
+        }
+
         const Direction d = sig.direction.value_or(Direction::High);
+
+        // A signal pointing at a tail the norm never grades CANNOT fire, and says so outright
+        // rather than reaching the same answer by arithmetic. On a floor the high edge is mu and
+        // everything above it grades Ideal, so `deviated` would already be false — but that is a
+        // coincidence of two other rules, and an author who wrote this signal has misunderstood
+        // the measure. `diagnostics_health` reports it as `signalOnOpenTail` at validation time.
+        const bool tailOpen = (d == Direction::High) ? r.highOpen : r.lowOpen;
+
         // Two conditions, both required. The GRADE decides whether this is a deviation at all
         // (Watch or Action — see MeasureReading::grade for why not merely "outside Ideal"), and the
         // SIDE decides whether it is this tail's deviation. An axis has two conditions on one norm,
         // so without the side check both tails would fire on any deviation in either direction.
         const bool deviated = isDeviation(r.grade);
         const bool onTail   = (d == Direction::High) ? (r.value > r.greenHi) : (r.value < r.greenLo);
-        v.fired = deviated && onTail;
+        v.fired = !tailOpen && deviated && onTail;
 
         // A context the shot never declared is a weaker basis for a finding than one it did. Reuse
         // the confidence channel rather than inventing a second signal for it — assessment_rules
@@ -145,10 +164,19 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
         const double ratio = readings[0].value / denom;
         const MeasureReading &r = readings.front();
         if (!r.hasCorridor) { v.available = false; v.missing = sig.measures; return v; }
+        if (r.implausible || readings[1].implausible) {
+            // Same rule as the corridor branch: a ratio built from a reading nobody believes was
+            // not assessed, whichever half of it was wrong.
+            v.available = false;
+            v.missing   = sig.measures;
+            return v;
+        }
         const Direction d = sig.direction.value_or(Direction::High);
         // The ratio is computed here, so the reading's own grade (which grades readings[0]'s value,
         // not the ratio) does not apply. The corridor edges do.
-        v.fired = (d == Direction::High) ? (ratio > r.greenHi) : (ratio < r.greenLo);
+        const bool ratioTailOpen = (d == Direction::High) ? r.highOpen : r.lowOpen;
+        v.fired = !ratioTailOpen
+                  && ((d == Direction::High) ? (ratio > r.greenHi) : (ratio < r.greenLo));
         if (r.contextInferred) v.confidence *= kInferredContextConfidence;
         break;
     }

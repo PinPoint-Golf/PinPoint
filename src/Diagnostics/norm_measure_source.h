@@ -64,12 +64,17 @@ public:
 //                            characteristic reports Unavailable.
 class NormMeasureSource final : public IMeasureSource {
 public:
+    // `pack` supplies the measure's SHAPE, which lives on the measure and nowhere else. Optional
+    // and null-safe: without it every measure reads as a Target, which is what this source did
+    // before shapes existed and is right for 105 of the 106 shipped measures. A caller that has a
+    // pack should pass it — a floor graded as a target penalises its good tail.
     NormMeasureSource(const IMeasureValueSource          &values,
                       std::shared_ptr<const INormProvider> norms,
                       QString                              contextId = QString(),
-                      GradePolicy                          policy    = {})
+                      GradePolicy                          policy    = {},
+                      const CharacteristicPack            *pack      = nullptr)
         : m_values(values), m_norms(std::move(norms)),
-          m_contextId(std::move(contextId)), m_policy(policy)
+          m_contextId(std::move(contextId)), m_policy(policy), m_pack(pack)
     {
     }
 
@@ -90,17 +95,23 @@ public:
         if (!res.found())
             return r;                     // no norm on the chain — same outcome, reported honestly
 
+        const Measure *m     = m_pack ? m_pack->measure(measureId) : nullptr;
+        const Shape    shape = m ? m->shape : Shape::Target;
+
         // The POLICY's Ideal band, not the norm's bare claim. The engine tests `onTail` against
         // these edges and `deviated` against grade(), and those two must derive from one scale or
         // a reading can be a deviation that is on neither tail. They agreed before this only
         // because every shipped preset has goodMaxZ >= 1 — an accident, now an asserted invariant
         // (gradePolicyIsOrdered, norm.h).
-        const NormBandEdges e = bandEdgesOf(*res.norm, m_policy);
+        const NormBandEdges e = bandEdgesOf(*res.norm, m_policy, -1.0, shape);
 
         r.hasCorridor     = true;
         r.greenLo         = e.idealLo;
         r.greenHi         = e.idealHi;
-        r.grade           = grade(v->value, *res.norm, m_policy);
+        r.lowOpen         = e.lowOpen;
+        r.highOpen        = e.highOpen;
+        r.grade           = grade(v->value, *res.norm, m_policy, shape);
+        r.implausible     = res.norm->isImplausible(v->value);
         r.normContextId   = res.contextId;
         r.contextInferred = m_contextId.isEmpty();
         return r;
@@ -111,6 +122,7 @@ private:
     std::shared_ptr<const INormProvider> m_norms;
     QString                              m_contextId;
     GradePolicy                          m_policy;
+    const CharacteristicPack            *m_pack = nullptr;   // shape only; may be null
 };
 
 } // namespace pinpoint::analysis

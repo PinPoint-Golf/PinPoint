@@ -202,6 +202,67 @@ int main()
               "corridor would not fix it");
     }
 
+    // ── A signal watching a tail that never grades ──────────────────────────
+    std::printf("=== a signal on the OPEN tail of a one-sided measure is reported ===\n");
+    {
+        // Distinct in kind from signalNoNorm, and the difference decides which queue it belongs
+        // to: a signal with no norm is waiting for work somebody could do, and this one can never
+        // fire however much gets built, because the measure has no fault on that side. So this is
+        // NOT scoped to Live — it is an author's misreading, visible the moment it is written.
+        CharacteristicPack pack = fakePack();
+
+        Measure floorM;
+        floorM.id     = QStringLiteral("m_floor");
+        floorM.label  = QStringLiteral("Smash factor");
+        floorM.status = MeasureStatus::Live;
+        floorM.shape  = Shape::Floor;
+        pack.measures.push_back(floorM);
+
+        Measure ceilM;
+        ceilM.id     = QStringLiteral("m_ceiling");
+        ceilM.status = MeasureStatus::Planned;          // deliberately NOT live
+        ceilM.shape  = Shape::Ceiling;
+        pack.measures.push_back(ceilM);
+
+        auto sig = [&](const char *id, const char *mid, Direction d) {
+            Signal s;
+            s.id        = QString::fromLatin1(id);
+            s.test      = SignalTest::OutsideCorridor;
+            s.measures  = { QString::fromLatin1(mid) };
+            s.direction = d;
+            pack.signalDefs.push_back(s);
+        };
+        sig("sig_floorHigh", "m_floor",   Direction::High);   // the open tail — reported
+        sig("sig_floorLow",  "m_floor",   Direction::Low);    // the graded tail — silent
+        sig("sig_ceilLow",   "m_ceiling", Direction::Low);    // the open tail — reported
+        sig("sig_ceilHigh",  "m_ceiling", Direction::High);   // the graded tail — silent
+
+        FakeNorms norms;
+        norms.add("m_normed",   "full_swing", 10.0, 2.0);
+        norms.add("m_unnormed", "full_swing", 10.0, 2.0);
+        norms.add("m_floor",    "full_swing", 1.48, 0.05);
+        norms.add("m_ceiling",  "full_swing", 0.0,  2.0);
+
+        const auto issues = diagnosticsHealth(pack, norms, cat);
+
+        check(hasSubject(issues, "signalOnOpenTail", QStringLiteral("sig_floorHigh")),
+              "a High signal on a FLOOR is reported");
+        check(hasSubject(issues, "signalOnOpenTail", QStringLiteral("sig_ceilLow")),
+              "…and a Low signal on a CEILING, which is the mirror");
+        check(!hasSubject(issues, "signalOnOpenTail", QStringLiteral("sig_floorLow")),
+              "the tail that DOES grade is not reported");
+        check(!hasSubject(issues, "signalOnOpenTail", QStringLiteral("sig_ceilHigh")),
+              "…on either shape");
+        check(!hasSubject(issues, "signalOnOpenTail", QStringLiteral("sig_normed")),
+              "and a two-sided measure is never reported — both its tails grade");
+        check(countCode(issues, "signalOnOpenTail") == 2, "exactly the two, and no others");
+
+        // Not scoped to Live: m_ceiling is Planned and still reported, because no producer will
+        // ever give a ceiling an upper... a lower fault.
+        check(hasSubject(issues, "signalOnOpenTail", QStringLiteral("sig_ceilLow")),
+              "a planned measure is reported too — this is not a producer backlog");
+    }
+
     // ── The single-tail axis must stay silent ───────────────────────────────
     std::printf("=== the unread edge of a single-tail axis is NOT reported ===\n");
     {

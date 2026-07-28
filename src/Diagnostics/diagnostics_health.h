@@ -41,6 +41,13 @@
 //   signalNoNorm           A corridor signal on a live measure with no norm in any context. It
 //                          cannot fire — not "does not fire on this swing", cannot, ever. Author a
 //                          norm or accept that the characteristic is undetectable.
+//   signalOnOpenTail       A corridor or ratio signal watching the tail a one-sided measure does not
+//                          grade — a High signal on a floor, or a Low one on a ceiling. It can never
+//                          fire, and unlike signalNoNorm no producer will ever change that: the
+//                          measure has no fault on that side. Point it at the other tail, or accept
+//                          that the condition is undetectable by design. NOT scoped to Live: this is
+//                          an author's misreading of the measure, not a backlog item, and it should
+//                          be visible the moment it is written rather than when a producer lands.
 //   personalNormNoSample   A corridor of YOUR OWN, seated on nothing (n = 0). Fine as a starting
 //                          figure; worth knowing you typed it rather than measured it. Scoped to
 //                          the personal layer through the provider's own override tracking, so the

@@ -120,6 +120,37 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
         }
     }
 
+    // ── A signal watching a tail the norm never grades ──────────────────────
+    //
+    // Reported wherever it is authored, at any measure status, and NOT scoped to Live the way
+    // signalNoNorm above is. The two mean opposite things: a signal with no norm is waiting for
+    // work somebody could do, and this one is an author having misunderstood the measure. A floor
+    // has no upper fault, so a High signal on it can never fire whatever gets built — dressing that
+    // up as a producer backlog would put it in the wrong queue forever.
+    //
+    // The engine refuses it at runtime as well (characteristic_engine.cpp). Both, deliberately:
+    // the runtime guard makes the answer right, and this makes the mistake visible.
+    for (const Signal &s : pack.signalDefs) {
+        if (s.test != SignalTest::OutsideCorridor && s.test != SignalTest::Ratio) continue;
+        const Measure *m = pack.measure(s.measures.value(0));
+        if (m == nullptr || !shapeIsOneSided(m->shape)) continue;
+
+        const Direction d      = s.direction.value_or(Direction::High);
+        const bool      atOpen = (m->shape == Shape::Floor) ? (d == Direction::High)
+                                                            : (d == Direction::Low);
+        if (!atOpen) continue;
+
+        out.push_back(warn(QStringLiteral("signalOnOpenTail"), s.id,
+                           QObject::tr("'%1' watches the %2 tail of %3, and that measure is '%4' — "
+                                       "so that tail never grades and the signal can never fire. "
+                                       "Point it at the other tail, or the condition behind it is "
+                                       "undetectable by design.")
+                               .arg(s.id,
+                                    d == Direction::High ? QObject::tr("high") : QObject::tr("low"),
+                                    m->label.isEmpty() ? m->id : m->label,
+                                    shapeLabel(m->shape))));
+    }
+
     // ── A screen or drill reference pointing at nothing ─────────────────────
     //
     // Both joins are exact string matches into a separate registry, so a typo or a renamed row

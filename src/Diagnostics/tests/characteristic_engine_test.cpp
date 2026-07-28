@@ -41,6 +41,32 @@ public:
         r.hasCorridor = false;
         m[id]         = r;
     }
+    // A one-sided corridor, as NormMeasureSource builds one: the open side's edge is mu.
+    void addOneSided(const QString &id, double value, double mu, double sigma, Shape shape)
+    {
+        Norm n;
+        n.mu = mu;
+        n.sigmaLo = n.sigmaHi = sigma;
+        const NormBandEdges e = bandEdgesOf(n, {}, -1.0, shape);
+
+        MeasureReading r;
+        r.value       = value;
+        r.hasCorridor = true;
+        r.greenLo     = e.idealLo;
+        r.greenHi     = e.idealHi;
+        r.lowOpen     = e.lowOpen;
+        r.highOpen    = e.highOpen;
+        r.grade       = grade(value, n, {}, shape);
+        m[id]         = r;
+    }
+    // A reading outside what its norm is willing to believe.
+    void addImplausible(const QString &id, double value, double lo, double hi)
+    {
+        MeasureReading r = MeasureReading::fromCorridor(value, lo, hi);
+        r.grade          = Grade::NotMeasured;
+        r.implausible    = true;
+        m[id]            = r;
+    }
     std::optional<MeasureReading> read(const QString &id) const override
     {
         const auto it = m.find(id);
@@ -502,6 +528,80 @@ int main()
         check(!ex.roots.empty() && !plain.roots.empty()
                   && ex.roots.front().score == plain.roots.front().score,
               "corroboration changes no score");
+    }
+
+    // ── A one-sided corridor: the open tail can never fire ──────────────────
+    std::printf("\none-sided corridors\n");
+    {
+        CharacteristicPack p;
+        Measure m;
+        m.id     = QStringLiteral("m_smash");
+        m.status = MeasureStatus::Live;
+        m.shape  = Shape::Floor;
+        p.measures.push_back(m);
+
+        Signal high;                       // the misunderstanding: a floor has no upper fault
+        high.id        = QStringLiteral("sigHigh");
+        high.measures  = { m.id };
+        high.direction = Direction::High;
+        p.signalDefs.push_back(high);
+
+        Signal low;                        // the graded tail
+        low.id        = QStringLiteral("sigLow");
+        low.measures  = { m.id };
+        low.direction = Direction::Low;
+        p.signalDefs.push_back(low);
+
+        Condition tooHigh;
+        tooHigh.id         = QStringLiteral("c_high");
+        tooHigh.detectedBy = { high.id };
+        tooHigh.state      = ConditionState::Active;
+        p.conditions.push_back(tooHigh);
+
+        Condition tooLow;
+        tooLow.id         = QStringLiteral("c_low");
+        tooLow.detectedBy = { low.id };
+        tooLow.state      = ConditionState::Active;
+        p.conditions.push_back(tooLow);
+
+        // Far above the aspiration: the good side of a floor, however far out.
+        FakeSource above;
+        above.addOneSided(m.id, 2.20, 1.48, 0.05, Shape::Floor);
+        const DetectionResult ra = detect(p, above);
+        check(ra.find("c_high") && ra.find("c_high")->state == FindingState::NotFired,
+              "a High signal on a floor does not fire, however far above the aspiration");
+        check(ra.find("c_low") && ra.find("c_low")->state == FindingState::NotFired,
+              "…and the graded tail is quiet too, because nothing is wrong");
+
+        // Well below it: the graded tail, and only that one, fires.
+        FakeSource below;
+        below.addOneSided(m.id, 1.28, 1.48, 0.05, Shape::Floor);
+        const DetectionResult rb = detect(p, below);
+        check(rb.find("c_low") && rb.find("c_low")->state == FindingState::Fired,
+              "the graded tail fires exactly as a target norm's low tail would");
+        check(rb.find("c_high") && rb.find("c_high")->state == FindingState::NotFired,
+              "…and the open tail stays silent on the same swing");
+
+        // The authoring mistake is ALSO reported by diagnosticsHealth as `signalOnOpenTail` —
+        // gated in diagnostics_health_test, which is where that module is linked. Both guards
+        // exist deliberately: the runtime one makes the answer right, the health one makes the
+        // mistake visible.
+    }
+
+    // ── A reading nobody believes was not assessed ──────────────────────────
+    std::printf("\nimplausible readings\n");
+    {
+        const CharacteristicPack p = fixture();
+
+        FakeSource src;
+        src.addImplausible(QStringLiteral("mSway"), 9999.0, 0.0, 10.0);
+
+        const DetectionResult r = detect(p, src);
+        const Finding *f = r.find(QStringLiteral("sway"));
+        check(f && f->state == FindingState::Unavailable,
+              "an implausible reading is UNAVAILABLE, not NotFired — it was never assessed");
+        check(f && !f->missingMeasures.isEmpty(),
+              "…and the finding names the measure, so the UI can say which reading was wrong");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
