@@ -1080,6 +1080,18 @@ not confuse the two.
 7. **Inside a Repeater delegate, only the component root id resolves** — and a handler on a
    composite type that declares its own `id: root` cannot see even that. It throws only on
    click, so no binding, test or screenshot will show it.
+8. **A hoverEnabled MouseArea inside a hover-revealed item is an infinite loop.** Row affordances are
+   `visible: rowMa.containsMouse`; a hoverEnabled child on top of `rowMa` STEALS the hover, which
+   hides the item, which kills the hover, which shows it again — the row strobes every frame and the
+   click can never land. Set `hoverEnabled: false` on the child: an area that does not accept hover
+   is skipped for hover delivery, clicks still reach the topmost item, and `cursorShape` needs no
+   hover. Same shape as trap 7 — invisible to bindings, tests and screenshots, visible only under a
+   live pointer.
+9. **A missing `Theme` token fails SILENTLY and renders white.** `Theme.colorBg1` does not exist;
+   assigning it warned once at startup and left the `Rectangle` on its own default colour, so a
+   modal ignored the dark theme entirely. Two symptoms, one cause. The warning names the file and
+   line, so a single headless launch after any QML change catches it — which is why that check is
+   not the one to skip when trimming a gate.
 
 ---
 
@@ -1116,6 +1128,7 @@ resolved with the stage that closed it.
 | N23 | **`shadowedCohort` and `cohortGap` cannot fire on any content that exists.** Both need cohort rows, and every shipped row is unqualified; `shadowedCohort` additionally needs four rows at one node. Gated in both directions in `diagnostics_health_test` against fixtures, which is the only gate they can have until B4's content arrives. Noted so a later reader does not read them as exercised. | B1 | open by design |
 | N24 | **The corridor editor is unqualified end to end.** `begin()` resolves with no athlete cohort and the draft is left at the default, so save/reset/basis all key on the unqualified row. That is correct for B1 and is exactly what B2 changes — and the hazard B2 must not walk into is seeding a draft from a cohort row and saving it at the unqualified key. The guard today is a comment on the resolve line. | B1 | ☑ **closed in B2** — `begin(measureId, contextId, cohort)` seeds by resolving FOR that cohort, so its own row wins at probe 1 when one exists; the hazard is closed by the draft carrying the same cohort it was seeded for |
 | N26 | **A cohort-qualified override records no `NormBasis`.** `save()` stamps the base from `shippedNorm` at the EXACT key, and core carries no cohort rows — so a new segmented override has no base and `overrideCoreChanged` is permanently silent for it. Correct today (there is no shipped cohort row that could move) and it is "as today" in the most literal reading of the plan. Revisit when B4's content lands: the alternative is a basis that records WHICH key it was seeded from, which is a schema change. | B2 | open — revisit at B4 |
+| N31 | ☑ **CLOSED.** Was: no way to CREATE a cohort-qualified corridor from the UI. Editing one works end to end — identity, seed, save, basis, reset, the list, the editor's own "which population" line — but the only entry point to the editor is a row in MeasureDetail's list, and that list shows the universal row per context plus cohort rows that ALREADY EXIST. So an author cannot write their first segmented row without hand-editing the user norms JSON, after which everything works. B2's bullet was "cohort is part of the row identity it EDITS" and that was met; the authoring affordance was never in any stage's scope and should have been recorded here when the gap became visible. Closed by a "· for a cohort…" affordance on each context's universal row, opening a sex/age picker over `NormModel::cohortVocabulary()` and calling the `editCorridor(measureId, contextId, cohort)` signal B2 already built. **Verified by hand in the running app.** | B2 | ☑ closed after B3 |
 | N27 | **The editor's import list and `adoptFrom` are unqualified-only.** Both walk `overriddenContextsFor` and then `find(measureId, cid)`, so a context carrying ONLY a segmented row contributes no candidate (skipped safely, no crash). Adopting numbers across cohorts is a second UI decision — the rows would need a cohort label and `adoptFrom` a cohort argument — and nothing can exercise it until cohort content exists. | B2 | open — with the content |
 | N28 | **The editor's parent note models context inheritance only.** Dropping a `{female}@driver` row falls back to `{}@driver` — a broader COHORT at the same context — before it falls back to the parent context, and the note does not say that. It now resolves the parent for the draft's own cohort, which is the right population; the fallback ORDER it describes is still context-only. | B2 | open — with the content |
 | N25 | **The diagnostics developer guide's `Norm` snippet is stale.** It predates `shape`, `plausibleLo/Hi` and now `cohort`, and §4's resolution description says nothing about the cohort probe order. Not corrected per stage (A1–A5 did not either); sweep it once at the end of the package, with §12's suite table. | B1 | open — sweep at package close |

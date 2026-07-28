@@ -53,6 +53,39 @@ Item {
     // silently edit the universal corridor while the row that was clicked describes one segment.
     signal editCorridor(string measureId, string contextId, var cohort)
 
+    // The cohort axes a corridor can be authored against, from NormModel.cohortVocabulary().
+    // Passed in rather than looked up here for the same reason `detail` is: this page renders a map
+    // and holds no model.
+    property var cohortVocab: ({})
+
+    readonly property var _cohortSexes: root.cohortVocab.sexes || []
+    readonly property var _cohortAges:  root.cohortVocab.ages  || []
+
+    function _labelsOf(list) {
+        var out = []
+        for (var i = 0; i < list.length; ++i) out.push(list[i].label)
+        return out
+    }
+    function _valueForLabel(list, label) {
+        for (var i = 0; i < list.length; ++i)
+            if (list[i].label === label) return list[i].value
+        return ""
+    }
+    function _labelForValue(list, value) {
+        for (var i = 0; i < list.length; ++i)
+            if (list[i].value === value) return list[i].label
+        return list.length > 0 ? list[0].label : ""
+    }
+    // The picker's own preview of what it is about to author. Assembled from the two labels rather
+    // than from C++'s cohortLabel() because there is no Cohort here yet — nothing has been saved —
+    // and the labels are the same strings that function formats.
+    function _cohortLabelOf(sexValue, ageValue) {
+        var parts = []
+        if (sexValue !== "") parts.push(root._labelForValue(root._cohortSexes, sexValue))
+        if (ageValue !== "") parts.push(root._labelForValue(root._cohortAges, ageValue))
+        return parts.join(" ")
+    }
+
     readonly property var _norms:  detail.norms  || []
     readonly property var _usedBy: detail.usedBy || []
     readonly property string _unit: detail.unit || ""
@@ -382,6 +415,48 @@ Item {
                                     color:          Theme.colorAccent
                                 }
 
+                                // Authoring a SEGMENTED corridor. Its own affordance and not a mode
+                                // on the one above, because it answers a different question — that
+                                // one is "which shot", this is "which golfer" — and because the
+                                // universal corridor must stay the thing a single click reaches.
+                                //
+                                // Offered only on the universal row of each context: a segmented row
+                                // is already a cohort, and hanging "for a cohort…" off it would
+                                // invite authoring a cohort of a cohort, which the key cannot hold.
+                                Text {
+                                    visible: normMa.containsMouse
+                                             && (modelData.cohortLabel || "").length === 0
+                                    text:    qsTr("· for a cohort…")
+                                    font.family:    Theme.fontBody
+                                    font.pixelSize: Theme.fontSzMicro
+                                    color:          Theme.colorAccent
+
+                                    // On TOP of the row's own full-bleed handler, which sits under
+                                    // the content, so this wins the click.
+                                    //
+                                    // hoverEnabled MUST stay false. This Text is `visible` only
+                                    // while `normMa` reports hover, and a hoverEnabled child on top
+                                    // of `normMa` STEALS that hover — which hides this Text, which
+                                    // kills the hover, which shows it again. The row strobes every
+                                    // frame and the click can never land. A MouseArea that does not
+                                    // accept hover is skipped for hover delivery, so `normMa` keeps
+                                    // it, and clicks still hit the topmost item. `cursorShape` does
+                                    // not need hover either.
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -Theme.sp(3)
+                                        hoverEnabled: false
+                                        cursorShape:  Qt.PointingHandCursor
+                                        onClicked: {
+                                            cohortPicker.contextId    = modelData.askedContextId
+                                            cohortPicker.contextLabel = modelData.askedContextLabel
+                                            cohortPicker.sexValue     = ""
+                                            cohortPicker.ageValue     = ""
+                                            cohortPicker.open()
+                                        }
+                                    }
+                                }
+
                                 // "action below 1.33" on a floor, never "beyond 1.33 to 1.48":
                                 // the open tail has no fault edge to be beyond. The parenthetical
                                 // stays here because it is about WHERE the edge came from, which
@@ -555,6 +630,152 @@ Item {
             }
 
             Item { Layout.fillWidth: true; implicitHeight: Theme.sp(24) }
+        }
+    }
+
+    // ── Author a corridor for one population ────────────────────────────────
+    //
+    // At FILE SCOPE and not inside the Repeater delegate, deliberately. A popup declared in a
+    // delegate is destroyed with its row and its handlers resolve against delegate scope, which is
+    // the trap that throws only on click — nothing in a binding, a test or a screenshot would show
+    // it. The row sets three properties here and opens it.
+    Popup {
+        id: cohortPicker
+        objectName: "cohortPicker"
+
+        property string contextId:    ""
+        property string contextLabel: ""
+        property string sexValue:     ""   // "" = any, which is how an unset axis is spelled
+        property string ageValue:     ""
+
+        // Both axes "any" IS the universal corridor, which the row itself already opens. Refusing
+        // it here rather than letting it through keeps one corridor reachable by one gesture.
+        readonly property bool _qualified: sexValue !== "" || ageValue !== ""
+
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        dim: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        padding: Theme.sp(20)
+        width: Math.min(Theme.sp(420), (parent ? parent.width : Theme.sp(420)) - Theme.sp(48))
+
+        // The same surface + border pair PpAboutDialog uses, which is the app's one modal
+        // precedent. `colorBg1` is not a token — the assignment silently failed and the Rectangle
+        // kept its own default, which is white, so the panel ignored the dark theme entirely.
+        background: Rectangle {
+            radius:       Theme.radiusLg
+            color:        Theme.colorSurface
+            border.width: 1
+            border.color: Theme.colorBorderStrong
+        }
+
+        ColumnLayout {
+            width:   parent.width
+            spacing: Theme.sp(14)
+
+            Text {
+                Layout.fillWidth: true
+                text:           qsTr("A corridor for one population")
+                font.family:    Theme.fontDisplay
+                font.pixelSize: Theme.fontSzBody
+                color:          Theme.colorText
+                wrapMode:       Text.WordWrap
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: qsTr("In %1. Everyone outside the group you pick keeps being graded by the "
+                           + "corridor that is there now — this adds one beside it, it does not "
+                           + "replace it.").arg(cohortPicker.contextLabel)
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorText3
+                wrapMode:       Text.WordWrap
+            }
+
+            Column {
+                Layout.fillWidth: true
+                spacing: Theme.sp(4)
+                Text {
+                    text:               qsTr("SEX")
+                    font.family:        Theme.fontData
+                    font.pixelSize:     Theme.fontSzMicro
+                    font.letterSpacing: Theme.trackingLabel
+                    color:              Theme.colorText3
+                }
+                PpChipGroup {
+                    options:  root._labelsOf(root._cohortSexes)
+                    selected: root._labelForValue(root._cohortSexes, cohortPicker.sexValue)
+                    onSelectionChanged: function(v) {
+                        cohortPicker.sexValue = root._valueForLabel(root._cohortSexes, v)
+                    }
+                }
+            }
+
+            Column {
+                Layout.fillWidth: true
+                spacing: Theme.sp(4)
+                Text {
+                    text:               qsTr("AGE")
+                    font.family:        Theme.fontData
+                    font.pixelSize:     Theme.fontSzMicro
+                    font.letterSpacing: Theme.trackingLabel
+                    color:              Theme.colorText3
+                }
+                PpChipGroup {
+                    options:  root._labelsOf(root._cohortAges)
+                    selected: root._labelForValue(root._cohortAges, cohortPicker.ageValue)
+                    onSelectionChanged: function(v) {
+                        cohortPicker.ageValue = root._valueForLabel(root._cohortAges, v)
+                    }
+                }
+                // "18+" is authorable in its own right and is not merely the parent of the three
+                // bands under it — most published provenance is no better than "adult male", and
+                // without it that common case would need three duplicate rows that then drift.
+                Text {
+                    width:          parent.width
+                    text:           qsTr("Pick 18+ when the source says only \"adults\". An exact band is always tried first, so a row for it still resolves for everyone the exact bands do not cover.")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorText3
+                    wrapMode:       Text.WordWrap
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(8)
+
+                Text {
+                    Layout.fillWidth: true
+                    text: cohortPicker._qualified
+                            ? qsTr("Grades %1 only.")
+                                .arg(root._cohortLabelOf(cohortPicker.sexValue, cohortPicker.ageValue))
+                            : qsTr("Pick at least one — with neither, this is the corridor you already have.")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          cohortPicker._qualified ? Theme.colorAccent : Theme.colorText3
+                    wrapMode:       Text.WordWrap
+                }
+
+                PpButton {
+                    label: qsTr("Cancel")
+                    onClicked: cohortPicker.close()
+                }
+                PpButton {
+                    label:   qsTr("Open editor")
+                    primary: true
+                    enabled: cohortPicker._qualified
+                    onClicked: {
+                        var c = ({})
+                        if (cohortPicker.sexValue !== "") c.sex = cohortPicker.sexValue
+                        if (cohortPicker.ageValue !== "") c.age = cohortPicker.ageValue
+                        cohortPicker.close()
+                        root.editCorridor(root.detail.id || "", cohortPicker.contextId, c)
+                    }
+                }
+            }
         }
     }
 }

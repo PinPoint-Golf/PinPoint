@@ -136,6 +136,17 @@ public:
     Q_INVOKABLE QVariantMap normAt(const QString &measureId, const QString &contextId,
                                    const QVariantMap &athlete = {}) const;
 
+    // The cohort axes a corridor can be authored against:
+    //   { sexes: [{value,label}, …], ages: [{value,label}, …] }
+    // with an "any" entry (value "") at the head of each, because BOTH axes are optional and a
+    // corridor qualified on one alone is the common case — most provenance is no better than
+    // "adult male".
+    //
+    // From C++ so the picker cannot invent a token: these are the same strings the norm set is keyed
+    // on and the same labels every other surface renders. `declined` is deliberately absent — it is
+    // an answer a PERSON can give, never a population a corridor can describe.
+    Q_INVOKABLE QVariantMap cohortVocabulary() const;
+
     // The metric -> measure join, marshalled for QML. `phase` is the Phase enum as an int, which
     // is how metric_catalog.cpp already passes phases across the boundary.
     //   { found, measureId, label, unit, deltaFromAddress, reducerKind }

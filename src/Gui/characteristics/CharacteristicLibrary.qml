@@ -707,6 +707,7 @@ Item {
         visible: root._selectedMeasureId !== "" && !root._editing && !root._corridor
         detail:  (root._selectedMeasureId !== "" && root._revision >= 0)
                  ? norms.measureDetail(root._selectedMeasureId) : ({})
+        cohortVocab: norms.cohortVocabulary()
 
         onBack: root._selectedMeasureId = ""
         // Following a user of this measure lands on that characteristic's page, which is the only

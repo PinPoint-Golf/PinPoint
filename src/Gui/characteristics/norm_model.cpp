@@ -526,6 +526,33 @@ QVariantMap NormModel::normAt(const QString &measureId, const QString &contextId
     return out;
 }
 
+QVariantMap NormModel::cohortVocabulary() const
+{
+    auto entry = [](const QString &value, const QString &label) {
+        QVariantMap m;
+        m.insert(QStringLiteral("value"), value);
+        m.insert(QStringLiteral("label"), label);
+        return QVariant(m);
+    };
+
+    // "Any" heads each list and stores the EMPTY string, which is exactly how an unset axis is
+    // spelled in the JSON and in cohortToMap. So "any sex, 55–64" is one selection, not a special
+    // case the picker has to remember to strip.
+    QVariantList sexes{ entry(QString(), tr("Any")) };
+    for (Sex s : { Sex::Female, Sex::Male })
+        sexes.append(entry(sexName(s), sexLabel(s)));
+
+    QVariantList ages{ entry(QString(), tr("Any")) };
+    for (AgeBand b : { AgeBand::Junior, AgeBand::Adult, AgeBand::Adult18_54,
+                       AgeBand::Adult55_64, AgeBand::Adult65Plus })
+        ages.append(entry(ageBandName(b), ageBandLabel(b)));
+
+    QVariantMap out;
+    out.insert(QStringLiteral("sexes"), sexes);
+    out.insert(QStringLiteral("ages"),  ages);
+    return out;
+}
+
 // ── Detail ──────────────────────────────────────────────────────────────────
 
 QVariantMap NormModel::measureDetail(const QString &measureId) const
