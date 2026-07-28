@@ -97,6 +97,15 @@ SourceRing::WriteSlot SourceRing::acquireWriteSlot() noexcept {
     // subsequently load write_seq_ with acquire and see the incremented value.
     write_seq_.store(seq + 1, std::memory_order_release);
 
+    // The store-release above is a ONE-WAY barrier: it orders everything before it, and stops
+    // nothing after it from moving up. The caller's payload stores land after this returns, so
+    // without a second barrier they may become visible BEFORE the gen=odd marker they are supposed
+    // to be covered by — and a consumer recycling this slot would then copy half-written bytes
+    // while the generation still looks stable, i.e. a torn read that validate() calls clean.
+    // On x86-TSO store-store ordering is free and this compiles to nothing; on arm64 it is the
+    // difference between the seqlock working and silently not.
+    std::atomic_thread_fence(std::memory_order_release);
+
     return WriteSlot{
         .data          = payloadAt(idx),
         .capacity      = slot_max_bytes_,
@@ -127,6 +136,10 @@ SourceRing::WriteSlot SourceRing::getSlotByIndex(size_t slot_idx) noexcept {
     }
 
     write_seq_.store(seq + 1, std::memory_order_release);
+
+    // Same one-way-barrier reasoning as acquireWriteSlot(): keep the caller's payload stores from
+    // being reordered above the gen=odd marker.
+    std::atomic_thread_fence(std::memory_order_release);
 
     return WriteSlot{
         .data          = payloadAt(slot_idx),
@@ -206,7 +219,17 @@ void SourceRing::ReadHandle::copyBytesRacy(void* dst, size_t len) const noexcept
 bool SourceRing::ReadHandle::validate(const SourceRing& ring) const noexcept {
     if (!data) return false;
     const SlotHeader& hdr = ring.slotHeaderAt(slot_idx_);
-    uint64_t gen_after = hdr.generation.load(std::memory_order_acquire);
+
+    // The read side of the seqlock needs this fence, and an acquire LOAD cannot supply it: acquire
+    // stops later accesses from floating up, whereas what has to be pinned here is the payload copy
+    // that already happened — copyBytesRacy()'s loads must not sink below the check that is meant to
+    // vet them. An acquire FENCE is the barrier with that direction (no prior load may cross it), so
+    // the generation is re-read strictly after the bytes were taken. Without it the CPU is free to
+    // satisfy the copy late, from a slot the producer has since recycled, and this function then
+    // certifies those bytes against a generation that was read before they were fetched.
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    uint64_t gen_after = hdr.generation.load(std::memory_order_relaxed);
     return gen_after == generation_snapshot;
 }
 
