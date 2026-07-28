@@ -215,7 +215,11 @@ int main()
     {
         FakeSource src;
         src.add(QStringLiteral("mSway"), 50.0, 0.0, 10.0, 0.4f);
-        const Finding *f = detect(pack, src).find(QStringLiteral("sway"));
+        // Bind the result: find() returns a pointer INTO its findings vector, so calling it on the
+        // temporary leaves f dangling the moment this statement ends. It read plausible confidences
+        // off freed memory on x86 and garbage on arm64.
+        const DetectionResult d = detect(pack, src);
+        const Finding        *f = d.find(QStringLiteral("sway"));
         check(f && f->confidence > 0.39f && f->confidence < 0.41f, "measure confidence reaches the finding");
     }
 

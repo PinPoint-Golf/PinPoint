@@ -60,8 +60,13 @@ int main()
             x.push_back(std::sin(2.0 * kPi * 2.0 * i / fs));
         const std::vector<double> y = ps::lowpassZeroPhase(x, fs, 10.0);
 
+        // ONE period, so there is exactly one maximum to find. A 2 Hz sine at 200 Hz peaks every
+        // 100 samples, so the old [100,300) window held two — at 125 and 225, bit-identical in
+        // double. Which one a strict `>` scan kept was then decided by rounding: the raw signal
+        // kept the first, the filtered one could keep either, and the test read a 100-sample
+        // "phase shift" off a tie rather than off the filter.
         int rawPeak = 100, fltPeak = 100;
-        for (int i = 100; i < 300; ++i) {
+        for (int i = 100; i < 200; ++i) {
             if (x[size_t(i)] > x[size_t(rawPeak)]) rawPeak = i;
             if (y[size_t(i)] > y[size_t(fltPeak)]) fltPeak = i;
         }
