@@ -770,20 +770,23 @@ int main(int argc, char **argv)
                                "plausibleLoError", "plausibleHiError" })
             check(d2.contains(QLatin1String(k)), k);
 
-        // ABSENT IS NOT ZERO. A shipped smash row carries no cap, and `.toDouble()` on a missing
-        // key yields 0.0 — so without the has* flags every uncapped row in the pack would read as
-        // "stops believing readings below zero".
-        check(!d2.value(QStringLiteral("hasPlausibleLo")).toBool()
-                  && !d2.value(QStringLiteral("hasPlausibleHi")).toBool(),
-              "a shipped row starts uncapped, and says so with a flag rather than a zero");
+        // ABSENT IS NOT ZERO, and the seed conversion makes both halves of that live at once: the
+        // shipped driver row caps ABOVE and says nothing below. `.toDouble()` on a missing key
+        // yields 0.0, so without the has* flags the absent lower bound would read as "stops
+        // believing readings below zero" — a limit nobody authored, on a ratio that cannot be
+        // negative anyway.
+        check(d2.value(QStringLiteral("hasPlausibleHi")).toBool(),
+              "the SHIPPED driver row carries its cap into the draft");
+        near(num(d2, "plausibleHi"), 1.56, "…the seeded one, unchanged by opening the editor");
+        check(!d2.value(QStringLiteral("hasPlausibleLo")).toBool(),
+              "…and no lower bound, stated as a flag rather than as a zero");
         check(d2.value(QStringLiteral("plausibleLoError")).toString().isEmpty(),
               "…and an absent bound cannot be wrong");
 
-        // The seed conversion's own number: driver smash caps at 1.56, ABOVE, on the open side.
-        pe.setPlausibleHi(1.56);
+        pe.setPlausibleHi(1.60);
         d2 = pe.draft();
-        check(d2.value(QStringLiteral("hasPlausibleHi")).toBool(), "a cap can be set");
-        near(num(d2, "plausibleHi"), 1.56, "…to what was asked");
+        check(d2.value(QStringLiteral("hasPlausibleHi")).toBool(), "a cap can be moved");
+        near(num(d2, "plausibleHi"), 1.60, "…to what was asked");
         check(d2.value(QStringLiteral("plausibleHiError")).toString().isEmpty(),
               "a cap on the OPEN side is never inside the corridor, so it is always legal there");
         check(d2.value(QStringLiteral("dirty")).toBool(), "…and it dirties the draft");
@@ -880,10 +883,13 @@ int main(int argc, char **argv)
         near(num(re.draft(), "plausibleHi"), 1.56, "…unchanged");
 
         // Clean up: this test writes to the user norm set, and the sections after it read the
-        // resolved corridor. resetToDefault drops the override.
+        // resolved corridor. resetToDefault drops the override — and what it drops BACK to is the
+        // shipped cap, not to no cap, which is a stronger statement than the one this asserted
+        // before the seed conversion gave the row one.
         re.resetToDefault();
-        check(!re.draft().value(QStringLiteral("hasPlausibleHi")).toBool(),
-              "dropping the override drops the cap with it");
+        check(re.draft().value(QStringLiteral("hasPlausibleHi")).toBool(),
+              "dropping the override restores the SHIPPED cap rather than clearing it");
+        near(num(re.draft(), "plausibleHi"), 1.56, "…the seeded figure, back where it started");
     }
 
     // ── …and none of it reaches a target norm ───────────────────────────────
@@ -893,12 +899,16 @@ int main(int argc, char **argv)
     std::printf("\nthe two-sided control\n");
     qputenv("PINPOINT_CORE_PACK", realPack);
     {
+        // m_ballPosition, NOT m_smashFactor. The seed conversion made smash a floor in the shipped
+        // pack, so using it as the two-sided control is how a control quietly stops controlling:
+        // every assertion below would then be checking the same shape twice. Ball position is one
+        // of the 105 that stay ordinary corridors, and the shipped driver row is mu 5, sigma 8.
         NormEditorModel te;
-        check(te.begin(QStringLiteral("m_smashFactor"), QStringLiteral("driver")), "opens");
+        check(te.begin(QStringLiteral("m_ballPosition"), QStringLiteral("driver")), "opens");
         QVariantMap t = te.draft();
 
         check(t.value(QStringLiteral("shape")).toString() == QLatin1String("target"),
-              "unshaped in the shipped pack — the seed conversion is a later stage");
+              "an ordinary measure is unshaped, which is 105 of the 106");
         check(!t.value(QStringLiteral("oneSided")).toBool(), "…so nothing is one-sided");
         check(!t.value(QStringLiteral("lowOpen")).toBool() && !t.value(QStringLiteral("highOpen")).toBool(),
               "…and both flags are written false rather than left absent");
@@ -906,17 +916,20 @@ int main(int argc, char **argv)
               "a two-sided corridor has no open end to label");
         check(t.value(QStringLiteral("shapeNote")).toString().isEmpty(),
               "…and no shape sentence: the line reverts to 'Higher means'");
+        check(!t.value(QStringLiteral("hasPlausibleLo")).toBool()
+                  && !t.value(QStringLiteral("hasPlausibleHi")).toBool(),
+              "…and it carries no plausibility bound: the seed conversion touched one measure");
 
         const double mu = num(t, "mu");
-        near(num(t, "idealHi"), mu + 0.05, "the high side is an ordinary graded edge again");
-        near(num(t, "goodHi"),  mu + 0.10, "…Good runs two sigma past mu, uncollapsed");
-        near(num(t, "watchHi"), mu + 0.15, "…and Watch three");
+        near(num(t, "idealHi"), mu + 8.0,  "the high side is an ordinary graded edge");
+        near(num(t, "goodHi"),  mu + 16.0, "…Good runs two sigma past mu, uncollapsed");
+        near(num(t, "watchHi"), mu + 24.0, "…and Watch three");
         check(t.value(QStringLiteral("claimPhrase")).toString().contains(QLatin1String(" to ")),
               "the claim names both bounds");
         check(t.value(QStringLiteral("policyNote")).toString().contains(QLatin1String("beyond")),
               "…and the policy line names a fault on both tails");
 
-        // The two-sided mutators are live again, and the one-sided ones are inert.
+        // The two-sided mutators are live, and the one-sided ones are inert.
         te.setClaimBand(1.40, 1.60);
         t = te.draft();
         near(num(t, "mu"), 1.50, "setClaimBand works on a target norm");

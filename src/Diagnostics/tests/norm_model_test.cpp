@@ -370,6 +370,60 @@ int main(int argc, char **argv)
               "the row's count and the detail's list agree");
     }
 
+    // ── The one-sided row, as Measures & norms actually reads it ────────────
+    //
+    // The screen claim of the seed conversion, asserted where the screen gets its words. The row
+    // must not name an upper bound: on a floor `claimHi` is mu plus a tolerance nothing grades, so
+    // "1.48 to 1.53" would state a limit core does not assert, on the side it refuses to grade.
+    std::printf("=== a floor reads one-sided wherever it is rendered ===\n");
+    {
+        const QVariantMap n = m.normAt(QStringLiteral("m_smashFactor"), QStringLiteral("driver"));
+        check(n.value(QStringLiteral("found")).toBool(), "the shipped driver row resolves");
+        check(n.value(QStringLiteral("shape")).toString() == QLatin1String("floor"),
+              "…carrying the measure's shape, not the norm's");
+        check(n.value(QStringLiteral("oneSided")).toBool(), "…as a flag the row can bind");
+
+        const QString band = n.value(QStringLiteral("bandPhrase")).toString();
+        check(band.contains(QLatin1String("at least")), "the norm row reads 'at least'");
+        check(band.contains(QLatin1String("1.48")),
+              "…naming the aspiration, faithfully — at one decimal it would read 1.5");
+        check(!band.contains(QLatin1String(" to ")), "…and never names a second bound");
+
+        const QString act = n.value(QStringLiteral("actionPhrase")).toString();
+        check(act.contains(QLatin1String("action below")),
+              "the action line faults on the low tail only");
+        check(!act.contains(QLatin1String("beyond")),
+              "…never 'beyond', which would imply a fault above the aspiration");
+
+        // Every drawn edge on the open side collapses onto the aspiration, Good included — it is
+        // the pair computed by hand here rather than by bandEdgesOf.
+        const double mu = n.value(QStringLiteral("mu")).toDouble();
+        check(qFuzzyCompare(1.0 + n.value(QStringLiteral("idealHi")).toDouble(), 1.0 + mu),
+              "the Ideal edge ends at mu");
+        check(qFuzzyCompare(1.0 + n.value(QStringLiteral("goodHi")).toDouble(), 1.0 + mu),
+              "…so does Good, which is computed by hand and would otherwise escape");
+        check(qFuzzyCompare(1.0 + n.value(QStringLiteral("watchHi")).toDouble(), 1.0 + mu),
+              "…and Watch");
+        check(n.value(QStringLiteral("goodLo")).toDouble() < mu,
+              "…while the graded side is an ordinary corridor");
+
+        // The catalogue row takes the same phrase, so the two surfaces cannot say different things
+        // about one measure.
+        const QVariantMap row = rowFor(m.measures(), "m_smashFactor");
+        check(row.value(QStringLiteral("bandPhrase")).toString().contains(QLatin1String("at least")),
+              "the measures list says the same thing as the detail row");
+
+        // Both directions: an ordinary measure is untouched by every rule above.
+        const QVariantMap t = m.normAt(QStringLiteral("m_ballPosition"), QStringLiteral("driver"));
+        check(t.value(QStringLiteral("shape")).toString() == QLatin1String("target")
+                  && !t.value(QStringLiteral("oneSided")).toBool(),
+              "a target measure is unshaped");
+        check(t.value(QStringLiteral("bandPhrase")).toString().contains(QLatin1String(" to ")),
+              "…and its row names both bounds");
+        check(t.value(QStringLiteral("actionPhrase")).toString().contains(QLatin1String("beyond")),
+              "…and faults on both tails");
+    }
+
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "PASSED", g_fail,
                 g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

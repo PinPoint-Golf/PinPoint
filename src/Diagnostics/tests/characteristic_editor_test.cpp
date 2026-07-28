@@ -538,11 +538,20 @@ int main(int argc, char **argv)
         check(bare.first().toMap().value(QStringLiteral("reason")).toString().isEmpty(),
               "…and an available tail carries no reason to explain");
 
-        // A real shipped measure, still a target: nothing changes for the 105 that are.
-        const QVariantList tgt = ed.directionOptions(hm, QStringLiteral("m_smashFactor"));
+        // A real shipped TARGET measure: nothing changes for the 105 that are. Deliberately not
+        // m_smashFactor, which the seed conversion made a floor — using the one shipped one-sided
+        // measure as the two-sided control is how a control quietly stops controlling.
+        const QVariantList tgt = ed.directionOptions(hm, QStringLiteral("m_ballPosition"));
         check(tgt.first().toMap().value(QStringLiteral("enabled")).toBool()
                   && tgt.last().toMap().value(QStringLiteral("enabled")).toBool(),
               "a TARGET measure grades both tails, so both stay live");
+
+        // …and the shipped floor needs no scratch pack any more. It is real content now, which is
+        // a stronger assertion than the injected one below and is left beside it deliberately:
+        // the injected pair still gates the CEILING mirror, which nothing ships.
+        const QVariantList shippedFloor = ed.directionOptions(hm, QStringLiteral("m_smashFactor"));
+        check(!shippedFloor.first().toMap().value(QStringLiteral("enabled")).toBool(),
+              "the SHIPPED floor closes its high tail — read from core.json, not injected");
 
         // …and one that is not. The shape is injected through the same PINPOINT_CORE_PACK seam the
         // norm editor test uses, so this runs against the real measure the seed conversion changes.

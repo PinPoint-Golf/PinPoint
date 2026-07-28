@@ -1563,6 +1563,7 @@
         "anchor": "p7"
       },
       "status": "externalDevice",
+      "shape": "floor",
       "label": "Smash factor",
       "unit": "ratio",
       "highMeans": "more of the clubhead speed reaching the ball — a more efficient strike",

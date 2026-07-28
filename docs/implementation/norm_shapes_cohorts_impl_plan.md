@@ -33,8 +33,8 @@ rule in there survives this work.
 | A4c | Corridor editor — handles, readouts, diff rows | ☑ complete — 79/79, +89 assertions | 2026-07-28 |
 | A4d | Corridor editor — plausibility fields and plot regions | ☑ complete — 79/79, +33 assertions | 2026-07-28 |
 | A4e | Wording pass + signal direction picker | ☑ complete — 79/79, +43 assertions | 2026-07-28 |
-| A5 | Seed conversion — smash factor becomes a floor | ☐ not started | |
-| — | **merge gate · Part B does not begin until Part A is merged and green** | | |
+| A5 | Seed conversion — smash factor becomes a floor | ☑ complete — **80**/80, +1 suite | 2026-07-28 |
+| — | **merge gate · Part B does not begin until Part A is merged and green** | ☑ Part A complete, 80/80 | |
 | B1 | Cohort schema, parse, validation, resolution | ☐ not started | |
 | B2 | Cohort provenance threading + surfaces | ☐ not started | |
 | B3 | Athlete DOB and sex, age at swing date | ☐ not started | |
@@ -59,6 +59,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-28 | A4c | Fact 14 closed: `setClaimBand` is **refused** on a one-sided draft rather than left to caller discipline, and `setAspiration` / `setTolerance` / `nudgeGradedEdge` land beside it — mu and the tolerance are INDEPENDENT numbers there, not two ends of a span. `nudgeClaimLo/Hi` became shape-aware routers so a caller holding "the low field" keeps working on all three shapes. The centre mark is draggable and is the headline; the handle `Repeater` is **one element**, and the dead handle is ABSENT. No swap-follow one-sided — `nudgeGradedEdge` clamps ON the centre rather than reflecting, so nothing can cross anything. `goodLo/goodHi`, the one pair computed outside `bandEdgesOf`, gained the shape collapse it was escaping: all THREE drawn bands now end at the aspiration. Wording moved into the model (`claimPhrase`, `policyNote`, `parentNote`, `shapeNote`, `openEndLabel`, import `rangeText`) per fact 16. Seat-from-swings is a median + 16th/84th percentile through a free-standing `fitOneSided()` — gateable without a swing library — with **no borrow fallback**. Monitor editing needed nothing: the editor never carries monitor bounds into a draft (`begin()` drops them on purpose). ⚠ **A defect found rather than planned — every readout was fixed at one decimal**, so smash factor's 1.48 ± 0.05 read "1.5" / "0.1" and its policy line named two different edges as one number; and a FIELD commits what it shows, so tabbing past an untouched corridor would have saved the rounding. Fixed with a faithful formatter on both sides (N15). 79/79 with 89 new assertions, every one-sided case paired with a two-sided control. App builds; headless clean; all three shapes rendered offscreen. Next: A4d. |
 | 2026-07-28 | A4d | An **Implausible beyond** group with an optional bound per side, and two hatched plot regions covering the bands AND the bars — drawn after both and before the handles, because a reading out there is not graded at all. Deliberately NOT in the fault colour: Action is already drawn out here as bare track, and "the swing was poor" and "the reading was never believed" must not share one. Inline validation mirrors the pack validator's arithmetic exactly and reads the **widest** preset, never the active one — an editor validating against the reader's own sensitivity would let an author on `strict` save a row that fails to load on `lenient`. `save()` refuses on it too, because the call it already makes is `validateNormPack`, the standalone one, which cannot see the measure and so carries `plausibleOrder` but NOT `plausibleInsideCorridor`. **Two half-landed A2 items closed**: `begin()` now carries the bounds into the draft (a bound the editor SHOWS must survive a round trip, unlike the monitor bounds it deliberately drops), and `NormBasis`'s plausibility pair — on the struct since A2 but written by nothing and compared by nothing — is now stamped in `save()` and read in `overrideCoreChanged`, with a **second message** for the caps-only case so the notice never claims a corridor revision whose two quoted numbers would be identical. 79/79, +33 assertions; app builds; headless clean; the floor and the illegal target case both rendered offscreen. Next: A4e. |
 | 2026-07-28 | A4e | The phrasing moved to **norm.h**, beside the vocabulary it formats — `normNumber` / `rangePhrase` / `actionPhrase` / `implausibleLabel` / `implausibleNote` — because six surfaces render a corridor as a sentence and six copies of `"%1 to %2"` is how a floor ends up reading "1.48 to 1.53" on five of them. `rangePhrase` takes **mu as well as the pair** and uses only mu one-sided, which is what lets a collapsed BAND edge and an uncollapsed CLAIM edge both phrase correctly without either caller knowing which it holds. Rewired: MeasureDetail's norm row, its shipped-diff and its action line, MeasureCatalogue's row, `overrideCoreChanged`, and the editor's own `fmtNum`/`claimPhrase`, which are now forwards. ⚠ **`monitorExcludesIdeal` MOVED to `validateNormsAgainst`** — it was gated on `hasExplicitMonitor()`, which without a shape demands BOTH bounds, so on a one-sided row it refused nothing and checked nothing; the same blindness A2 found in `partialMonitor`, in the check beside it. Its message now names the two EDGES, not two bands. **A live surface for implausibility turned up**: `grade()` returns NotMeasured for a capped reading, so the editor's swing list said "Not measured" for a mis-tracked ball, and — worse — `gradeCounts` let it fall through the switch entirely, so the running safety line silently under-reported. Both fixed, with `total` now accounting for every marked swing. Direction picker: `directionOptions` gains `enabled`+`reason` and takes a measureId; `TailChip` gained the disabled state it never had, with the reason in a caption beside the chips per DagView's doctrine. 79/79, +43 assertions; app builds; headless clean; qmllint unchanged or better on all four files. Next: A5. |
+| 2026-07-28 | A5 | **Part A's first and only content change.** `m_smashFactor` ships as a `floor`; the four rows keep their mu/sigma and gain per-context `plausibleHi` caps (1.56 / 1.56 / 1.45 / 1.32) with the physics-of-loft reasoning in `citation` and no commercial sources. The norms.json header records where shape lives and why, what plausibility is FOR, the five candidates deliberately not converted with their reasons, and that cohort-relative bigger-is-better measures get no norm at all. New `seed_conversion_test` (**the suite goes 79 → 80**) gates the behavioural delta on shipped content: 1.55 Good → **Ideal**, 1.62 Watch → **NotMeasured + implausible**, 1.30 Action either way — plus that shape ships on exactly ONE measure, that the caps fall with loft, and that the shipped set still validates. It pins no mu or sigma: those are heuristics meant to move. ⚠ **Three suites failed on the content change and each was right to** — `reference_bands_test`'s parity sweep over-claimed (a `Band` cannot express a plausibility cap; it now states its domain and asserts no wrist cell is excluded, which is the guard the non-goals wanted from `NormBandProvider`), and two tests used smash factor as their two-sided control, which stopped controlling the moment it became a floor. Next: **Part B is now unblocked** — B1. |
 
 ---
 
@@ -698,6 +699,29 @@ population floor on them would grade a golfer Action for their age.
 **Screen:** the smash factor rows in Measures & norms read "at least 1.48"; the corridor
 editor opens them one-sided; a driver smash of 1.55 now grades Ideal.
 
+**The gate is its own suite** (`seed_conversion_test`, the 80th), because this is content and a
+content regression — somebody editing `norms.json` — should fail a test whose *name* says what
+broke. It pins the SHAPE of the answer (which band a value lands in, which side is open, that
+the caps fall with loft) and one physical cap; it deliberately pins no `mu` or `sigma`, because
+those are heuristics and are meant to move when a corpus re-seats them (trap 5).
+
+**Three suites failed on the content change, and each was right to.** Worth recording, because
+all three were tests that had quietly encoded "nothing shipped is one-sided yet":
+
+- **`reference_bands_test`'s parity sweep over-claimed.** It swept all 149 rows asserting
+  `ragOf(grade(v)) == classifyDelta(v)`, which held only while every row was expressible as a
+  `Band` — and a `Band` has four numbers and no way to say *not believed*, so a capped row makes
+  `grade()` answer Grey where `classifyDelta()` answers Amber, and neither is wrong. It now
+  skips rows a `Band` cannot express, **counts** the skips, and asserts none of them is a cell
+  the wrist grid renders. That last assertion is the guard the non-goals asked
+  `NormBandProvider` for — a wrist DOF gaining a shape or a cap now fails a test that already
+  runs, rather than needing a runtime assert nobody would see.
+- **Two tests used `m_smashFactor` as their two-sided control** (`characteristic_editor_test`'s
+  direction picker, `norm_editor_model_test`'s target block). A control that becomes the thing
+  it controls for stops controlling; both moved to `m_ballPosition`, and the shipped floor
+  became a *stronger* assertion beside the injected one — real content rather than a scratch
+  pack.
+
 ### Part A gate
 
 - `norm_test`: floor/ceiling grading tables; continuity at `mu` (z = 0 from both sides);
@@ -714,6 +738,23 @@ editor opens them one-sided; a driver smash of 1.55 now grades Ideal.
 - **Model-level tests for the derived values the QML binds to** — the one-sided domain rules,
   the one-sided readout strings, and the plausibility field validation. Fact 16 is why: a rule
   that lives only inside a `.qml` binding is a rule nothing can test.
+
+**Audited at A5, item by item, rather than assumed** — the list spans A2–A5 and "we did that
+somewhere" is how a gate goes unmet:
+
+| Gate item | Where it actually runs |
+|---|---|
+| `norm_test` grading tables, continuity, z clamp, edge sweep, monitor, plausible, zero-sigma | `norm_test` (204 assertions) |
+| `sigmaHi` differs on a floor · `monitorHi` on a floor · plausible inside the watch edge · unknown shape token | `norm_pack_test` (+ the ceiling mirror of each), `characteristic_pack_test` for the token |
+| Engine: a High signal on a floor never fires and is a health finding; a Low signal fires as a target's low tail would | `characteristic_engine_test`, both directions; `diagnostics_health_test` for `signalOnOpenTail` |
+| Openness through `corridorForMetricAtPhase`; `marginOverride` widens one side only | `manifest_migration_test`, `norm_test` |
+| The smash behavioural delta | `seed_conversion_test` |
+| Model-level for the QML-bound values | `dashboard_reductions_test` (bar domains), `norm_editor_model_test` (readouts, plausibility fields), `norm_model_test` (the row phrases) |
+
+**Not covered by any test, and stated rather than left implied:** the PAINTING. Every surface
+was rendered offscreen against a mock during A4b–A4d and looked right, but a mock is a hand
+transcription (ledger N16) and the characteristic editor's chips were never rendered at all.
+The QML has no test harness in this repo; that is fact 16 and it is unchanged by this work.
 
 ---
 
@@ -929,6 +970,8 @@ resolved with the stage that closed it.
 | N12 | **`handSpeed` is the one rail whose appearance changes**, and it exposes a content defect. It is the only catalogue metric that both matched the old unit sniff (`mph`) and carries a corridor: `m_handSpeedP6P7 @ any` is `mu 20, sigmaLo 40`, whose own citation says *"sigma is twice mu, which is not a corridor"*. It was drawn as a floor and now draws as the two-sided norm that actually grades it, so its domain widens to roughly −100…140 and the trace squashes. That is the heuristic being deleted doing its job — the rail was hiding a bad norm, not compensating for a good one. **Fix by re-seating the norm, never by restoring a unit sniff.** `m_clubheadSpeedImpact` and `m_ballSpeed` carry no norm at all, so their rails are sparklines and are unaffected. | A4a | open — content, belongs with the corpus re-seat |
 | N11 | `bandEdgesOf`'s signature is now `(norm, policy, marginOverride, shape)` — shape is the FOURTH argument, so a caller wanting shape must also pass `marginOverride = -1.0`. Only `reference_bands.cpp` passes a margin. Tolerable; revisit if a third caller wants shape without a margin. | A2 | open — cosmetic |
 | N13 | The Setup zone's orientation glyph now falls back to a bar on a one-sided corridor. `orientationLabel()` itself is unchanged and still cannot see openness — the guard is at the call site, where the corridor is in hand. Every alignment measure is `target`, so the branch is unreachable today; it exists so that changing one's shape degrades visibly instead of labelling a floor's best possible reading "open". If a one-sided alignment measure is ever authored, decide then whether the glyph grows a one-sided vocabulary or the guard becomes permanent. | A4b | open by design |
+| N20 | **The four annotated shape candidates remain author's-call**, now recorded in the norms.json header rather than only here: `m_leadHeelLiftTop` (ceiling, domain [0,∞)), `m_leadHandWidth` (floor?, and `planned` so inert), `m_handSpeedP6P7` (sign convention unresolved), `m_lagAngleDown` and `m_xFactorStretch` (both genuinely two-sided, reasons recorded). `seed_conversion_test` asserts exactly ONE one-sided measure ships, so a fifth arriving without that conversation fails a test. | A5 | open — author's call |
+| N21 | `NormBandProvider` still has no runtime shape assertion; the non-goals asked for one. The guard landed instead in `reference_bands_test`'s parity sweep, which asserts no wrist-grid cell is excluded from it — a wrist DOF gaining a shape or a cap fails a test that already runs, which is better than an assert nobody would see. Add the runtime one only if `Band` is ever extended. | A5 | closed by other means |
 | N18 | `MetricDetail.qml`'s `_normProvenance()` and the DAG / characteristic detail text were NOT swept in A4e — they describe provenance and causation rather than a corridor's bounds, so none of them renders a `%1 to %2`. Re-check when a one-sided measure actually ships (A5): if either ever says "above the corridor", it belongs to this sweep and was missed. | A4e | open — verify at A5 |
 | N19 | `implausibleLabel()` / `implausibleNote()` have exactly one caller between them (the corridor editor's swing list). The engine that carries the `implausible` flag is still dormant, so the finding surfaces cannot use them yet — see N9. They are written now so the surface that eventually shows an implausible reading does not invent its own words for it. | A4e | open by design |
 | N17 | The corridor editor's numeric fields ASSIGN `text` in their `onEditingFinished` handler, which permanently breaks the declarative binding — so after one edit a field only updates through its own handler, and a `discardChanges()` would not refresh it. Pre-existing on the two claim fields; A4c and A4d matched the pattern rather than diverging from it mid-stage. | A4d | open — pre-existing |

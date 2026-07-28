@@ -24,6 +24,8 @@
 
 #include "../reference_bands.h"
 
+#include <QSet>
+
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -292,10 +294,38 @@ int main()
         const std::shared_ptr<const INormProvider> norms = sharedNormProvider();
         const GradePolicy                          policy;   // the shipped default
 
+        // ── The DOMAIN of the claim, stated rather than assumed ────────────
+        //
+        // Every measure the wrist grid can ask for, built from the same DOF -> measure mapping the
+        // provider itself uses. Until the seed conversion the sweep ran over ALL 149 rows and got
+        // away with it, because every row was expressible as a Band. That is no longer true, and
+        // an over-claiming parity test fails for a reason that is not a drift.
+        QSet<QString> gridMeasures;
+        for (int d = 0; d < kNumDof; ++d)
+            for (int p = 0; p < kNumPos; ++p)
+                gridMeasures.insert(NormBandProvider::cellMeasureId(static_cast<PpJointDof>(d),
+                                                                    static_cast<PpSwingPosition>(p)));
+
         int     rows = 0, samples = 0, mismatch = 0, withMonitor = 0, withoutMonitor = 0;
+        int     skipped = 0, skippedInGrid = 0;
         QString firstBad;
 
         for (const Norm &n : norms->norms().norms) {
+            // A Band has four numbers and no way to say "not believed": a row carrying a
+            // plausibility bound has a state the type cannot hold, so grade() answers Grey where
+            // classifyDelta() answers Amber and neither is wrong. Skipped, and COUNTED, because a
+            // silent skip is how a parity sweep quietly stops sweeping.
+            //
+            // The wrist grid is the only consumer of Band, so the skip is only safe while nothing
+            // it renders is skipped — which is asserted below rather than assumed. That assertion
+            // is also what would catch a wrist DOF acquiring a shape or a cap, which is the guard
+            // the plan's non-goals ask NormBandProvider for, in a place that already runs.
+            if (n.plausibleLo.has_value() || n.plausibleHi.has_value()) {
+                ++skipped;
+                if (gridMeasures.contains(n.measureId)) ++skippedInGrid;
+                continue;
+            }
+
             ++rows;
             n.hasExplicitMonitor() ? ++withMonitor : ++withoutMonitor;
 
@@ -330,13 +360,23 @@ int main()
             }
         }
 
-        std::printf("      %d norm rows (%d with explicit monitor, %d z-derived), %d samples\n",
-                    rows, withMonitor, withoutMonitor, samples);
+        std::printf("      %d norm rows (%d with explicit monitor, %d z-derived), %d samples, "
+                    "%d skipped as inexpressible as a Band\n",
+                    rows, withMonitor, withoutMonitor, samples, skipped);
         if (!firstBad.isEmpty())
             std::printf("      first mismatch: %s\n", qPrintable(firstBad));
 
         check(rows > 0, "the shipped norm set loaded");
-        check(mismatch == 0, "ragOf(grade(v)) equals classifyDelta(v) on every shipped norm");
+        check(mismatch == 0,
+              "ragOf(grade(v)) equals classifyDelta(v) on every shipped norm a Band can express");
+        // BOTH directions. The skip must be exercised — otherwise this branch is untested and the
+        // seed conversion's caps are not actually reaching the pack — and it must not touch a
+        // single cell the wrist grid renders, which is the whole reason skipping is safe.
+        check(skipped > 0, "…and the exclusion is real: the shipped set does carry capped rows");
+        check(skippedInGrid == 0,
+              "…none of which is a cell the wrist grid renders — the grid stays entirely "
+              "expressible as a Band, and this is what fails if a wrist DOF ever gains a cap or a "
+              "shape");
         // BOTH branches of the precedence rule have to be exercised or the assertion is half a
         // gate: the monitor-dominated path is what migrated content uses, the z-derived path is
         // what everything authored in the corridor editor uses.

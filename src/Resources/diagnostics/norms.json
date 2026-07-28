@@ -49,7 +49,45 @@
     "pp_tuned_constants.h only as the frozen record of what they were migrated from).",
     "Bowed styles tolerate more bow and cupped styles more cup, so grading a valid style",
     "against the neutral corridor would red-flag it. They override the general row on the",
-    "lead-wrist face axis ONLY; every other DOF is archetype-invariant and inherits."
+    "lead-wrist face axis ONLY; every other DOF is archetype-invariant and inherits.",
+    "",
+    "SHAPE IS ON THE MEASURE, NOT HERE. A measure that grades only one tail is declared once",
+    "in core.json ('shape': 'floor' | 'ceiling'), because one-sidedness is a property of the",
+    "QUANTITY and cannot differ between a driver row and an iron row for the same measure.",
+    "Rows here carry only numbers. What a shape changes for an author is what those numbers",
+    "MEAN: on a floor, sigmaHi must equal sigmaLo (it grades nothing, and a load error names",
+    "it if they differ) and only monitorLo is legal.",
+    "",
+    "plausibleLo/plausibleHi answer a DIFFERENT QUESTION from the corridor. The corridor asks",
+    "whether the swing was good; these ask whether the reading is real. A reading outside them",
+    "is not graded at all — not Action, not Ideal — because a driver smash of 1.62 is not a",
+    "swing finding, it is a mis-tracked ball, and grading it in either direction would launder",
+    "a capture fault into a confident diagnosis. They are on the ROW rather than the measure,",
+    "deliberately the opposite of shape, because the physical cap is context-dependent: smash",
+    "is bounded by loft, so driver, iron and wedge cap differently while all three are the same",
+    "one-sided quantity. Either bound may appear alone.",
+    "",
+    "m_smashFactor is the only one-sided measure shipped. Four measures were considered and",
+    "NOT converted, and the reasons are recorded so they are not re-litigated from scratch:",
+    "",
+    "  m_leadHeelLiftTop  a ceiling candidate on domain [0, infinity) — author's call, pending.",
+    "  m_leadHandWidth    65 ±10 '% arm length' penalises a wider arc, which may be a floor.",
+    "                     Author's call; it is 'planned', so inert either way today.",
+    "  m_handSpeedP6P7    sign convention unresolved — deceleration or release-drag — and a",
+    "                     shape chosen before the sign is settled would be a guess about which",
+    "                     tail is the good one.",
+    "  m_lagAngleDown     genuinely TWO-SIDED: too little is casting, too much is a flip. Both",
+    "                     tails are faults, which is exactly what 'target' means.",
+    "  m_xFactorStretch   stays target. The high tail is not free — it carries lumbar-load risk",
+    "                     — so calling it a floor would tell a golfer to keep going.",
+    "",
+    "COHORT-RELATIVE BIGGER-IS-BETTER MEASURES GET NO NORM AT ALL, and 'floor' is not the way",
+    "in. Ball speed, clubhead speed and carry are the cases people reach for first, and a",
+    "population floor on any of them grades a golfer Action for their age: the corridor would",
+    "be describing a population they are not in. They are BENCHMARKS — a different feature,",
+    "against a comparison group — and until that exists the honest answer is to report the",
+    "number and grade nothing. 'floor' is for self-normalising ratios and mechanically",
+    "universal thresholds only."
   ],
   "norms": [
     {
@@ -1328,32 +1366,40 @@
       "context": "any",
       "mu": 1.4,
       "sigmaLo": 0.08,
+      "plausibleHi": 1.56,
       "unit": "ratio",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Cap is the across-club ceiling, so a shot whose club is unknown still rejects an impossible reading. Ball speed cannot exceed clubhead speed by more than the coefficient of restitution allows, and the governing limit on that is a rule of the game rather than a property of any one club."
     },
     {
       "measure": "m_smashFactor",
       "context": "driver",
       "mu": 1.48,
       "sigmaLo": 0.05,
+      "plausibleHi": 1.56,
       "unit": "ratio",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "The cap is physics, not a corridor: a driver's low loft puts almost all of the strike into ball speed, and above roughly 1.56 the reading implies energy transfer the restitution limit does not permit. A higher figure is a mis-tracked ball or a mis-measured clubhead, not an efficient strike."
     },
     {
       "measure": "m_smashFactor",
       "context": "iron",
       "mu": 1.38,
       "sigmaLo": 0.06,
+      "plausibleHi": 1.45,
       "unit": "ratio",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "Loft-dependent: more loft sends more of the strike into spin and launch and less into ball speed, so an iron caps below a driver. The cap is a physical ceiling on the reading, never a judgement on the swing."
     },
     {
       "measure": "m_smashFactor",
       "context": "wedge",
       "mu": 1.2,
       "sigmaLo": 0.1,
+      "plausibleHi": 1.32,
       "unit": "ratio",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "The most lofted case and so the lowest ceiling — a wedge converts the least of the clubhead's speed into ball speed. Also the noisiest in practice, which is why the tolerance is the widest of the four while the cap is the tightest."
     },
     {
       "measure": "m_spinRate",

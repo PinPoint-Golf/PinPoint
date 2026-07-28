@@ -668,6 +668,21 @@ pp_norm_env(wrist_norm_render_test)
 # Stage 9's own gate: the corridors the metric surfaces used to get from the manifest now come from
 # the norm set through corridorForMetricAtPhase(), and nothing a surface drew went missing. Carries
 # the last migration PIN in the suite — the four tempo numbers, which retire with ledger C9.
+# A5's gate: the seed conversion, asserted on the SHIPPED content. m_smashFactor is the first and
+# only one-sided measure PinPoint ships, so this is where the shapes machinery meets real numbers —
+# which band a golfer's reading lands in, and which side of the corridor is open. Pins the shape of
+# the answer and one physical cap, never a fitted mu or sigma: those are heuristics and are meant to
+# move when a corpus re-seats them.
+pp_add_test(seed_conversion_test
+    SOURCES ${DIAG}/tests/seed_conversion_test.cpp
+            ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+set_tests_properties(seed_conversion_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
 pp_add_test(manifest_migration_test
     SOURCES ${DIAG}/tests/manifest_migration_test.cpp
             ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
