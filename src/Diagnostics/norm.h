@@ -127,6 +127,17 @@ struct NormBasis {
 // archetype — while age and sex are properties of the ATHLETE. Folding one into the other would push
 // the cross-product (senior × driver × female × …) through a single-inheritance walk that cannot
 // express two orthogonal dimensions without duplicating every row on both.
+//
+// A COHORT SHIFTS THE CORRIDOR AND NEVER INVERTS VALENCE — the same rule context obeys. If a measure
+// reads better high for one population it reads better high for all of them; what a cohort changes
+// is where the corridor sits, never which way is good. That is also why `Shape` is on the MEASURE
+// and not reachable from here: a cohort row that flipped the direction would not be a corridor for a
+// different population, it would be a different measure wearing the same id.
+//
+// BAND-EDGE CLIFFS ARE ACCEPTED. A golfer's grade can shift on their 55th birthday. There is no
+// interpolation between bands and there will not be: interpolating implies a continuity the banded
+// literature does not support, and the coach mediates the edge case exactly as they already do for
+// shot type.
 
 enum class Sex { Male, Female };
 

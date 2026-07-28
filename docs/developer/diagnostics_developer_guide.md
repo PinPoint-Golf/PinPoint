@@ -190,9 +190,11 @@ struct Edge { QString from, to; EdgeType type; Strength strength; Provenance pro
 
 ```cpp
 struct Norm {
-    QString measureId, contextId;      // the key. NEVER an athlete id
+    QString measureId, contextId;      // the key…
+    Cohort  cohort;                    // …and its optional third term. NEVER an athlete id
     double  mu, sigmaLo, sigmaHi;      // asymmetric BY DESIGN, not as an option
     std::optional<double> monitorLo, monitorHi;   // absolute Watch bounds — migrated content only
+    std::optional<double> plausibleLo, plausibleHi;   // outside these the reading is NOT BELIEVED
     int        n;  NormSource source;  QString unit, author, citation;  QDate setOn;
     std::optional<NormBasis> basedOn;  // what an override was made against (user rows only)
 
@@ -203,7 +205,13 @@ struct Norm {
 
 `claimLo()/claimHi()` are **not** the Ideal band. The Ideal band is `mu ± idealMaxZ × sigma` and comes from `bandEdgesOf()`; it moves with the grade policy and the claim does not. See §5.
 
-**All norms are population norms.** There is no per-athlete norm and nothing here should ever gain one — a norm that differs per player is a different feature with different storage and a different UI. Seating from a chosen set of swings records `n` and the scope in provenance; the result still applies to everyone using that norm set.
+**`plausibleLo/Hi` answer a different question from the corridor.** The corridor asks whether the swing was good; these ask whether the reading is real. Outside them the grade is `NotMeasured` **plus a distinct `implausible` flag**, and plausibility outranks even the monitor band — a driver smash of 1.62 is a mis-tracked ball, and grading it in either direction would launder a capture fault into a confident diagnosis. Three states, never merged: a capture GAP (nothing arrived), a swing FINDING (something arrived and was poor), a capture FAULT (something arrived that this instrument cannot produce). On the ROW rather than the measure — the opposite of `Shape` — because the physical cap is context-dependent: smash is bounded by loft.
+
+**Shape lives on the MEASURE, not here** (`characteristic.h`). One-sidedness is a property of the quantity and cannot differ between a driver row and an iron row, so norm rows carry only numbers and `validateNormsAgainst` joins the two — exactly as it already does for `unit`. On a floor, `sigmaHi` must equal `sigmaLo` and only `monitorLo` is legal; both are named load errors.
+
+**All norms are population norms**, and the inviolable rule is that a norm is **never keyed by athlete id**. It used to read "one population for everyone", which the optional `Cohort` retires: a cohort is a *segmented* population — men 55–64 — not a person. A norm that differs per player is a different feature with different storage and a different UI. Seating from a chosen set of swings records `n` and the scope in provenance; the result still applies to everyone in that cohort.
+
+**Cohort shifts the corridor and NEVER inverts valence** — the same rule context obeys — and band-edge cliffs are accepted: a grade can shift on a 55th birthday, and there is no interpolation, because interpolating implies a continuity the banded literature does not support.
 
 `monitorLo/Hi` exist ONLY to reproduce migrated content exactly. The old table added a fixed number of degrees either side of green, which is not a fixed multiple of the green half-width and so cannot be reproduced by any global z policy. Anything authored in the corridor editor omits them and derives its Watch edge from the `GradePolicy`.
 
@@ -253,7 +261,11 @@ The list form exists because the winner can carry no norm. `m_leadWristAtTop` is
 
 ### Measure → norm (`norm_provider.h`)
 
-`INormProvider::resolve(measureId, contextId)` walks **up** the chain from the requested context; the nearest row wins. It is **non-virtual on purpose** — every provider must resolve identically, or a grade would depend on which layer a norm happened to be stored in.
+`INormProvider::resolve(measureId, contextId, athlete = {})` walks **up** the chain from the requested context; the nearest row wins. It is **non-virtual on purpose** — every provider must resolve identically, or a grade would depend on which layer a norm happened to be stored in.
+
+**The walk is CONTEXT-MAJOR.** At each node of the context chain the cohort keys are probed most-specific-first — sex+band, sex+adult, band, adult, sex, unqualified (`cohortProbeOrder`, `norm.h`) — and only when none is present does it move up the tree. Two intended consequences: an unqualified `driver` row beats a senior row at `any` for a driver shot, and a senior row at `any` answers wherever no club row exists. Inverting the loops would make every cohort row shadow every club row beneath it.
+
+`athlete` is the GOLFER's cohort, derived from their date of birth **at the swing date** (`ageBandFor`) and never stored — an athlete ages across their own history. An axis with no answer is skipped, never guessed: unknown date of birth, unknown sex or a declined answer means only rows unqualified on that axis match, and the reading **still grades** against the universal corridor. An athlete we know nothing about yields exactly one probe, so resolution costs what it did before cohorts existed.
 
 Two fallbacks that look similar and are not:
 
@@ -650,7 +662,8 @@ All in the analyzer suite: `cmake -S src/Analysis/tests -B build/analyzer-tests`
 | `core_pack_test` | the SHIPPED pack: ids, referential integrity, that every live corridor signal can fire, and that **everything which can fire can also be explained** — a condition detectable today with no cause is a defect, not a backlog item |
 | `axis_direction_test` | every corridor signal points the way its own condition claims. The fixture carries the catalogue quote that decides each row, so a new signal with no fixture row **fails** |
 | `norm_test` | the grade rule: per-side z, monitor bounds dominating in both directions, the drawn Ideal edge agreeing with the graded one **under every preset**, and the preset ordering invariant |
-| `norm_pack_test` | persistence, validation, layering — and that context specificity beats layer precedence |
+| `norm_pack_test` | persistence, validation, layering — that context specificity beats layer precedence, the cohort probe order exhaustively, and the band a date of birth derives at a given date |
+| `seed_conversion_test` | the SHIPPED one-sided content: which band a value lands in either side of the smash-factor conversion, that shape ships on exactly one measure, and that the plausibility caps fall with loft. Pins no `mu` and no `sigma` — those are heuristics and are meant to move |
 | `context_tree_test` | upward resolution, the unknown-context rule, the shipped tree |
 | `measure_facets_test`, `anatomy_vocabulary_test` | the Composed vocabulary and its validity table |
 | `measure_sample_test` | reading a measure off a stored swing; an unsegmented phase yields NOTHING, never a nearest-sample guess |
