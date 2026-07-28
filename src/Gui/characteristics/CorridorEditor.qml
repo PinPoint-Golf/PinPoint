@@ -62,9 +62,27 @@ Item {
     readonly property var  _gc:   editor.gradeCounts || ({})
     readonly property string _unit: _d.unit || ""
 
-    // One decimal is the resolution every corridor in the pack is authored at; more reads as false
-    // precision on a figure that came from a heuristic.
+    // One decimal is the resolution most corridors in the pack are authored at; more reads as false
+    // precision on a figure that came from a heuristic. Right for the AXIS ENDS, which are a
+    // computed frame rather than a stated number.
     function _num(v) { return Number(v).toFixed(1) }
+
+    // A FIELD COMMITS WHAT IT SHOWS, so it may not round. PpTextField fires editingFinished on
+    // focus loss as well as Enter, and the handler parses whatever text is in the box — so a field
+    // displaying a rounded 1.5 for a corridor authored at 1.48 will SAVE 1.5 the moment the user
+    // tabs past it, having touched nothing. Smash factor is authored 1.48 ± 0.05, and a tolerance
+    // of 0.05 shown as "0.1" is a corridor drawn at twice its width.
+    //
+    // So: as many decimals as the value needs and no more, capped, which leaves every
+    // one-decimal measure reading exactly as it did.
+    function _fieldNum(v) {
+        if (!isFinite(v)) return "0"
+        for (var dp = 1; dp <= 4; ++dp) {
+            var s = Number(v).toFixed(dp)
+            if (Math.abs(parseFloat(s) - v) < 1e-9) return s
+        }
+        return Number(v).toFixed(4)
+    }
 
     function _gradeColor(g) {
         if (g === "ideal")  return Theme.colorRagGood
@@ -152,14 +170,23 @@ Item {
                 }
             }
 
-            // ── What a high value means ──────────────────────────────────────
+            // ── What a high value means, and which way the corridor opens ────
             //
             // Kept in view while dragging: which end of the number line is "more" is the one thing
             // an author must not have to guess at. See docs/design/pinpoint_sign_conventions.md.
+            //
+            // On a one-sided measure this becomes the SHAPE line instead, with highMeans folded
+            // into it by the model — "Higher is better: more of the clubhead's speed reaching the
+            // ball" reads as a reason, where a bare "floor" beside a bare "Higher means" reads as
+            // two facts the author has to join up themselves. Read-only either way: shape is a
+            // property of the measure, and this screen edits a norm.
             Text {
                 Layout.fillWidth: true
-                visible:        (root._d.highMeans || "").length > 0
-                text:           qsTr("Higher means: %1").arg(root._d.highMeans || "")
+                readonly property bool _oneSided: root._d.oneSided === true
+                visible: text.length > 0
+                text: _oneSided ? (root._d.shapeNote || "")
+                                : ((root._d.highMeans || "").length > 0
+                                     ? qsTr("Higher means: %1").arg(root._d.highMeans) : "")
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3
@@ -188,9 +215,15 @@ Item {
                     function xOf(v)  { return (v - axisLo) / span * width }
                     function valOf(x) { return axisLo + Math.max(0, Math.min(1, x / width)) * span }
 
-                    // Which handle is held, and which one a press here would take: "" | "lo" | "hi".
+                    // Which handle is held, and which one a press here would take.
+                    //   two-sided: "" | "lo" | "hi"     — the two ends of the claim
+                    //   one-sided: "" | "mu" | "edge"   — the aspiration, and the tolerance
                     property string grabbed: ""
                     property string hovered: ""
+
+                    readonly property bool oneSided: root._d.oneSided === true
+                    readonly property bool lowOpen:  root._d.lowOpen  === true
+                    readonly property bool highOpen: root._d.highOpen === true
 
                     readonly property real barsTop:    0
                     readonly property real barsHeight: height - Theme.sp(34)
@@ -227,6 +260,63 @@ Item {
                         radius: Theme.sp(2)
                     }
 
+                    // ── The open tail ────────────────────────────────────────
+                    //
+                    // Every band above ends at the aspiration on a one-sided norm, because that is
+                    // where its numbers end. Ideal does NOT: past mu, a floor grades Ideal for
+                    // ever. Drawn as green running off the end of the plot and fading out, never
+                    // as a band terminating in a hard edge — an edge there would state a bound,
+                    // and the entire claim of a one-sided norm is that there is not one.
+                    //
+                    // ADDITIVE, like the corridor bars: a target norm draws the three rectangles
+                    // above and nothing else.
+                    Rectangle {
+                        visible: plot.highOpen
+                        x:       plot.xOf(root._d.mu || 0)
+                        width:   Math.max(0, plot.width - x)
+                        y:       plot.bandTop
+                        height:  plot.bandHeight
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0
+                                           color: Qt.rgba(Theme.colorRagGood.r, Theme.colorRagGood.g,
+                                                          Theme.colorRagGood.b, 0.32) }
+                            GradientStop { position: 1.0
+                                           color: Qt.rgba(Theme.colorRagGood.r, Theme.colorRagGood.g,
+                                                          Theme.colorRagGood.b, 0.0) }
+                        }
+                    }
+                    Rectangle {
+                        visible: plot.lowOpen
+                        x:       0
+                        width:   Math.max(0, plot.xOf(root._d.mu || 0))
+                        y:       plot.bandTop
+                        height:  plot.bandHeight
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0
+                                           color: Qt.rgba(Theme.colorRagGood.r, Theme.colorRagGood.g,
+                                                          Theme.colorRagGood.b, 0.0) }
+                            GradientStop { position: 1.0
+                                           color: Qt.rgba(Theme.colorRagGood.r, Theme.colorRagGood.g,
+                                                          Theme.colorRagGood.b, 0.32) }
+                        }
+                    }
+
+                    // …and it is said in words as well as drawn. A fade is a convention, and a
+                    // convention nobody has been taught is decoration.
+                    Text {
+                        visible: plot.oneSided
+                        text:    root._d.openEndLabel || ""
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzMicro
+                        font.italic:    true
+                        color:          Theme.colorText3
+                        y:              plot.bandTop + plot.bandHeight + Theme.sp(3)
+                        x:              plot.highOpen ? Math.max(0, plot.width - width)
+                                                      : 0
+                    }
+
                     // ── Histogram ────────────────────────────────────────────
                     Repeater {
                         model: root.editor.histogram
@@ -258,12 +348,40 @@ Item {
                     }
 
                     // ── Centre mark ──────────────────────────────────────────
+                    //
+                    // A static tick on a target norm: mu there is a CONSEQUENCE of where the two
+                    // handles are, and offering to drag it would be offering to move two things
+                    // with one gesture.
+                    //
+                    // On a one-sided norm it is the headline and it is draggable. "At least 1.48"
+                    // IS the corridor — the tolerance is the secondary number — so mu has to be
+                    // the thing under your finger. Drawn as a handle when it is one, because a
+                    // hairline that responds to a drag is a control nobody will find.
                     Rectangle {
-                        x:      plot.xOf(root._d.mu || 0)
-                        y:      plot.bandTop - Theme.sp(4)
-                        width:  1
-                        height: plot.bandHeight + Theme.sp(8)
-                        color:  Theme.colorText3
+                        visible: !plot.oneSided
+                        x:       plot.xOf(root._d.mu || 0)
+                        y:       plot.bandTop - Theme.sp(4)
+                        width:   1
+                        height:  plot.bandHeight + Theme.sp(8)
+                        color:   Theme.colorText3
+                    }
+                    Item {
+                        id: muHandle
+                        visible: plot.oneSided
+                        readonly property bool lit: plot.grabbed === "mu" || plot.hovered === "mu"
+
+                        width:  Theme.sp(44)
+                        height: plot.bandHeight + Theme.sp(26)
+                        x:      plot.xOf(root._d.mu || 0) - width / 2
+                        y:      plot.bandTop - Theme.sp(13)
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            y:      0
+                            width:  Theme.sp(3)
+                            height: parent.height
+                            color:  muHandle.lit ? Theme.colorAccent : Theme.colorText
+                        }
                     }
 
                     // ── The two handles ──────────────────────────────────────
@@ -281,14 +399,23 @@ Item {
                     // The grab is a single MouseArea over the strip (below), which is also how the
                     // 44 pt touch target is honoured without two overlapping hit areas fighting
                     // over the middle when the corridor is narrow.
+                    //
+                    // ONE element on a one-sided norm, and the dead one is ABSENT rather than
+                    // disabled. A greyed handle invites "why can't I drag this?" on every single
+                    // visit, and the honest answer — "that side of the corridor does not exist" —
+                    // is not something a disabled state can say. Nothing is there because there is
+                    // nothing there.
                     Repeater {
-                        model: [{ which: "lo" }, { which: "hi" }]
+                        model: plot.oneSided ? [{ which: "edge" }]
+                                             : [{ which: "lo" }, { which: "hi" }]
                         delegate: Item {
                             id: handle
                             required property var modelData
                             readonly property bool isLo: modelData.which === "lo"
-                            readonly property real value: isLo ? (root._d.claimLo || 0)
-                                                               : (root._d.claimHi || 0)
+                            readonly property real value: modelData.which === "edge"
+                                                            ? (root._d.gradedEdge || 0)
+                                                            : (isLo ? (root._d.claimLo || 0)
+                                                                    : (root._d.claimHi || 0))
                             readonly property bool lit: plot.grabbed === modelData.which
                                                         || plot.hovered === modelData.which
 
@@ -338,18 +465,36 @@ Item {
                         // Which handle a press at this x would take, or "" when neither is close
                         // enough. Half the 44 pt target either side; the nearer wins a tie so a
                         // narrow corridor is still separable.
+                        //
+                        // One-sided: the two grabbable things are the aspiration and the graded
+                        // edge, which is the same two-target problem with different names.
                         function pick(px) {
-                            var dLo = Math.abs(px - plot.xOf(root._d.claimLo || 0))
-                            var dHi = Math.abs(px - plot.xOf(root._d.claimHi || 0))
-                            var r   = Theme.sp(22)
-                            if (dLo > r && dHi > r) return ""
-                            return dLo <= dHi ? "lo" : "hi"
+                            var r = Theme.sp(22)
+                            var aName = plot.oneSided ? "mu"   : "lo"
+                            var bName = plot.oneSided ? "edge" : "hi"
+                            var dA = Math.abs(px - plot.xOf(plot.oneSided ? (root._d.mu || 0)
+                                                                         : (root._d.claimLo || 0)))
+                            var dB = Math.abs(px - plot.xOf(plot.oneSided ? (root._d.gradedEdge || 0)
+                                                                         : (root._d.claimHi || 0)))
+                            if (dA > r && dB > r) return ""
+                            return dA <= dB ? aName : bName
                         }
 
                         onPositionChanged: function(mouse) {
                             if (plot.grabbed === "") { plot.hovered = pick(mouse.x); return }
 
                             var v = plot.valOf(mouse.x)
+
+                            // One-sided: no swap to follow. The aspiration and its tolerance are
+                            // independent numbers rather than two ends of one span, and the edge
+                            // clamps ON the centre instead of crossing it (nudgeGradedEdge), so
+                            // there is nothing for the pointer to lose hold of.
+                            if (plot.oneSided) {
+                                if (plot.grabbed === "mu") root.editor.setAspiration(v)
+                                else                       root.editor.nudgeGradedEdge(v)
+                                return
+                            }
+
                             if (plot.grabbed === "lo") root.editor.nudgeClaimLo(v)
                             else                       root.editor.nudgeClaimHi(v)
 
@@ -432,13 +577,25 @@ Item {
                 Layout.fillWidth: true
                 spacing: Theme.sp(12)
 
+                // TWO FIELDS EITHER WAY, but not the same two.
+                //
+                //   target    NORMAL FROM [1.43]  TO [1.53]   — the two ends of the claim
+                //   floor     AT LEAST    [1.48]  TOLERANCE [0.05]
+                //   ceiling   NO MORE THAN[12.0]  TOLERANCE [2.0]
+                //
+                // A one-sided corridor has an aspiration and a slack, not two ends, and the pair
+                // it does have is exactly what the two draggable marks above bind to. There is no
+                // field for the ungraded side because there is no number there — claimHi on a
+                // floor is mu plus a tolerance nothing grades.
                 ColumnLayout {
                     spacing: Theme.sp(3)
                     Text {
                         // The field edits the norm's own claim, which is what the handle beside it
                         // drags. "NORMAL FROM … TO" rather than "IDEAL FROM": the Ideal band is a
                         // grade, and this control does not set a grade.
-                        text:                qsTr("NORMAL FROM")
+                        text: root._d.shape === "floor"   ? qsTr("AT LEAST")
+                            : root._d.shape === "ceiling" ? qsTr("NO MORE THAN")
+                            :                               qsTr("NORMAL FROM")
                         font.family:         Theme.fontBody
                         font.pixelSize:      Theme.fontSzMicro
                         font.letterSpacing:  Theme.trackingMicro
@@ -447,13 +604,19 @@ Item {
                     }
                     PpTextField {
                         id: loField
+                        readonly property bool _oneSided: root._d.oneSided === true
+                        readonly property real _bound: _oneSided ? (root._d.mu || 0)
+                                                                 : (root._d.claimLo || 0)
                         Layout.preferredWidth: Theme.sp(110)
                         enabled: root._d.refused !== true
-                        text:    root._num(root._d.claimLo || 0)
+                        text:    root._fieldNum(_bound)
                         onEditingFinished: {
                             var v = parseFloat(text)
-                            if (!isNaN(v)) root.editor.nudgeClaimLo(v)
-                            text = root._num(root._d.claimLo || 0)
+                            if (!isNaN(v)) {
+                                if (_oneSided) root.editor.setAspiration(v)
+                                else           root.editor.nudgeClaimLo(v)
+                            }
+                            text = root._fieldNum(_bound)
                         }
                     }
                 }
@@ -461,7 +624,7 @@ Item {
                 ColumnLayout {
                     spacing: Theme.sp(3)
                     Text {
-                        text:                qsTr("TO")
+                        text: root._d.oneSided === true ? qsTr("TOLERANCE") : qsTr("TO")
                         font.family:         Theme.fontBody
                         font.pixelSize:      Theme.fontSzMicro
                         font.letterSpacing:  Theme.trackingMicro
@@ -470,13 +633,19 @@ Item {
                     }
                     PpTextField {
                         id: hiField
+                        readonly property bool _oneSided: root._d.oneSided === true
+                        readonly property real _bound: _oneSided ? (root._d.tolerance || 0)
+                                                                 : (root._d.claimHi || 0)
                         Layout.preferredWidth: Theme.sp(110)
                         enabled: root._d.refused !== true
-                        text:    root._num(root._d.claimHi || 0)
+                        text:    root._fieldNum(_bound)
                         onEditingFinished: {
                             var v = parseFloat(text)
-                            if (!isNaN(v)) root.editor.nudgeClaimHi(v)
-                            text = root._num(root._d.claimHi || 0)
+                            if (!isNaN(v)) {
+                                if (_oneSided) root.editor.setTolerance(v)
+                                else           root.editor.nudgeClaimHi(v)
+                            }
+                            text = root._fieldNum(_bound)
                         }
                     }
                 }
@@ -501,13 +670,13 @@ Item {
                 // could see Good and Watch move with the policy but not Ideal would reasonably
                 // conclude the green band was fixed. It is not, and it never was — it was only
                 // ever drawn as though it were.
+                // Composed in C++ (draft.policyNote) rather than assembled here: which of the three
+                // forms applies is a statement about the measure's shape, and "action beyond
+                // 1.3 – 1.5" on a floor would name a fault on the side that grades Ideal.
                 Text {
                     Layout.alignment: Qt.AlignBottom
                     Layout.bottomMargin: Theme.sp(8)
-                    text: qsTr("Ideal %1 – %2 · good to %3 – %4 · action beyond %5 – %6")
-                            .arg(root._num(root._d.idealLo || 0)).arg(root._num(root._d.idealHi || 0))
-                            .arg(root._num(root._d.goodLo  || 0)).arg(root._num(root._d.goodHi  || 0))
-                            .arg(root._num(root._d.watchLo || 0)).arg(root._num(root._d.watchHi || 0))
+                    text:           root._d.policyNote || ""
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzMicro
                     color:          Theme.colorText3
@@ -535,9 +704,14 @@ Item {
             Text {
                 Layout.fillWidth: true
                 visible: root._d.route === "hand"
-                text: qsTr("Drag the two handles, or type the numbers. The band between them is "
-                           + "what counts as ideal; everything wider follows from the grade "
-                           + "policy in Measures & norms.")
+                text: root._d.oneSided === true
+                        ? qsTr("Drag the centre mark to set the figure to reach, and the handle "
+                               + "to set how much slack there is on the graded side. The other "
+                               + "side has no limit; everything wider follows from the grade "
+                               + "policy in Measures & norms.")
+                        : qsTr("Drag the two handles, or type the numbers. The band between them "
+                               + "is what counts as ideal; everything wider follows from the grade "
+                               + "policy in Measures & norms.")
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzBody2
                 color:          Theme.colorText2
@@ -552,9 +726,17 @@ Item {
 
                 Text {
                     Layout.fillWidth: true
-                    text: qsTr("Mark the swings you consider well positioned, then fit. The "
-                               + "selector below picks which swings are drawn — it does not "
-                               + "narrow who the corridor applies to.")
+                    // The one-sided variant says what the fit will and will not do, because "fit"
+                    // on a measure with an unbounded good side is a different operation: the model
+                    // reads the graded tail only, and there is no ungraded side to offer to seat.
+                    text: root._d.oneSided === true
+                            ? qsTr("Mark the swings you consider well positioned, then fit. The "
+                                   + "fit reads the graded side only — the open side has no "
+                                   + "limit to find. The selector below picks which swings are "
+                                   + "drawn; it does not narrow who the corridor applies to.")
+                            : qsTr("Mark the swings you consider well positioned, then fit. The "
+                                   + "selector below picks which swings are drawn — it does not "
+                                   + "narrow who the corridor applies to.")
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzBody2
                     color:          Theme.colorText2
@@ -784,8 +966,10 @@ Item {
                                 color:          Theme.colorText
                             }
                             Text {
-                                text: qsTr("%1 to %2").arg(root._num(modelData.idealLo))
-                                                      .arg(root._num(modelData.idealHi))
+                                // The row's own claim, phrased by the model — "at least 1.4" on a
+                                // one-sided measure, where "1.4 to 1.5" would name a second bound
+                                // the row does not have.
+                                text: modelData.rangeText || ""
                                 font.family:        Theme.fontData
                                 font.pixelSize:     Theme.fontSzMicro
                                 font.letterSpacing: Theme.trackingData
@@ -886,13 +1070,7 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     visible: root._d.hasParent === true
-                    text: qsTr("%1 sets %2 to %3. This corridor is %4 %5 wide against its %6.")
-                            .arg(root._d.inheritedFrom || "")
-                            .arg(root._num(root._d.parentClaimLo || 0))
-                            .arg(root._num(root._d.parentClaimHi || 0))
-                            .arg(root._num(((root._d.claimHi || 0) - (root._d.claimLo || 0))))
-                            .arg(root._unit)
-                            .arg(root._num(((root._d.parentClaimHi || 0) - (root._d.parentClaimLo || 0))))
+                    text:    root._d.parentNote || ""
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzMicro
                     color:          Theme.colorText3

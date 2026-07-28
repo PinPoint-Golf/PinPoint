@@ -47,6 +47,25 @@ GradePolicy policyFor(const QString &name)
 // strings — the measures view and the metric detail page render them too.
 QString sourceLabel(NormSource s) { return normSourceLabel(s); }
 
+// Enough decimals to be FAITHFUL — one to four, and never more than the number needs.
+//
+// Every readout on this screen was fixed at one decimal, on the reasoning that one decimal is the
+// resolution the pack is authored at. That is true of the degree measures and false of the ratios.
+// Smash factor is authored mu 1.48 with a tolerance of 0.05, and at one decimal its policy line
+// read "Ideal from 1.4 · good from 1.4" — two different edges rendering as one number — while the
+// tolerance drew as 0.1, twice its real width. Found while building the one-sided fields, which is
+// where it stops being cosmetic: a tolerance is a small number by nature, so rounding it to a
+// tenth is the difference between a corridor and double a corridor.
+QString fmtNum(double v)
+{
+    if (!std::isfinite(v)) return QStringLiteral("—");
+    for (int dp = 1; dp <= 4; ++dp) {
+        const QString s = QString::number(v, 'f', dp);
+        if (std::fabs(s.toDouble() - v) < 1e-9) return s;
+    }
+    return QString::number(v, 'f', 4);
+}
+
 // How many swings one scan will look at. A cap, not a sample size — and it is REPORTED when it
 // bites (sampleSummary.truncated), because a silent cap reads as "that is the whole library".
 constexpr int kMaxScan = 2000;
@@ -83,6 +102,31 @@ NormPack readUserPack()
 }
 
 } // namespace
+
+// See the header for why this is a median and a percentile rather than a mean and a deviation,
+// and why it lives out here rather than inside seatFromSample().
+OneSidedFit fitOneSided(std::vector<double> values, Shape shape)
+{
+    OneSidedFit fit;
+    if (values.empty())
+        return fit;
+
+    std::sort(values.begin(), values.end());
+    const auto pct = [&values](double p) {
+        const double idx = p * double(values.size() - 1);
+        const auto   i   = std::size_t(std::floor(idx));
+        const auto   j   = std::min(i + 1, values.size() - 1);
+        return values[i] + (idx - double(i)) * (values[j] - values[i]);   // linear interpolation
+    };
+
+    fit.mu        = pct(0.50);
+    fit.tolerance = (shape == Shape::Ceiling) ? (pct(0.84) - fit.mu) : (fit.mu - pct(0.16));
+    // Order statistics cannot invert, so this only ever clamps floating-point noise off a
+    // degenerate sample — but a negative tolerance would author a corridor whose edges are the
+    // wrong way round, and that is not a thing to leave to arithmetic luck.
+    fit.tolerance = std::max(0.0, fit.tolerance);
+    return fit;
+}
 
 NormEditorModel::NormEditorModel(QObject *parent)
     : QObject(parent),
@@ -123,6 +167,26 @@ void NormEditorModel::reload()
 {
     resetSharedNormProvider();
     m_norms = sharedNormProvider();
+}
+
+Shape NormEditorModel::shape() const
+{
+    const Measure *m = measure();
+    return m ? m->shape : Shape::Target;
+}
+
+// A corridor's own claim as a sentence fragment. Takes the Norm rather than a pair, because on a
+// one-sided row the headline is `mu` — the aspiration — and a pair does not carry it: claimHi on a
+// floor is mu + a tolerance nothing grades, which is a number that should never reach a reader.
+QString NormEditorModel::claimPhrase(const Norm &n) const
+{
+    const auto &f = fmtNum;
+    switch (shape()) {
+    case Shape::Floor:   return tr("at least %1").arg(f(n.mu));
+    case Shape::Ceiling: return tr("no more than %1").arg(f(n.mu));
+    case Shape::Target:  break;
+    }
+    return tr("%1 to %2").arg(f(n.claimLo()), f(n.claimHi()));
 }
 
 const Measure *NormEditorModel::measure() const
@@ -235,6 +299,13 @@ void NormEditorModel::setRoute(const QString &r)
 
 void NormEditorModel::setClaimBand(double lo, double hi)
 {
+    // REFUSED on a one-sided norm, rather than left to the caller's discretion. Taking the midpoint
+    // of two edges would move mu — the aspiration, the headline — as a side effect of setting a
+    // tolerance, and splitting the width would leave sigmaLo != sigmaHi, which validateNormsAgainst
+    // refuses on a one-sided row. A legal-looking gesture would author an invalid pack. The
+    // one-sided operations are setAspiration and setTolerance, and nudgeClaimLo/Hi route to them.
+    if (shapeIsOneSided(shape())) return;
+
     if (hi < lo) std::swap(lo, hi);
 
     // A zero-width band admits only its own centre — norm.h calls that degenerate but well-defined,
@@ -246,6 +317,14 @@ void NormEditorModel::setClaimBand(double lo, double hi)
 
     // Hand-editing makes this an authored figure again. Leaving `Seated · n = 42` attached to
     // numbers a hand has since moved would be a provenance claim the norm no longer supports.
+    dropDerivedProvenance();
+}
+
+// Hand-editing makes this an authored figure again, on every route into the numbers. Factored out
+// of setClaimBand so the one-sided mutators cannot quietly keep a `Seated · n = 42` label attached
+// to a mu a hand has since dragged.
+void NormEditorModel::dropDerivedProvenance()
+{
     if (m_draft.source == NormSource::Seated || m_draft.source == NormSource::Imported) {
         m_draft.source = NormSource::Heuristic;
         m_draft.n      = 0;
@@ -255,8 +334,67 @@ void NormEditorModel::setClaimBand(double lo, double hi)
     emit sampleChanged();
 }
 
-void NormEditorModel::nudgeClaimLo(double to) { setClaimBand(to, m_draft.claimHi()); }
-void NormEditorModel::nudgeClaimHi(double to) { setClaimBand(m_draft.claimLo(), to); }
+void NormEditorModel::setAspiration(double mu)
+{
+    if (!shapeIsOneSided(shape())) return;      // a target norm's centre is a consequence, not a control
+    if (!std::isfinite(mu) || qFuzzyCompare(1.0 + mu, 1.0 + m_draft.mu)) return;
+    m_draft.mu = mu;
+    dropDerivedProvenance();
+}
+
+void NormEditorModel::setTolerance(double tolerance)
+{
+    if (!shapeIsOneSided(shape())) return;
+    if (!std::isfinite(tolerance)) return;
+    // Magnitude, because the graded side is below mu on a floor and above it on a ceiling, and a
+    // user typing -0.05 into a field labelled TOLERANCE means the same thing either way.
+    const double t = std::fabs(tolerance);
+    if (qFuzzyCompare(1.0 + t, 1.0 + m_draft.sigmaLo) && qFuzzyCompare(1.0 + t, 1.0 + m_draft.sigmaHi))
+        return;
+    // BOTH sides, always equal. validateNormsAgainst refuses a one-sided row whose sigmas differ,
+    // and the ungraded one is a number nothing reads — letting it drift would author an invalid
+    // pack out of a gesture that looked entirely legal.
+    m_draft.sigmaLo = t;
+    m_draft.sigmaHi = t;
+    dropDerivedProvenance();
+}
+
+void NormEditorModel::nudgeGradedEdge(double edgeValue)
+{
+    // Clamped at zero rather than taken as a magnitude, and the difference is what the drag feels
+    // like. setTolerance() takes |t| because a user TYPING -0.05 into a field labelled TOLERANCE
+    // means 0.05; a user DRAGGING the edge past the centre means "smaller, and smaller again", and
+    // reflecting it out the far side would make the handle leap away from the pointer. Clamping
+    // parks it on the centre — a zero tolerance, degenerate but well-defined (norm.h) — which is
+    // also why the two-sided swap-follow has no counterpart here: nothing can cross anything.
+    switch (shape()) {
+    case Shape::Floor:   setTolerance(std::max(0.0, m_draft.mu - edgeValue)); return;
+    case Shape::Ceiling: setTolerance(std::max(0.0, edgeValue - m_draft.mu)); return;
+    case Shape::Target:  return;
+    }
+}
+
+// Shape-aware routers, so a caller holding "the low field" keeps working on all three shapes and
+// no surface has to know which of the two interactions it is driving.
+void NormEditorModel::nudgeClaimLo(double to)
+{
+    switch (shape()) {
+    case Shape::Floor:   nudgeGradedEdge(to); return;   // on a floor the LOW edge is the graded one
+    case Shape::Ceiling: return;                        // …and here the low side is open: no edge to move
+    case Shape::Target:  break;
+    }
+    setClaimBand(to, m_draft.claimHi());
+}
+
+void NormEditorModel::nudgeClaimHi(double to)
+{
+    switch (shape()) {
+    case Shape::Ceiling: nudgeGradedEdge(to); return;
+    case Shape::Floor:   return;
+    case Shape::Target:  break;
+    }
+    setClaimBand(m_draft.claimLo(), to);
+}
 
 void NormEditorModel::beginHandleDrag()
 {
@@ -499,6 +637,30 @@ QVariantMap NormEditorModel::seatFromSample()
         return out;
     }
 
+    if (shapeIsOneSided(shape())) {
+        const OneSidedFit fit = fitOneSided(vals, shape());
+        // ONE tolerance, on both sides, and there is no borrow fallback. The two-sided one below
+        // exists because splitting a sample about its mean can legitimately leave a side empty,
+        // which is an artefact of the split. Here both order statistics come from the same
+        // one-sided distribution, so a zero spread means the sample really is a point mass — a
+        // degenerate but well-defined corridor (norm.h) — and saying so beats inventing a width.
+        m_draft.mu      = fit.mu;
+        m_draft.sigmaLo = fit.tolerance;
+        m_draft.sigmaHi = fit.tolerance;
+        m_draft.n       = int(vals.size());
+        m_draft.source  = NormSource::Seated;
+        m_draft.setOn   = QDate::currentDate();
+        m_dirty         = true;
+
+        emit draftChanged();
+        emit sampleChanged();
+
+        out.insert(QStringLiteral("ok"), true);
+        out.insert(QStringLiteral("message"),
+                   tr("Fitted to %n swing(s).", "", int(vals.size())));
+        return out;
+    }
+
     // Mean and a PER-SIDE deviation about it, so an asymmetric sample produces an asymmetric
     // corridor — the same asymmetry the two handles express by hand, and the reason Norm carries
     // sigmaLo and sigmaHi separately rather than one tolerance (norm.h).
@@ -543,6 +705,8 @@ QVariantList NormEditorModel::importCandidates() const
     if (!m_open)
         return out;
 
+    const Shape sh = shape();
+
     // Every context that carries its OWN row for this measure, excluding the one being edited.
     // "Adopt a row from another norm pack" reduces to this today — layers are merged into one
     // assembled set by (measureId, contextId), so a user row and a shipped row for the same key
@@ -558,9 +722,14 @@ QVariantList NormEditorModel::importCandidates() const
         r.insert(QStringLiteral("mu"),           n->mu);
         // A preview of what adopting this row would GRADE as Ideal, so it reads on the same scale
         // as the plot beside it rather than on the row's bare claim.
-        const NormBandEdges ce = bandEdgesOf(*n, policy());
+        const NormBandEdges ce = bandEdgesOf(*n, policy(), -1.0, sh);
         r.insert(QStringLiteral("idealLo"),      ce.idealLo);
         r.insert(QStringLiteral("idealHi"),      ce.idealHi);
+        // The row's own claim as a fragment, so the list reads "at least 1.4" on a one-sided
+        // measure rather than "1.4 to 1.5", whose second number is not a bound of anything. Every
+        // candidate is a row for the SAME measure at another context, so they all share this
+        // measure's shape — that is the whole reason shape sits on the measure and not the norm.
+        r.insert(QStringLiteral("rangeText"),    claimPhrase(*n));
         r.insert(QStringLiteral("sourceLabel"),  sourceLabel(n->source));
         r.insert(QStringLiteral("n"),            n->n);
         out.append(r);
@@ -745,6 +914,7 @@ QVariantMap NormEditorModel::draft() const
 
     const Measure *m   = measure();
     const GradePolicy p = policy();
+    const Shape       sh = shape();
 
     out.insert(QStringLiteral("measureId"),    m_measureId);
     out.insert(QStringLiteral("measureLabel"), m ? (m->label.isEmpty() ? m->id : m->label) : m_measureId);
@@ -759,7 +929,7 @@ QVariantMap NormEditorModel::draft() const
     // bounds dominate the z-derived edge inside grade(). Deriving the number here from sigma alone
     // showed the wrong edge on all 56 migrated corridors — a corridor the app does not use, in the
     // one screen whose entire job is to show what a corridor does.
-    const NormBandEdges e = bandEdgesOf(m_draft, p);
+    const NormBandEdges e = bandEdgesOf(m_draft, p, -1.0, sh);
 
     out.insert(QStringLiteral("mu"),      m_draft.mu);
 
@@ -778,11 +948,75 @@ QVariantMap NormEditorModel::draft() const
     out.insert(QStringLiteral("claimHi"), m_draft.claimHi());
     out.insert(QStringLiteral("idealLo"), e.idealLo);
     out.insert(QStringLiteral("idealHi"), e.idealHi);
-    out.insert(QStringLiteral("goodLo"),  m_draft.mu - p.goodMaxZ * m_draft.sigmaLo);
-    out.insert(QStringLiteral("goodHi"),  m_draft.mu + p.goodMaxZ * m_draft.sigmaHi);
+    // The Good edges are the one pair computed HERE rather than by bandEdgesOf, which is why they
+    // need the shape collapse spelled out: without it a floor would draw its Good band running two
+    // sigma ABOVE the aspiration, over the top of the Ideal band that owns that whole side. Same
+    // rule, same place in the sequence — see bandEdgesOf().
+    const double goodLo = e.lowOpen  ? m_draft.mu : (m_draft.mu - p.goodMaxZ * m_draft.sigmaLo);
+    const double goodHi = e.highOpen ? m_draft.mu : (m_draft.mu + p.goodMaxZ * m_draft.sigmaHi);
+    out.insert(QStringLiteral("goodLo"),  goodLo);
+    out.insert(QStringLiteral("goodHi"),  goodHi);
     out.insert(QStringLiteral("watchLo"), e.watchLo);
     out.insert(QStringLiteral("watchHi"), e.watchHi);
-    out.insert(QStringLiteral("explicitMonitor"), m_draft.hasExplicitMonitor());
+    out.insert(QStringLiteral("explicitMonitor"), m_draft.hasExplicitMonitor(sh));
+
+    // ── Shape ───────────────────────────────────────────────────────────────
+    //
+    // Written explicitly on every draft including two-sided ones, both flags and all: QML reads a
+    // missing key as `undefined` and `undefined === true` is false, so an omitted flag looks
+    // exactly like a considered one and the place a bug could hide is the place nobody looks.
+    out.insert(QStringLiteral("shape"),      shapeName(sh));
+    out.insert(QStringLiteral("shapeLabel"), shapeLabel(sh));
+    out.insert(QStringLiteral("oneSided"),   shapeIsOneSided(sh));
+    out.insert(QStringLiteral("lowOpen"),    e.lowOpen);
+    out.insert(QStringLiteral("highOpen"),   e.highOpen);
+
+    // The two numbers a one-sided corridor actually has. `tolerance` is the graded slack and
+    // `gradedEdge` is where it lands — the same quantity in the field's coordinates and the plot's,
+    // so QML converts nothing. On a target norm they are the low half, which nothing reads.
+    const double tol = (sh == Shape::Ceiling) ? m_draft.sigmaHi : m_draft.sigmaLo;
+    out.insert(QStringLiteral("tolerance"),  tol);
+    out.insert(QStringLiteral("gradedEdge"), (sh == Shape::Ceiling) ? (m_draft.mu + tol)
+                                                                   : (m_draft.mu - tol));
+
+    // The end-cap the open side terminates in. It must never be a hard edge: a band that stops at
+    // the edge of a plot reads as a bound, and the whole claim of a one-sided norm is that there
+    // isn't one on that side.
+    out.insert(QStringLiteral("openEndLabel"),
+               sh == Shape::Floor   ? tr("no upper limit")
+             : sh == Shape::Ceiling ? tr("no lower limit")
+                                    : QString());
+
+    // Shape as a sentence, with the measure's own highMeans folded in where it has one — so the
+    // author reads "Higher is better: more of the clubhead's speed reaching the ball" rather than
+    // a bare enum word they have to look up.
+    const QString hm = m ? m->highMeans : QString();
+    out.insert(QStringLiteral("shapeNote"),
+               !shapeIsOneSided(sh)  ? QString()
+             : hm.isEmpty()          ? shapeLabel(sh)
+                                     : tr("%1: %2").arg(shapeLabel(sh), hm));
+
+    // What this corridor claims, as a fragment: "1.4 to 1.5" / "at least 1.5" / "no more than 12.0".
+    out.insert(QStringLiteral("claimPhrase"), claimPhrase(m_draft));
+
+    // What the ACTIVE POLICY makes of it. Read-only, and quoted with the Ideal edge alongside Good
+    // and Watch because under any preset but `standard` Ideal is not where the handles are — an
+    // author who saw Good and Watch move with the policy but not Ideal would reasonably conclude
+    // the green band was fixed. One-sided, only the graded tail has edges to quote, and saying
+    // "action beyond 1.3 – 1.5" on a floor would name a fault on the side that grades Ideal.
+    const auto &f1 = fmtNum;
+    QString policyNote;
+    if (sh == Shape::Floor)
+        policyNote = tr("Ideal from %1 · good from %2 · action below %3")
+                         .arg(f1(e.idealLo), f1(goodLo), f1(e.watchLo));
+    else if (sh == Shape::Ceiling)
+        policyNote = tr("Ideal to %1 · good to %2 · action above %3")
+                         .arg(f1(e.idealHi), f1(goodHi), f1(e.watchHi));
+    else
+        policyNote = tr("Ideal %1 – %2 · good to %3 – %4 · action beyond %5 – %6")
+                         .arg(f1(e.idealLo), f1(e.idealHi), f1(goodLo), f1(goodHi),
+                              f1(e.watchLo), f1(e.watchHi));
+    out.insert(QStringLiteral("policyNote"), policyNote);
 
     out.insert(QStringLiteral("n"),           m_draft.n);
     out.insert(QStringLiteral("source"),      normSourceName(m_draft.source));
@@ -809,6 +1043,26 @@ QVariantMap NormEditorModel::draft() const
     out.insert(QStringLiteral("parentClaimLo"), par.found() ? par.norm->claimLo() : 0.0);
     out.insert(QStringLiteral("parentClaimHi"), par.found() ? par.norm->claimHi() : 0.0);
     out.insert(QStringLiteral("hasParent"),     par.found());
+
+    // The inheritance line, whole, because it is one sentence with a decision inside it. "You are
+    // 37 wider than the full swing" is what tells an author whether the override is worth having.
+    //
+    // ONE-SIDED, "wider" is still exactly the right word — it compares the two graded tolerances,
+    // which is the only width either corridor has. What changes is the first half: a floor's parent
+    // "sets at least 1.40", not "sets 1.32 to 1.48", and the second number in that pair was never
+    // real.
+    QString parentNote;
+    if (par.found()) {
+        const double mine   = shapeIsOneSided(sh) ? tol
+                                                  : (m_draft.claimHi() - m_draft.claimLo());
+        const double theirs = shapeIsOneSided(sh)
+                                  ? ((sh == Shape::Ceiling) ? par.norm->sigmaHi : par.norm->sigmaLo)
+                                  : (par.norm->claimHi() - par.norm->claimLo());
+        parentNote = tr("%1 sets %2. This corridor is %3 %4 wide against its %5.")
+                         .arg(contextLabel(par.contextId), claimPhrase(*par.norm),
+                              f1(mine), unitOf(), f1(theirs));
+    }
+    out.insert(QStringLiteral("parentNote"), parentNote);
 
     out.insert(QStringLiteral("dirty"),          m_dirty);
     out.insert(QStringLiteral("refused"),        !m_refused.isEmpty());
@@ -838,9 +1092,8 @@ QVariantMap NormEditorModel::draft() const
     // about the norm stack, not a formatting choice.
     QString editedNote;
     if (overridden && shipped)
-        editedNote = tr("You changed this. PinPoint ships %1 to %2 %3.")
-                         .arg(QString::number(shipped->claimLo(), 'f', 1),
-                              QString::number(shipped->claimHi(), 'f', 1), unitOf());
+        editedNote = tr("You changed this. PinPoint ships %1 %2.")
+                         .arg(claimPhrase(*shipped), unitOf());
     else if (overridden)
         editedNote = tr("You added this. PinPoint ships no corridor for %1 — without yours it "
                         "would inherit.").arg(contextLabel(m_contextId));
@@ -851,10 +1104,11 @@ QVariantMap NormEditorModel::draft() const
 QVariantList NormEditorModel::samples() const
 {
     const GradePolicy p = policy();
+    const Shape       sh = shape();
 
     QVariantList out;
     for (const Sample *s : visible()) {
-        const Grade g = grade(s->value, m_draft, p);
+        const Grade g = grade(s->value, m_draft, p, sh);
 
         QVariantMap r;
         r.insert(QStringLiteral("swingDir"),   s->swingDir);
@@ -934,6 +1188,7 @@ QVariantList NormEditorModel::histogram() const
     const double      axisLo = sum.value(QStringLiteral("axisLo")).toDouble();
     const double      axisHi = sum.value(QStringLiteral("axisHi")).toDouble();
     const GradePolicy p      = policy();
+    const Shape       sh     = shape();
 
     QVariantList out;
     if (!(axisHi > axisLo))
@@ -950,7 +1205,7 @@ QVariantList NormEditorModel::histogram() const
     const double w = (axisHi - axisLo) / kBins;
     for (int i = 0; i < kBins; ++i) {
         const double lo = axisLo + i * w;
-        const Grade  g  = grade(lo + 0.5 * w, m_draft, p);
+        const Grade  g  = grade(lo + 0.5 * w, m_draft, p, sh);
 
         QVariantMap r;
         r.insert(QStringLiteral("lo"),    lo);
@@ -965,11 +1220,12 @@ QVariantList NormEditorModel::histogram() const
 QVariantMap NormEditorModel::gradeCounts() const
 {
     const GradePolicy p = policy();
+    const Shape       sh = shape();
     int ideal = 0, good = 0, watch = 0, action = 0;
 
     for (const Sample *s : visible()) {
         if (!s->included) continue;
-        switch (grade(s->value, m_draft, p)) {
+        switch (grade(s->value, m_draft, p, sh)) {
         case Grade::Ideal:  ++ideal;  break;
         case Grade::Good:   ++good;   break;
         case Grade::Watch:  ++watch;  break;

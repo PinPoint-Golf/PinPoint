@@ -19,6 +19,14 @@
 //   5. The band edges shown follow the ACTIVE grade policy, because the edge drawn must be the edge
 //      that grades.
 //   6. A NotCapturable measure is refused: a corridor on it can never do anything but mislead.
+//   7. A ONE-SIDED measure edits differently and nothing about it leaks into a target norm. mu and
+//      the tolerance are independent numbers rather than two ends of a span; setClaimBand is
+//      refused because its midpoint would move mu and its split would leave the two sigmas
+//      unequal, which the pack validator rejects; every drawn band collapses onto the aspiration,
+//      Good included — that one is computed outside bandEdgesOf and would otherwise escape.
+//   8. The readouts are FAITHFUL, not rounded to the pack's usual one decimal. A label that
+//      rounds is cosmetic; a field that rounds saves the rounding, because PpTextField commits on
+//      focus loss.
 //
 //   cmake --build build/analyzer-tests --target norm_editor_model_test
 //   ctest --test-dir build/analyzer-tests -R norm_editor_model --output-on-failure
@@ -26,9 +34,15 @@
 #include "norm_editor_model.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 using namespace pinpoint::analysis;
 
@@ -56,6 +70,43 @@ const char *kMeasure = "m_leadWristRadUln_p4";
 const char *kContext = "any";
 
 double num(const QVariantMap &m, const char *k) { return m.value(QLatin1String(k)).toDouble(); }
+
+// A copy of the shipped pack with ONE measure given a shape, written to a scratch file whose path
+// is handed to the next NormEditorModel through the PINPOINT_CORE_PACK seam that already exists
+// for exactly this (resource_pack_provider.cpp reads it per construction).
+//
+// Patching the real pack rather than hand-writing a fixture: the assertions then run against the
+// actual shipped measure and its actual norm rows, so they cannot pass against a pack invented to
+// make them pass. m_smashFactor because it is the measure the seed conversion will really change.
+QString packWithShape(const char *shape)
+{
+    QFile in(QString::fromLocal8Bit(qgetenv("PINPOINT_CORE_PACK")));
+    if (!in.open(QIODevice::ReadOnly))
+        return QString();
+
+    QJsonObject doc = QJsonDocument::fromJson(in.readAll()).object();
+    QJsonArray  ms  = doc.value(QStringLiteral("measures")).toArray();
+    bool        hit = false;
+    for (int i = 0; i < ms.size(); ++i) {
+        QJsonObject m = ms.at(i).toObject();
+        if (m.value(QStringLiteral("id")).toString() != QLatin1String("m_smashFactor"))
+            continue;
+        m.insert(QStringLiteral("shape"), QLatin1String(shape));
+        ms.replace(i, m);
+        hit = true;
+    }
+    if (!hit)
+        return QString();                        // the measure was renamed: fail loudly, not quietly
+    doc.insert(QStringLiteral("measures"), ms);
+
+    const QString path =
+        QDir::temp().filePath(QStringLiteral("pp_norm_editor_%1_pack.json").arg(QLatin1String(shape)));
+    QFile out(path);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return QString();
+    out.write(QJsonDocument(doc).toJson());
+    return path;
+}
 
 } // namespace
 
@@ -491,6 +542,255 @@ int main(int argc, char **argv)
         check(d.value(QStringLiteral("resetLabel")).toString()
                   == QLatin1String("Remove your override"),
               "…so the promise is removal, after which the general band resolves again");
+    }
+
+    // ── One-sided corridors ─────────────────────────────────────────────────
+    //
+    // Nothing shipped is one-sided until the seed conversion, so the shape is injected through the
+    // PINPOINT_CORE_PACK seam: the same reviewable JSON the pack normally loads, with one measure
+    // carrying "shape". m_smashFactor deliberately, because it is the measure the conversion will
+    // actually change, so this exercises the real rows (mu 1.48, sigmaLo 0.05 at driver) rather
+    // than a fixture invented to pass.
+    //
+    // EVERY assertion below has a two-sided counterpart, either here or in the sections above.
+    // "One-sided works" is only half the claim; the other half is that none of it reaches the 105
+    // measures that are still ordinary corridors.
+    std::printf("\none-sided: the fit\n");
+    {
+        // The seat fit is gated free-standing because seating runs off a library scan, and there
+        // is no library here. A deliberately RIGHT-SKEWED sample: the median sits at 10, but a
+        // handful of excellent readings run far above it.
+        const std::vector<double> skew = { 8, 9, 9.5, 10, 10, 10, 10.5, 11, 14, 22, 40 };
+        const OneSidedFit f = fitOneSided(skew, Shape::Floor);
+        near(f.mu, 10.0, "a floor seats on the MEDIAN, which the long good tail cannot drag");
+
+        double mean = 0.0;
+        for (double v : skew) mean += v;
+        mean /= double(skew.size());
+        check(mean > f.mu + 3.0,
+              "…and the mean it refuses to use sits far above it — that is the whole point");
+        check(f.tolerance > 0.0 && f.tolerance < 2.0,
+              "the tolerance reads the GRADED tail only, so the good-side outliers do not widen it");
+
+        const OneSidedFit c = fitOneSided(skew, Shape::Ceiling);
+        near(c.mu, 10.0, "a ceiling seats on the same median");
+        check(c.tolerance > f.tolerance,
+              "…but measures the OTHER tail, which on this sample is the long one");
+
+        // Degenerate and empty: a point mass really is a point mass. There is no borrow fallback
+        // here and there must not be — see the header.
+        near(fitOneSided({ 5, 5, 5, 5 }, Shape::Floor).tolerance, 0.0,
+             "a point-mass sample yields a zero tolerance rather than an invented width");
+        near(fitOneSided({ 5, 5, 5, 5 }, Shape::Floor).mu, 5.0, "…seated where the mass is");
+        near(fitOneSided({}, Shape::Floor).tolerance, 0.0, "an empty sample fits nothing, safely");
+    }
+
+    std::printf("\none-sided: a floor draft\n");
+    const QByteArray realPack = qgetenv("PINPOINT_CORE_PACK");
+    {
+        const QString fp = packWithShape("floor");
+        check(!fp.isEmpty(), "built a scratch pack carrying a floor measure");
+        qputenv("PINPOINT_CORE_PACK", fp.toLocal8Bit());
+
+        NormEditorModel fe;
+        check(fe.begin(QStringLiteral("m_smashFactor"), QStringLiteral("driver")),
+              "a floor measure opens a draft");
+        QVariantMap f = fe.draft();
+
+        check(f.value(QStringLiteral("shape")).toString() == QLatin1String("floor"), "shape reaches the draft");
+        check(f.value(QStringLiteral("oneSided")).toBool(),  "…as a flag the view can bind");
+        check(f.value(QStringLiteral("highOpen")).toBool(),  "a floor is open ABOVE");
+        check(!f.value(QStringLiteral("lowOpen")).toBool(),  "…and graded below");
+
+        // The keys the one-sided view binds to, named here for the same reason the two-sided ones
+        // are: a rename that does not reach the .qml has to fail in a test and not on a screen.
+        for (const char *k : { "shape", "shapeLabel", "oneSided", "lowOpen", "highOpen",
+                               "tolerance", "gradedEdge", "shapeNote", "openEndLabel",
+                               "claimPhrase", "policyNote", "parentNote" })
+            check(f.contains(QLatin1String(k)), k);
+
+        // ALL THREE drawn bands collapse onto the aspiration, Good included. Good is the one pair
+        // computed outside bandEdgesOf, so it is the one that would silently keep running two
+        // sigma past mu — straight over the Ideal band that owns that entire side.
+        const double mu = num(f, "mu");
+        near(mu, 1.48, "seeded from the shipped driver row");
+        near(num(f, "idealHi"), mu, "the Ideal band ends at the aspiration");
+        near(num(f, "watchHi"), mu, "…so does Watch");
+        near(num(f, "goodHi"),  mu, "…AND Good, which is computed by hand and would otherwise escape");
+        near(num(f, "idealLo"), mu - 0.05, "the graded side is an ordinary corridor: 1 sigma");
+        near(num(f, "goodLo"),  mu - 0.10, "…2 sigma");
+        near(num(f, "watchLo"), mu - 0.15, "…3 sigma");
+        near(num(f, "tolerance"),  0.05, "the tolerance is the graded sigma");
+        near(num(f, "gradedEdge"), mu - 0.05, "…and the edge is where it lands");
+
+        // ── The readouts must be FAITHFUL, not rounded to the pack's usual resolution ────────
+        //
+        // Found while building the one-sided fields. Every number on this screen was fixed at one
+        // decimal, which is right for the degree measures and wrong for the ratios: smash factor
+        // is 1.48 with a tolerance of 0.05, so the policy line read "Ideal from 1.4 · good from
+        // 1.4" — two different edges as one number — and the tolerance field would have shown 0.1,
+        // twice its width. A LABEL rounding is cosmetic; a FIELD rounding is not, because
+        // PpTextField commits on focus loss and would save what it displayed.
+        check(f.value(QStringLiteral("policyNote")).toString().contains(QLatin1String("1.43")),
+              "the policy line shows the edge it means, not a tenth it rounds to");
+        check(f.value(QStringLiteral("policyNote")).toString().contains(QLatin1String("1.38")),
+              "…and the Good edge is distinguishable from the Ideal one");
+        check(f.value(QStringLiteral("claimPhrase")).toString().contains(QLatin1String("1.48")),
+              "…and the claim states the authored aspiration, not 1.5");
+
+        // Wording. The claim never names a second bound, and the policy line never names a fault
+        // on the side that grades Ideal.
+        const QString phrase = f.value(QStringLiteral("claimPhrase")).toString();
+        check(phrase.contains(QLatin1String("at least")), "the claim reads 'at least'");
+        check(!phrase.contains(QLatin1String(" to ")),    "…and never 'X to Y'");
+        const QString pol = f.value(QStringLiteral("policyNote")).toString();
+        check(pol.contains(QLatin1String("action below")), "the policy line grades the low tail");
+        check(!pol.contains(QLatin1String("beyond")),
+              "…and never 'action beyond', which would name a fault above the aspiration");
+        check(f.value(QStringLiteral("openEndLabel")).toString() == QLatin1String("no upper limit"),
+              "the open end is labelled, not just faded");
+        check(f.value(QStringLiteral("shapeNote")).toString().contains(QLatin1String("Higher is better")),
+              "the shape is stated in words");
+        check(f.value(QStringLiteral("shapeNote")).toString().contains(QLatin1String("efficient")),
+              "…with the measure's own highMeans folded in, not a bare enum");
+
+        // ── The mutators ────────────────────────────────────────────────────
+        //
+        // mu and the tolerance are INDEPENDENT here, where on a target norm they are two
+        // consequences of one pair of handles. Each must move without disturbing the other.
+        fe.setAspiration(1.50);
+        f = fe.draft();
+        near(num(f, "mu"), 1.50, "the aspiration moves");
+        near(num(f, "tolerance"), 0.05, "…and leaves the tolerance alone");
+
+        fe.setTolerance(0.10);
+        f = fe.draft();
+        near(num(f, "mu"), 1.50, "the tolerance moves without disturbing the aspiration");
+        near(num(f, "tolerance"), 0.10, "…to what was asked");
+        near(num(f, "claimHi") - num(f, "mu"), num(f, "mu") - num(f, "claimLo"),
+             "BOTH sigmas move together — validateNormsAgainst refuses a one-sided row where "
+             "they differ, and the ungraded one is a number nothing reads");
+
+        fe.setTolerance(-0.20);
+        near(num(fe.draft(), "tolerance"), 0.20,
+             "a typed negative tolerance is read as a magnitude, not as an inverted corridor");
+
+        fe.setTolerance(0.10);
+        fe.nudgeGradedEdge(1.40);
+        near(num(fe.draft(), "tolerance"), 0.10, "dragging the edge sets the tolerance from it");
+
+        // Dragged PAST the centre it clamps there rather than reflecting out the far side, which
+        // is what a magnitude would have done and would have thrown the handle off the pointer.
+        fe.nudgeGradedEdge(1.70);
+        f = fe.draft();
+        near(num(f, "tolerance"), 0.0, "an edge dragged through the centre clamps at zero");
+        near(num(f, "gradedEdge"), num(f, "mu"), "…parking on the aspiration, not beyond it");
+
+        // ── What must NOT work ──────────────────────────────────────────────
+        fe.setTolerance(0.05);
+        fe.setAspiration(1.48);
+        const QVariantMap before = fe.draft();
+
+        fe.nudgeClaimHi(9.9);
+        check(fe.draft() == before, "the OPEN side has no edge to nudge, so nothing moves");
+
+        fe.setClaimBand(1.0, 2.0);
+        check(fe.draft() == before,
+              "setClaimBand is refused: its midpoint would move the aspiration as a side effect, "
+              "and its split would leave the two sigmas unequal");
+
+        fe.nudgeClaimLo(1.40);
+        near(num(fe.draft(), "tolerance"), 0.08,
+             "…while the GRADED side's nudge routes to the edge, so a caller holding 'the low "
+             "field' keeps working on all three shapes");
+        near(num(fe.draft(), "mu"), 1.48, "…and still does not move the aspiration");
+
+        // Import rows carry the phrase too, and every candidate is the same measure at another
+        // context, so they all share this measure's shape.
+        const QVariantList cands = fe.importCandidates();
+        check(!cands.isEmpty(), "the other smash-factor contexts are offerable");
+        bool allOneSided = true;
+        for (const QVariant &cv : cands) {
+            const QString t = cv.toMap().value(QStringLiteral("rangeText")).toString();
+            if (!t.contains(QLatin1String("at least")) || t.contains(QLatin1String(" to ")))
+                allOneSided = false;
+        }
+        check(allOneSided, "…and each reads 'at least X', never 'X to Y'");
+    }
+
+    std::printf("\none-sided: a ceiling draft\n");
+    {
+        const QString cp = packWithShape("ceiling");
+        check(!cp.isEmpty(), "built a scratch pack carrying a ceiling measure");
+        qputenv("PINPOINT_CORE_PACK", cp.toLocal8Bit());
+
+        NormEditorModel ce;
+        check(ce.begin(QStringLiteral("m_smashFactor"), QStringLiteral("driver")), "opens");
+        QVariantMap c = ce.draft();
+
+        check(c.value(QStringLiteral("lowOpen")).toBool(),   "a ceiling is open BELOW");
+        check(!c.value(QStringLiteral("highOpen")).toBool(), "…and graded above");
+        const double mu = num(c, "mu");
+        near(num(c, "idealLo"), mu, "every drawn band ends at the aspiration on the open side");
+        near(num(c, "goodLo"),  mu, "…Good included");
+        near(num(c, "watchLo"), mu, "…and Watch");
+        near(num(c, "gradedEdge"), mu + 0.05, "the graded edge is ABOVE the aspiration");
+        check(c.value(QStringLiteral("claimPhrase")).toString().contains(QLatin1String("no more than")),
+              "the claim reads 'no more than'");
+        check(c.value(QStringLiteral("policyNote")).toString().contains(QLatin1String("action above")),
+              "…and the fault is named on the high tail");
+        check(c.value(QStringLiteral("openEndLabel")).toString() == QLatin1String("no lower limit"),
+              "the open end is the low one");
+
+        // The mirror of the floor's routing: here it is the HIGH nudge that reaches the edge.
+        ce.nudgeGradedEdge(mu + 0.20);
+        near(num(ce.draft(), "tolerance"), 0.20, "the high edge sets the tolerance");
+        ce.nudgeClaimLo(0.1);
+        near(num(ce.draft(), "tolerance"), 0.20, "…and the low side, being open, moves nothing");
+        ce.nudgeClaimHi(mu + 0.30);
+        near(num(ce.draft(), "tolerance"), 0.30, "…while the high nudge routes to the edge");
+    }
+
+    // ── …and none of it reaches a target norm ───────────────────────────────
+    //
+    // The other half of every assertion above. Restored to the real pack, the same measure is an
+    // ordinary corridor again and every one-sided rule is off.
+    std::printf("\nthe two-sided control\n");
+    qputenv("PINPOINT_CORE_PACK", realPack);
+    {
+        NormEditorModel te;
+        check(te.begin(QStringLiteral("m_smashFactor"), QStringLiteral("driver")), "opens");
+        QVariantMap t = te.draft();
+
+        check(t.value(QStringLiteral("shape")).toString() == QLatin1String("target"),
+              "unshaped in the shipped pack — the seed conversion is a later stage");
+        check(!t.value(QStringLiteral("oneSided")).toBool(), "…so nothing is one-sided");
+        check(!t.value(QStringLiteral("lowOpen")).toBool() && !t.value(QStringLiteral("highOpen")).toBool(),
+              "…and both flags are written false rather than left absent");
+        check(t.value(QStringLiteral("openEndLabel")).toString().isEmpty(),
+              "a two-sided corridor has no open end to label");
+        check(t.value(QStringLiteral("shapeNote")).toString().isEmpty(),
+              "…and no shape sentence: the line reverts to 'Higher means'");
+
+        const double mu = num(t, "mu");
+        near(num(t, "idealHi"), mu + 0.05, "the high side is an ordinary graded edge again");
+        near(num(t, "goodHi"),  mu + 0.10, "…Good runs two sigma past mu, uncollapsed");
+        near(num(t, "watchHi"), mu + 0.15, "…and Watch three");
+        check(t.value(QStringLiteral("claimPhrase")).toString().contains(QLatin1String(" to ")),
+              "the claim names both bounds");
+        check(t.value(QStringLiteral("policyNote")).toString().contains(QLatin1String("beyond")),
+              "…and the policy line names a fault on both tails");
+
+        // The two-sided mutators are live again, and the one-sided ones are inert.
+        te.setClaimBand(1.40, 1.60);
+        t = te.draft();
+        near(num(t, "mu"), 1.50, "setClaimBand works on a target norm");
+        te.setAspiration(2.0);
+        near(num(te.draft(), "mu"), 1.50, "…and setAspiration does not: mu is a consequence here");
+        te.setTolerance(0.9);
+        near(num(te.draft(), "claimHi"), 1.60, "…nor setTolerance");
+        te.nudgeGradedEdge(1.0);
+        near(num(te.draft(), "claimLo"), 1.40, "…nor nudgeGradedEdge");
     }
 
     // ── Closing ─────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ rule in there survives this work.
 | — | **review gate · expect context clear here** | | |
 | A4a | Rewire `oneSided` from the unit sniff to shape | ☑ complete — 79/79; **one rail changes appearance**, see N12 | 2026-07-28 |
 | A4b | One-sided domain rules for the bars | ☑ complete — 79/79, +26 assertions | 2026-07-28 |
-| A4c | Corridor editor — handles, readouts, diff rows | ☐ not started | |
+| A4c | Corridor editor — handles, readouts, diff rows | ☑ complete — 79/79, +89 assertions | 2026-07-28 |
 | A4d | Corridor editor — plausibility fields and plot regions | ☐ not started | |
 | A4e | Wording pass + signal direction picker | ☐ not started | |
 | A5 | Seed conversion — smash factor becomes a floor | ☐ not started | |
@@ -56,6 +56,7 @@ picks up. Keep it factual — this is the handoff, not a summary.
 | 2026-07-28 | A3 | `MeasureReading` carries `lowOpen`/`highOpen`/`implausible`; `NormMeasureSource` takes an optional `CharacteristicPack*` for the shape (null-safe, Target without it). A signal on the OPEN tail cannot fire — explicit in `evaluate()` for both `OutsideCorridor` and `Ratio`, rather than left as a coincidence of two other rules. **An implausible reading makes the finding `Unavailable`, not `NotFired`** — it was never assessed, and reporting it as "looked and fine" would be a false negative wearing a clean bill of health. New health code `signalOnOpenTail`, deliberately NOT scoped to Live (unlike `signalNoNorm`): no producer will ever give a floor an upper fault, so it is an authoring mistake, not a backlog row. Header table + `HealthView._codeLabel` updated in the same change. Both guards kept on purpose — runtime makes the answer right, health makes the mistake visible. Gated in both directions. 79/79; app builds; headless clean. Next: A4a. |
 | 2026-07-28 | A4a | `_isOneSided()`'s unit sniff **deleted**. Shape flows `Measure` → `MetricCorridor` → `metric_catalog.cpp` (per-corridor `lowOpen`/`highOpen`/`shape`, plus a metric-level `shape`/`oneSided` requiring unanimity across phases, falling back to `target`) → `PpBandRail`. Openness now travels **per checkpoint** on `RailCorridor`/`RailPoint`, so `railRange`'s `oneSided` bool is **gone entirely** rather than becoming a shape — with `mu` on the open side there is nothing aspirational left to drop, and the ceiling mirror comes free (see the stage note). `PpBandRail`'s ribbon substitutes the plot edge per side, so a ceiling is representable for the first time. 79/79; app builds; headless clean. **One rail changes appearance — N12.** Next: A4b. |
 | 2026-07-28 | A4b | `barDomain()` in `dashboard_reductions.h` + a `ChartMetrics::barDomain` façade; **both** bars now call it instead of computing a domain inside a binding (fact 16). **The defect was not the one the brief predicted** — A2 put `mu` on the open side, so the amber span is a healthy k×sigma and the domain never was degenerate. What actually broke: the domain STOPPED at `mu`, so every Ideal reading above a floor's aspiration clamped to the last pixel of the track and sat on a hard band edge reading as a bound. The open side now runs past the furthest of (aspiration, reading) by 35% of the graded span, and green runs off that end as a horizontal fade — **additive**, so two-sided bars are pixel-identical and the two-sided numbers are pinned exactly. Amber is deliberately untouched: on a floor it genuinely ends at `mu`, because above `mu` the grade is Ideal and the colour is green. Open-side tick labels re-position under the aspiration rather than pinning to the track end. `NormativeBar` gained the finite guards it never had (fact 13) and hides its bands on an invalid domain instead of collapsing them onto the left edge. `PpDashboardSetupZone` threads openness through; the `orientationLabel` audit became a one-term guard (N13). 79/79 with 26 new assertions, every one-sided case paired with a two-sided counterpart. App builds; headless clean; all six bar states rendered offscreen — see the stage note on what that does and does not prove. Next: A4c. |
+| 2026-07-28 | A4c | Fact 14 closed: `setClaimBand` is **refused** on a one-sided draft rather than left to caller discipline, and `setAspiration` / `setTolerance` / `nudgeGradedEdge` land beside it — mu and the tolerance are INDEPENDENT numbers there, not two ends of a span. `nudgeClaimLo/Hi` became shape-aware routers so a caller holding "the low field" keeps working on all three shapes. The centre mark is draggable and is the headline; the handle `Repeater` is **one element**, and the dead handle is ABSENT. No swap-follow one-sided — `nudgeGradedEdge` clamps ON the centre rather than reflecting, so nothing can cross anything. `goodLo/goodHi`, the one pair computed outside `bandEdgesOf`, gained the shape collapse it was escaping: all THREE drawn bands now end at the aspiration. Wording moved into the model (`claimPhrase`, `policyNote`, `parentNote`, `shapeNote`, `openEndLabel`, import `rangeText`) per fact 16. Seat-from-swings is a median + 16th/84th percentile through a free-standing `fitOneSided()` — gateable without a swing library — with **no borrow fallback**. Monitor editing needed nothing: the editor never carries monitor bounds into a draft (`begin()` drops them on purpose). ⚠ **A defect found rather than planned — every readout was fixed at one decimal**, so smash factor's 1.48 ± 0.05 read "1.5" / "0.1" and its policy line named two different edges as one number; and a FIELD commits what it shows, so tabbing past an untouched corridor would have saved the rounding. Fixed with a faithful formatter on both sides (N15). 79/79 with 89 new assertions, every one-sided case paired with a two-sided control. App builds; headless clean; all three shapes rendered offscreen. Next: A4d. |
 
 ---
 
@@ -509,6 +510,39 @@ FLOOR — smash factor, driver
 
 A `target` norm keeps the two handles and the static centre tick exactly as today.
 
+**How fact 14 was actually closed.** `setClaimBand` is **refused** on a one-sided draft, not
+merely bypassed. Left permissive it would take the midpoint of two edges — moving `mu`, the
+headline, as a side effect of setting a tolerance — and split the width, leaving
+`sigmaLo != sigmaHi`, which `validateNormsAgainst` refuses on a one-sided row. A legal-looking
+gesture would author an invalid pack. `setAspiration` / `setTolerance` are the one-sided
+operations, `nudgeGradedEdge` is the same thing in the drag's coordinates, and
+`nudgeClaimLo/Hi` route by shape so a caller holding "the low field" keeps working on all three.
+
+**Two decisions worth not relitigating:**
+
+- **No swap-follow one-sided.** `nudgeGradedEdge` CLAMPS the tolerance at zero rather than
+  taking a magnitude, so an edge dragged through the centre parks on it instead of reflecting
+  out the far side and throwing the handle off the pointer. Nothing can cross anything, so
+  there is no swap to follow — which is how the two-sided `pick()`/swap logic "simplifies".
+- **`goodLo`/`goodHi` needed the collapse spelled out.** They are the one pair computed in
+  `draft()` rather than by `bandEdgesOf`, so without it a floor drew its Good band running two
+  sigma ABOVE the aspiration, straight over the Ideal band that owns that whole side. Stage 0's
+  call-site audit flagged this pair as "easily missed"; it was.
+
+**Monitor editing needed nothing.** The plan asked for "monitor editing: only the graded side
+exists". `begin()` deliberately never carries monitor bounds into a draft (the editor does not
+expose them, and silently preserving an invisible bound would make the Action edge disagree
+with the drawn one), so there is no monitor UI to make one-sided.
+
+**A defect found rather than planned — see ledger N15.** Every readout on this screen was fixed
+at one decimal. That is right for the degree measures and wrong for the ratios: smash factor is
+authored `mu 1.48, sigmaLo 0.05`, so its policy line read *"Ideal from 1.4 · good from 1.4"* —
+two different edges as one number — and the new TOLERANCE field would have shown `0.1`, twice
+its real width. In a label that is cosmetic; in a FIELD it is not, because `PpTextField` commits
+on focus loss, so tabbing past an untouched corridor would have saved the rounding. Fixed with a
+faithful formatter on both sides, which leaves every one-decimal measure reading exactly as
+before.
+
 ### A4d — Corridor editor: plausibility fields and plot regions
 
 Plausibility bounds are authored data, not a compiled constant, so the editor must expose
@@ -834,4 +868,6 @@ resolved with the stage that closed it.
 | N12 | **`handSpeed` is the one rail whose appearance changes**, and it exposes a content defect. It is the only catalogue metric that both matched the old unit sniff (`mph`) and carries a corridor: `m_handSpeedP6P7 @ any` is `mu 20, sigmaLo 40`, whose own citation says *"sigma is twice mu, which is not a corridor"*. It was drawn as a floor and now draws as the two-sided norm that actually grades it, so its domain widens to roughly −100…140 and the trace squashes. That is the heuristic being deleted doing its job — the rail was hiding a bad norm, not compensating for a good one. **Fix by re-seating the norm, never by restoring a unit sniff.** `m_clubheadSpeedImpact` and `m_ballSpeed` carry no norm at all, so their rails are sparklines and are unaffected. | A4a | open — content, belongs with the corpus re-seat |
 | N11 | `bandEdgesOf`'s signature is now `(norm, policy, marginOverride, shape)` — shape is the FOURTH argument, so a caller wanting shape must also pass `marginOverride = -1.0`. Only `reference_bands.cpp` passes a margin. Tolerable; revisit if a third caller wants shape without a margin. | A2 | open — cosmetic |
 | N13 | The Setup zone's orientation glyph now falls back to a bar on a one-sided corridor. `orientationLabel()` itself is unchanged and still cannot see openness — the guard is at the call site, where the corridor is in hand. Every alignment measure is `target`, so the branch is unreachable today; it exists so that changing one's shape degrades visibly instead of labelling a floor's best possible reading "open". If a one-sided alignment measure is ever authored, decide then whether the glyph grows a one-sided vocabulary or the guard becomes permanent. | A4b | open by design |
+| N15 | **The corridor editor's readouts were fixed at one decimal**, which understated every measure authored finer — smash factor's policy line rendered its Ideal and Good edges (1.43 / 1.38) as the same "1.4". Fixed in A4c on both sides with a faithful formatter. The wider question is open: `MeasureDetail`, `MeasureCatalogue` and `norm_pack`'s validation messages all format at one decimal too, and A4e is the natural place to sweep them. | A4c | open — sweep in A4e |
+| N16 | The corridor editor now depends on `NormEditorModel` and the bars on `ChartMetrics`, so the pure-QML standalone render harness needs a mock of each to draw them at all. Both mocks are hand transcriptions and can drift from the C++ silently — they verify PAINTING only, never a rule. Do not let an assertion migrate into one. | A4c | open by design |
 | N14 | `PpRangeBar`'s **non-compact** form has no instantiation anywhere — the Verdict zone's tempo tile is absent until tempo has a producer, and the Setup zone is compact. So its tick row, and the one-sided tick placement in it, are unexercised. `NormativeBar`'s tick row does exercise the same rule. Not a defect; noted so a later reader does not read the code as covered. | A4b | open — latent surface |

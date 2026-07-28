@@ -53,6 +53,27 @@
 // norm still applies to EVERYONE using that norm set. The draw-from selector picks the sample, not
 // the scope. Nothing here is ever keyed by athlete — see norm.h.
 
+// ── The one-sided seat fit ─────────────────────────────────────────────────────────────────────
+//
+// Free-standing, and deliberately: seating runs off a library scan, so a fit reachable only
+// through seatFromSample() could not be gated without fabricating a swing library. The rule is
+// the interesting part and it belongs where a test can reach it.
+//
+// A MEDIAN AND A PERCENTILE, NOT A MEAN AND A DEVIATION. Moments describe a distribution with two
+// tails; a floor's sample has one. Its good side is unbounded by construction, so the very
+// excellence the norm exists NOT to penalise drags the mean upward and inflates the spread, and
+// the corridor is seated above where the population actually sits. The median and the 16th
+// percentile read only the graded tail — the only tail the norm makes a claim about.
+//
+// 16th because on a normal sample it is one sigma below the median, so a seated one-sided corridor
+// and a seated two-sided one mean the same thing by the same rule: the shape changes which tail is
+// measured, never what "a tolerance" is. Ceiling mirrors at the 84th.
+struct OneSidedFit {
+    double mu        = 0.0;
+    double tolerance = 0.0;
+};
+OneSidedFit fitOneSided(std::vector<double> values, pinpoint::analysis::Shape shape);
+
 class NormEditorModel : public QObject
 {
     Q_OBJECT
@@ -64,12 +85,18 @@ class NormEditorModel : public QObject
     // The draft, flattened for rendering:
     //   { measureId, measureLabel, unit, highMeans, contextId, contextLabel,
     //     route, mu, claimLo, claimHi, idealLo, idealHi, goodLo, goodHi, watchLo, watchHi,
+    //     shape, oneSided, lowOpen, highOpen, tolerance, gradedEdge, shapeNote, openEndLabel,
+    //     claimPhrase, policyNote, parentNote,
     //     n, source, sourceLabel, author, citation, setOn, weak, weakReason,
     //     own, inherited, inheritedFrom, parentClaimLo, parentClaimHi,
     //     dirty, canSave, whyNot, refused, refusedReason }
     //
     // `claimLo/claimHi` is what the handles drag; `idealLo/idealHi` is what the green band draws.
     // They are equal under `standard` and deliberately not under the other presets — see draft().
+    //
+    // On a ONE-SIDED measure the ungraded side's claim is a number nothing reads: `gradedEdge` is
+    // the only edge there is, `mu` is the headline, and the phrase fields carry the wording so no
+    // surface has to assemble "at least 1.48" out of a pair that has no second half.
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
 
     // Which authoring route the segmented control is on: "hand" | "seat" | "import".
@@ -147,9 +174,30 @@ public:
     // NOT the Ideal band, which is the claim scaled by the active grade policy and is drawn rather
     // than dragged. A handle that moved when a user changed a sensitivity setting would be a
     // control editing its own scale.
+    //
+    // TWO-SIDED ONLY. `setClaimBand` derives mu as the MIDPOINT of two handles, which is exactly
+    // the operation a one-sided norm cannot express: on a floor the headline number is mu itself
+    // ("at least 1.48") and there is no second handle to average it against. The one-sided
+    // interaction is setAspiration + setTolerance below, and `nudgeClaimLo/Hi` route to them by
+    // shape so a caller holding "the low field" keeps working on all three shapes.
     Q_INVOKABLE void setClaimBand(double lo, double hi);
     Q_INVOKABLE void nudgeClaimLo(double to);
     Q_INVOKABLE void nudgeClaimHi(double to);
+
+    // ── Set by hand, one-sided ──────────────────────────────────────────────
+    // `setAspiration` moves mu and leaves the tolerance alone; `setTolerance` does the reverse.
+    // They are two independent numbers on a one-sided norm — "at least 1.48, and 0.05 of slack
+    // below it" — where on a target norm they are two edges whose midpoint and half-width happen
+    // to be mu and sigma. Both keep sigmaLo == sigmaHi, which validateNormsAgainst REQUIRES of a
+    // one-sided row: the ungraded side's tolerance is not a second setting, it is a number nothing
+    // reads, and letting it drift would author an invalid pack from a legal-looking gesture.
+    //
+    // `nudgeGradedEdge` is the same operation in the drag's coordinates — it takes the EDGE's value
+    // off the plot and turns it into the tolerance, so QML still maps pixels to values and nothing
+    // else. On a target norm all three are no-ops; the two-sided path is setClaimBand.
+    Q_INVOKABLE void setAspiration(double mu);
+    Q_INVOKABLE void setTolerance(double tolerance);
+    Q_INVOKABLE void nudgeGradedEdge(double edgeValue);
 
     // ── The axis must not move while a handle is being dragged ──────────────
     //
@@ -219,6 +267,7 @@ private:
     };
 
     void reload();                     // re-take the shared provider after a write
+    void dropDerivedProvenance();      // any hand edit demotes Seated/Imported and marks dirty
     void startScan();
     void onScanFinished();
     void recomputeDerived();
@@ -227,6 +276,17 @@ private:
     QString                         contextLabel(const QString &id) const;
     const pinpoint::analysis::Measure *measure() const;
     QString                         unitOf() const;
+
+    // The MEASURE's shape, which is where one-sidedness lives — never the norm's, never guessed
+    // from the unit. Target when no measure resolves, which is what every path here did before
+    // shapes existed and is right for 105 of the 106 shipped measures.
+    pinpoint::analysis::Shape shape() const;
+
+    // "1.4 to 1.5" / "at least 1.5" / "no more than 12.0" — the ONE place a corridor's claim
+    // becomes a sentence. Built here and not in a delegate for the reason `editedNote` already
+    // is: which of the three forms applies is a statement about the measure, not a formatting
+    // choice, and there are no QML tests in this repo to catch it going wrong in a binding.
+    QString claimPhrase(const pinpoint::analysis::Norm &n) const;
 
     // Samples that pass the draw-from filter, in sample order. The filter is applied HERE and not
     // in QML, so "included" means one thing everywhere it is counted.
