@@ -49,6 +49,18 @@ pp_add_test(update_controller_policy_test
             ${SRC}/Gui/session/session_controller.cpp
             ${SRC}/Gui/athlete/athlete_controller.cpp
             ${SRC}/Core/tests/pp_log_stub.cpp
+            # athlete_controller.cpp includes Diagnostics/norm_pack.h for Cohort/cohortFor()/
+            # cohortToMap(), so the definitions have to come with it. norm_pack.cpp needs
+            # context_tree.cpp in turn — the same pairing every other suite that compiles it uses.
+            ${SRC}/Diagnostics/norm_pack.cpp
+            ${SRC}/Diagnostics/context_tree.cpp
+            ${SRC}/Diagnostics/characteristic_pack.cpp
+            ${SRC}/Diagnostics/characteristic.cpp
+            ${SRC}/Diagnostics/measure_facets.cpp
+            ${SRC}/Diagnostics/anatomy_vocabulary.cpp
+    # Diagnostics -> Metrics -> Analysis, all three: metric_reducer.h includes swing_analysis.h
+    # non-relatively. Same reason as NORM_INC in src/Analysis/tests/CMakeLists.txt.
     INCLUDE ${UPDATE} ${SRC}/Core ${SRC}/Gui/app ${SRC}/Gui/session ${SRC}/Gui/athlete
+            ${SRC}/Diagnostics ${SRC}/Metrics ${SRC}/Analysis
     LINK    Qt6::Qml Qt6::Test
     GTEST_NO_MAIN  AUTOMOC)
