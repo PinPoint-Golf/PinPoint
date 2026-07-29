@@ -372,8 +372,16 @@ QByteArray exportReferenceSetCsl(const ReferenceSet &set)
         // botched part of CSL-JSON. Omitted entirely for an undated record rather than emitting a
         // zero, which a processor would render as the year 0.
         if (ref.year > 0) {
+            // Built by append, NOT QJsonArray{ QJsonArray{ ref.year } }: a brace list holding a
+            // single element of the SAME type copy-constructs from that element instead of
+            // selecting the initializer_list constructor, so the outer array collapses into the
+            // inner one and `date-parts` serialises as [2005] rather than [[2005]].
+            QJsonArray ymd;
+            ymd.append(ref.year);
+            QJsonArray dateParts;
+            dateParts.append(ymd);
             QJsonObject issued;
-            issued.insert(QLatin1String("date-parts"), QJsonArray{ QJsonArray{ ref.year } });
+            issued.insert(QLatin1String("date-parts"), dateParts);
             o.insert(QLatin1String("issued"), issued);
         }
 

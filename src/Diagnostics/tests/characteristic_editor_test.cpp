@@ -672,6 +672,11 @@ int main(int argc, char **argv)
         QFile f(userPackPath());
         check(f.open(QIODevice::ReadOnly), "the user pack is readable");
         const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+        // Released before the model writes again. saveUserPack() replaces the file by remove+rename,
+        // which POSIX allows against an open handle and Windows refuses — leaving the read handle
+        // open here fails every later save on Windows only, and the assertions that depend on one
+        // having happened then pass vacuously.
+        f.close();
         check(res.parsed, "it parses");
         bool hasNew = false, hasOld = false;
         for (const Signal &s : res.pack.signalDefs) {
@@ -743,6 +748,7 @@ int main(int argc, char **argv)
             QFile f(userPackPath());
             check(f.open(QIODevice::ReadOnly), "the user pack is readable");
             const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            f.close();   // before the next save — see the note on the first read of this file
             check(res.parsed, "it parses");
 
             int  into = 0;
@@ -772,6 +778,7 @@ int main(int argc, char **argv)
             QFile f(userPackPath());
             check(f.open(QIODevice::ReadOnly), "the user pack is still readable");
             const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            f.close();   // before the next save — see the note on the first read of this file
             int  into = 0;
             bool hasNew = false;
             for (const Edge &e : res.pack.edges) {
@@ -817,6 +824,7 @@ int main(int argc, char **argv)
             QFile f(userPackPath());
             check(f.open(QIODevice::ReadOnly), "the user pack is readable after the undo");
             const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            f.close();   // before the next save — see the note on the first read of this file
             bool foundWeak = false;
             for (const Edge &e : res.pack.edges)
                 if (e.to == QStringLiteral("c_posture") && e.from == QStringLiteral("stance_wide"))
@@ -983,6 +991,7 @@ int main(int argc, char **argv)
             QFile f(userPackPath());
             check(f.open(QIODevice::ReadOnly), "the user pack is readable after the undo");
             const PackLoadResult res = loadPack(f.readAll(), userPackPath());
+            f.close();   // before the next save — see the note on the first read of this file
             bool restoredWeak = false;
             for (const Edge &e : res.pack.edges)
                 if (e.type == EdgeType::Corroborates
