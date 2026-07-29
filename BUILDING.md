@@ -248,25 +248,57 @@ date in place by **Sparkle** (the framework WinSparkle is a port of), gated by a
 
 **Build the DMG:**
 ```bash
-# Build deps come from Homebrew (CMake probes them): opencv, ffmpeg, aravis.
-#   brew install opencv ffmpeg aravis
-tools/package_macos.sh                         # → dist/PinPointStudio-<ver>-x86_64.dmg (signs+notarizes if creds set)
+# Build deps come from Homebrew (CMake probes them): opencv@4, ffmpeg, aravis.
+#   brew install opencv@4 ffmpeg aravis
+# NB opencv@4, NOT opencv — the plain formula is 5.x now, which moves calib3d into
+# separate 3d/calib modules and does not build here. CMake asks for opencv@4 by name
+# (it is keg-only, so `brew --prefix opencv` cannot see it) and rejects 5.x explicitly.
+tools/package_macos.sh                         # → dist/PinPointStudio-<ver>-<arch>.dmg (signs+notarizes if creds set)
 tools/package_macos.sh --no-sign               # unsigned dev build (no in-app update trust)
 tools/package_macos.sh --app <prebuilt.app>    # package an already-built .app (copied, never mutated)
+tools/package_macos.sh --check-only            # re-run ONLY the verification gate on the staged bundle
 ```
+The DMG is named from the **built binary**, not from the build host: `lipo -archs` on the
+staged executable decides the `-x86_64` / `-arm64` suffix, and the script refuses a
+universal binary (one arch per DMG — the two architectures ship different ONNX Runtime
+majors). It also cross-checks the Sparkle feed baked into `Info.plist` against that arch
+and aborts on a mismatch, which is what a stale CMake cache produces.
 The script resolves the version from `src/Core/version.h`, builds Release, runs
 `macdeployqt`, then **recursively relocates the Homebrew dependency closure** macdeployqt
 leaves half-done (OpenCV → VTK → webp; the Qt sql plugin → libmimerapi) into
-`Contents/Frameworks` with `@rpath` install names, and **verifies** no build-machine path
-leaks before building the DMG (it fails loudly if one does — the clean-host gate). With a
+`Contents/Frameworks` with `@rpath` install names, and **verifies** the bundle before
+building the DMG (the clean-host gate, which fails loudly). The gate makes two passes: no
+Mach-O may keep an **absolute** dependency outside `/usr/lib` and `/System` (an allow-list —
+a deny-list of Homebrew prefixes missed Qt's psql plugin linking a `/Applications/Postgres.app`
+path), and every **`@rpath` dependency must actually resolve** inside the bundle, resolved
+the way dyld does — including the main executable's `LC_RPATH`s, which is how dlopen'd Qt
+plugins find their frameworks. That second pass is what catches a dylib correctly rewritten
+to `@rpath` but never copied in, or copied in under a name nothing asks for. With a
 **Developer ID Application** identity in the keychain and a `NOTARY_PROFILE`, it also
 codesigns (Hardened Runtime, entitlements at `packaging/macos/entitlements.plist`),
 notarizes, and staples; without them it emits a valid **unsigned** DMG.
 
-- **v1 ships x86_64 only** (Intel; runs under Rosetta 2 on Apple Silicon). Native `arm64`
-  is a GA add (a second DMG + `appcast-mac-arm64.xml`). There is **no CUDA / no component
-  split** on macOS — the DMG is the whole, hardware-agnostic app (acceleration is
-  CoreML/Accelerate/Metal).
+- **Two DMGs, two feeds** — `PinPointStudio-<ver>-x86_64.dmg` → `appcast-mac.xml`, and
+  `PinPointStudio-<ver>-arm64.dmg` → `appcast-mac-arm64.xml`. Each architecture's binary
+  only ever sees its own feed; there is no arch negotiation inside a feed (Sparkle has no
+  such attribute). **`appcast-mac.xml` is a frozen name** — it is baked into the
+  `Info.plist` of every Intel install in the field and Sparkle re-reads it from the
+  *installed* bundle, so renaming it for symmetry would orphan them permanently.
+  There is **no CUDA / no component split** on macOS — the DMG is the whole,
+  hardware-agnostic app (acceleration is CoreML/Accelerate/Metal).
+- **The two builds are not equivalent.** arm64 gets ONNX Runtime 1.26 with the CoreML
+  execution provider **and ORT-GenAI (local LLM)**; x86_64 is pinned to ORT **1.20.1**, CPU
+  only, with **no local LLM** (it falls back to Gemini). This is not a choice — Microsoft
+  stopped shipping Intel macOS prebuilts for both after ORT 1.21 / ORT-GenAI 0.11.4, so the
+  gap widens with every release. Intel is also on a clock at the CI end: GitHub retires
+  x86_64 macOS runners in **August 2027**.
+- **The shipped minimum macOS is set by the build host, not by us.** Homebrew bottles are
+  compiled for the packaging machine's macOS, so a DMG built on a macOS 26 Mac requires
+  macOS 26 whatever `CMAKE_OSX_DEPLOYMENT_TARGET` says. `package_macos.sh` therefore
+  *computes* the floor (the highest `LC_BUILD_VERSION` minos across everything bundled),
+  stamps it as `LSMinimumSystemVersion`, and `make_appcast_mac.sh` reads it back out of the
+  DMG it is about to sign. **Ship CI-built DMGs**, not locally-built ones, unless you intend
+  the floor your own Mac imposes.
 - Developer ID signing + notarization are a **v1 requirement** on macOS (not optional
   polish): an un-notarized app is quarantined and App Translocation stops Sparkle updating
   in place. The cert + notary credential + the EdDSA private key all stay **offline, never
@@ -281,10 +313,14 @@ notarizes, and staples; without them it emits a valid **unsigned** DMG.
 > [`docs/implementation/macos_update_impl.md`](docs/implementation/macos_update_impl.md).
 
 **Releasing:** tag exactly the `version.h` string (e.g. `v0.1-alpha3`) and push; CI's
-`macos` job (Intel `macos-13`) builds the **unsigned** DMG and stages it on a **draft**
-release. The maintainer signs + notarizes the exact DMG locally, generates
-`appcast-mac.xml` (`packaging/make_appcast_mac.sh`), uploads both, and publishes
-non-prerelease — full steps in the runbook.
+`macos` job is a **two-leg matrix** — `x86_64` on `macos-15-intel` and `arm64` on
+`macos-15` — and each leg builds its **unsigned** DMG and stages it on the same **draft**
+release. `fail-fast: false`, so a flaky leg cannot cancel the other one's good DMG; a
+`macos-assets-complete` job then refuses to go green unless **both** DMGs are on the draft,
+because a feed whose architecture has no enclosure is invisible in the GitHub UI. The
+maintainer signs + notarizes each exact DMG locally and runs `make_appcast_mac.sh --arch`
+**once per architecture**, uploads all four assets, and publishes non-prerelease — full
+steps in the runbook.
 
 ---
 
@@ -403,7 +439,7 @@ Filter within any built tree with `ctest --test-dir <build> -R <regex>`.
 | **Shot impact-detector** | `src/IMU/tests` | 3 | IMU impact detector truth table (fires once; taps/waggles/swells rejected; refractory; orientation gate; back-dated `est_t`; 100↔200 Hz parity); `ImuIoWorker` thread/EventBuffer contract; ESKF gyro-unit pin. |
 | **Calibrated ball-detection** | `src/Pose/tests` | 3 | `ball_model.h` core (model fitting, theta, multi-cue scoring, gain invariance, drift); calibration protocol (round bookkeeping, profile save/load); `BallDetector` throttle contract. Needs OpenCV (core/imgproc/features2d). |
 | **Acoustic onset-detector** | `src/Audio/tests` | 1 | Onset detector truth table (click fires sample-accurately; speech/tone/ambient rejected; refractory; back-dating; reverb confirm; absolute amplitude gate). |
-| **In-app update** | `src/Update/tests` | 3 | Linux updater pure logic (version compare, AppImage asset selection across x86_64/aarch64, GPG VALIDSIG parse, placeholder-key refusal); `PlatformTarget` arch-token map; `UpdateController` state-machine + relaunch session-safety policy + QML state-string contract, driven by a `FakeUpdateBackend`. GoogleTest; the policy test needs Qt6 Qml + Test. |
+| **In-app update** | `src/Update/tests` | 3 | Linux updater pure logic (version compare, AppImage asset selection across x86_64/aarch64, GPG VALIDSIG parse, placeholder-key refusal); `PlatformTarget` arch-token map + a tripwire on the **frozen** macOS appcast filenames (`appcast-mac.xml` must stay unsuffixed; arm64 is a separate file); `UpdateController` state-machine + relaunch session-safety policy + QML state-string contract, driven by a `FakeUpdateBackend`. GoogleTest; the policy test needs Qt6 Qml + Test. |
 
 Framework note: Buffer, Core and In-app update use GoogleTest (fetched automatically); the other five use a self-contained `main()` + `CHECK`/`CHECK_NEAR` (no GoogleTest). `src/Buffer/tests` also builds `latency_benchmark`, intentionally **not** registered with CTest — run it by hand: `./build/tests/Buffer/latency_benchmark` (umbrella) or `./build/buffer-tests/tests/latency_benchmark` (standalone `-S src/Buffer`).
 

@@ -164,10 +164,17 @@ can consume — provable before the client exists, against a test key.
   locally, runs `make_appcast_mac.sh`, uploads the DMG + `appcast-mac.xml`, and
   publishes. (Mirrors the Linux/Windows local-signing model; the `guard` job already
   skips CI when a published release exists, so Path B isn't clobbered.)
-  - *Caveat:* GitHub macOS runners are **arm64** by default now — pin an **Intel
-    (`macos-13`)** runner so the x86_64 DMG is actually built x86_64, matching the v1
-    target arch. Heavy FetchContent (whisper/ViTPose/ORT) makes the first run slow;
-    validate with a test tag.
+  - *Runner pinning:* the `macos` job is a **two-leg matrix** — `x86_64` on
+    **`macos-15-intel`**, `arm64` on **`macos-15`** — with `fail-fast: false` so one
+    leg cannot cancel the other's good DMG, plus a `macos-assets-complete` job that
+    refuses to go green unless both DMGs reached the draft.
+    **`macos-13` is retired** (December 2025) and is no longer a valid label;
+    `macos-15-intel` is the last x86_64 image GitHub offers and it goes away in
+    **August 2027**, after which there is no Intel on GitHub Actions at all.
+    `macos-14` is deliberately not used despite being older — it entered deprecation
+    on 6 July 2026. Re-check these dates against `actions/runner-images` before
+    relying on them. Heavy FetchContent (whisper/ViTPose/ORT) makes the first run
+    slow; validate with a test tag.
 - ☐ **`macos_release_runbook.md`** — the local sign+notarize+EdDSA flow (Path A: CI
   draft → download DMG → `codesign`/`notarytool`/`stapler` → `make_appcast_mac.sh`
   sign+emit → verify (`spctl`, `sign_update --verify`) → upload appcast → publish;
@@ -269,7 +276,7 @@ EDIT CMakeLists.txt                                      (macdeployqt/dmg target
                                                           PINPOINT_INSTALLED define)            S1/S2
 (UpdateController is NOT edited — the factory + MacSparkleBackend carry the macOS port)
 EDIT src/Gui/main.cpp                                    (Sparkle init after window-ready)       S2·P3
-EDIT .github/workflows/release.yml                       (macOS draft-build job, macos-13)       S1·P2
+EDIT .github/workflows/release.yml                       (macOS matrix: x86_64+arm64)           S1·P2
 EDIT BUILDING.md                                         (macOS packaging + release section)     S1·P1/P2
 ```
 (`GeneralPanel.qml` is deliberately **not** in the list — the shared updater row already
@@ -285,10 +292,19 @@ covers macOS, design §5B.)
   `/usr/local` today and are **absent on a clean host** — they must be copied into the
   bundle and relinked (`install_name_tool`), the macOS equivalent of the Linux
   linuxdeploy bundling. This is the bulk of S1·P0 risk.
-- **Architecture (decided: x86_64 only v1)** — runs under Rosetta 2 on Apple Silicon.
-  Pin an **Intel `macos-13`** CI runner so CI actually builds x86_64. Native `arm64` is
-  a GA add (second feed, design §7); the diverging ORT versions (arm64 1.26 vs Intel
-  1.20.1) are why a universal binary is deferred.
+- **Architecture (now: BOTH, as two separate DMGs + two feeds)** — `x86_64` built on
+  `macos-15-intel`, `arm64` on `macos-15`. The diverging ORT versions (arm64 1.26 +
+  CoreML + ORT-GenAI vs Intel 1.20.1, CPU, no local LLM) are why a universal binary is
+  rejected permanently rather than deferred. Existing Apple Silicon users on the Intel
+  build stay there — no Rosetta→native migration hook, so "each arch sees only its own
+  feed" stays literally true.
+- **Minimum macOS is a property of the BUILD HOST, not a setting.** Homebrew bottles are
+  compiled for the packaging machine's macOS, so every bundled OpenCV/FFmpeg/Aravis/glib
+  dylib carries that host's `minos` — on a macOS 26 machine the DMG requires macOS 26 no
+  matter what `CMAKE_OSX_DEPLOYMENT_TARGET` is set to. Consequences: (a) the floor is
+  **computed** from the built closure and stamped as `LSMinimumSystemVersion`, with the
+  appcast reading it back from the signed bytes, so the feed cannot over-promise; (b)
+  **release DMGs must come from CI**, not from a maintainer Mac running a newer macOS.
 - **Sparkle native UI vs the QML house style** — accepted divergence: Sparkle owns its
   window on macOS as WinSparkle does on Windows. No custom QML flow (design §5).
 - **Key & cert custody** — the Ed25519 private key **and** the Developer ID

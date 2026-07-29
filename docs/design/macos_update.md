@@ -48,10 +48,21 @@ engine), and the Linux design [`linux_update.md`](linux_update.md) for the share
   Accelerate / Metal**, all OS-resident — so the `.app` is one self-contained,
   hardware-agnostic artifact and the Sparkle enclosure is simply "the whole app". This
   is a real simplification over Windows, not an omission.
-- A universal (fat) binary in v1. We ship **x86_64 only** (decided) — it runs natively
-  on Intel and under Rosetta 2 on Apple Silicon. A native `arm64` feed is a GA add
-  (§7), kept simple because the repo's ONNX Runtime versions already diverge per arch
-  (arm64 1.26 vs Intel 1.20.1), making a single lipo'd binary non-trivial.
+- A universal (fat) binary — **still rejected, and now permanently**. The repo's ONNX
+  Runtime versions diverge per arch (arm64 1.26 + CoreML + ORT-GenAI vs Intel 1.20.1,
+  CPU, no local LLM) because Microsoft stopped publishing Intel macOS prebuilts after
+  ORT 1.21 / ORT-GenAI 0.11.4. A single lipo'd binary would have to carry two different
+  ONNX majors and two different engine sets behind one `Info.plist`, which no amount of
+  packaging cleverness makes coherent. **Two separate DMGs, two separate feeds.**
+  `package_macos.sh` refuses a universal bundle outright rather than let one be built
+  by accident.
+
+  > **Superseded:** v1 shipped **x86_64 only**, with Apple Silicon running under
+  > Rosetta 2 and native `arm64` deferred to GA. Native `arm64` now ships as a second
+  > DMG + `appcast-mac-arm64.xml`. Existing Apple Silicon users who installed the Intel
+  > build **stay on it** — there is deliberately no Rosetta→native migration hook, which
+  > keeps the "each architecture's binary only ever sees its own feed" invariant (§4.1)
+  > literally true. They move over by reinstalling, if they ever choose to.
 
 ## 2. The cross-platform mapping
 
@@ -195,10 +206,23 @@ Read by Sparkle:
 > During alpha/beta we therefore **publish releases as non-prerelease** so the macOS
 > `latest/download/appcast-mac.xml`, the Windows `appcast-win.xml`, and the Linux
 > `gh-releases-zsync … latest` all resolve off the same release. **Architecture** is
-> handled the same way a Stable/Beta split would be: v1's `SUFeedURL` is baked to
-> `appcast-mac.xml` (the x86_64 feed); a future native `arm64` build bakes a different
-> `SUFeedURL` (`appcast-mac-arm64.xml`) at build time, so each architecture's binary
-> only ever sees its own feed. No runtime arch negotiation in the appcast.
+> handled the same way a Stable/Beta split would be: `SUFeedURL` is baked at **configure**
+> time from `CMAKE_SYSTEM_PROCESSOR` — x86_64 bakes `appcast-mac.xml`, arm64 bakes
+> `appcast-mac-arm64.xml` — so each architecture's binary only ever sees its own feed.
+> No runtime arch negotiation in the appcast; Sparkle has no arch attribute to negotiate
+> with, and one item per feed is the whole mechanism.
+>
+> **`appcast-mac.xml` is a FROZEN name.** It is baked into the `Info.plist` of every
+> Intel install already in the field, and Sparkle re-reads that URL from the *installed*
+> bundle — never from anything we publish later. Renaming it for symmetry with the arm64
+> name would point every one of them at a 404: they would poll forever, never update, and
+> there is no remote fix. **Add feeds; never rename this one.**
+>
+> Two independent checks enforce the pairing, because a stale CMake cache silently
+> produces a binary of one arch carrying the other's feed: `package_macos.sh` cross-checks
+> the baked `SUFeedURL` against `lipo -archs` of the built binary before naming the DMG,
+> and `make_appcast_mac.sh` re-checks it against the mounted DMG's bytes before its EdDSA
+> signature blesses them.
 
 ### 4.2 Why an appcast, not the GitHub JSON API
 
@@ -457,8 +481,11 @@ Sparkle's helper is the swap mechanism, operating on the artifact Sparkle verifi
   as WinSparkle's is the Windows idiom and the QML banner is the Linux idiom.
 - Not splitting the app into components or managing a hardware sidecar — macOS has no
   CUDA gigabyte; the DMG is the whole, hardware-agnostic app (§4.3).
-- Not shipping a universal binary or a native `arm64` build in v1 — x86_64 only, native
-  `arm64` deferred to GA as a second feed (§7). Apple Silicon runs v1 under Rosetta 2.
+- Not shipping a universal binary — ever (§1). Native `arm64` now ships as a **second
+  DMG + second feed**, not as a fat binary.
+- Not migrating existing Apple Silicon users off the Intel build. There is no
+  Rosetta→native hook; they stay on x86_64 until they reinstall. A migration would mean
+  one install switching feeds mid-life, which is precisely the invariant §4.1 rests on.
 - Not delivering binary deltas in v1 — full DMGs; Sparkle deltas are a clean GA add
   (§4.4).
 - Not using the Mac App Store update channel (incompatible with Sparkle).
@@ -488,14 +515,30 @@ controller created after the main window is shown:
 ### Appendix B — release artifacts (per GitHub Release, macOS side)
 
 ```
-PinPointStudio-<ver>-x86_64.dmg        # the Sparkle enclosure: notarized, EdDSA-signed bytes
-appcast-mac.xml                        # the Sparkle feed: version, URL, edSignature, notes link
+PinPointStudio-<ver>-x86_64.dmg        # Intel enclosure:  notarized, EdDSA-signed bytes
+PinPointStudio-<ver>-arm64.dmg         # Apple Silicon enclosure: likewise
+appcast-mac.xml                        # Intel feed         (FROZEN name — see §4.1)
+appcast-mac-arm64.xml                  # Apple Silicon feed
 release-notes-mac.html                 # (optional) "what's new", shown in Sparkle's window
 ```
+**Four macOS assets, not two.** Each appcast carries exactly one `<item>`, pointing at the
+DMG of its own architecture. `make_appcast_mac.sh --arch <x86_64|arm64>` is run once per
+architecture and verifies the enclosure's actual slice, its baked `SUFeedURL`, and its
+`LSMinimumSystemVersion` by mounting the DMG — the filename alone is treated as hearsay,
+since in the CI path (runbook Path A) those bytes were built elsewhere and downloaded.
 `<ver>` = the **`version.h` string / release tag** (e.g. `v0.1-alpha3`) — the asset
 filename reflects the tag, while the *internal* `CFBundleVersion` is the monotonic
 `PINPOINT_VERSION_BUILD`. `appcast-mac.xml` and the DMG co-exist with the Windows
 (`appcast-win.xml`, `*-core.exe`) and Linux (`*.AppImage*`) assets on the **same**
 release; each platform's updater reads only its own assets and ignores the others'
-(Sparkle only ever looks at `appcast-mac.xml`). A native `arm64` GA build adds
-`PinPointStudio-<ver>-arm64.dmg` + `appcast-mac-arm64.xml` alongside.
+(an Intel install only ever looks at `appcast-mac.xml`, an arm64 install only at
+`appcast-mac-arm64.xml`).
+
+**`sparkle:minimumSystemVersion` is computed, not chosen.** Homebrew bottles are built for
+the *packaging host's* macOS, so the bundle's real floor is the highest `LC_BUILD_VERSION`
+minos across everything shipped — typically the runner's OS version, regardless of the
+`CMAKE_OSX_DEPLOYMENT_TARGET` we pin. `package_macos.sh` derives that value and stamps it
+as `LSMinimumSystemVersion`; `make_appcast_mac.sh` reads it back out of the DMG being
+signed. This matters because Sparkle offers any update whose `minimumSystemVersion` the
+user's Mac satisfies and then installs it **in place**: an over-optimistic floor does not
+decline gracefully, it replaces a working install with one that cannot launch.

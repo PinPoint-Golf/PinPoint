@@ -107,6 +107,86 @@ signed by a *different* cert as a different app. Back it up now:
 3. Store the `.p12` + its password somewhere offline (password manager / encrypted drive).
    **Never commit it. It is not a CI secret.**
 
+#### 0.3a Setting up a SECOND signing Mac — import, never re-issue
+
+When you move release signing to another machine (e.g. the Apple Silicon Mac used for
+arm64 builds), **import the backed-up `.p12` from 0.3. Do NOT create a new certificate.**
+
+This is the single most damaging wrong turn in this runbook, because issuing a fresh cert
+appears to work perfectly and breaks things you will not notice for weeks:
+
+- macOS keys **TCC permission grants** (camera, microphone, Bluetooth, speech) to the
+  app's *designated requirement*, which names the signing certificate. A new cert silently
+  resets every one of those grants for existing users.
+- Sparkle treats an update signed by a different Developer ID as a **different app**, so
+  in-place updates for everyone already installed stop working.
+
+> **The `.p12` has the leaf cert only, not the issuing CA.** After import you may see
+> `1 identity imported` yet `security find-identity -v -p codesigning` reports
+> **`0 valid identities`**. That is not a bad import — the leaf cannot chain to Apple Root
+> without the **Developer ID Certification Authority (G2)** intermediate, and codesign will
+> not use an identity it cannot fully validate. Install the intermediate (public cert, no
+> desktop session needed):
+> ```bash
+> curl -fsSLO https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+> security import DeveloperIDG2CA.cer -k ~/Library/Keychains/login.keychain-db
+> security find-identity -v -p codesigning     # now shows 1 valid
+> ```
+> `setup_release_signing.sh` does this automatically when the intermediate is absent; the
+> manual steps are here for when you are diagnosing by hand. Seen on the M4, 2026-07-29.
+
+**`tools/setup_release_signing.sh` does all of this** — import, the G2 intermediate,
+partition list, and the notarytool profile — reading both passwords interactively so
+neither is written to disk, passed as `argv` (where `ps` would show it), or echoed:
+
+```bash
+tools/setup_release_signing.sh --p12 ~/certs/pinpoint_developer_id.p12
+```
+
+**Run it from Terminal.app on the Mac** (screen share / VNC is fine). It refuses to run
+over SSH, because the login keychain unlocks only by prompting and there is nothing to
+prompt with in launchd session `Background` — codesign there dies
+`errSecInternalComponent`. That is a property of the *login keychain*, not of codesign:
+the dev cert signs fine headlessly because it lives in a dedicated keychain
+(`tools/setup_dev_signing.sh`), a trade deliberately **not** extended to the distribution
+cert.
+
+The manual equivalent, if you would rather see each step:
+```bash
+security import ~/certs/pinpoint_developer_id.p12 -k ~/Library/Keychains/login.keychain-db \
+  -T /usr/bin/codesign -T /usr/bin/security
+# Let codesign use it without an interactive prompt on every signature:
+security set-key-partition-list -S apple-tool:,apple:,codesign: \
+  -s -k "<login-keychain-password>" ~/Library/Keychains/login.keychain-db
+security find-identity -v -p codesigning   # must list "Developer ID Application: …"
+```
+The notary credential and the Ed25519 key **do not travel with the certificate** — redo
+**0.5** on that machine and restore the EdDSA key for **1.7**.
+
+> **Check the EdDSA key still matches the pin before you need it.** The private key is
+> useless if it does not pair with `src/Resources/keys/pinpoint_release_mac_eddsa.pub`,
+> which is compiled into every shipped app as `SUPublicEDKey` — signatures from a
+> mismatched key are rejected by every installed client, and you would only find out at
+> the update-offer stage. Sign anything and verify it round-trips:
+> ```bash
+> SU=$(find build -name sign_update -type f | head -1)
+> echo test > /tmp/t.bin
+> SIG=$("$SU" /tmp/t.bin -f ~/certs/pinpoint_release_mac_eddsa_PRIVATE.pem -p)
+> "$SU" --verify /tmp/t.bin "$SIG" -f ~/certs/pinpoint_release_mac_eddsa_PRIVATE.pem
+> ```
+> Verified matching on 2026-07-29 for the key in `~/certs`.
+
+> **Keep the distribution cert in the LOGIN keychain.** The project also has a throwaway
+> self-signed *development* cert living in a dedicated keychain with its password on disk
+> (`tools/setup_dev_signing.sh`) so that dev builds can sign unattended. Do **not** extend
+> that trick to the Developer ID cert: a password sitting next to the key on disk is
+> exactly the posture this runbook keeps the cert offline to avoid. Release signing runs
+> in a desktop session, deliberately.
+>
+> Note that `codesign` cannot reach the login keychain from an SSH session
+> (`errSecInternalComponent`) — it needs the Aqua session. Signing is therefore a
+> sit-at-the-Mac step, or one driven into the desktop session via a LaunchAgent.
+
 ### 0.4 Note your Team ID
 It's the `(TEAMID9999)` in the identity name above, and on
 **developer.apple.com/account** → **Membership**. You'll use it for notarization. Below,
@@ -161,9 +241,13 @@ CMake derives the bundle version + DMG name from these — nothing else to edit.
 **A release MUST NOT be cut while any test is failing or not building.** PinPoint has
 seven standalone CTest suites (they are *not* part of the app build — see
 [`../../BUILDING.md`](../../BUILDING.md) § Testing). Build and run every one; each must
-report `100% tests passed` (OpenCV comes from Homebrew, so no `OpenCV_DIR` needed):
+report `100% tests passed` (OpenCV comes from Homebrew, so no `OpenCV_DIR` needed —
+CMake asks for the keg-only **`opencv@4`** by name; the plain `opencv` formula is 5.x
+now and is rejected explicitly):
 ```bash
-QT=~/Qt/6.11.0/macos
+# Point QT at whichever Qt 6.11.x you actually have installed — `ls ~/Qt` to check.
+# A stale version here fails at the first configure, before any test runs.
+QT=$(ls -d ~/Qt/6.11.*/macos | tail -1)
 for s in Buffer=src/Buffer Analysis=src/Analysis/tests Audio=src/Audio/tests \
          Core=src/Core/tests Gui=src/Gui/tests IMU=src/IMU/tests Pose=src/Pose/tests; do
   n=${s%%=*}; d=${s#*=}
@@ -176,28 +260,45 @@ done
 **If any suite fails to build or any test fails, STOP — fix it and re-run before you
 tag.** Do not proceed to the build/sign steps below.
 
-### 1.3 Build the DMG
-Two paths — pick one.
+### 1.3 Build the DMGs — **there are TWO, one per architecture**
 
-**Path A — CI builds it (recommended once the workflow is validated).** Push a tag; the
-`macos` job (Intel `macos-13`) builds the **unsigned** DMG onto a **draft** release:
+Every step from here to publish happens **twice**, once for `x86_64` and once for
+`arm64`. They are separate enclosures with separate feeds; nothing is shared but the
+release they sit on.
+
+> **Prefer Path A for anything you actually publish.** Homebrew bottles are built for
+> the packaging host's macOS, so a DMG built on your own Mac carries *your* macOS as its
+> minimum — on a macOS 26 machine that is a DMG only macOS 26 users can run. The tooling
+> will tell you the truth rather than ship a lie (the computed floor is stamped into
+> `Info.plist` and copied into the appcast), but the truth may be a floor you did not
+> intend. CI runners are older, so their floor is the one you want.
+
+**Path A — CI builds both (the release path).** Push a tag; the two-leg `macos` matrix
+(`macos-15-intel` + `macos-15`) builds the **unsigned** DMGs onto a **draft** release,
+and the `macos-assets-complete` job goes red if either is missing:
 ```bash
 TAG=v0.1-alpha4
 git tag "$TAG" && git push origin "$TAG"      # wait for the Actions run to finish
 gh release download "$TAG" -R PinPoint-Golf/PinPointStudio -p '*-x86_64.dmg' -D /tmp/rel
+gh release download "$TAG" -R PinPoint-Golf/PinPointStudio -p '*-arm64.dmg'  -D /tmp/rel
 ```
-Then sign + notarize that exact downloaded DMG (it's unsigned from CI).
+Then sign + notarize **each** exact downloaded DMG (both are unsigned from CI).
 
-**Path B — build locally (best for your first time — full control, signs in one shot).**
+**Path B — build locally (fine for learning and for dev builds; see the warning above).**
 With the cert + notary profile from Part 0 in place, the packaging script does the whole
-build → deploy → relocate → **sign → notarize → staple** → DMG automatically:
+build → deploy → relocate → verify → **sign → notarize → staple** → DMG automatically.
+Note it builds **host-native only** — this produces the DMG for the Mac you are sitting
+at, and there is no cross-build:
 ```bash
-brew install opencv ffmpeg aravis     # build deps (once)
+brew install opencv@4 ffmpeg aravis   # build deps (once) — @4, NOT plain opencv (that is 5.x)
 export SIGN_IDENTITY="Developer ID Application: Mark Liversedge (<TEAMID>)"   # or omit → auto-detect
 export NOTARY_PROFILE=pinpoint-notary
 tools/package_macos.sh                # ~build is slow the first time
-DMG=$(ls -t dist/PinPointStudio-*-x86_64.dmg | head -1)
+DMG=$(ls -t dist/PinPointStudio-*-$(uname -m).dmg | head -1)
 ```
+The DMG is named from the built binary, so its `-x86_64`/`-arm64` suffix always matches
+its contents. The script aborts if the Sparkle feed baked into the bundle disagrees with
+that architecture — the signature of a build tree reused across arches.
 If `SIGN_IDENTITY`/`NOTARY_PROFILE` are unset, the script still builds a valid **unsigned**
 DMG and tells you it skipped signing.
 
@@ -253,31 +354,70 @@ codesign --verify --deep --strict --verbose=2 "$DMG"              # → valid on
 All three must pass before you publish. The most common first-time failure is a missing
 or wrong entitlement / an unsigned nested binary — see Troubleshooting.
 
-### 1.7 [Stage 2] EdDSA-sign the DMG + generate the appcast — REQUIRED every release
-```bash
-# Signs with the private key in your login Keychain (no --key-file needed); auto-finds
-# sign_update under build/**/_deps/sparkle-src/bin/. Writes appcast-mac.xml next to the DMG.
-packaging/make_appcast_mac.sh --tag "$TAG" --dmg "$DMG" \
-  --notes-url "https://github.com/PinPoint-Golf/PinPointStudio/releases/tag/$TAG"
+### 1.7 [Stage 2] EdDSA-sign each DMG + generate BOTH appcasts — REQUIRED every release
 
-# Verify the signature against the published bytes before uploading (must exit 0):
+**Run this once per architecture.** `--arch` selects the DMG, decides which feed the
+enclosure is required to point at, and names the output file. Passing the wrong one is
+caught, not silently honoured: the script mounts the DMG and compares `lipo -archs` and
+the bundle's `SUFeedURL` against what `--arch` claims, and refuses to sign on a mismatch.
+
+```bash
+NOTES="https://github.com/PinPoint-Golf/PinPointStudio/releases/tag/$TAG"
+
+# Intel → appcast-mac.xml  (the FROZEN feed name — never rename it)
+packaging/make_appcast_mac.sh --tag "$TAG" --arch x86_64 \
+  --dmg /tmp/rel/PinPointStudio-$TAG-x86_64.dmg --notes-url "$NOTES"
+
+# Apple Silicon → appcast-mac-arm64.xml
+packaging/make_appcast_mac.sh --tag "$TAG" --arch arm64 \
+  --dmg /tmp/rel/PinPointStudio-$TAG-arm64.dmg --notes-url "$NOTES"
+
+# Verify each signature against the published bytes before uploading (must exit 0):
 SU=$(find build -name sign_update -type f | head -1)
-SIG=$(sed -n 's/.*edSignature="\([^"]*\)".*/\1/p' "$(dirname "$DMG")/appcast-mac.xml")
-"$SU" --verify "$DMG" "$SIG"; echo "verify exit: $?"
+for a in x86_64 arm64; do
+  case "$a" in x86_64) FEED=appcast-mac.xml ;; arm64) FEED=appcast-mac-arm64.xml ;; esac
+  D=/tmp/rel/PinPointStudio-$TAG-$a.dmg
+  SIG=$(sed -n 's/.*edSignature="\([^"]*\)".*/\1/p' "$(dirname "$D")/$FEED")
+  "$SU" --verify "$D" "$SIG"; echo "$a verify exit: $?"
+done
 ```
-Sign the **notarized** DMG (its bytes are what users download). If signing from the
-offline `.pem` instead of the Keychain, add `--key-file ~/pinpoint_release_mac_eddsa_PRIVATE.pem`.
+Sign the **notarized** DMG in each case (its bytes are what users download). If signing
+from the offline `.pem` instead of the Keychain, add
+`--key-file ~/pinpoint_release_mac_eddsa_PRIVATE.pem`.
+
+`sparkle:minimumSystemVersion` is **not** a constant you set here — it is read from the
+`LSMinimumSystemVersion` the packaging script stamped into the app inside that DMG, which
+is the highest `minos` across everything bundled. If it reads higher than you expect, the
+build host's Homebrew bottles are why; rebuild in CI rather than overriding it. `--min-os`
+exists as an escape hatch, but overriding it upward-of-reality is how you ship an update
+that installs over a working app and then will not launch.
 
 ### 1.8 Tag (if not already) + publish to GitHub
-```bash
-# Path B (local): create the release with the assets. For Stage 1, just the DMG:
-gh release create "$TAG" -R PinPoint-Golf/PinPointStudio \
-   --title "PinPoint Studio $TAG" --notes "…release notes…" "$DMG"
-#   [Stage 2] also attach the appcast:  … "$DMG" "$(dirname "$DMG")/appcast-mac.xml"
+**FOUR macOS assets go up: two DMGs and two appcasts.** A release carrying only one
+architecture's pair is worse than no release for the other architecture — its feed
+resolves to a release with no enclosure it can use.
 
-# Path A (CI draft already holds an unsigned DMG): replace it with your signed one + publish:
-gh release upload "$TAG" -R PinPoint-Golf/PinPointStudio "$DMG" --clobber
+```bash
+R=/tmp/rel
+ASSETS=("$R/PinPointStudio-$TAG-x86_64.dmg" "$R/PinPointStudio-$TAG-arm64.dmg" \
+        "$R/appcast-mac.xml"                "$R/appcast-mac-arm64.xml")
+
+# Path B (local): create the release with all four assets.
+gh release create "$TAG" -R PinPoint-Golf/PinPointStudio \
+   --title "PinPoint Studio $TAG" --notes "…release notes…" "${ASSETS[@]}"
+
+# Path A (CI draft already holds the two unsigned DMGs): replace them with your signed,
+# notarized ones, add both appcasts, then publish:
+gh release upload "$TAG" -R PinPoint-Golf/PinPointStudio "${ASSETS[@]}" --clobber
 gh release edit   "$TAG" -R PinPoint-Golf/PinPointStudio --draft=false --prerelease=false
+
+# Confirm BOTH feeds resolve before you walk away — a 404 here means silent
+# never-updates-again for every install of that architecture:
+for f in appcast-mac.xml appcast-mac-arm64.xml; do
+  printf '%-24s ' "$f"
+  curl -fsIL -o /dev/null -w '%{http_code}\n' \
+    "https://github.com/PinPoint-Golf/PinPointStudio/releases/latest/download/$f"
+done
 ```
 **Publish non-draft AND non-prerelease** — the `latest/download/…` URLs (Stage 2's
 `SUFeedURL`) only resolve to a non-prerelease release. The `gh release create` tag fires
@@ -295,15 +435,26 @@ warning. (Stage 2: an older installed build offers the update via Settings → C
 ---
 
 ## Quick checklist (per release)
+Rows marked **×2** are done once for `x86_64` and once for `arm64`. Do not treat the
+release as done until both columns are ticked — a half-shipped release leaves one
+architecture's feed pointing at a release with no enclosure for it.
+
 - [ ] Bump `PINPOINT_VERSION_BUILD` (+ MAJOR/MINOR/POSTFIX) in `version.h`; commit, push
 - [ ] **Run all 7 CTest suites — every one `100% tests passed` (mandatory; stop if any fail)**
-- [ ] Build the DMG (Path A CI tag push, or Path B `tools/package_macos.sh`)
-- [ ] **Smoke-launch the unsigned bundle (`--no-sign` → `open …`) — main window appears, no crash**
-- [ ] Sign (Developer ID) + notarize + staple — automatic in Path B with the env vars set
-- [ ] Verify: `spctl` → Notarized Developer ID, `stapler validate`, `codesign --verify`
-- [ ] [Stage 2] `make_appcast_mac.sh` → EdDSA signature + `appcast-mac.xml`; `--verify`
-- [ ] Publish DMG (+ appcast in Stage 2) **non-draft, non-prerelease**
-- [ ] Confirm: browser-download the DMG, open with no Gatekeeper warning
+- [ ] Build the DMGs — Path A tag push (both matrix legs green + `macos-assets-complete` green)
+
+| step | `x86_64` | `arm64` |
+|---|---|---|
+| **Smoke-launch** the bundle — main window appears, no crash | ☐ | ☐ |
+| Sign (Developer ID) + notarize + staple | ☐ | ☐ |
+| Verify: `spctl` → Notarized Developer ID, `stapler validate`, `codesign --verify` | ☐ | ☐ |
+| `make_appcast_mac.sh --arch <arch>` → EdDSA signature + the right appcast; `--verify` | ☐ | ☐ |
+| Sanity-check the advertised `minimumSystemVersion` is the floor you intended | ☐ | ☐ |
+
+- [ ] Upload **all four** assets (2 DMGs + `appcast-mac.xml` + `appcast-mac-arm64.xml`)
+- [ ] Publish **non-draft, non-prerelease**
+- [ ] Confirm **both** feed URLs return 200 at `releases/latest/download/…`
+- [ ] Confirm: browser-download each DMG, open with no Gatekeeper warning
 
 ---
 
