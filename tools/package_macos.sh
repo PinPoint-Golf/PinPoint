@@ -508,20 +508,27 @@ if ! ls "$FW"/libonnxruntime-genai*.dylib >/dev/null 2>&1; then
     if [[ -n "$genai" ]]; then
         genai_base="$(bundle_dylib "$genai")" || die "failed to bundle ORT-GenAI from $genai"
         log "bundling ONNX Runtime GenAI: $genai_base"
-        # GenAI dlopen()s the UNVERSIONED name "libonnxruntime.dylib" from @loader_path.
-        # 4a bundles ORT under its VERSIONED name only (libonnxruntime.1.dylib), so that
-        # dlopen finds nothing: GenAI's static initializer throws std::runtime_error
-        # ("Failed to load onnxruntime") and dyld SIGABRTs the app before main(). It is
-        # invisible to §5 (a dlopen is not a NEEDED entry), so the alias is the only guard.
-        if [[ ! -e "$FW/libonnxruntime.dylib" ]]; then
-            ort_versioned="$(cd "$FW" && ls libonnxruntime.*.dylib 2>/dev/null | head -1)"
-            [[ -n "$ort_versioned" ]] || die "ORT-GenAI bundled but no libonnxruntime.*.dylib to alias — the app would abort in dyld at launch"
-            ln -sf "$ort_versioned" "$FW/libonnxruntime.dylib"
-            log "aliasing libonnxruntime.dylib → $ort_versioned (ORT-GenAI dlopen target)"
-        fi
     else
         log "ORT-GenAI dylib not found under _deps — expected on Intel (local LLM falls back to Gemini)"
     fi
+fi
+
+# 4a″. GenAI's RUNTIME dependency on ORT proper. GenAI dlopen()s the UNVERSIONED name
+#     "libonnxruntime.dylib" from @loader_path, but 4a bundles ORT under its VERSIONED
+#     name only (libonnxruntime.1.dylib). Without this alias the dlopen finds nothing,
+#     GenAI's static initializer throws std::runtime_error ("Failed to load onnxruntime"),
+#     and dyld SIGABRTs the app before main() — the bundle looks perfect and never opens.
+#
+#     This is deliberately OUTSIDE 4a′: GenAI is a NEEDED dep of the app binary, so
+#     macdeployqt usually copies it in first, which makes 4a′'s guard false and skips that
+#     whole block. Keying off "is GenAI in the bundle" — no matter who put it there — is
+#     what makes this fire. §5 cannot cover it either, because a dlopen is not a NEEDED
+#     entry, so this alias is the only thing standing between us and a DOA arm64 DMG.
+if ls "$FW"/libonnxruntime-genai*.dylib >/dev/null 2>&1 && [[ ! -e "$FW/libonnxruntime.dylib" ]]; then
+    ort_versioned="$(cd "$FW" && ls libonnxruntime.*.dylib 2>/dev/null | head -1)"
+    [[ -n "$ort_versioned" ]] || die "ORT-GenAI is bundled but no libonnxruntime.*.dylib is — the app would abort in dyld at launch"
+    ln -sf "$ort_versioned" "$FW/libonnxruntime.dylib"
+    log "aliasing libonnxruntime.dylib → $ort_versioned (ORT-GenAI dlopen target)"
 fi
 
 # 4b. Spinnaker (proprietary, dlopen'd → not in NEEDED, so macdeployqt skips it).
