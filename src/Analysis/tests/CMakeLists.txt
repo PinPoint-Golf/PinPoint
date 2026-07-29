@@ -45,6 +45,11 @@ pp_add_test(wrist_angle_sampling_test SOURCES wrist_angle_sampling_test.cpp)
 set(NORM_INC ${SRC}/Diagnostics ${SRC}/Metrics ${ANALYSIS})
 set(NORM_SRC ${SRC}/Diagnostics/norm_pack.cpp ${SRC}/Diagnostics/context_tree.cpp
              ${SRC}/Diagnostics/characteristic_pack.cpp ${SRC}/Diagnostics/characteristic.cpp
+             # The pack loader resolves a citation against the bibliography to decide whether a
+             # peer tier is resting on a BOOK, so every target that compiles characteristic_pack.cpp
+             # now links reference_pack.cpp too. Where no registry is on the path the shared set is
+             # empty, nothing resolves, and the gate is a no-op — the link is the only requirement.
+             ${SRC}/Diagnostics/reference_pack.cpp
              ${SRC}/Diagnostics/measure_facets.cpp ${SRC}/Diagnostics/anatomy_vocabulary.cpp
              ${SRC}/Diagnostics/resource_norm_provider.cpp
              ${SRC}/Diagnostics/file_norm_provider.cpp
@@ -459,6 +464,9 @@ pp_add_test(measure_facets_test
 # Pack schema, loader and validator. Every rejection path is exercised: a validator whose
 # negative cases are untested is a validator that passes everything.
 set(DIAG_PACK ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
+              # See NORM_SRC above: the loader's book-citation tier gate resolves through the
+              # bibliography, so the two travel together on every link line.
+              ${DIAG}/reference_pack.cpp
               ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp)
 
 pp_add_test(characteristic_pack_test
@@ -469,6 +477,12 @@ pp_add_test(characteristic_pack_test
 # structural edge-orientation check (which a coverage count cannot make — totals are identical
 # under edge reversal), the capture-gap classification, and that no commercial brand has leaked
 # into the content.
+#
+# PINPOINT_CORE_REFERENCES is DELIBERATELY absent from this target's environment, so the shared
+# bibliography stays empty here. With the registry live, loadPack() would DEMOTE a book citation
+# sitting at a peer tier before this test ever looked at it, and the shipped-content check would
+# pass by watching the fix rather than the fault. It reads references.json itself, through
+# PP_CORE_REFERENCES_PATH, precisely so the validator and the content are gated separately.
 pp_add_test(core_pack_test
     SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK} ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
@@ -592,6 +606,7 @@ pp_add_test(dag_layout_test
 # ── Norms ───────────────────────────────────────────────────────────────────
 set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
               ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
+              ${DIAG}/reference_pack.cpp            # same pairing as DIAG_PACK
               ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp)
 
 # The grade rule. Asserts z is computed per side (an asymmetric norm grades asymmetrically) and
@@ -600,6 +615,7 @@ set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
 pp_add_test(norm_test
     SOURCES ${DIAG}/tests/norm_test.cpp ${DIAG}/norm_pack.cpp ${DIAG}/characteristic_pack.cpp
             ${DIAG}/characteristic.cpp ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp
+            ${DIAG}/reference_pack.cpp   # spelled out rather than DIAG_NORM; keep the pairing
             ${DIAG}/context_tree.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 

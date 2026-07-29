@@ -31,6 +31,13 @@ import PinPointStudio
 // Papers nothing cites are KEPT and marked. One of them contradicts two claims the pack does make,
 // and a bibliography that quietly dropped it would be the most misleading version of this view we
 // could ship.
+//
+// Two kinds of record, one list. Most rows are here because something cites them; the rows under
+// GENERAL READING are the field's standard works, here so a reader can find the reading itself. The
+// flag is ADDITIVE — a cited paper can also be standard reading, and one that is appears ONCE, in
+// its normal position among the cited rows, wearing the badge rather than being duplicated into a
+// second list. A record that is neither cited nor flagged is nobody's decision yet, sits at the tail
+// of the first section, and raises `referenceOrphan` in the health list.
 Item {
     id: root
 
@@ -155,9 +162,9 @@ Item {
             Text {
                 Layout.fillWidth: true
                 text: qsTr("Every source behind a citation in the library, with the claims resting "
-                           + "on it and the tier each one earned. Ordered by how much each paper "
-                           + "holds up. Tap a paper to open it at the publisher; tap a claim to go "
-                           + "to it. "
+                           + "on it and the tier each one earned. Ordered by how much each source "
+                           + "holds up. Tap a source to open it — at the publisher for a paper, at "
+                           + "a library catalogue for a book; tap a claim to go to it. "
                            + "Most of the library is coaching practice rather than published "
                            + "measurement — where that is so, no source is listed and the claim "
                            + "says as much.")
@@ -174,14 +181,51 @@ Item {
                 delegate: ColumnLayout {
                     id: rrow
                     required property var modelData
+                    required property int index
 
                     // True only for the row a citation link just landed on, and only while the
                     // flash runs.
                     readonly property bool _landed:
                         root._flash && root._focusId === rrow.modelData.id
 
+                    readonly property bool _general: rrow.modelData.generalReading === true
+
+                    // The GENERAL READING boundary. The model sorts the uncited tail so every
+                    // flagged record follows every unflagged one, so the section starts at the
+                    // first flagged row and this is simply "am I it?". Drawn inside the delegate
+                    // rather than by splitting the Repeater — see the sort comment in
+                    // characteristic_library_model.cpp for why the list must stay one sequence.
+                    readonly property bool _startsGeneral: {
+                        if (!rrow._general || rrow.modelData.citeCount !== 0) return false
+                        if (rrow.index === 0) return true
+                        var prev = root._refs[rrow.index - 1]
+                        return !(prev.generalReading === true && prev.citeCount === 0)
+                    }
+
                     Layout.fillWidth: true
                     spacing:          Theme.sp(4)
+
+                    // ── The general-reading heading, when this row opens it ─────
+                    ColumnLayout {
+                        Layout.fillWidth:  true
+                        Layout.topMargin:  Theme.sp(12)
+                        Layout.bottomMargin: Theme.sp(4)
+                        spacing:           Theme.sp(6)
+                        visible:           rrow._startsGeneral
+
+                        SectionHead { text: qsTr("GENERAL READING") }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: qsTr("The field's standard works. Nothing in the library cites "
+                                       + "these — they are here so a reader can find the reading, "
+                                       + "not because a claim rests on them.")
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                            wrapMode:       Text.WordWrap
+                        }
+                    }
 
                     // ── The paper ──────────────────────────────────────────────
                     RowLayout {
@@ -197,6 +241,21 @@ Item {
                             color:            (paperMa.containsMouse || rrow._landed)
                                               ? Theme.colorAccent : Theme.colorText
                             Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                        }
+
+                        // Only where it says something the layout does not. A flagged record in the
+                        // GENERAL READING section already sits under a heading that reads the same
+                        // way, and a badge on every row there would be the heading repeated N times.
+                        // Up here, among the cited rows, it is the ONLY thing that says this paper
+                        // would earn its place even if the claims resting on it went away — which is
+                        // the case the additive flag exists for.
+                        Text {
+                            visible:        rrow._general && rrow.modelData.citeCount > 0
+                            text:           qsTr("general reading")
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                            opacity:        0.75
                         }
 
                         // The count leads, because it is what the ordering is on: a reader
@@ -221,7 +280,11 @@ Item {
                         text: {
                             var bits = []
                             if (rrow.modelData.authors) bits.push(rrow.modelData.authors)
-                            if (rrow.modelData.journal) bits.push(rrow.modelData.journal)
+                            // A book has a publisher where a paper has a journal. One or the other,
+                            // never both — the slot names the source's container, and a row that
+                            // showed a journal AND a publisher would be claiming to be both.
+                            if (rrow.modelData.journal)        bits.push(rrow.modelData.journal)
+                            else if (rrow.modelData.publisher) bits.push(rrow.modelData.publisher)
                             if (rrow.modelData.year)    bits.push(String(rrow.modelData.year))
                             return bits.join("  ·  ")
                         }

@@ -113,6 +113,7 @@ Item {
         case "drillNoInstruction": return qsTr("A drill that does not say what the golfer does")
         case "drillNoTarget":      return qsTr("A drill that does not say what it is trying to change")
         case "drillIdNamespace":   return qsTr("A drill id outside the drill. namespace")
+        case "referenceOrphan":    return qsTr("Cited by nothing, and not marked as general reading")
         case "externalDeviceNoReason": return qsTr("Reads from an external device but does not say which")
         case "unwatchedTailNoReason": return qsTr("A tail called deliberately unwatched, with no reason given")
         case "unwatchedTailShaped":   return qsTr("A one-sided measure claiming a tail is unwatched — the shape already says so")

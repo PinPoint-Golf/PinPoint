@@ -666,13 +666,14 @@ QVariantList CharacteristicLibraryModel::references() const
 
     QVariantList out;
     for (const Reference &ref : sharedReferenceSet().references) {
-        // The citation joins against EITHER identifier: a handful of journals issue no DOI, and a
-        // strict DOI match would silently drop every claim resting on those papers — the row would
-        // render "cited by nothing" while the library leaned on it.
+        // The citation joins against ANY of the three identifiers: a handful of journals issue no
+        // DOI, a book never had one, and a strict DOI match would silently drop every claim resting
+        // on those sources — the row would render "cited by nothing" while the library leaned on it.
         const auto matches = [&ref](const QString &citation) {
             if (citation.isEmpty()) return false;
             return (!ref.doi.isEmpty() && citation == ref.doi)
-                || (!ref.pmid.isEmpty() && citation == ref.pmid);
+                || (!ref.pmid.isEmpty() && citation == ref.pmid)
+                || (!ref.isbn.isEmpty() && citation == ref.isbn);
         };
 
         // Every claim resting on this paper, and the tier each one earned. An edge cited at
@@ -709,13 +710,16 @@ QVariantList CharacteristicLibraryModel::references() const
         r.insert(QStringLiteral("id"), ref.id);
         r.insert(QStringLiteral("doi"), ref.doi);
         r.insert(QStringLiteral("pmid"), ref.pmid);
+        r.insert(QStringLiteral("isbn"), ref.isbn);
         r.insert(QStringLiteral("identifier"), ref.identifierLabel());
         r.insert(QStringLiteral("url"), ref.url());
         r.insert(QStringLiteral("title"), ref.title);
         r.insert(QStringLiteral("authors"), ref.authors);
         r.insert(QStringLiteral("journal"), ref.journal);
+        r.insert(QStringLiteral("publisher"), ref.publisher);
         r.insert(QStringLiteral("year"), ref.year);
         r.insert(QStringLiteral("establishes"), ref.establishes);
+        r.insert(QStringLiteral("generalReading"), ref.generalReading);
         r.insert(QStringLiteral("cites"), cites);
         r.insert(QStringLiteral("citeCount"), cites.size());
         out.append(r);
@@ -724,10 +728,24 @@ QVariantList CharacteristicLibraryModel::references() const
     // By how much of the library each one holds up. That ordering IS the argument: the paper four
     // claims rest on is a different kind of object from the one cited once, and a bibliography
     // sorted alphabetically hides exactly that.
+    //
+    // The uncited tail is then split, unflagged before flagged, and the view draws its GENERAL
+    // READING heading at that boundary. Doing it HERE rather than with a second Repeater keeps the
+    // list one sequence, which `focusReference()` depends on: its deep-link resolves an index into
+    // this list and asks the Repeater for `itemAt(i)`, so two Repeaters would silently break every
+    // citation link into the second group. One list, one index, one heading drawn mid-stream.
     std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
         const int ca = a.toMap().value(QStringLiteral("citeCount")).toInt();
         const int cb = b.toMap().value(QStringLiteral("citeCount")).toInt();
         if (ca != cb) return ca > cb;
+        if (ca == 0) {
+            // Among the uncited, the ones that explain themselves go last — under their own
+            // heading. An unflagged uncited record stays where a reader is already looking, beside
+            // the cited rows it no longer resembles.
+            const bool ga = a.toMap().value(QStringLiteral("generalReading")).toBool();
+            const bool gb = b.toMap().value(QStringLiteral("generalReading")).toBool();
+            if (ga != gb) return !ga;
+        }
         const int ya = a.toMap().value(QStringLiteral("year")).toInt();
         const int yb = b.toMap().value(QStringLiteral("year")).toInt();
         if (ya != yb) return ya > yb;

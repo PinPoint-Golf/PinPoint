@@ -248,6 +248,12 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
         for (const ValidationIssue &i : validateDrillSet(drills).issues)   out.push_back(i);
     }
 
+    // ── A reference nothing cites and nothing explains ──────────────────────
+    // The one place the other direction IS reported, and the reason is the flag: a bibliography can
+    // say out loud that a record is here for its own sake, so a record that says neither is a record
+    // nobody has accounted for. See referenceHealth() for the argument.
+    for (const ValidationIssue &i : referenceHealth(pack, sharedReferenceSet())) out.push_back(i);
+
     // ── Your own corridors, seated on nothing ───────────────────────────────
     //
     // `isOverridden` is per KEY and tracked at merge time, which is what scopes this to the personal
@@ -451,6 +457,42 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                      .arg(mine.measureId,
                                           believeClause(theirs->plausibleLo, theirs->plausibleHi),
                                           believeClause(base.plausibleLo, base.plausibleHi))));
+    }
+
+    return out;
+}
+
+std::vector<ValidationIssue> referenceHealth(const CharacteristicPack &pack,
+                                             const ReferenceSet       &refs)
+{
+    std::vector<ValidationIssue> out;
+
+    // Every identifier the pack actually leans on. Collected once rather than searched per record:
+    // the join is an exact string match either way, and the pack is the larger of the two.
+    QSet<QString> cited;
+    for (const Condition &c : pack.conditions)
+        if (!c.provenance.citation.isEmpty()) cited.insert(c.provenance.citation);
+    for (const Edge &e : pack.edges)
+        if (!e.provenance.citation.isEmpty()) cited.insert(e.provenance.citation);
+
+    for (const Reference &r : refs.references) {
+        // The flag is the record saying why it is here. Nothing more is required of it — and nothing
+        // less is accepted, which is the whole point: it must be a deliberate act, not a default.
+        if (r.generalReading) continue;
+
+        // Any of the three identifiers will do. Matching on the DOI alone would report every
+        // PMID-only and ISBN-only record as an orphan — a check that fires on correct content
+        // teaches people to ignore it.
+        if ((!r.doi.isEmpty()  && cited.contains(r.doi))
+            || (!r.pmid.isEmpty() && cited.contains(r.pmid))
+            || (!r.isbn.isEmpty() && cited.contains(r.isbn)))
+            continue;
+
+        out.push_back(warn(QStringLiteral("referenceOrphan"), r.id,
+                           QObject::tr("'%1' is cited by nothing and is not marked as general "
+                                       "reading, so the bibliography does not say why it is here. "
+                                       "Cite it, flag it, or remove it.")
+                               .arg(r.title.isEmpty() ? r.id : r.title)));
     }
 
     return out;

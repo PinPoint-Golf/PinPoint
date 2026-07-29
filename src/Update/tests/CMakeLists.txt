@@ -56,6 +56,9 @@ pp_add_test(update_controller_policy_test
             ${SRC}/Diagnostics/context_tree.cpp
             ${SRC}/Diagnostics/characteristic_pack.cpp
             ${SRC}/Diagnostics/characteristic.cpp
+            # characteristic_pack.cpp resolves a citation against the bibliography to decide whether
+            # a peer tier rests on a book, so reference_pack.cpp comes with it on every link line.
+            ${SRC}/Diagnostics/reference_pack.cpp
             ${SRC}/Diagnostics/measure_facets.cpp
             ${SRC}/Diagnostics/anatomy_vocabulary.cpp
     # Diagnostics -> Metrics -> Analysis, all three: metric_reducer.h includes swing_analysis.h

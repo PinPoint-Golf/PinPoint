@@ -12,6 +12,8 @@
 //   ctest --test-dir build/analyzer-tests -R diagnostics_catalogue_integrity --output-on-failure
 
 #include "../characteristic_pack.h"
+#include "../diagnostics_health.h"    // referenceHealth()
+#include "../reference_pack.h"
 
 #include "characteristic_library_model.h"
 #include "metric_catalogue.h"
@@ -461,12 +463,14 @@ int main()
         int withUrl = 0, withCites = 0, withTier = 0, totalCites = 0;
         for (const QVariant &v : refs) {
             const QVariantMap r = v.toMap();
-            // doi.org OR PubMed: a handful of journals issue no DOI, and those records join and
-            // open on their PMID instead. What matters is that the row goes SOMEWHERE — a marshaller
-            // that emitted an empty url renders a paper the reader cannot reach.
+            // doi.org, PubMed OR Open Library: a handful of journals issue no DOI and join on their
+            // PMID instead, and a book never had one and joins on its ISBN. What matters is that the
+            // row goes SOMEWHERE — a marshaller that emitted an empty url renders a source the
+            // reader cannot reach.
             const QString url = r.value(QStringLiteral("url")).toString();
             if (url.startsWith(QLatin1String("https://doi.org/"))
-                || url.startsWith(QLatin1String("https://pubmed.ncbi.nlm.nih.gov/")))
+                || url.startsWith(QLatin1String("https://pubmed.ncbi.nlm.nih.gov/"))
+                || url.startsWith(QLatin1String("https://openlibrary.org/isbn/")))
                 ++withUrl;
             const QVariantList cites = r.value(QStringLiteral("cites")).toList();
             if (!cites.isEmpty()) ++withCites;
@@ -480,7 +484,8 @@ int main()
                     ++withTier;
             }
         }
-        check(withUrl == refs.size(), "every reference carries an openable doi.org or PubMed URL");
+        check(withUrl == refs.size(),
+              "every reference carries an openable doi.org, PubMed or Open Library URL");
 
         // The round trip, through the surface QML actually sees. References says "this condition
         // rests on this paper"; the condition's provenance block has to agree and carry the id it
@@ -535,6 +540,119 @@ int main()
             prev = n;
         }
         check(descending, "references are ordered by how much of the library they hold up");
+
+        // The uncited tail is split so the view can draw its GENERAL READING heading mid-stream
+        // rather than by splitting the Repeater — which would break `focusReference()`, since its
+        // deep-link resolves an index into THIS list and asks the Repeater for `itemAt(i)`. The
+        // heading is therefore only correct if every flagged uncited record follows every unflagged
+        // one, and that is an ordering guarantee the model owes the view.
+        bool tailSplit = true;
+        bool seenFlaggedTail = false;
+        for (const QVariant &v : refs) {
+            const QVariantMap r = v.toMap();
+            if (r.value(QStringLiteral("citeCount")).toInt() != 0) continue;
+            const bool flagged = r.value(QStringLiteral("generalReading")).toBool();
+            if (flagged) seenFlaggedTail = true;
+            else if (seenFlaggedTail) tailSplit = false;   // an unflagged row AFTER the heading
+        }
+        check(tailSplit, "the uncited tail groups the general-reading records last, in one run");
+    }
+
+    // ── referenceOrphan: a record nothing cites and nothing explains ────────────
+    //
+    // The registry holds two kinds of record and `generalReading` is how the second kind says so, so
+    // a record that says neither is one nobody has accounted for — a citation that was removed, an
+    // id that was retyped, or a paper somebody meant to come back to.
+    //
+    // Over FIXTURES rather than the shipped content, in both directions. Half the value of a check
+    // is the negative case: one that only ever fires proves nothing about what it lets through, and
+    // this one lets things through on two separate conditions (cited, or flagged) that must be
+    // tested apart. The shipped count is printed underneath so the number of live orphans is visible
+    // rather than inferred — it is expected to be non-zero, and that is the check working.
+    std::printf("=== referenceOrphan ===\n");
+    {
+        const auto refWith = [](const char *id, const char *doi, bool general) {
+            Reference r;
+            r.id             = QString::fromLatin1(id);
+            r.doi            = QString::fromLatin1(doi);
+            r.title          = QString::fromLatin1(id);
+            r.authors        = QStringLiteral("A");
+            r.year           = 2020;
+            r.generalReading = general;
+            return r;
+        };
+
+        ReferenceSet set;
+        set.references.push_back(refWith("ref.orphan",   "10.1000/orphan",   false));
+        set.references.push_back(refWith("ref.reading",  "10.1000/reading",  true));
+        set.references.push_back(refWith("ref.cited",    "10.1000/cited",    false));
+        set.references.push_back(refWith("ref.both",     "10.1000/both",     true));
+
+        CharacteristicPack fixture;
+        {
+            Condition c;
+            c.id                     = QStringLiteral("cond.a");
+            c.provenance.citation    = QStringLiteral("10.1000/cited");
+            fixture.conditions.push_back(c);
+
+            Edge e;
+            e.from                   = QStringLiteral("cond.a");
+            e.to                     = QStringLiteral("cond.b");
+            e.provenance.citation    = QStringLiteral("10.1000/both");
+            fixture.edges.push_back(e);
+        }
+
+        const auto issues = referenceHealth(fixture, set);
+        const auto fired  = [&issues](const char *id) {
+            for (const ValidationIssue &i : issues)
+                if (i.code == QLatin1String("referenceOrphan") && i.subject == QLatin1String(id))
+                    return true;
+            return false;
+        };
+
+        check(fired("ref.orphan"),
+              "an uncited, unflagged reference warns — nothing says why it is in the registry");
+        check(!fired("ref.reading"),
+              "…and an uncited FLAGGED one does not: the flag is the explanation");
+        check(!fired("ref.cited"),
+              "…and a cited unflagged one does not, which is the ordinary case");
+        check(!fired("ref.both"),
+              "…and one that is BOTH cited and flagged does not — the flag is additive, and an "
+              "edge citation counts as much as a condition's");
+        check(issues.size() == 1, "…and nothing else was reported");
+
+        // The join is by ANY identifier. Matching on the DOI alone would report every PMID-only and
+        // ISBN-only record as an orphan, and a check that fires on correct content gets ignored.
+        {
+            ReferenceSet alt;
+            Reference pm = refWith("ref.pmidCited", "", false);
+            pm.pmid      = QStringLiteral("30479527");
+            Reference bk = refWith("ref.isbnCited", "", false);
+            bk.isbn      = QStringLiteral("9781875378371");
+            alt.references.push_back(pm);
+            alt.references.push_back(bk);
+
+            CharacteristicPack citesBoth;
+            Condition c1; c1.id = QStringLiteral("c1");
+            c1.provenance.citation = QStringLiteral("30479527");
+            Condition c2; c2.id = QStringLiteral("c2");
+            c2.provenance.citation = QStringLiteral("9781875378371");
+            citesBoth.conditions.push_back(c1);
+            citesBoth.conditions.push_back(c2);
+
+            check(referenceHealth(citesBoth, alt).empty(),
+                  "a PMID or ISBN citation counts as a citation — the orphan join is not DOI-only");
+        }
+
+        // And against the shipped content, so the live number is on the record.
+        {
+            const auto shipped = referenceHealth(p, sharedReferenceSet());
+            std::printf("        (%d shipped references are orphans:", int(shipped.size()));
+            for (const ValidationIssue &i : shipped) std::printf(" %s", qPrintable(i.subject));
+            std::printf(")\n");
+            check(int(sharedReferenceSet().references.size()) > int(shipped.size()),
+                  "…and the shipped registry is not ALL orphans, which would mean the join broke");
+        }
     }
 
     // ── Every Connections handler names a signal that exists ────────────────────

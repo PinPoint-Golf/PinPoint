@@ -20,6 +20,7 @@
 
 #include "characteristic_pack.h"     // CharacteristicPack, ValidationIssue
 #include "norm_provider.h"
+#include "reference_pack.h"          // ReferenceSet, for referenceHealth()
 #include "../Metrics/metric_catalogue.h"
 
 #include <vector>
@@ -99,6 +100,15 @@
 //   drillNoInstruction     A drill that does not say what the golfer does.
 //   drillNoTarget          A drill that does not say what it is trying to change, so nobody can
 //                          judge whether it is the right one.
+//   referenceOrphan        A reference cited by nothing that does NOT claim to be general reading.
+//                          The registry holds two kinds of record — the sources behind a citation,
+//                          and the field's standard reading — and `generalReading` is how the second
+//                          kind says so. A record that is neither is one nobody has explained: it
+//                          may be a citation that was removed, an id that was retyped, or a paper
+//                          somebody meant to come back to. A WARNING and not an error, because a
+//                          record legitimately sits uncited while the conditions that will cite it
+//                          are authored; what it must not do is sit there silently forever. The fix
+//                          is to cite it, flag it, or delete it — and choosing is the point.
 //   overrideCoreChanged    Your override was made against shipped numbers that have since been
 //                          revised. Offers a diff and "Take theirs" (which is the existing
 //                          drop-your-row operation — one operation, honest label).
@@ -145,5 +155,17 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
 
 // The corpus-share check, over counts a caller has already gathered.
 std::vector<ValidationIssue> corpusShareHealth(const std::vector<CorpusGradeCounts> &counts);
+
+// `referenceOrphan`, over the pack and the bibliography together — neither can answer it alone, and
+// `validateReferenceSet()` takes a ReferenceSet and so cannot see who cites what.
+//
+// Split out rather than folded into diagnosticsHealth() for the same reason corpusShareHealth() is:
+// it is the seam that makes the check testable. diagnosticsHealth() reads its screen and drill sets
+// from the process-global singletons, and a check reachable only that way can be tested only against
+// whatever registry happens to be on the path. Taking the set as a parameter lets both directions be
+// asserted over fixtures — and a check whose negative case is untested passes everything.
+// diagnosticsHealth() calls this with sharedReferenceSet(), so callers see no change.
+std::vector<ValidationIssue> referenceHealth(const CharacteristicPack &pack,
+                                             const ReferenceSet       &refs);
 
 } // namespace pinpoint::analysis

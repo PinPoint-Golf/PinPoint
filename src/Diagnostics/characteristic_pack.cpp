@@ -18,6 +18,8 @@
 
 #include "characteristic_pack.h"
 
+#include "reference_pack.h"   // the book gate resolves a citation against the bibliography
+
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -84,6 +86,42 @@ void err(ValidationReport &r, const QString &code, const QString &subject, const
 void warn(ValidationReport &r, const QString &code, const QString &subject, const QString &message)
 {
     add(r, IssueSeverity::Warning, code, subject, message);
+}
+
+// ── The book gate ───────────────────────────────────────────────────────────
+//
+// True only where the citation RESOLVES to a reference whose sole identifier is an ISBN — a book,
+// or a chapter in an edited volume. Everything else, including a citation that resolves to nothing
+// at all, is false: an unresolvable citation is a different fault with its own check, and folding
+// the two together would make both harder to read and neither easy to fix.
+//
+// This is the one place the pack loader consults process-global state, and it is worth being
+// explicit about the trade. Where no bibliography is on the path — most standalone test binaries —
+// the shared set is empty, nothing resolves, and the gate below is a no-op. That is the SAFE
+// direction: the gate can only ever soften a claim, never harden one, so an absent registry
+// under-corrects rather than inventing a tier nobody authored.
+bool bookOnlyCitation(const QString &citation)
+{
+    if (citation.isEmpty()) return false;
+    const Reference *ref = sharedReferenceSet().byCitation(citation);
+    return ref && ref->doi.isEmpty() && ref->pmid.isEmpty() && !ref->isbn.isEmpty();
+}
+
+// A book is not peer review. `Supported` is documented as "a peer-reviewed source tests this cause
+// and this effect" and `Established` as reproduction across independent sources; a coaching text,
+// however good, does neither. Admitting ISBNs to the bibliography without this guard would quietly
+// promote doctrine into the two tiers that exist to mean the opposite of doctrine.
+//
+// Demoted to `Indirect` rather than to `Proposed`, which is what the sibling demotion above it
+// does. The distinction is the whole point: a missing citation means nobody has shown their
+// working, while a book citation is a REAL source that supports the reasoning and simply does not
+// test the named pair — which is precisely what `Indirect` was added to record.
+bool demoteBookCitation(ProvenanceTier &tier, const QString &citation)
+{
+    if (tier != ProvenanceTier::Supported && tier != ProvenanceTier::Established) return false;
+    if (!bookOnlyCitation(citation)) return false;
+    tier = ProvenanceTier::Indirect;
+    return true;
 }
 
 // ── JSON helpers ────────────────────────────────────────────────────────────
@@ -920,6 +958,11 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
                  QStringLiteral("'%1' claimed a citation tier with no citation; demoted to proposed.")
                      .arg(c.id));
         }
+        // …and a citation is only as good as what it points AT. See demoteBookCitation().
+        if (demoteBookCitation(c.provenance.tier, c.provenance.citation))
+            warn(r, QStringLiteral("bookCitationAtPeerTier"), c.id,
+                 QStringLiteral("'%1' claims a peer-reviewed tier on a citation that resolves to a "
+                                "book; demoted to indirect.").arg(c.id));
         // NoSourceFound is the one tier that is MEANT to have no citation, and demoting it would
         // destroy the finding it records — turning "we looked and the literature is silent" back
         // into "nobody has looked". What it needs instead is the date that makes it re-openable.
@@ -976,6 +1019,11 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
                  QStringLiteral("The edge '%1' -> '%2' claims a citation tier with no citation; "
                                 "demoted to proposed.").arg(e.from, e.to));
         }
+        // …and a citation is only as good as what it points AT. See demoteBookCitation().
+        if (demoteBookCitation(e.provenance.tier, e.provenance.citation))
+            warn(r, QStringLiteral("bookCitationAtPeerTier"), e.from,
+                 QStringLiteral("The edge '%1' -> '%2' claims a peer-reviewed tier on a citation "
+                                "that resolves to a book; demoted to indirect.").arg(e.from, e.to));
         if (searchDateRequired(e.provenance.tier) && !e.provenance.searched()) {
             e.provenance.tier = ProvenanceTier::Proposed;
             warn(r, QStringLiteral("searchNoDate"), e.from,

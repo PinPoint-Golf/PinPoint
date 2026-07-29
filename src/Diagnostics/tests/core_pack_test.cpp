@@ -9,8 +9,10 @@
 
 #include "../characteristic_pack.h"
 #include "../norm_pack.h"
+#include "../reference_pack.h"
 
 #include <QFile>
+#include <QSet>
 
 #include <algorithm>
 #include <cstdio>
@@ -383,6 +385,53 @@ int main()
         std::printf("        (edge provenance:");
         for (const auto &kv : byTier) std::printf(" %s=%d", qPrintable(kv.first), kv.second);
         std::printf(")\n");
+    }
+
+    // ── No peer tier rests on a book ────────────────────────────────────────────
+    // `Supported` means a peer-reviewed source tested this cause and this effect; `Established`
+    // means independent sources reproduced it. A book is neither, however good it is, and admitting
+    // ISBNs to the bibliography without this check would let coaching doctrine be filed under the
+    // two tiers that exist to mean the opposite of doctrine.
+    //
+    // The pack loader demotes this at load time (`bookCitationAtPeerTier`), and that is precisely
+    // why the content needs its OWN check: a validator that fires is not the same as content that
+    // is right, and a reader of core.json sees the authored tier, not the corrected one. Note that
+    // this target deliberately runs with NO bibliography on the path — see its CMake comment — so
+    // the tiers read here are exactly as authored, and the registry is loaded by hand below.
+    {
+        QFile rf(QStringLiteral(PP_CORE_REFERENCES_PATH));
+        check(rf.open(QIODevice::ReadOnly), "the shipped reference registry is readable");
+        const ReferenceLoadResult rres =
+            loadReferenceSet(rf.readAll(), QStringLiteral("references.json"));
+        check(rres.loaded, "the shipped reference registry loads and validates clean");
+
+        // The identifiers of every record whose ONLY identifier is an ISBN. A record carrying both
+        // an ISBN and a DOI is a paper that also happens to have been collected into a volume, and
+        // it is peer-reviewed on the strength of the DOI.
+        QSet<QString> bookOnly;
+        for (const Reference &r : rres.set.references)
+            if (r.doi.isEmpty() && r.pmid.isEmpty() && !r.isbn.isEmpty()) bookOnly.insert(r.isbn);
+
+        const auto peer = [](ProvenanceTier t) {
+            return t == ProvenanceTier::Supported || t == ProvenanceTier::Established;
+        };
+
+        int overclaimed = 0;
+        for (const Condition &c : p.conditions)
+            if (peer(c.provenance.tier) && bookOnly.contains(c.provenance.citation)) {
+                ++overclaimed;
+                std::printf("        '%s' claims a peer tier on the book '%s'\n",
+                            qPrintable(c.id), qPrintable(c.provenance.citation));
+            }
+        for (const Edge &e : p.edges)
+            if (peer(e.provenance.tier) && bookOnly.contains(e.provenance.citation)) {
+                ++overclaimed;
+                std::printf("        edge '%s' -> '%s' claims a peer tier on the book '%s'\n",
+                            qPrintable(e.from), qPrintable(e.to),
+                            qPrintable(e.provenance.citation));
+            }
+        check(overclaimed == 0, "no condition or edge claims a peer-reviewed tier on a book");
+        std::printf("        (%d book-only references in the registry)\n", int(bookOnly.size()));
     }
 
     // ── Every condition says what it costs the golfer ───────────────────────────

@@ -229,12 +229,20 @@ enum class ConfirmedBy {
 // and filing it as NoSourceFound would throw away the distinction between "the field is silent" and
 // "the field agrees but has never measured it".
 //
-// It carries no citation, and that is forced rather than lazy: the sources are commercial screening
-// and launch-monitor bodies, and this repo's standing rule is that the TERMS are common domain
-// while the ATTRIBUTION must not enter the content in any form — not a citation, not an author, not
-// a note. `core_pack_test` greps the raw bytes for exactly that. So the tier records the STATE of
-// the evidence and `searchTerms` records what was looked for; naming who says it is what we cannot
-// do, and it is also the part that carries the least information.
+// It carries no citation WHERE THE SOURCE IS A COMMERCIAL SCREENING OR LAUNCH-MONITOR BODY, and
+// there the absence is forced rather than lazy: this repo's standing rule is that the TERMS are
+// common domain while the ATTRIBUTION must not enter the content in any form — not a citation, not
+// an author, not a note. `core_pack_test` greps the raw bytes for exactly that. So the tier records
+// the STATE of the evidence and `searchTerms` records what was looked for; naming who says it is
+// what we cannot do, and it is also the part that carries the least information.
+//
+// It MAY carry one where the source is a PUBLISHED BOOK. Coaching doctrine has a documented
+// literature going back decades, an ISBN names it without naming a vendor, and "the field agrees
+// but has never measured it" is better evidence when we can say who the field is. No code change
+// was needed to permit this — `citationRequired(Practice)` is already false and nothing forbids a
+// citation on the tier — so this comment is the code catching up with what it always allowed, and
+// it is the thing a future author would otherwise get wrong. The guard that keeps it honest sits
+// one tier up: a book citation may not hold `Supported` or `Established` (reference_pack.h).
 enum class ProvenanceTier {
     Proposed,       // nobody has searched yet. The UI must badge it wherever it appears.
     NoSourceFound,  // searched, and nothing supports it. Requires `searchedOn` to mean anything.
@@ -250,7 +258,7 @@ enum class ConditionState { Draft, Candidate, Active, NeedsRevalidation, Superse
 
 struct Provenance {
     QString        author;
-    QString        citation;   // DOI or PMID. NEVER a commercial organisation, product or
+    QString        citation;   // DOI, PMID or ISBN. NEVER a commercial organisation, product or
                                // certification body — the domain terms are common property, the
                                // attributions are not.
     ProvenanceTier tier = ProvenanceTier::Proposed;

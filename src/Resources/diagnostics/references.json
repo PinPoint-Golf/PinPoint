@@ -2,7 +2,7 @@
   "id": "core",
   "version": "1.0.0",
   "schemaVersion": 1,
-  "_comment": "The bibliography behind every citation in core.json. The pack stores an identifier; this stores what the identifier IS, so a reader can see the paper without leaving the app. Every record here was resolved against CrossRef (or PubMed, or arXiv) and its title, journal, authors and year read off that record -- nothing is recalled, and nothing is added from a reference list without resolving it first. `year` is the issue year, which is what a reader will match against; several of these were online-first the year before. A record carries a `doi` OR a `pmid`: some journals issue no DOI at all, and refusing them would mean the pack could cite a paper no reader could ever be shown. One record is an arXiv preprint and says so in its journal and establishes fields -- it is here to attribute a widely quoted figure, not to support a claim, and nothing cites it. NO commercial organisation, product or certification body may be named in this file: core_pack_test greps content bytes for it, and two of these papers have manufacturer-employed authors -- they are peer-reviewed with DOIs, and only the work is recorded.",
+  "_comment": "The bibliography behind the library. TWO KINDS OF RECORD: the sources behind a citation in core.json, and the field's standard reading, which carries `generalReading: true`. The flag is ADDITIVE and not a category -- it says a record earns its place on its own, and says nothing about whether anything cites it, so a record may be both. Modelling it as a two-value role would force a choice that does not exist, and the first time a general-reading record acquired a citation somebody would have to decide which list it leaves. A general-reading record meets every rule a cited one does: identifier, title, authors, year, namespace, no duplicates -- it is a different reason to be here, not a lower standard. A record that is neither cited nor flagged raises `referenceOrphan` in the health list, which is a question rather than a fault: cite it, flag it, or remove it. The pack stores an identifier; this stores what the identifier IS, so a reader can see the paper without leaving the app. Every record here was resolved against CrossRef (or PubMed, or arXiv, or a library catalogue) and its title, journal or publisher, authors and year read off that record -- nothing is recalled, and nothing is added from a reference list without resolving it first. `year` is the issue year, which is what a reader will match against; several of these were online-first the year before. A record carries a `doi`, a `pmid` OR an `isbn`: some journals issue no DOI at all, and most golf coaching doctrine was never published in a journal in the first place -- it lives in books and in chapters of edited volumes, whose identifier is an ISBN. Refusing any of the three would mean the pack could cite a source no reader could ever be shown. AN ISBN-ONLY RECORD CANNOT BACK `supported` OR `established`: a book is not peer review, those two tiers mean a peer-reviewed source tested the named pair and that independent sources reproduced it, and the pack loader demotes any claim that tries. A book belongs at `practice` or `indirect`, which is not a lesser status -- it is what lets 'the field agrees but has never measured it' finally say who the field is. NO commercial organisation, product or certification body may be named in this file: core_pack_test greps content bytes for it, and two of these papers have manufacturer-employed authors -- they are peer-reviewed with DOIs, and only the work is recorded.",
   "references": [
     {
       "id": "ref.vad2004",
@@ -56,7 +56,8 @@
       "authors": "Watson, Coughlan, Clement, Murray, Murray, Miller",
       "journal": "Journal of Sports Sciences",
       "year": 2023,
-      "establishes": "Mixed and null results: NO significant differences in hip angle, trunk angle or crunch factor in recreational golfers. Elite golfers with low back pain showed shorter transition phases and greater peak lead-side lumbar lateral flexion. Nothing cites it, and it is the most load-bearing uncited paper here: it is the reason every injury note in the library is phrased as an association with stated uncertainty rather than as a risk, and no note may be strengthened past what it supports."
+      "establishes": "Mixed and null results: NO significant differences in hip angle, trunk angle or crunch factor in recreational golfers. Elite golfers with low back pain showed shorter transition phases and greater peak lead-side lumbar lateral flexion. Nothing cites it, and it is the most load-bearing uncited paper here: it is the reason every injury note in the library is phrased as an association with stated uncertainty rather than as a risk, and no note may be strengthened past what it supports.",
+      "generalReading": true
     },
     {
       "id": "ref.myers2008",
@@ -119,7 +120,8 @@
       "authors": "Madrid, Avalos, Levine, Tuttle, Becker, Kwon",
       "journal": "Applied Sciences",
       "year": 2020,
-      "establishes": "66 skilled golfers. Higher clubhead speed was associated with shorter downswings, larger rotation ranges, larger hip–shoulder separation at impact and delayed transitions — but clubhead speed was NOT well associated with wrist-cock angles or ranges, or with X-factor and X-factor stretch. This is the conflicting half of the wrist-release and X-factor claims; it is recorded here because it must be read, not because anything cites it."
+      "establishes": "66 skilled golfers. Higher clubhead speed was associated with shorter downswings, larger rotation ranges, larger hip–shoulder separation at impact and delayed transitions — but clubhead speed was NOT well associated with wrist-cock angles or ranges, or with X-factor and X-factor stretch. This is the conflicting half of the wrist-release and X-factor claims; it is recorded here because it must be read, not because anything cites it.",
+      "generalReading": true
     },
     {
       "id": "ref.cheng2025",
@@ -182,7 +184,8 @@
       "authors": "Grober, Cholewicki",
       "journal": "arXiv (preprint — NOT peer reviewed)",
       "year": 2006,
-      "establishes": "PREPRINT, not peer reviewed, and listed here for attribution rather than support. Models the body/club system as a simple harmonic oscillator — a biomechanical clock — accounting for total swing duration, the ratio of backswing to downswing time, and tempo's relative insensitivity to shot length. Shaft-mounted accelerometers at roughly 250 Hz, ten to twenty five-iron swings each, over 12 playing professionals, 13 teaching professionals and good amateurs, and 18 other golfers. The backswing:downswing ratio is centred at 3.0 in all three groups; playing professionals span 2.5 to 3.5 with very small per-golfer standard deviation and swing uniformly faster than the rest. This is the source of the widely quoted 3:1 figure. NOTE THE BASIS: their backswing is measured from the START OF MOTION, not from address, so it is not the same quantity this product's tempo ratio reports."
+      "establishes": "PREPRINT, not peer reviewed, and listed here for attribution rather than support. Models the body/club system as a simple harmonic oscillator — a biomechanical clock — accounting for total swing duration, the ratio of backswing to downswing time, and tempo's relative insensitivity to shot length. Shaft-mounted accelerometers at roughly 250 Hz, ten to twenty five-iron swings each, over 12 playing professionals, 13 teaching professionals and good amateurs, and 18 other golfers. The backswing:downswing ratio is centred at 3.0 in all three groups; playing professionals span 2.5 to 3.5 with very small per-golfer standard deviation and swing uniformly faster than the rest. This is the source of the widely quoted 3:1 figure. NOTE THE BASIS: their backswing is measured from the START OF MOTION, not from address, so it is not the same quantity this product's tempo ratio reports.",
+      "generalReading": true
     },
     {
       "id": "ref.hume2005",
@@ -191,7 +194,148 @@
       "authors": "Hume, Keogh, Reid",
       "journal": "Sports Medicine",
       "year": 2005,
-      "establishes": "Review of the biomechanics of distance and accuracy. General background; nothing in the pack cites it, and it is listed so a reader can find the survey rather than because a claim rests on it."
+      "establishes": "The field's standard review of the biomechanics of distance and accuracy. Here as general reading rather than in support of a claim — it is the survey a reader should find first, and it will pick up citations as the pack matures, which is exactly the overlap the additive flag exists to allow.",
+      "generalReading": true
+    },
+    {
+      "id": "ref.cheetham2001",
+      "isbn": "9781875378371",
+      "title": "The importance of stretching the X-Factor in the golf downswing",
+      "authors": "Cheetham, Martin, Mottram, St Laurent",
+      "publisher": "Australian Academic Press",
+      "year": 2001,
+      "establishes": "X-Factor Stretch. A chapter in the edited volume 'Optimising Performance in Golf' (P. Thomas, ed.), pp. 192-199; the ISBN identifies that volume. Establishes that pelvis-thorax separation does not peak at the top of the backswing: it INCREASES during the early downswing, beyond its value at the top, and it does so for skilled and less-skilled golfers alike. The increase is larger in the more skilled group. The conclusion drawn is that the stretch matters more than the separation measured at the top, which is why a measurement taken at the top alone can miss the quantity that discriminates. FIGURES NOT RECORDED: the chapter's F statistics, p values and per-group percentages could not be resolved against the source when this record was filed, and are deliberately absent rather than transcribed from a secondary quotation. The qualitative finding above is what this record supports; anyone needing the numbers must read the chapter and add them here.",
+      "generalReading": true
+    },
+    {
+      "id": "ref.bourgain2022",
+      "doi": "10.3390/sports10060091",
+      "title": "Golf Swing Biomechanics: A Systematic Review and Methodological Recommendations for Kinematics",
+      "authors": "Bourgain, Rouch, Rouillon, Thoreux, Sauret",
+      "journal": "Sports",
+      "year": 2022,
+      "generalReading": true,
+      "establishes": "The map of the field, over 92 articles, organised into the five domains this library also works in: X-factor, crunch factor, swing plane and clubhead trajectory, kinematic sequence, and joint angular kinematics. Its most useful finding for us is a negative one: the LACK OF METHODOLOGICAL CONSENSUS prevented generalising the performance parameters and produced contradictory results across studies. That is the reason two sound papers here can disagree without either being wrong, and it is the argument for recording where our sources conflict rather than picking a winner. Also notes that the ISB recommendations are rarely followed, and that the subjects are overwhelmingly male — read alongside ref.horan2010 and ref.zheng2008b before assuming any published figure applies to a woman."
+    },
+    {
+      "id": "ref.zheng2008a",
+      "doi": "10.1055/s-2007-989229",
+      "title": "Kinematic analysis of swing in pro and amateur golfers",
+      "authors": "Zheng, Barrentine, Fleisig, Andrews",
+      "journal": "International Journal of Sports Medicine",
+      "year": 2008,
+      "generalReading": true,
+      "establishes": "72 male golfers across four skill levels, optoelectronic capture at 240 Hz. Professionals reached larger ranges of motion at the top — left shoulder horizontal adduction 125±6°, right shoulder external rotation 66±11°, trunk rotation 60±7° — and the highest downswing angular velocities, club shaft 2413±442°/s with right elbow extension 854±150°/s and wrists near 1100°/s. The authors read the middle- and high-handicap patterns as improper mechanics that may contribute to injury. TREAT THAT LAST STEP CAREFULLY: the study measures kinematics, not injuries, so the injury link is the authors' inference and not a result — ref.watson2023 is the check on how far any such claim may be taken here."
+    },
+    {
+      "id": "ref.zheng2008b",
+      "doi": "10.1055/s-2008-1038732",
+      "title": "Swing kinematics for male and female pro golfers",
+      "authors": "Zheng, Barrentine, Fleisig, Andrews",
+      "journal": "International Journal of Sports Medicine",
+      "year": 2008,
+      "generalReading": true,
+      "establishes": "25 LPGA and 25 PGA professionals, optoelectronic capture at 240 Hz. Finds sex differences at the professional level and locates them: trunk forward tilt at the top (25±4° vs 31±4°), pelvis orientation at the top (49±8° vs 42±7°), pelvis rotation at impact (-52±11° vs -42±12°), and lower angular velocities for the LPGA group at the club shaft, both wrists and elbow extension. The authors' emphasis is DISTAL — 'major differences were found at the wrist and elbow'. Note what is NOT in its list of significant differences: trunk axial rotation. COMPARE ref.horan2010, which finds the differences predominantly PROXIMAL — thorax and pelvis lateral and anterior-posterior tilt — and does report less axial rotation to the left in males at ball contact. The two agree that a woman's swing is not a man's; they disagree on where that shows and on axial rotation specifically. Both bear on whether the cohort work in norms.json should carry a sex axis, and neither settles it alone."
+    },
+    {
+      "id": "ref.horan2010",
+      "doi": "10.1016/j.jbiomech.2010.02.005",
+      "title": "Thorax and pelvis kinematics during the downswing of male and female skilled golfers",
+      "authors": "Horan, Evans, Morris, Kavanagh",
+      "journal": "Journal of Biomechanics",
+      "year": 2010,
+      "generalReading": true,
+      "establishes": "19 male and 19 female skilled golfers (handicap ≤4), optical capture, 3D thorax and pelvis profiles across the WHOLE downswing rather than at the top and impact alone — which is its methodological point: most of the literature samples two instants and cannot see the coordination between them. At ball contact males showed greater pelvis posterior tilt, greater pelvis and thorax lateral tilt to the right, and LESS axial rotation to the left than females, plus greater peak angular velocities in tilt. Concludes that what is considered optimal for male golfers should not be generalised to female golfers. COMPARE ref.zheng2008b: both find sex differences, but Zheng locates the major ones distally at the wrist and elbow and does not report a significant trunk axial-rotation difference, where this study finds the differences proximally in tilt and does report one in axial rotation. Read together before any norm is split, or not split, on sex."
+    },
+    {
+      "id": "ref.kwon2012",
+      "doi": "10.1080/14763141.2012.660799",
+      "title": "Assessment of planarity of the golf swing based on the functional swing plane of the clubhead and motion planes of the body points",
+      "authors": "Kwon, Como, Singhal, Lee, Han",
+      "journal": "Sports Biomechanics",
+      "year": 2012,
+      "generalReading": true,
+      "establishes": "14 skilled male golfers (mean handicap -0.5±2.0), three clubs, optical capture at 250 Hz. The load-bearing result for anyone drawing a plane on a video: the downswing is SEMI-planar, not planar. Skilled golfers hold a well-defined functional swing plane for the clubhead and well-defined motion planes for the shoulder and arm points, but those planes are vastly different from one another and the points deviate substantially from the clubhead's plane. The downswing separates into a transition phase and a planar execution phase, and only the second is plane-like. Slope and direction of the functional plane show a significant club effect (p<0.001), so 'the swing plane' is not one plane per golfer either. Read with ref.madrid2020, which measures on-plane angular motions of the axle-chain system against clubhead speed; neither treats a single plane as settled."
+    },
+    {
+      "id": "ref.nesbit2005",
+      "pmid": "24627665",
+      "title": "A three dimensional kinematic and kinetic study of the golf swing",
+      "authors": "Nesbit",
+      "journal": "Journal of Sports Science and Medicine",
+      "year": 2005,
+      "generalReading": true,
+      "establishes": "85 amateur golfers (84 male) spanning a wide skill range, driven through a full-body model coupled to a FLEXIBLE club model — the kinetic counterpart to the kinematic studies here, giving forces, torques, work and power alongside trajectories and shaft deflection. Two findings carry: the wrists dominate the generation of clubhead velocity and the orientation of the face, and the variables correlating most strongly with skill are the HAND TRAJECTORY and work capacity rather than any single joint angle. It also records how individually variable the swing is between subjects, which is a caution against reading any of these means as a template. This journal issues no DOI, so the PMID is the identifier."
+    },
+    {
+      "id": "ref.gluck2008",
+      "doi": "10.1016/j.spinee.2007.07.388",
+      "title": "The lumbar spine and low back pain in golf: a literature review of swing biomechanics and injury prevention",
+      "authors": "Gluck, Bendo, Spivak",
+      "journal": "The Spine Journal",
+      "year": 2008,
+      "generalReading": true,
+      "establishes": "Review of lumbar loading in the swing, the modern versus classic technique argument, and what the evidence supports doing about it. Reports that physical therapy targeting transversus abdominis and multifidus is central to managing low back pain, and that classic-swing coaching plus improved trunk flexibility MAY add to it. Its most honest passage is the gap it names: almost no study separates the effect of a swing modification from the effect of the rehabilitation delivered alongside it, so controlled trials are still needed before any swing change can be claimed to reduce pain. It argues for individualised intervention over a universal protocol. Read as the older survey behind ref.edwards2020 and ref.cole2016, and bounded by ref.watson2023 — nothing here licenses telling a golfer that a swing change will fix their back."
+    },
+    {
+      "id": "ref.cochran1968",
+      "isbn": "9781572431096",
+      "title": "The Search for the Perfect Swing",
+      "authors": "Cochran, Stobbs",
+      "publisher": "Triumph Books",
+      "year": 1968,
+      "generalReading": true,
+      "establishes": "The book the scientific study of the golf swing starts from: a multi-year programme of measurement commissioned by the Golf Society of Great Britain, covering swing mechanics as a double pendulum, impact, ball flight, and the statistics of scoring. Its lasting contribution is methodological — it is the first sustained attempt to decide golf questions by measurement rather than by authority, and most of the quantities this product computes descend from questions it framed. GENERAL READING, not support: it predates every instrument here, its figures have been superseded in detail, and an ISBN-only record cannot back a peer tier in any case. First published 1968; the ISBN identifies the Triumph Books reissue."
+    },
+    {
+      "id": "ref.jorgensen1994",
+      "isbn": "9780387986913",
+      "title": "The Physics of Golf",
+      "authors": "Jorgensen",
+      "publisher": "Springer (AIP Press)",
+      "year": 1994,
+      "generalReading": true,
+      "establishes": "A physicist's book-length treatment of the swing as a mechanical system — the double-pendulum model worked through properly, with the release of the wrist cock, the energy transfer to the clubhead, shaft behaviour and the impact interval each derived rather than asserted. The companion volume to ref.penner2003, which is the peer-reviewed review of much the same ground: read the paper for what the field accepts, this for the derivations behind it. Useful here as the reasoning behind the wrist-release and clubhead-speed claims the library makes, and it is reasoning rather than evidence — the models are analytic, and the golfers in them are idealised."
+    },
+    {
+      "id": "ref.hogan1957",
+      "isbn": "9780671723019",
+      "title": "Five Lessons: The Modern Fundamentals of Golf",
+      "authors": "Hogan, Wind",
+      "publisher": "Pocket Books",
+      "year": 1957,
+      "generalReading": true,
+      "establishes": "The most widely taught instruction text in the game, and the origin of a large share of the vocabulary this library records at the `practice` tier — the grip, the plane of glass through the shoulders, the waggle, and the sequencing of the downswing from the lower body. It is here so that 'the field agrees and has never measured it' can finally name the field: many conditions in this pack describe faults defined against what this book prescribes. INSTRUCTION, NOT EVIDENCE. It reports one exceptional player's account of his own method, contains no measurement, and cannot back `supported` or `established` — the loader enforces that. Where it disagrees with a measured source, the measured source wins. First published 1957; the ISBN identifies the Pocket Books edition."
+    },
+    {
+      "id": "ref.nicklaus1974",
+      "isbn": "9780671217020",
+      "title": "Golf My Way",
+      "authors": "Nicklaus, Bowden",
+      "publisher": "Simon & Schuster",
+      "year": 1974,
+      "generalReading": true,
+      "establishes": "The other pillar of the modern instruction canon alongside ref.hogan1957, and a deliberately different one: where Hogan prescribes a method, this describes a method and repeatedly says which parts are personal to its author. That distinction is worth having in the registry, because a `practice`-tier claim sourced here is weaker than the same claim sourced from a text that claims universality — and stronger in a different way, since it admits its own scope. Same limit as every instruction text: one player's account, no measurement, and it may not back a peer tier."
+    },
+    {
+      "id": "ref.leadbetter1990",
+      "isbn": "9780002183505",
+      "title": "The Golf Swing",
+      "authors": "Leadbetter, Huggan",
+      "publisher": "Willow",
+      "year": 1990,
+      "generalReading": true,
+      "establishes": "The teaching text that carried the modern-swing model — connection, a stable lower body, the body-driven rather than hands-driven downswing — into mainstream coaching, and the source of much of the fault vocabulary a coach will use with this product's output. Recorded here because the library must be able to say WHOSE model a `practice` claim reflects; several conditions in this pack are faults only relative to this model and would not be faults relative to ref.nicklaus1974. Instruction, not measurement: it may not back a peer tier, and where it and ref.gluck2008 disagree about what the modern swing costs the lumbar spine, the review is the one with evidence behind it."
+    },
+    {
+      "id": "ref.kelley1979",
+      "isbn": "9780932890054",
+      "title": "The Golfing Machine",
+      "authors": "Kelley",
+      "publisher": "Star System Press",
+      "year": 1979,
+      "generalReading": true,
+      "establishes": "The most systematic attempt to describe the swing as geometry rather than as advice — an enumerated catalogue of components and their permissible combinations, written by an engineer and the origin of terms a coach may well use in front of this product's output. Its value here is that it is FALSIFIABLE in a way instruction texts usually are not: it makes geometric claims that measurement can check, and ref.kwon2012's finding that the downswing is only semi-planar is exactly such a check. NOTE THE PUBLISHER: Star System Press is the imprint of the commercial instruction system of the same name as the book. The TEXT is common domain and is recorded; the system's instructor programme is an attribution this repo does not carry, and must not be named anywhere in the content. Original edition 1979; the ISBN identifies a Star System Press printing."
     }
   ]
 }

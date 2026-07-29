@@ -36,19 +36,48 @@
 // our own words, including where it DISAGREES with another reference. That sentence is the whole
 // reason a reader can tell an `indirect` citation from a `supported` one without opening the PDF.
 //
-// TWO IDENTIFIERS, ONE JOIN. Most records carry a DOI. Some journals issue none at all — not as an
-// oversight, as a policy — and for those the PubMed id is the identifier the world actually uses.
-// Refusing them would mean the pack could cite a paper no reader could ever be shown, which is the
-// exact failure this registry exists to prevent. So `citation` joins against EITHER field, and a
-// record needs one of the two rather than the DOI specifically. Neither is preferred where both
-// exist; a DOI simply resolves more directly, so it wins the URL.
+// THREE IDENTIFIERS, ONE JOIN. Most records carry a DOI. Some journals issue none at all — not as
+// an oversight, as a policy — and for those the PubMed id is the identifier the world actually
+// uses. And most golf coaching doctrine was never published in a journal at all: it lives in books
+// and in chapters of edited volumes, whose identifier is an ISBN. Refusing any of the three would
+// mean the pack could cite a source no reader could ever be shown, which is the exact failure this
+// registry exists to prevent. So `citation` joins against ANY of the three fields, and a record
+// needs one of them rather than the DOI specifically. None is preferred where several exist; a DOI
+// simply resolves most directly, so it wins the URL.
 //
-// PROVENANCE OF THE PROVENANCE. Every record was resolved against CrossRef and its title, journal,
-// authors and year read off that record. Nothing here is recalled from memory, and nothing is
-// copied out of another paper's reference list without resolving it first — a plausible-looking
-// DOI is worse than no citation at all, because the null is honest and the wrong DOI is a lie that
-// survives review. `references_test` re-asserts the shape; only a human re-resolving them can
-// re-assert the content.
+// A BOOK IS NOT PEER REVIEW, and the ISBN is where that distinction has to be kept. `Supported`
+// means a peer-reviewed source tested this cause and this effect; `Established` means independent
+// sources reproduced it. Admitting books without a guard would quietly promote coaching doctrine
+// into the two tiers that exist to mean the opposite. So the pack loader demotes any condition or
+// edge whose citation resolves to a reference carrying ONLY an ISBN out of those tiers and down to
+// `Indirect` — see `bookCitationAtPeerTier` in characteristic_pack.cpp. The source is real and it
+// supports the reasoning; it just does not TEST the named pair. Nothing stops a book backing
+// `Practice`, which is the tier most of them belong to and the reason this was worth building.
+//
+// TWO KINDS OF RECORD, AND THE FLAG IS ADDITIVE. Most records are here because something cites
+// them. Some are here because a coach or a contributor opening the bibliography should find the
+// field's standard reading, not only the specific papers that happened to back a specific edge —
+// those carry `generalReading`.
+//
+// The flag says NOTHING about whether the record is cited, and that is the design decision worth
+// defending. A record may be cited AND be general reading: `ref.hume2005` is the field's standard
+// review and will pick up citations as the pack matures. Modelling this as a two-value `role` enum
+// would force a choice that does not exist, and the first time a general-reading record acquired a
+// citation somebody would have to decide which list it LEAVES. So the flag is one more fact about
+// the record — it earns its place on its own — and the two populations overlap freely.
+//
+// A general-reading record obeys every rule a cited one does: identifier, title, authors, year,
+// namespace, no duplicates. It is not a lower standard, it is a different reason to be here. The
+// mirror of the flag is `referenceOrphan` (diagnostics_health.h): cited by nothing AND unflagged,
+// which is a record nobody has explained.
+//
+// PROVENANCE OF THE PROVENANCE. Every record was resolved against CrossRef (or PubMed, or a library
+// catalogue for the ISBNs) and its title, journal or publisher, authors and year read off that
+// record. Nothing here is recalled from memory, and nothing is copied out of another paper's
+// reference list without resolving it first — a plausible-looking identifier is worse than no
+// citation at all, because the null is honest and the wrong identifier is a lie that survives
+// review. `references_test` re-asserts the shape; only a human re-resolving them can re-assert the
+// content.
 //
 // Deliberately NOT behind an abstract provider, for the same reason as screens and drills: that
 // polymorphism exists so a COMMUNITY pack can be namespaced against core, there is no community
@@ -61,18 +90,33 @@ struct Reference {
     QString id;           // `ref.*`
     QString doi;          // the join key with Provenance::citation — an exact string match
     QString pmid;         // the SAME join key, for journals that issue no DOI at all
+    QString isbn;         // the THIRD join key — books, and chapters in edited volumes
     QString title;
     QString authors;      // family names in citation order, comma separated
     QString journal;
+    QString publisher;    // a book has a publisher where a paper has a journal. NOT interchangeable
+                          // with `journal`: the view labels that field as the periodical, so a
+                          // publisher sitting in it renders as a small, checkable lie.
     int     year = 0;
     QString establishes;  // what it actually shows, and what it does not
 
-    // Where the reader goes when they tap the row: doi.org, or PubMed when there is no DOI.
+    // Worth reading regardless of what cites it. ADDITIVE, not a category — see the header block.
+    //
+    // No `schemaVersion` bump came with this field, deliberately. It is optional and additive: a
+    // reader that has never heard of it still loads every record correctly and still resolves every
+    // citation, because an absent flag and a false one are indistinguishable. Bumping would force a
+    // migration for a default, and a schema version that moves for a no-op teaches the next author
+    // that the number means nothing.
+    bool    generalReading = false;
+
+    // Where the reader goes when they tap the row: doi.org, PubMed when there is no DOI, or the
+    // Open Library catalogue when the only identifier is an ISBN.
     QString url() const;
 
     // The identifier as a reader should SEE it. A DOI announces what it is — it starts "10." and
     // has a slash in it. A bare PubMed id is eight digits that could be anything: a year, a count,
-    // an internal key. So it is labelled, and this is the one place that decides how.
+    // an internal key, and a bare ISBN is thirteen digits with the same problem. So both are
+    // labelled, and this is the one place that decides how.
     QString identifierLabel() const;
 };
 
@@ -86,7 +130,7 @@ struct ReferenceSet {
 
     const Reference *reference(const QString &id) const;
 
-    // The join the UI actually makes: a Provenance::citation against a DOI *or* a PMID.
+    // The join the UI actually makes: a Provenance::citation against a DOI, a PMID *or* an ISBN.
     const Reference *byCitation(const QString &citation) const;
 };
 
@@ -97,10 +141,14 @@ struct ReferenceSet {
 //   duplicateDoi        two references share a DOI — the join is by DOI, so the second is
 //                       unreachable and the pack would silently resolve to whichever came first
 //   duplicatePmid       the same, for the PMID join key
+//   duplicateIsbn       and the same again for the ISBN. Two chapters of ONE edited volume share
+//                       its ISBN, so this is the code an author will meet first — and it is right
+//                       that they do: an identifier that names two records joins to neither.
 //   referenceIdNamespace  an id outside the `ref.` namespace
-//   referenceNoDoi      a reference with NEITHER a DOI nor a PMID cannot be joined to anything or
-//                       opened by anyone. (The code name predates PMID support and is kept: it is
-//                       the stable contract the health view and tests key off.)
+//   referenceNoDoi      a reference with NONE of a DOI, a PMID or an ISBN cannot be joined to
+//                       anything or opened by anyone. (The code name predates both PMID and ISBN
+//                       support and is DELIBERATELY kept: it is the stable contract the health view
+//                       and tests key off, and renaming it would break both silently.)
 // WARNINGS:
 //   referenceNoTitle    a row that renders as a bare identifier
 //   referenceNoYear     undated, so a reader cannot judge how current it is
@@ -108,8 +156,9 @@ ValidationReport validateReferenceSet(const ReferenceSet &set);
 
 // The same rule for a citation string with no Reference in hand — every provenance block in the UI
 // shows one of these, not just the bibliography. Resolves against the shared registry so the label
-// is a fact rather than a guess, and falls back to shape when a citation does not resolve (a DOI
-// always starts "10."; a bare run of digits can only be a PubMed id).
+// is a fact rather than a guess, and falls back to SHAPE when a citation does not resolve: a DOI
+// always starts "10."; an ISBN is a run of digits of a known length with a known prefix; and only
+// what survives both of those can be a PubMed id.
 //
 // Returns a string for DISPLAY ONLY. The stored citation stays the bare identifier — it is the
 // join key, and "PMID 30479527" joins to nothing.

@@ -29,15 +29,60 @@
 
 namespace pinpoint::analysis {
 
+namespace {
+
+// Hyphens in an identifier are presentation: "978-1-875378-37-1" and "9781875378371" are the same
+// ISBN. They are stripped for anything that has to reason about the identifier — the URL, the shape
+// test — while the stored form stays exactly as the author wrote it.
+QString bareIsbn(const QString &isbn)
+{
+    QString out = isbn;
+    out.remove(QLatin1Char('-'));
+    out.remove(QLatin1Char(' '));
+    return out;
+}
+
+// Is this string an ISBN by SHAPE alone? Only ever asked of a citation the registry could not
+// resolve — and it has to be asked before "a run of digits is a PubMed id", because an ISBN-13 is
+// thirteen digits and would otherwise render as a confident, well-formed, wrong `PMID 9781875378371`.
+bool looksLikeIsbn(const QString &s)
+{
+    const QString d = bareIsbn(s);
+
+    if (d.size() == 13)
+        return std::all_of(d.begin(), d.end(), [](QChar c) { return c.isDigit(); })
+               && (d.startsWith(QStringLiteral("978")) || d.startsWith(QStringLiteral("979")));
+
+    if (d.size() == 10) {
+        // The ISBN-10 check digit is computed mod 11, so it has ELEVEN possible values and the
+        // eleventh is written 'X'. A trailing X is CORRECT here, not a typo and not a placeholder —
+        // dropping the case would send every book whose check digit happens to be 10 down the PMID
+        // branch. This is the line a future reader will assume is a mistake; it is not.
+        const QChar last = d.back();
+        return std::all_of(d.begin(), d.end() - 1, [](QChar c) { return c.isDigit(); })
+               && (last.isDigit() || last == QLatin1Char('X') || last == QLatin1Char('x'));
+    }
+
+    return false;
+}
+
+} // namespace
+
 QString Reference::url() const
 {
-    // A DOI resolves straight to the publisher, so it wins where both exist. Falling back to the
-    // PMID matters more than it looks: building a doi.org URL out of a bare PubMed id yields a
-    // link that is well-formed, clickable, and dead — the worst of the three outcomes, because it
-    // fails only for the reader and never for us.
+    // A DOI resolves straight to the publisher, so it wins where several exist. Falling back
+    // matters more than it looks: building a doi.org URL out of a bare PubMed id or ISBN yields a
+    // link that is well-formed, clickable, and dead — the worst of the outcomes, because it fails
+    // only for the reader and never for us.
     if (!doi.isEmpty())  return QStringLiteral("https://doi.org/") + doi;
     if (!pmid.isEmpty()) return QStringLiteral("https://pubmed.ncbi.nlm.nih.gov/") + pmid
                               + QStringLiteral("/");
+    // No ISBN resolver has doi.org's standing, so this is a choice rather than a lookup, and it is
+    // made once here. Open Library is a non-commercial catalogue, it takes a bare ISBN in the path,
+    // and an ISBN it does not hold lands on a "not in catalogue" page rather than a dead link.
+    // Deliberately NOT a bookseller: the standing rule against naming commercial organisations
+    // governs the URLs this repo generates, not only the content it stores.
+    if (!isbn.isEmpty()) return QStringLiteral("https://openlibrary.org/isbn/") + bareIsbn(isbn);
     return QString();
 }
 
@@ -45,6 +90,7 @@ QString Reference::identifierLabel() const
 {
     if (!doi.isEmpty())  return doi;
     if (!pmid.isEmpty()) return QStringLiteral("PMID ") + pmid;
+    if (!isbn.isEmpty()) return QStringLiteral("ISBN ") + isbn;
     return QString();
 }
 
@@ -59,7 +105,8 @@ const Reference *ReferenceSet::byCitation(const QString &c) const
 {
     if (c.isEmpty()) return nullptr;
     const auto it = std::find_if(references.begin(), references.end(), [&](const Reference &r) {
-        return (!r.doi.isEmpty() && r.doi == c) || (!r.pmid.isEmpty() && r.pmid == c);
+        return (!r.doi.isEmpty() && r.doi == c) || (!r.pmid.isEmpty() && r.pmid == c)
+            || (!r.isbn.isEmpty() && r.isbn == c);
     });
     return it == references.end() ? nullptr : &*it;
 }
@@ -89,8 +136,11 @@ QString citationLabel(const QString &citation)
     // fact. Everything shipped resolves — `reference_sets_test` fails the build otherwise.
     if (const Reference *ref = sharedReferenceSet().byCitation(c)) return ref->identifierLabel();
 
-    // A user-layer citation naming a paper the registry has never heard of still has to render as
-    // something. Shape is enough to tell the two apart: a DOI is "10.<registrant>/<suffix>".
+    // A user-layer citation naming a source the registry has never heard of still has to render as
+    // something. Shape is enough to tell the three apart, PROVIDED the ISBN test runs first: an
+    // ISBN-13 is thirteen digits, so under a bare all-digits rule it renders "PMID 9781875378371",
+    // which is well-formed, confident and wrong. A DOI is whatever survives — "10.<reg>/<suffix>".
+    if (looksLikeIsbn(c)) return QStringLiteral("ISBN ") + c;
     const bool allDigits = std::all_of(c.begin(), c.end(), [](QChar ch) { return ch.isDigit(); });
     return allDigits ? QStringLiteral("PMID ") + c : c;
 }
@@ -98,7 +148,7 @@ QString citationLabel(const QString &citation)
 ValidationReport validateReferenceSet(const ReferenceSet &set)
 {
     ValidationReport r;
-    QSet<QString>    ids, dois, pmids;
+    QSet<QString>    ids, dois, pmids, isbns;
 
     for (const Reference &ref : set.references) {
         if (ids.contains(ref.id))
@@ -110,12 +160,14 @@ ValidationReport validateReferenceSet(const ReferenceSet &set)
             add(r, IssueSeverity::Error, QStringLiteral("referenceIdNamespace"), ref.id,
                 QStringLiteral("Reference id '%1' is outside the 'ref.' namespace.").arg(ref.id));
 
-        // An identifier is both the join key and the only way a reader reaches the paper. Without
-        // one the row is decoration. Either kind will do — some journals issue no DOI at all.
-        if (ref.doi.isEmpty() && ref.pmid.isEmpty())
+        // An identifier is both the join key and the only way a reader reaches the source. Without
+        // one the row is decoration. Any of the three will do — some journals issue no DOI at all,
+        // and a book was never going to have one. The CODE NAME predates both the PMID and the ISBN
+        // and is kept deliberately: it is the contract the health view and the tests key off.
+        if (ref.doi.isEmpty() && ref.pmid.isEmpty() && ref.isbn.isEmpty())
             add(r, IssueSeverity::Error, QStringLiteral("referenceNoDoi"), ref.id,
-                QStringLiteral("Reference '%1' has neither a DOI nor a PMID, so nothing can cite "
-                               "it and nobody can open it.").arg(ref.id));
+                QStringLiteral("Reference '%1' has no DOI, PMID or ISBN, so nothing can cite it "
+                               "and nobody can open it.").arg(ref.id));
 
         if (!ref.doi.isEmpty()) {
             if (dois.contains(ref.doi))
@@ -133,6 +185,15 @@ ValidationReport validateReferenceSet(const ReferenceSet &set)
                                    "by identifier, so the second could never be reached.")
                         .arg(ref.pmid));
             pmids.insert(ref.pmid);
+        }
+
+        if (!ref.isbn.isEmpty()) {
+            if (isbns.contains(ref.isbn))
+                add(r, IssueSeverity::Error, QStringLiteral("duplicateIsbn"), ref.id,
+                    QStringLiteral("Two references share the ISBN '%1'. The join from a citation is "
+                                   "by identifier, so the second could never be reached.")
+                        .arg(ref.isbn));
+            isbns.insert(ref.isbn);
         }
 
         if (ref.title.isEmpty())
@@ -172,11 +233,15 @@ ReferenceLoadResult loadReferenceSet(const QByteArray &json, const QString &sour
         ref.id          = o.value(QStringLiteral("id")).toString();
         ref.doi         = o.value(QStringLiteral("doi")).toString();
         ref.pmid        = o.value(QStringLiteral("pmid")).toString();
+        ref.isbn        = o.value(QStringLiteral("isbn")).toString();
         ref.title       = o.value(QStringLiteral("title")).toString();
         ref.authors     = o.value(QStringLiteral("authors")).toString();
         ref.journal     = o.value(QStringLiteral("journal")).toString();
+        ref.publisher   = o.value(QStringLiteral("publisher")).toString();
         ref.year        = o.value(QStringLiteral("year")).toInt();
         ref.establishes = o.value(QStringLiteral("establishes")).toString();
+        // Absent reads as false, which is the whole reason this needed no schema bump.
+        ref.generalReading = o.value(QStringLiteral("generalReading")).toBool(false);
         out.set.references.push_back(std::move(ref));
     }
 
@@ -199,11 +264,14 @@ QByteArray saveReferenceSet(const ReferenceSet &set)
         o.insert(QStringLiteral("id"), ref.id);
         if (!ref.doi.isEmpty())         o.insert(QStringLiteral("doi"), ref.doi);
         if (!ref.pmid.isEmpty())        o.insert(QStringLiteral("pmid"), ref.pmid);
+        if (!ref.isbn.isEmpty())        o.insert(QStringLiteral("isbn"), ref.isbn);
         if (!ref.title.isEmpty())       o.insert(QStringLiteral("title"), ref.title);
         if (!ref.authors.isEmpty())     o.insert(QStringLiteral("authors"), ref.authors);
         if (!ref.journal.isEmpty())     o.insert(QStringLiteral("journal"), ref.journal);
+        if (!ref.publisher.isEmpty())   o.insert(QStringLiteral("publisher"), ref.publisher);
         if (ref.year > 0)               o.insert(QStringLiteral("year"), ref.year);
         if (!ref.establishes.isEmpty()) o.insert(QStringLiteral("establishes"), ref.establishes);
+        if (ref.generalReading)         o.insert(QStringLiteral("generalReading"), true);
         arr.append(o);
     }
     root.insert(QStringLiteral("references"), arr);
