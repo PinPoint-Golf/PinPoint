@@ -80,11 +80,26 @@ if ($fail) { Write-Error "RELEASE BLOCKED — failing suites: $($fail -join ', '
 **If any suite fails to build or any test fails, STOP — fix it and re-run before you
 tag.** Do not proceed to the build/sign steps below.
 
-> A configure that fails to find OpenCV caches `OpenCV_DIR-NOTFOUND` in
-> `build/tests-<name>`, and every later attempt fails identically until that directory
-> is deleted — so an Analysis/Pose "configure" failure is worth confirming with
-> `Select-String OpenCV_DIR build/tests-Analysis/CMakeCache.txt` before you go looking
-> for a real breakage.
+> **If Analysis or Pose fails at *configure*, suspect the OpenCV path before you suspect
+> the code.** Only those two need OpenCV, and there are two traps that compound:
+>
+> - **The `-D` arguments must reach CMake expanded.** They have arrived as the literal
+>   strings `$Qt` / `$OCV` — `find_package(OpenCV)` then looks up a nonsense path and
+>   reports the generic "did not find OpenCVConfig.cmake", which reads exactly like a
+>   missing OpenCV install. Confirm what CMake actually received:
+>   ```powershell
+>   Select-String 'OpenCV_DIR|CMAKE_PREFIX_PATH' build/tests-Analysis/CMakeCache.txt
+>   ```
+>   Real paths, not `$OCV`. If in doubt, quote them (`"-DOpenCV_DIR=$OCV"`) or build the
+>   argument list as an array and splat it.
+> - **The failure is then CACHED.** A failed lookup writes `OpenCV_DIR-NOTFOUND` into
+>   `build/tests-<name>/CMakeCache.txt`, so every retry fails identically *even after the
+>   argument is fixed*. Delete `build/tests-<name>` and configure again, or you are
+>   debugging a stale answer.
+>
+> What must exist on disk is `C:\tools\opencv\build\OpenCVConfig.cmake`. If it is there
+> and the cache holds real paths, only then is the suite itself worth investigating.
+> (Both traps cost real time during the v0.1-alpha10 gate.)
 
 ### 3. Build the `-core` installer (the update payload)
 Either let CI do it, or build locally — pick one.
