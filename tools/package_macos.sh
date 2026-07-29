@@ -494,9 +494,11 @@ fi
 #     proper, unpacked under _deps/onnxruntime_genai-*/ (note the underscore), so 4a's
 #     glob can never reach it. The app hard-links @rpath/libonnxruntime-genai.dylib
 #     whenever HAVE_ORTGENAI is defined, so a missing copy is a dyld failure before
-#     main(). It links only itself and system frameworks, so this one file is the whole
-#     closure. Intel forces WITH_ORTGENAI OFF (no Intel macOS prebuilt after v0.11.4),
-#     so there is nothing to find there and this block is a clean no-op.
+#     main(). Its LINK-time closure is just itself + system frameworks, but it also
+#     dlopen()s ORT proper at RUNTIME (see the alias below) — that edge is in no NEEDED
+#     list, so neither macdeployqt nor §5's verifier can see it. Intel forces
+#     WITH_ORTGENAI OFF (no Intel macOS prebuilt after v0.11.4), so there is nothing to
+#     find there and this block is a clean no-op — which is why only arm64 hits this.
 if ! ls "$FW"/libonnxruntime-genai*.dylib >/dev/null 2>&1; then
     genai=""
     for cand in "$BUILD_DIR"/_deps/onnxruntime_genai-*/lib/libonnxruntime-genai*.dylib \
@@ -506,6 +508,17 @@ if ! ls "$FW"/libonnxruntime-genai*.dylib >/dev/null 2>&1; then
     if [[ -n "$genai" ]]; then
         genai_base="$(bundle_dylib "$genai")" || die "failed to bundle ORT-GenAI from $genai"
         log "bundling ONNX Runtime GenAI: $genai_base"
+        # GenAI dlopen()s the UNVERSIONED name "libonnxruntime.dylib" from @loader_path.
+        # 4a bundles ORT under its VERSIONED name only (libonnxruntime.1.dylib), so that
+        # dlopen finds nothing: GenAI's static initializer throws std::runtime_error
+        # ("Failed to load onnxruntime") and dyld SIGABRTs the app before main(). It is
+        # invisible to §5 (a dlopen is not a NEEDED entry), so the alias is the only guard.
+        if [[ ! -e "$FW/libonnxruntime.dylib" ]]; then
+            ort_versioned="$(cd "$FW" && ls libonnxruntime.*.dylib 2>/dev/null | head -1)"
+            [[ -n "$ort_versioned" ]] || die "ORT-GenAI bundled but no libonnxruntime.*.dylib to alias — the app would abort in dyld at launch"
+            ln -sf "$ort_versioned" "$FW/libonnxruntime.dylib"
+            log "aliasing libonnxruntime.dylib → $ort_versioned (ORT-GenAI dlopen target)"
+        fi
     else
         log "ORT-GenAI dylib not found under _deps — expected on Intel (local LLM falls back to Gemini)"
     fi
