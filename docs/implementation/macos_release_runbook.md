@@ -158,7 +158,7 @@ partition list, and the notarytool profile — reading both passwords interactiv
 neither is written to disk, passed as `argv` (where `ps` would show it), or echoed:
 
 ```bash
-tools/setup_release_signing.sh --p12 ~/certs/pinpoint_developer_id.p12
+tools/setup_release_signing.sh --p12 ~/Documents/certs/pinpoint_developer_id.p12
 ```
 
 **Run it from Terminal.app on the Mac** (screen share / VNC is fine). It refuses to run
@@ -171,7 +171,7 @@ cert.
 
 The manual equivalent, if you would rather see each step:
 ```bash
-security import ~/certs/pinpoint_developer_id.p12 -k ~/Library/Keychains/login.keychain-db \
+security import ~/Documents/certs/pinpoint_developer_id.p12 -k ~/Library/Keychains/login.keychain-db \
   -T /usr/bin/codesign -T /usr/bin/security
 # Let codesign use it without an interactive prompt on every signature:
 security set-key-partition-list -S apple-tool:,apple:,codesign: \
@@ -199,14 +199,18 @@ security find-identity -v -p codesigning   # must list "Developer ID Application
 > useless if it does not pair with `src/Resources/keys/pinpoint_release_mac_eddsa.pub`,
 > which is compiled into every shipped app as `SUPublicEDKey` — signatures from a
 > mismatched key are rejected by every installed client, and you would only find out at
-> the update-offer stage. Sign anything and verify it round-trips:
+> the update-offer stage.
+>
+> **A sign/verify round-trip does NOT prove this.** Signing with a key and verifying with
+> that same key succeeds for *any* well-formed key, including a wrong one — it shows the
+> key is self-consistent, not that it is *the* key the apps pin. The only real check is to
+> derive the public half and compare it against the committed `.pub`:
 > ```bash
-> SU=$(find build -name sign_update -type f | head -1)
-> echo test > /tmp/t.bin
-> SIG=$("$SU" /tmp/t.bin -f ~/certs/pinpoint_release_mac_eddsa_PRIVATE.pem -p)
-> "$SU" --verify /tmp/t.bin "$SIG" -f ~/certs/pinpoint_release_mac_eddsa_PRIVATE.pem
+> tools/check_eddsa_pin.py ~/Documents/certs/pinpoint_release_mac_eddsa_PRIVATE.pem
+> # → derived == pinned  ✅ MATCH
 > ```
-> Verified matching on 2026-07-29 for the key in `~/certs`.
+> Verified MATCH on 2026-07-29 for the key in `~/Documents/certs`
+> (`XvDSO0q45bIWGY22yqA2ZsdZxFp1teww8vZe3vR23Eg=`).
 
 > **Keep the distribution cert in the LOGIN keychain.** The project also has a throwaway
 > self-signed *development* cert living in a dedicated keychain with its password on disk
@@ -352,11 +356,23 @@ stray build-machine `LC_RPATH` left in the binary makes dyld load a *second* cop
 ("OMP: Error #15") **before `main()` runs**. The app dies instantly on launch. Notarization is
 the slow, irreversible step — never spend it on a bundle you haven't watched open.
 
-So launch the freshly-built bundle once, **unsigned**, and confirm the window actually appears:
+So launch the freshly-built bundle once and confirm the window actually appears. Note the
+staging path is **arch-qualified** (`build/macos-pkg-$(uname -m)`):
 ```bash
-tools/package_macos.sh --no-sign            # build + deploy + relocate, no sign/notarize
-open build/macos-pkg/PinPointStudio.app     # the main window MUST appear — quit it after a few seconds
+tools/package_macos.sh --no-sign                     # build + deploy + relocate, no sign/notarize
+open "build/macos-pkg-$(uname -m)/PinPointStudio.app"  # main window MUST appear — quit after a few seconds
 ```
+> **On Apple Silicon an unsigned bundle CANNOT launch — do not read that as a code bug.**
+> CMake signs the bundle with the dev cert at build time, then this script rewrites those
+> same Mach-Os (macdeployqt, dylib relocation, rpath stripping, Sparkle) — which invalidates
+> that signature. arm64 requires a valid signature, so the kernel kills it instantly:
+> `SIGKILL (Code Signature Invalid)`, `namespace CODESIGNING`, `indicator Invalid Page`, and
+> an empty `codeSigningID` in the report. Intel tolerates this, which is why only the arm64
+> leg trips it. To smoke-test on arm64, sign first — either ad-hoc
+> (`codesign --force --deep --sign - <app>`) for a quick check, or set `SIGN_IDENTITY` and
+> leave `NOTARY_PROFILE` unset to get a real Developer ID signature without spending a
+> notarization. Only a CODESIGNING kill is explained away by this; any other crash is real.
+
 If it crashes on launch, open the crash report and read the **faulting library** before
 re-running:
 - `__kmp_register_library_startup` / `__kmp_fatal` / "OMP Error #15" → a duplicate OpenMP
@@ -365,6 +381,12 @@ re-running:
   `/usr/local`, `/opt/homebrew`, or build-tree rpath — so a clean re-run should fix it. If the
   gate *didn't* catch it, widen the prefixes it checks.
 - "image not found" / dyld → an unrelocated dependency; same §5 gate territory.
+- `std::runtime_error` thrown from `libonnxruntime-genai.dylib` inside
+  `dyld4::Loader::findAndRunAllInitializers` → GenAI's `dlopen` of the UNVERSIONED
+  `libonnxruntime.dylib` failed. §4a″ of `package_macos.sh` creates that alias; if it is
+  missing from `Contents/Frameworks`, that block did not fire. **arm64 only** — Intel forces
+  `WITH_ORTGENAI` OFF. This class of failure (a `dlopen`, not a `NEEDED` entry) is invisible
+  to both macdeployqt and the §5 gate, which is precisely why this smoke gate is mandatory.
 
 Only once it launches cleanly, re-run with your signing env vars (1.5, Path B) to produce the
 signed DMG. (Path A / CI DMG: `hdiutil attach` it and launch the `.app` from the mounted
