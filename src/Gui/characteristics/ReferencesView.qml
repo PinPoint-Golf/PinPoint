@@ -152,12 +152,41 @@ Item {
         anchors.margins: Theme.sp(20)
         clip:            true
 
+        // Without this the Flickable takes its content width from the widest child IMPLICIT width,
+        // and the description paragraph's implicit width is the whole thing on ONE unwrapped line.
+        // The column then lays out far wider than the viewport: left-aligned content looks correct
+        // and merely gets clipped, so the defect is invisible — until something is right-aligned,
+        // which lands it off-screen entirely. Pinning it to the viewport is what makes the text wrap.
+        contentWidth: availableWidth
+
         ColumnLayout {
             id:      content
             width:   parent.width
             spacing: Theme.sp(16)
 
-            SectionHead { text: qsTr("REFERENCES") }
+            // The eyebrow carries the export rather than a heading of its own: this view has never
+            // had a title, and adding one to hang a button off would be the button choosing the
+            // page's structure.
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.sp(12)
+
+                SectionHead { text: qsTr("REFERENCES") }
+                Item { Layout.fillWidth: true }
+
+                // `label`, not `text` — PpButton is a Rectangle with its own vocabulary.
+                PpButton {
+                    label: qsTr("Export")
+                    onClicked: {
+                        var r = root.library.exportReferences()
+                        // The message is built in C++ and already names the path, so it is not
+                        // re-composed here — one tr() string, in one place, for both outcomes.
+                        exportToast.severity = r.ok ? "info" : "error"
+                        exportToast.copyText = r.ok ? r.path : ""   // empty hides the copy action
+                        exportToast.show(r.message)
+                    }
+                }
+            }
 
             Text {
                 Layout.fillWidth: true
@@ -167,7 +196,8 @@ Item {
                            + "a library catalogue for a book; tap a claim to go to it. "
                            + "Most of the library is coaching practice rather than published "
                            + "measurement — where that is so, no source is listed and the claim "
-                           + "says as much.")
+                           + "says as much. Export writes the whole bibliography as CSL-JSON, "
+                           + "which reference managers import directly.")
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3
@@ -387,5 +417,19 @@ Item {
                 }
             }
         }
+    }
+
+    // Informational toast for the export — no UNDO, because writing a file is not undoable and a
+    // stray UNDO affordance implies it is. The path goes to `copyText`: the next thing anyone does
+    // with an exported file is paste its location somewhere, and re-typing it from a toast is worse
+    // than not being told at all. Same shape as the log export in ScreenResourceMonitor.
+    PpToast {
+        id: exportToast
+        showUndo: false
+        glyph:    "⤓"
+        z:        10
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom:           parent.bottom
+        anchors.bottomMargin:     Theme.sp(24)
     }
 }

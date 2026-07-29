@@ -17,6 +17,9 @@
 #include "../screen_pack.h"
 
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 
 #include <cstdio>
@@ -504,6 +507,250 @@ int main()
             std::printf("        (%d of %d references carry generalReading)\n",
                         flagged, int(refs.references.size()));
             check(flagged > 0, "the shipped registry actually uses the flag");
+        }
+    }
+
+    // ── CSL-JSON export ─────────────────────────────────────────────────────
+    //
+    // A bibliography nobody can get out of the app is an appendix. CSL-JSON is what Zotero imports
+    // and what pandoc consumes, so one export renders in every citation style without us writing
+    // one — which is exactly why the mapping has to be right: a consumer that half-understands the
+    // file produces a plausible citation with the wrong parts missing, and says nothing.
+    //
+    // There is no importer, so these gate SHAPE rather than a round trip: what a consumer is handed,
+    // not what we can read back. The two things easiest to get wrong and hardest to see are the
+    // uppercase identifier fields and the nesting of `issued`, and both have a check of their own.
+    std::printf("=== CSL-JSON export ===\n");
+    {
+        auto itemsOf = [](const ReferenceSet &s) {
+            return QJsonDocument::fromJson(exportReferenceSetCsl(s)).array();
+        };
+        auto oneItem = [&itemsOf](const Reference &r) {
+            ReferenceSet s;
+            s.references.push_back(r);
+            const QJsonArray a = itemsOf(s);
+            return a.isEmpty() ? QJsonObject() : a.first().toObject();
+        };
+
+        // Named rather than positional, for the reason given above the PMID fixture: a new field on
+        // Reference would otherwise shift every value one slot right and be caught, if at all, by
+        // whichever assertion happened to look wrong first.
+        Reference art;
+        art.id          = QStringLiteral("ref.art");
+        art.doi         = QStringLiteral("10.1000/art");
+        art.title       = QStringLiteral("T");
+        art.authors     = QStringLiteral("Brown, Selbie, Wallace");
+        art.journal     = QStringLiteral("Journal of Sports Sciences");
+        art.year        = 2005;
+        art.volume      = QStringLiteral("23");
+        art.issue       = QStringLiteral("Suppl 1");   // not a number, and that is the point
+        art.pages       = QStringLiteral("1156-1163");
+        art.establishes = QStringLiteral("E");
+
+        Reference chap;
+        chap.id             = QStringLiteral("ref.chap");
+        chap.isbn           = QStringLiteral("9781875378371");
+        chap.title          = QStringLiteral("C");
+        chap.authors        = QStringLiteral("Cheetham");
+        chap.publisher      = QStringLiteral("P");
+        chap.containerTitle = QStringLiteral("Optimising Performance in Golf");
+        chap.editor         = QStringLiteral("Thomas");
+        chap.year           = 2001;
+        chap.pages          = QStringLiteral("192-199");
+
+        Reference bk;
+        bk.id        = QStringLiteral("ref.bk");
+        bk.isbn      = QStringLiteral("9780387986913");
+        bk.title     = QStringLiteral("B");
+        bk.authors   = QStringLiteral("Jorgensen");
+        bk.publisher = QStringLiteral("S");
+        bk.year      = 1994;
+
+        const QJsonObject ai = oneItem(art);
+        const QJsonObject ci = oneItem(chap);
+        const QJsonObject bi = oneItem(bk);
+
+        // ── The outer shape ─────────────────────────────────────────────────
+        {
+            const QJsonDocument doc = QJsonDocument::fromJson(exportReferenceSetCsl(refs));
+            check(doc.isArray() && !doc.isObject(),
+                  "the export is a bare JSON array — a consumer handed an object wrapping one "
+                  "fails with an error that says nothing about which end is wrong");
+            check(doc.array().size() == int(refs.references.size()),
+                  "…carrying one item per record, with none dropped");
+        }
+
+        // ── Type, inferred from what the record already carries ─────────────
+        check(ai.value(QStringLiteral("type")).toString() == QStringLiteral("article-journal"),
+              "a record with no ISBN types as an article — the identifier decides, nothing else");
+        check(ci.value(QStringLiteral("type")).toString() == QStringLiteral("chapter"),
+              "…an ISBN with a containerTitle is a chapter of that volume");
+        check(bi.value(QStringLiteral("type")).toString() == QStringLiteral("book"),
+              "…and an ISBN on its own is the book");
+
+        // ── issued: the nesting everybody gets wrong ─────────────────────────
+        {
+            const QJsonArray parts = ai.value(QStringLiteral("issued")).toObject()
+                                       .value(QStringLiteral("date-parts")).toArray();
+            check(parts.size() == 1 && parts.first().toArray().size() == 1
+                      && parts.first().toArray().first().isDouble()
+                      && parts.first().toArray().first().toInt() == 2005,
+                  "issued is date-parts: an array of arrays holding the year as an INTEGER");
+
+            Reference undated = art;
+            undated.year = 0;
+            check(!oneItem(undated).contains(QStringLiteral("issued")),
+                  "…and an undated record omits it rather than claiming the year 0");
+        }
+
+        // ── The identifiers are the only uppercase names in the format ──────
+        check(ai.contains(QStringLiteral("DOI")) && !ai.contains(QStringLiteral("doi")),
+              "the DOI key is uppercase — CSL names everything lowercase EXCEPT the identifiers");
+        check(bi.contains(QStringLiteral("ISBN")) && !bi.contains(QStringLiteral("isbn")),
+              "…and so is the ISBN");
+        check(ai.value(QStringLiteral("URL")).toString() == art.url()
+                  && !ai.contains(QStringLiteral("url")),
+              "…and the URL, which comes from the accessor so doi->pmid->isbn stays in one place");
+        {
+            Reference pm = art;
+            pm.doi.clear();
+            pm.pmid = QStringLiteral("30479527");
+            const QJsonObject pi = oneItem(pm);
+            check(pi.contains(QStringLiteral("PMID")) && !pi.contains(QStringLiteral("pmid")),
+                  "…and the PMID, which is a legal CSL-JSON field rather than an extension of ours");
+        }
+
+        // ── Locators ────────────────────────────────────────────────────────
+        check(ai.value(QStringLiteral("page")).toString() == QStringLiteral("1156-1163")
+                  && !ai.contains(QStringLiteral("pages")),
+              "the locator is CSL `page`, SINGULAR — `pages` is our spelling, not the format's");
+        check(ai.value(QStringLiteral("issue")).toString() == QStringLiteral("Suppl 1"),
+              "…and an issue designator that was never a number survives as written");
+
+        // ── Authors, and why they are literal ───────────────────────────────
+        {
+            const QJsonArray au = ai.value(QStringLiteral("author")).toArray();
+            check(au.size() == 1
+                      && au.first().toObject().value(QStringLiteral("literal")).toString()
+                             == art.authors,
+                  "authors are ONE CSL `literal` name — deliberately: the field is a single string "
+                  "and structuring it is a schemaVersion bump, not a serialiser change");
+            check(ci.value(QStringLiteral("editor")).toArray().first().toObject()
+                      .value(QStringLiteral("literal")).toString() == QStringLiteral("Thomas"),
+                  "…and a volume's editor travels the same way");
+            check(!ai.contains(QStringLiteral("editor")),
+                  "…and a record with no editor omits the field rather than emitting an empty name");
+        }
+
+        // ── note: our words, said to be ours ────────────────────────────────
+        check(ai.value(QStringLiteral("note")).toString()
+                  == QStringLiteral("PinPoint diagnostics: E"),
+              "establishes exports as a note, PREFIXED — it is our editorial judgement, and it "
+              "travels into somebody else's library where nothing else says so");
+        {
+            Reference bare = art;
+            bare.establishes.clear();
+            check(!oneItem(bare).contains(QStringLiteral("note")),
+                  "…and a record with nothing to say omits the note rather than prefixing silence");
+        }
+
+        // ── One container, and the record that claims two ───────────────────
+        check(ai.value(QStringLiteral("container-title")).toString() == art.journal,
+              "an article's container-title is its journal");
+        check(ci.value(QStringLiteral("container-title")).toString() == chap.containerTitle,
+              "…and a chapter's is the volume it appears in");
+        {
+            ReferenceSet clash;
+            Reference    both  = art;
+            both.containerTitle = QStringLiteral("A Book");
+            clash.references.push_back(both);
+            check(hasCode(validateReferenceSet(clash), "referenceContainerConflict"),
+                  "a record carrying BOTH a journal and a containerTitle is refused — they are one "
+                  "field in a citation, so it claims to be a paper and a chapter at once");
+
+            ReferenceSet onlyJournal;
+            onlyJournal.references.push_back(art);
+            check(!hasCode(validateReferenceSet(onlyJournal), "referenceContainerConflict"),
+                  "…and one carrying only a journal is not");
+
+            ReferenceSet onlyContainer;
+            onlyContainer.references.push_back(chap);
+            check(!hasCode(validateReferenceSet(onlyContainer), "referenceContainerConflict"),
+                  "…nor one carrying only a containerTitle");
+        }
+
+        // ── categories ──────────────────────────────────────────────────────
+        {
+            Reference gr = art;
+            gr.generalReading = true;
+            const QJsonArray cats = oneItem(gr).value(QStringLiteral("categories")).toArray();
+            check(cats.size() == 1
+                      && cats.first().toString() == QStringLiteral("general reading"),
+                  "a general-reading record says so in CSL `categories`");
+            check(!ai.contains(QStringLiteral("categories")),
+                  "…and an unflagged one omits it, exactly as the stored flag does");
+        }
+
+        // ── THE SHIPPED REGISTRY, not a fixture ─────────────────────────────
+        //
+        // A check that cannot fire on real content is a check nobody notices is broken. Every
+        // assertion above would pass over an empty registry; these cannot.
+        {
+            const QJsonArray live = itemsOf(refs);
+            int missing = 0, blanks = 0;
+            int nArticle = 0, nBook = 0, nChapter = 0, noLocator = 0;
+
+            for (const QJsonValue &v : live) {
+                const QJsonObject o = v.toObject();
+
+                if (o.value(QStringLiteral("id")).toString().isEmpty()
+                    || o.value(QStringLiteral("type")).toString().isEmpty()
+                    || o.value(QStringLiteral("title")).toString().isEmpty()) ++missing;
+
+                // Top level only, which is sufficient: the two nested shapes are `author`/`editor`
+                // (omitted entirely when the source string is empty) and `categories` (a constant).
+                for (auto it = o.begin(); it != o.end(); ++it) {
+                    const QJsonValue val = it.value();
+                    if (val.isString() && val.toString().isEmpty()) ++blanks;
+                }
+
+                const QString t = o.value(QStringLiteral("type")).toString();
+                if (t == QLatin1String("article-journal")) {
+                    ++nArticle;
+                    if (!o.contains(QStringLiteral("volume"))
+                        && !o.contains(QStringLiteral("page"))) ++noLocator;
+                } else if (t == QLatin1String("book"))    ++nBook;
+                else if   (t == QLatin1String("chapter")) ++nChapter;
+            }
+
+            check(missing == 0,
+                  "every shipped record exports with an id, a type and a title");
+            check(blanks == 0,
+                  "…and no field anywhere in the export is an empty string, which a consumer would "
+                  "render as present-but-blank and punctuate around");
+            check(nArticle > 0 && nBook > 0,
+                  "…and the export actually spans both kinds of source");
+
+            std::printf("        (%d article-journal, %d book, %d chapter"
+                        " — %d articles carry no locator)\n",
+                        nArticle, nBook, nChapter, noLocator);
+
+            // Printed, never asserted. A CSL-JSON error is almost always visible on inspection and
+            // almost never visible in a passing shape test, so one item of each kind goes to the
+            // log for a human. Pinning the content here would be the mistake the file warns about.
+            auto printFirst = [&live](const char *want) {
+                for (const QJsonValue &v : live) {
+                    if (v.toObject().value(QStringLiteral("type")).toString()
+                            != QLatin1String(want)) continue;
+                    std::printf("      ── first %s ──\n%s\n", want,
+                                QJsonDocument(v.toObject())
+                                    .toJson(QJsonDocument::Indented).constData());
+                    return;
+                }
+            };
+            printFirst("article-journal");
+            printFirst("chapter");
+            printFirst("book");
         }
     }
 

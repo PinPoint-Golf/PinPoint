@@ -1282,3 +1282,32 @@ QVariantMap CharacteristicLibraryModel::exportRoadmap() const
     r.insert(QStringLiteral("message"), tr("Exported to %1").arg(path));
     return r;
 }
+
+QVariantMap CharacteristicLibraryModel::exportReferences() const
+{
+    QVariantMap r;
+
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir.isEmpty()) {
+        r.insert(QStringLiteral("ok"), false);
+        r.insert(QStringLiteral("message"), tr("No Documents folder to write to."));
+        return r;
+    }
+
+    // The double extension is the CSL-JSON convention and it tells a human what the file is before
+    // they open it. Zotero imports it either way.
+    const QString path = dir + QStringLiteral("/pinpoint-references.csl.json");
+    QFile         f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        r.insert(QStringLiteral("ok"), false);
+        r.insert(QStringLiteral("message"), tr("Could not write to %1.").arg(path));
+        return r;
+    }
+    f.write(exportReferenceSetCsl(sharedReferenceSet()));
+    f.close();
+
+    r.insert(QStringLiteral("ok"), true);
+    r.insert(QStringLiteral("path"), path);
+    r.insert(QStringLiteral("message"), tr("Exported to %1").arg(path));
+    return r;
+}

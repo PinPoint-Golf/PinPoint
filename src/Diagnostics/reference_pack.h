@@ -79,6 +79,15 @@
 // review. `references_test` re-asserts the shape; only a human re-resolving them can re-assert the
 // content.
 //
+// A PERIODICAL AND A BOOK ARE DIFFERENT CONTAINERS, and `journal` cannot be asked to mean both.
+// A chapter in an edited volume needs the volume's title, and that is `containerTitle` rather than
+// a second meaning for `journal` — because `journal` already means "a periodical" everywhere in
+// this codebase and in the UI. `ReferencesView` renders the byline as authors · journal-or-publisher
+// · year, so a book title arriving in the journal slot would render as a small, checkable lie for
+// whichever case lost the argument. The two fields are therefore MUTUALLY EXCLUSIVE — they map to
+// the same CSL container, and a record carrying both cannot be typed at all. That is an ERROR
+// (`referenceContainerConflict`), not a warning: there is no reading of such a record to salvage.
+//
 // Deliberately NOT behind an abstract provider, for the same reason as screens and drills: that
 // polymorphism exists so a COMMUNITY pack can be namespaced against core, there is no community
 // story for a bibliography, and three provider classes for a flat list would be ceremony standing
@@ -97,7 +106,27 @@ struct Reference {
     QString publisher;    // a book has a publisher where a paper has a journal. NOT interchangeable
                           // with `journal`: the view labels that field as the periodical, so a
                           // publisher sitting in it renders as a small, checkable lie.
+
+    // The BOOK a chapter appears in — never a journal, and never set alongside `journal`. See the
+    // header block: the two are the same container in every citation format, so a record carrying
+    // both raises `referenceContainerConflict` rather than picking one.
+    QString containerTitle;
+    QString editor;       // the volume's editor(s), for a chapter. Same convention as `authors`
+
     int     year = 0;
+
+    // Article locators. STRINGS, not ints, and not because it was easier: page ranges ("1156-1163"),
+    // article numbers used in place of pages ("91") and issue designators ("Suppl 1") all occur in
+    // this literature, and not one of them is an integer.
+    QString volume;
+    QString issue;
+    QString pages;
+
+    // None of the five fields above — containerTitle, editor, volume, issue, pages — bumped
+    // `schemaVersion`, on the reasoning spelled out for `generalReading` below: each is optional and
+    // additive, so a reader that has never heard of them still loads every record and still resolves
+    // every citation.
+
     QString establishes;  // what it actually shows, and what it does not
 
     // Worth reading regardless of what cites it. ADDITIVE, not a category — see the header block.
@@ -149,6 +178,10 @@ struct ReferenceSet {
 //                       anything or opened by anyone. (The code name predates both PMID and ISBN
 //                       support and is DELIBERATELY kept: it is the stable contract the health view
 //                       and tests key off, and renaming it would break both silently.)
+//   referenceContainerConflict  a reference carries BOTH a journal and a containerTitle. They are
+//                       one field in every citation format, so the record cannot be typed: it
+//                       claims to be a paper in a periodical and a chapter in a book at once. An
+//                       error rather than a warning because there is no half of it worth keeping.
 // WARNINGS:
 //   referenceNoTitle    a row that renders as a bare identifier
 //   referenceNoYear     undated, so a reader cannot judge how current it is
@@ -173,6 +206,25 @@ struct ReferenceLoadResult {
 
 ReferenceLoadResult loadReferenceSet(const QByteArray &json, const QString &sourceLabel);
 QByteArray          saveReferenceSet(const ReferenceSet &set);
+
+// The registry as CSL-JSON: a bare JSON ARRAY of items, which is what the format is.
+//
+// CSL-JSON is the interchange format of the citation-style ecosystem — Zotero exports it natively,
+// pandoc consumes it, and every CSL style renders from it. Emitting it once means the bibliography
+// leaves this app as APA, Vancouver, Harvard or anything else without us writing a single citation
+// style. It is a one-way door: there is no importer, and the app is not a reference manager.
+//
+// PURE — takes a set, returns bytes, touches no filesystem. That is what makes it testable without
+// a temp directory, and it is the same split as `roadmapMarkdown()` from `exportRoadmap()`.
+//
+// Two things in the mapping are easy to get wrong and silently so, and both are pinned by tests:
+// CSL names every field lowercase-hyphenated EXCEPT the identifiers (`DOI`, `PMID`, `ISBN`, `URL`),
+// which are uppercase; and `issued` is `{"date-parts": [[2005]]}` — an array of arrays holding an
+// integer, not a year, not a string, not one level of nesting.
+//
+// AUTHORS ARE EMITTED AS A CSL `literal`, DELIBERATELY — see the comment on the mapper. Anyone
+// tempted to "fix" that should read it first: the fix is a schema change, not a serialiser change.
+QByteArray          exportReferenceSetCsl(const ReferenceSet &set);
 
 const ReferenceSet &sharedReferenceSet();
 void                resetSharedReferenceSet();

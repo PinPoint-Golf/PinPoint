@@ -198,6 +198,15 @@ public:
     // write reports rather than throwing, so it reaches the user instead of a log.
     Q_INVOKABLE QVariantMap exportRoadmap() const;
 
+    // The whole bibliography as CSL-JSON, written to the user's Documents folder. Same
+    // { ok, path, message } contract as exportRoadmap(), for the same reason.
+    //
+    // CSL-JSON because it is what Zotero imports and what pandoc consumes, so a coach who wants
+    // these sources in their own library, or a contributor writing them up, gets every citation
+    // style for free rather than us picking one. Cited and general-reading records alike — a
+    // filtered export is a UI question and there is no UI asking it.
+    Q_INVOKABLE QVariantMap exportReferences() const;
+
     bool    corpusScanning() const { return m_corpusScanning; }
     bool    corpusEverScanned() const { return m_corpusEverScanned; }
     int     corpusSwings() const { return m_corpusSwings; }

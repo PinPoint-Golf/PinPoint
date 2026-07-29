@@ -196,6 +196,17 @@ ValidationReport validateReferenceSet(const ReferenceSet &set)
             isbns.insert(ref.isbn);
         }
 
+        // A periodical and a book are ONE field in every citation format, so a record claiming both
+        // cannot be typed at all — it says it is a paper in a journal and a chapter in a book at the
+        // same time. There is no half of that worth keeping, which is why it is an error: picking
+        // one silently would put a book title in the byline slot the view labels as the periodical.
+        if (!ref.journal.isEmpty() && !ref.containerTitle.isEmpty())
+            add(r, IssueSeverity::Error, QStringLiteral("referenceContainerConflict"), ref.id,
+                QStringLiteral("Reference '%1' carries both a journal ('%2') and a containerTitle "
+                               "('%3'). They are the same field in a citation, so the record cannot "
+                               "be typed — a paper has a journal, a chapter has a container.")
+                    .arg(ref.id, ref.journal, ref.containerTitle));
+
         if (ref.title.isEmpty())
             add(r, IssueSeverity::Warning, QStringLiteral("referenceNoTitle"), ref.id,
                 QStringLiteral("Reference '%1' has no title and would render as a bare identifier.")
@@ -236,9 +247,14 @@ ReferenceLoadResult loadReferenceSet(const QByteArray &json, const QString &sour
         ref.isbn        = o.value(QStringLiteral("isbn")).toString();
         ref.title       = o.value(QStringLiteral("title")).toString();
         ref.authors     = o.value(QStringLiteral("authors")).toString();
-        ref.journal     = o.value(QStringLiteral("journal")).toString();
-        ref.publisher   = o.value(QStringLiteral("publisher")).toString();
-        ref.year        = o.value(QStringLiteral("year")).toInt();
+        ref.journal        = o.value(QStringLiteral("journal")).toString();
+        ref.publisher      = o.value(QStringLiteral("publisher")).toString();
+        ref.containerTitle = o.value(QStringLiteral("containerTitle")).toString();
+        ref.editor         = o.value(QStringLiteral("editor")).toString();
+        ref.year           = o.value(QStringLiteral("year")).toInt();
+        ref.volume         = o.value(QStringLiteral("volume")).toString();
+        ref.issue          = o.value(QStringLiteral("issue")).toString();
+        ref.pages          = o.value(QStringLiteral("pages")).toString();
         ref.establishes = o.value(QStringLiteral("establishes")).toString();
         // Absent reads as false, which is the whole reason this needed no schema bump.
         ref.generalReading = o.value(QStringLiteral("generalReading")).toBool(false);
@@ -269,7 +285,13 @@ QByteArray saveReferenceSet(const ReferenceSet &set)
         if (!ref.authors.isEmpty())     o.insert(QStringLiteral("authors"), ref.authors);
         if (!ref.journal.isEmpty())     o.insert(QStringLiteral("journal"), ref.journal);
         if (!ref.publisher.isEmpty())   o.insert(QStringLiteral("publisher"), ref.publisher);
+        if (!ref.containerTitle.isEmpty())
+                                        o.insert(QStringLiteral("containerTitle"), ref.containerTitle);
+        if (!ref.editor.isEmpty())      o.insert(QStringLiteral("editor"), ref.editor);
         if (ref.year > 0)               o.insert(QStringLiteral("year"), ref.year);
+        if (!ref.volume.isEmpty())      o.insert(QStringLiteral("volume"), ref.volume);
+        if (!ref.issue.isEmpty())       o.insert(QStringLiteral("issue"), ref.issue);
+        if (!ref.pages.isEmpty())       o.insert(QStringLiteral("pages"), ref.pages);
         if (!ref.establishes.isEmpty()) o.insert(QStringLiteral("establishes"), ref.establishes);
         if (ref.generalReading)         o.insert(QStringLiteral("generalReading"), true);
         arr.append(o);
@@ -277,6 +299,112 @@ QByteArray saveReferenceSet(const ReferenceSet &set)
     root.insert(QStringLiteral("references"), arr);
 
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
+}
+
+// ── CSL-JSON ────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Our editorial judgement travels with the record, so it has to say whose judgement it is. Exported
+// bare, `establishes` lands in someone else's library as an unattributed opinion about a paper.
+// ONE constant, used ONCE, rather than a format string repeated through the mapper.
+const QLatin1String kCslNotePrefix("PinPoint diagnostics: ");
+
+// Every field except `id` and `type` is omitted when empty rather than written as "". A CSL consumer
+// treats an empty string as present-but-blank and renders the punctuation around it — an empty
+// `page` becomes a stray comma in the middle of a citation.
+void putIf(QJsonObject &o, QLatin1String key, const QString &value)
+{
+    if (!value.isEmpty()) o.insert(key, value);
+}
+
+// CSL wants structured names: {"family": "Wallace", "given": "Eric S."}. `authors` is one
+// comma-separated string of family names and cannot produce that, so we use `literal` — the spec's
+// escape hatch for corporate and unparseable names, which every CSL processor handles.
+//
+// THE TRADE-OFF, because the next reader will assume this was an oversight: a literal name renders
+// correctly in most styles but sorts wrong, and cannot be initialised or abbreviated to "Brown et
+// al." The correct fix is restructuring `authors` into an array of family/given pairs — a migration
+// across every record AND a genuine schemaVersion bump, because an old reader would find an array
+// where it expects a string. That is a separate decision and it has deliberately not been taken.
+// Changing this function alone does not achieve it.
+QJsonArray literalName(const QString &names)
+{
+    QJsonObject one;
+    one.insert(QLatin1String("literal"), names);
+    return QJsonArray{ one };
+}
+
+} // namespace
+
+QByteArray exportReferenceSetCsl(const ReferenceSet &set)
+{
+    QJsonArray items;
+
+    for (const Reference &ref : set.references) {
+        QJsonObject o;
+
+        // Required by CSL, so written unconditionally. The `ref.` prefix stays: the id must be
+        // unique within the export and it already is, and a reader who sees one in a rendered
+        // bibliography can find it again here.
+        o.insert(QLatin1String("id"), ref.id);
+
+        // Inferred rather than stored, from what the record already carries. An ISBN means a book;
+        // a book that also names the volume it sits inside is a chapter of that volume.
+        const bool isBook = !ref.isbn.isEmpty();
+        o.insert(QLatin1String("type"),
+                 !isBook                         ? QStringLiteral("article-journal")
+                 : !ref.containerTitle.isEmpty() ? QStringLiteral("chapter")
+                                                 : QStringLiteral("book"));
+
+        putIf(o, QLatin1String("title"), ref.title);
+
+        if (!ref.authors.isEmpty()) o.insert(QLatin1String("author"), literalName(ref.authors));
+        if (!ref.editor.isEmpty())  o.insert(QLatin1String("editor"), literalName(ref.editor));
+
+        // One container, whichever of the two is set — validateReferenceSet() refuses both.
+        putIf(o, QLatin1String("container-title"),
+              ref.journal.isEmpty() ? ref.containerTitle : ref.journal);
+
+        putIf(o, QLatin1String("publisher"), ref.publisher);
+
+        // `date-parts` is an ARRAY OF ARRAYS holding an integer, and it is the single most commonly
+        // botched part of CSL-JSON. Omitted entirely for an undated record rather than emitting a
+        // zero, which a processor would render as the year 0.
+        if (ref.year > 0) {
+            QJsonObject issued;
+            issued.insert(QLatin1String("date-parts"), QJsonArray{ QJsonArray{ ref.year } });
+            o.insert(QLatin1String("issued"), issued);
+        }
+
+        putIf(o, QLatin1String("volume"), ref.volume);
+        putIf(o, QLatin1String("issue"), ref.issue);
+        putIf(o, QLatin1String("page"), ref.pages);   // CSL is `page`, singular
+
+        // The identifier fields are the ONLY uppercase names in CSL-JSON. Everything else is
+        // lowercase-hyphenated, and getting this backwards produces a file that parses cleanly and
+        // drops every identifier.
+        putIf(o, QLatin1String("DOI"), ref.doi);
+        putIf(o, QLatin1String("PMID"), ref.pmid);    // a legal CSL-JSON field, not an extension
+        putIf(o, QLatin1String("ISBN"), ref.isbn);
+        putIf(o, QLatin1String("URL"), ref.url());    // the accessor, so doi->pmid->isbn stays in one place
+
+        putIf(o, QLatin1String("note"),
+              ref.establishes.isEmpty() ? QString()
+                                        : QString(kCslNotePrefix) + ref.establishes);
+
+        // Consumer support for `categories` varies, and that is acceptable: it is the spec-correct
+        // field for this, and a consumer that ignores it loses nothing else about the record.
+        if (ref.generalReading)
+            o.insert(QLatin1String("categories"),
+                     QJsonArray{ QStringLiteral("general reading") });
+
+        items.append(o);
+    }
+
+    // A BARE ARRAY, not an object wrapping one. That is what the format is, and a consumer handed
+    // the wrong outer shape fails with an error that says nothing about which end is wrong.
+    return QJsonDocument(items).toJson(QJsonDocument::Indented);
 }
 
 namespace {

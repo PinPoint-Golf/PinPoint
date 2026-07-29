@@ -31,17 +31,8 @@ Item {
 
     required property var library     // CharacteristicLibraryModel
 
-    property string _statusMessage: ""
-    property bool   _statusOk:      true
-
     readonly property var _rows: root.library.roadmap()
     readonly property var _gaps: root.library.captureGaps()
-
-    Timer {
-        id: statusTimer
-        interval: 5000
-        onTriggered: root._statusMessage = ""
-    }
 
     ScrollView {
         anchors.fill: parent
@@ -69,23 +60,15 @@ Item {
                 PpDisplayText { text: qsTr("Measure roadmap") }
                 Item { Layout.fillWidth: true }
 
-                Text {
-                    visible:        root._statusMessage.length > 0
-                    text:           root._statusMessage
-                    font.family:    Theme.fontBody
-                    font.pixelSize: Theme.fontSzMicro
-                    color:          root._statusOk ? Theme.colorText3 : Theme.colorRagFault
-                    elide:          Text.ElideMiddle
-                    Layout.maximumWidth: Theme.sp(320)
-                }
-
                 PpButton {
                     label: qsTr("Export")
                     onClicked: {
                         var r = root.library.exportRoadmap()
-                        root._statusMessage = r.message
-                        root._statusOk      = r.ok
-                        statusTimer.restart()
+                        // The message is built in C++ and already names the path, so it is not
+                        // re-composed here — one tr() string, in one place, for both outcomes.
+                        exportToast.severity = r.ok ? "info" : "error"
+                        exportToast.copyText = r.ok ? r.path : ""   // empty hides the copy action
+                        exportToast.show(r.message)
                     }
                 }
             }
@@ -259,5 +242,18 @@ Item {
 
             Item { Layout.fillWidth: true; implicitHeight: Theme.sp(24) }
         }
+    }
+
+    // Same shape as the References export and as the log export in ScreenResourceMonitor: no UNDO
+    // (writing a file is not undoable), and the path offered to the clipboard because the next thing
+    // anyone does with an exported file is paste its location somewhere.
+    PpToast {
+        id: exportToast
+        showUndo: false
+        glyph:    "⤓"
+        z:        10
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom:           parent.bottom
+        anchors.bottomMargin:     Theme.sp(24)
     }
 }
