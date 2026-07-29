@@ -55,7 +55,7 @@ app's WinSparkle display/build version comes from it too. Nothing else to bump.
 
 ### 2. Run the full test suite — ALL must pass (MANDATORY GATE)
 **A release MUST NOT be cut while any test is failing or not building.** PinPoint has
-seven standalone CTest suites (they are *not* part of the app build — see
+eight standalone CTest suites (they are *not* part of the app build — see
 [`../../BUILDING.md`](../../BUILDING.md) § Testing). Build and run every one; each must
 report `100% tests passed`. Run this from a Developer (vcvars64) shell with CMake +
 Ninja on `PATH`:
@@ -65,7 +65,8 @@ $OCV = 'C:/tools/opencv/build'                          # Analysis & Pose need O
 $env:PATH = "$Qt/bin;$OCV/x64/vc16/bin;$env:PATH"       # so test exes resolve Qt/OpenCV DLLs
 $fail = @()
 foreach ($s in @('Buffer=src/Buffer','Analysis=src/Analysis/tests','Audio=src/Audio/tests',
-                 'Core=src/Core/tests','Gui=src/Gui/tests','IMU=src/IMU/tests','Pose=src/Pose/tests')) {
+                 'Core=src/Core/tests','Gui=src/Gui/tests','IMU=src/IMU/tests','Pose=src/Pose/tests',
+                 'Update=src/Update/tests')) {
   $n,$d = $s -split '='
   cmake -S $d -B "build/tests-$n" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=$Qt -DOpenCV_DIR=$OCV
   if ($LASTEXITCODE) { $fail += "$n (configure)"; continue }
@@ -78,6 +79,12 @@ if ($fail) { Write-Error "RELEASE BLOCKED — failing suites: $($fail -join ', '
 ```
 **If any suite fails to build or any test fails, STOP — fix it and re-run before you
 tag.** Do not proceed to the build/sign steps below.
+
+> A configure that fails to find OpenCV caches `OpenCV_DIR-NOTFOUND` in
+> `build/tests-<name>`, and every later attempt fails identically until that directory
+> is deleted — so an Analysis/Pose "configure" failure is worth confirming with
+> `Select-String OpenCV_DIR build/tests-Analysis/CMakeCache.txt` before you go looking
+> for a real breakage.
 
 ### 3. Build the `-core` installer (the update payload)
 Either let CI do it, or build locally — pick one.
@@ -157,7 +164,7 @@ installer, verifies the signature, and relaunches on the new version — no UAC 
 ## Quick checklist (per release)
 
 - [ ] Bump `PINPOINT_VERSION_BUILD` (+ MAJOR/MINOR/POSTFIX) in `version.h`, commit, push
-- [ ] **Run all 7 CTest suites — every one `100% tests passed` (mandatory; stop if any fail)**
+- [ ] **Run all 8 CTest suites — every one `100% tests passed` (mandatory; stop if any fail)**
 - [ ] Build the `-core` installer (CI tag push, or `build_installer.ps1 -Components core`)
 - [ ] If CI: `gh release download` the exact `-core.exe`
 - [ ] `make_appcast.ps1` → signs + writes `appcast-win.xml`
