@@ -625,7 +625,34 @@ set(PP_VERSION_BUILD   "${_pp_ver_build}")
 # .pub so the generated Info.plist carries it as SUPublicEDKey. PLACEHOLDER until
 # the offline key is generated — the macOS updater (Stage 2) refuses to arm while
 # it is the placeholder, exactly as the Windows/Linux gates do.
-set(PP_SU_FEED_URL "https://github.com/PinPoint-Golf/PinPointStudio/releases/latest/download/appcast-mac.xml")
+#
+# ONE FEED PER ARCHITECTURE. x86_64 and arm64 ship different ONNX Runtime major
+# versions and different engines (arm64: ORT 1.26 + CoreML + ORT-GenAI; x86_64: ORT
+# 1.20.1, CPU, no local LLM), so a single feed would offer each arch the other's DMG.
+# Sparkle installs IN PLACE, so that is not a failed download — it is a working install
+# replaced by one that cannot launch. Design §4.1: each architecture's binary only ever
+# sees its own feed.
+#
+# Branch on CMAKE_SYSTEM_PROCESSOR — the SAME predicate the ORT package and the CoreML
+# define already use above, so there is exactly one arch test in this file with one
+# meaning. Note this deliberately does NOT set CMAKE_OSX_ARCHITECTURES: that would not
+# move CMAKE_SYSTEM_PROCESSOR, so a cross-build would silently desync the ORT package,
+# the CoreML define and this feed URL from the slice actually emitted. Host-native
+# builds only.
+#
+#   !! THE x86_64 URL IS FROZEN !!  It is baked into the Info.plist of every Intel
+#   install already in the field, and Sparkle re-reads it from the INSTALLED bundle.
+#   Renaming it — even for symmetry with the arm64 name — permanently orphans every one
+#   of them: they would poll a URL that 404s and silently never update again. Add feeds,
+#   never rename this one.
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    set(PP_SU_FEED_URL "https://github.com/PinPoint-Golf/PinPointStudio/releases/latest/download/appcast-mac-arm64.xml")
+else()
+    set(PP_SU_FEED_URL "https://github.com/PinPoint-Golf/PinPointStudio/releases/latest/download/appcast-mac.xml")
+endif()
+if(APPLE)
+    message(STATUS "Sparkle feed (${CMAKE_SYSTEM_PROCESSOR}): ${PP_SU_FEED_URL}")
+endif()
 set(_pp_mac_eddsa_pub "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/keys/pinpoint_release_mac_eddsa.pub")
 if(EXISTS "${_pp_mac_eddsa_pub}")
     file(READ "${_pp_mac_eddsa_pub}" PP_SU_PUBLIC_ED_KEY)
@@ -2147,18 +2174,29 @@ if(WIN32)
 endif()
 
 # ── OpenCV ───────────────────────────────────────────────────────────────────
-# macOS: inject Homebrew prefix so CMake can locate OpenCVConfig.cmake
+# macOS: inject Homebrew prefix so CMake can locate OpenCVConfig.cmake.
+#
+# Try the VERSIONED formula first. Homebrew's plain `opencv` formula is now 5.x, which
+# reorganises calib3d into separate 3d/calib modules; this project targets 4.x and does
+# not build against it. The version guard below only rejects < 3.0, so an OpenCV 5 prefix
+# sails past configure and fails later at compile time, which is a much worse place to
+# find out. opencv@4 is keg-only, so `brew --prefix opencv` cannot see it — it has to be
+# asked for by name.
 if(APPLE)
-    execute_process(
-        COMMAND brew --prefix opencv
-        OUTPUT_VARIABLE _brew_opencv
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-        RESULT_VARIABLE _brew_result
-    )
-    if(_brew_result EQUAL 0 AND EXISTS "${_brew_opencv}")
-        list(APPEND CMAKE_PREFIX_PATH "${_brew_opencv}")
-    endif()
+    foreach(_brew_formula opencv@4 opencv)
+        execute_process(
+            COMMAND brew --prefix ${_brew_formula}
+            OUTPUT_VARIABLE _brew_opencv
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _brew_result
+        )
+        if(_brew_result EQUAL 0 AND EXISTS "${_brew_opencv}")
+            list(APPEND CMAKE_PREFIX_PATH "${_brew_opencv}")
+            message(STATUS "OpenCV: using Homebrew formula '${_brew_formula}' at ${_brew_opencv}")
+            break()
+        endif()
+    endforeach()
 endif()
 
 # Windows: probe common install locations; user can override with -DOpenCV_DIR=
@@ -2170,6 +2208,13 @@ if(WIN32 AND NOT OpenCV_DIR)
 endif()
 
 find_package(OpenCV REQUIRED)
+if(OpenCV_VERSION VERSION_GREATER_EQUAL "5.0")
+    message(FATAL_ERROR
+        "OpenCV ${OpenCV_VERSION} found, but this project targets 4.x. OpenCV 5 moves calib3d "
+        "into separate 3d/calib modules and the code does not build against it. On macOS: "
+        "`brew install opencv@4` (it is keg-only, so plain `brew --prefix opencv` will not find "
+        "it — this file asks for opencv@4 by name). Or point -DOpenCV_DIR= at a 4.x install.")
+endif()
 if(OpenCV_VERSION VERSION_LESS "3.0")
     message(FATAL_ERROR "OpenCV 3.0 or higher is required (found ${OpenCV_VERSION})")
 endif()
