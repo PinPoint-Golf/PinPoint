@@ -63,8 +63,32 @@ jobs:
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
 
-  appimage:
+  # ── Create the draft release ONCE, before anything uploads to it ──────────────
+  # Every build job stages its assets with softprops/action-gh-release, which CREATES
+  # the release if absent. With four legs starting simultaneously (appimage, windows,
+  # macOS ×2) they race to create the same draft, and the losers can 422 or produce a
+  # duplicate. Serialising creation here — and only creation — makes the uploads
+  # idempotent; they still run fully in parallel afterwards.
+  draft:
     needs: guard
+    if: needs.guard.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure the draft release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists — leaving it as-is"
+          else
+            echo "creating draft release $GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
+              --draft --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+
+  appimage:
+    needs: [guard, draft]
     if: needs.guard.outputs.proceed == 'true'
     runs-on: ubuntu-22.04   # oldest supported glibc → widest AppImage compatibility
     steps:
@@ -144,7 +168,7 @@ jobs:
   # STATUS: scaffolding — authored, not yet run. Heavy FetchContent (whisper/ViTPose/
   # ORT) makes the first run slow; validate by pushing a test tag.
   windows:
-    needs: guard
+    needs: [guard, draft]
     if: needs.guard.outputs.proceed == 'true'
     runs-on: windows-latest
     steps:
@@ -202,16 +226,49 @@ jobs:
   # publishes — only then is it live to users (docs/implementation/macos_release_runbook.md,
   # design docs/design/macos_update.md). No signing/notarization/EdDSA secrets here.
   #
-  # Pinned to an INTEL runner (macos-13) so the x86_64 DMG is genuinely x86_64 — the v1
-  # target arch (runs under Rosetta 2 on Apple Silicon). GitHub's default macos-latest is
-  # arm64 now; a native arm64 build + second feed is a GA add (design §7).
+  # TWO LEGS, one per architecture — they differ only in which runner they land on, so
+  # this is a matrix rather than a copied job. Each produces its OWN DMG and its own
+  # Sparkle feed; the two are never mixed (design §4.1 — each architecture's binary only
+  # ever sees its own feed).
+  #
+  #   x86_64 → macos-15-intel   arm64 → macos-15
+  #
+  # Runner choice is time-sensitive, so state the reasoning rather than just the labels:
+  #   • macos-13 (the previous pin) was RETIRED in December 2025. It is not a valid label
+  #     any more — leaving it here would fail to allocate a runner, not build an Intel DMG.
+  #   • macos-15-intel is the LAST x86_64 image GitHub will offer, available until
+  #     August 2027. Apple has dropped Intel; there is no successor. When that date lands,
+  #     the x86_64 leg stops being buildable here and the appcast-mac.xml feed goes frozen
+  #     rather than broken — existing Intel installs keep polling a feed that simply stops
+  #     gaining entries.
+  #   • macos-14 is NOT used even though it is older: it entered deprecation on 6 July 2026
+  #     and is unsupported from 2 November 2026. macos-15 is the oldest SUPPORTED arm64.
+  # Re-check these against actions/runner-images before relying on them.
+  #
+  # The runner's OS also sets the shipped floor: Homebrew bottles are built for the host's
+  # macOS, so the DMG's real minimum is roughly the runner's version (~15.0 on both legs),
+  # NOT the CMAKE_OSX_DEPLOYMENT_TARGET we pin. package_macos.sh computes that floor from
+  # the built closure and stamps it into Info.plist, and make_appcast_mac.sh reads it back
+  # out of the signed bytes — so the feed cannot promise a floor the enclosure fails to meet.
+  # This is also why a DMG built on the maintainer's own (newer) Mac must not be shipped.
   #
   # STATUS: scaffolding — authored, not yet run. Heavy FetchContent (whisper/ViTPose/ORT)
   # + a full Release build make the first run slow; validate by pushing a test tag.
   macos:
-    needs: guard
+    needs: [guard, draft]
     if: needs.guard.outputs.proceed == 'true'
-    runs-on: macos-13   # Intel x86_64 — matches the enclosure arch (NOT the arm64 default)
+    strategy:
+      # Load-bearing: a flaky Intel leg must NOT cancel a good arm64 DMG (and vice versa).
+      # Either DMG is independently useful, and the publish gate below is what insists on
+      # having both before anything goes live.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-15-intel
+          - arch: arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -220,11 +277,26 @@ jobs:
           maj=$(sed -n 's/^#define PINPOINT_VERSION_MAJOR[[:space:]]*\([0-9]*\).*/\1/p' src/Core/version.h)
           min=$(sed -n 's/^#define PINPOINT_VERSION_MINOR[[:space:]]*\([0-9]*\).*/\1/p' src/Core/version.h)
           pfx=$(sed -n 's/^#define PINPOINT_VERSION_POSTFIX[[:space:]]*"\([^"]*\)".*/\1/p' src/Core/version.h)
-          echo "asset version → v${maj}.${min}${pfx} (tag ${GITHUB_REF_NAME})"
+          echo "asset version → v${maj}.${min}${pfx} (tag ${GITHUB_REF_NAME}, ${{ matrix.arch }})"
 
-      # CMake probes Homebrew for these (CMakeLists ~1721–1937); absent on a fresh runner.
-      - name: Install Homebrew deps (OpenCV / FFmpeg / Aravis)
-        run: brew install opencv ffmpeg aravis
+      # Fail EARLY if the runner is not the architecture this leg is meant to build. The
+      # packaging script derives the DMG name from the binary, so a wrong runner would
+      # otherwise produce a correctly-named DMG for the wrong leg and upload it happily.
+      - name: Assert runner architecture
+        run: |
+          set -euo pipefail
+          got="$(uname -m)"
+          echo "runner ${{ matrix.runner }} reports: $got"
+          [ "$got" = "${{ matrix.arch }}" ] || {
+            echo "::error::expected ${{ matrix.arch }} but runner is $got — the ${{ matrix.runner }} label has changed architecture"
+            exit 1
+          }
+
+      # CMake probes Homebrew for these; absent on a fresh runner.
+      # opencv@4, NOT opencv: the plain formula is 5.x now, which this project does not
+      # build against (CMakeLists rejects it explicitly with the same rationale).
+      - name: Install Homebrew deps (OpenCV 4 / FFmpeg / Aravis)
+        run: brew install opencv@4 ffmpeg aravis
 
       - name: Install Qt 6.11
         uses: jurplel/install-qt-action@v4
@@ -233,19 +305,70 @@ jobs:
           modules: 'qtmultimedia qtwebsockets qtquick3d qtshadertools qtserialport qtconnectivity'
 
       # package_macos.sh builds Release (PINPOINT_INSTALLED=ON), runs macdeployqt,
-      # relocates the Homebrew closure, VERIFIES self-containment (fails the job if a
-      # build-machine path leaks), and emits the unsigned DMG. --no-sign: no cert in CI.
+      # relocates the Homebrew closure, VERIFIES self-containment and that every @rpath
+      # dependency resolves (fails the job if not), derives the DMG name from the built
+      # binary, and cross-checks the baked Sparkle feed against that arch.
+      # --no-sign: no cert in CI, by design.
       - name: Build + package UNSIGNED DMG
         env:
           CMAKE_PREFIX: ${{ env.QT_ROOT_DIR }}
           JOBS: '3'   # hosted macOS runners are small
         run: tools/package_macos.sh --no-sign
 
+      # The DMG name comes from the BUILT BINARY, so a file carrying this leg's arch can
+      # only exist if the binary really was that arch. Insisting on exactly one also
+      # catches a dist/ left dirty by a previous step.
+      - name: Assert exactly one ${{ matrix.arch }} DMG was produced
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(dist/PinPointStudio-*-${{ matrix.arch }}.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one ${{ matrix.arch }} DMG, found ${#dmgs[@]}"
+            ls -la dist/ 2>/dev/null || true
+            exit 1
+          fi
+          echo "OK: ${dmgs[0]}"
+
       - name: Stage on draft release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          draft: true            # maintainer signs + notarizes + adds appcast-mac.xml + publishes
+          draft: true            # maintainer signs + notarizes + adds the appcasts + publishes
           prerelease: false
           files: |
-            dist/PinPointStudio-*-x86_64.dmg
+            dist/PinPointStudio-*-${{ matrix.arch }}.dmg
+
+  # ── Both macOS DMGs must be present before the draft is fit to publish ─────────
+  # `fail-fast: false` means one leg can fail while the other succeeds, and a draft
+  # holding a single DMG looks perfectly healthy in the GitHub UI. Publishing it would
+  # leave one architecture's feed pointing at a release with no enclosure for it — and
+  # because the maintainer signs and publishes by hand later, this is the only automated
+  # place that can notice. It does NOT publish anything; it just refuses to go green,
+  # so a half-built draft is visibly not ready.
+  #
+  # `if: always()` is required — without it this is skipped (not failed) the moment a
+  # matrix leg fails, which is exactly the case it exists to catch.
+  macos-assets-complete:
+    needs: [guard, macos]
+    if: always() && needs.guard.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both an x86_64 and an arm64 DMG on the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets="$(gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
+                      --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          echo "assets on ${GITHUB_REF_NAME}:"
+          echo "${assets:-  (none)}"
+          missing=0
+          for arch in x86_64 arm64; do
+            if ! echo "$assets" | grep -q -- "-${arch}\.dmg$"; then
+              echo "::error::no ${arch} DMG on the draft release — do NOT publish; that architecture would have a feed with no enclosure"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "both macOS DMGs present — draft is ready for local signing + notarization"
