@@ -36,8 +36,8 @@
 class AppInfo : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QString versionString READ versionString CONSTANT)   // "v0.1-alpha9"
-    Q_PROPERTY(QString buildNumber   READ buildNumber   CONSTANT)   // "10009"
+    Q_PROPERTY(QString versionString READ versionString CONSTANT)   // "v0.1-alpha10"
+    Q_PROPERTY(QString buildNumber   READ buildNumber   CONSTANT)   // "10010"
     Q_PROPERTY(QString gitSha        READ gitSha        CONSTANT)   // short sha / "unknown"
     Q_PROPERTY(QString buildDate     READ buildDate     CONSTANT)   // compile date of this TU
     Q_PROPERTY(QString osName        READ osName        CONSTANT)   // QSysInfo::prettyProductName()
