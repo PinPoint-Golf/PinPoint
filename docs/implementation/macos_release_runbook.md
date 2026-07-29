@@ -279,12 +279,16 @@ now and is rejected explicitly):
 ```bash
 # Point QT at whichever Qt 6.11.x you actually have installed — `ls ~/Qt` to check.
 # A stale version here fails at the first configure, before any test runs.
+# JOBS=6 for the same reason package_macos.sh caps there: a bare `-j` is UNBOUNDED,
+# and ~30 parallel clang processes exhaust the 16 GB M4 mini and take the machine down
+# mid-release. Never use a bare `-j` here.
 QT=$(ls -d ~/Qt/6.11.*/macos | tail -1)
+JOBS="${JOBS:-6}"
 for s in Buffer=src/Buffer Analysis=src/Analysis/tests Audio=src/Audio/tests \
          Core=src/Core/tests Gui=src/Gui/tests IMU=src/IMU/tests Pose=src/Pose/tests; do
   n=${s%%=*}; d=${s#*=}
   cmake -S "$d" -B "build/tests-$n" -DCMAKE_PREFIX_PATH="$QT" \
-    && cmake --build "build/tests-$n" -j \
+    && cmake --build "build/tests-$n" --parallel "$JOBS" \
     && ctest --test-dir "build/tests-$n" --output-on-failure \
     || { echo "❌ RELEASE BLOCKED — $n failed"; break; }
 done
