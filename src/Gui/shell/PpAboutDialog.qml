@@ -22,13 +22,15 @@ import QtQuick.Layouts
 import PinPointStudio
 
 // About PinPoint Studio — modal dialog showing the icon, "PinPoint Studio for
-// <OS>", the version + build stats, and the bundled library versions. Where the
-// platform supports updates it surfaces the updater state and lets the user
-// check, download and restart into an update — reusing the existing
-// `updateController` (the same surface the Settings → General version row
-// drives). Opening the dialog never checks on its own: a check only happens when
-// the user presses "Check for updates". Opened from the header version pill (all
-// platforms) and the macOS application menu.
+// <OS>", the version + build stats, and the bundled library versions. It surfaces
+// the updater state and lets the user check, download and restart into an update —
+// reusing the existing `updateController` (the same surface the Settings → General
+// version row drives). Opening the dialog never checks on its own: a check only
+// happens when the user presses "Check for updates". Unlike the Settings row the
+// update block is shown on every platform — a devbuild or an unsupported build gets
+// the badge saying so and a disabled button, rather than a blank gap that reads as a
+// missing control. Opened from the header version pill (all platforms) and the macOS
+// application menu.
 Popup {
     id: root
     objectName: "aboutDialog"
@@ -52,7 +54,10 @@ Popup {
         case "ready":       return { text: qsTr("Restart to update"),     fg: Theme.colorGood,  bg: Theme.colorGoodLight }
         case "error":       return { text: qsTr("Update check failed"),   fg: Theme.colorWarn,  bg: Theme.colorWarnLight }
         case "devbuild":    return { text: qsTr("Development build"),      fg: Theme.colorText3, bg: "transparent" }
-        default:            return { text: qsTr("✓  Up to date"),         fg: Theme.colorGood,  bg: Theme.colorGoodLight }  // uptodate / unsupported
+        // Never checked and never can — don't borrow GeneralPanel's "Up to date" here,
+        // which would claim a result the updater is in no position to have.
+        case "unsupported": return { text: qsTr("Updates not available"),  fg: Theme.colorText3, bg: "transparent" }
+        default:            return { text: qsTr("✓  Up to date"),         fg: Theme.colorGood,  bg: Theme.colorGoodLight }
         }
     }
 
@@ -129,10 +134,9 @@ Popup {
             }
         }
 
-        // ── Update section (hidden where updates aren't supported) ──────────
+        // ── Update section (always shown; inert where updates aren't supported) ──
         ColumnLayout {
             Layout.fillWidth: true
-            visible: updateController.supported
             spacing: Theme.sp(8)
 
             RowLayout {
@@ -164,7 +168,9 @@ Popup {
                 Item { Layout.fillWidth: true }
 
                 // Contextual action: Check for updates / Download & install / Restart now.
-                // Hidden while a check/download/verify is in flight.
+                // Hidden while a check/download/verify is in flight; present but disabled
+                // on a devbuild / unsupported platform, where there is no engine to drive
+                // — so the row reads as "nothing to press yet" rather than as a gap.
                 PpButton {
                     readonly property string mode:
                         root.uState === "available" ? "download"
@@ -173,6 +179,7 @@ Popup {
                            || root.uState === "verifying") ? ""
                         : "check"
                     visible: mode !== ""
+                    enabled: updateController.supported
                     primary: mode === "download" || mode === "restart"
                     label:   mode === "download" ? qsTr("Download & install")
                            : mode === "restart"  ? qsTr("Restart now")
