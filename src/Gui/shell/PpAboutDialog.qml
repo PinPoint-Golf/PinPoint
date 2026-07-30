@@ -22,11 +22,13 @@ import QtQuick.Layouts
 import PinPointStudio
 
 // About PinPoint Studio — modal dialog showing the icon, "PinPoint Studio for
-// <OS>", the version + build stats, and the bundled library versions. On open it
-// checks for a newer version and, when the platform supports it, lets the user
-// download / restart into the update — reusing the existing `updateController`
-// (the same surface the Settings → General version row drives). Opened from the
-// header version pill (all platforms) and the macOS application menu.
+// <OS>", the version + build stats, and the bundled library versions. Where the
+// platform supports updates it surfaces the updater state and lets the user
+// check, download and restart into an update — reusing the existing
+// `updateController` (the same surface the Settings → General version row
+// drives). Opening the dialog never checks on its own: a check only happens when
+// the user presses "Check for updates". Opened from the header version pill (all
+// platforms) and the macOS application menu.
 Popup {
     id: root
     objectName: "aboutDialog"
@@ -38,14 +40,6 @@ Popup {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     padding: Theme.sp(24)
     width: Math.min(Theme.sp(480), (parent ? parent.width : Theme.sp(480)) - Theme.sp(48))
-
-    // Auto check-for-updates on open (only where updates are supported and we're
-    // not mid-flight). checkNow() is a no-op / native on unsupported platforms.
-    onOpened: {
-        if (updateController.supported
-                && (uState === "idle" || uState === "uptodate" || uState === "error"))
-            updateController.checkNow()
-    }
 
     // Live updater state + status-badge palette — mirrors GeneralPanel.qml's version row.
     readonly property string uState: updateController.state
