@@ -59,21 +59,26 @@ Item {
             var panels = [
                 generalPanel, appearancePanel, displaysPanel,
                 camerasPanel, imusPanel, microphonesPanel,
-                null, storagePanel, null, characteristicPanel
+                null, storagePanel, null, characteristicPanel,
+                diagnosticModelPanel
             ]
             var panel = panels[entry.panelIndex]
             if (panel) scrollWithRetry(panel, entry.itemId, 0)
         })
     }
 
-    // Deep link straight to one metric's detail page (dashboard tile click-through,
-    // routed via MetricRoute). Same callLater shape as navigateToResult: the panel
-    // Loader must have instantiated before we can address it.
+    // Deep link straight to one metric (dashboard tile click-through, routed via
+    // MetricRoute). Same callLater shape as navigateToResult: the panel Loader must
+    // have instantiated before we can address it.
+    //
+    // Repointed from Diagnostics (9) to Diagnostic Model (10) when the Diagnostics row
+    // was hidden: a link into a panel with no sidenav row opens a page the user cannot
+    // tell where they are on, which reads as the app losing its place.
     function showMetricDetail(key) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 9                       // Diagnostics
-        Qt.callLater(function() { characteristicPanel.showMetric(key) })
+        root.activeNavIndex = 10                      // Diagnostic Model
+        Qt.callLater(function() { diagnosticModelPanel.showMetric(key) })
     }
 
     // Deep link straight to one characteristic's detail page. Same callLater shape as
@@ -81,8 +86,8 @@ Item {
     function showCharacteristicDetail(conditionId) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 9                       // Diagnostics
-        Qt.callLater(function() { characteristicPanel.showCharacteristic(conditionId) })
+        root.activeNavIndex = 10                      // Diagnostic Model
+        Qt.callLater(function() { diagnosticModelPanel.showCharacteristic(conditionId) })
     }
 
     // Deep link to the MEASURE that defines a corridor — the norm rows in Diagnostics, from which the
@@ -92,8 +97,8 @@ Item {
     function showMeasureDetail(measureId) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 9                       // Diagnostics
-        Qt.callLater(function() { characteristicPanel.showMeasure(measureId) })
+        root.activeNavIndex = 10                      // Diagnostic Model
+        Qt.callLater(function() { diagnosticModelPanel.showMeasure(measureId) })
     }
 
     function scrollWithRetry(panel, itemId, retries) {
@@ -221,13 +226,24 @@ Item {
                                 // a metric, the measures that read it and the corridors that judge
                                 // them are one chain, and following it meant leaving the panel.
                                 // Everything below it moved up one when it went.
-                                { navIdx: 9, icon: "◇", label: qsTr("Diagnostics"),    sectionHead: qsTr("Reference"), hasBadge: false },
+                                // Diagnostics (navIdx 9) is HIDDEN, not removed. Diagnostic Model
+                                // replaces it and now answers all three deep links too. The panel
+                                // is still child 9 of the StackLayout below and the indices are
+                                // deliberately NOT renumbered: nothing routes there any more, but
+                                // renumbering would move every panel after it for no gain while the
+                                // code is still present. The gap is the point.
+                                //
+                                // The code comes out in its own session. Until then this is one
+                                // deleted line rather than a change nobody can undo in a hurry.
+                                { navIdx: 10, icon: "❖", label: qsTr("Diagnostic Model"), sectionHead: qsTr("Reference"), hasBadge: false },
                                 // Not a panel: emits resourceMonitorRequested() (its
                                 // own screen) rather than switching activeNavIndex.
                                 // It is an ACTION row, so its navIdx never indexes the
                                 // StackLayout — but it must not collide with a panel
-                                // index either.
-                                { navIdx: 10, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
+                                // index either. It was 10 until Diagnostic Model took
+                                // that index; the same renumber Diagnostics itself
+                                // caused when it landed.
+                                { navIdx: 11, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
                             ]
 
                             delegate: Column {
@@ -457,6 +473,7 @@ Item {
                 StoragePanel {    id: storagePanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 7
                 ScreenPlaceholder { titleText: "Archiving" }                                               // 8
                 CharacteristicLibrary { id: characteristicPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 9
+                DiagnosticModel { id: diagnosticModelPanel; Layout.fillWidth: true; Layout.fillHeight: true }      // 10
             }
         }
     }

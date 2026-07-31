@@ -764,3 +764,57 @@ pp_add_test(norm_editor_model_test
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 set_tests_properties(norm_editor_model_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/norm_editor_scratch")
+
+# The Diagnostic Model panel's facade. Same contract as norm_model_test and for the same reason —
+# QML holds no rules, so every rule this hides is asserted here or nowhere. The load-bearing ones are
+# the working copy (an unsaved edit has to be VISIBLE, or editing looks like nothing happening),
+# undo as the inverse of copy-on-write (undoing a first edit to shipped content IS the reset), a
+# bulk-set being ONE command, and legality being decided by the same function the graph drag asks.
+#
+# Writes go to QStandardPaths::AppDataLocation, so XDG_DATA_HOME is isolated: a suite that wrote into
+# the developer's own diagnostics pack would be a test with a side effect on the product.
+pp_add_test(model_browser_test
+    SOURCES ${DIAG}/tests/model_browser_test.cpp
+            ${SRC}/Gui/diagnosticmodel/model_browser.cpp
+            ${DIAG}/corridor_plot.cpp ${DIAG}/measure_sample.cpp
+            ${DIAG}/dag_layout.cpp ${DIAG}/diagnostics_health.cpp
+            ${DIAG}/drill_pack.cpp ${DIAG}/screen_pack.cpp ${DIAG}/reference_pack.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp ${DIAG}/memory_pack_provider.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp ${DIAG}/memory_norm_provider.cpp ${DIAG_NORM}
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${ANALYSIS}/reference_bands.cpp
+    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics ${SRC}/Gui/diagnosticmodel
+    LINK    Qt6::Qml Qt6::Concurrent
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+# The screen, drill and reference registries need their env overrides too: this panel reads all
+# three ALONGSIDE the pack (a screen is only interesting for what it would settle), and without them
+# the assembled library reports every screenRef and drill id as dangling — which would make the
+# validation-strip assertions below pass for entirely the wrong reason.
+set_tests_properties(model_browser_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json;PINPOINT_CORE_REFERENCES=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/references.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/model_browser_scratch")
+
+# The corridor picture. Pure geometry over value types, which is the whole reason the layout lives
+# in C++ — a curve computed inside delegate bindings is a curve nothing can assert. The load-bearing
+# claims are that the curve is SPLIT-normal (the tolerances are asymmetric by design), that the
+# bands drawn are bandEdgesOf()'s bands under whatever policy is active, and that implausible
+# readings are counted apart rather than graded.
+pp_add_test(corridor_plot_test
+    SOURCES ${DIAG}/tests/corridor_plot_test.cpp
+            ${DIAG}/corridor_plot.cpp ${DIAG}/diagnostics_health.cpp
+            ${DIAG}/drill_pack.cpp ${DIAG}/screen_pack.cpp ${DIAG}/reference_pack.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp ${DIAG_NORM}
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${ANALYSIS}/reference_bands.cpp
+    INCLUDE ${NORM_INC}
+    LINK    Qt6::Qml)

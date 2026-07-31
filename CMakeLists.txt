@@ -276,7 +276,7 @@ target_include_directories(PinPointStudio PRIVATE
     src/Gui/app src/Gui/shell src/Gui/athlete src/Gui/monitor src/Gui/cameras
     src/Gui/imu src/Gui/viz src/Gui/session src/Gui/shot src/Gui/review
     src/Gui/media src/Gui/calibration src/Gui/diagnostics src/Gui/markup
-    src/Gui/characteristics
+    src/Gui/characteristics src/Gui/diagnosticmodel
     src/IMU src/Audio src/Video src/Pose src/STT src/TTS src/LLM src/Secrets src/Core src/Buffer
     src/Analysis src/Metrics src/Diagnostics
     src/Update
@@ -427,6 +427,20 @@ qt_add_qml_module(PinPointStudio
         src/Gui/characteristics/GlossaryView.qml
         src/Gui/characteristics/ScreensView.qml
         src/Gui/characteristics/ReferencesView.qml
+        # Settings → Reference → Diagnostic Model. Its own directory so the panel it
+        # will eventually replace (src/Gui/characteristics/) stays untouched.
+        src/Gui/diagnosticmodel/DiagnosticModel.qml
+        src/Gui/diagnosticmodel/ModelTypeRail.qml
+        src/Gui/diagnosticmodel/ModelTable.qml
+        src/Gui/diagnosticmodel/ModelInspector.qml
+        src/Gui/diagnosticmodel/ModelTrail.qml
+        src/Gui/diagnosticmodel/ModelGraph.qml
+        src/Gui/diagnosticmodel/ModelPicker.qml
+        src/Gui/diagnosticmodel/ModelEdits.qml
+        src/Gui/diagnosticmodel/ModelMint.qml
+        src/Gui/diagnosticmodel/ModelChipRow.qml
+        src/Gui/diagnosticmodel/ModelTools.qml
+        src/Gui/diagnosticmodel/ModelCorridorPlot.qml
         src/Gui/diagnostics/WristDiagnostics.qml
         src/Gui/diagnostics/DofTrajectoryStrip.qml
         src/Gui/diagnostics/PositionAngleGrid.qml
@@ -466,6 +480,11 @@ qt_add_qml_module(PinPointStudio
         src/Gui/characteristics/norm_model.cpp
         src/Gui/characteristics/norm_editor_model.h
         src/Gui/characteristics/norm_editor_model.cpp
+        # Settings → Reference → Diagnostic Model. One facade over the whole content set: it reads
+        # an assembly containing the UNSAVED working copy, which is what lets editing accumulate
+        # into one Save and lets the validation strip grade the draft rather than the file.
+        src/Gui/diagnosticmodel/model_browser.h
+        src/Gui/diagnosticmodel/model_browser.cpp
         src/Diagnostics/anatomy_vocabulary.h
         src/Diagnostics/anatomy_vocabulary.cpp
         src/Diagnostics/measure_facets.h
@@ -476,6 +495,10 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/characteristic_pack.cpp
         src/Diagnostics/pack_provider.h
         src/Diagnostics/resource_pack_provider.cpp
+        src/Diagnostics/memory_pack_provider.cpp
+        src/Diagnostics/memory_norm_provider.cpp
+        src/Diagnostics/corridor_plot.h
+        src/Diagnostics/corridor_plot.cpp
         src/Diagnostics/file_pack_provider.cpp
         src/Diagnostics/merged_pack_provider.cpp
         src/Diagnostics/characteristic_engine.h

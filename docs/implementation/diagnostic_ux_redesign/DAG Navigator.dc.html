@@ -1,0 +1,1949 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500&amp;family=Geist+Mono:wght@300;400&amp;display=swap"><style>
+body{margin:0;background:#eeece7;font-family:-apple-system,"Segoe UI",Helvetica,sans-serif}
+a{color:#3a6ea5}a:hover{color:#254a73}
+.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}
+.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}
+.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}
+.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}
+.dv-card{max-width:100%;background:#fff;border:1px solid rgba(0,0,0,.18);border-radius:6px;box-shadow:0 2px 10px rgba(0,0,0,.10);overflow:hidden}
+.dv-opt:target .dv-oid{background:#3a6ea5;color:#fff}
+.dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}
+</style></helmet>
+
+<section class="dv-turn" id="t5">
+<div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Phase 2 — editing, and the DAG as a pane in the same shell</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="5a">
+<div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a><strong>Edit in the inspector</strong> — the table stays the record picker, the third pane becomes the form. Draft-based, never a modal: dirty gutter on rows, validation strip, explicit Save / Revert.</div>
+<div class="dv-card" style="width:1600px">
+<div style="position:relative;box-sizing:border-box;padding-left:84px;display:flex;flex-direction:column;height:900px;background:#F6F6F5;color:#0A0A09;font-family:Geist,-apple-system,sans-serif;font-size:13px;font-weight:400">
+  <div style="position:absolute;left:0;top:0;bottom:0;width:84px;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;align-items:center;padding:16px 0">
+    <div style="width:32px;height:32px;border-radius:16px;background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:#0066FF">ML</div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin:12px 0"></div>
+    <sc-for list="{{ railModes }}" as="r" hint-placeholder-count="5">
+      <div style="width:56px;padding:5px 0;margin-bottom:8px;display:flex;flex-direction:column;align-items:center;gap:2px">
+        <span style="font-size:14px;color:{{ r.fg }}">{{ r.icon }}</span>
+        <span style="font-size:9px;color:{{ r.fg }}">{{ r.label }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="height:40px;flex:none;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid rgba(0,0,0,.10)">
+    <span>Pinpoint</span>
+    <span style="width:1px;height:16px;background:rgba(0,0,0,.15)"></span>
+    <span style="font-size:11px;font-weight:300;letter-spacing:.6px;text-transform:uppercase;color:#ABABAA">Model browser · editing</span>
+    <div style="flex:1"></div>
+    <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#D94A00">draft · not saved</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid rgba(0,0,0,.06)">
+    <div style="flex:1;max-width:340px;height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px">
+      <span style="color:#ABABAA">⌕</span><span style="color:#ABABAA">Search every content type</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;border:1px solid rgba(0,0,0,.15);border-radius:5px;overflow:hidden;font-size:10px">
+      <div style="padding:5px 12px;background:#0066FF;color:#F6F6F5">Table</div>
+      <div style="padding:5px 12px;border-left:1px solid rgba(0,0,0,.15);color:#525251">Graph</div>
+    </div>
+    <div style="display:flex;border:1px solid #0066FF;border-radius:5px;overflow:hidden;font-size:10px">
+      <div style="padding:5px 12px;background:#0066FF;color:#F6F6F5">Editing</div>
+      <div style="padding:5px 12px;background:transparent;color:#0066FF">Read only</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:10px;padding:8px 24px;background:rgba(217,74,0,.06);border-bottom:1px solid rgba(0,0,0,.06)">
+    <span style="font-size:11px;color:#D94A00">⚠</span>
+    <span style="font-size:11px;color:#D94A00">{{ valid5.headline }}</span>
+    <sc-for list="{{ valid5.items }}" as="v" hint-placeholder-count="2">
+      <span style="font-size:11px;color:#D94A00;opacity:.8">· {{ v }}</span>
+    </sc-for>
+    <div style="flex:1"></div>
+    <span style="font-size:11px;color:#D94A00">show only these rows →</span>
+  </div>
+
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:190px;flex:none;border-right:1px solid rgba(0,0,0,.06);padding-top:12px">
+      <div style="padding:0 18px 6px;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Content</div>
+      <sc-for list="{{ types5 }}" as="t" hint-placeholder-count="9">
+        <div style="display:flex;align-items:baseline;gap:9px;padding:6px 18px;background:{{ t.bg }}">
+          <span style="flex:1;font-size:13px;color:{{ t.fg }}">{{ t.name }}</span>
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:{{ t.nfg }}">{{ t.n }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#FAFAF9">
+      <div style="box-sizing:border-box;display:grid;grid-template-columns:1fr 96px 44px 44px 74px 78px;padding:0 18px;height:28px;align-items:center;border-bottom:1px solid rgba(0,0,0,.10);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">
+        <span>Characteristic</span><span>Group</span><span style="text-align:right">Meas</span><span style="text-align:right">Caus</span><span style="padding-left:12px">Reach</span><span style="padding-left:8px">Source</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden">
+        <sc-for list="{{ rows5 }}" as="r" hint-placeholder-count="14">
+          <div style="box-sizing:border-box;display:grid;grid-template-columns:1fr 96px 44px 44px 74px 78px;padding:0 18px;height:32px;align-items:center;border-bottom:1px solid rgba(0,0,0,.06);background:{{ r.bg }};box-shadow:inset {{ r.gutter }}px 0 0 0 #0066FF">
+            <span style="display:flex;align-items:center;gap:9px;min-width:0;padding-right:14px">
+              <span style="width:7px;height:7px;flex:none;border-radius:50%;background:{{ r.dot }}"></span>
+              <span style="flex:1;min-width:0;font-size:13px;color:{{ r.fg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.label }}</span>
+              <span style="flex:none;font-size:10px;color:#D94A00">{{ r.dirtyTag }}</span>
+            </span>
+            <span style="font-size:11px;color:#525251;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.group }}</span>
+            <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:#525251">{{ r.measures }}</span>
+            <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:#525251">{{ r.causes }}</span>
+            <span style="padding-left:12px;font-size:11px;color:#525251">{{ r.reach }}</span>
+            <span style="padding-left:8px"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:{{ r.srcBg }};color:{{ r.srcFg }}">{{ r.src }}</span></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="width:400px;flex:none;border-left:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;background:#F6F6F5">
+      <div style="flex:none;padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06);display:flex;align-items:baseline;gap:10px">
+        <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Editing characteristic</span>
+        <div style="flex:1"></div>
+        <span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(0,102,255,.05);color:#0066FF">your override</span>
+      </div>
+
+      <div style="flex:1;min-height:0;overflow:hidden">
+        <div style="padding:12px 18px;display:flex;flex-direction:column;gap:11px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Label</span>
+            <div style="height:30px;display:flex;align-items:center;padding:0 10px;background:#FAFAF9;border:1px solid #0066FF;border-radius:5px;font-size:13px">{{ draft5.label }}</div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Group</span>
+              <div style="height:30px;display:flex;align-items:center;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px;color:#525251">{{ draft5.group }} <span style="margin-left:auto;color:#ABABAA">▾</span></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Confirmed by</span>
+              <div style="height:30px;display:flex;align-items:center;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px;color:#525251">{{ draft5.reach }} <span style="margin-left:auto;color:#ABABAA">▾</span></div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Consequence</span>
+            <div style="padding:8px 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px;line-height:1.5;color:#0A0A09;text-wrap:pretty">{{ draft5.consequence }}</div>
+          </div>
+        </div>
+
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
+            <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Caused by</span>
+            <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ draft5.causeN }}</span>
+          </div>
+          <sc-for list="{{ draft5.causes }}" as="c" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0">
+              <span style="flex:1;min-width:0;font-size:12px;color:#0A0A09;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.label }}</span>
+              <div style="display:flex;border:1px solid rgba(0,0,0,.10);border-radius:4px;overflow:hidden;font-size:9px;flex:none">
+                <span style="padding:3px 6px;background:{{ c.wBg }};color:{{ c.wFg }}">weak</span>
+                <span style="padding:3px 6px;border-left:1px solid rgba(0,0,0,.10);background:{{ c.mBg }};color:{{ c.mFg }}">mod</span>
+                <span style="padding:3px 6px;border-left:1px solid rgba(0,0,0,.10);background:{{ c.sBg }};color:{{ c.sFg }}">strong</span>
+              </div>
+              <span style="font-family:'Geist Mono',monospace;font-size:9px;color:#ABABAA;width:52px">{{ c.tier }}</span>
+              <span style="font-size:12px;color:#ABABAA">✕</span>
+            </div>
+          </sc-for>
+          <div style="margin-top:6px;padding:6px 10px;border:1px dashed rgba(0,0,0,.15);border-radius:5px;font-size:11px;color:#0066FF">+ add cause — legal targets only</div>
+        </div>
+
+        <div style="padding:12px 18px">
+          <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+            <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Detected by</span>
+            <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ draft5.measureN }}</span>
+          </div>
+          <sc-for list="{{ draft5.measures }}" as="mm" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:#FAFAF9;border:1px solid rgba(0,0,0,.06);border-radius:5px;margin-bottom:5px">
+              <span style="flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ mm.label }}</span>
+              <span style="font-size:10px;color:#D94A00">{{ mm.shared }}</span>
+              <span style="font-size:12px;color:#ABABAA">✕</span>
+            </div>
+          </sc-for>
+          <div style="padding:6px 10px;border:1px dashed rgba(0,0,0,.15);border-radius:5px;font-size:11px;color:#0066FF">+ pick a measure…</div>
+        </div>
+      </div>
+
+      <div style="flex:none;display:flex;align-items:center;gap:10px;padding:11px 18px;border-top:1px solid rgba(0,0,0,.10);background:#EEEEED">
+        <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#525251">{{ draft5.dirtyN }} unsaved</span>
+        <div style="flex:1"></div>
+        <div style="height:30px;padding:0 14px;display:flex;align-items:center;border:1px solid rgba(0,0,0,.15);border-radius:5px;font-size:12px;color:#525251">Revert</div>
+        <div style="height:30px;padding:0 14px;display:flex;align-items:center;background:#0066FF;border-radius:5px;font-size:12px;color:#F6F6F5">Save to your pack</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="5b">
+<div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a><strong>DAG as the middle pane</strong> — same shell, Graph segment active, coordinates from <code>dag()</code>. Selection is shared with the table, so switching views keeps your place. An edge drag is in progress, and the validator is refusing it.</div>
+<div class="dv-card" style="width:1600px">
+<div style="position:relative;box-sizing:border-box;padding-left:84px;display:flex;flex-direction:column;height:900px;background:#F6F6F5;color:#0A0A09;font-family:Geist,-apple-system,sans-serif;font-size:13px;font-weight:400">
+  <div style="position:absolute;left:0;top:0;bottom:0;width:84px;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;align-items:center;padding:16px 0">
+    <div style="width:32px;height:32px;border-radius:16px;background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:#0066FF">ML</div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin:12px 0"></div>
+    <sc-for list="{{ railModes }}" as="r" hint-placeholder-count="5">
+      <div style="width:56px;padding:5px 0;margin-bottom:8px;display:flex;flex-direction:column;align-items:center;gap:2px">
+        <span style="font-size:14px;color:{{ r.fg }}">{{ r.icon }}</span>
+        <span style="font-size:9px;color:{{ r.fg }}">{{ r.label }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="height:40px;flex:none;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid rgba(0,0,0,.10)">
+    <span>Pinpoint</span>
+    <span style="width:1px;height:16px;background:rgba(0,0,0,.15)"></span>
+    <span style="font-size:11px;font-weight:300;letter-spacing:.6px;text-transform:uppercase;color:#ABABAA">Model browser · graph</span>
+    <div style="flex:1"></div>
+    <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">layout from dag() · {{ g5.drawn }} of {{ g5.total }} nodes</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid rgba(0,0,0,.06)">
+    <div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px;min-width:240px">
+      <span style="color:#ABABAA">◎</span><span>{{ g5.focusLabel }}</span>
+      <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA;margin-left:auto">focus</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#525251">
+      <span>Radius</span>
+      <div style="display:flex;border:1px solid rgba(0,0,0,.15);border-radius:5px;overflow:hidden;font-size:10px">
+        <div style="padding:4px 10px;color:#525251">1</div>
+        <div style="padding:4px 10px;border-left:1px solid rgba(0,0,0,.15);background:#0066FF;color:#F6F6F5">2</div>
+        <div style="padding:4px 10px;border-left:1px solid rgba(0,0,0,.15);color:#525251">3</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#525251"><span style="width:12px;height:12px;border:1px solid rgba(0,0,0,.15);border-radius:2px;background:#0066FF"></span>Hide weak</div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#525251"><span style="width:12px;height:12px;border:1px solid rgba(0,0,0,.15);border-radius:2px;background:#FAFAF9"></span>Include measures</div>
+    <div style="flex:1"></div>
+    <div style="display:flex;border:1px solid rgba(0,0,0,.15);border-radius:5px;overflow:hidden;font-size:10px">
+      <div style="padding:5px 12px;color:#525251">Table</div>
+      <div style="padding:5px 12px;border-left:1px solid rgba(0,0,0,.15);background:#0066FF;color:#F6F6F5">Graph</div>
+    </div>
+    <div style="display:flex;border:1px solid #0066FF;border-radius:5px;overflow:hidden;font-size:10px">
+      <div style="padding:5px 12px;background:#0066FF;color:#F6F6F5">Editing</div>
+      <div style="padding:5px 12px;color:#0066FF">Read only</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:10px;padding:8px 24px;background:rgba(217,74,0,.06);border-bottom:1px solid rgba(0,0,0,.06)">
+    <span style="font-size:11px;color:#D94A00">⚠</span>
+    <span style="font-size:11px;color:#D94A00">{{ g5.reject }}</span>
+    <div style="flex:1"></div>
+    <span style="font-size:11px;color:#D94A00">release to cancel</span>
+  </div>
+
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="flex:1;min-width:0;position:relative;background:#FAFAF9;border-right:1px solid rgba(0,0,0,.06)">
+      <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(4,1fr);pointer-events:none">
+        <sc-for list="{{ g5.heads }}" as="h" hint-placeholder-count="4">
+          <div style="border-right:1px solid rgba(0,0,0,.06);padding:10px 0 0 14px;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">{{ h }}</div>
+        </sc-for>
+      </div>
+      <svg viewBox="0 0 1000 640" width="100%" height="100%" preserveAspectRatio="none" style="position:absolute;inset:0">
+        <sc-for list="{{ g5.edges }}" as="e" hint-placeholder-count="14">
+          <path d="{{ e.d }}" fill="none" stroke="{{ e.stroke }}" strokeWidth="{{ e.w }}" strokeDasharray="{{ e.dash }}" opacity="{{ e.op }}"></path>
+        </sc-for>
+      </svg>
+      <div style="position:absolute;inset:0">
+        <sc-for list="{{ g5.nodes }}" as="n" hint-placeholder-count="12">
+          <div style="position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 10px;border-radius:5px;left:{{ n.l }};top:{{ n.t }};width:{{ n.w }};height:{{ n.h }};background:{{ n.bg }};border:1px solid {{ n.bd }};box-shadow:inset 3px 0 0 0 {{ n.gc }}">
+            <div style="font-size:12px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ n.fg }}">{{ n.label }}</div>
+            <div style="font-family:'Geist Mono',monospace;font-size:9px;color:#ABABAA;white-space:nowrap">{{ n.meta }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="position:absolute;left:16px;bottom:14px;display:flex;align-items:center;gap:14px;padding:8px 12px;background:#F6F6F5;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:10px;color:#525251">
+        <span style="letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Drag a node’s right edge onto another to add a cause</span>
+        <span style="color:#D94A00">dashed red = refused</span>
+      </div>
+    </div>
+
+    <div style="width:400px;flex:none;display:flex;flex-direction:column;background:#F6F6F5">
+      <div style="flex:none;padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+        <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Editing causal link</span>
+        <div style="display:flex;align-items:center;gap:9px;margin-top:9px">
+          <span style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e5.from }}</span>
+          <span style="color:#ABABAA">→</span>
+          <span style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e5.to }}</span>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden">
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;gap:5px">
+          <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Relation</span>
+          <div style="display:flex;border:1px solid rgba(0,0,0,.10);border-radius:5px;overflow:hidden;font-size:11px">
+            <span style="flex:1;text-align:center;padding:5px 0;background:#0066FF;color:#F6F6F5">causes</span>
+            <span style="flex:1;text-align:center;padding:5px 0;border-left:1px solid rgba(0,0,0,.10);color:#525251">corroborates</span>
+            <span style="flex:1;text-align:center;padding:5px 0;border-left:1px solid rgba(0,0,0,.10);color:#525251">excludes</span>
+          </div>
+          <span style="font-size:10px;color:#ABABAA">corroborates may not shadow an existing causes edge — the validator rejects it</span>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;gap:5px">
+          <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Strength</span>
+          <div style="display:flex;border:1px solid rgba(0,0,0,.10);border-radius:5px;overflow:hidden;font-size:11px">
+            <span style="flex:1;text-align:center;padding:5px 0;color:#525251">weak</span>
+            <span style="flex:1;text-align:center;padding:5px 0;border-left:1px solid rgba(0,0,0,.10);background:#0066FF;color:#F6F6F5">moderate</span>
+            <span style="flex:1;text-align:center;padding:5px 0;border-left:1px solid rgba(0,0,0,.10);color:#525251">strong</span>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Evidence</span>
+          <div style="display:flex;gap:6px">
+            <span style="padding:3px 9px;border-radius:10px;font-size:10px;background:rgba(10,122,74,.06);color:#0A7A4A">supported</span>
+            <span style="padding:3px 9px;border-radius:10px;font-size:10px;background:rgba(217,74,0,.06);color:#D94A00">indirect</span>
+            <span style="padding:3px 9px;border-radius:10px;font-size:10px;background:#0066FF;color:#F6F6F5">practice</span>
+          </div>
+          <div style="height:30px;display:flex;align-items:center;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-family:'Geist Mono',monospace;font-size:11px;color:#ABABAA">{{ e5.citation }}</div>
+          <span style="font-size:10px;color:#ABABAA">practice-tier links need no citation and are badged wherever they appear</span>
+        </div>
+        <div style="padding:12px 18px">
+          <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Effect of this edit</span>
+          <div style="display:flex;flex-direction:column;gap:5px;margin-top:7px">
+            <sc-for list="{{ e5.effects }}" as="x" hint-placeholder-count="3">
+              <div style="display:flex;align-items:baseline;gap:8px;font-size:11px;color:#525251">
+                <span style="width:5px;height:5px;border-radius:50%;background:#0066FF;flex:none"></span>
+                <span>{{ x }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:10px;padding:11px 18px;border-top:1px solid rgba(0,0,0,.10);background:#EEEEED">
+        <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#0A7A4A">acyclic ✓</span>
+        <div style="flex:1"></div>
+        <div style="height:30px;padding:0 14px;display:flex;align-items:center;border:1px solid rgba(0,0,0,.15);border-radius:5px;font-size:12px;color:#525251">Remove link</div>
+        <div style="height:30px;padding:0 14px;display:flex;align-items:center;background:#0066FF;border-radius:5px;font-size:12px;color:#F6F6F5">Apply</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: “show the shipped-vs-yours diff before saving” · “what does <a class="dv-oid" href="#5a">5a</a> look like editing a <em>measure</em> rather than a characteristic?” · “add the blast-radius confirmation as a real step”</p>
+</section>
+
+<section class="dv-turn" id="t4">
+<div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">A new screen: one navigator over the whole model — phase 1, navigation only. The existing Diagnostics panel is untouched.</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="4a">
+<div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a><strong>Model browser</strong> — type rail → table → relationship inspector, with a trail of the chain you walked. One shell, columns adapt per type. Shown mid-chain: a slice led here.</div>
+<div class="dv-card" style="width:1600px">
+<div style="position:relative;box-sizing:border-box;padding-left:84px;display:flex;flex-direction:column;height:864px;background:#F6F6F5;color:#0A0A09;font-family:Geist,-apple-system,sans-serif;font-size:13px;font-weight:400">
+  <div style="position:absolute;left:0;top:0;bottom:0;width:84px;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;align-items:center;padding:16px 0">
+    <div style="width:32px;height:32px;border-radius:16px;background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:#0066FF">ML</div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin:12px 0"></div>
+    <sc-for list="{{ railModes }}" as="r" hint-placeholder-count="5">
+      <div style="width:56px;padding:5px 0;margin-bottom:8px;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px">
+        <span style="font-size:14px;color:{{ r.fg }}">{{ r.icon }}</span>
+        <span style="font-size:9px;color:{{ r.fg }}">{{ r.label }}</span>
+      </div>
+    </sc-for>
+    <div style="flex:1"></div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin-bottom:8px"></div>
+    <div style="width:56px;padding:5px 0;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px">
+      <span style="font-size:14px;color:#ABABAA">⚙</span>
+      <span style="font-size:9px;color:#ABABAA">Settings</span>
+    </div>
+  </div>
+
+  <div style="height:40px;flex:none;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid rgba(0,0,0,.10)">
+    <span style="font-size:13px">Pinpoint</span>
+    <span style="width:1px;height:16px;background:rgba(0,0,0,.15)"></span>
+    <span style="font-size:11px;font-weight:300;letter-spacing:.6px;text-transform:uppercase;color:#ABABAA">Model browser</span>
+    <div style="flex:1"></div>
+    <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">core v1.0.0 · schema 1</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid rgba(0,0,0,.06)">
+    <div style="flex:1;max-width:420px;height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px">
+      <span style="color:#ABABAA">⌕</span><span style="color:#ABABAA">Search every content type</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;padding:0 3px 0 10px;height:28px;border:1px solid rgba(0,0,0,.10);border-radius:14px;background:#FAFAF9">
+      <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Trail</span>
+      <sc-for list="{{ trail4 }}" as="t" hint-placeholder-count="3">
+        <span style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:11px;color:{{ t.fg }}">{{ t.label }}</span>
+          <span style="font-size:10px;color:#ABABAA">{{ t.arrow }}</span>
+        </span>
+      </sc-for>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;border:1px solid rgba(0,0,0,.15);border-radius:5px;overflow:hidden;font-size:10px">
+      <div style="padding:5px 12px;background:#0066FF;color:#F6F6F5">Table</div>
+      <div style="padding:5px 12px;border-left:1px solid rgba(0,0,0,.15);color:#ABABAA">Graph</div>
+    </div>
+    <div style="padding:5px 12px;border:1px dashed rgba(0,0,0,.15);border-radius:5px;font-size:10px;color:#ABABAA">Edit — phase 2</div>
+  </div>
+
+  <div style="display:flex;flex:1;min-height:0">
+
+    <div style="width:214px;flex:none;border-right:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;padding-top:12px">
+      <div style="padding:0 18px 6px;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Content</div>
+      <sc-for list="{{ types4 }}" as="t" hint-placeholder-count="9">
+        <div style="display:flex;align-items:baseline;gap:9px;padding:6px 18px;background:{{ t.bg }}">
+          <span style="flex:1;font-size:13px;color:{{ t.fg }}">{{ t.name }}</span>
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:{{ t.nfg }}">{{ t.n }}</span>
+        </div>
+      </sc-for>
+      <div style="margin-top:auto;padding:12px 18px;border-top:1px solid rgba(0,0,0,.06)">
+        <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:6px">Filters</div>
+        <sc-for list="{{ mFilters }}" as="x" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+            <span style="width:12px;height:12px;flex:none;border:1px solid rgba(0,0,0,.15);border-radius:2px;background:{{ x.box }}"></span>
+            <span style="flex:1;font-size:12px;color:#525251">{{ x.label }}</span>
+            <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ x.n }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#FAFAF9">
+      <div style="display:flex;align-items:baseline;gap:10px;padding:14px 18px 10px">
+        <span style="font-size:16px">Measures</span>
+        <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">106 · what the app can actually read</span>
+      </div>
+      <div style="box-sizing:border-box;display:grid;grid-template-columns:1fr 108px 78px 74px 68px;padding:0 18px;height:28px;align-items:center;border-bottom:1px solid rgba(0,0,0,.10);border-top:1px solid rgba(0,0,0,.06);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">
+        <span>Measure</span><span>Unit</span><span>Anchor</span><span>Status ▾</span><span style="text-align:right">Read by</span>
+      </div>
+      <div style="height:512px;flex:none;overflow:hidden">
+        <sc-for list="{{ rows4 }}" as="r" hint-placeholder-count="16">
+          <div style="box-sizing:border-box;display:grid;grid-template-columns:1fr 108px 78px 74px 68px;padding:0 18px;height:32px;align-items:center;border-bottom:1px solid rgba(0,0,0,.06);background:{{ r.bg }}">
+            <span style="display:flex;align-items:center;gap:9px;min-width:0">
+              <span style="width:7px;height:7px;flex:none;border-radius:50%;background:{{ r.dot }}"></span>
+              <span style="flex:1;min-width:0;font-size:13px;color:{{ r.fg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.label }}</span>
+            </span>
+            <span style="font-size:11px;color:#525251;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.unit }}</span>
+            <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ r.anchor }}</span>
+            <span style="font-size:11px;color:#525251">{{ r.status }}</span>
+            <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:{{ r.readFg }}">{{ r.reads }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="margin-top:auto;height:28px;flex:none;display:flex;align-items:center;gap:16px;padding:0 18px;border-top:1px solid rgba(0,0,0,.10);font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">
+        <span>16 of 106 shown · sorted by status, then least-read</span><span>42 read by nothing</span><span>51 planned</span><span>2 no producer</span>
+      </div>
+    </div>
+
+    <div style="width:352px;flex:none;border-left:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;overflow:hidden">
+      <div style="flex:none;padding:14px 18px 12px;border-bottom:1px solid rgba(0,0,0,.06)">
+        <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Measure</div>
+        <div style="font-size:16px;margin-top:5px;text-wrap:pretty">{{ sel4.label }}</div>
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA;margin-top:5px">{{ sel4.id }} · {{ sel4.unit }}</div>
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+          <span style="padding:2px 8px;border-radius:10px;font-size:10px;background:{{ sel4.stBg }};color:{{ sel4.stFg }}">{{ sel4.status }}</span>
+          <span style="padding:2px 8px;border-radius:10px;font-size:10px;border:1px solid rgba(0,0,0,.15);color:#525251">{{ sel4.kind }}</span>
+          <span style="padding:2px 8px;border-radius:10px;font-size:10px;border:1px solid rgba(0,0,0,.15);color:#525251">at {{ sel4.anchor }}</span>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden">
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:6px">High means</div>
+          <div style="font-size:12px;line-height:1.55;color:#525251;text-wrap:pretty">{{ sel4.highMeans }}</div>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:7px">Comes from metric</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:#F6F6F5;border:1px solid rgba(0,0,0,.06);border-radius:5px">
+            <span style="flex:1;font-family:'Geist Mono',monospace;font-size:11px;color:#0066FF">{{ sel4.metricKey }}</span>
+            <span style="font-size:10px;color:#ABABAA">open →</span>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="display:flex;justify-content:space-between;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:7px"><span>Read by signals</span><span style="font-family:'Geist Mono',monospace;letter-spacing:0">{{ sel4.sigN }}</span></div>
+          <sc-for list="{{ sel4.signals }}" as="s" hint-placeholder-count="2">
+            <div style="display:flex;align-items:baseline;gap:8px;padding:3px 0">
+              <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#0066FF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">{{ s.id }}</span>
+              <span style="flex:1;font-size:11px;color:#525251">{{ s.test }}</span>
+              <span style="font-size:10px;color:#ABABAA">{{ s.direction }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="display:flex;justify-content:space-between;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:4px"><span>Blast radius</span><span style="font-family:'Geist Mono',monospace;letter-spacing:0">{{ sel4.userN }}</span></div>
+          <div style="font-size:11px;color:#ABABAA;margin-bottom:7px">characteristics that would change if this measure changed</div>
+          <sc-for list="{{ sel4.users }}" as="u" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;gap:9px;padding:3px 0">
+              <span style="width:6px;height:6px;flex:none;border-radius:50%;background:{{ u.dot }}"></span>
+              <span style="flex:1;font-size:12px;color:#0A0A09;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ u.label }}</span>
+              <span style="font-size:10px;color:#ABABAA">{{ u.group }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:12px 18px">
+          <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:7px">Corridors</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:rgba(217,74,0,.06);border-radius:5px">
+            <span style="flex:1;font-size:12px;color:#D94A00">No norm resolves for this measure</span>
+            <span style="font-size:10px;color:#D94A00">health →</span>
+          </div>
+        </div>
+      </div>
+      <div style="flex:none;display:flex;gap:14px;padding:11px 18px;border-top:1px solid rgba(0,0,0,.06);font-size:11px;color:#0066FF">
+        <span>Show in graph</span><span>Open in Diagnostics</span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="4b">
+<div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a><strong>One table, everything in it</strong> — all {{ stat4b.objects }} objects in a single sortable list with a Type column. One search answers “where is <em>hip</em> mentioned”, across every content file at once.</div>
+<div class="dv-card" style="width:1600px">
+<div style="position:relative;box-sizing:border-box;padding-left:84px;display:flex;flex-direction:column;height:864px;background:#F6F6F5;color:#0A0A09;font-family:Geist,-apple-system,sans-serif;font-size:13px;font-weight:400">
+  <div style="position:absolute;left:0;top:0;bottom:0;width:84px;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;align-items:center;padding:16px 0">
+    <div style="width:32px;height:32px;border-radius:16px;background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:#0066FF">ML</div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin:12px 0"></div>
+    <sc-for list="{{ railModes }}" as="r" hint-placeholder-count="5">
+      <div style="width:56px;padding:5px 0;margin-bottom:8px;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px">
+        <span style="font-size:14px;color:{{ r.fg }}">{{ r.icon }}</span>
+        <span style="font-size:9px;color:{{ r.fg }}">{{ r.label }}</span>
+      </div>
+    </sc-for>
+    <div style="flex:1"></div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin-bottom:8px"></div>
+    <div style="width:56px;padding:5px 0;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px">
+      <span style="font-size:14px;color:#ABABAA">⚙</span>
+      <span style="font-size:9px;color:#ABABAA">Settings</span>
+    </div>
+  </div>
+  <div style="height:40px;flex:none;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid rgba(0,0,0,.10)">
+    <span style="font-size:13px">Pinpoint</span>
+    <span style="width:1px;height:16px;background:rgba(0,0,0,.15)"></span>
+    <span style="font-size:11px;font-weight:300;letter-spacing:.6px;text-transform:uppercase;color:#ABABAA">Model browser</span>
+    <div style="flex:1"></div>
+    <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">core v1.0.0 · {{ stat4b.objects }} objects</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 24px 0">
+    <div style="flex:1;max-width:420px;height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px">
+      <span style="color:#ABABAA">⌕</span><span style="color:#0A0A09">{{ stat4b.q }}</span>
+      <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA;margin-left:auto">{{ stat4b.total }} matches</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;border:1px solid rgba(0,0,0,.15);border-radius:5px;overflow:hidden;font-size:10px">
+      <div style="padding:5px 12px;background:#0066FF;color:#F6F6F5">Table</div>
+      <div style="padding:5px 12px;border-left:1px solid rgba(0,0,0,.15);color:#ABABAA">Graph</div>
+    </div>
+    <div style="padding:5px 12px;border:1px dashed rgba(0,0,0,.15);border-radius:5px;font-size:10px;color:#ABABAA">Edit — phase 2</div>
+  </div>
+
+  <div style="display:flex;gap:6px;padding:14px 24px;flex-wrap:wrap">
+    <sc-for list="{{ typeChips }}" as="t" hint-placeholder-count="9">
+      <div style="height:26px;padding:0 10px;border-radius:13px;display:flex;align-items:center;gap:6px;font-size:10px;background:{{ t.bg }};border:1px solid {{ t.bd }};color:{{ t.fg }}">
+        <span>{{ t.name }}</span><span style="font-family:'Geist Mono',monospace;color:{{ t.nfg }}">{{ t.n }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column;margin:0 24px 24px;background:#FAFAF9;border:1px solid rgba(0,0,0,.06);border-radius:8px;overflow:hidden">
+    <div style="box-sizing:border-box;display:grid;grid-template-columns:104px 1fr 150px 300px 62px 76px;padding:0 18px;height:30px;align-items:center;border-bottom:1px solid rgba(0,0,0,.10);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">
+      <span>Type</span><span>Name</span><span>Identifier</span><span>Connected to</span><span style="text-align:right">Links</span><span style="padding-left:8px">Status</span>
+    </div>
+    <div style="height:576px;flex:none;overflow:hidden">
+      <sc-for list="{{ rows4b }}" as="r" hint-placeholder-count="18">
+        <div style="box-sizing:border-box;display:grid;grid-template-columns:104px 1fr 150px 300px 62px 76px;padding:0 18px;height:32px;align-items:center;border-bottom:1px solid rgba(0,0,0,.06);background:{{ r.bg }}">
+          <span style="display:flex;align-items:center;gap:8px">
+            <span style="width:3px;height:14px;flex:none;border-radius:2px;background:{{ r.tcolor }}"></span>
+            <span style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:#ABABAA">{{ r.type }}</span>
+          </span>
+          <span style="min-width:0;font-size:13px;color:#0A0A09;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.label }}</span>
+          <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.id }}</span>
+          <span style="min-width:0;font-size:11px;color:#525251;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.linked }}</span>
+          <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:#525251">{{ r.links }}</span>
+          <span style="padding-left:8px"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:{{ r.stBg }};color:{{ r.stFg }}">{{ r.status }}</span></span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="margin-top:auto;height:30px;flex:none;display:flex;align-items:center;gap:16px;padding:0 18px;border-top:1px solid rgba(0,0,0,.10);font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">
+      <span>{{ stat4b.shown }} of {{ stat4b.total }} matches for “{{ stat4b.q }}”</span><span>across {{ stat4b.types }} types</span><span>sorted by type, then links ▾</span>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Phase 2 hooks are already drawn as the dashed <em>Edit</em> control and the greyed <em>Graph</em> segment — say the word and I’ll design either. Try next: “<a class="dv-oid" href="#4a">4a</a> with Causal links selected” · “combine them — <a class="dv-oid" href="#4b">4b</a>’s flat search as <a class="dv-oid" href="#4a">4a</a>’s search results” · “what does the Health type look like here?”</p>
+</section>
+
+<section class="dv-turn" id="t3">
+<div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">The table, rebuilt in PinPoint’s own Studio theme — real <code>query()</code> columns, added alongside Settings › Reference › Diagnostics</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="3a">
+<div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>New <em>Directory</em> view — facet rail + table + inspector. Everything on screen comes from <code>query()</code> and <code>detail()</code>. Needs a wide window: three panes plus the settings sidenav.</div>
+<div class="dv-card" style="width:1600px">
+<div style="display:flex;height:824px;background:#F6F6F5;color:#0A0A09;font-family:Geist,-apple-system,sans-serif;font-size:13px;font-weight:400">
+
+  <div style="width:84px;flex:none;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;align-items:center;padding:16px 0">
+    <div style="width:32px;height:32px;border-radius:16px;background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:#0066FF">ML</div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin:12px 0"></div>
+    <sc-for list="{{ railModes }}" as="r" hint-placeholder-count="5">
+      <div style="width:56px;padding:5px 0;margin-bottom:8px;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px;background:{{ r.bg }};border:1px solid {{ r.bd }}">
+        <span style="font-size:14px;color:{{ r.fg }}">{{ r.icon }}</span>
+        <span style="font-size:9px;color:{{ r.fg }}">{{ r.label }}</span>
+      </div>
+    </sc-for>
+    <div style="flex:1"></div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin-bottom:8px"></div>
+    <div style="width:56px;padding:5px 0;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10)">
+      <span style="font-size:14px;color:#0A0A09">⚙</span>
+      <span style="font-size:9px;color:#0A0A09">Settings</span>
+    </div>
+  </div>
+
+  <div style="width:275px;flex:none;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;padding-top:20px">
+    <sc-for list="{{ settingsNav }}" as="s" hint-placeholder-count="11">
+      <div style="display:flex;flex-direction:column">
+        <div style="padding:14px 20px 5px;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;display:{{ s.headShow }}">{{ s.head }}</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:6px 20px;background:{{ s.bg }}">
+          <span style="width:14px;font-size:12px;color:{{ s.fg }}">{{ s.icon }}</span>
+          <span style="flex:1;font-size:13px;color:{{ s.fg }}">{{ s.name }}</span>
+          <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ s.badge }}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+
+    <div style="height:40px;flex:none;display:flex;align-items:center;gap:12px;padding:0 32px;border-bottom:1px solid rgba(0,0,0,.10)">
+      <span style="font-size:13px;color:#0A0A09">Pinpoint</span>
+      <span style="width:1px;height:16px;background:rgba(0,0,0,.15)"></span>
+      <span style="font-size:11px;font-weight:300;letter-spacing:.6px;text-transform:uppercase;color:#ABABAA">Reference · Diagnostics</span>
+    </div>
+
+    <div style="padding:24px 32px 0">
+      <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Reference</div>
+      <div style="font-size:22px;font-weight:300;margin-top:10px;color:#0A0A09">Swing diagnostics</div>
+      <div style="font-size:10px;font-family:'Geist Mono',monospace;color:#ABABAA;margin-top:8px">140 characteristics · 87 causes · 276 causal links</div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:6px;padding:16px 32px 0;align-items:center">
+      <sc-for list="{{ viewChips }}" as="v" hint-placeholder-count="7">
+        <div style="height:28px;padding:0 11px;border-radius:14px;display:flex;align-items:center;font-size:10px;background:{{ v.bg }};border:1px solid {{ v.bd }};color:{{ v.fg }}">{{ v.label }}</div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 32px 14px">
+      <div style="flex:1;max-width:380px;height:30px;display:flex;align-items:center;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px;color:#ABABAA">Search characteristics, aliases, measures</div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#525251"><span style="width:12px;height:12px;border:1px solid rgba(0,0,0,.15);border-radius:2px;background:#0066FF"></span>Observable only</div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#525251"><span style="width:12px;height:12px;border:1px solid rgba(0,0,0,.15);border-radius:2px;background:#FAFAF9"></span>Hide proposed</div>
+      <div style="flex:1"></div>
+      <div style="display:flex;border:1px solid rgba(0,0,0,.15);border-radius:5px;overflow:hidden;font-size:10px">
+        <div style="padding:5px 11px;background:#0066FF;color:#F6F6F5">Table</div>
+        <div style="padding:5px 11px;background:transparent;border-left:1px solid rgba(0,0,0,.15);color:#525251">Grouped</div>
+        <div style="padding:5px 11px;background:transparent;border-left:1px solid rgba(0,0,0,.15);color:#525251">Graph</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex:1;min-height:0;border-top:1px solid rgba(0,0,0,.06)">
+
+      <div style="width:196px;flex:none;padding:14px 0 0;border-right:1px solid rgba(0,0,0,.06);overflow:hidden">
+        <sc-for list="{{ facets3 }}" as="f" hint-placeholder-count="4">
+          <div style="padding:0 16px 14px">
+            <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;padding-bottom:6px">{{ f.name }}</div>
+            <sc-for list="{{ f.items }}" as="it" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+                <span style="width:12px;height:12px;flex:none;border:1px solid rgba(0,0,0,.15);border-radius:2px;background:{{ it.box }}"></span>
+                <span style="flex:1;font-size:12px;color:#525251;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.label }}</span>
+                <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ it.n }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#FAFAF9">
+        <div style="display:grid;grid-template-columns:1fr 92px 40px 40px 52px 78px 76px;padding:0 16px;height:28px;align-items:center;border-bottom:1px solid rgba(0,0,0,.10);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">
+          <span>Characteristic</span><span>Group</span><span style="text-align:right">Meas</span><span style="text-align:right">Caus</span><span style="text-align:right">Expl</span><span style="padding-left:10px">Reach</span><span style="padding-left:8px">Evidence</span>
+        </div>
+        <div style="height:512px;flex:none;overflow:hidden">
+          <sc-for list="{{ rows3 }}" as="r" hint-placeholder-count="16">
+            <div style="box-sizing:border-box;display:grid;grid-template-columns:1fr 92px 40px 40px 52px 78px 76px;padding:0 16px;height:32px;align-items:center;border-bottom:1px solid rgba(0,0,0,.06);background:{{ r.bg }}">
+              <span style="display:flex;align-items:center;gap:9px;min-width:0">
+                <span style="width:7px;height:7px;flex:none;border-radius:50%;background:{{ r.dot }}"></span>
+                <span style="flex:1;min-width:0;font-size:13px;color:{{ r.fg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.label }}</span>
+              </span>
+              <span style="font-size:11px;color:{{ r.mid }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.group }}</span>
+              <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:{{ r.numFg }}">{{ r.measures }}</span>
+              <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:{{ r.numFg }}">{{ r.causes }}</span>
+              <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:{{ r.numFg }}">{{ r.effects }}</span>
+              <span style="padding-left:10px;font-size:11px;color:{{ r.mid }}">{{ r.reach }}</span>
+              <span style="padding-left:8px"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:{{ r.tierBg }};color:{{ r.tierFg }}">{{ r.tier }}</span></span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:auto;height:28px;flex:none;display:flex;align-items:center;gap:16px;padding:0 16px;border-top:1px solid rgba(0,0,0,.10);font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">
+          <span>{{ stat3.shown }} of 140 shown</span><span>62 proposed hidden</span><span>25 latent hidden</span>
+        </div>
+      </div>
+
+      <div style="width:320px;flex:none;border-left:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px 12px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="font-size:16px;color:#0A0A09">{{ sel3.label }}</div>
+          <div style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA;margin-top:4px">{{ sel3.id }}</div>
+          <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+            <span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.12);color:#0066FF">{{ sel3.group }}</span>
+            <span style="padding:2px 8px;border-radius:10px;font-size:10px;border:1px solid rgba(0,0,0,.15);color:#525251">{{ sel3.reach }}</span>
+            <span style="padding:2px 8px;border-radius:10px;font-size:10px;background:{{ sel3.tierBg }};color:{{ sel3.tierFg }}">{{ sel3.tier }}</span>
+          </div>
+        </div>
+        <div style="flex:1;min-height:0;overflow:hidden">
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:6px">Consequence</div>
+          <div style="font-size:12px;line-height:1.55;color:#525251;text-wrap:pretty">{{ sel3.consequence }}</div>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="display:flex;justify-content:space-between;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:7px"><span>Caused by</span><span style="font-family:'Geist Mono',monospace;letter-spacing:0">{{ sel3.inN }}</span></div>
+          <sc-for list="{{ sel3.causes }}" as="c" hint-placeholder-count="6">
+            <div style="display:flex;align-items:center;gap:9px;padding:3px 0">
+              <span style="width:32px;height:3px;flex:none;border-radius:2px;background:#E4E4E3;overflow:hidden"><span style="display:block;height:3px;width:{{ c.w }};background:{{ c.color }}"></span></span>
+              <span style="flex:1;font-size:12px;color:#0A0A09;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.label }}</span>
+              <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ c.tier }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid rgba(0,0,0,.06)">
+          <div style="display:flex;justify-content:space-between;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:7px"><span>Explains</span><span style="font-family:'Geist Mono',monospace;letter-spacing:0">{{ sel3.outN }}</span></div>
+          <sc-for list="{{ sel3.effects }}" as="c" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:9px;padding:3px 0">
+              <span style="width:32px;height:3px;flex:none;border-radius:2px;background:#E4E4E3;overflow:hidden"><span style="display:block;height:3px;width:{{ c.w }};background:{{ c.color }}"></span></span>
+              <span style="flex:1;font-size:12px;color:#0A0A09;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.label }}</span>
+              <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ c.tier }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:12px 18px">
+          <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;margin-bottom:7px">Detected by</div>
+          <sc-for list="{{ sel3.measures }}" as="m" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:#F6F6F5;border:1px solid rgba(0,0,0,.06);border-radius:5px;margin-bottom:5px">
+              <span style="width:6px;height:6px;flex:none;border-radius:50%;background:{{ m.dot }}"></span>
+              <span style="flex:1;font-size:12px;color:#0A0A09;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.label }}</span>
+              <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ m.status }}</span>
+            </div>
+          </sc-for>
+        </div>
+        </div>
+        <div style="flex:none;display:flex;gap:14px;padding:11px 18px;border-top:1px solid rgba(0,0,0,.06);font-size:11px;color:#0066FF">
+          <span>Open detail</span><span>Show in graph</span><span>Edit…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="3b">
+<div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Smallest diff — a <em>Table / Grouped</em> toggle on the existing Characteristics view. No inspector; a row opens the existing <code>CharacteristicDetail</code>. Adds one component, changes no navigation.</div>
+<div class="dv-card" style="width:1360px">
+<div style="display:flex;height:824px;background:#F6F6F5;color:#0A0A09;font-family:Geist,-apple-system,sans-serif;font-size:13px;font-weight:400">
+  <div style="width:84px;flex:none;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;align-items:center;padding:16px 0">
+    <div style="width:32px;height:32px;border-radius:16px;background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:#0066FF">ML</div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin:12px 0"></div>
+    <sc-for list="{{ railModes }}" as="r" hint-placeholder-count="5">
+      <div style="width:56px;padding:5px 0;margin-bottom:8px;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px;background:{{ r.bg }};border:1px solid {{ r.bd }}">
+        <span style="font-size:14px;color:{{ r.fg }}">{{ r.icon }}</span>
+        <span style="font-size:9px;color:{{ r.fg }}">{{ r.label }}</span>
+      </div>
+    </sc-for>
+    <div style="flex:1"></div>
+    <div style="width:24px;height:1px;background:rgba(0,0,0,.06);margin-bottom:8px"></div>
+    <div style="width:56px;padding:5px 0;border-radius:5px;display:flex;flex-direction:column;align-items:center;gap:2px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10)">
+      <span style="font-size:14px;color:#0A0A09">⚙</span>
+      <span style="font-size:9px;color:#0A0A09">Settings</span>
+    </div>
+  </div>
+
+  <div style="width:275px;flex:none;background:#F6F6F5;border-right:1px solid rgba(0,0,0,.10);display:flex;flex-direction:column;padding-top:20px">
+    <sc-for list="{{ settingsNav }}" as="s" hint-placeholder-count="11">
+      <div style="display:flex;flex-direction:column">
+        <div style="padding:14px 20px 5px;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA;display:{{ s.headShow }}">{{ s.head }}</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:6px 20px;background:{{ s.bg }}">
+          <span style="width:14px;font-size:12px;color:{{ s.fg }}">{{ s.icon }}</span>
+          <span style="flex:1;font-size:13px;color:{{ s.fg }}">{{ s.name }}</span>
+          <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">{{ s.badge }}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+    <div style="height:40px;flex:none;display:flex;align-items:center;gap:12px;padding:0 32px;border-bottom:1px solid rgba(0,0,0,.10)">
+      <span style="font-size:13px">Pinpoint</span>
+      <span style="width:1px;height:16px;background:rgba(0,0,0,.15)"></span>
+      <span style="font-size:11px;font-weight:300;letter-spacing:.6px;text-transform:uppercase;color:#ABABAA">Reference · Diagnostics</span>
+    </div>
+    <div style="padding:24px 32px 0">
+      <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">Reference</div>
+      <div style="display:flex;align-items:baseline;gap:12px;margin-top:10px">
+        <div style="font-size:22px;font-weight:300">Swing diagnostics</div>
+        <div style="flex:1"></div>
+        <div style="height:34px;padding:0 14px;border:1px solid rgba(0,0,0,.15);border-radius:5px;display:flex;align-items:center;font-size:13px;font-weight:300;color:#525251">New characteristic</div>
+      </div>
+      <div style="font-size:10px;font-family:'Geist Mono',monospace;color:#ABABAA;margin-top:8px">140 characteristics · 87 causes · 276 causal links</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;padding:16px 32px 0">
+      <sc-for list="{{ viewChips2 }}" as="v" hint-placeholder-count="7">
+        <div style="height:28px;padding:0 11px;border-radius:14px;display:flex;align-items:center;font-size:10px;background:{{ v.bg }};border:1px solid {{ v.bd }};color:{{ v.fg }}">{{ v.label }}</div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:16px 32px 0;flex-wrap:wrap">
+      <div style="flex:1;max-width:380px;height:30px;display:flex;align-items:center;padding:0 10px;background:#FAFAF9;border:1px solid rgba(0,0,0,.10);border-radius:5px;font-size:12px;color:#ABABAA">Search characteristics</div>
+      <div style="flex:1"></div>
+      <div style="display:flex;border:1px solid rgba(0,0,0,.15);border-radius:5px;overflow:hidden;font-size:10px">
+        <div style="padding:5px 12px;background:#0066FF;color:#F6F6F5">Table</div>
+        <div style="padding:5px 12px;border-left:1px solid rgba(0,0,0,.15);color:#525251">Grouped</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;padding:14px 32px 14px;flex-wrap:wrap">
+      <sc-for list="{{ groupChips }}" as="g" hint-placeholder-count="9">
+        <div style="height:26px;padding:0 10px;border-radius:13px;display:flex;align-items:center;font-size:10px;background:{{ g.bg }};color:{{ g.fg }}">{{ g.label }}</div>
+      </sc-for>
+    </div>
+    <div style="flex:1;min-height:0;display:flex;flex-direction:column;margin:0 32px 24px;background:#FAFAF9;border:1px solid rgba(0,0,0,.06);border-radius:8px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:1fr 110px 150px 46px 46px 58px 84px 88px;padding:0 18px;height:30px;align-items:center;border-bottom:1px solid rgba(0,0,0,.10);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ABABAA">
+        <span>Characteristic</span><span>Group</span><span>Also called</span><span style="text-align:right">Meas</span><span style="text-align:right">Caus</span><span style="text-align:right">Expl</span><span style="padding-left:10px">Reach</span><span style="padding-left:8px">Evidence</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden">
+        <sc-for list="{{ rows3b }}" as="r" hint-placeholder-count="13">
+          <div style="box-sizing:border-box;display:grid;grid-template-columns:1fr 110px 150px 46px 46px 58px 84px 88px;padding:0 18px;height:32px;align-items:center;border-bottom:1px solid rgba(0,0,0,.06);background:{{ r.bg }}">
+            <span style="display:flex;align-items:center;gap:9px;min-width:0">
+              <span style="width:7px;height:7px;flex:none;border-radius:50%;background:{{ r.dot }}"></span>
+              <span style="flex:1;min-width:0;font-size:13px;color:{{ r.fg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.label }}</span>
+            </span>
+            <span style="font-size:11px;color:#525251;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.group }}</span>
+            <span style="font-size:11px;color:#ABABAA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.alias }}</span>
+            <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:#525251">{{ r.measures }}</span>
+            <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:#525251">{{ r.causes }}</span>
+            <span style="text-align:right;font-family:'Geist Mono',monospace;font-size:11px;font-weight:300;color:#525251">{{ r.effects }}</span>
+            <span style="padding-left:10px;font-size:11px;color:#525251">{{ r.reach }}</span>
+            <span style="padding-left:8px"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:{{ r.tierBg }};color:{{ r.tierFg }}">{{ r.tier }}</span></span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="margin-top:auto;height:30px;flex:none;display:flex;align-items:center;gap:16px;padding:0 18px;border-top:1px solid rgba(0,0,0,.10);font-family:'Geist Mono',monospace;font-size:10px;color:#ABABAA">
+        <span>{{ stat3.shown3b }} of 140 shown</span><span>click a row for its detail page</span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: “sort <a class="dv-oid" href="#3a">3a</a> by what’s blocking the most characteristics” · “show the dirty / unsaved state on the inspector” · “swap the theme to Vector to check the table survives radius 0”</p>
+</section>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Working backwards — “I hit a slice, what’s causing it?”</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="2a">
+<div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Root-cause outline — <a class="dv-oid" href="#1a">1a</a>’s table, inverted into an upstream tree, with terminal causes ranked.</div>
+<div class="dv-card" style="width:1240px">
+<div style="display:flex;flex-direction:column;height:764px;background:#f2f1ee;color:#1c1c1a;font-size:12px">
+  <div style="display:flex;gap:16px;padding:5px 10px;background:linear-gradient(#fbfbfa,#eeece8);border-bottom:1px solid #cfcdc7;color:#33322f">
+    <span>File</span><span>Edit</span><span>Model</span><span>View</span><span>Validate</span><span>Help</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;background:#f6f5f2;border-bottom:1px solid #d6d4ce">
+    <span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#918f8a;text-transform:uppercase">Observed</span>
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 10px;background:#fff;border:1px solid #b9b7b1;border-radius:3px">
+      <span style="width:7px;height:7px;border-radius:50%;background:#2f6f8a"></span>
+      <span style="font-weight:600;font-size:13px">Slice</span>
+      <span style="font:10px ui-monospace,Menlo,monospace;color:#a8a6a1">slice · ballFlight</span>
+    </div>
+    <div style="display:flex;border:1px solid #b9b7b1;border-radius:3px;overflow:hidden;font-size:11px">
+      <div style="padding:4px 11px;background:#3a6ea5;color:#fff">↑ Causes</div>
+      <div style="padding:4px 11px;background:#fff;border-left:1px solid #b9b7b1;color:#4a4945">↓ Effects</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#4a4945">
+      <span>Depth</span>
+      <div style="display:flex;border:1px solid #b9b7b1;border-radius:3px;overflow:hidden">
+        <div style="padding:3px 9px;background:#fff">1</div>
+        <div style="padding:3px 9px;background:#fff;border-left:1px solid #b9b7b1">2</div>
+        <div style="padding:3px 9px;background:#3a6ea5;color:#fff;border-left:1px solid #b9b7b1">3</div>
+        <div style="padding:3px 9px;background:#fff;border-left:1px solid #b9b7b1">all</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4a4945"><span style="width:11px;height:11px;border:1px solid #a5a39e;border-radius:2px;background:#3a6ea5"></span>Hide weak links</div>
+    <div style="flex:1"></div>
+    <span style="font-size:11px;color:#3a6ea5">Export path set…</span>
+  </div>
+
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#fff">
+      <div style="display:grid;grid-template-columns:1fr 108px 96px 78px 74px 84px;padding:6px 12px;background:#f0eeea;border-bottom:1px solid #c9c7c1;font:600 10.5px system-ui;color:#575652">
+        <span>Cause tree ↑</span><span>Group</span><span>Link</span><span>Confirm by</span><span style="text-align:right">Paths</span><span style="padding-left:10px">Evidence</span>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ tree }}" as="r" hint-placeholder-count="19">
+          <div style="display:grid;grid-template-columns:1fr 108px 96px 78px 74px 84px;align-items:center;padding:6px 12px;border-bottom:1px solid #efeeeb;background:{{ r.bg }}">
+            <span style="display:flex;align-items:center;gap:0;min-width:0;padding-left:{{ r.indent }}">
+              <span style="width:12px;flex:none;font:10px ui-monospace,Menlo,monospace;color:#c3c1bc">{{ r.branch }}</span>
+              <span style="width:9px;flex:none;font-size:9px;color:#918f8a">{{ r.caret }}</span>
+              <span style="width:6px;height:6px;flex:none;border-radius:50%;background:{{ r.gcolor }};margin-right:8px"></span>
+              <span style="font-weight:{{ r.fw }};font-size:{{ r.fs }};color:{{ r.fg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.label }}</span>
+              <span style="font:10px ui-monospace,Menlo,monospace;color:#c3c1bc;margin-left:8px;white-space:nowrap">{{ r.rootTag }}</span>
+            </span>
+            <span style="font-size:11px;color:#6b6a66">{{ r.group }}</span>
+            <span style="display:flex;align-items:center;gap:7px">
+              <span style="width:34px;height:4px;flex:none;border-radius:2px;background:#dedcd6;overflow:hidden"><span style="display:block;height:4px;width:{{ r.w }};background:{{ r.color }}"></span></span>
+              <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ r.strength }}</span>
+            </span>
+            <span style="font-size:10.5px;color:{{ r.confFg }}">{{ r.conf }}</span>
+            <span style="text-align:right;font:11px ui-monospace,Menlo,monospace;color:#6b6a66">{{ r.paths }}</span>
+            <span style="padding-left:10px"><span style="padding:1.5px 6px;border-radius:9px;font-size:10px;background:{{ r.tierBg }};color:{{ r.tierFg }}">{{ r.tier }}</span></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="width:324px;flex:none;background:#f6f5f2;border-left:1px solid #d6d4ce;display:flex;flex-direction:column">
+      <div style="padding:9px 12px;border-bottom:1px solid #d6d4ce;background:#eceae5">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#77756f;text-transform:uppercase">Terminal causes, ranked</div>
+        <div style="font-size:10.5px;color:#918f8a;margin-top:3px">where the chain stops — nothing upstream</div>
+      </div>
+      <sc-for list="{{ roots }}" as="r" hint-placeholder-count="7">
+        <div style="padding:9px 12px;border-bottom:1px solid #e2e0da">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="width:15px;font:10px ui-monospace,Menlo,monospace;color:#a8a6a1">{{ r.rank }}</span>
+            <span style="flex:1;font-size:12px;font-weight:500;color:#1c1c1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.label }}</span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ r.score }}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:23px">
+            <span style="flex:1;height:5px;border-radius:2px;background:#dedcd6;overflow:hidden"><span style="display:block;height:5px;width:{{ r.w }};background:{{ r.color }}"></span></span>
+            <span style="padding:1.5px 7px;border-radius:9px;font-size:9.5px;background:{{ r.confBg }};color:{{ r.confFg }}">{{ r.conf }}</span>
+          </div>
+          <div style="padding-left:23px;margin-top:5px;font:10px ui-monospace,Menlo,monospace;color:#a8a6a1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.via }}</div>
+        </div>
+      </sc-for>
+      <div style="margin-top:auto;padding:10px 12px;border-top:1px solid #d6d4ce;background:#eceae5;font-size:10.5px;line-height:1.55;color:#77756f">Score = strongest path to <span style="color:#3a3936">slice</span>, strong 0.9 · moderate 0.55 · weak 0.3, multiplied along the path.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:14px;padding:5px 11px;background:#e6e4df;border-top:1px solid #cfcdc7;font:10.5px ui-monospace,Menlo,monospace;color:#5e5d59">
+    <span>{{ stat2.paths }} causal paths</span><span>{{ stat2.distinct }} distinct causes</span><span>{{ stat2.roots }} terminal</span><span>depth ≤ 3</span><span style="margin-left:auto">acyclic ✓</span>
+  </div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="2b">
+<div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Upstream funnel — the fault pinned right, causes fanning left by layer. Everything flows toward the symptom.</div>
+<div class="dv-card" style="width:1240px">
+<div style="display:flex;flex-direction:column;height:764px;background:#f2f1ee;color:#1c1c1a;font-size:12px">
+  <div style="display:flex;gap:16px;padding:5px 10px;background:linear-gradient(#fbfbfa,#eeece8);border-bottom:1px solid #cfcdc7;color:#33322f">
+    <span>File</span><span>Edit</span><span>Model</span><span>View</span><span>Validate</span><span>Help</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;background:#f6f5f2;border-bottom:1px solid #d6d4ce">
+    <span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#918f8a;text-transform:uppercase">Trace back from</span>
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 10px;background:#fff;border:1px solid #b9b7b1;border-radius:3px">
+      <span style="width:7px;height:7px;border-radius:50%;background:#2f6f8a"></span><span style="font-weight:600;font-size:13px">Slice</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4a4945"><span style="width:11px;height:11px;border:1px solid #a5a39e;border-radius:2px;background:#3a6ea5"></span>Strongest paths only</div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4a4945"><span style="width:11px;height:11px;border:1px solid #a5a39e;border-radius:2px;background:#fff"></span>Include latent causes</div>
+    <div style="flex:1"></div>
+    <span style="font-size:11px;color:#3a6ea5">Open as table</span>
+  </div>
+
+  <div style="flex:1;min-height:0;position:relative;background:#fdfdfc">
+    <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(5,1fr);pointer-events:none">
+      <sc-for list="{{ fnHeads }}" as="h" hint-placeholder-count="5">
+        <div style="border-right:1px solid #eeece7;padding:10px 0 0 14px;font:600 9.5px ui-monospace,Menlo,monospace;letter-spacing:.07em;text-transform:uppercase;color:#a8a6a1">{{ h }}</div>
+      </sc-for>
+    </div>
+    <svg viewBox="0 0 1080 620" width="100%" height="100%" preserveAspectRatio="none" style="position:absolute;inset:0">
+      <sc-for list="{{ fnEdges }}" as="e" hint-placeholder-count="18">
+        <path d="{{ e.d }}" fill="none" stroke="{{ e.stroke }}" strokeWidth="{{ e.w }}" opacity="{{ e.op }}"></path>
+      </sc-for>
+    </svg>
+    <div style="position:absolute;inset:0">
+      <sc-for list="{{ fnNodes }}" as="n" hint-placeholder-count="16">
+        <div style="position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:0 10px 0 12px;border-radius:3px;left:{{ n.lpc }};top:{{ n.tpc }};width:{{ n.wpc }};height:{{ n.hpc }};background:{{ n.fill }};border:1px solid {{ n.stroke }};box-shadow:inset 3.5px 0 0 0 {{ n.gcolor }}">
+          <div style="font-size:{{ n.fs }};line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:{{ n.fw }};color:{{ n.fg }}">{{ n.label }}</div>
+          <div style="font:9.5px ui-monospace,Menlo,monospace;color:#918f8a;white-space:nowrap">{{ n.meta }}</div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="position:absolute;left:14px;bottom:14px;display:flex;flex-direction:column;gap:5px;padding:9px 11px;background:rgba(255,255,255,.94);border:1px solid #d6d4ce;border-radius:4px;font-size:10.5px;color:#4a4945">
+      <div style="font:600 9.5px ui-monospace,Menlo,monospace;letter-spacing:.07em;text-transform:uppercase;color:#918f8a">Reading it</div>
+      <div>every arrow points at what it produces</div>
+      <div>thickness = causal strength</div>
+      <div>left edge colour = model group</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:14px;padding:5px 11px;background:#e6e4df;border-top:1px solid #cfcdc7;font:10.5px ui-monospace,Menlo,monospace;color:#5e5d59">
+    <span>slice ← {{ stat2.distinct }} causes</span><span>strongest path: weak grip → open face to path → slice</span><span style="margin-left:auto">core v1.0.0</span>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: “in <a class="dv-oid" href="#2a">2a</a>, group the tree by what I can actually screen or measure” · “let <a class="dv-oid" href="#2b">2b</a> start from any ball-flight fault, not just slice” · “add the same trace to the editing screens”</p>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Navigating the causal model — 140 conditions, 276 edges</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="1a">
+<div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Filter workbench — facets + table + inspector. Nothing is drawn; the graph is read as lists.</div>
+<div class="dv-card" style="width:1240px">
+<div style="display:flex;flex-direction:column;height:764px;background:#f2f1ee;color:#1c1c1a;font-size:12px">
+
+  <div style="display:flex;gap:16px;padding:5px 10px;background:linear-gradient(#fbfbfa,#eeece8);border-bottom:1px solid #cfcdc7;font-size:12px;color:#33322f">
+    <span>File</span><span>Edit</span><span>Model</span><span>View</span><span>Validate</span><span>Help</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#f6f5f2;border-bottom:1px solid #d6d4ce">
+    <div style="display:flex;gap:2px">
+      <div style="padding:4px 9px;border:1px solid #c6c4be;border-radius:3px 0 0 3px;background:#fff;font-size:11px">◀</div>
+      <div style="padding:4px 9px;border:1px solid #c6c4be;border-left:0;border-radius:0 3px 3px 0;background:#fff;font-size:11px;color:#a8a6a1">▶</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;flex:1;max-width:340px;padding:4px 9px;background:#fff;border:1px solid #b9b7b1;border-radius:3px">
+      <span style="color:#8d8b86">⌕</span><span style="color:#8d8b86">Search conditions, aliases, measures…</span>
+    </div>
+    <div style="display:flex;gap:6px;margin-left:4px">
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:#e6ecf4;border:1px solid #9fb6cf;border-radius:11px;font-size:11px">group: posture, lateral, armsAndClub <span style="color:#5b7fa6">✕</span></div>
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:#e6ecf4;border:1px solid #9fb6cf;border-radius:11px;font-size:11px">state: active <span style="color:#5b7fa6">✕</span></div>
+      <div style="padding:4px 8px;border:1px dashed #b9b7b1;border-radius:11px;font-size:11px;color:#77756f">+ filter</div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;border:1px solid #b9b7b1;border-radius:3px;overflow:hidden;font-size:11px">
+      <div style="padding:4px 11px;background:#3a6ea5;color:#fff">Table</div>
+      <div style="padding:4px 11px;background:#fff;border-left:1px solid #b9b7b1;color:#4a4945">Graph</div>
+      <div style="padding:4px 11px;background:#fff;border-left:1px solid #b9b7b1;color:#4a4945">Matrix</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex:1;min-height:0">
+
+    <div style="width:214px;flex:none;background:#eceae5;border-right:1px solid #d6d4ce;overflow:hidden;display:flex;flex-direction:column">
+      <div style="padding:8px 10px 6px;font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#77756f;text-transform:uppercase">Facets</div>
+      <sc-for list="{{ facets }}" as="f" hint-placeholder-count="4">
+        <div style="padding:4px 10px 10px">
+          <div style="display:flex;justify-content:space-between;font:600 11px system-ui;color:#3a3936;padding:3px 0">
+            <span>▾ {{ f.name }}</span><span style="color:#918f8a;font-weight:400">{{ f.total }}</span>
+          </div>
+          <sc-for list="{{ f.items }}" as="it" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:7px;padding:2.5px 0 2.5px 4px">
+              <span style="width:11px;height:11px;flex:none;border:1px solid #a5a39e;border-radius:2px;background:{{ it.box }}"></span>
+              <span style="flex:1;color:#3a3936;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.label }}</span>
+              <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ it.n }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+      <div style="margin-top:auto;padding:9px 10px;border-top:1px solid #d6d4ce;font-size:10.5px;color:#77756f;line-height:1.5">Saved views<br><span style="color:#3a6ea5">Draft backlog</span> · <span style="color:#3a6ea5">Unmeasured</span><br><span style="color:#3a6ea5">Practice-tier only</span></div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#fff">
+      <div style="display:grid;grid-template-columns:1fr 96px 74px 62px 40px 40px 46px 92px;gap:0;padding:6px 12px;background:#f0eeea;border-bottom:1px solid #c9c7c1;font:600 10.5px system-ui;color:#575652;letter-spacing:.02em">
+        <span>Condition ▲</span><span>Group</span><span>Detected by</span><span>State</span><span style="text-align:right">In</span><span style="text-align:right">Out</span><span style="text-align:right">Depth</span><span style="padding-left:10px">Evidence</span>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ rows }}" as="r" hint-placeholder-count="16">
+          <div style="display:grid;grid-template-columns:1fr 96px 74px 62px 40px 40px 46px 92px;align-items:center;padding:6.5px 12px;border-bottom:1px solid #efeeeb;background:{{ r.bg }}">
+            <span style="display:flex;align-items:baseline;gap:8px;min-width:0">
+              <span style="width:6px;height:6px;flex:none;border-radius:50%;background:{{ r.gcolor }}"></span>
+              <span style="font-weight:500;color:{{ r.fg }};white-space:nowrap">{{ r.label }}</span>
+              <span style="font:10px ui-monospace,Menlo,monospace;color:{{ r.dim }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.id }}</span>
+            </span>
+            <span style="font-size:11px;color:{{ r.mid }}">{{ r.group }}</span>
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:{{ r.mid }}">{{ r.detected }}</span>
+            <span style="font-size:10.5px;color:{{ r.mid }}">{{ r.state }}</span>
+            <span style="text-align:right;font:11px ui-monospace,Menlo,monospace;color:{{ r.fg }}">{{ r.inDeg }}</span>
+            <span style="text-align:right;font:11px ui-monospace,Menlo,monospace;color:{{ r.fg }}">{{ r.outDeg }}</span>
+            <span style="text-align:right;font:11px ui-monospace,Menlo,monospace;color:{{ r.mid }}">{{ r.depth }}</span>
+            <span style="padding-left:10px"><span style="padding:1.5px 6px;border-radius:9px;font-size:10px;background:{{ r.tierBg }};color:{{ r.tierFg }}">{{ r.tier }}</span></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="width:336px;flex:none;background:#f6f5f2;border-left:1px solid #d6d4ce;display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:9px 12px;border-bottom:1px solid #d6d4ce;background:#eceae5">
+        <div style="font:600 13px system-ui;color:#1c1c1a">{{ sel.label }}</div>
+        <div style="font:10.5px ui-monospace,Menlo,monospace;color:#8d8b86;margin-top:2px">{{ sel.id }} · {{ sel.group }} · depth {{ sel.depth }}</div>
+      </div>
+      <div style="padding:10px 12px;border-bottom:1px solid #e2e0da">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:5px">Consequence</div>
+        <div style="font-size:11.5px;line-height:1.5;color:#3a3936;text-wrap:pretty">{{ sel.consequence }}</div>
+      </div>
+      <div style="padding:10px 12px;border-bottom:1px solid #e2e0da">
+        <div style="display:flex;justify-content:space-between;font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:6px"><span>Caused by</span><span>{{ sel.inN }}</span></div>
+        <sc-for list="{{ sel.causes }}" as="c" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+            <span style="width:34px;height:4px;flex:none;border-radius:2px;background:#dedcd6;overflow:hidden"><span style="display:block;height:4px;width:{{ c.w }};background:{{ c.color }}"></span></span>
+            <span style="flex:1;font-size:11.5px;color:#2c2b28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.label }}</span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ c.tier }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding:10px 12px;border-bottom:1px solid #e2e0da">
+        <div style="display:flex;justify-content:space-between;font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:6px"><span>Leads to</span><span>{{ sel.outN }}</span></div>
+        <sc-for list="{{ sel.effects }}" as="c" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+            <span style="width:34px;height:4px;flex:none;border-radius:2px;background:#dedcd6;overflow:hidden"><span style="display:block;height:4px;width:{{ c.w }};background:{{ c.color }}"></span></span>
+            <span style="flex:1;font-size:11.5px;color:#2c2b28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.label }}</span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ c.tier }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding:10px 12px">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:6px">Detected by</div>
+        <sc-for list="{{ sel.measures }}" as="m" hint-placeholder-count="2">
+          <div style="padding:5px 8px;background:#fff;border:1px solid #e2e0da;border-radius:3px;margin-bottom:4px">
+            <div style="font-size:11px;color:#2c2b28">{{ m.label }}</div>
+            <div style="font:10px ui-monospace,Menlo,monospace;color:#918f8a;margin-top:2px">{{ m.id }} · {{ m.unit }} · {{ m.status }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="margin-top:auto;padding:9px 12px;border-top:1px solid #d6d4ce;background:#eceae5;font:10.5px ui-monospace,Menlo,monospace;color:#77756f">provenance · {{ sel.tier }} {{ sel.cite }}</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:14px;padding:5px 11px;background:#e6e4df;border-top:1px solid #cfcdc7;font:10.5px ui-monospace,Menlo,monospace;color:#5e5d59">
+    <span>{{ stat.shown }} of 140 conditions</span><span>276 edges</span><span>62 draft</span><span>25 latent</span><span style="margin-left:auto">core v1.0.0 · schema 1</span>
+  </div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="1b">
+<div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Layered canvas — depth columns, 2-hop neighbourhood only. The graph is drawn, but never all of it.</div>
+<div class="dv-card" style="width:1240px">
+<div style="display:flex;flex-direction:column;height:764px;background:#f2f1ee;color:#1c1c1a;font-size:12px">
+  <div style="display:flex;gap:16px;padding:5px 10px;background:linear-gradient(#fbfbfa,#eeece8);border-bottom:1px solid #cfcdc7;color:#33322f">
+    <span>File</span><span>Edit</span><span>Model</span><span>View</span><span>Validate</span><span>Help</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:#f6f5f2;border-bottom:1px solid #d6d4ce">
+    <div style="display:flex;align-items:center;gap:7px;padding:4px 9px;background:#fff;border:1px solid #b9b7b1;border-radius:3px;min-width:230px">
+      <span style="color:#8d8b86">◎</span><span style="font-weight:500">Over the top</span><span style="font:10px ui-monospace,Menlo,monospace;color:#a8a6a1">over_the_top</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#4a4945">
+      <span>Radius</span>
+      <div style="display:flex;border:1px solid #b9b7b1;border-radius:3px;overflow:hidden">
+        <div style="padding:3px 9px;background:#fff">1</div>
+        <div style="padding:3px 9px;background:#3a6ea5;color:#fff;border-left:1px solid #b9b7b1">2</div>
+        <div style="padding:3px 9px;background:#fff;border-left:1px solid #b9b7b1">3</div>
+        <div style="padding:3px 9px;background:#fff;border-left:1px solid #b9b7b1">all</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4a4945"><span style="width:11px;height:11px;border:1px solid #a5a39e;border-radius:2px;background:#3a6ea5"></span>Hide weak links</div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4a4945"><span style="width:11px;height:11px;border:1px solid #a5a39e;border-radius:2px;background:#3a6ea5"></span>Hide draft</div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4a4945"><span style="width:11px;height:11px;border:1px solid #a5a39e;border-radius:2px;background:#fff"></span>Show corroborates / excludes</div>
+    <div style="flex:1"></div>
+    <div style="display:flex;border:1px solid #b9b7b1;border-radius:3px;overflow:hidden;font-size:11px">
+      <div style="padding:4px 11px;background:#fff;color:#4a4945">Table</div>
+      <div style="padding:4px 11px;background:#3a6ea5;color:#fff;border-left:1px solid #b9b7b1">Graph</div>
+      <div style="padding:4px 11px;background:#fff;border-left:1px solid #b9b7b1;color:#4a4945">Matrix</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="flex:1;min-width:0;position:relative;background:#fdfdfc;background-image:radial-gradient(#e0ded8 1px,transparent 1px);background-size:22px 22px">
+      <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(6,1fr);pointer-events:none">
+        <sc-for list="{{ colHeads }}" as="h" hint-placeholder-count="6">
+          <div style="border-right:1px solid #eae8e2;padding:8px 0 0 10px;font:600 9.5px ui-monospace,Menlo,monospace;letter-spacing:.07em;text-transform:uppercase;color:#a8a6a1">{{ h }}</div>
+        </sc-for>
+      </div>
+      <svg viewBox="0 0 1080 640" width="100%" height="100%" preserveAspectRatio="none" style="position:absolute;inset:0">
+        <sc-for list="{{ gEdges }}" as="e" hint-placeholder-count="20">
+          <path d="{{ e.d }}" fill="none" stroke="{{ e.stroke }}" strokeWidth="{{ e.w }}" strokeDasharray="{{ e.dash }}" opacity="{{ e.op }}"></path>
+        </sc-for>
+      </svg>
+      <div style="position:absolute;inset:0">
+        <sc-for list="{{ gNodes }}" as="n" hint-placeholder-count="18">
+          <div style="position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 9px 0 11px;border-radius:3px;left:{{ n.lpc }};top:{{ n.tpc }};width:{{ n.wpc }};height:{{ n.hpc }};opacity:{{ n.op }};background:{{ n.fill }};border:1px solid {{ n.stroke }};box-shadow:inset 3.5px 0 0 0 {{ n.gcolor }}">
+            <div style="font-size:11.5px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:{{ n.fw }};color:{{ n.fg }}">{{ n.label }}</div>
+            <div style="font:9.5px ui-monospace,Menlo,monospace;color:#918f8a;white-space:nowrap">{{ n.meta }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="width:280px;flex:none;background:#f6f5f2;border-left:1px solid #d6d4ce;display:flex;flex-direction:column">
+      <div style="padding:9px 12px;border-bottom:1px solid #d6d4ce;background:#eceae5">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase">Whole model</div>
+      </div>
+      <div style="padding:10px 12px;border-bottom:1px solid #e2e0da">
+        <svg viewBox="0 0 256 150" width="100%" height="150" style="background:#fff;border:1px solid #e2e0da;border-radius:3px">
+          <sc-for list="{{ mini }}" as="m" hint-placeholder-count="40">
+            <circle cx="{{ m.cx }}" cy="{{ m.cy }}" r="{{ m.r }}" fill="{{ m.fill }}" opacity="{{ m.op }}"></circle>
+          </sc-for>
+          <rect x="{{ miniBox.x }}" y="{{ miniBox.y }}" width="{{ miniBox.w }}" height="{{ miniBox.h }}" fill="rgba(58,110,165,.10)" stroke="#3a6ea5" strokeWidth="1"></rect>
+        </svg>
+        <div style="font:10px ui-monospace,Menlo,monospace;color:#8d8b86;margin-top:5px">viewport · 28 of 140 in view</div>
+      </div>
+      <div style="padding:10px 12px;border-bottom:1px solid #e2e0da">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:6px">Groups in view</div>
+        <sc-for list="{{ legend }}" as="g" hint-placeholder-count="6">
+          <div style="display:flex;align-items:center;gap:8px;padding:2.5px 0">
+            <span style="width:9px;height:9px;flex:none;border-radius:2px;background:{{ g.color }}"></span>
+            <span style="flex:1;font-size:11px;color:#3a3936">{{ g.name }}</span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ g.n }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding:10px 12px;border-bottom:1px solid #e2e0da">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:6px">Edges</div>
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:10.5px;color:#4a4945">
+          <div style="display:flex;align-items:center;gap:8px"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="#5b5a56" strokeWidth="2.6"></line></svg>strong</div>
+          <div style="display:flex;align-items:center;gap:8px"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="#8b8a85" strokeWidth="1.4"></line></svg>moderate</div>
+          <div style="display:flex;align-items:center;gap:8px"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="#b0aea9" strokeWidth="0.8"></line></svg>weak (hidden)</div>
+          <div style="display:flex;align-items:center;gap:8px"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="#8b8a85" strokeWidth="1.4" strokeDasharray="4 3"></line></svg>corroborates</div>
+        </div>
+      </div>
+      <div style="padding:10px 12px">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:6px">Hidden by filters</div>
+        <div style="font-size:11px;line-height:1.6;color:#575652">18 weak edges<br>62 draft conditions<br>19 corroborates / excludes edges</div>
+      </div>
+      <div style="margin-top:auto;padding:9px 12px;border-top:1px solid #d6d4ce;background:#eceae5;font:10.5px ui-monospace,Menlo,monospace;color:#77756f">layout · longest-path layering</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:14px;padding:5px 11px;background:#e6e4df;border-top:1px solid #cfcdc7;font:10.5px ui-monospace,Menlo,monospace;color:#5e5d59">
+    <span>focus: over_the_top</span><span>radius 2</span><span>28 nodes · 41 edges drawn</span><span style="margin-left:auto">acyclic ✓ · 0 orphans</span>
+  </div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="1c">
+<div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Trail walker — one condition at a time, causes left, effects right, history as a path. Zero layout complexity.</div>
+<div class="dv-card" style="width:1240px">
+<div style="display:flex;flex-direction:column;height:764px;background:#f2f1ee;color:#1c1c1a;font-size:12px">
+  <div style="display:flex;gap:16px;padding:5px 10px;background:linear-gradient(#fbfbfa,#eeece8);border-bottom:1px solid #cfcdc7;color:#33322f">
+    <span>File</span><span>Edit</span><span>Model</span><span>View</span><span>Validate</span><span>Help</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:#f6f5f2;border-bottom:1px solid #d6d4ce;font-size:11.5px">
+    <span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#918f8a;text-transform:uppercase;margin-right:4px">Trail</span>
+    <sc-for list="{{ trail }}" as="t" hint-placeholder-count="4">
+      <span style="display:flex;align-items:center;gap:6px">
+        <span style="padding:3px 9px;border:1px solid {{ t.bd }};border-radius:12px;background:{{ t.bg }};color:{{ t.fg }};font-weight:{{ t.fw }}">{{ t.label }}</span>
+        <span style="color:#b0aea9">{{ t.arrow }}</span>
+      </span>
+    </sc-for>
+    <div style="flex:1"></div>
+    <span style="color:#3a6ea5">Save trail as hypothesis…</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:330px 1fr 330px;flex:1;min-height:0">
+
+    <div style="border-right:1px solid #d6d4ce;background:#f6f5f2;overflow:hidden;display:flex;flex-direction:column">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding:11px 14px 8px;border-bottom:1px solid #e2e0da">
+        <span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#77756f;text-transform:uppercase">◀ Caused by</span>
+        <span style="font:10.5px ui-monospace,Menlo,monospace;color:#a8a6a1">{{ sel.inN }}</span>
+      </div>
+      <sc-for list="{{ sel.causes }}" as="c" hint-placeholder-count="6">
+        <div style="padding:10px 14px;border-bottom:1px solid #eae8e2;background:{{ c.rowbg }}">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="width:6px;height:6px;flex:none;border-radius:50%;background:{{ c.gcolor }}"></span>
+            <span style="flex:1;font-size:12.5px;font-weight:500;color:#1c1c1a">{{ c.label }}</span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ c.upN }} ↑</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:14px">
+            <span style="width:40px;height:4px;flex:none;border-radius:2px;background:#dedcd6;overflow:hidden"><span style="display:block;height:4px;width:{{ c.w }};background:{{ c.color }}"></span></span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ c.strength }} · {{ c.tier }}</span>
+          </div>
+        </div>
+      </sc-for>
+      <div style="margin-top:auto;padding:9px 14px;border-top:1px solid #e2e0da;font-size:10.5px;color:#918f8a">sorted by causal strength</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;background:#fff;padding:26px 32px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:9px">
+        <span style="width:9px;height:9px;border-radius:50%;background:{{ sel.gcolor }}"></span>
+        <span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.09em;color:#77756f;text-transform:uppercase">{{ sel.group }} · depth {{ sel.depth }}</span>
+      </div>
+      <div style="font:600 30px/1.15 Helvetica,sans-serif;letter-spacing:-.015em;margin-top:10px;color:#141412">{{ sel.label }}</div>
+      <div style="font:11.5px ui-monospace,Menlo,monospace;color:#a8a6a1;margin-top:7px">{{ sel.id }} · also “{{ sel.alias }}”</div>
+
+      <div style="display:flex;gap:7px;margin-top:16px;flex-wrap:wrap">
+        <span style="padding:3px 9px;border-radius:3px;background:#eceff4;border:1px solid #cfd7e2;font-size:10.5px;color:#3f5b7d">{{ sel.obs }}</span>
+        <span style="padding:3px 9px;border-radius:3px;background:#eef1ec;border:1px solid #d2dbcd;font-size:10.5px;color:#4b6047">{{ sel.conf }}</span>
+        <span style="padding:3px 9px;border-radius:3px;background:#f4f0e7;border:1px solid #e0d6c2;font-size:10.5px;color:#7a6437">evidence: {{ sel.tier }}</span>
+        <span style="padding:3px 9px;border-radius:3px;background:#f6f5f2;border:1px solid #dedcd6;font-size:10.5px;color:#6b6a66">axis: {{ sel.axis }}</span>
+      </div>
+
+      <div style="margin-top:22px;padding:16px 18px;background:#f8f7f4;border-left:2px solid {{ sel.gcolor }};border-radius:2px">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:7px">Consequence</div>
+        <div style="font-size:14px;line-height:1.6;color:#2c2b28;text-wrap:pretty">{{ sel.consequence }}</div>
+      </div>
+
+      <div style="margin-top:20px">
+        <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d8b86;text-transform:uppercase;margin-bottom:9px">Detected by</div>
+        <sc-for list="{{ sel.measures }}" as="m" hint-placeholder-count="2">
+          <div style="display:flex;align-items:baseline;gap:10px;padding:7px 11px;border:1px solid #e6e4de;border-radius:3px;margin-bottom:6px">
+            <span style="flex:1;font-size:12px;color:#2c2b28">{{ m.label }}</span>
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:#918f8a">{{ m.unit }}</span>
+            <span style="padding:1.5px 7px;border-radius:9px;background:#eef1ec;font-size:10px;color:#4b6047">{{ m.status }}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="margin-top:auto;display:flex;gap:10px;padding-top:18px;border-top:1px solid #eae8e2;font-size:11px;color:#77756f">
+        <span style="color:#3a6ea5">Open in graph</span><span>·</span><span style="color:#3a6ea5">Show all paths to ball flight</span><span>·</span><span style="color:#3a6ea5">Edit condition…</span>
+      </div>
+    </div>
+
+    <div style="border-left:1px solid #d6d4ce;background:#f6f5f2;overflow:hidden;display:flex;flex-direction:column">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding:11px 14px 8px;border-bottom:1px solid #e2e0da">
+        <span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#77756f;text-transform:uppercase">Leads to ▶</span>
+        <span style="font:10.5px ui-monospace,Menlo,monospace;color:#a8a6a1">{{ sel.outN }}</span>
+      </div>
+      <sc-for list="{{ sel.effects }}" as="c" hint-placeholder-count="5">
+        <div style="padding:10px 14px;border-bottom:1px solid #eae8e2;background:{{ c.rowbg }}">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="width:6px;height:6px;flex:none;border-radius:50%;background:{{ c.gcolor }}"></span>
+            <span style="flex:1;font-size:12.5px;font-weight:500;color:#1c1c1a">{{ c.label }}</span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ c.downN }} ↓</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:14px">
+            <span style="width:40px;height:4px;flex:none;border-radius:2px;background:#dedcd6;overflow:hidden"><span style="display:block;height:4px;width:{{ c.w }};background:{{ c.color }}"></span></span>
+            <span style="font:10px ui-monospace,Menlo,monospace;color:#918f8a">{{ c.strength }} · {{ c.tier }}</span>
+          </div>
+        </div>
+      </sc-for>
+      <div style="margin-top:auto;padding:9px 14px;border-top:1px solid #e2e0da;font-size:10.5px;color:#918f8a">3 reach ball flight in ≤2 steps</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:14px;padding:5px 11px;background:#e6e4df;border-top:1px solid #cfcdc7;font:10.5px ui-monospace,Menlo,monospace;color:#5e5d59">
+    <span>trail depth 3</span><span>140 conditions</span><span>276 edges</span><span style="margin-left:auto">core v1.0.0</span>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: “take <a class="dv-oid" href="#1a">1a</a>’s inspector and put it inside <a class="dv-oid" href="#1c">1c</a>” · “show <a class="dv-oid" href="#1b">1b</a> with the whole 140-node model, zoomed out” · “add an edge-editing / validation state”</p>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1340,&quot;height&quot;:900}}">
+const GC = {setup:'#6b7f9e',posture:'#8a6f9e',lateral:'#4f8a7b',armsAndClub:'#a0764a',release:'#9e6b6b',sequence:'#5b7a94',impact:'#8a7a3f',finish:'#7a7a74',ballFlight:'#2f6f8a'};
+const SW = {strong:'100%',moderate:'62%',weak:'30%'};
+const SC = {strong:'#3a6ea5',moderate:'#7d9cbd',weak:'#c0cbd8'};
+const TIERBG = {supported:'#e7efe6',indirect:'#f4f0e7',practice:'#efeeeb'};
+const TIERFG = {supported:'#3f6038',indirect:'#7a6437',practice:'#6b6a66'};
+
+class Component extends DCLogic {
+  state = { m: null };
+  componentDidMount() {
+    import('./model-data.js').then(mod => this.setState({ m: mod.MODEL }));
+  }
+  side(id, dir) {
+    const { nodes, edges } = this.state.m;
+    const by = Object.fromEntries(nodes.map(n => [n.id, n]));
+    return edges.filter(e => e[dir === 'in' ? 'to' : 'from'] === id)
+      .map(e => { const o = by[e[dir === 'in' ? 'from' : 'to']]; return { o, e }; })
+      .sort((a, b) => ({strong:0,moderate:1,weak:2}[a.e.strength] - {strong:0,moderate:1,weak:2}[b.e.strength]))
+      .map(({ o, e }) => ({
+        id: o.id, label: o.label, gcolor: GC[o.group] || '#8b8a85',
+        w: SW[e.strength], color: SC[e.strength], strength: e.strength, tier: e.tier,
+        upN: o.inDeg, downN: o.outDeg, rowbg: 'transparent'
+      }));
+  }
+  renderVals() {
+    const m = this.state.m;
+    if (!m) return {};
+    const by = Object.fromEntries(m.nodes.map(n => [n.id, n]));
+
+    // ---- 1a table
+    const groups = ['posture', 'lateral', 'armsAndClub'];
+    const selId = 'early_extension';
+    const rows = m.nodes.filter(n => groups.includes(n.group) && n.state === 'active')
+      .sort((a, b) => (b.inDeg + b.outDeg) - (a.inDeg + a.outDeg)).slice(0, 17)
+      .map(n => {
+        const on = n.id === selId;
+        return {
+          id: n.id, label: n.label, group: n.group, state: n.state, depth: n.depth,
+          inDeg: n.inDeg, outDeg: n.outDeg, detected: n.measures.length ? n.measures.length + ' measure' + (n.measures.length > 1 ? 's' : '') : '—',
+          gcolor: GC[n.group], bg: on ? '#dce6f2' : '#fff',
+          fg: on ? '#14304d' : '#1c1c1a', mid: on ? '#3f5b7d' : '#6b6a66', dim: on ? '#6c88ab' : '#a8a6a1',
+          tier: n.tier || '—', tierBg: on ? '#cfdcec' : (TIERBG[n.tier] || '#efeeeb'), tierFg: TIERFG[n.tier] || '#6b6a66'
+        };
+      });
+    const count = (f) => m.nodes.reduce((a, n) => (a[f(n)] = (a[f(n)] || 0) + 1, a), {});
+    const gc = count(n => n.group), sc = count(n => n.state), oc = count(n => n.obs), tc = count(n => n.tier);
+    const mk = (name, obj, on) => ({
+      name, total: Object.values(obj).reduce((a, b) => a + b, 0),
+      items: Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 9)
+        .map(([k, v]) => ({ label: k, n: v, box: on.includes(k) ? '#3a6ea5' : '#fff' }))
+    });
+    const facets = [
+      mk('Group', gc, groups), mk('State', sc, ['active']),
+      mk('Observability', oc, []), mk('Evidence tier', tc, [])
+    ];
+
+    const s = by[selId];
+    const sel = {
+      id: s.id, label: s.label, group: s.group, depth: s.depth, consequence: s.consequence,
+      gcolor: GC[s.group], obs: s.obs, conf: s.conf, tier: s.tier || 'practice',
+      cite: s.cite || '(no DOI)', axis: s.axis || 'none', alias: s.aliases[0] || s.label.toLowerCase(),
+      inN: s.inDeg, outN: s.outDeg,
+      causes: this.side(selId, 'in').slice(0, 7),
+      effects: this.side(selId, 'out').slice(0, 6),
+      measures: s.measures.slice(0, 3)
+    };
+
+    // ---- 1b layered neighbourhood graph
+    const focus = 'over_the_top';
+    const nbr = (id) => m.edges.filter(e => e.type === 'causes' && e.strength !== 'weak' && (e.from === id || e.to === id))
+      .map(e => e.from === id ? e.to : e.from);
+    const ring1 = [...new Set(nbr(focus))];
+    const ring2 = [...new Set(ring1.flatMap(nbr))].filter(x => x !== focus && !ring1.includes(x));
+    const keep = new Set([focus, ...ring1, ...ring2.slice(0, 14)]);
+    const sub = [...keep].map(id => by[id]).filter(Boolean);
+    const minD = Math.min(...sub.map(n => n.depth));
+    const cols = {};
+    sub.forEach(n => { const c = Math.min(5, n.depth - minD); (cols[c] = cols[c] || []).push(n); });
+    const W = 152, H = 40, VW = 1080, VH = 640;
+    const pos = {};
+    const gNodes = [];
+    Object.keys(cols).forEach(c => {
+      const list = cols[c].sort((a, b) => b.inDeg + b.outDeg - a.inDeg - a.outDeg).slice(0, 7);
+      const x = 14 + (+c) * (VW / 6);
+      list.forEach((n, i) => {
+        const y = (VH / (list.length + 1)) * (i + 1) - H / 2;
+        pos[n.id] = { x, y };
+        const on = n.id === focus, r1 = ring1.includes(n.id);
+        gNodes.push({
+          lpc: (x / VW * 100) + '%', tpc: (y / VH * 100) + '%',
+          wpc: (W / VW * 100) + '%', hpc: (H / VH * 100) + '%',
+          label: n.label,
+          meta: n.inDeg + '↑ ' + n.outDeg + '↓ · ' + (n.tier || '—').slice(0, 4),
+          fill: on ? '#e3edf8' : '#ffffff', stroke: on ? '#3a6ea5' : '#cfcdc7', sw: on ? 2 : 1,
+          fg: on ? '#14304d' : '#2c2b28', fw: on ? 600 : 500,
+          gcolor: GC[n.group] || '#8b8a85', op: on || r1 ? 1 : 0.55
+        });
+      });
+    });
+    const gEdges = m.edges.filter(e => pos[e.from] && pos[e.to] && e.strength !== 'weak' && e.type === 'causes').map(e => {
+      const a = pos[e.from], b = pos[e.to];
+      const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2;
+      const dx = Math.max(40, Math.abs(x2 - x1) * 0.45);
+      const touch = e.from === focus || e.to === focus;
+      return {
+        d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`,
+        stroke: touch ? '#3a6ea5' : '#a9a7a2', w: e.strength === 'strong' ? 2.4 : 1.3,
+        dash: e.type === 'corroborates' ? '4 3' : 'none', op: touch ? 0.85 : 0.35
+      };
+    });
+    const colHeads = [0, 1, 2, 3, 4, 5].map(i => 'layer ' + (minD + i));
+    const inViewGroups = {};
+    sub.forEach(n => inViewGroups[n.group] = (inViewGroups[n.group] || 0) + 1);
+    const legend = Object.entries(inViewGroups).sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => ({ name: k, n: v, color: GC[k] || '#8b8a85' }));
+
+    let seed = 7;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const mini = m.nodes.map(n => ({
+      cx: 10 + (n.depth / 7) * 236, cy: 8 + rnd() * 134,
+      r: 1.4 + Math.min(3, (n.inDeg + n.outDeg) / 6),
+      fill: GC[n.group] || '#8b8a85', op: keep.has(n.id) ? 0.95 : 0.28
+    }));
+    const miniBox = { x: 132, y: 18, w: 108, h: 112 };
+
+    // ---- 1c trail
+    const trailIds = ['limited_ankle_dorsiflexion', 'limited_trail_hip_ir'];
+    const trail = trailIds.map((id, i) => ({
+      label: by[id] ? by[id].label : id, arrow: '→',
+      bg: '#fff', bd: '#d6d4ce', fg: '#4a4945', fw: 400
+    }));
+    trail.push({ label: sel.label, arrow: '', bg: '#dce6f2', bd: '#9fb6cf', fg: '#14304d', fw: 600 });
+
+    // ---- turn 2: backward trace from a ball-flight fault
+    const target = 'slice';
+    const WT = { strong: 0.9, moderate: 0.55, weak: 0.3 };
+    const inEdges = {};
+    m.edges.filter(e => e.type === 'causes').forEach(e => (inEdges[e.to] = inEdges[e.to] || []).push(e));
+    const CONFFG = { measured: '#3f6038', screened: '#7a6437', asserted: '#8d8b86' };
+    const CONFBG = { measured: '#e7efe6', screened: '#f4f0e7', asserted: '#efeeeb' };
+
+    const scores = {}, viaOf = {}, pathCount = {};
+    let totalPaths = 0;
+    const dfs = (id, depth, score, via) => {
+      const ups = (inEdges[id] || []).filter(e => e.strength !== 'weak');
+      if (!ups.length || depth >= 3) { totalPaths++; return; }
+      ups.forEach(e => {
+        const s = score * WT[e.strength];
+        if (!(scores[e.from] >= s)) { scores[e.from] = s; viaOf[e.from] = via; }
+        pathCount[e.from] = (pathCount[e.from] || 0) + 1;
+        dfs(e.from, depth + 1, s, [by[e.to].label, ...via].slice(0, 3));
+      });
+    };
+    dfs(target, 0, 1, []);
+
+    const tree = [];
+    const build = (id, depth, chain) => {
+      if (depth > 2 || tree.length > 18) return;
+      const ups = (inEdges[id] || []).filter(e => e.strength !== 'weak')
+        .sort((a, b) => WT[b.strength] - WT[a.strength]);
+      ups.forEach((e, i) => {
+        if (tree.length > 18 || chain.includes(e.from)) return;
+        const n = by[e.from];
+        const terminal = !(inEdges[e.from] || []).filter(x => x.strength !== 'weak').length;
+        tree.push({
+          id: n.id, label: n.label, group: n.group, gcolor: GC[n.group] || '#8b8a85',
+          indent: (depth * 22) + 'px', branch: depth ? (i === ups.length - 1 ? '└' : '├') : '',
+          caret: terminal ? '·' : '▾',
+          fw: depth === 0 ? 600 : 500, fs: depth === 0 ? '12.5px' : '12px',
+          fg: depth === 0 ? '#14304d' : '#1c1c1a',
+          bg: depth === 0 ? '#f2f6fb' : '#fff',
+          rootTag: terminal ? 'terminal' : '',
+          strength: e.strength, w: SW[e.strength], color: SC[e.strength],
+          conf: n.conf, confFg: CONFFG[n.conf] || '#6b6a66',
+          paths: pathCount[n.id] || 1,
+          tier: e.tier || '—', tierBg: TIERBG[e.tier] || '#efeeeb', tierFg: TIERFG[e.tier] || '#6b6a66'
+        });
+        build(e.from, depth + 1, [...chain, e.from]);
+      });
+    };
+    build(target, 0, [target]);
+
+    const roots = Object.keys(scores)
+      .filter(id => !(inEdges[id] || []).filter(x => x.strength !== 'weak').length)
+      .sort((a, b) => scores[b] - scores[a]).slice(0, 7)
+      .map((id, i) => ({
+        rank: (i + 1) + '.', label: by[id].label, score: scores[id].toFixed(2),
+        w: Math.round(scores[id] * 100) + '%',
+        color: scores[id] > 0.7 ? '#3a6ea5' : scores[id] > 0.35 ? '#7d9cbd' : '#c0cbd8',
+        conf: by[id].conf, confBg: CONFBG[by[id].conf] || '#efeeeb', confFg: CONFFG[by[id].conf] || '#6b6a66',
+        via: 'via ' + (viaOf[id] || []).slice().reverse().join(' → ')
+      }));
+    const stat2 = { paths: totalPaths, distinct: Object.keys(scores).length, roots: roots.length };
+
+    // funnel layout: 5 columns, target pinned right
+    const lvl = {}; lvl[target] = 4;
+    const q = [[target, 4]];
+    while (q.length) {
+      const [id, L] = q.shift();
+      if (L <= 0) continue;
+      (inEdges[id] || []).filter(e => e.strength !== 'weak').forEach(e => {
+        if (lvl[e.from] === undefined || lvl[e.from] > L - 1) { lvl[e.from] = L - 1; q.push([e.from, L - 1]); }
+      });
+    }
+    const fcols = {};
+    Object.keys(lvl).forEach(id => (fcols[lvl[id]] = fcols[lvl[id]] || []).push(id));
+    const FW = 168, FH = 44, FVW = 1080, FVH = 620;
+    const fpos = {}, fnNodes = [];
+    [0, 1, 2, 3, 4].forEach(c => {
+      const list = (fcols[c] || []).sort((a, b) => (scores[b] || 1) - (scores[a] || 1)).slice(0, 6);
+      const x = 20 + c * (FVW / 5);
+      list.forEach((id, i) => {
+        const n = by[id], y = (FVH / (list.length + 1)) * (i + 1) - FH / 2, on = id === target;
+        fpos[id] = { x, y };
+        fnNodes.push({
+          lpc: (x / FVW * 100) + '%', tpc: ((y - 20) / FVH * 100) + '%',
+          wpc: (FW / FVW * 100) + '%', hpc: (FH / FVH * 100) + '%',
+          label: n.label, meta: on ? 'observed fault' : n.conf + ' · ' + (scores[id] || 1).toFixed(2),
+          fill: on ? '#e3edf8' : '#fff', stroke: on ? '#3a6ea5' : '#dedcd6',
+          fg: on ? '#14304d' : '#2c2b28', fw: on ? 600 : 500, fs: on ? '13px' : '11.5px',
+          gcolor: GC[n.group] || '#8b8a85'
+        });
+      });
+    });
+    const fnEdges = m.edges.filter(e => e.type === 'causes' && fpos[e.from] && fpos[e.to] && e.strength !== 'weak')
+      .map(e => {
+        const a = fpos[e.from], b2 = fpos[e.to];
+        const x1 = a.x + FW, y1 = a.y + FH / 2 - 20, x2 = b2.x, y2 = b2.y + FH / 2 - 20;
+        const dx = Math.max(36, (x2 - x1) * 0.5);
+        return {
+          d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`,
+          stroke: e.to === target ? '#3a6ea5' : '#b3b1ac',
+          w: e.strength === 'strong' ? 2.6 : 1.3, op: e.to === target ? 0.9 : 0.5
+        };
+      });
+    const fnHeads = ['4 steps upstream', '3 steps', '2 steps', '1 step', 'Observed fault'];
+
+    // ═══ turn 3: the table in PinPoint's real Studio theme ═══
+    // Studio light tokens, verbatim from docs/design/pinpoint_qml_design_system.md
+    const T = {
+      bg: '#F6F6F5', bg2: '#EEEEED', bg3: '#E4E4E3', surface: '#FAFAF9',
+      border: 'rgba(0,0,0,.06)', borderMid: 'rgba(0,0,0,.10)', borderStrong: 'rgba(0,0,0,.15)',
+      text: '#0A0A09', text2: '#525251', text3: '#ABABAA',
+      accent: '#0066FF', accentLight: 'rgba(0,102,255,.05)', accentMid: 'rgba(0,102,255,.12)',
+      good: '#0A7A4A', warn: '#D94A00'
+    };
+    // Resolvability dot — maps to Theme.colorRag* in QML, values approximated here
+    const RAG = { live: T.good, planned: T.warn, externalDevice: T.warn, noProducer: '#A32100', notCapturable: T.text3 };
+    const TIER3 = {
+      supported: { bg: 'rgba(10,122,74,.06)', fg: T.good },
+      indirect: { bg: 'rgba(217,74,0,.06)', fg: T.warn },
+      practice: { bg: T.bg2, fg: T.text2 }
+    };
+    const GLABEL = {
+      setup: 'Setup', posture: 'Posture', lateral: 'Lateral', armsAndClub: 'Arms & club',
+      release: 'Release', sequence: 'Sequence', impact: 'Impact', finish: 'Finish', ballFlight: 'Ball flight'
+    };
+    // reach is derived in C++ from confirmedBy; these are the labels a row shows
+    const REACH = { measured: 'Measured', screened: 'Screened', asserted: 'Asserted' };
+
+    // PpRail.qml — five mode buttons, Settings pinned at the foot; rail is railWidth * 1.6
+    const railModes = [['⌂', 'Home'], ['◑', 'Swing'], ['⌖', 'Wrist'], ['⇅', 'GRF'], ['✦', 'Coach']]
+      .map(([icon, label]) => ({ icon, label, bg: 'transparent', bd: 'transparent', fg: T.text3 }));
+    // ScreenSettings.qml:211–230 — navIdx, icon, label, sectionHead. Metrics is NOT here: it
+    // became a view inside Diagnostics. Diagnostics is navIdx 9 under the "Reference" head.
+    const settingsNav = [
+      ['⊞', 'General', 'General', ''], ['◐', 'Appearance', '', ''], ['▭', 'Displays', '', ''],
+      ['⊙', 'Cameras', 'Hardware', '2'], ['⌖', 'IMUs', '', '3'], ['♪', 'Microphone', '', ''],
+      ['◎', 'Launch Monitor', '', ''], ['▥', 'Storage', 'Data', ''], ['▤', 'Archiving', '', ''],
+      ['◇', 'Diagnostics', 'Reference', ''], ['◈', 'System', '', '']
+    ].map(([icon, name, head, badge]) => ({
+      icon, name, head, badge, headShow: head ? 'block' : 'none',
+      bg: name === 'Diagnostics' ? T.accentLight : 'transparent',
+      fg: name === 'Diagnostics' ? T.accent : T.text2
+    }));
+    const chip = (label, active, outline) => ({
+      label,
+      bg: active && !outline ? T.accent : outline ? 'transparent' : T.bg2,
+      bd: outline ? (active ? T.accent : T.borderMid) : 'transparent',
+      fg: active ? (outline ? T.accent : T.bg) : T.text2
+    });
+    const viewChips = [chip('Characteristics', false), chip('Directory', true),
+      chip('Measures & norms', false), chip('Metrics', false), chip('Causes & health', false),
+      chip('Drills', false), chip('Glossary', false), chip('References', false, true)];
+    const viewChips2 = [chip('Characteristics', true), chip('Measures & norms', false),
+      chip('Metrics', false), chip('Causes & health', false), chip('Drills', false),
+      chip('Glossary', false), chip('References', false, true)];
+    const groupChips = [{ label: 'All', bg: T.accent, fg: T.bg },
+      ...Object.values(GLABEL).map(label => ({ label, bg: T.bg2, fg: T.text2 }))];
+
+    const resolvabilityOf = (n) => {
+      if (!n.measures.length) return n.conf === 'screened' ? 'notCapturable' : 'noProducer';
+      const st = n.measures.map(x => x.status);
+      if (st.includes('live')) return 'live';
+      if (st.includes('externalDevice')) return 'externalDevice';
+      if (st.includes('planned')) return 'planned';
+      return 'noProducer';
+    };
+    const mkRow3 = (n, selected) => ({
+      id: n.id, label: n.label, group: GLABEL[n.group] || n.group,
+      alias: n.aliases[0] || '—',
+      measures: n.measures.length, causes: n.inDeg, effects: n.outDeg,
+      reach: REACH[n.conf] || n.conf, dot: RAG[resolvabilityOf(n)],
+      bg: selected ? T.accentLight : 'transparent',
+      fg: selected ? T.accent : T.text, dim: selected ? T.accent : T.text3,
+      mid: T.text2, numFg: selected ? T.accent : T.text2,
+      tier: n.tier || 'practice',
+      tierBg: (TIER3[n.tier] || TIER3.practice).bg, tierFg: (TIER3[n.tier] || TIER3.practice).fg
+    });
+
+    const order = Object.keys(GLABEL);
+    const active = m.nodes.filter(n => n.state === 'active' && n.obs === 'observable')
+      .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || a.label.localeCompare(b.label));
+    // Chosen from the rendered window so the selected-row treatment is always on screen.
+    const sel3Id = (active.slice(0, 16).find(n => n.inDeg > 0 && n.outDeg > 0 && n.consequence)
+                    || active[0]).id;
+    const rows3 = active.slice(0, 16).map(n => mkRow3(n, n.id === sel3Id));
+    const rows3b = active.slice(0, 13).map(n => mkRow3(n, false));
+
+    const facets3 = [
+      { name: 'Group', items: Object.entries(GLABEL).map(([k, label]) => ({
+        label, n: m.nodes.filter(n => n.group === k).length, box: T.surface })).slice(0, 6) },
+      { name: 'Reach', items: Object.entries(REACH).map(([k, label]) => ({
+        label, n: m.nodes.filter(n => n.conf === k).length, box: k === 'measured' ? T.accent : T.surface })) },
+      { name: 'Evidence', items: ['supported', 'indirect', 'practice'].map(k => ({
+        label: k, n: m.nodes.filter(n => n.tier === k).length, box: T.surface })) },
+      { name: 'Resolvability', items: ['live', 'planned', 'externalDevice', 'noProducer'].map(k => ({
+        label: k, n: m.nodes.filter(n => resolvabilityOf(n) === k).length, box: T.surface })) }
+    ];
+
+    const s3 = by[sel3Id];
+    const side3 = (dir) => this.side(sel3Id, dir).map(c => ({
+      label: c.label, tier: c.tier || '—', w: c.w,
+      color: c.strength === 'strong' ? T.accent : c.strength === 'moderate' ? 'rgba(0,102,255,.45)' : T.bg3
+    }));
+    const sel3 = {
+      id: s3.id, label: s3.label, group: GLABEL[s3.group] || s3.group,
+      reach: REACH[s3.conf] || s3.conf, consequence: s3.consequence,
+      tier: s3.tier || 'practice',
+      tierBg: (TIER3[s3.tier] || TIER3.practice).bg, tierFg: (TIER3[s3.tier] || TIER3.practice).fg,
+      inN: s3.inDeg, outN: s3.outDeg,
+      causes: side3('in').slice(0, 6), effects: side3('out').slice(0, 4),
+      measures: s3.measures.slice(0, 3).map(x => ({
+        label: x.label, status: x.status, dot: RAG[x.status] || T.text3 }))
+    };
+    const stat3 = { shown: rows3.length, shown3b: rows3b.length };
+
+    // ═══ turn 4: the new model-browser screen — every entity type, navigation only ═══
+    const ST = { live: { bg: 'rgba(10,122,74,.06)', fg: T.good }, planned: { bg: 'rgba(217,74,0,.06)', fg: T.warn },
+      externalDevice: { bg: T.bg2, fg: T.text2 }, noProducer: { bg: 'rgba(217,74,0,.06)', fg: '#A32100' } };
+    const TYPEC = { Charac: '#0066FF', Cause: '#6b7f9e', Measure: T.good, Signal: '#8a6f9e',
+      Link: '#4f8a7b', Screen: '#a0764a', Drill: '#8a7a3f', Ref: '#2f6f8a' };
+
+    const chars = m.nodes.filter(n => n.measures.length);
+    const causes = m.nodes.filter(n => !n.measures.length);
+    const types4 = [
+      ['Characteristics', chars.length], ['Causes', causes.length], ['Measures', m.measures.length],
+      ['Signals', m.signals.length], ['Causal links', m.edges.length], ['Screens', m.screens.length],
+      ['Drills', m.drills.length], ['References', m.references.length], ['Health', '—']
+    ].map(([name, n]) => ({
+      name, n, bg: name === 'Measures' ? T.accentLight : 'transparent',
+      fg: name === 'Measures' ? T.accent : T.text2,
+      nfg: name === 'Measures' ? T.accent : T.text3
+    }));
+    const mFilters = [
+      { label: 'live', n: m.measures.filter(x => x.status === 'live').length, box: T.accent },
+      { label: 'planned', n: m.measures.filter(x => x.status === 'planned').length, box: T.accent },
+      { label: 'externalDevice', n: m.measures.filter(x => x.status === 'externalDevice').length, box: T.surface },
+      { label: 'noProducer', n: m.measures.filter(x => x.status === 'noProducer').length, box: T.surface }
+    ];
+
+    // Every addressable object the browser covers, causal links included — they are a type in the
+    // chip row, so the "All types" total has to count them.
+    const OBJECTS = m.nodes.length + m.measures.length + m.signals.length + m.edges.length
+                  + m.screens.length + m.drills.length + m.references.length;
+
+    const sigsOfMeasure = (label) => m.signals.filter(s => s.measures.includes(label));
+    // Sorted by what the app cannot yet read — the question a model author actually opens this with.
+    const STRANK = { noProducer: 0, notCapturable: 1, planned: 2, externalDevice: 3, live: 4 };
+    const measuresSorted = m.measures.slice().sort((a, b) =>
+      STRANK[a.status] - STRANK[b.status] || a.users.length - b.users.length
+      || a.label.localeCompare(b.label));
+    const window4 = measuresSorted.slice(0, 16);
+    const sel4m = window4.slice().sort((a, b) => b.users.length - a.users.length)
+                    .find(x => x.highMeans) || window4[0];
+    const rows4 = window4.map(x => {
+      const on = x.id === sel4m.id;
+      return {
+        id: x.id, label: x.label || x.id, unit: x.unit || '—', anchor: x.anchor || '—', status: x.status,
+        reads: x.users.length,
+        readFg: on ? T.accent : x.users.length === 0 ? T.warn : T.text2,
+        dot: (ST[x.status] || ST.externalDevice).fg,
+        bg: on ? T.accentLight : 'transparent', fg: on ? T.accent : T.text,
+        numFg: on ? T.accent : T.text2
+      };
+    });
+    const byLabel = Object.fromEntries(m.nodes.map(n => [n.label, n]));
+    const sel4 = {
+      id: sel4m.id, label: sel4m.label || sel4m.id, unit: sel4m.unit, status: sel4m.status,
+      kind: sel4m.kind,
+      stBg: (ST[sel4m.status] || ST.externalDevice).bg, stFg: (ST[sel4m.status] || ST.externalDevice).fg,
+      anchor: sel4m.anchor || '—', highMeans: sel4m.highMeans || '—', metricKey: sel4m.metricKey || '—',
+      signals: sigsOfMeasure(sel4m.label).slice(0, 3),
+      sigN: sigsOfMeasure(sel4m.label).length,
+      userN: sel4m.users.length,
+      users: sel4m.users.slice(0, 4).map(label => ({
+        label, group: GLABEL[(byLabel[label] || {}).group] || '',
+        dot: GC[(byLabel[label] || {}).group] || T.text3
+      }))
+    };
+
+    // The trail is the chain actually walked to this selection: a cause, the characteristic it
+    // explains, and the measure that characteristic is read by — which IS the current selection.
+    const u0 = sel4.users.length ? byLabel[sel4.users[0].label] : null;
+    const up0 = u0 ? this.side(u0.id, 'in')[0] : null;
+    const trail4 = [];
+    if (up0) trail4.push({ label: up0.label, arrow: '→', fg: T.text2 });
+    if (u0) trail4.push({ label: u0.label, arrow: '→', fg: T.text2 });
+    trail4.push({ label: sel4.id, arrow: '', fg: T.accent });
+
+    // 4b — every object in one list, filtered by a search across all types
+    const query4 = 'hip';
+    const hit = (s) => (s || '').toLowerCase().includes(query4);
+    const mk4b = (type, label, id, linked, links, status) => ({
+      type, label, id, linked, links, status,
+      tcolor: TYPEC[type] || T.text3, bg: 'transparent',
+      stBg: (ST[status] || { bg: T.bg2 }).bg, stFg: (ST[status] || { fg: T.text2 }).fg
+    });
+    const matches4b = [
+      ...m.nodes.filter(n => hit(n.label) || hit(n.id)).map(n => mk4b(
+        n.measures.length ? 'Charac' : 'Cause', n.label, n.id,
+        [...this.side(n.id, 'in').slice(0, 2).map(c => c.label)].join(', ') || '—',
+        n.inDeg + n.outDeg, n.tier || 'practice')),
+      ...m.measures.filter(x => hit(x.label) || hit(x.id)).map(x => mk4b(
+        'Measure', x.label, x.id, x.users.slice(0, 2).join(', ') || 'nothing reads it',
+        x.users.length, x.status)),
+      ...m.signals.filter(x => hit(x.id) || x.measures.some(hit)).map(x => mk4b(
+        'Signal', x.test + ' · ' + x.direction, x.id, x.measures.slice(0, 2).join(', '),
+        x.users.length, 'live')),
+      ...m.screens.filter(x => hit(x.id)).map(x => mk4b(
+        'Screen', x.id.replace('screen.', ''), x.id, x.settles.slice(0, 2).join(', '),
+        x.settles.length, 'live')),
+      ...m.drills.filter(x => hit(x.id)).map(x => mk4b(
+        'Drill', x.id.replace('drill.', ''), x.id, x.answers.slice(0, 2).join(', '),
+        x.answers.length, 'live'))
+    ];
+    const rows4b = matches4b.slice(0, 18);
+    const stat4b = { q: query4, total: matches4b.length, shown: rows4b.length, objects: OBJECTS,
+                     types: new Set(matches4b.map(x => x.type)).size };
+    const typeChips = [
+      { name: 'All types', n: OBJECTS }, { name: 'Characteristics', n: chars.length },
+      { name: 'Causes', n: causes.length }, { name: 'Measures', n: m.measures.length },
+      { name: 'Signals', n: m.signals.length }, { name: 'Causal links', n: m.edges.length },
+      { name: 'Screens', n: m.screens.length }, { name: 'Drills', n: m.drills.length },
+      { name: 'References', n: m.references.length }
+    ].map((x, i) => ({
+      ...x, bg: i === 0 ? T.accent : T.bg2, bd: 'transparent',
+      fg: i === 0 ? T.bg : T.text2, nfg: i === 0 ? 'rgba(246,246,245,.7)' : T.text3
+    }));
+
+    // ═══ turn 5: phase 2 — draft editing, and the DAG as a pane ═══
+    const focus5 = by[sel3Id] || active[0];
+    const types5 = types4.map(t => ({
+      ...t, bg: t.name === 'Characteristics' ? T.accentLight : 'transparent',
+      fg: t.name === 'Characteristics' ? T.accent : T.text2,
+      nfg: t.name === 'Characteristics' ? T.accent : T.text3
+    }));
+
+    // Three rows carry an unsaved draft; the rest are shipped content.
+    const dirtyIds = [focus5.id, ...active.filter(n => n.id !== focus5.id).slice(0, 2).map(n => n.id)];
+    const rows5 = active.slice(0, 14).map(n => {
+      const dirty = dirtyIds.includes(n.id), on = n.id === focus5.id;
+      return {
+        label: n.label, group: GLABEL[n.group] || n.group, measures: n.measures.length,
+        causes: n.inDeg, reach: REACH[n.conf] || n.conf,
+        dot: RAG[resolvabilityOf(n)],
+        bg: on ? T.accentLight : 'transparent', fg: on ? T.accent : T.text,
+        gutter: dirty ? 2 : 0, dirtyTag: dirty ? 'edited' : '',
+        src: dirty ? 'yours' : 'shipped',
+        srcBg: dirty ? 'rgba(0,102,255,.05)' : T.bg2, srcFg: dirty ? T.accent : T.text2
+      };
+    });
+    if (!dirtyIds.some(id => rows5.some(r => r.dirtyTag && r.label === by[id].label))) rows5[0].gutter = 2;
+
+    const sharedMeasures = focus5.measures.map(x => {
+      const src = m.measures.find(mm => mm.id === x.id);
+      const n = src ? src.users.length : 1;
+      return { label: x.label || x.id, shared: n > 1 ? 'shared with ' + (n - 1) : '' };
+    });
+    const causeEdges5 = this.side(focus5.id, 'in');
+    const seg = (on) => on
+      ? { bg: T.accent, fg: T.bg }
+      : { bg: 'transparent', fg: T.text2 };
+    const draft5 = {
+      label: focus5.label, group: GLABEL[focus5.group] || focus5.group,
+      reach: REACH[focus5.conf] || focus5.conf, consequence: focus5.consequence,
+      causeN: causeEdges5.length, measureN: focus5.measures.length,
+      causes: causeEdges5.slice(0, 5).map(c => {
+        const w = seg(c.strength === 'weak'), md = seg(c.strength === 'moderate'), s = seg(c.strength === 'strong');
+        return { label: c.label, tier: c.tier || 'practice',
+          wBg: w.bg, wFg: w.fg, mBg: md.bg, mFg: md.fg, sBg: s.bg, sFg: s.fg };
+      }),
+      measures: sharedMeasures.slice(0, 3)
+    };
+    draft5.dirtyN = dirtyIds.length;
+
+    const noCorridor = focus5.measures.filter(x => {
+      const src = m.measures.find(mm => mm.id === x.id);
+      return src && src.status !== 'live';
+    }).length;
+    const sharedN = sharedMeasures.filter(x => x.shared).length;
+    const validItems = [];
+    if (noCorridor) validItems.push(noCorridor + ' of its measures cannot be read yet');
+    if (sharedN) validItems.push(sharedN + ' measure is shared — editing it changes other characteristics');
+    const valid5 = {
+      headline: validItems.length + ' thing' + (validItems.length === 1 ? '' : 's')
+                + ' to check before saving', items: validItems
+    };
+
+    // ── 5b graph: causes left, focus centre, effects right — coordinates from dag() in the app
+    const outAll = {}, inAll = {};
+    m.edges.filter(e => e.type === 'causes').forEach(e => {
+      (outAll[e.from] = outAll[e.from] || []).push(e.to);
+      (inAll[e.to] = inAll[e.to] || []).push(e.from);
+    });
+    const gfocus = m.nodes.filter(n => n.inDeg > 1 && n.outDeg > 0)
+      .sort((a, b) => (b.inDeg + b.outDeg) - (a.inDeg + a.outDeg))[0] || focus5;
+    const placed = new Set([gfocus.id]);
+    const take = (ids, n) => {
+      const out = [];
+      for (const id of ids) { if (!placed.has(id) && by[id]) { placed.add(id); out.push(id); } if (out.length === n) break; }
+      return out;
+    };
+    // Nearest-column-wins: col1 claims the direct causes, so col0 can only hold what is left.
+    const col1 = take(inAll[gfocus.id] || [], 4);
+    const col0 = take([...new Set(col1.flatMap(id => inAll[id] || []))], 3);
+    const col3 = take(outAll[gfocus.id] || [], 3);
+    const cols5 = [col0, col1, [gfocus.id], col3];
+    const GW = 1000, GH = 640, NW = 190, NH = 44;
+    const gpos = {}, gnodes5 = [];
+    cols5.forEach((list, c) => {
+      const x = 18 + c * (GW / 4);
+      list.forEach((id, i) => {
+        const n = by[id]; if (!n) return;
+        const y = (GH / (list.length + 1)) * (i + 1) - NH / 2;
+        gpos[id] = { x, y };
+        const on = id === gfocus.id;
+        gnodes5.push({
+          l: (x / GW * 100) + '%', t: (y / GH * 100) + '%',
+          w: (NW / GW * 100) + '%', h: (NH / GH * 100) + '%',
+          label: n.label, meta: n.inDeg + '↑ ' + n.outDeg + '↓ · ' + (n.tier || 'practice'),
+          bg: on ? 'rgba(0,102,255,.05)' : T.bg, bd: on ? T.accent : T.border,
+          fg: on ? T.accent : T.text, gc: GC[n.group] || T.text3
+        });
+      });
+    });
+    const path5 = (a, b) => {
+      const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2;
+      const dx = Math.max(40, (x2 - x1) * 0.5);
+      return `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`;
+    };
+    const e5edge = m.edges.find(e => e.to === gfocus.id && e.type === 'causes' && gpos[e.from])
+                 || m.edges.find(e => e.to === gfocus.id && e.type === 'causes') || m.edges[0];
+    const gedges5 = m.edges.filter(e => e.type === 'causes' && gpos[e.from] && gpos[e.to]).map(e => {
+      const sel = e === e5edge, touches = e.to === gfocus.id || e.from === gfocus.id;
+      return {
+        d: path5(gpos[e.from], gpos[e.to]),
+        stroke: sel ? T.accent : touches ? 'rgba(0,102,255,.45)' : '#B9B8B4',
+        w: sel ? 3.4 : e.strength === 'strong' ? 2.2 : 1.3, dash: 'none',
+        op: sel ? 1 : touches ? 0.7 : 0.35
+      };
+    });
+    // The refused drag: from something the focus already leads to, back into the focus.
+    const cycleTarget = col3.find(id => gpos[id]);
+    if (cycleTarget) gedges5.push({
+      d: path5(gpos[cycleTarget], gpos[gfocus.id]), stroke: T.warn, w: 2, dash: '5 4', op: 0.95
+    });
+    const g5 = {
+      focusLabel: gfocus.label, drawn: gnodes5.length, total: m.nodes.length,
+      heads: ['2 steps upstream', '1 step', 'Focus', 'Leads to'],
+      nodes: gnodes5, edges: gedges5,
+      reject: cycleTarget
+        ? `Refused — “${gfocus.label}” already leads to “${by[cycleTarget].label}”, so this edge would create a cycle`
+        : 'Refused — this edge would create a cycle'
+    };
+
+    const e5 = {
+      from: (by[e5edge.from] || {}).label || e5edge.from,
+      to: (by[e5edge.to] || {}).label || e5edge.to,
+      citation: e5edge.tier === 'practice' ? 'no citation — practice tier' : 'pick a reference…',
+      effects: [
+        'recomputes ' + (by[e5edge.to] || {}).inDeg + ' incoming links on “' + ((by[e5edge.to] || {}).label || '') + '”',
+        'writes to your pack; shipped content is left intact',
+        'health list re-runs on save'
+      ]
+    };
+
+    return {
+      types5, rows5, draft5, valid5, g5, e5,
+      types4, mFilters, trail4, rows4, sel4, rows4b, typeChips, stat4b,
+      railModes, settingsNav, viewChips, viewChips2, groupChips,
+      rows3, rows3b, facets3, sel3, stat3,
+      facets, rows, sel, stat: { shown: rows.length },
+      tree, roots, stat2, fnNodes, fnEdges, fnHeads,
+      gNodes, gEdges, colHeads, legend, mini, miniBox, trail
+    };
+  }
+}
+</script>
+</body>
+</html>

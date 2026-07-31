@@ -89,4 +89,18 @@ std::unique_ptr<ICharacteristicPackProvider> makeMergedPackProvider(
 // The default assembly: shipped core plus whatever the user has installed.
 std::unique_ptr<ICharacteristicPackProvider> makeCharacteristicPackProvider();
 
+// A provider over a pack that is already in memory, validated on construction exactly as a loaded
+// one is.
+//
+// This exists for ONE reason and it is worth stating, because a provider that reads nothing looks
+// like a test double: an editor holds a WORKING COPY of the user pack that has not been saved yet,
+// and every surface showing that edit has to read an assembly containing it. Without this seam the
+// only assembly available is the one on disk, so an unsaved edit is invisible until it is written —
+// which forces per-field saves, and per-field saves are what make an undo stack impossible to
+// promise anything with. Feed this to makeMergedPackProvider() beside a core provider and the
+// result is "the library as it would be if you saved now".
+std::unique_ptr<ICharacteristicPackProvider> makeMemoryPackProvider(
+    const CharacteristicPack &pack, const QString &label = QString(),
+    PackOrigin origin = PackOrigin::LocalUser);
+
 } // namespace pinpoint::analysis

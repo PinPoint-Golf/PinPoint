@@ -134,6 +134,22 @@ PackLoadResult loadPack(const QByteArray &json, const QString &sourceLabel = QSt
 
 QJsonObject savePack(const CharacteristicPack &pack);
 
+// ── The name a measure renders under ────────────────────────────────────────
+//
+// ONE rule, here, because a measure with no authored label is not an edge case: nine shipped
+// measures carry `label: ""`, all of them `kind: "composed"`, and eight of the nine are `planned` or
+// `noProducer` — exactly the rows an author is hunting for. Every surface that had its own fallback
+// got a different answer, and the surfaces that had none rendered a blank row.
+//
+// The order matters and each step is load-bearing:
+//   authored label   — an author's own words always win
+//   canonical label  — Composed measures ARE their facets, so the series and the reducer name them
+//                      ("Thoracic segment angle to ground, at P1") deterministically
+//   id               — a last resort that cannot be reached by a well-formed Composed measure, but
+//                      a Provided measure with no label has no facets to generate one from, and a
+//                      nameless row is worse than an ugly one
+QString measureDisplayLabel(const Measure &m);
+
 // ── Graph helpers (shared by the validator, the resolver and the UI) ────────
 // `Causes` edges only. Direction follows Edge's contract: `from` causes `to`.
 QStringList causesOf(const CharacteristicPack &pack, const QString &conditionId);   // upstream

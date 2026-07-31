@@ -199,6 +199,20 @@ std::unique_ptr<INormProvider> makeMergedNormProvider(
 // The default assembly: shipped core plus whatever the user has authored.
 std::unique_ptr<INormProvider> makeNormProvider();
 
+// A norm set that is already in memory, presented through the provider seam so it can be merged
+// with core exactly as a file-backed one is. The context tree comes from `contexts`, because a norm
+// set does not carry one and resolution is meaningless without it.
+//
+// Same reason as makeMemoryPackProvider(): an editor holds a WORKING COPY of the user norm set that
+// has not been saved yet, and every surface showing that edit — the corridor list, the measure's
+// blast radius, the health strip — has to read an assembly containing it. Without this seam the
+// only assembly available is the one on disk, so an unsaved corridor is invisible until it is
+// written, which forces a per-corridor save and makes one undo history across both registries
+// impossible.
+std::unique_ptr<INormProvider> makeMemoryNormProvider(
+    const NormPack &pack, const ContextTree &contexts, const QString &label = QString(),
+    PackOrigin origin = PackOrigin::LocalUser);
+
 // ── Which layers take part, process-wide ────────────────────────────────────
 //
 // Set from AppSettings by the app so the Diagnostics module keeps no settings dependency, exactly

@@ -284,6 +284,21 @@ QJsonObject writeProvenance(const Provenance &p)
 
 } // namespace
 
+// ── The name a measure renders under ────────────────────────────────────────
+
+QString measureDisplayLabel(const Measure &m)
+{
+    if (!m.label.isEmpty()) return m.label;
+    // Only a Composed measure has facets to generate from. Asking a Provided measure for its
+    // canonical label would name it after a default-constructed series — a confident wrong answer,
+    // which is worse than falling through to the id.
+    if (m.kind == MeasureKind::Composed) {
+        const QString canonical = canonicalMeasureLabel(m.series, m.reducer);
+        if (!canonical.isEmpty()) return canonical;
+    }
+    return m.id;
+}
+
 // ── Graph helpers ───────────────────────────────────────────────────────────
 
 QStringList causesOf(const CharacteristicPack &pack, const QString &conditionId)
