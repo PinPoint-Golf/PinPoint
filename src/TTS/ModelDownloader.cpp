@@ -39,6 +39,11 @@ ModelDownloader::~ModelDownloader()
 
 void ModelDownloader::download(const QList<Item> &items)
 {
+    // A new batch supersedes whatever was in flight. Without this the old reply
+    // keeps writing into the abandoned .part file, and both it and the QFile are
+    // orphaned until this object is destroyed.
+    abort();
+
     m_items = items;
     m_index = 0;
     startNext();
@@ -46,10 +51,17 @@ void ModelDownloader::download(const QList<Item> &items)
 
 void ModelDownloader::abort()
 {
+    // QNetworkReply::abort() emits finished() SYNCHRONOUSLY. Sever the wires
+    // first so it cannot re-enter onFinished(), which would clear m_reply
+    // underneath us (leaving this call to dereference null) and then advance
+    // m_index into the next item mid-abort. Nulling the member before touching
+    // the reply matches AzureTTSEngine::stop() and STTBackendAzure.
     if (m_reply) {
-        m_reply->abort();
-        m_reply->deleteLater();
+        QNetworkReply *reply = m_reply;
         m_reply = nullptr;
+        disconnect(reply, nullptr, this, nullptr);
+        reply->abort();
+        reply->deleteLater();
     }
     discardPart();
 }
@@ -85,7 +97,7 @@ void ModelDownloader::startNext()
 
 void ModelDownloader::onReadyRead()
 {
-    if (m_file)
+    if (m_reply && m_file)
         m_file->write(m_reply->readAll());
 }
 
@@ -96,6 +108,11 @@ void ModelDownloader::onDownloadProgress(qint64 received, qint64 total)
 
 void ModelDownloader::onFinished()
 {
+    // abort() disconnects before tearing the reply down, so this slot should not
+    // run without one — the guard keeps any future re-entrant path honest.
+    if (!m_reply)
+        return;
+
     if (m_reply->error() != QNetworkReply::NoError) {
         const QString err = m_reply->errorString();
         m_reply->deleteLater();
