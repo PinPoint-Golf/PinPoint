@@ -38,20 +38,18 @@
 // ModelBrowser — the whole Diagnostic Model panel's model: one connected content graph, read and
 // edited through one object.
 //
-// ── Why this is not CharacteristicLibraryModel ──────────────────────────────────────────────────
+// ── Reuse; do not reimplement ───────────────────────────────────────────────────────────────────
 //
-// The brief's rule is "reuse; do not reimplement", and this obeys it where it counts: every RULE
-// here is a call into the layer that owns it — causesOf/effectsOf/coverageOf/hasCausalPath and
-// tailsOfAxis (characteristic_pack.h), validatePack, diagnosticsHealth, layoutDag,
-// measureDisplayLabel, the shared screen/drill/reference registries, and the enum label tables. What
-// is reimplemented is MARSHALLING, and only marshalling.
+// The brief's rule, obeyed where it counts: every RULE here is a call into the layer that owns it —
+// causesOf/effectsOf/coverageOf/hasCausalPath and tailsOfAxis (characteristic_pack.h), validatePack,
+// diagnosticsHealth, layoutDag, measureDisplayLabel, the shared screen/drill/reference registries,
+// and the enum label tables. What is reimplemented is MARSHALLING, and only marshalling.
 //
-// It is a second façade for one structural reason: CharacteristicLibraryModel reads the pack AS
-// SAVED, which is correct for a read-only panel and fatal for this one. Editing here accumulates in
-// an unsaved WORKING COPY of the user pack (rule 8: "Save is once, not per field"), and every
-// surface has to show the library as it would be if you saved now — the table, the inspector, the
-// graph, and above all the validation strip, which is worthless if it grades the file rather than
-// the draft. A façade that cannot be handed a provider cannot do that.
+// It replaced an earlier façade that read the pack AS SAVED, which is correct for a read-only panel
+// and fatal for this one. Editing here accumulates in an unsaved WORKING COPY of the user pack (rule
+// 8: "Save is once, not per field"), and every surface has to show the library as it would be if you
+// saved now — the table, the inspector, the graph, and above all the validation strip, which is
+// worthless if it grades the file rather than the draft.
 //
 // ── The layering ────────────────────────────────────────────────────────────────────────────────
 //
@@ -223,7 +221,7 @@ public:
 
     // The laid-out causal DAG around one condition — every coordinate from dag_layout.h, over the
     // WORKING assembly so an unsaved edge is drawn. Same shape as
-    // CharacteristicLibraryModel::dag().
+    // the graph pane renders.
     Q_INVOKABLE QVariantMap dag(const QString &conditionId, const QVariantMap &options = {}) const;
 
     // Legal targets for a link from `fromId`, pre-filtered: no self, no existing edge, no cycle,

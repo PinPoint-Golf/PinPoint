@@ -28,9 +28,8 @@ import PinPointStudio
 // Settings → Reference → Diagnostic Model. One shell, three panes: type rail → table → relationship
 // inspector, with a trail of the chain you walked.
 //
-// It sits BESIDE the existing Diagnostics panel (CharacteristicLibrary.qml) and touches nothing in
-// it. The intent is that this replaces it once its UX is better in every respect; until then both
-// ship and the old one is the fallback.
+// It REPLACED an earlier Diagnostics panel, which is now deleted. That one read the pack as saved
+// and could not show an unsaved edit, which is why this exists rather than growing out of it.
 //
 // The organising rule: EVERY element of the model is editable in the fewest possible clicks. No
 // modals, no edit mode, no Edit button. A click selects a row; a click on a row that is already
@@ -51,8 +50,7 @@ Item {
     }
 
     // The façade is read through Q_INVOKABLEs, which are not properties and so cannot be bound to.
-    // This is nudged by modelChanged and every list binding depends on it — the same shape
-    // CharacteristicLibrary.qml uses, and for the same reason.
+    // This is nudged by modelChanged and every list binding depends on it.
     //
     // ⚠ EVERY BINDING THAT READS THIS MUST *USE* THE VALUE. Naming it on a line of its own —
     //

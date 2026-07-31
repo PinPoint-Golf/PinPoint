@@ -59,8 +59,7 @@ Item {
             var panels = [
                 generalPanel, appearancePanel, displaysPanel,
                 camerasPanel, imusPanel, microphonesPanel,
-                null, storagePanel, null, characteristicPanel,
-                diagnosticModelPanel
+                null, storagePanel, null, diagnosticModelPanel
             ]
             var panel = panels[entry.panelIndex]
             if (panel) scrollWithRetry(panel, entry.itemId, 0)
@@ -70,14 +69,10 @@ Item {
     // Deep link straight to one metric (dashboard tile click-through, routed via
     // MetricRoute). Same callLater shape as navigateToResult: the panel Loader must
     // have instantiated before we can address it.
-    //
-    // Repointed from Diagnostics (9) to Diagnostic Model (10) when the Diagnostics row
-    // was hidden: a link into a panel with no sidenav row opens a page the user cannot
-    // tell where they are on, which reads as the app losing its place.
     function showMetricDetail(key) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 10                      // Diagnostic Model
+        root.activeNavIndex = 9                       // Diagnostic Model
         Qt.callLater(function() { diagnosticModelPanel.showMetric(key) })
     }
 
@@ -86,18 +81,17 @@ Item {
     function showCharacteristicDetail(conditionId) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 10                      // Diagnostic Model
+        root.activeNavIndex = 9                       // Diagnostic Model
         Qt.callLater(function() { diagnosticModelPanel.showCharacteristic(conditionId) })
     }
 
-    // Deep link to the MEASURE that defines a corridor — the norm rows in Diagnostics, from which the
-    // corridor editor opens. Reached from a metric's detail page: the metric catalogue says what good
-    // looks like, and this is the way to the place that decides it. Same callLater shape as its two
-    // siblings above; the panel Loader must have instantiated before it can be addressed.
+    // Deep link to the MEASURE that defines a corridor. Reached from a metric's detail page: the
+    // metric catalogue says what good looks like, and this is the way to the place that decides it.
+    // Same callLater shape as its two siblings above.
     function showMeasureDetail(measureId) {
         searchInput.text = ""
         root.searchQuery = ""
-        root.activeNavIndex = 10                      // Diagnostic Model
+        root.activeNavIndex = 9                       // Diagnostic Model
         Qt.callLater(function() { diagnosticModelPanel.showMeasure(measureId) })
     }
 
@@ -246,28 +240,18 @@ Item {
                                 { navIdx: 6, icon: "◎", label: qsTr("Launch Monitor"), sectionHead: "",               hasBadge: false },
                                 { navIdx: 7, icon: "▥", label: qsTr("Storage"),        sectionHead: qsTr("Data"),     hasBadge: false },
                                 { navIdx: 8, icon: "▤", label: qsTr("Archiving"),      sectionHead: "",               hasBadge: false },
-                                // Metrics was navIdx 9 until it became a VIEW inside Diagnostics:
-                                // a metric, the measures that read it and the corridors that judge
-                                // them are one chain, and following it meant leaving the panel.
-                                // Everything below it moved up one when it went.
-                                // Diagnostics (navIdx 9) is HIDDEN, not removed. Diagnostic Model
-                                // replaces it and now answers all three deep links too. The panel
-                                // is still child 9 of the StackLayout below and the indices are
-                                // deliberately NOT renumbered: nothing routes there any more, but
-                                // renumbering would move every panel after it for no gain while the
-                                // code is still present. The gap is the point.
-                                //
-                                // The code comes out in its own session. Until then this is one
-                                // deleted line rather than a change nobody can undo in a hurry.
-                                { navIdx: 10, icon: "❖", label: qsTr("Diagnostic Model"), sectionHead: qsTr("Reference"), hasBadge: false },
-                                // Not a panel: emits resourceMonitorRequested() (its
-                                // own screen) rather than switching activeNavIndex.
-                                // It is an ACTION row, so its navIdx never indexes the
-                                // StackLayout — but it must not collide with a panel
-                                // index either. It was 10 until Diagnostic Model took
-                                // that index; the same renumber Diagnostics itself
-                                // caused when it landed.
-                                { navIdx: 11, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
+                                // Metrics and Diagnostics were both rows here once. A metric, the
+                                // measures that read it and the corridors that judge them are one
+                                // chain, and following it meant leaving the panel — so they became
+                                // views inside Diagnostic Model, which now answers every deep link
+                                // the two of them used to. The old panel and its hidden row are
+                                // gone, and the indices below are contiguous again.
+                                { navIdx: 9, icon: "❖", label: qsTr("Diagnostic Model"), sectionHead: qsTr("Reference"), hasBadge: false },
+                                // Not a panel: emits resourceMonitorRequested() (its own screen)
+                                // rather than switching activeNavIndex. It is an ACTION row, so its
+                                // navIdx never indexes the StackLayout — but it must not collide
+                                // with a panel index either, which is why it sits one past the last.
+                                { navIdx: 10, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
                             ]
 
                             delegate: Column {
@@ -572,8 +556,7 @@ Item {
                 ScreenPlaceholder { titleText: "Launch Monitor" }                                          // 6
                 StoragePanel {    id: storagePanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 7
                 ScreenPlaceholder { titleText: "Archiving" }                                               // 8
-                CharacteristicLibrary { id: characteristicPanel; Layout.fillWidth: true; Layout.fillHeight: true }  // 9
-                DiagnosticModel { id: diagnosticModelPanel; Layout.fillWidth: true; Layout.fillHeight: true }      // 10
+                DiagnosticModel { id: diagnosticModelPanel; Layout.fillWidth: true; Layout.fillHeight: true }       // 9
             }
         }
     }

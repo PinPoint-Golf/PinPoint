@@ -805,7 +805,7 @@ Item {
         // were two icons on the context bar, which put a destructive action in the chrome next to
         // controls that only change what you are LOOKING at — and asked the reader to know what ⧉
         // meant. Delete wears colorError because that is how this app draws a write that removes
-        // something (DagView's destructive menu row), and because "Move to trash" being recoverable
+        // something, and because "Move to trash" being recoverable
         // is a reason to allow it, not a reason to hide it.
         Rectangle {
             Layout.fillWidth: true

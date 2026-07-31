@@ -503,35 +503,17 @@ pp_add_test(characteristic_engine_test
             ${DIAG}/context_tree.cpp ${DIAG_PACK}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 
-# Authoring round-trip (src/Gui/characteristics/characteristic_editor_model.*): the faceted picker,
-# stub minting, save/reload, and the two ways an edit could quietly be lost — an override touching
-# the shipped pack, or a removed cause surviving underneath in core. Needs Qt Qml for QML_ELEMENT
-# and the core pack via PINPOINT_CORE_PACK (the Qt resource exists only inside the app binary).
-# AUTOMOC for the editor model (it is a QObject with Q_PROPERTY/Q_INVOKABLE).
+# Qml for the QML_ELEMENT façades under test (ModelBrowser is a QObject with Q_PROPERTY/Q_INVOKABLE,
+# so those targets also need AUTOMOC).
 find_package(Qt6 REQUIRED COMPONENTS Qml)
 # Quick, for inspector_refresh_test: it counts the delegates a Repeater actually builds, which is
 # the one link in the panel's refresh chain that cannot be checked by reading a map.
 find_package(Qt6 REQUIRED COMPONENTS Quick)
-# Concurrent: norm_editor_model.cpp scans the swing library on a worker rather than stalling the
+# Concurrent: ModelBrowser scans the swing library on a worker rather than stalling the
 # GUI thread for the seconds a first pass over a real library costs.
 find_package(Qt6 REQUIRED COMPONENTS Concurrent)
 set(CMAKE_AUTOMOC ON)
 
-# The norm stack joined the link line at stage 7: the editor renders a checkbox per CONTEXT, and
-# the context tree ships with the norms rather than with the pack.
-pp_add_test(characteristic_editor_test
-    SOURCES ${DIAG}/tests/characteristic_editor_test.cpp
-            ${SRC}/Gui/characteristics/characteristic_editor_model.cpp
-            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
-            ${DIAG}/merged_pack_provider.cpp ${DIAG_PACK}
-            ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
-            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
-            ${DIAG}/merged_norm_provider.cpp
-    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
-    LINK    Qt6::Qml
-    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
-set_tests_properties(characteristic_editor_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
 # Cross-registry integrity: the diagnostics pack vs the metric catalogue. The catalogue's `usedBy`
 # is hand-authored and will otherwise rot silently — a wrong reverse index is worse than an absent
@@ -540,8 +522,9 @@ set_tests_properties(characteristic_editor_test PROPERTIES
 pp_add_test(diagnostics_catalogue_integrity_test
     SOURCES ${DIAG}/tests/diagnostics_catalogue_integrity_test.cpp ${DIAG_PACK}
             ${DIAG}/screen_pack.cpp ${DIAG}/drill_pack.cpp ${DIAG}/reference_pack.cpp
-            ${SRC}/Gui/characteristics/characteristic_library_model.cpp
-            ${DIAG}/dag_layout.cpp
+            ${SRC}/Gui/diagnosticmodel/model_browser.cpp
+            ${DIAG}/dag_layout.cpp ${DIAG}/corridor_plot.cpp
+            ${DIAG}/memory_pack_provider.cpp ${DIAG}/memory_norm_provider.cpp
             # The model's health list spans the norm set now, and its corpus check reads phase grids.
             ${DIAG}/diagnostics_health.cpp ${DIAG}/screen_pack.cpp ${DIAG}/drill_pack.cpp ${DIAG}/measure_sample.cpp
             ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
@@ -553,13 +536,14 @@ pp_add_test(diagnostics_catalogue_integrity_test
             ${ANALYSIS}/reference_bands.cpp ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
             ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
             ${DIAG}/merged_norm_provider.cpp
-    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/characteristics
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/diagnosticmodel
     LINK    Qt6::Qml Qt6::Concurrent
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
-# CharacteristicLibraryModel assembles the pack through the provider, which normally reads the Qt
-# resource — absent from a standalone binary. Point it at the reviewable JSON instead.
+# ModelBrowser assembles the pack through the provider, which normally reads the Qt resource — absent
+# from a standalone binary. Point it at the reviewable JSON instead. PP_DIAG_QML_DIR is the panel
+# whose Connections blocks are joined against the model's signals.
 target_compile_definitions(diagnostics_catalogue_integrity_test PRIVATE
-    PP_DIAG_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../Gui/characteristics")
+    PP_DIAG_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../Gui/diagnosticmodel")
 set_tests_properties(diagnostics_catalogue_integrity_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json;PINPOINT_CORE_REFERENCES=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/references.json")
 
@@ -716,61 +700,10 @@ pp_add_test(manifest_migration_test
 set_tests_properties(manifest_migration_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
-# The QML façade over measures, norms and contexts, run against the SHIPPED content. Its whole job
-# is that QML holds no rules, so every rule it hides is asserted here or nowhere: the (metricKey,
-# phase) join stage 9 re-points metric_catalog.cpp at, the inheritance markers on the
-# norms-by-context list, and that the band edge SHOWN is the band edge that grades.
-# Needs Qt Qml for QML_ELEMENT and AUTOMOC (already ON above, set by characteristic_editor_test).
-pp_add_test(norm_model_test
-    SOURCES ${DIAG}/tests/norm_model_test.cpp
-            ${SRC}/Gui/characteristics/norm_model.cpp
-            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
-            ${DIAG}/merged_pack_provider.cpp
-            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
-            ${DIAG}/merged_norm_provider.cpp ${DIAG_NORM}
-            ${SRC}/Metrics/metric_catalogue.cpp
-            ${SRC}/Metrics/metric_resolver.cpp
-            ${SRC}/Metrics/metric_catalogue_manifest.cpp
-            ${SRC}/Metrics/metric_providers.cpp
-            ${ANALYSIS}/reference_bands.cpp
-    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics
-    LINK    Qt6::Qml
-    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
-# XDG_DATA_HOME is isolated for the same reason norm_editor_model_test's is, and it was missing here:
-# without it the user norm set on the DEVELOPER's machine takes part in every assertion below, so a
-# corridor somebody overrode by hand could fail this suite for them and nobody else. The cohort block
-# also writes a user set, and it must land in a scratch directory rather than in a real profile.
-set_tests_properties(norm_model_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/norm_model_scratch")
 
-# The corridor editor's model. Same contract as norm_model_test — QML holds no rules, so every rule
-# this hides is asserted here or nowhere. The load-bearing one is that the two handles bind the
-# IDEAL band (mu +/- sigma), which the plan's own stage-6 text got wrong until 2026-07-26.
-#
-# Writes go to QStandardPaths::AppDataLocation, so the test sets an isolated app name: a suite that
-# wrote into the developer's real norm set would be a test with a side effect on the product.
-pp_add_test(norm_editor_model_test
-    SOURCES ${DIAG}/tests/norm_editor_model_test.cpp
-            ${SRC}/Gui/characteristics/norm_editor_model.cpp
-            ${DIAG}/measure_sample.cpp
-            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
-            ${DIAG}/merged_pack_provider.cpp
-            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
-            ${DIAG}/merged_norm_provider.cpp ${DIAG_NORM}
-            ${SRC}/Metrics/metric_catalogue.cpp
-            ${SRC}/Metrics/metric_resolver.cpp
-            ${SRC}/Metrics/metric_catalogue_manifest.cpp
-            ${SRC}/Metrics/metric_providers.cpp
-            ${ANALYSIS}/reference_bands.cpp
-    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics
-    LINK    Qt6::Qml Qt6::Concurrent
-    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
-set_tests_properties(norm_editor_model_test PROPERTIES
-    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/norm_editor_scratch")
-
-# The Diagnostic Model panel's facade. Same contract as norm_model_test and for the same reason —
-# QML holds no rules, so every rule this hides is asserted here or nowhere. The load-bearing ones are
-# the working copy (an unsaved edit has to be VISIBLE, or editing looks like nothing happening),
+# The Diagnostic Model panel's facade. QML holds no rules, so every rule it hides is asserted
+# here or nowhere. The load-bearing ones are the working copy (an unsaved edit has to be VISIBLE, or
+# editing looks like nothing happening),
 # undo as the inverse of copy-on-write (undoing a first edit to shipped content IS the reset), a
 # bulk-set being ONE command, and legality being decided by the same function the graph drag asks.
 #
@@ -791,7 +724,7 @@ pp_add_test(model_browser_test
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
             ${ANALYSIS}/reference_bands.cpp
-    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics ${SRC}/Gui/diagnosticmodel
+    INCLUDE ${NORM_INC} ${SRC}/Gui/diagnosticmodel
     LINK    Qt6::Qml Qt6::Concurrent
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 # The screen, drill and reference registries need their env overrides too: this panel reads all
@@ -822,7 +755,7 @@ pp_add_test(inspector_refresh_test
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
             ${ANALYSIS}/reference_bands.cpp
-    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics ${SRC}/Gui/diagnosticmodel
+    INCLUDE ${NORM_INC} ${SRC}/Gui/diagnosticmodel
     LINK    Qt6::Qml Qt6::Quick Qt6::Concurrent
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
 set_tests_properties(inspector_refresh_test PROPERTIES

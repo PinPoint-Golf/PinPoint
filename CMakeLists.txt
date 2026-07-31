@@ -413,22 +413,8 @@ qt_add_qml_module(PinPointStudio
         src/Gui/review/MetricDetail.qml
         src/Gui/review/MetricLibrary.qml
         src/Gui/review/MetricRoute.qml
-        src/Gui/characteristics/CharacteristicLibrary.qml
-        src/Gui/characteristics/CharacteristicRow.qml
-        src/Gui/characteristics/CharacteristicDetail.qml
-        src/Gui/characteristics/CharacteristicEditor.qml
-        src/Gui/characteristics/MeasurePicker.qml
-        src/Gui/characteristics/MeasureCatalogue.qml
-        src/Gui/characteristics/MeasureDetail.qml
-        src/Gui/characteristics/CorridorEditor.qml
-        src/Gui/characteristics/DagView.qml
-        src/Gui/characteristics/RoadmapView.qml
-        src/Gui/characteristics/HealthView.qml
-        src/Gui/characteristics/GlossaryView.qml
-        src/Gui/characteristics/ScreensView.qml
-        src/Gui/characteristics/ReferencesView.qml
-        # Settings → Reference → Diagnostic Model. Its own directory so the panel it
-        # will eventually replace (src/Gui/characteristics/) stays untouched.
+        # Settings → Reference → Diagnostic Model. The whole diagnostics content set, in one
+        # panel; the earlier read-only Diagnostics panel it replaced has been deleted.
         src/Gui/diagnosticmodel/DiagnosticModel.qml
         src/Gui/diagnosticmodel/ModelTypeRail.qml
         src/Gui/diagnosticmodel/ModelTable.qml
@@ -477,14 +463,6 @@ qt_add_qml_module(PinPointStudio
         src/Gui/review/chart_metrics.cpp
         src/Gui/review/metric_catalog.h
         src/Gui/review/metric_catalog.cpp
-        src/Gui/characteristics/characteristic_library_model.h
-        src/Gui/characteristics/characteristic_library_model.cpp
-        src/Gui/characteristics/characteristic_editor_model.h
-        src/Gui/characteristics/characteristic_editor_model.cpp
-        src/Gui/characteristics/norm_model.h
-        src/Gui/characteristics/norm_model.cpp
-        src/Gui/characteristics/norm_editor_model.h
-        src/Gui/characteristics/norm_editor_model.cpp
         # Settings → Reference → Diagnostic Model. One facade over the whole content set: it reads
         # an assembly containing the UNSAVED working copy, which is what lets editing accumulate
         # into one Save and lets the validation strip grade the draft rather than the file.

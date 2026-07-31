@@ -31,8 +31,8 @@ import PinPointStudio
 // is defined as a call-to-action frame — "draws the eye to a row/control that needs the user to act" —
 // and the close prompt wears it because it interrupts something live, not because it destroys
 // anything. A prompt that discards saved work wears the error family instead, which is how the app
-// already draws a destructive menu row (DagView.qml, "Removing a link is a write to the user's pack
-// and is styled as one"). Two different events must not read alike.
+// already draws a destructive action: removing something is a write to the user's pack, and is
+// styled as one. Two different events must not read alike.
 Popup {
     id: root
 

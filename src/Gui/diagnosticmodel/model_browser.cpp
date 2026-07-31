@@ -211,8 +211,8 @@ QVariantList stateOptions()
 }
 
 // Resolvability drives the row dot. A capture gap is deliberately NOT the fault colour: it is not a
-// failure, it is an honest statement that no sensor we have can see this. Same mapping as
-// CharacteristicRow.qml, expressed as a tone name so the delegate keeps it in Theme tokens.
+// failure, it is an honest statement that no sensor we have can see this. Returned as a tone NAME
+// rather than a colour, so the delegate keeps it in Theme tokens.
 QString statusTone(MeasureStatus s)
 {
     switch (s) {
@@ -1530,10 +1530,26 @@ QVariantList ModelBrowser::rows(const QString &type, const QVariantMap &filters)
         const QVariantMap a = av.toMap().value(QStringLiteral("sortKeys")).toMap();
         const QVariantMap b = bv.toMap().value(QStringLiteral("sortKeys")).toMap();
 
-        auto compare = [](const QVariant &x, const QVariant &y) -> int {
-            if (x.typeId() == QMetaType::Int || y.typeId() == QMetaType::Int) {
-                const int xi = x.toInt(), yi = y.toInt();
-                return xi == yi ? 0 : (xi < yi ? -1 : 1);
+        // ANY numeric type, not just Int. This tested `typeId() == Int` and nothing else, so every
+        // count inserted as a container's `.size()` — which is a qsizetype, i.e. LongLong — fell
+        // through to the STRING branch and sorted lexicographically: the bibliography read
+        // 7, 6, 6, 4, 3, 2, 2, 12, 1 …, with the paper holding up twelve claims buried between the
+        // twos and the ones. Corridor `mu` is a double and sorted the same wrong way.
+        //
+        // Compared as double so an int, a size and a real all order against each other correctly;
+        // no sort key in this file is large enough for the mantissa to matter.
+        auto numeric = [](const QVariant &v) {
+            switch (v.typeId()) {
+            case QMetaType::Int:      case QMetaType::UInt:
+            case QMetaType::LongLong: case QMetaType::ULongLong:
+            case QMetaType::Double:   case QMetaType::Float:  return true;
+            default:                                          return false;
+            }
+        };
+        auto compare = [&numeric](const QVariant &x, const QVariant &y) -> int {
+            if (numeric(x) || numeric(y)) {
+                const double xi = x.toDouble(), yi = y.toDouble();
+                return qFuzzyCompare(xi, yi) ? 0 : (xi < yi ? -1 : 1);
             }
             return QString::compare(x.toString(), y.toString(), Qt::CaseInsensitive);
         };
@@ -3144,8 +3160,7 @@ QVariantMap ModelBrowser::save()
     invalidateDerived();
 
     // Every other façade in the app caches its provider, so an edit written here is on disk and
-    // invisible until relaunch unless they re-take. That is the trap CharacteristicLibrary.qml
-    // documents twice; this is the same shape from the other side.
+    // invisible until relaunch unless they re-take.
     emit libraryChanged();
 
     r.insert(QStringLiteral("ok"), true);

@@ -77,7 +77,8 @@ Popup {
         property string label: ""
         property string hint:  ""
         // Styled as what it does. The app already draws a destructive row this way — see the per-row
-        // menu in DagView.qml, "Removing a link is a write to the user's pack and is styled as one".
+        // rule the app has always used: removing something is a write to the user's pack, and is
+        // styled as one.
         property bool   destructive: false
         signal triggered()
 

@@ -1550,6 +1550,50 @@ int main(int argc, char **argv)
         while (m.canUndo()) m.undo();
     }
 
+    std::printf("=== counts sort as numbers, not as strings ===\n");
+    {
+        // Every count in a sortKeys map is a container's `.size()`, which is a qsizetype — and the
+        // comparator tested `typeId() == Int` and nothing else, so all of them fell through to the
+        // string branch. The bibliography came out 7, 6, 4, 3, 2, 2, 12, 1: the paper holding up
+        // twelve claims buried between the twos and the ones, because "12" < "2" as text. Two
+        // digits is all it takes, so nothing smaller than a ten-row count could ever have shown it.
+        for (const QString &type : { QStringLiteral("references"), QStringLiteral("screens"),
+                                     QStringLiteral("drills"), QStringLiteral("measures") }) {
+            const QVariantList rows = m.rows(type);
+            if (rows.size() < 3) continue;
+            // The key each type defaults to, read back off the rows themselves.
+            const QString key = type == QStringLiteral("references")  ? QStringLiteral("supports")
+                              : type == QStringLiteral("screens")     ? QStringLiteral("settlesCount")
+                              : type == QStringLiteral("drills")      ? QStringLiteral("answersCount")
+                                                                      : QStringLiteral("readBy");
+            const bool wantDescending = (type == QStringLiteral("references"));
+            bool ordered = true;
+            int  prev    = wantDescending ? (1 << 30) : -1;
+            for (const QVariant &v : rows) {
+                const int n = v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                                  .value(key).toInt();
+                if (type == QStringLiteral("measures")) continue;   // sorts by status first
+                if (wantDescending ? (n > prev) : (n < prev)) ordered = false;
+                prev = n;
+            }
+            check(ordered, qPrintable(QStringLiteral("%1 sort numerically by %2").arg(type, key)));
+        }
+
+        // A double sort key went the same way — mu is not an Int either.
+        const QVariantList corridors = m.rows(QStringLiteral("corridors"),
+                                              QVariantMap{ { QStringLiteral("sort"),
+                                                             QStringLiteral("mu") } });
+        bool muOrdered = true;
+        double prevMu = -1e18;
+        for (const QVariant &v : corridors) {
+            const double mu = v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                                  .value(QStringLiteral("mu")).toDouble();
+            if (mu < prevMu) muOrdered = false;
+            prevMu = mu;
+        }
+        check(muOrdered, "and a corridor's mu sorts as a number too");
+    }
+
     std::printf("=== the inspector can edit EVERY writable field of every type ===\n");
     {
         // The pane is where an author expects to see and change everything an object holds. It used

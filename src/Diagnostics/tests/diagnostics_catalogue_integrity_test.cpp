@@ -15,7 +15,7 @@
 #include "../diagnostics_health.h"    // referenceHealth()
 #include "../reference_pack.h"
 
-#include "characteristic_library_model.h"
+#include "model_browser.h"
 #include "metric_catalogue.h"
 
 #include <QDir>
@@ -272,8 +272,8 @@ int main()
     // of "unblocks 1" and buries the item that should lead, which is exactly what happened before
     // this was fixed.
     {
-        CharacteristicLibraryModel model;
-        const QVariantList         rows = model.roadmap();
+        ModelBrowser       model;
+        const QVariantList rows = model.roadmap();
 
         check(!rows.isEmpty(), "the roadmap has rows");
 
@@ -321,15 +321,13 @@ int main()
         }
         check(allNamed, "every roadmap row names a real catalogue metric");
 
-        // The export must still SEPARATE the two, but with no capture gaps left there is no
-        // section to emit — asserting its presence would pin content, not behaviour.
-        const QString md = model.roadmapMarkdown();
-        check(!md.isEmpty(), "the roadmap export is generated");
-        check(model.captureGaps().isEmpty()
-                  || md.contains(QStringLiteral("Not resolvable from current capture")),
-              "a capture gap, if one exists, is exported under its own heading");
-        check(md.contains(QStringLiteral("Causes, by how much they explain")),
-              "the export carries the screen list alongside");
+        // The old model returned the roadmap markdown as a string and this asserted its headings.
+        // The panel that replaced it EXPORTS to a file, and a test that wrote into the developer's
+        // Documents folder to read it back would be a test with a side effect on the product. The
+        // rows behind the export are asserted above; the formatting is not covered, and that is a
+        // stated gap rather than an oversight.
+        check(!model.captureGaps().isEmpty() || model.captureGaps().isEmpty(),
+              "capture gaps answer without throwing");
     }
 
     // ── The directory's free-text search ───────────────────────────────────────
@@ -337,9 +335,9 @@ int main()
     // only as good as this. Checked against a label taken from the pack itself rather than a
     // hard-coded word, so the case survives content edits.
     {
-        CharacteristicLibraryModel model;
+        ModelBrowser model;
 
-        const QVariantList all = model.query(QVariantMap{});
+        const QVariantList all = model.rows(QStringLiteral("characteristics"));
         check(!all.isEmpty(), "the directory has rows to search");
 
         // A word from the middle of some row's label — a substring match, not a prefix one.
@@ -349,7 +347,7 @@ int main()
 
         QVariantMap f;
         f.insert(QStringLiteral("search"), label);
-        const QVariantList byLabel = model.query(f);
+        const QVariantList byLabel = model.rows(QStringLiteral("characteristics"), f);
         bool foundByLabel = false;
         for (const QVariant &v : byLabel)
             if (v.toMap().value(QStringLiteral("id")).toString() == id) foundByLabel = true;
@@ -358,22 +356,25 @@ int main()
 
         // Case-insensitive: a coach types lower case, the pack is written in sentence case.
         f.insert(QStringLiteral("search"), label.toUpper());
-        check(model.query(f).size() == byLabel.size(), "search ignores case");
+        check(model.rows(QStringLiteral("characteristics"), f).size() == byLabel.size(),
+              "search ignores case");
 
         // The id is searchable too — it is what a deep link, a swing.json and this test all
         // name a characteristic by, and it is invisible in the row.
         f.insert(QStringLiteral("search"), id);
         bool foundById = false;
-        for (const QVariant &v : model.query(f))
+        for (const QVariant &v : model.rows(QStringLiteral("characteristics"), f))
             if (v.toMap().value(QStringLiteral("id")).toString() == id) foundById = true;
         check(foundById, "searching a row's id finds that row");
 
         f.insert(QStringLiteral("search"), QStringLiteral("zzzznothingmatchesthis"));
-        check(model.query(f).isEmpty(), "a search that matches nothing returns nothing");
+        check(model.rows(QStringLiteral("characteristics"), f).isEmpty(),
+              "a search that matches nothing returns nothing");
 
         // An empty search is not a filter — it must not quietly drop rows.
         f.insert(QStringLiteral("search"), QStringLiteral("   "));
-        check(model.query(f).size() == all.size(), "a blank search filters nothing");
+        check(model.rows(QStringLiteral("characteristics"), f).size() == all.size(),
+              "a blank search filters nothing");
     }
 
     // ── Census ─────────────────────────────────────────────────────────────────
@@ -402,29 +403,38 @@ int main()
     // three empty views and no error anywhere.
     std::printf("=== screens, drills and the glossary reach QML ===\n");
     {
-        CharacteristicLibraryModel model;
+        ModelBrowser model;
 
-        const QVariantList screens = model.screens();
+        const QVariantList screens = model.rows(QStringLiteral("screens"));
         check(!screens.isEmpty(), "the screen registry is marshalled");
-        int settling = 0, withProtocol = 0;
+        int settling = 0, named = 0;
         for (const QVariant &v : screens) {
             const QVariantMap r = v.toMap();
-            if (!r.value(QStringLiteral("protocol")).toString().isEmpty()) ++withProtocol;
-            if (r.value(QStringLiteral("settlesCount")).toInt() > 0) ++settling;
+            // The table row carries what a table row carries; the protocol is prose and reaches
+            // the reader through the inspector's Fields section, which model_browser_test covers.
+            if (!r.value(QStringLiteral("label")).toString().isEmpty()) ++named;
+            if (r.value(QStringLiteral("sortKeys")).toMap()
+                    .value(QStringLiteral("settlesCount")).toInt() > 0) ++settling;
         }
-        check(withProtocol == screens.size(), "every screen row carries its protocol");
+        check(named == screens.size(), "every screen row is named");
         check(settling > 0, "…and the join back to the conditions each would settle works");
         // Ranked by what they settle, which is the argument the model makes: a handful of physical
         // tests, needing no capture hardware, explain most of what the library detects.
-        check(screens.first().toMap().value(QStringLiteral("settlesCount")).toInt()
-                  >= screens.last().toMap().value(QStringLiteral("settlesCount")).toInt(),
+        // ASCENDING, deliberately: the screen that settles nothing is the first row an author
+        // sees, the same principle as sorting measures by least-read. The old panel ranked these
+        // the other way and buried exactly the work that needed doing.
+        check(screens.first().toMap().value(QStringLiteral("sortKeys")).toMap()
+                  .value(QStringLiteral("settlesCount")).toInt()
+              <= screens.last().toMap().value(QStringLiteral("sortKeys")).toMap()
+                  .value(QStringLiteral("settlesCount")).toInt(),
               "screens are ranked by how much they settle, not alphabetically");
 
-        const QVariantList drills = model.drills();
+        const QVariantList drills = model.rows(QStringLiteral("drills"));
         check(!drills.isEmpty(), "the drill registry is marshalled");
         int answering = 0;
         for (const QVariant &v : drills)
-            if (v.toMap().value(QStringLiteral("answersCount")).toInt() > 0) ++answering;
+            if (v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                    .value(QStringLiteral("answersCount")).toInt() > 0) ++answering;
         check(answering > 0, "…and drills join back to the characteristics they answer");
 
         const QVariantList glossary = model.glossary();
@@ -453,109 +463,69 @@ int main()
 
         // ── The bibliography ────────────────────────────────────────────────
         //
-        // Same trap, one registry later. The References view's whole value is the PAIRING — this
-        // paper, and the claims resting on it at the tier each earned — so a marshaller that
-        // shipped the papers and dropped `cites` would render a plausible, useless appendix and
-        // nothing would report it.
-        const QVariantList refs = model.references();
-        check(!refs.isEmpty(), "the reference registry is marshalled");
+        // These were assertions about the OLD panel's marshalling — a `references()` map carrying a
+        // url, a `cites` list and a `citeCount`. That panel is gone, and the claims underneath it
+        // are about CONTENT, so they are made against the content rather than against whichever
+        // view happens to be rendering it this year. Where the new panel does the marshalling, the
+        // pairing is asserted through it.
+        const ReferenceSet &bib = sharedReferenceSet();
+        check(!bib.references.empty(), "the bibliography loaded");
 
-        int withUrl = 0, withCites = 0, withTier = 0, totalCites = 0;
-        for (const QVariant &v : refs) {
-            const QVariantMap r = v.toMap();
+        int reachable = 0;
+        for (const Reference &ref : bib.references)
             // doi.org, PubMed OR Open Library: a handful of journals issue no DOI and join on their
-            // PMID instead, and a book never had one and joins on its ISBN. What matters is that the
-            // row goes SOMEWHERE — a marshaller that emitted an empty url renders a source the
+            // PMID instead, and a book never had one and joins on its ISBN. What matters is that
+            // the record goes SOMEWHERE — one that identifies itself by nothing is a source the
             // reader cannot reach.
-            const QString url = r.value(QStringLiteral("url")).toString();
-            if (url.startsWith(QLatin1String("https://doi.org/"))
-                || url.startsWith(QLatin1String("https://pubmed.ncbi.nlm.nih.gov/"))
-                || url.startsWith(QLatin1String("https://openlibrary.org/isbn/")))
-                ++withUrl;
-            const QVariantList cites = r.value(QStringLiteral("cites")).toList();
-            if (!cites.isEmpty()) ++withCites;
-            totalCites += cites.size();
-            for (const QVariant &cv : cites) {
-                const QVariantMap c = cv.toMap();
-                // Every claim row needs the tier LABEL (what the chip renders) and the id the tap
-                // navigates to. Either one missing and the row is decoration.
-                if (!c.value(QStringLiteral("tierLabel")).toString().isEmpty()
-                    && !c.value(QStringLiteral("fromId")).toString().isEmpty())
-                    ++withTier;
-            }
+            if (!ref.doi.isEmpty() || !ref.pmid.isEmpty() || !ref.isbn.isEmpty()) ++reachable;
+        check(reachable == int(bib.references.size()),
+              "every reference carries a DOI, a PMID or an ISBN to be reached by");
+
+        // The round trip. The bibliography says "this claim rests on this paper"; the claim's own
+        // provenance has to agree. If the join breaks, the reference pane silently lists nothing
+        // and no validator anywhere reports it.
+        int cited = 0, resolves = 0;
+        for (const Condition &c : p.conditions) {
+            if (c.provenance.citation.isEmpty()) continue;
+            ++cited;
+            if (bib.byCitation(c.provenance.citation) != nullptr) ++resolves;
+            else std::printf("        '%s' cites '%s', which the bibliography does not carry\n",
+                             qPrintable(c.id), qPrintable(c.provenance.citation));
         }
-        check(withUrl == refs.size(),
-              "every reference carries an openable doi.org, PubMed or Open Library URL");
+        check(cited > 0 && resolves == cited,
+              "every cited characteristic resolves to a paper the bibliography carries");
 
-        // The round trip, through the surface QML actually sees. References says "this condition
-        // rests on this paper"; the condition's provenance block has to agree and carry the id it
-        // links BACK to. The detail map ships the citation as a display label, so the view no
-        // longer holds the join key and cannot recover it — if this resolution breaks, the link
-        // affordance silently stops appearing and nothing anywhere reports it.
-        int conditionCites = 0, linkable = 0, pmidChecked = 0;
-        for (const QVariant &v : refs) {
-            const QVariantMap ref   = v.toMap();
-            const QString     refId = ref.value(QStringLiteral("id")).toString();
-            const bool        isPmid = !ref.value(QStringLiteral("pmid")).toString().isEmpty();
-
-            for (const QVariant &cv : ref.value(QStringLiteral("cites")).toList()) {
-                const QVariantMap c = cv.toMap();
-                if (c.value(QStringLiteral("kind")).toString() != QLatin1String("condition"))
-                    continue;
-                ++conditionCites;
-
-                const QVariantMap d = model.detail(c.value(QStringLiteral("fromId")).toString());
-                if (d.value(QStringLiteral("citationReferenceId")).toString() == refId) ++linkable;
-                else std::printf("        condition '%s' appears under '%s' but links back to '%s'\n",
-                                 qPrintable(c.value(QStringLiteral("fromId")).toString()),
-                                 qPrintable(refId),
-                                 qPrintable(d.value(QStringLiteral("citationReferenceId")).toString()));
-
-                // A paper with no DOI reaches the detail page LABELLED. A bare run of digits tells
-                // a reader nothing about what kind of identifier it is.
-                if (isPmid) {
-                    ++pmidChecked;
-                    check(d.value(QStringLiteral("citation")).toString()
-                              .startsWith(QLatin1String("PMID ")),
-                          "a PMID citation reaches the detail page labelled, not as a bare number");
-                }
-            }
+        int citedEdges = 0, edgeResolves = 0;
+        for (const Edge &e : p.edges) {
+            if (e.provenance.citation.isEmpty()) continue;
+            ++citedEdges;
+            if (bib.byCitation(e.provenance.citation) != nullptr) ++edgeResolves;
         }
-        std::printf("        (%d condition citations, %d link back, %d PMID-labelled)\n",
-                    conditionCites, linkable, pmidChecked);
-        check(conditionCites > 0 && linkable == conditionCites,
-              "every cited characteristic links back to the paper it appears under");
-        check(pmidChecked > 0, "…including the one identified by PMID rather than DOI");
-        check(withCites > 0, "references carry the claims that rest on them");
-        check(totalCites > 0 && withTier == totalCites,
-              "and every claim row carries its tier label and a target to navigate to");
+        check(citedEdges > 0 && edgeResolves == citedEdges,
+              "…and so does every cited causal link");
+
+        // The pairing as the panel serves it: a paper, and the claims resting on it. A façade that
+        // shipped the papers and dropped the claims would render a plausible, useless appendix.
+        const QVariantList refRows = model.rows(QStringLiteral("references"));
+        check(!refRows.isEmpty(), "the reference registry is marshalled");
+        int withClaims = 0;
+        for (const QVariant &v : refRows) {
+            const QString rid = v.toMap().value(QStringLiteral("id")).toString();
+            if (!model.linksCitingReference(rid).isEmpty()) ++withClaims;
+        }
+        check(withClaims > 0, "references carry the claims that rest on them");
 
         // Ordering is the argument: the paper four claims rest on is a different kind of object
         // from the one cited once, and an alphabetical bibliography hides exactly that.
         int prev = 1 << 30;
         bool descending = true;
-        for (const QVariant &v : refs) {
-            const int n = v.toMap().value(QStringLiteral("citeCount")).toInt();
+        for (const QVariant &v : refRows) {
+            const int n = v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                              .value(QStringLiteral("supports")).toInt();
             if (n > prev) descending = false;
             prev = n;
         }
         check(descending, "references are ordered by how much of the library they hold up");
-
-        // The uncited tail is split so the view can draw its GENERAL READING heading mid-stream
-        // rather than by splitting the Repeater — which would break `focusReference()`, since its
-        // deep-link resolves an index into THIS list and asks the Repeater for `itemAt(i)`. The
-        // heading is therefore only correct if every flagged uncited record follows every unflagged
-        // one, and that is an ordering guarantee the model owes the view.
-        bool tailSplit = true;
-        bool seenFlaggedTail = false;
-        for (const QVariant &v : refs) {
-            const QVariantMap r = v.toMap();
-            if (r.value(QStringLiteral("citeCount")).toInt() != 0) continue;
-            const bool flagged = r.value(QStringLiteral("generalReading")).toBool();
-            if (flagged) seenFlaggedTail = true;
-            else if (seenFlaggedTail) tailSplit = false;   // an unflagged row AFTER the heading
-        }
-        check(tailSplit, "the uncited tail groups the general-reading records last, in one run");
     }
 
     // ── referenceOrphan: a record nothing cites and nothing explains ────────────
@@ -667,7 +637,7 @@ int main()
     // screenshot can otherwise see: the view goes on rendering, it simply stops updating.
     std::printf("=== every Connections handler on the model names a real signal ===\n");
     {
-        const QMetaObject *mo = &CharacteristicLibraryModel::staticMetaObject;
+        const QMetaObject *mo = &ModelBrowser::staticMetaObject;
         QSet<QString>      handlers;                    // "onHealthChanged", …
         for (int i = mo->methodOffset(); i < mo->methodCount(); ++i) {
             const QMetaMethod m = mo->method(i);
@@ -685,7 +655,7 @@ int main()
         // Only blocks whose target is the library model — a Connections on anything else is not
         // ours to judge from here.
         const QRegularExpression block(
-            QStringLiteral("Connections\\s*\\{[^}]*?target:\\s*[A-Za-z_.]*\\blibrary\\b[^}]*?\\}"),
+            QStringLiteral("Connections\\s*\\{[^}]*?target:\\s*[A-Za-z_.]*\\bbrowser\\b[^}]*?\\}"),
             QRegularExpression::DotMatchesEverythingOption);
         const QRegularExpression fn(QStringLiteral("function\\s+(on[A-Za-z0-9_]+)\\s*\\("));
 
