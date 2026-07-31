@@ -74,6 +74,10 @@ CLAUDE.md
 *.bak
 *.swp
 
+# macOS Finder metadata. Written into any directory the Finder has looked at, so it
+# turns up far from where anyone was working.
+.DS_Store
+
 # vcpkg
 vcpkg_installed/
 
