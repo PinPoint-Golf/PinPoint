@@ -18,8 +18,10 @@
 
 #pragma once
 
+#include "../../Diagnostics/drill_pack.h"
 #include "../../Diagnostics/norm_provider.h"
 #include "../../Diagnostics/pack_provider.h"
+#include "../../Diagnostics/screen_pack.h"
 #include "../../Metrics/metric_catalogue.h"
 
 #include <QFutureWatcher>
@@ -98,6 +100,16 @@ class ModelBrowser : public QObject
     // are one unsaved object, and the status bar says what would be written.
     Q_PROPERTY(int unsavedCount READ unsavedCount NOTIFY modelChanged)
 
+    // ── How far this install has drifted from what shipped ──────────────────
+    //
+    // Two counts because they are two different things to lose, and the reset prompt says both.
+    // `overridden` is shipped objects this install has changed — the ones that make its grading
+    // differ from an unmodified install, which is what the first-save warning is about. `authored`
+    // is objects written here that core has never heard of; those extend the model rather than
+    // contradicting it, so they do not trigger that warning, but a reset still takes them.
+    Q_PROPERTY(int overriddenCount READ overriddenCount NOTIFY modelChanged)
+    Q_PROPERTY(int authoredCount   READ authoredCount   NOTIFY modelChanged)
+
     // ── Undo ────────────────────────────────────────────────────────────────
     Q_PROPERTY(bool    canUndo   READ canUndo   NOTIFY modelChanged)
     Q_PROPERTY(bool    canRedo   READ canRedo   NOTIFY modelChanged)
@@ -142,6 +154,8 @@ public:
     QString      packLabel() const;
     bool         dirty() const;
     int          unsavedCount() const;
+    int          overriddenCount() const;
+    int          authoredCount() const;
     bool         canUndo() const;
     bool         canRedo() const;
     QString      undoLabel() const;
@@ -268,6 +282,42 @@ public:
 
     Q_INVOKABLE QVariantMap removeObject(const QString &type, const QString &id);
 
+    // ── Screens and drills ──────────────────────────────────────────────────
+    //
+    // Both registries have had rows, facets and an inspector section since this panel landed, and no
+    // write path at all — so every cell was inert and the inspector was a dead end. They are ordinary
+    // editable types now: setField(), createObject(), duplicate() and removeObject() all dispatch to
+    // them, so the shell's inline edit, ⌘D, dirty gutter, Source badge and bulk-set need no changes.
+    //
+    // The relationships are the exception, because they are not stored where you would guess. A
+    // screen does not list what it settles and a drill does not list what it answers — the CONDITION
+    // names them (`Condition::screenRef`, `Condition::drills`), which is the join every reader in the
+    // app already uses. So these four write the condition, and they live here rather than on the
+    // condition because "what does this screen settle" is the question an author has open.
+    Q_INVOKABLE QVariantMap addScreenSettles(const QString &screenId, const QString &conditionId);
+    Q_INVOKABLE QVariantMap removeScreenSettles(const QString &screenId, const QString &conditionId);
+    Q_INVOKABLE QVariantMap addDrillAnswers(const QString &drillId, const QString &conditionId);
+    Q_INVOKABLE QVariantMap removeDrillAnswers(const QString &drillId, const QString &conditionId);
+
+    // Legal, pre-filtered candidates, as linkCandidates() is: conditions this screen does not already
+    // settle / this drill does not already answer. An illegal edit cannot be CONSTRUCTED.
+    Q_INVOKABLE QVariantList screenCandidates(const QString &screenId,
+                                              const QString &search = QString()) const;
+    Q_INVOKABLE QVariantList drillCandidates(const QString &drillId,
+                                             const QString &search = QString()) const;
+
+    // Every link resting on one reference. The citation is imported and stays read-only; the CLAIM
+    // resting on it is ours, and its strength is editable through the ordinary setField("links", …).
+    Q_INVOKABLE QVariantList linksCitingReference(const QString &refId) const;
+
+    // One record as CSL-JSON, for the reference pane's copy action — the same format the whole-set
+    // export writes, because a coach pasting one citation into Zotero wants what the file would have
+    // given them. Empty for an id that resolves to nothing.
+    Q_INVOKABLE QString referenceCsl(const QString &refId) const;
+    // The resolver URL for a DOI, or empty when the record has none. Built here rather than in QML:
+    // which of three identifiers a record carries is a fact about the record.
+    Q_INVOKABLE QString referenceDoiUrl(const QString &refId) const;
+
     // ── Corridors ───────────────────────────────────────────────────────────
     //
     // A corridor is a norm row keyed on (measureId, contextId, cohort). It is edited through
@@ -364,6 +414,18 @@ public:
     // Discard every unsaved edit, back to the file. Itself undoable.
     Q_INVOKABLE QVariantMap revert();
 
+    // Put this install back on the model that ships: every override AND everything authored here,
+    // across both registries. NOT revert() — that one discards the session's UNSAVED edits back to
+    // the file; this discards what the file itself holds, and it writes.
+    //
+    // Recoverable twice over, because the panel's rule is that nothing here is unrecoverable:
+    //   · it is a command like every other write, so ⌘Z restores the whole draft for the session
+    //   · the user layers are COPIED ASIDE before they are replaced (`*-<stamp>.backup.json`), so an
+    //     author who resets in error still has the file after the session's undo has expired
+    // The returned map carries `backups` — the paths written — because a backup nobody is told about
+    // is a backup nobody can use.
+    Q_INVOKABLE QVariantMap resetToStandard();
+
     // Re-take the shared providers after somebody else wrote (the old panel, the corridor editor).
     Q_INVOKABLE void refresh();
 
@@ -387,19 +449,32 @@ private:
     struct Command {
         QString                                label;    // "Strength → strong"
         QString                                detail;   // "Early extension → Loss of posture"
-        // BOTH registries, every time. A command that snapshotted only the one it happened to touch
-        // would restore correctly on its own and corrupt the other as soon as the stack was wound
-        // past it — the state a position on the stack describes is the whole draft, not a diff.
+        // ALL FOUR registries, every time. A command that snapshotted only the one it happened to
+        // touch would restore correctly on its own and corrupt the others as soon as the stack was
+        // wound past it — the state a position on the stack describes is the whole draft, not a diff.
         pinpoint::analysis::CharacteristicPack before;
         pinpoint::analysis::CharacteristicPack after;
         pinpoint::analysis::NormPack           normsBefore;
         pinpoint::analysis::NormPack           normsAfter;
+        pinpoint::analysis::ScreenSet          screensBefore;
+        pinpoint::analysis::ScreenSet          screensAfter;
+        pinpoint::analysis::DrillSet           drillsBefore;
+        pinpoint::analysis::DrillSet           drillsAfter;
     };
     // Push the current state as a command, dropping any redo tail. `before` is the pack state the
     // command started from; the norm baseline is captured by the caller in the same breath.
+    //
+    // The four-argument form is for every write that cannot touch a screen or a drill, which is most
+    // of them: it captures the CURRENT screen and drill layers as the before-state, which is correct
+    // precisely because they did not change. Writes that do touch them use the long form.
     void        pushCommand(const QString &label, const QString &detail,
                             const pinpoint::analysis::CharacteristicPack &before,
                             const pinpoint::analysis::NormPack           &normsBefore);
+    void        pushCommand(const QString &label, const QString &detail,
+                            const pinpoint::analysis::CharacteristicPack &before,
+                            const pinpoint::analysis::NormPack           &normsBefore,
+                            const pinpoint::analysis::ScreenSet          &screensBefore,
+                            const pinpoint::analysis::DrillSet           &drillsBefore);
     QVariantMap applyStackPosition(int newIndex);
 
     // ── Working-copy helpers ────────────────────────────────────────────────
@@ -421,6 +496,10 @@ private:
     const QSet<QString> &dirtyIds() const;
     void                 invalidateDerived();
 
+    // How many objects in the DRAFT sourceOf() answers `want` for, across all four registries. The
+    // two counts the reset prompt states are the same question asked twice.
+    int countBySource(const QString &want) const;
+
     // Rows for one type, unsorted and unfiltered. Everything else composes over this.
     QVariantList rawRows(const QString &type) const;
 
@@ -429,6 +508,10 @@ private:
     QVariantMap measureRow(const pinpoint::analysis::Measure &m) const;
     QVariantMap signalRow(const pinpoint::analysis::Signal &s) const;
     QVariantMap edgeRow(const pinpoint::analysis::Edge &e) const;
+
+    // Every writable field of one object, as editor rows. THE list — the inspector renders exactly
+    // these, so "what can I edit" has one answer per type rather than one per surface.
+    QVariantList fieldsOf(const QString &type, const QString &id) const;
 
     // "shipped" | "yours" | "both" for one id — the Source column, and the thing that tells an
     // author whose content they are about to change.
@@ -469,6 +552,23 @@ private:
     // The user norm set, layered exactly as the pack is.
     pinpoint::analysis::NormPack m_savedNorms;
     pinpoint::analysis::NormPack m_workingNorms;
+
+    // Screens and drills, layered exactly as the pack is — saved layer, working layer, and the
+    // assembly everything reads. They are flat sets rather than providers (screen_pack.h says why),
+    // so the assembly is done here instead of by a merged provider, but the shape is the same one:
+    // core, plus the user's own by id, rebuilt after every mutation.
+    pinpoint::analysis::ScreenSet m_savedScreens;
+    pinpoint::analysis::ScreenSet m_workingScreens;
+    pinpoint::analysis::ScreenSet m_screens;
+    pinpoint::analysis::DrillSet  m_savedDrills;
+    pinpoint::analysis::DrillSet  m_workingDrills;
+    pinpoint::analysis::DrillSet  m_drills;
+
+    // Copy-on-write for the two flat sets, mirroring workingCondition() and friends: fetch the row
+    // from the working layer, copying it out of the assembly on first touch. Null only when no such
+    // screen/drill exists anywhere.
+    pinpoint::analysis::Screen *workingScreen(const QString &id);
+    pinpoint::analysis::Drill  *workingDrill(const QString &id);
 
     // The corridor rows this session has explicitly RETIRED — a reset of a user override back to
     // whatever core says. Tracked rather than inferred from absence, because "no user row" is also

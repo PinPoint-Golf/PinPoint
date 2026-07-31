@@ -57,3 +57,16 @@ pp_add_test(reanalysis_controller_test
             ${SRC}/Core/tests/pp_log_stub.cpp
     INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core
     LINK    Qt6::Qml Qt6::Concurrent  AUTOMOC)
+
+# No binding may subscribe to a dependency it does not USE.
+#
+# A revision counter named on a line of its own is an expression statement whose value is discarded;
+# the QML compiler drops it and the binding is left subscribed to nothing, answering once and then
+# forever with the past. It shipped that way in the Diagnostic Model panel, it is invisible to review
+# and to qmllint, and any test that loads QML through QQmlComponent::setData will pass regardless
+# because the interpreter keeps what the compiler removes. So this reads the source.
+pp_add_test(qml_reactivity_test
+    SOURCES qml_reactivity_test.cpp
+    INCLUDE ${GUI} ${SRC}
+    LINK    Qt6::Core
+    COMPILE_OPTIONS -DPP_QML_ROOT="${GUI}")

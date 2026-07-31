@@ -18,7 +18,9 @@
 
 #include "screen_pack.h"
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -163,7 +165,7 @@ QByteArray saveScreenSet(const ScreenSet &set)
 
 namespace {
 
-ScreenSet assembleScreenSet()
+ScreenSet loadCoreScreenSet()
 {
     const QByteArray override = qgetenv("PINPOINT_CORE_SCREENS");
     const QString    corePath = override.isEmpty() ? QStringLiteral(":/diagnostics/screens.json")
@@ -176,30 +178,81 @@ ScreenSet assembleScreenSet()
         out = std::move(res.set);
     }
     out.readOnly = true;
+    return out;
+}
+
+ScreenSet assembleScreenSet()
+{
+    ScreenSet out = loadCoreScreenSet();
 
     // The user's own layer, by id. A user row REPLACES the shipped one rather than merging field by
     // field: a half-overridden protocol describing one movement with another's pass criterion would
     // be worse than either.
-    const QString userPath = userScreenPath();
-    QFile         uf(userPath);
-    if (!userPath.isEmpty() && uf.open(QIODevice::ReadOnly)) {
-        ScreenLoadResult res = loadScreenSet(uf.readAll(), userPath);
-        if (res.parsed) {
-            for (const Screen &s : res.set.screens) {
-                auto it = std::find_if(out.screens.begin(), out.screens.end(),
-                                       [&](const Screen &x) { return x.id == s.id; });
-                if (it != out.screens.end()) *it = s;
-                else                          out.screens.push_back(s);
-            }
-            out.readOnly = false;
+    const ScreenSet user = loadUserScreenSet();
+    if (!user.screens.empty()) {
+        for (const Screen &s : user.screens) {
+            auto it = std::find_if(out.screens.begin(), out.screens.end(),
+                                   [&](const Screen &x) { return x.id == s.id; });
+            if (it != out.screens.end()) *it = s;
+            else                          out.screens.push_back(s);
         }
+        out.readOnly = false;
     }
     return out;
 }
 
 ScreenSet *g_screens = nullptr;
+ScreenSet *g_core    = nullptr;
 
 } // namespace
+
+const ScreenSet &coreScreenSet()
+{
+    if (!g_core) g_core = new ScreenSet(loadCoreScreenSet());
+    return *g_core;
+}
+
+QString userScreenSetPath() { return userScreenPath(); }
+
+ScreenSet loadUserScreenSet()
+{
+    // `parsed`, NOT `loaded`. A user layer routinely fails STANDALONE validation — it holds two
+    // screens, not the shipped thirteen — and keying off `loaded` would silently drop every override
+    // the author had, then let the next save write the empty result over them.
+    const QString path = userScreenPath();
+    QFile         f(path);
+    if (path.isEmpty() || !f.open(QIODevice::ReadOnly)) return {};
+    ScreenLoadResult res = loadScreenSet(f.readAll(), path);
+    return res.parsed ? std::move(res.set) : ScreenSet{};
+}
+
+bool saveUserScreenSet(const ScreenSet &set, QString *whyNot)
+{
+    const QString path = userScreenSetPath();
+    if (path.isEmpty()) {
+        if (whyNot) *whyNot = QStringLiteral("No writable application data location.");
+        return false;
+    }
+    QDir().mkpath(QFileInfo(path).absolutePath());
+
+    // Write to a temporary and rename, exactly as saveUserPack() does — an interrupted save must not
+    // truncate a set the author has spent time on.
+    const QString tmpPath = path + QStringLiteral(".tmp");
+    QFile         tmp(tmpPath);
+    if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (whyNot) *whyNot = QStringLiteral("Could not write to %1.").arg(tmpPath);
+        return false;
+    }
+    tmp.write(saveScreenSet(set));
+    tmp.close();
+
+    QFile::remove(path);
+    if (!QFile::rename(tmpPath, path)) {
+        if (whyNot) *whyNot = QStringLiteral("Could not replace %1.").arg(path);
+        return false;
+    }
+    return true;
+}
 
 const ScreenSet &sharedScreenSet()
 {
@@ -214,6 +267,8 @@ void resetSharedScreenSet()
 {
     delete g_screens;
     g_screens = nullptr;
+    // The core layer is immutable and cached separately, so it deliberately survives — nothing a
+    // user write can do changes what shipped.
 }
 
 } // namespace pinpoint::analysis

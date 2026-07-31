@@ -18,7 +18,9 @@
 
 #include "drill_pack.h"
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -159,7 +161,7 @@ QByteArray saveDrillSet(const DrillSet &set)
 
 namespace {
 
-DrillSet assembleDrillSet()
+DrillSet loadCoreDrillSet()
 {
     const QByteArray override = qgetenv("PINPOINT_CORE_DRILLS");
     const QString    corePath = override.isEmpty() ? QStringLiteral(":/diagnostics/drills.json")
@@ -172,27 +174,74 @@ DrillSet assembleDrillSet()
         out = std::move(res.set);
     }
     out.readOnly = true;
+    return out;
+}
 
-    const QString userPath = userDrillPath();
-    QFile         uf(userPath);
-    if (!userPath.isEmpty() && uf.open(QIODevice::ReadOnly)) {
-        DrillLoadResult res = loadDrillSet(uf.readAll(), userPath);
-        if (res.parsed) {
-            for (const Drill &d : res.set.drills) {
-                auto it = std::find_if(out.drills.begin(), out.drills.end(),
-                                       [&](const Drill &x) { return x.id == d.id; });
-                if (it != out.drills.end()) *it = d;
-                else                         out.drills.push_back(d);
-            }
-            out.readOnly = false;
+DrillSet assembleDrillSet()
+{
+    DrillSet       out  = loadCoreDrillSet();
+    const DrillSet user = loadUserDrillSet();
+    if (!user.drills.empty()) {
+        for (const Drill &d : user.drills) {
+            auto it = std::find_if(out.drills.begin(), out.drills.end(),
+                                   [&](const Drill &x) { return x.id == d.id; });
+            if (it != out.drills.end()) *it = d;
+            else                         out.drills.push_back(d);
         }
+        out.readOnly = false;
     }
     return out;
 }
 
 DrillSet *g_drills = nullptr;
+DrillSet *g_core   = nullptr;
 
 } // namespace
+
+// The two layers apart — see screen_pack.h for why an editor needs them that way.
+const DrillSet &coreDrillSet()
+{
+    if (!g_core) g_core = new DrillSet(loadCoreDrillSet());
+    return *g_core;
+}
+
+QString userDrillSetPath() { return userDrillPath(); }
+
+DrillSet loadUserDrillSet()
+{
+    // `parsed`, not `loaded`, for the same reason the screen layer is read that way.
+    const QString path = userDrillPath();
+    QFile         f(path);
+    if (path.isEmpty() || !f.open(QIODevice::ReadOnly)) return {};
+    DrillLoadResult res = loadDrillSet(f.readAll(), path);
+    return res.parsed ? std::move(res.set) : DrillSet{};
+}
+
+bool saveUserDrillSet(const DrillSet &set, QString *whyNot)
+{
+    const QString path = userDrillSetPath();
+    if (path.isEmpty()) {
+        if (whyNot) *whyNot = QStringLiteral("No writable application data location.");
+        return false;
+    }
+    QDir().mkpath(QFileInfo(path).absolutePath());
+
+    const QString tmpPath = path + QStringLiteral(".tmp");
+    QFile         tmp(tmpPath);
+    if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (whyNot) *whyNot = QStringLiteral("Could not write to %1.").arg(tmpPath);
+        return false;
+    }
+    tmp.write(saveDrillSet(set));
+    tmp.close();
+
+    QFile::remove(path);
+    if (!QFile::rename(tmpPath, path)) {
+        if (whyNot) *whyNot = QStringLiteral("Could not replace %1.").arg(path);
+        return false;
+    }
+    return true;
+}
 
 const DrillSet &sharedDrillSet()
 {

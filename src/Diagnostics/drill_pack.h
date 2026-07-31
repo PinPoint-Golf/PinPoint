@@ -80,4 +80,10 @@ QByteArray      saveDrillSet(const DrillSet &set);
 const DrillSet &sharedDrillSet();
 void            resetSharedDrillSet();
 
+// The layers apart, for the editor. See screen_pack.h.
+const DrillSet &coreDrillSet();
+DrillSet        loadUserDrillSet();
+QString         userDrillSetPath();
+bool            saveUserDrillSet(const DrillSet &set, QString *whyNot = nullptr);
+
 } // namespace pinpoint::analysis

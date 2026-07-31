@@ -106,4 +106,17 @@ QByteArray       saveScreenSet(const ScreenSet &set);
 const ScreenSet &sharedScreenSet();
 void             resetSharedScreenSet();   // after writing a user set; call from the UI thread
 
+// ── The two layers, separately ──────────────────────────────────────────────
+//
+// sharedScreenSet() is the MERGE, which is the right answer for everybody who only reads. An editor
+// needs the layers apart: it must write back the user's own entries and never a flattened copy of
+// the shipped set, and it has to be able to answer "does this ship?" — which the merge cannot.
+//
+// The same split the pack and norm registries already have (userPackPath / saveUserPack), arriving
+// here for the same reason: the Diagnostic Model panel writes screens now.
+const ScreenSet &coreScreenSet();          // shipped only, cached like the merge
+ScreenSet        loadUserScreenSet();      // the user layer alone; empty when there is no file
+QString          userScreenSetPath();
+bool             saveUserScreenSet(const ScreenSet &set, QString *whyNot = nullptr);
+
 } // namespace pinpoint::analysis

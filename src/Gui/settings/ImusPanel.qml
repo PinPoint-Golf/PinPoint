@@ -69,7 +69,11 @@ Item {
         // Live ImuInstance for this device; null when not selected/connected.
         // Rebinds whenever instances change (selection or connection-state change).
         readonly property QtObject inst: {
-            imuManager.instances // triggers rebind on selection/connection changes
+            // Read as a VALUE, not as a bare statement. `imuManager.instances` on a line of its own
+            // is dead code: the compiler drops it and takes the dependency with it, so this would
+            // resolve once and never rebind — exactly the bug that froze the diagnostic model's
+            // inspector (see the note on `_revision` in DiagnosticModel.qml).
+            if (imuManager.instances.length < 0) return null
             return imuManager.instanceFor(imuData.id)
         }
 

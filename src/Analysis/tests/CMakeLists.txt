@@ -509,6 +509,9 @@ pp_add_test(characteristic_engine_test
 # and the core pack via PINPOINT_CORE_PACK (the Qt resource exists only inside the app binary).
 # AUTOMOC for the editor model (it is a QObject with Q_PROPERTY/Q_INVOKABLE).
 find_package(Qt6 REQUIRED COMPONENTS Qml)
+# Quick, for inspector_refresh_test: it counts the delegates a Repeater actually builds, which is
+# the one link in the panel's refresh chain that cannot be checked by reading a map.
+find_package(Qt6 REQUIRED COMPONENTS Quick)
 # Concurrent: norm_editor_model.cpp scans the swing library on a worker rather than stalling the
 # GUI thread for the seconds a first pass over a real library costs.
 find_package(Qt6 REQUIRED COMPONENTS Concurrent)
@@ -797,6 +800,33 @@ pp_add_test(model_browser_test
 # validation-strip assertions below pass for entirely the wrong reason.
 set_tests_properties(model_browser_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json;PINPOINT_CORE_REFERENCES=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/references.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/model_browser_scratch")
+
+# Does the details pane REDRAW after a write? model_browser_test proves the façade answers correctly;
+# this proves the four-link chain between that answer and the screen — the command's signal, the
+# panel's revision counter, the binding that reads it, and the hop across into the pane's own `var`
+# property. A pane showing yesterday's answer while the table shows today's is the one failure this
+# panel's "selecting a row IS opening its editor" premise cannot survive, and it is invisible in a
+# façade test and in a screenshot that happens to be of a correct pane.
+pp_add_test(inspector_refresh_test
+    SOURCES ${DIAG}/tests/inspector_refresh_test.cpp
+            ${SRC}/Gui/diagnosticmodel/model_browser.cpp
+            ${DIAG}/corridor_plot.cpp ${DIAG}/measure_sample.cpp
+            ${DIAG}/dag_layout.cpp ${DIAG}/diagnostics_health.cpp
+            ${DIAG}/drill_pack.cpp ${DIAG}/screen_pack.cpp ${DIAG}/reference_pack.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp ${DIAG}/memory_pack_provider.cpp
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp ${DIAG}/memory_norm_provider.cpp ${DIAG_NORM}
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${ANALYSIS}/reference_bands.cpp
+    INCLUDE ${NORM_INC} ${SRC}/Gui/characteristics ${SRC}/Gui/diagnosticmodel
+    LINK    Qt6::Qml Qt6::Quick Qt6::Concurrent
+    COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+set_tests_properties(inspector_refresh_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json;PINPOINT_CORE_SCREENS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/screens.json;PINPOINT_CORE_DRILLS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/drills.json;PINPOINT_CORE_REFERENCES=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/references.json;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/inspector_refresh_scratch")
 
 # The corridor picture. Pure geometry over value types, which is the whole reason the layout lives
 # in C++ — a curve computed inside delegate bindings is a curve nothing can assert. The load-bearing

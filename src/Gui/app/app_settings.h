@@ -72,6 +72,19 @@ class AppSettings : public QObject
     // author sees what the shipped corridors say without deleting their overrides — so this is a
     // view of the library, persisted, not a scratch toggle.
     Q_PROPERTY(QStringList diagnosticsNormSetsOff READ diagnosticsNormSetsOff WRITE setDiagnosticsNormSetsOff NOTIFY diagnosticsNormSetsOffChanged)
+    // Whether this install has been told, once, that saving over shipped diagnostic content makes
+    // its results differ from an unmodified install. Confirming the prompt IS the acknowledgement —
+    // there is no "don't show me again" checkbox to forget to tick — and resetting to the standard
+    // model clears it again, because an install back on the standard has not been warned about
+    // leaving it. Persisted, or the warning would be a warning every session, which is no warning.
+    Q_PROPERTY(bool diagnosticsBaseModelWarningAck READ diagnosticsBaseModelWarningAck WRITE setDiagnosticsBaseModelWarningAck NOTIFY diagnosticsBaseModelWarningAckChanged)
+    // Whether the Settings sidenav is folded to its icon strip. Persisted and applied to EVERY
+    // settings panel: a fold that resets on every visit is a fold you re-do forever.
+    Q_PROPERTY(bool settingsNavCollapsed READ settingsNavCollapsed WRITE setSettingsNavCollapsed NOTIFY settingsNavCollapsedChanged)
+    // …and the same for the Diagnostic Model's inspector pane, for the same reason. Separate keys
+    // because they are separate decisions: an author reading a wide table wants the inspector out of
+    // the way and the sidenav where it was, or the other way round.
+    Q_PROPERTY(bool diagnosticsInspectorCollapsed READ diagnosticsInspectorCollapsed WRITE setDiagnosticsInspectorCollapsed NOTIFY diagnosticsInspectorCollapsedChanged)
     // Global replay behaviour (surfaced in the View menu alongside the timeline
     // options, not per-mode): whether a just-captured shot auto-replays, and
     // whether replay playback is trimmed to the detected swing (Address → Finish).
@@ -243,6 +256,12 @@ public:
                                                       QStringLiteral("standard")).toString();
         m_diagnosticsNormSetsOff = ppSettings().value(QStringLiteral("ui/diagnosticsNormSetsOff"),
                                                       QStringList()).toStringList();
+        m_diagnosticsBaseModelWarningAck =
+            ppSettings().value(QStringLiteral("ui/diagnosticsBaseModelWarningAck"), false).toBool();
+        m_settingsNavCollapsed =
+            ppSettings().value(QStringLiteral("ui/settingsNavCollapsed"), false).toBool();
+        m_diagnosticsInspectorCollapsed =
+            ppSettings().value(QStringLiteral("ui/diagnosticsInspectorCollapsed"), false).toBool();
         m_autoReplayAfterCapture = ppSettings().value(QStringLiteral("ui/autoReplayAfterCapture"), true).toBool();
         m_replayTrimToSwing = ppSettings().value(QStringLiteral("ui/replayTrimToSwing"), false).toBool();
         m_reduceMotion    = ppSettings().value(QStringLiteral("ui/reduceMotion"),    false).toBool();
@@ -368,6 +387,9 @@ public:
     bool    metricsHidePlanned()  const { return m_metricsHidePlanned; }
     QString diagnosticsGradePolicy() const { return m_diagnosticsGradePolicy; }
     QStringList diagnosticsNormSetsOff() const { return m_diagnosticsNormSetsOff; }
+    bool    diagnosticsBaseModelWarningAck() const { return m_diagnosticsBaseModelWarningAck; }
+    bool    settingsNavCollapsed() const { return m_settingsNavCollapsed; }
+    bool    diagnosticsInspectorCollapsed() const { return m_diagnosticsInspectorCollapsed; }
     bool    autoReplayAfterCapture() const { return m_autoReplayAfterCapture; }
     bool    replayTrimToSwing()   const { return m_replayTrimToSwing; }
     bool    reduceMotion()  const { return m_reduceMotion; }
@@ -555,6 +577,30 @@ public:
         m_diagnosticsNormSetsOff = v;
         ppSettings().setValue(QStringLiteral("ui/diagnosticsNormSetsOff"), v);
         emit diagnosticsNormSetsOffChanged();
+    }
+
+    void setDiagnosticsBaseModelWarningAck(bool v)
+    {
+        if (m_diagnosticsBaseModelWarningAck == v) return;
+        m_diagnosticsBaseModelWarningAck = v;
+        ppSettings().setValue(QStringLiteral("ui/diagnosticsBaseModelWarningAck"), v);
+        emit diagnosticsBaseModelWarningAckChanged();
+    }
+
+    void setSettingsNavCollapsed(bool v)
+    {
+        if (m_settingsNavCollapsed == v) return;
+        m_settingsNavCollapsed = v;
+        ppSettings().setValue(QStringLiteral("ui/settingsNavCollapsed"), v);
+        emit settingsNavCollapsedChanged();
+    }
+
+    void setDiagnosticsInspectorCollapsed(bool v)
+    {
+        if (m_diagnosticsInspectorCollapsed == v) return;
+        m_diagnosticsInspectorCollapsed = v;
+        ppSettings().setValue(QStringLiteral("ui/diagnosticsInspectorCollapsed"), v);
+        emit diagnosticsInspectorCollapsedChanged();
     }
 
     void setAutoReplayAfterCapture(bool v)
@@ -1227,6 +1273,9 @@ signals:
     void metricsHidePlannedChanged();
     void diagnosticsGradePolicyChanged();
     void diagnosticsNormSetsOffChanged();
+    void diagnosticsBaseModelWarningAckChanged();
+    void settingsNavCollapsedChanged();
+    void diagnosticsInspectorCollapsedChanged();
     void autoReplayAfterCaptureChanged();
     void replayTrimToSwingChanged();
     void reduceMotionChanged();
@@ -1322,6 +1371,9 @@ private:
     bool    m_metricsHidePlanned = false;
     QString m_diagnosticsGradePolicy = QStringLiteral("standard");
     QStringList m_diagnosticsNormSetsOff;
+    bool        m_diagnosticsBaseModelWarningAck = false;
+    bool        m_settingsNavCollapsed = false;
+    bool        m_diagnosticsInspectorCollapsed = false;
     bool    m_autoReplayAfterCapture = true;
     bool    m_replayTrimToSwing = false;
     bool    m_reduceMotion    = false;

@@ -28,32 +28,41 @@ import PinPointStudio
 //
 // Clicking a step goes back to it and truncates everything after, so the trail never carries a
 // future you have left.
-Rectangle {
+//
+// It is reset, not extended, whenever the author picks a row out of the table — see selectFresh() in
+// DiagnosticModel.qml. Only a followed RELATIONSHIP is a step; choosing where to stand is the start of
+// a different chain, and a breadcrumb that kept the old one would be describing a route nobody took.
+//
+// It is also the middle pane's HEADING (ADDENDUM-02, A2). It used to be a pill on the global toolbar
+// labelled TRAIL, one band above a separate row that named the type — a breadcrumb and a pane title
+// saying overlapping things in two places. Drawn as a heading, the terminal item IS the title, and
+// with nothing walked yet it degrades to `fallbackLabel`, which is exactly what that second row said.
+// So the pill, the eyebrow and the band all go, and nothing is lost.
+Item {
     id: root
 
-    property var trail: []      // [{ type, id, label }]
+    property var    trail: []           // [{ type, id, label }]
+    // What to show before anything has been walked: the type label, as the old header row rendered.
+    property string fallbackLabel: ""
 
     signal stepPicked(string type, string id)
 
-    implicitHeight: Theme.sp(28)
-    radius:       height / 2
-    color:        Theme.colorSurface
-    border.width: 1
-    border.color: Theme.colorBorderMid
+    implicitHeight: Theme.sp(24)
+    implicitWidth:  layout.implicitWidth
 
     RowLayout {
+        id: layout
         anchors.fill: parent
-        anchors.leftMargin:  Theme.sp(10)
-        anchors.rightMargin: Theme.sp(10)
         spacing: Theme.sp(6)
 
         Text {
-            text:                qsTr("TRAIL")
-            font.family:         Theme.fontBody
-            font.pixelSize:      Theme.fontSzMicro
-            font.letterSpacing:  Theme.trackingMicro
-            font.capitalization: Font.AllUppercase
-            color:               Theme.colorText3
+            visible: root.trail.length === 0
+            text:    root.fallbackLabel
+            font.family:    Theme.fontBody
+            font.pixelSize: Theme.fontSzHeading
+            font.weight:    Theme.fontBodyWeight
+            color:          Theme.colorText
+            elide:          Text.ElideRight
         }
 
         Repeater {
@@ -68,13 +77,16 @@ Rectangle {
                 spacing: Theme.sp(6)
                 // Earlier steps give up their width first: what you are looking at NOW is the part
                 // that must stay readable, so the terminal item keeps its room and the rest elide.
-                Layout.maximumWidth: terminal ? Theme.sp(180) : Theme.sp(110)
+                Layout.maximumWidth: terminal ? Theme.sp(260) : Theme.sp(110)
 
                 Text {
                     Layout.fillWidth: true
                     text: step.modelData.label
                     font.family:    Theme.fontBody
-                    font.pixelSize: Theme.fontSzBody2
+                    // The terminal item is the pane's title and is sized as one; the steps behind it
+                    // are the path taken to it and stay subordinate. One control, two weights, so the
+                    // breadcrumb and the heading are visibly one thing.
+                    font.pixelSize: step.terminal ? Theme.fontSzHeading : Theme.fontSzBody2
                     font.weight:    Theme.fontBodyWeight
                     color: step.terminal ? Theme.colorText : Theme.colorText3
                     elide: Text.ElideRight

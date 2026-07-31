@@ -113,6 +113,24 @@ Item {
         onActivated: searchInput.forceActiveFocus()
     }
 
+    // ── The fold ──────────────────────────────────────────────────────────────
+    //
+    // The sidenav costs 275px on every settings panel, and on the widest of them — the Diagnostic
+    // Model, three panes and a facet rail — that is the width the name column starves for. Folding it
+    // to an icon strip gives the panel back a quarter of the room it was short of.
+    //
+    // Deliberately MANUAL. A width-driven auto-fold was the alternative and it is the wrong trade: a
+    // sidenav that vanishes on its own teaches an author that the app moves things when they are not
+    // looking. The state persists in AppSettings and applies to every settings panel, because a fold
+    // that resets on every visit is a fold you re-do forever.
+    readonly property bool navCollapsed: appSettings.settingsNavCollapsed
+
+    Shortcut {
+        // ⌘\ on macOS, Ctrl+\ elsewhere — Qt maps the modifier per platform.
+        sequence: "Ctrl+\\"
+        onActivated: appSettings.settingsNavCollapsed = !appSettings.settingsNavCollapsed
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -120,8 +138,12 @@ Item {
         // ── Sidenav ──────────────────────────────────────────────────────────
         Item {
             id: sidenav
-            Layout.preferredWidth: Theme.sidenavWidth
+            Layout.preferredWidth: root.navCollapsed ? Theme.sp(46) : Theme.sidenavWidth
             Layout.fillHeight: true
+
+            Behavior on Layout.preferredWidth {
+                NumberAnimation { duration: Theme.durationFast; easing.type: Easing.OutCubic }
+            }
 
             Rectangle {
                 anchors.fill: parent
@@ -137,14 +159,20 @@ Item {
                 opacity: Theme.borderOpacityNormal
             }
 
-            Column {
+            // A layout rather than a plain Column since the fold gave the strip a foot: the nav list
+            // takes what is left instead of every item computing its own height off the parent's.
+            ColumnLayout {
                 anchors.fill: parent
                 spacing: 0
 
                 // ── Search field ──────────────────────────────────────────────
+                // Gone when folded. A 46px strip cannot hold a text field, and half of one that
+                // could not be typed into would be chrome pretending to be a control.
                 Item {
-                    width:  parent.width
-                    height: Theme.sp(46)
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: root.navCollapsed ? 0 : Theme.sp(46)
+                    visible: !root.navCollapsed
+                    clip:    true
 
                     Row {
                         id: searchRow
@@ -197,15 +225,11 @@ Item {
                 }
 
                 // ── Nav list — hidden while searching ────────────────────────
-                // Reserve sp(46) top (search field) only; System now lives in
-                // the nav list (Reference section) rather than pinned to the
-                // bottom, so no bottom reservation is needed.
                 Item {
-                    width:   parent.width
-                    height:  root.isSearching ? 0 : parent.height - Theme.sp(46)
+                    Layout.fillWidth:  true
+                    Layout.fillHeight: true
                     clip:    true
                     visible: !root.isSearching
-                    Behavior on height { NumberAnimation { duration: Theme.durationFast } }
 
                     Column {
                         width:   parent.width
@@ -252,10 +276,13 @@ Item {
                                 width:   sidenav.width
                                 spacing: 0
 
-                                // Section eyebrow
+                                // Section eyebrow. Folded, the word will not fit and is drawn as the
+                                // rule it always was — the grouping survives, the label waits.
                                 Item {
                                     width:   parent.width
-                                    height:  modelData.sectionHead !== "" ? Theme.sp(14) + eyebrow.implicitHeight + Theme.sp(4) : 0
+                                    height:  modelData.sectionHead === "" ? 0
+                                           : root.navCollapsed ? Theme.sp(13)
+                                                               : Theme.sp(14) + eyebrow.implicitHeight + Theme.sp(4)
                                     visible: modelData.sectionHead !== ""
 
                                     Text {
@@ -264,6 +291,7 @@ Item {
                                         anchors.leftMargin:   Theme.sp(16)
                                         anchors.bottom:       parent.bottom
                                         anchors.bottomMargin: Theme.sp(4)
+                                        visible:              !root.navCollapsed
                                         text:                 modelData.sectionHead
                                         font.family:          Theme.fontBody
                                         font.pixelSize:       Theme.fontSzMicro
@@ -271,6 +299,18 @@ Item {
                                         font.letterSpacing:   Theme.trackingMicro
                                         font.capitalization:  Font.AllUppercase
                                         color:                Theme.colorText3
+                                    }
+
+                                    Rectangle {
+                                        anchors.left:           parent.left
+                                        anchors.right:          parent.right
+                                        anchors.leftMargin:     Theme.sp(12)
+                                        anchors.rightMargin:    Theme.sp(12)
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        height:  1
+                                        visible: root.navCollapsed
+                                        color:   Theme.colorBorderMid
+                                        opacity: Theme.borderOpacityNormal
                                     }
                                 }
 
@@ -307,10 +347,15 @@ Item {
                                         Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                                     }
 
+                                    // Folded, the icon takes the middle of the strip and the row keeps
+                                    // its full height — a fold that also shrank the rows would be a
+                                    // different nav, not the same one narrower.
                                     Text {
                                         id: navItemIcon
                                         anchors.left:           parent.left
-                                        anchors.leftMargin:     Theme.sp(16)
+                                        anchors.leftMargin:     root.navCollapsed
+                                                                    ? (parent.width - navItemIcon.width) / 2
+                                                                    : Theme.sp(16)
                                         anchors.verticalCenter: parent.verticalCenter
                                         text:           modelData.icon
                                         font.family:    Theme.fontData
@@ -326,6 +371,7 @@ Item {
                                         anchors.right:          navItemBadge.visible ? navItemBadge.left : parent.right
                                         anchors.rightMargin:    Theme.sp(10)
                                         anchors.verticalCenter: parent.verticalCenter
+                                        visible:        !root.navCollapsed
                                         text:           modelData.label
                                         font.family:    Theme.fontBody
                                         font.pixelSize: Theme.fontSzBody2
@@ -342,12 +388,19 @@ Item {
                                         anchors.rightMargin:    Theme.sp(12)
                                         anchors.verticalCenter: parent.verticalCenter
                                         text:           navItem.actualBadge >= 0 ? navItem.actualBadge.toString() : ""
-                                        visible:        navItem.actualBadge >= 0
+                                        visible:        navItem.actualBadge >= 0 && !root.navCollapsed
                                         font.family:    Theme.fontData
                                         font.pixelSize: Theme.fontSzMicro
                                         color: navItem.isActive ? Theme.colorAccent : Theme.colorText3
                                         Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                                     }
+
+                                    // Folded, hovering the strip peeks the label. The icons alone are
+                                    // learnable but not self-describing, and a strip you have to
+                                    // unfold to read is a strip nobody folds twice.
+                                    ToolTip.visible: root.navCollapsed && navItem.hovered
+                                    ToolTip.text:    modelData.label
+                                    ToolTip.delay:   300
 
                                     PpPressable {
                                         id: navArea
@@ -367,11 +420,10 @@ Item {
 
                 // ── Search results — shown while searching ────────────────────
                 Item {
-                    width:   parent.width
-                    height:  root.isSearching ? parent.height - Theme.sp(46) : 0
+                    Layout.fillWidth:  true
+                    Layout.fillHeight: true
                     clip:    true
                     visible: root.isSearching
-                    Behavior on height { NumberAnimation { duration: Theme.durationFast } }
 
                     ListView {
                         id: resultsList
@@ -447,6 +499,54 @@ Item {
                                 hoverScale: 1.0
                                 onClicked:  root.navigateToResult(modelData)
                             }
+                        }
+                    }
+                }
+
+                // ── The fold control ─────────────────────────────────────────
+                // At the sidenav's own foot, because it is the sidenav's state. Putting it on the
+                // panel would make every panel carry a control for somebody else's chrome.
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Theme.sp(34)
+
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; top: parent.top }
+                        height:  1
+                        color:   Theme.colorBorderMid
+                        opacity: Theme.borderOpacityNormal
+                    }
+
+                    Rectangle {
+                        id: foldButton
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left:           parent.left
+                        anchors.leftMargin:     root.navCollapsed
+                                                    ? (parent.width - width) / 2 : Theme.sp(10)
+                        width:  Theme.sp(26)
+                        height: Theme.sp(22)
+                        radius: Theme.radius
+                        color:  foldMa.containsMouse ? Theme.colorBg2 : "transparent"
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.navCollapsed ? "››" : "‹‹"
+                            font.family:    Theme.fontData
+                            font.pixelSize: Theme.fontSzBody2
+                            color: foldMa.containsMouse ? Theme.colorText2 : Theme.colorText3
+                        }
+
+                        ToolTip.visible: foldMa.containsMouse
+                        ToolTip.text: (root.navCollapsed ? qsTr("Show the settings list")
+                                                         : qsTr("Collapse the settings list"))
+                                      + (Qt.platform.os === "osx" ? "  ⌘\\" : "  Ctrl+\\")
+                        ToolTip.delay: 400
+
+                        PpPressable {
+                            id: foldMa
+                            hoverScale: 1.0
+                            onClicked: appSettings.settingsNavCollapsed = !appSettings.settingsNavCollapsed
                         }
                     }
                 }

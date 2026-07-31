@@ -440,6 +440,11 @@ qt_add_qml_module(PinPointStudio
         src/Gui/diagnosticmodel/ModelMint.qml
         src/Gui/diagnosticmodel/ModelChipRow.qml
         src/Gui/diagnosticmodel/ModelTools.qml
+        src/Gui/diagnosticmodel/ModelBarButton.qml
+        src/Gui/diagnosticmodel/ModelEnumField.qml
+        src/Gui/diagnosticmodel/ModelConfirm.qml
+        src/Gui/diagnosticmodel/ModelPolicyPicker.qml
+        src/Gui/diagnosticmodel/ModelUnsaved.qml
         src/Gui/diagnosticmodel/ModelCorridorPlot.qml
         src/Gui/diagnostics/WristDiagnostics.qml
         src/Gui/diagnostics/DofTrajectoryStrip.qml

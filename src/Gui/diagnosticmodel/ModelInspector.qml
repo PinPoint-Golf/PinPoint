@@ -48,7 +48,34 @@ Item {
     signal addCauseRequested()
     signal addMeasureRequested()
     signal addCorridorRequested()
+    // Sections added since: the add is the same gesture every time, so it travels as the section's
+    // own action KEY rather than growing a signal per relationship.
+    signal addRowRequested(string action)
     signal removeRowRequested(string type, string id)
+    // A row that is a BUTTON rather than a link — "Copy CSL-JSON", "Open DOI ↗". The row carries the
+    // action key in its id, so the view stays ignorant of what any of them do.
+    signal rowActionRequested(string action, string id)
+    // A claim's strength, set from the reference pane. The citation is imported and read-only; what
+    // rests on it is ours, so this one control is live on an otherwise inert page.
+    signal claimStrengthChanged(string linkId, string strength)
+    // Fold this pane away. The control belongs to the pane, not to the panel — the same reasoning
+    // that puts the settings sidenav's ‹‹ at the sidenav's own edge rather than on the page.
+    signal collapseRequested()
+
+    // Where the affordance that just fired sits, in THIS pane's coordinates. The panel maps it and
+    // opens the picker there, so a type-ahead triggered from a section at the bottom right of the
+    // window does not appear at the top left of it — which on a large screen is a mouse journey
+    // across the whole display to answer a question you asked over here.
+    property point actionOrigin: Qt.point(0, 0)
+
+    // A field of the selected object was committed. Routed to the same setField() the table uses, so
+    // there is one write path and one set of rules whichever surface the author typed into.
+    signal fieldCommitted(string field, var value)
+    // Copy / Delete for the whole object. They live here rather than on the context bar because they
+    // act on the thing this pane is showing, and a destructive action belongs beside the thing it
+    // would destroy.
+    signal duplicateRequested()
+    signal removeRequested()
     // A binding cycles rather than opening a control: applies → not counted → does not apply →
     // inherits. Four states, one click each, and the row says which it is in — a tri-state that
     // needed a popup would cost more clicks than the thing it is setting is worth.
@@ -84,6 +111,38 @@ Item {
         color:          Theme.colorText3
     }
 
+    // The fold, at this pane's own leading edge — it collapses rightwards, out of the way of the
+    // table, so it points the way it goes. Anchored to the PANE, not placed in the header: the
+    // header comes and goes with the selection and this must not.
+    Rectangle {
+        id: foldButton
+        anchors.left:       parent.left
+        anchors.top:        parent.top
+        anchors.leftMargin: Theme.sp(14)
+        anchors.topMargin:  Theme.sp(12)
+        z: 2
+        width:  Theme.sp(24)
+        height: Theme.sp(20)
+        radius: Theme.radius
+        color:  foldMa.containsMouse ? Theme.colorBg2 : "transparent"
+        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+        Text {
+            anchors.centerIn: parent
+            text: "››"
+            font.family:    Theme.fontData
+            font.pixelSize: Theme.fontSzBody2
+            color: foldMa.containsMouse ? Theme.colorText2 : Theme.colorText3
+        }
+
+        ToolTip.visible: foldMa.containsMouse
+        ToolTip.text: qsTr("Hide the inspector")
+                      + (Qt.platform.os === "osx" ? "  ⌘⇧\\" : "  Ctrl+Shift+\\")
+        ToolTip.delay: 400
+
+        PpPressable { id: foldMa; hoverScale: 1.0; onClicked: root.collapseRequested() }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -94,7 +153,10 @@ Item {
             Layout.fillWidth:    true
             Layout.leftMargin:   Theme.sp(18)
             Layout.rightMargin:  Theme.sp(18)
-            Layout.topMargin:    Theme.sp(14)
+            // Room at the top for the fold control, which floats over this pane rather than sitting
+            // in the header — the header only exists when something is selected, and a pane you can
+            // only fold while it has content is a pane that traps you on an empty one.
+            Layout.topMargin:    Theme.sp(38)
             Layout.bottomMargin: Theme.sp(12)
             spacing: Theme.sp(5)
 
@@ -274,10 +336,15 @@ Item {
                                 id: hubRow
                                 required property var modelData
 
+                                readonly property string kind: sectionItem.modelData.kind
+
                                 width:  sectionItem.width
-                                height: sectionItem.modelData.kind === "prose"
-                                            ? proseText.implicitHeight + Theme.sp(4)
-                                            : Math.max(Theme.sp(24), rowLabel.implicitHeight + Theme.sp(8))
+                                height: kind === "fields" ? fieldEditor.implicitHeight + Theme.sp(10)
+                                      : kind === "prose" ? proseText.implicitHeight + Theme.sp(4)
+                                      : kind === "quote" ? quoteBlock.implicitHeight + Theme.sp(10)
+                                      : kind === "claims" ? Math.max(Theme.sp(34),
+                                                                     rowLabel.implicitHeight + Theme.sp(10))
+                                      : Math.max(Theme.sp(24), rowLabel.implicitHeight + Theme.sp(8))
 
                                 Rectangle {
                                     anchors.fill: parent
@@ -286,6 +353,34 @@ Item {
                                 }
 
                                 HoverHandler { id: hubHover }
+
+                                // A quoted record — the citation as it reads, set apart so it is
+                                // legible as one thing rather than as a paragraph of prose.
+                                Rectangle {
+                                    id: quoteBlock
+                                    visible: hubRow.kind === "quote"
+                                    x:      Theme.sp(18)
+                                    width:  sectionItem.width - Theme.sp(36)
+                                    implicitHeight: quoteText.implicitHeight + Theme.sp(20)
+                                    height: implicitHeight
+                                    radius: Theme.radius
+                                    color:  Theme.colorBg2
+
+                                    Text {
+                                        id: quoteText
+                                        anchors.left:   parent.left
+                                        anchors.right:  parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.leftMargin:  Theme.sp(12)
+                                        anchors.rightMargin: Theme.sp(12)
+                                        text: hubRow.modelData.label
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzBody2
+                                        color:          Theme.colorText2
+                                        wrapMode:       Text.WordWrap
+                                        lineHeight:     1.35
+                                    }
+                                }
 
                                 Text {
                                     id: proseText
@@ -359,9 +454,230 @@ Item {
                                     }
                                 }
 
+                                // A FIELD row: label above, editor below. Every writable field of
+                                // every type comes through here — the inspector is where an author
+                                // expects to see and change everything an object holds, and the
+                                // table is the fast path for the few that fit in a column.
+                                ColumnLayout {
+                                    id: fieldEditor
+                                    objectName: "fieldBox"
+                                    visible: hubRow.kind === "fields"
+                                    x:     Theme.sp(18)
+                                    y:     Theme.sp(5)
+                                    width: sectionItem.width - Theme.sp(36)
+                                    // A Layout that is not itself inside a Layout gets NO size from
+                                    // anywhere — `width` was set and `height` was not, so this box
+                                    // was 0 high and laid its children out into nothing: the label
+                                    // painted, the control under it did not, and the field read as
+                                    // present but dead. Both dimensions have to be stated.
+                                    height: implicitHeight
+                                    spacing: Theme.sp(3)
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: Theme.sp(6)
+
+                                        Text {
+                                            text: hubRow.modelData.label
+                                            font.family:         Theme.fontBody
+                                            font.pixelSize:      Theme.fontSzMicro
+                                            font.letterSpacing:  Theme.trackingMicro
+                                            font.capitalization: Font.AllUppercase
+                                            color:               Theme.colorText3
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text:    hubRow.modelData.detail || ""
+                                            visible: text.length > 0
+                                            font.family:    Theme.fontBody
+                                            font.pixelSize: Theme.fontSzMicro
+                                            color:          Theme.colorText3
+                                            opacity: 0.8
+                                            elide:   Text.ElideRight
+                                        }
+                                    }
+
+                                    // text · number — one line, commits on Enter or focus-out, the
+                                    // same contract the table's inline editor keeps.
+                                    PpTextField {
+                                        objectName: "fieldEditor:" + hubRow.modelData.field + ":text"
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: Theme.sp(30)
+                                        visible: hubRow.modelData.kind === "text"
+                                                 || hubRow.modelData.kind === "number"
+                                        enabled: root.editable
+                                        text: hubRow.modelData.value !== undefined
+                                                  ? String(hubRow.modelData.value) : ""
+                                        horizontalAlignment: hubRow.modelData.kind === "number"
+                                                                 ? TextInput.AlignRight
+                                                                 : TextInput.AlignLeft
+                                        font.family: hubRow.modelData.kind === "number"
+                                                         ? Theme.fontData : Theme.fontBody
+                                        onEditingFinished: {
+                                            var was = hubRow.modelData.value !== undefined
+                                                          ? String(hubRow.modelData.value) : ""
+                                            // Nothing is written unless something changed. A pane
+                                            // that pushed a command every time focus moved would
+                                            // fill the undo stack with edits nobody made.
+                                            if (text !== was)
+                                                root.fieldCommitted(hubRow.modelData.field, text)
+                                        }
+                                    }
+
+                                    // prose — the reason this kind exists. A paragraph has never
+                                    // belonged in a table cell, which is why these fields had no
+                                    // control at all until now.
+                                    Rectangle {
+                                        objectName: "fieldEditor:" + hubRow.modelData.field + ":prose"
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: Math.max(Theme.sp(56),
+                                                                         proseEdit.implicitHeight
+                                                                         + Theme.sp(12))
+                                        visible: hubRow.modelData.kind === "prose"
+                                        radius:  Theme.radius
+                                        color:   Theme.colorSurface
+                                        border.width: 1
+                                        border.color: proseEdit.activeFocus ? Theme.colorAccent
+                                                                            : Theme.colorBorderStrong
+
+                                        TextEdit {
+                                            id: proseEdit
+                                            anchors.fill: parent
+                                            anchors.margins: Theme.sp(8)
+                                            enabled: root.editable
+                                            text: hubRow.modelData.value !== undefined
+                                                      ? String(hubRow.modelData.value) : ""
+                                            wrapMode: TextEdit.Wrap
+                                            selectByMouse: true
+                                            font.family:    Theme.fontBody
+                                            font.pixelSize: Theme.fontSzBody2
+                                            color:          Theme.colorText
+                                            // Focus-out, never per-keystroke: a paragraph typed a
+                                            // character at a time would be a hundred commands.
+                                            onActiveFocusChanged: {
+                                                if (activeFocus) return
+                                                var was = hubRow.modelData.value !== undefined
+                                                              ? String(hubRow.modelData.value) : ""
+                                                if (text !== was)
+                                                    root.fieldCommitted(hubRow.modelData.field, text)
+                                            }
+                                        }
+                                    }
+
+                                    // enum — the same box a text field gets, opened by clicking
+                                    // it. See ModelEnumField.qml for why this is not a segmented
+                                    // control any more.
+                                    ModelEnumField {
+                                        objectName: "fieldEditor:" + hubRow.modelData.field + ":enum"
+                                        Layout.fillWidth: true
+                                        visible: hubRow.modelData.kind === "enum"
+                                        enabled: root.editable
+                                        options: hubRow.modelData.options || []
+                                        value:   hubRow.modelData.value
+                                        onPicked: (v) => root.fieldCommitted(hubRow.modelData.field, v)
+                                    }
+                                }
+
+                                // An ACTION row: a button, not a link. Drawn as one so nobody expects
+                                // it to navigate.
                                 RowLayout {
-                                    visible: sectionItem.modelData.kind !== "prose"
-                                             && sectionItem.modelData.kind !== "bindings"
+                                    visible: hubRow.kind === "actions"
+                                    anchors.fill: parent
+                                    anchors.leftMargin:  Theme.sp(18)
+                                    anchors.rightMargin: Theme.sp(18)
+                                    spacing: Theme.sp(9)
+
+                                    Rectangle {
+                                        implicitWidth:  actionLbl.implicitWidth + Theme.sp(18)
+                                        implicitHeight: Theme.sp(24)
+                                        radius: Theme.radius
+                                        color:  actionMa.containsMouse ? Theme.colorBg3 : Theme.colorBg2
+                                        border.width: 1
+                                        border.color: Theme.colorBorderMid
+                                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                                        Text {
+                                            id: actionLbl
+                                            anchors.centerIn: parent
+                                            text: hubRow.modelData.label
+                                            font.family:    Theme.fontBody
+                                            font.pixelSize: Theme.fontSzMicro
+                                            color:          Theme.colorText2
+                                        }
+                                        PpPressable {
+                                            id: actionMa
+                                            hoverScale: 1.0
+                                            onClicked: root.rowActionRequested(hubRow.modelData.id,
+                                                                               hubRow.modelData.label)
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: hubRow.modelData.detail
+                                        font.family:    Theme.fontData
+                                        font.pixelSize: Theme.fontSzMicro
+                                        color:          Theme.colorText3
+                                        elide:          Text.ElideRight
+                                    }
+                                }
+
+                                // A CLAIM row: navigable like any relationship row, with the one
+                                // control on this page that is live. The reference is imported; the
+                                // claim resting on it is ours.
+                                RowLayout {
+                                    visible: hubRow.kind === "claims"
+                                    anchors.fill: parent
+                                    anchors.leftMargin:  Theme.sp(18)
+                                    anchors.rightMargin: Theme.sp(18)
+                                    spacing: Theme.sp(9)
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: hubRow.modelData.label
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzBody2
+                                        font.weight:    Theme.fontBodyWeight
+                                        color:          Theme.colorText
+                                        elide:          Text.ElideRight
+
+                                        PpPressable {
+                                            hoverScale: 1.0
+                                            enabled:    hubRow.modelData.id !== undefined
+                                            onClicked:  root.navigate(hubRow.modelData.type,
+                                                                      hubRow.modelData.id)
+                                        }
+                                    }
+
+                                    // Only an EDGE carries a strength. A condition's own provenance
+                                    // is in the same list because it rests on the same paper, and it
+                                    // is left alone rather than given a control that would write
+                                    // nowhere.
+                                    ModelEnumField {
+                                        id: strengthControl
+                                        visible: root.editable
+                                                 && hubRow.modelData.options !== undefined
+                                        Layout.preferredWidth: Theme.sp(168)
+                                        Layout.minimumWidth:   Theme.sp(140)
+                                        options: hubRow.modelData.options || []
+                                        value:   hubRow.modelData.strength
+                                        onPicked: (v) => root.claimStrengthChanged(hubRow.modelData.id, v)
+                                    }
+
+                                    Text {
+                                        visible: !strengthControl.visible
+                                        text:    hubRow.modelData.detail || ""
+                                        font.family:    Theme.fontBody
+                                        font.pixelSize: Theme.fontSzMicro
+                                        color:          Theme.colorText3
+                                        elide:          Text.ElideRight
+                                    }
+                                }
+
+                                RowLayout {
+                                    visible: hubRow.kind !== "prose" && hubRow.kind !== "bindings"
+                                             && hubRow.kind !== "quote" && hubRow.kind !== "actions"
+                                             && hubRow.kind !== "claims" && hubRow.kind !== "fields"
                                     anchors.fill: parent
                                     anchors.leftMargin:  Theme.sp(18)
                                     anchors.rightMargin: Theme.sp(18)
@@ -408,7 +724,9 @@ Item {
                                         text:    "×"
                                         visible: root.editable && hubHover.hovered
                                                  && (sectionItem.modelData.action === "cause"
-                                                     || sectionItem.modelData.action === "measure")
+                                                     || sectionItem.modelData.action === "measure"
+                                                     || sectionItem.modelData.action === "settles"
+                                                     || sectionItem.modelData.action === "answers")
                                         font.family:    Theme.fontData
                                         font.pixelSize: Theme.fontSzBody
                                         color:          Theme.colorText3
@@ -423,7 +741,10 @@ Item {
 
                                 PpPressable {
                                     hoverScale: 1.0
+                                    // A claims row draws its own click target on the label, so the
+                                    // whole-row one would sit over the strength control.
                                     enabled:    hubRow.modelData.navigable
+                                                && hubRow.kind !== "claims"
                                     onClicked:  root.navigate(hubRow.modelData.type,
                                                               hubRow.modelData.id)
                                 }
@@ -433,12 +754,15 @@ Item {
                         // "+ add" lives at the foot of the section it adds to, so the affordance is
                         // where the thing goes. Click, type three characters, Enter.
                         Text {
+                            id: addAffordance
                             visible: root.editable && sectionItem.modelData.action !== ""
                                      && sectionItem.modelData.action !== "binding"
                             x: Theme.sp(18)
                             topPadding: Theme.sp(4)
                             text: sectionItem.modelData.action === "cause"    ? qsTr("+ add cause")
                                 : sectionItem.modelData.action === "corridor" ? qsTr("+ add corridor")
+                                : sectionItem.modelData.action === "settles"  ? qsTr("+ settles a characteristic")
+                                : sectionItem.modelData.action === "answers"  ? qsTr("+ answers a characteristic")
                                                                               : qsTr("+ add measure")
                             font.family:    Theme.fontBody
                             font.pixelSize: Theme.fontSzMicro
@@ -446,10 +770,18 @@ Item {
                             PpPressable {
                                 hoverScale: 1.0
                                 onClicked: {
+                                    // Recorded before the signal, so whoever handles it knows where
+                                    // the click was. Bottom-left of the affordance: the picker hangs
+                                    // off it the way a menu hangs off the thing that opened it.
+                                    root.actionOrigin = addAffordance.mapToItem(
+                                        root, 0, addAffordance.height)
                                     if (sectionItem.modelData.action === "cause")
                                         root.addCauseRequested()
                                     else if (sectionItem.modelData.action === "corridor")
                                         root.addCorridorRequested()
+                                    else if (sectionItem.modelData.action === "settles"
+                                             || sectionItem.modelData.action === "answers")
+                                        root.addRowRequested(sectionItem.modelData.action)
                                     else
                                         root.addMeasureRequested()
                                 }
@@ -464,6 +796,81 @@ Item {
                         }
                     }
                 }
+            }
+        }
+
+        // ── Copy · Delete ─────────────────────────────────────────────────────
+        //
+        // Words, not glyphs, and at the foot of the pane that shows the object they act on. They
+        // were two icons on the context bar, which put a destructive action in the chrome next to
+        // controls that only change what you are LOOKING at — and asked the reader to know what ⧉
+        // meant. Delete wears colorError because that is how this app draws a write that removes
+        // something (DagView's destructive menu row), and because "Move to trash" being recoverable
+        // is a reason to allow it, not a reason to hide it.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            visible: root.editable && root._found
+            color:   Theme.colorBorder
+            opacity: Theme.borderOpacityNormal
+        }
+
+        RowLayout {
+            Layout.fillWidth:    true
+            Layout.leftMargin:   Theme.sp(18)
+            Layout.rightMargin:  Theme.sp(18)
+            Layout.topMargin:    Theme.sp(10)
+            Layout.bottomMargin: Theme.sp(12)
+            visible: root.editable && root._found
+            spacing: Theme.sp(8)
+
+            Item { Layout.fillWidth: true }
+
+            Rectangle {
+                implicitWidth:  copyLbl.implicitWidth + Theme.sp(22)
+                implicitHeight: Theme.sp(28)
+                radius: Theme.radius
+                color:  copyMa.containsMouse ? Theme.colorBg3 : Theme.colorBg2
+                border.width: 1
+                border.color: Theme.colorBorderMid
+                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                Text {
+                    id: copyLbl
+                    anchors.centerIn: parent
+                    text: qsTr("Copy")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzBody2
+                    color:          Theme.colorText2
+                }
+                ToolTip.visible: copyMa.containsMouse
+                ToolTip.text: Qt.platform.os === "osx" ? qsTr("Duplicate this  ⌘D")
+                                                       : qsTr("Duplicate this  Ctrl+D")
+                ToolTip.delay: 400
+                PpPressable { id: copyMa; hoverScale: 1.0; onClicked: root.duplicateRequested() }
+            }
+
+            Rectangle {
+                implicitWidth:  delLbl.implicitWidth + Theme.sp(22)
+                implicitHeight: Theme.sp(28)
+                radius: Theme.radius
+                color:  delMa.containsMouse ? Theme.colorErrorLight : "transparent"
+                border.width: 1
+                border.color: Theme.colorError
+                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                Text {
+                    id: delLbl
+                    anchors.centerIn: parent
+                    text: qsTr("Delete")
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzBody2
+                    color:          Theme.colorError
+                }
+                ToolTip.visible: delMa.containsMouse
+                ToolTip.text: qsTr("Move to trash — ⌘Z brings it back")
+                ToolTip.delay: 400
+                PpPressable { id: delMa; hoverScale: 1.0; onClicked: root.removeRequested() }
             }
         }
     }

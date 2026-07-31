@@ -20,6 +20,8 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+// Controls.Basic for the attached ToolTip on the inspector's unfold strip — the only Controls type
+// this file uses directly.
 import QtQuick.Controls.Basic
 import PinPointStudio
 
@@ -51,6 +53,26 @@ Item {
     // The façade is read through Q_INVOKABLEs, which are not properties and so cannot be bound to.
     // This is nudged by modelChanged and every list binding depends on it — the same shape
     // CharacteristicLibrary.qml uses, and for the same reason.
+    //
+    // ⚠ EVERY BINDING THAT READS THIS MUST *USE* THE VALUE. Naming it on a line of its own —
+    //
+    //     readonly property var _rows: {
+    //         root._revision            // ← dead code. Dropped, and the dependency with it.
+    //         return browser.rows(…)
+    //     }
+    //
+    // is a statement whose result is discarded, so the compiler removes it and the binding is left
+    // subscribed to nothing. It then answers once and never again.
+    //
+    // This is not hypothetical and it is not obvious from reading: it shipped, and the symptom was
+    // an inspector that kept showing three causes after a fourth was added — while the graph beside
+    // it showed four, because switching views re-evaluated that binding for an unrelated reason.
+    // Fourteen bindings in this file had it. Every one now reads the value into a guard
+    // (`if (root._revision < 0) return …`), which is unreachable, cheap, and impossible to optimise
+    // away — the read has to happen for the comparison to be made.
+    //
+    // If you add a binding that calls a Q_INVOKABLE on `browser`, copy the guard. If you are ever
+    // debugging "the model changed but the screen did not", start here.
     property int _revision: 0
 
     Connections {
@@ -73,12 +95,24 @@ Item {
     property string _selectedId:   ""
     property string _selectedType: ""
     property var    _selection:  []
-    property bool   _editsOpen:  false
     // The chain walked to get here. Its terminal item is ALWAYS the current selection — that is
     // what makes it a trail rather than a history.
     property var    _trail:      []
 
-    readonly property bool _searching: _search.trim().length > 0
+    // A search runs in one of two SCOPES, and the difference is the whole reason the rail felt dead.
+    //
+    // Typing searches EVERYTHING — one flat cross-type result list, which is what `searchAll()`
+    // returns and what `_searching` gates. Picking a type in the rail while that is up does not
+    // throw the search away; it NARROWS it, keeping the text and applying it within that type. The
+    // list then gets that type's own columns and its own editable cells, which is what the author
+    // was reaching for: "find the causal links about attack angle, then re-rate one of them".
+    //
+    // It used to do neither. `_type` changed, `_search` did not, and `_searching` kept the table on
+    // the cross-type results — so the rail highlighted a type and the screen did not move. The
+    // result list also has search's columns (no Strength) and is deliberately not editable, so the
+    // panel looked read-only into the bargain.
+    property bool _searchAllTypes: true
+    readonly property bool _searching: _search.trim().length > 0 && _searchAllTypes
     // Screens, drills, references and health have their own registries and their own write paths;
     // this panel does not write them, and a cell that looked live and did nothing would be worse
     // than one that plainly is not.
@@ -88,6 +122,55 @@ Item {
     readonly property bool _typeEditable:
         _type === "characteristics" || _type === "causes" || _type === "measures"
         || _type === "signals" || _type === "links" || _type === "corridors"
+        || _type === "screens" || _type === "drills"
+
+    // What ONE of the current type is called, for the button that names what it would make. The
+    // string comes from C++ with every other type-naming rule rather than being a second table here.
+    readonly property string _typeOne: {
+        if (root._revision < 0) return ""
+        var t = browser.types
+        for (var i = 0; i < t.length; i++) if (t[i].key === root._type) return t[i].one
+        return ""
+    }
+
+    // Creation is not a thing for every editable type: a link is drawn between two objects, a signal
+    // is minted by attaching a measure, a corridor is added at a context. Nor while searching — a
+    // result list is not a place you author into.
+    readonly property bool _canCreate:
+        _typeEditable && !_searching && _type !== "links" && _type !== "signals"
+        && _type !== "corridors"
+
+    // The grade policy as a WORD, not the stored key. The readout is the state every corridor on
+    // screen is drawn under, so it has to read like the thing the policy list offered.
+    readonly property string _policyLabel: {
+        if (root._revision < 0) return ""
+        var ps = browser.gradePolicies()
+        for (var i = 0; i < ps.length; i++)
+            if (ps[i].name === appSettings.diagnosticsGradePolicy) return ps[i].label
+        return appSettings.diagnosticsGradePolicy
+    }
+
+    // The active filters, as chips, for when the facet rail is collapsed. Labels come from the same
+    // facet spec the rail renders, so a chip cannot say something the rail would not.
+    readonly property var _facetChips: {
+        if (root._revision < 0) return []
+        var out = []
+        var spec = browser.facets(root._type)
+        for (var k in root._facets) {
+            var values = root._facets[k]
+            for (var i = 0; i < values.length; i++) {
+                var label = values[i]
+                for (var s = 0; s < spec.length; s++) {
+                    if (spec[s].key !== k) continue
+                    for (var o = 0; o < spec[s].options.length; o++)
+                        if (spec[s].options[o].value === values[i])
+                            label = spec[s].label + " · " + spec[s].options[o].label
+                }
+                out.push({ key: k, value: values[i], label: label })
+            }
+        }
+        return out
+    }
 
     // ── Responsive ────────────────────────────────────────────────────────────
     // The three panes plus the sidenav add up fast, and the name column is what gets starved.
@@ -95,23 +178,44 @@ Item {
     // it is the one that gets the room. Widened by half over the mockup's 352, which was drawn
     // before it carried a plot at all — and the threshold for dropping it moves with it, or the
     // panel would keep a pane it can no longer fit.
+    //
+    // Both thresholds are stated as THIS PANEL'S width. They used to be written `1500 - 275` and
+    // `1326 - 275`, subtracting a settings sidenav that is now foldable — a constant baked into a
+    // measurement of something else. The panel is handed whatever the sidenav does not take, so its
+    // own width is the only figure either question needs, and folding the sidenav now buys the facet
+    // rail and the inspector real room instead of quietly changing what the arithmetic meant.
+    //
+    // Order of concession under pressure: fold the sidenav → collapse the facet rail → drop the
+    // inspector. The first step is the author's to take, which is why it is a control and not a
+    // threshold.
     readonly property int  _inspectorWidth: Theme.sp(528)
-    readonly property bool _showFacets:     width > Theme.sp(1500 - 275)
-    readonly property bool _showInspector:  width > Theme.sp(1326 - 275)
+
+    // Folded away by hand, and it STAYS folded — persisted in AppSettings for the same reason the
+    // settings sidenav's fold is: one that resets on every visit is one you re-do forever.
+    //
+    // Distinct from _showInspector below, which is the panel running out of room. That one is the
+    // app's decision and reverses itself when the window grows; this one is the author's and does
+    // not. When the panel drops the pane for width, it takes the fold's strip with it — a control
+    // offering to restore something the layout will not give back would be a lie.
+    readonly property bool _inspectorFolded: appSettings.diagnosticsInspectorCollapsed
+    readonly property bool _showFacets:     width > Theme.sp(1225)
+    readonly property bool _showInspector:  width > Theme.sp(1051)
 
     // ── Data, all derived in C++ ──────────────────────────────────────────────
     readonly property var _columns: {
-        root._revision
+        if (root._revision < 0) return []
         return root._searching ? browser.columns("search") : browser.columns(root._type)
     }
     readonly property var _rows: {
-        root._revision
+        if (root._revision < 0) return []
         if (root._searching) return browser.searchAll(root._search)
+        // `search` travels into rows() so a search narrowed to one type still filters it. The
+        // façade has always taken this filter; the panel simply never passed it.
         return browser.rows(root._type, { sort: root._sort, descending: root._descending,
-                                          facets: root._facets })
+                                          facets: root._facets, search: root._search })
     }
     readonly property int _totalForType: {
-        root._revision
+        if (root._revision < 0) return 0
         var t = browser.types
         for (var i = 0; i < t.length; i++) if (t[i].key === root._type) return t[i].count
         return 0
@@ -124,8 +228,7 @@ Item {
     // Reads _revision and _scanRevision so a redraw follows an edit or a reading landing; the plot
     // re-invokes it on its own for a drag.
     readonly property var _corridorPlotSource: {
-        root._revision
-        root._scanRevision
+        if (root._revision < 0 || root._scanRevision < 0) return function () { return ({}) }
         var type = root._selectedType
         var id   = root._selectedId
         return function (opts) {
@@ -140,8 +243,7 @@ Item {
     property int _scanRevision: 0
 
     readonly property var _inspectorDetail: {
-        root._revision
-        if (root._selectedId === "") return ({})
+        if (root._revision < 0 || root._selectedId === "") return ({})
         return browser.inspect(root._selectedType, root._selectedId)
     }
 
@@ -152,6 +254,13 @@ Item {
         return row && row.resultType ? row.resultType : (row && row.type ? row.type : root._type)
     }
 
+    function _trailStep(type, id) {
+        return { type: type, id: id, label: browser.inspect(type, id).label || id }
+    }
+
+    // WALKED to — the trail grows. Following a relationship is the only thing that makes a chain a
+    // chain: a metric, the measure that reads it, the corridor that judges it, the characteristic
+    // that fires. Every caller of this is a link somebody followed.
     function select(type, id, pushTrail) {
         root._selectedType = type
         root._selectedId   = id
@@ -163,9 +272,26 @@ Item {
         var t = root._trail.slice()
         for (var i = 0; i < t.length; i++)
             if (t[i].id === id) { t = t.slice(0, i); break }
-        t.push({ type: type, id: id, label: browser.inspect(type, id).label || id })
+        t.push(_trailStep(type, id))
         if (t.length > 8) t = t.slice(t.length - 8)
         root._trail = t
+    }
+
+    // ARRIVED at — the trail STARTS here, one item long.
+    //
+    // Picking a row out of the table is not a step in a chain; it is the decision to start a
+    // different one. Keeping the old walk in front of it would make the breadcrumb claim a route
+    // nobody took — and worse, offer to "go back" to something the author had already left. So the
+    // trail is exactly what it says it is: what you walked SINCE you last chose where to stand.
+    //
+    // The test for which of the two applies is whether a RELATIONSHIP was followed. Table rows, deep
+    // links from the dashboard, a health finding's subject and a freshly created object all put you
+    // somewhere without one, so all of them begin a trail rather than extending one.
+    function selectFresh(type, id) {
+        root._selectedType = type
+        root._selectedId   = id
+        root._selectedEdgeId = ""
+        root._trail = [ _trailStep(type, id) ]
     }
 
     // Navigating from the inspector may cross types — a measure's blast radius lands on a
@@ -209,13 +335,59 @@ Item {
             var rows = browser.rows(order[t], { ids: [ subject ] })
             if (rows.length > 0) {
                 root._type = order[t]
-                root.select(order[t], subject, true)
+                // A finding is not a step in a chain — it is a place to start looking.
+                root.selectFresh(order[t], subject)
                 return
             }
         }
         // A subject that resolves nowhere is itself the finding — say so rather than doing nothing.
         toast.severity = "warn"
         toast.show(qsTr("Nothing in the model has the id %1").arg(subject))
+    }
+
+    // One place, because two surfaces set it: the facet rail and the chips the context bar draws
+    // when that rail is collapsed. Toggling from either has to mean the same thing.
+    function toggleFacet(key, value) {
+        table.endEdit()
+        var f = JSON.parse(JSON.stringify(root._facets))
+        var v = f[key] || []
+        var at = v.indexOf(value)
+        if (at >= 0) v.splice(at, 1)
+        else         v.push(value)
+        if (v.length === 0) delete f[key]
+        else                f[key] = v
+        root._facets = f
+    }
+
+    // Open a picker where the click was.
+    //
+    // Every one of these used to compute `parent.width / 2 - popup.width / 2` — but `parent` there
+    // was the inspector (528 wide) while `x` is in the PANEL's coordinates, so the sum landed the
+    // popup at x≈84: hard against the left edge, however far right the affordance that opened it
+    // was. On a full-screen window that is the whole display to cross to answer a question you just
+    // asked on the other side.
+    //
+    // `origin` is in `source`'s coordinates; it is mapped here and then clamped so the popup stays
+    // on the panel whichever edge it was opened near.
+    function _openPickerNear(popup, source, origin) {
+        var p = source.mapToItem(root, origin.x, origin.y)
+        var h = popup.height > 0 ? popup.height : Theme.sp(320)
+        popup.x = Math.max(Theme.sp(8),
+                           Math.min(p.x, root.width - popup.width - Theme.sp(8)))
+        popup.y = Math.max(Theme.sp(8),
+                           Math.min(p.y + Theme.sp(4), root.height - h - Theme.sp(8)))
+        popup.open()
+    }
+
+    // Hang a popover under the bar item that owns it, right edges aligned. The item's own `x` is
+    // relative to the bar, not to the panel, so it has to be mapped or every popover sits one bar
+    // margin off — visible as a popover that does not quite line up with the thing it belongs to.
+    function _dropUnder(popup, item) {
+        var right = item.mapToItem(root, item.width, item.height)
+        popup.x = Math.max(Theme.sp(8), Math.min(right.x - popup.width,
+                                                 root.width - popup.width - Theme.sp(8)))
+        popup.y = right.y + Theme.sp(2)
+        popup.open()
     }
 
     function _report(result) {
@@ -236,30 +408,53 @@ Item {
             _report(browser.setField(type, id, field, value))
     }
 
-    function doSave()      { _report(browser.save()) }
+    // Save is PACK-WIDE: one button, everything dirty, which is why the `n unsaved` count beside it
+    // is exactly what it would write.
+    //
+    // The first save that writes over SHIPPED content interrupts, once per install. Every other edit
+    // in this panel is undoable and local; this one changes what the whole app grades against, and an
+    // author should meet that fact deliberately once rather than never. Purely authored content does
+    // not trigger it — adding a characteristic of your own is not deviating from the standard model,
+    // and a prompt that cried wolf on the first save of anything would be dismissed unread.
+    function doSave() {
+        if (!appSettings.diagnosticsBaseModelWarningAck && browser.overriddenCount > 0) {
+            saveConfirm.open()
+            return
+        }
+        _report(browser.save())
+    }
     function doUndo()      { _report(browser.undo()) }
     function doRedo()      { _report(browser.redo()) }
     function doRevert()    { _report(browser.revert()) }
 
-    function doDuplicate(id) {
-        var r = browser.duplicate(root._type, id)
+    // The way back from that warning. Everything local goes — overrides AND objects authored here,
+    // because a new characteristic is screened and graded like any other, so an install carrying one
+    // is not running the standard model either. Recoverable twice over: it is a command, so ⌘Z holds
+    // it for the session, and the packs are copied aside before they are replaced.
+    function doResetToStandard() {
+        var r = browser.resetToStandard()
         _report(r)
-        if (r.ok === true) select(r.type, r.id, true)
+        // Back on the standard model is back to not having been warned about leaving it.
+        if (r.ok === true) appSettings.diagnosticsBaseModelWarningAck = false
     }
 
-    function doRemove(id) {
-        if (root._type === "links") {
-            var row = null
-            for (var i = 0; i < root._rows.length; i++)
-                if (root._rows[i].id === id) row = root._rows[i]
-            if (!row) return
-            var rel = ""
-            for (var c = 0; c < row.cells.length; c++)
-                if (row.cells[c].field === "relation") rel = row.cells[c].value
-            _report(browser.removeLink(row.fromId, row.toId, rel))
-        } else {
-            _report(browser.removeObject(root._type, id))
-        }
+    // `type` is optional and defaults to the LIST's type, which is right for the table. The
+    // inspector passes the SELECTED object's type explicitly, because what is selected need not be
+    // of the type the list is showing — following a cause out of a characteristic's pane leaves the
+    // list on characteristics and the selection on a link.
+    function doDuplicate(id, type) {
+        var r = browser.duplicate(type || root._type, id)
+        _report(r)
+        // The copy appears in the table and is selected there. Same rule as picking it by hand: it
+        // begins a trail rather than hanging off whatever chain the original was the end of.
+        if (r.ok === true) selectFresh(r.type, r.id)
+    }
+
+    function doRemove(id, type) {
+        // removeObject() unpacks a link id itself now, so there is one call for every type. It used
+        // to hunt the visible rows for the link's parts, which only worked while the link happened
+        // to be in the list on screen — never true when the delete came from the inspector.
+        _report(browser.removeObject(type || root._type, id))
     }
 
     // ── Deep links ────────────────────────────────────────────────────────────
@@ -270,25 +465,28 @@ Item {
     //
     // Each of these is "select this object", because that is all navigation in this panel IS: the
     // type rail follows the selection and the inspector follows it too.
+    //
+    // They BEGIN a trail. Arriving from a dashboard tile is the start of a piece of work, and the
+    // chain somebody walked in this panel an hour ago is not the route they took to get here.
     function showMetric(key) {
         root._search = ""
         root._view   = "table"
         root._type   = "metrics"
-        root.select("metrics", key, true)
+        root.selectFresh("metrics", key)
     }
 
     function showCharacteristic(conditionId) {
         root._search = ""
         root._view   = "table"
         root._type   = "characteristics"
-        root.select("characteristics", conditionId, true)
+        root.selectFresh("characteristics", conditionId)
     }
 
     function showMeasure(measureId) {
         root._search = ""
         root._view   = "table"
         root._type   = "measures"
-        root.select("measures", measureId, true)
+        root.selectFresh("measures", measureId)
     }
 
     function scrollToItem(itemId) {
@@ -303,133 +501,194 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // ── Page header ───────────────────────────────────────────────────────
+        // ── The global bar ────────────────────────────────────────────────────
+        //
+        // ONE bar where there were four bands: a page header, a nine-control toolbar, a validation
+        // strip and a status bar that repeated the unsaved count. The rule that decides what belongs
+        // here (ADDENDUM-02, A1): the top bar belongs to the PANEL and never changes. Anything that
+        // depends on what you are looking at is on the context bar inside the middle pane, where it
+        // can act on the thing it names. A bar that never moves can be learned; a bar whose contents
+        // shuffle per type cannot.
+        //
+        // The page header is gone entirely. `REFERENCE` was the sidenav section the reader was
+        // standing in, and repeating it is chrome describing chrome.
         RowLayout {
-            Layout.fillWidth:   true
-            Layout.leftMargin:  Theme.sp(24)
-            Layout.rightMargin: Theme.sp(24)
-            Layout.topMargin:   Theme.sp(12)
-            spacing: Theme.sp(12)
+            id: globalBar
+            Layout.fillWidth:       true
+            Layout.leftMargin:      Theme.sp(24)
+            Layout.rightMargin:     Theme.sp(24)
+            Layout.preferredHeight: Theme.sp(42)
+            spacing: Theme.sp(10)
 
-            Text {
-                text:                qsTr("REFERENCE")
-                font.family:         Theme.fontBody
-                font.pixelSize:      Theme.fontSzMicro
-                font.letterSpacing:  Theme.trackingMicro
-                font.capitalization: Font.AllUppercase
-                color:               Theme.colorText3
+            // Below this the title and the pack label drop out before anything else does. They are
+            // the only two items on the bar that say something the reader already knows.
+            readonly property bool roomy: root.width > Theme.sp(1100)
+
+            PpDisplayText {
+                text:    qsTr("Diagnostic Model")
+                visible: globalBar.roomy
+                Layout.fillWidth: false
             }
-
-            PpDisplayText { text: qsTr("Diagnostic Model") }
-
-            Item { Layout.fillWidth: true }
 
             Text {
                 text:           browser.packLabel
+                visible:        globalBar.roomy
                 font.family:    Theme.fontData
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3
+                Layout.fillWidth: false
             }
-        }
-
-        // ── Toolbar ───────────────────────────────────────────────────────────
-        RowLayout {
-            Layout.fillWidth:    true
-            Layout.leftMargin:   Theme.sp(24)
-            Layout.rightMargin:  Theme.sp(24)
-            Layout.topMargin:    Theme.sp(12)
-            Layout.bottomMargin: Theme.sp(10)
-            spacing: Theme.sp(10)
 
             PpTextField {
                 id: searchField
-                Layout.preferredWidth: Theme.sp(320)
+                Layout.fillWidth:    true
+                Layout.maximumWidth: Theme.sp(420)
+                Layout.minimumWidth: Theme.sp(180)
+                Layout.preferredHeight: Theme.sp(30)
+                rightPadding: findHint.implicitWidth + Theme.sp(18)
                 placeholderText: qsTr("Search every content type")
                 onTextChanged: {
                     table.endEdit()
                     root._search = text
+                    // Typing is always a fresh question, asked of everything. Narrowing to a type is
+                    // a decision taken AFTER the answer comes back.
+                    root._searchAllTypes = true
                     // A search answers across every type at once, which is a LIST — so asking for
                     // one puts you in the list, visibly, rather than silently swapping the pane out
                     // from under a control that still says otherwise.
                     if (text.trim().length > 0) root._view = "table"
                 }
                 Keys.onEscapePressed: { text = ""; root._search = "" }
-            }
 
-            ModelTrail {
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                Layout.maximumWidth: Theme.sp(520)
-                trail: root._trail
-                visible: root._trail.length > 0 && !root._searching
-                onStepPicked: (type, id) => root.navigateTo(type, id)
+                // The shortcut exists either way; saying so is what makes it reachable by anybody
+                // who did not read the code.
+                Text {
+                    id: findHint
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right:          parent.right
+                    anchors.rightMargin:    Theme.sp(9)
+                    visible: !searchField.activeFocus && searchField.text === ""
+                    text:    Qt.platform.os === "osx" ? "⌘F" : "Ctrl+F"
+                    font.family:    Theme.fontData
+                    font.pixelSize: Theme.fontSzMicro
+                    color:          Theme.colorText3
+                }
             }
 
             Item { Layout.fillWidth: true }
 
-            // Unsaved state, said plainly. The count is OBJECTS that would be written, not
-            // keystrokes — three edits to one label is one unsaved object.
-            Text {
-                text: qsTr("%n unsaved", "", browser.unsavedCount)
-                visible: browser.dirty
-                font.family:    Theme.fontData
-                font.pixelSize: Theme.fontSzMicro
-                color:          Theme.colorAccent
+            // ── Grading, as a live readout ────────────────────────────────────
+            // Every band edge in every corridor on screen is drawn under this policy, so the answer
+            // to "why is this corridor red" must not be behind a button called Tools. Promoted out
+            // of the drawer to a value you can see and change in one click.
+            ModelBarButton {
+                id: gradingButton
+                Layout.fillWidth: false
+                label:   qsTr("Grading %1").arg(root._policyLabel)
+                hint:    "▾"
+                tooltip: qsTr("How every corridor on screen is graded")
+                active:  policyPopup.opened
+                onClicked: root._dropUnder(policyPopup, gradingButton)
             }
 
-            // minimumWidth, not just preferredWidth: PpSegmentedControl sets an implicitHeight and
-            // no implicitWidth, so a RowLayout under pressure will happily shrink it to nothing —
-            // and the Table/Graph toggle would vanish rather than merely get narrow. It is the only
-            // way into the graph pane besides the G key, so it must not be the thing that gives.
-            PpSegmentedControl {
-                Layout.preferredWidth: Theme.sp(150)
-                Layout.minimumWidth:   Theme.sp(120)
-                options: [ qsTr("Table"), qsTr("Graph") ]
-                selected: root._view === "table" ? qsTr("Table") : qsTr("Graph")
-                onActivated: (value) => root._view = (value === qsTr("Table") ? "table" : "graph")
+            ModelBarButton {
+                id: drawerButton
+                Layout.fillWidth: false
+                glyph:   "⋯"
+                tooltip: qsTr("Views, exports and norm sets")
+                active:  toolsPopup.opened
+                onClicked: root._dropUnder(toolsPopup, drawerButton)
             }
 
-            // What "new" means depends on what you are looking at: a measure is built from facets,
-            // a characteristic starts blank. One button, because "New" is one intent.
-            PpButton {
-                label:   qsTr("New")
-                visible: root._typeEditable && root._type !== "links" && root._type !== "signals"
-                         && root._type !== "corridors"
-                onClicked: {
-                    if (root._type === "measures") {
-                        mintPopup.x = root.width / 2 - mintPopup.width / 2
-                        mintPopup.y = Theme.sp(80)
-                        mintPopup.open()
-                    } else {
-                        var r = browser.createObject(root._type)
-                        root._report(r)
-                        if (r.ok === true) root.select(r.type, r.id, true)
+            Rectangle {
+                Layout.fillWidth: false
+                Layout.preferredWidth:  1
+                Layout.preferredHeight: Theme.sp(18)
+                color:   Theme.colorBorderMid
+                opacity: Theme.borderOpacityNormal
+            }
+
+            // ── The validation chip ───────────────────────────────────────────
+            // Was a band of its own. A clean draft now costs zero pixels rather than a conditional
+            // strip, and the one thing that made the strip worth having survives: clicking it is a
+            // WAY IN to the findings, not a description of a problem the reader then has to go and
+            // locate.
+            Rectangle {
+                id: validationChip
+                readonly property int errors:   browser.validationErrorCount
+                readonly property int warnings: browser.validationWarningCount
+
+                Layout.fillWidth: false
+                visible: errors + warnings > 0
+                implicitWidth:  chipText.implicitWidth + Theme.sp(18)
+                implicitHeight: Theme.sp(26)
+                radius: Theme.radius
+                color:  errors > 0 ? Theme.colorErrorLight : Theme.colorWarnLight
+
+                Text {
+                    id: chipText
+                    anchors.centerIn: parent
+                    text: {
+                        if (root._revision < 0) return ""
+                        var bits = []
+                        if (validationChip.errors > 0)
+                            bits.push(qsTr("%n error(s)", "", validationChip.errors))
+                        if (validationChip.warnings > 0)
+                            bits.push(qsTr("%n warning(s)", "", validationChip.warnings))
+                        return "⚠ " + bits.join(" · ")
+                    }
+                    font.family:    Theme.fontBody
+                    font.pixelSize: Theme.fontSzMicro
+                    font.weight:    Theme.fontBodyWeight
+                    color: validationChip.errors > 0 ? Theme.colorError : Theme.colorWarn
+                }
+
+                PpPressable {
+                    hoverScale: 1.0
+                    onClicked: {
+                        root._type   = "health"
+                        root._search = ""
+                        searchField.text = ""
                     }
                 }
             }
 
-            PpButton {
-                label: qsTr("Tools")
-                onClicked: {
-                    toolsPopup.x = root.width - toolsPopup.width - Theme.sp(24)
-                    toolsPopup.y = Theme.sp(80)
-                    toolsPopup.open()
-                }
-            }
-
-            PpButton {
-                label:   qsTr("Edits")
-                enabled: true
-                onClicked: root._editsOpen = !root._editsOpen
-            }
-
-            PpButton {
-                label:   qsTr("Undo")
+            // ── The commit cluster ────────────────────────────────────────────
+            // Three items, always adjacent, always here. This is the only part of the chrome an
+            // author touches every few seconds, and it used to be spread across three bands with
+            // `revert` orphaned in the status bar and redo owning no button at all.
+            ModelBarButton {
+                Layout.fillWidth: false
+                glyph:   "↶"
                 enabled: browser.canUndo
+                // The commands already carry a human label and nothing showed it anywhere.
+                tooltip: browser.canUndo ? qsTr("Undo %1").arg(browser.undoLabel) : qsTr("Nothing to undo")
                 onClicked: root.doUndo()
             }
 
+            ModelBarButton {
+                Layout.fillWidth: false
+                glyph:   "↷"
+                enabled: browser.canRedo
+                tooltip: browser.canRedo ? qsTr("Redo %1").arg(browser.redoLabel) : qsTr("Nothing to redo")
+                onClicked: root.doRedo()
+            }
+
+            ModelBarButton {
+                id: unsavedButton
+                Layout.fillWidth: false
+                visible: browser.dirty
+                label:   qsTr("%n unsaved", "", browser.unsavedCount)
+                hint:    "▾"
+                tone:    Theme.colorAccent
+                tooltip: qsTr("What Save would write")
+                active:  unsavedPopup.opened
+                onClicked: root._dropUnder(unsavedPopup, unsavedButton)
+            }
+
             PpButton {
+                Layout.fillWidth: false
+                Layout.preferredHeight: Theme.sp(30)
                 label:   qsTr("Save")
                 primary: true
                 enabled: browser.dirty
@@ -437,58 +696,166 @@ Item {
             }
         }
 
-        // ── Validation strip ──────────────────────────────────────────────────
-        // What is wrong with the DRAFT. Clicking it filters the table to the offending rows, so the
-        // strip is a way in rather than a description of a problem the reader then has to find.
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight:
-                (browser.validationErrorCount + browser.validationWarningCount) > 0
-                    ? Theme.sp(30) : 0
-            visible: Layout.preferredHeight > 0
-            color: browser.validationErrorCount > 0
-                       ? Theme.colorErrorLight : Theme.colorWarnLight
+        // ── The context bar ───────────────────────────────────────────────────
+        //
+        // Everything that depends on WHAT YOU ARE LOOKING AT (ADDENDUM-02, A2), on its own line
+        // directly under the global bar. It replaces the old middle-pane header row rather than
+        // adding to it: the trail IS the heading, so the breadcrumb sits above the list it walked
+        // and a band disappears.
+        //
+        // A2 originally put this INSIDE the middle pane, starting where the table starts, on the
+        // argument that a bar belonging to the list should look like it. That argument was right
+        // about meaning and wrong about arithmetic: the middle pane is what is left after a 214px
+        // rail and a 528px inspector, so eight controls plus an eliding breadcrumb were fighting
+        // over roughly a third of the window — cramped at FULL SCREEN, not just under pressure.
+        // A row that cannot hold its contents does not communicate what it belongs to either.
+        //
+        // So it spans the panel and takes the same margins as the global bar. Two bands, both
+        // full width: one that never changes and one that always does.
+        RowLayout {
+            id: contextBar
+            Layout.fillWidth:       true
+            Layout.leftMargin:      Theme.sp(24)
+            Layout.rightMargin:     Theme.sp(24)
+            Layout.bottomMargin:    Theme.sp(6)
+            Layout.preferredHeight: Theme.sp(38)
+            spacing: Theme.sp(10)
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin:  Theme.sp(24)
-                anchors.rightMargin: Theme.sp(24)
-                spacing: Theme.sp(10)
+            ModelTrail {
+                Layout.fillWidth:    true
+                Layout.minimumWidth: Theme.sp(60)
+                trail: root._searching ? [] : root._trail
+                fallbackLabel: {
+                    if (root._revision < 0) return ""
+                    if (root._searching) return qsTr("Results")
+                    var t = browser.types
+                    for (var i = 0; i < t.length; i++)
+                        if (t[i].key === root._type) return t[i].label
+                    return ""
+                }
+                onStepPicked: (type, id) => root.navigateTo(type, id)
+            }
 
-                Text {
-                    Layout.fillWidth: true
-                    text: {
-                        root._revision
-                        var e = browser.validationErrorCount, w = browser.validationWarningCount
-                        var bits = []
-                        if (e > 0) bits.push(qsTr("%n error(s)", "", e))
-                        if (w > 0) bits.push(qsTr("%n warning(s)", "", w))
-                        return bits.join(" · ")
+            Text {
+                Layout.fillWidth: false
+                Layout.maximumWidth: Theme.sp(260)
+                text: {
+                    if (root._revision < 0) return ""
+                    if (root._searching)
+                        return qsTr("%n match(es) across every type", "", root._rows.length)
+                    var t = browser.types
+                    for (var i = 0; i < t.length; i++)
+                        if (t[i].key === root._type)
+                            return t[i].count + " · " + t[i].hint
+                    return ""
+                }
+                font.family:    Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorText3
+                elide:          Text.ElideRight
+            }
+
+            // A collapsed facet rail hides the fact that a filter is ON, which would leave
+            // the reader looking at a short list with no way to see why. The chips are the
+            // filter, said where the list is.
+            Repeater {
+                model: root._showFacets ? [] : root._facetChips
+                delegate: Rectangle {
+                    id: facetChip
+                    required property var modelData
+
+                    Layout.fillWidth: false
+                    implicitWidth:  facetChipText.implicitWidth + Theme.sp(22)
+                    implicitHeight: Theme.sp(22)
+                    radius: height / 2
+                    color:  Theme.colorAccentLight
+                    border.width: 1
+                    border.color: Theme.colorAccent
+
+                    Text {
+                        id: facetChipText
+                        anchors.centerIn: parent
+                        text: facetChip.modelData.label + "  ✕"
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorAccent
                     }
-                    font.family:    Theme.fontBody
-                    font.pixelSize: Theme.fontSzBody2
-                    color: browser.validationErrorCount > 0
-                               ? Theme.colorError : Theme.colorWarn
-                    elide: Text.ElideRight
-                }
 
-                Text {
-                    text: qsTr("show →")
-                    font.family:    Theme.fontBody
-                    font.pixelSize: Theme.fontSzMicro
-                    color: browser.validationErrorCount > 0
-                               ? Theme.colorError : Theme.colorWarn
+                    PpPressable {
+                        hoverScale: 1.0
+                        onClicked: root.toggleFacet(facetChip.modelData.key,
+                                                    facetChip.modelData.value)
+                    }
                 }
             }
 
-            PpPressable {
-                hoverScale: 1.0
+            // Bulk-set is offered only when there is a selection to bulk-set, and it says
+            // how many rows it would touch.
+            Text {
+                Layout.fillWidth: false
+                visible: root._selection.length > 1
+                text: qsTr("%n selected", "", root._selection.length)
+                font.family:    Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorAccent
+            }
+
+            // minimumWidth, not just preferredWidth: PpSegmentedControl sets an
+            // implicitHeight and no implicitWidth, so a RowLayout under pressure will
+            // happily shrink it to nothing — and the Table/Graph toggle would vanish rather
+            // than merely get narrow. It is the only way into the graph pane besides the G
+            // key, so it must not be the thing that gives.
+            //
+            // Hidden for health, where a finding has no neighbourhood to draw.
+            PpSegmentedControl {
+                Layout.fillWidth: false
+                Layout.preferredWidth: Theme.sp(140)
+                Layout.minimumWidth:   Theme.sp(120)
+                visible: root._type !== "health"
+                options: [ qsTr("Table"), qsTr("Graph") ]
+                selected: root._view === "table" ? qsTr("Table") : qsTr("Graph")
+                onActivated: (value) => root._view = (value === qsTr("Table") ? "table" : "graph")
+            }
+
+            // ── The three row actions ─────────────────────────────────────────
+            //
+            // ONE control type for all three. They were a PpButton and two bar glyphs, which read as
+            // three different kinds of thing sitting together: a filled 34px page button beside two
+            // quiet 28px icons, for three actions of equal standing that all operate on the same
+            // list.
+            //
+            // The rule for both bars, now stated: everything is a ModelBarButton, and `Save` is the
+            // sole PpButton because it is the sole action that leaves the draft. Weight among the
+            // three is carried by TONE, not by shape — accent for the one that makes something,
+            // plain for the ones that copy and remove it.
+            //
+            // The label still NAMES the type. "New" answered a question the reader had to hold in
+            // their head — new what? — while being the one control on the old toolbar that knew
+            // what was selected at all.
+            ModelBarButton {
+                id: newButton
+                Layout.fillWidth: false
+                glyph:   "+"
+                label:   qsTr("New %1").arg(root._typeOne.toLowerCase())
+                tone:    Theme.colorAccent
+                tooltip: qsTr("Create a %1").arg(root._typeOne.toLowerCase())
+                visible: root._canCreate
                 onClicked: {
-                    root._type   = "health"
-                    root._search = ""
-                    searchField.text = ""
+                    if (root._type === "measures") {
+                        root._dropUnder(mintPopup, newButton)
+                    } else {
+                        var r = browser.createObject(root._type)
+                        root._report(r)
+                        // A new object is not somewhere you walked to, so it begins a trail.
+                        if (r.ok === true) root.selectFresh(r.type, r.id)
+                    }
                 }
             }
+
+            // Copy and Delete used to sit here as ⧉ and 🗑. They act on the SELECTED OBJECT, not on
+            // the list, so they moved to the foot of the pane that shows that object — where they
+            // are words rather than glyphs, and where a destructive action sits beside the thing it
+            // would remove instead of in the chrome. `+ New` stays: it acts on the list.
         }
 
         Rectangle {
@@ -509,7 +876,7 @@ Item {
                 Layout.fillHeight:     true
                 types:        browser.types
                 facets: {
-                    root._revision
+                    if (root._revision < 0) return []
                     return root._showFacets ? browser.facets(root._type) : []
                 }
                 activeFacets: root._facets
@@ -519,21 +886,20 @@ Item {
                     // Close any open editor BEFORE the rows change under it — see
                     // ModelTable.endEdit()'s comment for what a stale editor looks like.
                     table.endEdit()
+                    // NARROWS the search rather than ending it: the text stays, the scope becomes
+                    // this one type. See `_searchAllTypes`.
+                    root._searchAllTypes = false
                     root._type = key
                     root._sort = ""
                     root._facets = ({})
                     root._selection = []
                 }
+                // A facet narrows ONE type's rows, so it cannot apply to a cross-type result list —
+                // touching one scopes the search to the type being looked at, exactly as picking the
+                // type would.
                 onFacetToggled: (key, value) => {
-                    table.endEdit()
-                    var f = JSON.parse(JSON.stringify(root._facets))
-                    var v = f[key] || []
-                    var at = v.indexOf(value)
-                    if (at >= 0) v.splice(at, 1)
-                    else         v.push(value)
-                    if (v.length === 0) delete f[key]
-                    else                f[key] = v
-                    root._facets = f
+                    root._searchAllTypes = false
+                    root.toggleFacet(key, value)
                 }
                 onFacetsCleared: { table.endEdit(); root._facets = ({}) }
             }
@@ -553,58 +919,8 @@ Item {
                 Layout.minimumWidth: Theme.sp(400)
                 spacing: 0
 
-                RowLayout {
-                    Layout.fillWidth:    true
-                    Layout.leftMargin:   Theme.sp(18)
-                    Layout.rightMargin:  Theme.sp(18)
-                    Layout.topMargin:    Theme.sp(14)
-                    Layout.bottomMargin: Theme.sp(10)
-                    spacing: Theme.sp(10)
-
-                    Text {
-                        text: {
-                            root._revision
-                            if (root._searching) return qsTr("Results")
-                            var t = browser.types
-                            for (var i = 0; i < t.length; i++)
-                                if (t[i].key === root._type) return t[i].label
-                            return ""
-                        }
-                        font.family:    Theme.fontBody
-                        font.pixelSize: Theme.fontSzHeading
-                        font.weight:    Theme.fontBodyWeight
-                        color:          Theme.colorText
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: {
-                            root._revision
-                            if (root._searching)
-                                return qsTr("%n match(es) across every type", "", root._rows.length)
-                            var t = browser.types
-                            for (var i = 0; i < t.length; i++)
-                                if (t[i].key === root._type)
-                                    return t[i].count + " · " + t[i].hint
-                            return ""
-                        }
-                        font.family:    Theme.fontData
-                        font.pixelSize: Theme.fontSzMicro
-                        color:          Theme.colorText3
-                        elide:          Text.ElideRight
-                    }
-
-                    // Bulk-set is offered only when there is a selection to bulk-set, and it says
-                    // how many rows it would touch.
-                    Text {
-                        visible: root._selection.length > 1
-                        text: qsTr("%n selected", "", root._selection.length)
-                        font.family:    Theme.fontData
-                        font.pixelSize: Theme.fontSzMicro
-                        color:          Theme.colorAccent
-                    }
-                }
-
+                // No header row of its own any more — the context bar above the panes is the
+                // heading, and the table starts at the top of the pane it fills.
                 ModelTable {
                     id: table
                     Layout.fillWidth:  true
@@ -636,7 +952,9 @@ Item {
                             root.openSubject(row.subject)
                             return
                         }
-                        root.select(root._typeOfRow(row), id, true)
+                        // Picking a row is choosing where to STAND, not a step taken from where you
+                        // were — so the trail starts here rather than growing by one.
+                        root.selectFresh(root._typeOfRow(row), id)
                     }
                     onCommit: (id, field, value) => root.doCommit(id, field, value)
                     onDuplicateRequested: (id) => root.doDuplicate(id)
@@ -659,8 +977,8 @@ Item {
                     // DAG because it has ranks; everything else gets its neighbourhood, which is
                     // the honest shape for a relation that is one hop and has no direction.
                     layoutData: {
-                        root._revision
-                        if (root._view !== "graph" || root._selectedId === "") return ({})
+                        if (root._revision < 0
+                            || root._view !== "graph" || root._selectedId === "") return ({})
                         // The theme's own metrics travel INTO the layout — the layout does the
                         // positioning, but it has to be told what a row is worth in this aesthetic.
                         return browser.graph(root._selectedType, root._selectedId, {
@@ -736,6 +1054,9 @@ Item {
                             color:          Theme.colorText3
                         }
 
+                        // Only what is genuinely status. The unsaved count and `revert` both left:
+                        // the count was drawn twice and `revert` was a 12px word nowhere near the
+                        // Save it undoes. Both now live in the commit cluster, together.
                         Text {
                             Layout.fillWidth: true
                             visible: !root._searching
@@ -745,23 +1066,6 @@ Item {
                             font.pixelSize: Theme.fontSzMicro
                             color:          Theme.colorText3
                             elide:          Text.ElideRight
-                        }
-
-                        Text {
-                            text: qsTr("%n unsaved", "", browser.unsavedCount)
-                            visible: browser.dirty
-                            font.family:    Theme.fontData
-                            font.pixelSize: Theme.fontSzMicro
-                            color:          Theme.colorAccent
-                        }
-
-                        Text {
-                            text:    qsTr("revert")
-                            visible: browser.dirty
-                            font.family:    Theme.fontBody
-                            font.pixelSize: Theme.fontSzMicro
-                            color:          Theme.colorText3
-                            PpPressable { hoverScale: 1.0; onClicked: root.doRevert() }
                         }
                     }
                 }
@@ -775,18 +1079,61 @@ Item {
                 visible: root._showInspector
             }
 
-            // ── Inspector / Edits ─────────────────────────────────────────────
-            // The Edits history takes the inspector's slot rather than floating over the table:
-            // it is a place you go, and stealing the list's width to show it would be the modal
-            // this panel does not have.
+            // ── Inspector ─────────────────────────────────────────────────────
+            // The Edits history used to share this slot behind an `Edits` button. It moved into the
+            // popover under the count that describes it, which is where an author looking at "12
+            // unsaved" actually wants it — so the inspector is now just the inspector.
             Item {
-                Layout.preferredWidth: root._inspectorWidth
+                // Folded, the pane keeps a strip just wide enough to hold the way back. Zero width
+                // would be tidier and would strand the author: the only route back would be a
+                // shortcut nobody has been told about.
+                Layout.preferredWidth: root._inspectorFolded ? Theme.sp(26) : root._inspectorWidth
                 Layout.fillHeight:     true
                 visible: root._showInspector
 
+                Behavior on Layout.preferredWidth {
+                    NumberAnimation { duration: Theme.durationFast; easing.type: Easing.OutCubic }
+                }
+
+                // The way back, in the strip the fold leaves behind. Points left because that is
+                // where the pane comes back from.
+                Rectangle {
+                    id: unfoldButton
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top:              parent.top
+                    anchors.topMargin:        Theme.sp(12)
+                    visible: root._inspectorFolded
+                    width:   Theme.sp(22)
+                    height:  Theme.sp(20)
+                    radius:  Theme.radius
+                    color:   unfoldMa.containsMouse ? Theme.colorBg2 : "transparent"
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "‹‹"
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzBody2
+                        color: unfoldMa.containsMouse ? Theme.colorText2 : Theme.colorText3
+                    }
+
+                    ToolTip.visible: unfoldMa.containsMouse
+                    ToolTip.text: qsTr("Show the inspector")
+                                  + (Qt.platform.os === "osx" ? "  ⌘⇧\\" : "  Ctrl+Shift+\\")
+                    ToolTip.delay: 400
+
+                    PpPressable {
+                        id: unfoldMa
+                        hoverScale: 1.0
+                        onClicked: appSettings.diagnosticsInspectorCollapsed = false
+                    }
+                }
+
                 ModelInspector {
+                    id: inspector
                     anchors.fill: parent
-                    visible: !root._editsOpen
+                    visible: !root._inspectorFolded
+                    onCollapseRequested: appSettings.diagnosticsInspectorCollapsed = true
                     detail:  root._inspectorDetail
                     corridorPlotSource: root._corridorPlotSource
                     editable: root._typeEditable
@@ -800,40 +1147,60 @@ Item {
                     onCorridorScanRequested: browser.scanCorridor(root._corridorMeasureId)
                     onNavigate: (type, id) => root.navigateTo(type, id)
                     onAddCauseRequested: {
-                        causePicker.x = parent.width / 2 - causePicker.width / 2
-                        causePicker.y = Theme.sp(80)
-                        causePicker.open()
+                        root._openPickerNear(causePicker, inspector, inspector.actionOrigin)
                     }
                     onAddMeasureRequested: {
-                        measurePicker.x = parent.width / 2 - measurePicker.width / 2
-                        measurePicker.y = Theme.sp(80)
-                        measurePicker.open()
+                        root._openPickerNear(measurePicker, inspector, inspector.actionOrigin)
                     }
                     onAddCorridorRequested: {
-                        corridorPicker.x = parent.width / 2 - corridorPicker.width / 2
-                        corridorPicker.y = Theme.sp(80)
-                        corridorPicker.open()
+                        root._openPickerNear(corridorPicker, inspector, inspector.actionOrigin)
                     }
                     onBindingCycled: (contextId, applicable, material, clear) => {
                         if (clear) root._report(browser.clearBinding(root._selectedId, contextId))
                         else       root._report(browser.setBinding(root._selectedId, contextId,
                                                                    applicable, material))
                     }
+                    // The reference pane's two buttons. Copying a citation is not an edit and does
+                    // not touch the undo stack; opening a DOI leaves the app entirely.
+                    onRowActionRequested: (action, label) => {
+                        if (action === "copyCitation") {
+                            var csl = browser.referenceCsl(root._selectedId)
+                            if (csl === "") { root._report({ ok: false,
+                                                             message: qsTr("Nothing to copy.") })
+                                              return }
+                            clipboard.setText(csl)
+                            toast.severity = "info"
+                            toast.show(qsTr("CSL-JSON copied"))
+                        } else if (action === "openDoi") {
+                            var url = browser.referenceDoiUrl(root._selectedId)
+                            if (url !== "") Qt.openUrlExternally(url)
+                        }
+                    }
+                    // The one live control on an otherwise imported page.
+                    onClaimStrengthChanged: (linkId, strength) => root._report(
+                        browser.setField("links", linkId, "strength", strength))
+                    // One write path: the inspector's editors go through the same setField() the
+                    // table's inline editor does, so a field cannot behave differently depending on
+                    // which surface it was typed into.
+                    onFieldCommitted: (field, value) =>
+                        root._report(browser.setField(root._selectedType, root._selectedId,
+                                                      field, value))
+                    onDuplicateRequested: root.doDuplicate(root._selectedId, root._selectedType)
+                    onRemoveRequested:    root.doRemove(root._selectedId, root._selectedType)
+                    onAddRowRequested: (action) => {
+                        settlesPicker.mode = action
+                        root._openPickerNear(settlesPicker, inspector, inspector.actionOrigin)
+                    }
                     onRemoveRowRequested: (kind, id) => {
                         if (kind === "measure")
                             root._report(browser.removeMeasureFrom(root._selectedId, id))
+                        else if (kind === "settles")
+                            root._report(browser.removeScreenSettles(root._selectedId, id))
+                        else if (kind === "answers")
+                            root._report(browser.removeDrillAnswers(root._selectedId, id))
                         else
                             root._report(browser.removeLink(id, root._selectedId, "causes"))
                     }
-                }
-
-                ModelEdits {
-                    anchors.fill: parent
-                    visible: root._editsOpen
-                    edits:   browser.edits
-                    sessionScoped: browser.undoIsSessionScoped
-                    onWindTo: (index) => root._report(browser.undoTo(index))
-                    onCloseRequested: root._editsOpen = false
                 }
             }
         }
@@ -854,7 +1221,7 @@ Item {
         parent: root
         title: qsTr("Add corridor at")
         candidateSource: (text) => {
-            root._revision
+            if (root._revision < 0) return []
             // Only contexts WITHOUT a row of their own: adding a second corridor at one context is
             // not a thing, and offering it would be a choice the facade then refuses.
             var all = browser.corridorContexts(root._selectedType === "corridors"
@@ -884,23 +1251,65 @@ Item {
         onPicked: (id) => root._report(browser.addMeasureTo(root._selectedId, id, "high"))
     }
 
+    // One picker for both relationships, because it is one gesture — pick the characteristic this
+    // screen settles, or the one this drill answers. `mode` says which, and the candidate list comes
+    // pre-filtered from C++ either way, so an illegal pairing cannot be constructed.
+    ModelPicker {
+        id: settlesPicker
+        parent: root
+        property string mode: "settles"
+        title: mode === "settles" ? qsTr("Settles which characteristic?")
+                                  : qsTr("Answers which characteristic?")
+        candidateSource: (text) => {
+            if (root._revision < 0) return []
+            return settlesPicker.mode === "settles"
+                       ? browser.screenCandidates(root._selectedId, text)
+                       : browser.drillCandidates(root._selectedId, text)
+        }
+        onPicked: (id) => root._report(settlesPicker.mode === "settles"
+                                           ? browser.addScreenSettles(root._selectedId, id)
+                                           : browser.addDrillAnswers(root._selectedId, id))
+    }
+
     ModelMint {
         id: mintPopup
         parent:  root
         browser: browser
-        onMinted: (id) => { root._type = "measures"; root.select("measures", id, true) }
+        onMinted: (id) => { root._type = "measures"; root.selectFresh("measures", id) }
+    }
+
+    ModelPolicyPicker {
+        id: policyPopup
+        parent:  root
+        browser: browser
+        gradePolicy: appSettings.diagnosticsGradePolicy
+        // Written straight to the ONE global AppSettings, per the single-shared-instance rule. It is
+        // not an edit to the library, so it deliberately does not touch the undo stack.
+        onPicked: (name) => { appSettings.diagnosticsGradePolicy = name
+                              toast.severity = "info"
+                              toast.show(qsTr("Grading as %1").arg(name)) }
+    }
+
+    ModelUnsaved {
+        id: unsavedPopup
+        parent: root
+        edits:  browser.edits
+        sessionScoped: browser.undoIsSessionScoped
+        onWindTo:   (index) => root._report(browser.undoTo(index))
+        onRevertAll: root.doRevert()
     }
 
     ModelTools {
         id: toolsPopup
         parent:  root
         browser: browser
-        gradePolicy: appSettings.diagnosticsGradePolicy
-        // Written straight to the ONE global AppSettings, per the single-shared-instance rule. It is
-        // not an edit to the library, so it deliberately does not touch the undo stack.
-        onGradePolicyPicked: (name) => { appSettings.diagnosticsGradePolicy = name
-                                         toast.severity = "info"
-                                         toast.show(qsTr("Grading as %1").arg(name)) }
+        revision: root._revision
+        // Counted over the DRAFT, not the file: these are what a reset would take away, and an edit
+        // made a minute ago is as much a loss as one saved last week.
+        hasLocalContent: browser.overriddenCount + browser.authoredCount > 0
+        changedCount:    browser.overriddenCount
+        yoursCount:      browser.authoredCount
+        onResetRequested: resetConfirm.open()
         onExportRoadmapRequested:    root._report(browser.exportRoadmap())
         onExportReferencesRequested: root._report(browser.exportReferences())
         onRoadmapRequested:  { root._type = "measures"
@@ -910,6 +1319,49 @@ Item {
         onGlossaryRequested: { root._type = "characteristics"
                                searchField.forceActiveFocus()
                                toast.show(qsTr("Search by the word you were taught")) }
+    }
+
+    // ── The two prompts ───────────────────────────────────────────────────────
+    //
+    // Same structure, deliberately different colour. One is a call to act and loses nothing; the
+    // other destroys saved work. See ModelConfirm.qml for why that distinction is drawn rather than
+    // assumed.
+
+    ModelConfirm {
+        id: saveConfirm
+        parent: root
+        tone:   "attention"
+        title:  qsTr("Your diagnostics will differ from the standard")
+        body:   qsTr("Saving writes your edits over the diagnostic model that ships with PinPoint "
+                     + "Studio. From here on this install screens, grades and explains against your "
+                     + "version, so its results are no longer directly comparable with an unmodified "
+                     + "install.\n\nNothing is lost — shipped items keep their original underneath "
+                     + "and the Source column shows which is which.")
+        confirmText: qsTr("Save changes")
+        onConfirmed: {
+            // Confirming IS the acknowledgement; there is no checkbox to forget to tick.
+            appSettings.diagnosticsBaseModelWarningAck = true
+            root._report(browser.save())
+        }
+    }
+
+    ModelConfirm {
+        id: resetConfirm
+        parent: root
+        tone:   "error"
+        title:  qsTr("Reset to the standard model")
+        body: {
+            var changed = browser.overriddenCount, mine = browser.authoredCount
+            var what = []
+            if (changed > 0) what.push(qsTr("%n change(s) to shipped items", "", changed))
+            if (mine > 0)    what.push(qsTr("%n item(s) you created", "", mine))
+            return qsTr("This removes %1, and puts this install back on the diagnostic model that "
+                        + "ships with PinPoint Studio.\n\nYour current model is copied to a dated "
+                        + "backup file first, and ⌘Z undoes this until you close the app.")
+                     .arg(what.join(qsTr(" and ")))
+        }
+        confirmText: qsTr("Reset")
+        onConfirmed: root.doResetToStandard()
     }
 
     PpToast {
@@ -928,13 +1380,20 @@ Item {
     Shortcut { sequence: "Ctrl+D";         onActivated: if (root._selectedId !== "")
                                                             root.doDuplicate(root._selectedId) }
     Shortcut { sequences: [ StandardKey.Find ]; onActivated: searchField.forceActiveFocus() }
+    // ⌘⇧\ folds the inspector, beside ⌘\ for the settings sidenav — the same gesture for the same
+    // kind of decision, one modifier apart, so learning either teaches the other.
+    Shortcut {
+        sequence: "Ctrl+Shift+\\"
+        onActivated: appSettings.diagnosticsInspectorCollapsed =
+                         !appSettings.diagnosticsInspectorCollapsed
+    }
     Shortcut {
         sequence: "G"
         // Window-wide shortcuts outrank a focused text field, so an ungated "G" would make the
         // letter untypeable in the search box and in every inline editor. It is a view toggle, not
         // a text key, and it has to stand down while something is being typed into.
         enabled: !searchField.activeFocus && !table.editing
-                 && !causePicker.opened && !measurePicker.opened
+                 && !causePicker.opened && !measurePicker.opened && !settlesPicker.opened
         onActivated: root._view = root._view === "graph" ? "table" : "graph"
     }
 
