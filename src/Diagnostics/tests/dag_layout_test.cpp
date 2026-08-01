@@ -212,8 +212,7 @@ int main()
         check(!nodeById(d1, "deepA"), "depth 1 stops at the first rank of causes");
         check(!nodeById(d1, "deepEffect"), "and at the first rank of effects");
         for (const DagNode &n : d1.nodes)
-            if (n.kind != DagNodeKind::Measure)
-                check(std::abs(n.rank) <= 1, "no node past the bound");
+            check(std::abs(n.rank) <= 1, "no node past the bound");
 
         // What is off screen is COUNTED on the node it hangs off, not dropped. A graph that
         // silently omits half of what it knows is worse than one that draws nothing.
@@ -250,8 +249,7 @@ int main()
         o5.depth = 5;
         const DagLayout d5 = layoutDag(p, QStringLiteral("focus"), o5);
         for (const DagNode &n : d5.nodes)
-            if (n.kind != DagNodeKind::Measure)
-                check(std::abs(n.rank) <= 4, "depth clamps at 4");
+            check(std::abs(n.rank) <= 4, "depth clamps at 4");
         check(!nodeById(d5, "far"), "and the node past it is not drawn");
 
         check(!nodeById(d2, "island"), "an unconnected condition is not in someone else's graph");
@@ -475,7 +473,9 @@ int main()
             if (h.label == QLatin1String("Measured by")) measuredBy = true;
         }
         check(causedBy && leadsTo, "both sides of the graph are named");
-        check(measuredBy, "so is the detection lane");
+        // …and there is no third heading. `Measured by` named a lane that no longer exists; the
+        // measures are rows inside the boxes, which needs no word over an empty region.
+        check(!measuredBy, "and nothing still names the lane that was removed");
 
         // The heading has to sit OVER its own side, or it names the wrong half of the picture.
         for (const DagHeading &h : l.headings) {
@@ -543,78 +543,101 @@ int main()
         check(l.width == 0 && l.height == 0, "and takes no space");
     }
 
-    // ── The detection lane ──────────────────────────────────────────────────
-    std::printf("Measures are detection, not causation\n");
+    // ── Measures are rows in a box, not nodes ───────────────────────────────
+    //
+    // They used to be a lane under the band with a line up to every condition they detected. The
+    // lines were the problem: one measure serving three conditions drew three of them across the
+    // picture, and a line into a box that was not the lowest in its column had to be routed up the
+    // gutter beside it to avoid crossing the boxes underneath. A row inside the box says the same
+    // thing with no line at all.
+    std::printf("Measures are drawn inside the condition they detect\n");
     {
         const DagLayout l = layoutDag(p, QStringLiteral("focus"));
-        const DagNode  *m = nodeById(l, "mLive");
-        check(m != nullptr, "the focus's measure is drawn");
-        check(m->kind == DagNodeKind::Measure, "as a measure");
 
-        // Below the whole causal band, so nothing in the left-to-right flow can be read as caused
-        // by a measure.
-        double bandBottom = 0;
-        for (const DagNode &n : l.nodes)
-            if (n.kind != DagNodeKind::Measure) bandBottom = std::max(bandBottom, n.y + n.h);
-        check(m->y >= bandBottom, "in its own lane beneath the band");
+        check(!nodeById(l, "mLive"), "a measure is not a node any more");
+        for (const DagEdge &e : l.edges)
+            check(!e.detects, "and nothing draws a detection line");
 
-        // The lane answers for the whole PICTURE, not for the focus. `cause2` is detected by a
-        // different measure, and a lane that drew only the focus's left it looking like a condition
-        // nothing can see — which is a claim about the pack, and the wrong one.
-        check(nodeById(l, "mGhost") != nullptr, "a measure of a NON-focus condition is drawn too");
+        const DagNode *f = nodeById(l, "focus");
+        check(f && f->measures.size() == 1, "the focus carries its own detector as a row");
+        check(f->measures[0].id == QLatin1String("mLive"), "…the right one");
+        check(f->measures[0].available, "…and reports it live");
 
-        // Once, however many of the drawn conditions it detects. Two boxes for one measure would
-        // read as two ways of seeing where the pack holds one — and the shared detector is exactly
-        // what makes two conditions hard to tell apart, so it has to be visible as shared.
-        int copies = 0;
-        for (const DagNode &n : l.nodes)
-            if (n.id == QLatin1String("mLive")) ++copies;
-        check(copies == 1, "and a measure serving several of them is drawn once");
+        // EVERY drawn condition answers, not the focus alone. cause2 is detected by a different
+        // measure; listing detectors for one box would leave the rest looking undetectable.
+        const DagNode *c2 = nodeById(l, "cause2");
+        check(c2 && c2->measures.size() == 1 && c2->measures[0].id == QLatin1String("mGhost"),
+              "so does every other drawn condition");
+        check(!c2->measures[0].available, "with a measure nothing produces marked as a gap");
+        check(!c2->measures[0].statusLabel.isEmpty(), "…and named rather than left blank");
 
-        std::set<std::pair<QString, QString>> detectPairs;
-        int                                   causal = 0;
-        for (const DagEdge &e : l.edges) {
-            if (e.detects) detectPairs.insert({ e.from, e.to });
-            else           ++causal;
+        // cause3 has no measure at all and must not invent one — an unmeasurable cause drawn with a
+        // detector is the worst thing this could say.
+        const DagNode *c3 = nodeById(l, "cause3");
+        check(c3 && c3->measures.empty(), "a condition nothing detects carries no row");
+
+        // The BOX GREW. That is the whole visible claim, and the rows have to sit inside it or the
+        // view would draw them over the node below.
+        check(f->h > c3->h, "a box with a row is taller than one without");
+        for (const DagMeasure &dm : f->measures) {
+            check(dm.y >= f->y && dm.y + dm.h <= f->y + f->h + 0.001,
+                  "every row lies inside its own box");
+            check(dm.y >= f->y + DagLayoutOptions{}.nodeH - 0.001,
+                  "…and below the condition's own row, never over it");
         }
-        // mLive detects focus, cause1, effect1 and effect2; mGhost detects cause2. cause3 has no
-        // measure and gets no line — an unmeasurable cause drawn with one would be the worst
-        // possible thing this lane could say.
-        check(detectPairs.size() == 5, "one line from each measure to each condition it detects");
-        for (const auto &pr : detectPairs)
-            check(nodeById(l, pr.second.toLatin1().constData()) != nullptr,
-                  "and never to a condition that is not on the picture");
-        check(!detectPairs.count({ QStringLiteral("mLive"), QStringLiteral("cause3") }),
-              "a condition nothing detects gets no detection line");
-        check(!detectPairs.count({ QStringLiteral("mLive"), QStringLiteral("deepEffect") }),
-              "nor does one that is off the picture");
-        // Every Causes edge whose BOTH ends are drawn — the three into the focus, the two out of
-        // it, the same-rank cause3 -> cause1, and cause2 -> effect2, which spans the focus column
-        // and is therefore emitted as TWO segments. Cross-links are not extra: an edge dropped for
-        // not lying between adjacent ranks would show two independent causes where the pack holds
-        // a chain.
-        check(causal == 8, "and every causal edge among the drawn nodes, in segments");
 
-        int spanning = 0;
-        for (const DagEdge &e : l.edges)
-            if (e.from == QLatin1String("cause2") && e.to == QLatin1String("effect2")) ++spanning;
-        check(spanning == 2, "an edge crossing a rank is routed through it, not over it");
+        // THE BOX HAS TO BE WIDE ENOUGH FOR THE ROW. A row the reader can see and cannot read is
+        // worse than no row, and a measure label is a sentence where a condition's name is a
+        // phrase — which is why the rows have their own cap rather than sharing maxW.
+        {
+            CharacteristicPack wide = p;
+            for (Measure &mm : wide.measures)
+                if (mm.id == QLatin1String("mLive"))
+                    mm.label = QStringLiteral("Thorax centre distance relative to the trail "
+                                              "ankle, change from P1 to P5");
+            DagLayoutOptions o;
+            o.maxW = 200;          // the condition-name cap…
+            o.measureMaxW = 360;   // …and the roomier one the rows answer to
+            const DagLayout lw = layoutDag(wide, QStringLiteral("focus"), o);
+            const DagNode *f = nodeById(lw, "focus");
+            check(f->w > o.maxW, "a long measure label widens the box past the NAME cap");
+            check(f->w <= o.measureMaxW + 0.001, "…and no further than the row cap");
 
-        int tips = 0;
-        for (const DagEdge &e : l.edges) if (e.tip) ++tips;
-        check(tips == 7, "one arrowhead per causal relationship, on its last segment only");
-        for (const DagEdge &e : l.edges)
-            if (e.detects) check(!e.tip, "a detection edge carries no arrowhead");
+            // Only the box that carries it. A wide row must not widen the picture wholesale.
+            const DagNode *c3 = nodeById(lw, "cause3");
+            check(c3 && c3->w < f->w, "a box with no rows is not widened by somebody else's");
 
-        // A same-rank edge (cause3 -> cause1) is still drawn. Dropping it would show two independent
-        // causes where the pack holds a chain.
-        bool sameRank = false;
-        for (const DagEdge &e : l.edges)
-            if (e.from == QLatin1String("cause3") && e.to == QLatin1String("cause1")) sameRank = true;
-        check(sameRank, "an edge between two nodes of the same rank is drawn");
+            // And the same graph without measures keeps the narrow box, so the width is the ROWS'
+            // doing rather than something the condition label was always going to ask for.
+            DagLayoutOptions no = o;
+            no.includeMeasures = false;
+            check(nodeById(layoutDag(wide, QStringLiteral("focus"), no), "focus")->w < f->w,
+                  "…and it is the rows that widened it, not the name");
+        }
+
+        // Switched off, the rows go and the boxes shrink back.
+        DagLayoutOptions off;
+        off.includeMeasures = false;
+        const DagLayout lOff = layoutDag(p, QStringLiteral("focus"), off);
+        check(nodeById(lOff, "focus")->measures.empty(), "no rows when measures are off");
+        check(nodeById(lOff, "focus")->h < f->h, "and the box is back to one row high");
+
+        // No overlap once the boxes have grown — the reason the rows are counted before the columns
+        // are stacked rather than attached afterwards.
+        DagLayoutOptions on;
+        on.depth = 2;
+        const DagLayout l2 = layoutDag(p, QStringLiteral("focus"), on);
+        bool ok = true;
+        for (size_t i = 0; i < l2.nodes.size(); ++i)
+            for (size_t j = i + 1; j < l2.nodes.size(); ++j)
+                if (overlaps(l2.nodes[i], l2.nodes[j])) ok = false;
+        check(ok, "grown boxes still do not overlap");
+        QString why;
+        const bool bad = linesCrossBoxes(l2, &why);
+        if (bad) std::printf("      %s\n", qPrintable(why));
+        check(!bad, "and no line is drawn through one");
     }
 
-    // ── The encoding ────────────────────────────────────────────────────────
     std::printf("What the boxes claim\n");
     {
         const DagLayout l = layoutDag(p, QStringLiteral("focus"));
@@ -671,7 +694,7 @@ int main()
 
         int atPlusOne = 0;
         for (const DagNode &n : l.nodes)
-            if (n.kind != DagNodeKind::Measure && n.rank == 1) ++atPlusOne;
+            if (n.rank == 1) ++atPlusOne;
         check(atPlusOne == 6, "the cap holds");
         check(l.truncated, "and the layout says so");
         check(nodeById(l, "focus")->hiddenEffects == 16, "the rest are counted on the focus");

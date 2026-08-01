@@ -1250,7 +1250,13 @@ Item {
                         // were never the problem.
                         return browser.graph(root._graphFocus.type, root._graphFocus.id, {
                             nodeH: Theme.sp(34), gapX: Theme.sp(165), gapY: Theme.sp(39),
-                            laneGap: Theme.sp(96), padX: Theme.sp(12), charW: Theme.sp(6.4),
+                            measureRowH: Theme.sp(24), padX: Theme.sp(12), charW: Theme.sp(6.4),
+                            // The rows render at fontSzMicro against the name's fontSzBody2, so
+                            // their advance is scaled by that ratio rather than sharing charW.
+                            measureCharW: Theme.sp(6.4) * (Theme.fontSzMicro / Theme.fontSzBody2),
+                            // Wider than maxW on purpose — a measure label is a sentence. See the
+                            // note on measureMaxW in dag_layout.h for the 32 %/95 % figures.
+                            measureMaxW: Theme.sp(340),
                             minW: Theme.sp(110), maxW: Theme.sp(210),
                             depth: middlePane.graphDepth, maxPerRank: 8,
                             expanded: middlePane.graphExpanded, maxPerExpand: 16,

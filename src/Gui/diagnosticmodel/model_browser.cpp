@@ -2918,7 +2918,9 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
     opt.nodeH      = num("nodeH", opt.nodeH);
     opt.gapX       = num("gapX", opt.gapX);
     opt.gapY       = num("gapY", opt.gapY);
-    opt.laneGap    = num("laneGap", opt.laneGap);
+    opt.measureRowH = num("measureRowH", opt.measureRowH);
+    opt.measureCharW = num("measureCharW", opt.measureCharW);
+    opt.measureMaxW  = num("measureMaxW", opt.measureMaxW);
     opt.padX       = num("padX", opt.padX);
     opt.charW      = num("charW", opt.charW);
     opt.minW       = num("minW", opt.minW);
@@ -2963,6 +2965,24 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
         m.insert(QStringLiteral("hiddenCauses"), n.hiddenCauses);
         m.insert(QStringLiteral("hiddenEffects"), n.hiddenEffects);
         m.insert(QStringLiteral("expanded"), n.expanded);
+
+        // The measures that detect this condition, as rows INSIDE its box. Coordinates are absolute
+        // and come straight from the layout — the delegate draws from these and the pane hit-tests
+        // from these, so a row you can see is a row you can press.
+        QVariantList rows;
+        for (const DagMeasure &dm : n.measures) {
+            QVariantMap r;
+            r.insert(QStringLiteral("id"), dm.id);
+            r.insert(QStringLiteral("label"), dm.label);
+            r.insert(QStringLiteral("statusLabel"), dm.statusLabel);
+            r.insert(QStringLiteral("metricKey"), dm.metricKey);
+            r.insert(QStringLiteral("available"), dm.available);
+            r.insert(QStringLiteral("unavailableReason"), dm.unavailableReason);
+            r.insert(QStringLiteral("y"), dm.y);
+            r.insert(QStringLiteral("h"), dm.h);
+            rows.append(r);
+        }
+        m.insert(QStringLiteral("measures"), rows);
         m.insert(QStringLiteral("groupLabel"), n.groupLabel);
         m.insert(QStringLiteral("statusLabel"), n.statusLabel);
         m.insert(QStringLiteral("metricKey"), n.metricKey);
@@ -6506,10 +6526,10 @@ QVariantMap ModelBrowser::graph(const QString &type, const QString &id,
         QVariantList nodes;
         for (const QVariant &v : g.value(QStringLiteral("nodes")).toList()) {
             QVariantMap n    = v.toMap();
-            const QString k  = n.value(QStringLiteral("kind")).toString();
-            const QString nt = k == QStringLiteral("measure") ? kMeasures
-                             : n.value(QStringLiteral("latent")).toBool() ? kCauses
-                                                                          : kCharacteristics;
+            // Every node in a causal layout is a condition now — the measures are rows inside them
+            // and carry their own type where they are drawn.
+            const QString nt = n.value(QStringLiteral("latent")).toBool() ? kCauses
+                                                                         : kCharacteristics;
             decorateNode(n, nt, n.value(QStringLiteral("id")).toString());
             nodes.append(n);
         }

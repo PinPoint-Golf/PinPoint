@@ -65,23 +65,27 @@
 // lines. And an edge between two nodes of the SAME rank bulges into the empty gutter beside its
 // column, never across the focus.
 //
-// ── Measures are not causes ────────────────────────────────────────────────────────────────────
+// ── Measures are not causes, and they are not nodes either ────────────────────────────────────
 //
 // The measures are drawn, because "what would have to be true to see this" is the other half of the
-// question the page answers — but they live in their own LANE below the causal band, never in the
-// ranking. A measure does not cause a condition; it detects one, and placing it in the same
-// left-to-right flow as the causes would state a relationship the pack does not hold.
+// question the page answers. They are drawn INSIDE the condition they detect: the box grows and the
+// measures are rows in it. A measure does not cause a condition, it detects one, and giving it a
+// node of its own in a causal graph asked the reader to decide what the box meant every time.
 //
-// The lane answers for EVERY drawn condition, not for the focus alone. The reader turns it on to
-// ask a question about the picture, and a lane that answered for one box left the rest looking
-// undetectable — a claim about the pack, and a false one. Which causes the app cannot see is the
-// thing this view is best placed to make obvious, and it is only obvious beside the ones it can.
+// This replaced a detection LANE under the band, with a line from each measure up to every
+// condition it detected. The lane was honest and it was unreadable. A measure serving three
+// conditions drew three lines across the picture; a line into a box that was not the lowest in its
+// column had to be routed up the gutter beside that column to avoid crossing the boxes beneath it;
+// and the whole apparatus existed to say something a row inside the box says with no line at all.
+// Inside the box, "what detects this" is answered where the question is asked.
 //
-// A measure appears ONCE however many of the drawn conditions it detects, with one line to each: a
-// shared detector is why two conditions are hard to tell apart, and drawing it twice would hide the
-// very thing worth seeing. Lines into a box that is not the lowest in its column come up the GUTTER
-// beside that column and in from the side, because the direct route to its underside would pass
-// through every box stacked below it.
+// The cost is honest: a measure detecting several drawn conditions now appears in each of them,
+// where the lane drew it once. That repetition is the price of locality, and it is the right way
+// round — a reader looking at one condition wants its detectors listed under it, not a shared box
+// three columns away with a line they have to trace.
+//
+// Every drawn condition answers, not the focus alone. A picture that listed detectors for one box
+// left the rest looking undetectable, which is a claim about the pack and a false one.
 
 namespace pinpoint::analysis {
 
@@ -93,10 +97,24 @@ enum class DagNodeKind {
     Cause,     // rank < 0
     Effect,    // rank > 0
     Related,   // rank 0, beside the focus: corroborates or excludes it. Not a cause, not the focus
-    Measure,   // the detection lane — navigates into the measure, never re-centres the graph
 };
 
 QString dagNodeKindName(DagNodeKind k);
+
+// One measure, drawn as a row inside the box of a condition it detects.
+//
+// `y` is ABSOLUTE, in the same space as DagNode::y, rather than an offset the view has to add. The
+// row is a hit target as well as a drawing — pressing it opens the measure — and a drawn rect and a
+// clickable rect derived from two different numbers is the defect that arithmetic invites.
+struct DagMeasure {
+    QString id;
+    QString label;
+    QString statusLabel;        // "Live", "No producer", …
+    QString metricKey;
+    bool    available = true;   // Live; anything else is a gap and is drawn as one
+    QString unavailableReason;
+    double  y = 0, h = 0;
+};
 
 struct DagNode {
     QString     id;
@@ -131,6 +149,11 @@ struct DagNode {
     // measured, and greying them would report a capability gap that does not exist.
     bool    available = true;
     QString unavailableReason;
+
+    // The measures that detect this condition, drawn as rows INSIDE its box — which is why the box
+    // is taller than `nodeH` whenever this is non-empty. Empty when the caller did not ask for
+    // measures, and on a condition nothing detects.
+    std::vector<DagMeasure> measures;
 
     int     coverage      = 0;   // how many conditions it explains directly
     int     hiddenCauses  = 0;   // neighbours the depth bound (or the per-rank cap) cut off
@@ -202,7 +225,25 @@ struct DagLayoutOptions {
     double nodeH   = 40;    // every node is one row high — the boxes differ in width, never in rank
     double gapX    = 110;   // between columns; wide enough for a label to sit on the line
     double gapY    = 26;    // between nodes within a column
-    double laneGap = 64;    // between the causal band and the detection lane
+    double measureRowH = 26;   // one measure row inside a condition's box
+
+    // The advance for a MEASURE row's text, which the view draws smaller than the condition's own
+    // name. Sizing those rows with `charW` overestimated their width by the ratio between the two
+    // font sizes and pushed almost every box with a measure straight to `maxW` — a graph that
+    // doubled in width when the switch was flipped, for text that was never that wide. Supplied by
+    // the caller for the same reason charW is: the layout has no font metrics and must be told.
+    double measureCharW = 5.8;
+
+    // The width cap for a box carrying MEASURE rows, separate from maxW and deliberately larger.
+    // maxW bounds a condition's own name, which is a phrase; a measure's label is a sentence —
+    // "thorax centre distance relative to trail ankle, change P1 to P5" is 63 characters. Sharing
+    // the one cap fitted 32 % of the shipped rows whole and elided the rest, which is a row the
+    // reader can see is there and cannot read. At 360 it is 95 %, and the remainder elide as long
+    // condition labels always have.
+    //
+    // The cost is a wider graph whenever measures are on. That is the trade the switch makes: the
+    // view opens fitted, so a wider picture arrives more zoomed out rather than off the canvas.
+    double measureMaxW = 360;
     double padX    = 16;    // horizontal padding inside a node
     double charW   = 7.0;   // approximate advance per character; see the note in the .cpp
     double minW    = 110;

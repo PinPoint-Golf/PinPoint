@@ -193,7 +193,6 @@ Item {
     function _nodeAt(x, y) {
         for (var i = 0; i < _nodes.length; i++) {
             var n = _nodes[i]
-            if (n.kind === "measure") continue
             var nx = n.x + root._ndx(n.id, root._nudgeRev)
             var ny = n.y + root._ndy(n.id, root._nudgeRev)
             if (x >= nx && x <= nx + n.w && y >= ny && y <= ny + n.h) return n
@@ -239,8 +238,8 @@ Item {
 
     // Which side a node opens towards: a cause opens further left, an effect further right, and
     // rank 0 — the focus and its partners — opens both ways, so it gets a control on each side.
-    function _opensLeft(n)  { return n.kind !== "measure" && (n.rank || 0) <= 0 }
-    function _opensRight(n) { return n.kind !== "measure" && (n.rank || 0) >= 0 }
+    function _opensLeft(n)  { return (n.rank || 0) <= 0 }
+    function _opensRight(n) { return (n.rank || 0) >= 0 }
 
     // "" when the point is on no control, else "<id>|L" or "<id>|R". A string rather than the node,
     // so a press and its release can be compared for the SAME control without relying on the
@@ -248,10 +247,11 @@ Item {
     function _toggleAt(x, y) {
         for (var i = 0; i < _nodes.length; i++) {
             var n = _nodes[i]
-            if (n.kind === "measure") continue
             var nx = n.x + root._ndx(n.id, root._nudgeRev)
             var ny = n.y + root._ndy(n.id, root._nudgeRev)
-            var ty = ny + n.h / 2 - root._togH / 2
+            // Centred on the CONDITION's own row rather than on the box, which is taller than one
+            // row whenever the box carries measures.
+            var ty = ny + root._condRowH(n) / 2 - root._togH / 2
             if (y < ty || y > ty + root._togH) continue
             if (root._opensLeft(n) && (n.expanded === true || (n.hiddenCauses || 0) > 0)) {
                 var lx = nx - Theme.sp(3) - root._togW
@@ -264,6 +264,34 @@ Item {
         }
         return ""
     }
+
+    // How tall the condition's OWN row is, whatever else the box carries. The delegate anchors the
+    // name to this and the toggle centres on it; deriving it twice is how the two drift apart.
+    function _condRowH(n) {
+        var rows = (n.measures || []).length
+        if (rows === 0) return n.h
+        return n.h - rows * (n.measures[0].h || 0)
+    }
+
+    // Which measure row is under this point, as "<conditionId>|<measureId>", or "". The rows carry
+    // ABSOLUTE y from the layout, so this adds only the node's nudge — the same offset the delegate
+    // applies to the box the rows are drawn in.
+    function _measureAt(x, y) {
+        for (var i = 0; i < _nodes.length; i++) {
+            var n = _nodes[i]
+            var ms = n.measures || []
+            if (ms.length === 0) continue
+            var nx = n.x + root._ndx(n.id, root._nudgeRev)
+            if (x < nx || x > nx + n.w) continue
+            var dy = root._ndy(n.id, root._nudgeRev)
+            for (var k = 0; k < ms.length; k++) {
+                var top = ms[k].y + dy
+                if (y >= top && y <= top + ms[k].h) return n.id + "|" + ms[k].id
+            }
+        }
+        return ""
+    }
+    property string _hotMeasure: ""
 
     // The control under the pointer, so it can look like one before it is pressed. Static text that
     // turns out to be clickable is a control nobody finds.
@@ -288,7 +316,7 @@ Item {
     function _conditionIds() {
         var out = []
         for (var i = 0; i < _nodes.length; i++)
-            if (_nodes[i].kind !== "measure") out.push(_nodes[i].id)
+            out.push(_nodes[i].id)
         return out
     }
 
@@ -541,11 +569,14 @@ Item {
                 z: 2
 
                 readonly property bool isFocus:   modelData.kind === "focus"
-                readonly property bool isMeasure: modelData.kind === "measure"
                 readonly property bool inSelection: root.selectedNodeIds.indexOf(modelData.id) >= 0
                 // Asked of the LAYOUT, not of the view's own list of opened ids: a box the reader
                 // opened and then navigated away from is not open on a graph it is no longer in.
                 readonly property bool opened: modelData.expanded === true
+                // Read in two places — the frame draws it and the measure rows inset by it. The
+                // last row reaches the bottom of the box, so a fill that ignored this painted over
+                // the frame and the box lost its bottom edge under the pointer.
+                readonly property int borderW: hotTarget ? 2 : isFocus ? 2 : 1
 
                 readonly property var  refusal: root._dragging ? root._refusalOf(modelData.id) : null
                 readonly property bool refused: refusal !== null
@@ -572,7 +603,7 @@ Item {
                                ? "transparent"
                                : Qt.rgba(nodeItem.tint.r, nodeItem.tint.g, nodeItem.tint.b,
                                          nodeItem.isFocus ? 0.22 : 0.10)
-                    border.width: nodeItem.hotTarget ? 2 : nodeItem.isFocus ? 2 : 1
+                    border.width: nodeItem.borderW
                     border.color: nodeItem.hotTarget              ? Theme.colorAccent
                                 : nodeItem.inSelection            ? Theme.colorAccent
                                 : nodeItem.isFocus                ? nodeItem.tint
@@ -599,8 +630,14 @@ Item {
                     z: -1
                 }
 
+                // The condition's own row, at the TOP of the box rather than filling it. With
+                // measures on the box is taller than one row and the rest of it belongs to them;
+                // anchors.fill would centre the name over the whole stack.
                 RowLayout {
-                    anchors.fill: parent
+                    anchors.left:   parent.left
+                    anchors.right:  parent.right
+                    anchors.top:    parent.top
+                    height:         root._condRowH(nodeItem.modelData)
                     anchors.leftMargin:  Theme.sp(7)
                     anchors.rightMargin: Theme.sp(7)
                     spacing: Theme.sp(6)
@@ -624,8 +661,7 @@ Item {
                             Layout.fillWidth: true
                             text: nodeItem.modelData.label
                             font.family:    Theme.fontBody
-                            font.pixelSize: nodeItem.isMeasure ? Theme.fontSzMicro
-                                                               : Theme.fontSzBody2
+                            font.pixelSize: Theme.fontSzBody2
                             font.weight:    Theme.fontBodyWeight
                             color: nodeItem.modelData.available ? Theme.colorText : Theme.colorText3
                             elide: Text.ElideRight
@@ -649,6 +685,83 @@ Item {
                                  : nodeItem.refusal.reason === "cycle" ? Theme.colorWarn
                                                                        : Theme.colorText3
                             elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                // ── The measures, inside the box ──────────────────────────────
+                //
+                // Drawn from the layout's own y and h, mapped into the node by subtracting the
+                // node's origin. The pane hit-tests the same numbers, so a row that is visible is a
+                // row that opens its measure — see root._measureAt.
+                //
+                // A measure nothing can produce is drawn as the gap it is rather than left to look
+                // live. That is the whole reason for showing detectors at all: a condition the app
+                // cannot currently see is the thing this view is best placed to make obvious.
+                Repeater {
+                    model: nodeItem.modelData.measures || []
+                    delegate: Item {
+                        id: mrow
+                        required property var modelData
+                        x: 0
+                        y: mrow.modelData.y - nodeItem.modelData.y
+                        width:  nodeItem.width
+                        height: mrow.modelData.h
+
+                        required property int index
+                        readonly property bool last:
+                            mrow.index === (nodeItem.modelData.measures || []).length - 1
+                        readonly property bool hot:
+                            root._hotMeasure === nodeItem.modelData.id + "|" + mrow.modelData.id
+
+                        // Inset by the frame on every side it touches, and rounded at the bottom on
+                        // the LAST row — the box has a radius, and a square fill in a rounded corner
+                        // shows outside it.
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.leftMargin:   nodeItem.borderW
+                            anchors.rightMargin:  nodeItem.borderW
+                            anchors.bottomMargin: mrow.last ? nodeItem.borderW : 0
+                            bottomLeftRadius:  mrow.last ? Theme.radius : 0
+                            bottomRightRadius: mrow.last ? Theme.radius : 0
+                            color: mrow.hot ? Theme.colorBg2 : "transparent"
+                            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                        }
+
+                        // A hairline above each row, so the stack reads as rows of one box rather
+                        // than as text that happened to be placed under a name.
+                        Rectangle {
+                            anchors { left: parent.left; right: parent.right; top: parent.top }
+                            anchors.leftMargin:  Theme.sp(6)
+                            anchors.rightMargin: Theme.sp(6)
+                            height: 1
+                            color: Theme.colorBorderMid
+                            opacity: Theme.borderOpacityNormal
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin:  Theme.sp(9)
+                            anchors.rightMargin: Theme.sp(7)
+                            spacing: Theme.sp(5)
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: mrow.modelData.label
+                                font.family:    Theme.fontData
+                                font.pixelSize: Theme.fontSzMicro
+                                color: mrow.modelData.available ? (mrow.hot ? Theme.colorText
+                                                                            : Theme.colorText2)
+                                                                : Theme.colorText3
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: mrow.modelData.available ? "" : mrow.modelData.statusLabel
+                                visible: text.length > 0
+                                font.family:    Theme.fontData
+                                font.pixelSize: Theme.fontSzMicro
+                                color:          Theme.colorText3
+                            }
                         }
                     }
                 }
@@ -834,11 +947,12 @@ Item {
             z: 60
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            cursorShape: root._dragging          ? Qt.CrossCursor
-                       : root._hotToggle !== ""  ? Qt.PointingHandCursor
-                                                 : Qt.ArrowCursor
+            cursorShape: root._dragging           ? Qt.CrossCursor
+                       : root._hotToggle !== ""   ? Qt.PointingHandCursor
+                       : root._hotMeasure !== ""  ? Qt.PointingHandCursor
+                                                  : Qt.ArrowCursor
 
-            // "idle" | "pending" | "nudge" | "marquee" | "ring" | "armed" | "toggle"
+            // "idle" | "pending" | "nudge" | "marquee" | "ring" | "armed" | "toggle" | "measure"
             property string mode: "idle"
             property real   pressLX: 0     // press point, in LAYOUT coordinates
             property real   pressLY: 0
@@ -847,6 +961,7 @@ Item {
             property var    pressedNode: null
             property var    pressedEdge: null
             property string pressedToggle: ""
+            property string pressedMeasure: ""
             property var    nudgeBase:   ({})
 
             function toLayout(mx, my) { return inner.mapFromItem(input, mx, my) }
@@ -870,6 +985,12 @@ Item {
                 // that was actually pressed.
                 pressedToggle = mouse.button === Qt.LeftButton ? root._toggleAt(p.x, p.y) : ""
                 if (pressedToggle !== "") { mode = "toggle"; return }
+
+                // Before the node, because a measure row is INSIDE its box: hit-testing the node
+                // first would always win and no row would ever be reachable. Like the toggle it is
+                // neither a selection nor a hold target — opening a measure is a navigation.
+                pressedMeasure = mouse.button === Qt.LeftButton ? root._measureAt(p.x, p.y) : ""
+                if (pressedMeasure !== "") { mode = "measure"; return }
 
                 pressedNode = root._nodeAt(p.x, p.y)
                 pressedEdge = pressedNode ? null : root._edgeAt(p.x, p.y)
@@ -897,9 +1018,12 @@ Item {
 
                 // Only while nothing else is in flight — a control lighting up under a marquee or a
                 // link drag would offer something this gesture cannot do.
-                root._hotToggle = (mode === "idle" || mode === "pending" || mode === "toggle")
-                                  && !root._dragging
-                                      ? root._toggleAt(p.x, p.y) : ""
+                var quiet = (mode === "idle" || mode === "pending" || mode === "toggle"
+                             || mode === "measure") && !root._dragging
+                root._hotToggle  = quiet ? root._toggleAt(p.x, p.y) : ""
+                root._hotMeasure = quiet && root._hotToggle === "" ? root._measureAt(p.x, p.y) : ""
+
+                if (mode === "measure") return
 
                 // A press on a control that then travels off it is abandoned, exactly as a button
                 // is. It never becomes a nudge: the control is not the node, and dragging it would
@@ -944,6 +1068,17 @@ Item {
                 holdTimer.stop()
                 var p = toLayout(mouse.x, mouse.y)
 
+                if (mode === "measure") {
+                    if (root._measureAt(p.x, p.y) === pressedMeasure) {
+                        // The measure is its own object with its own page; opening it does NOT
+                        // re-centre the graph on the condition the row was read from.
+                        var bar = pressedMeasure.indexOf("|")
+                        root.nodeActivated("measures", pressedMeasure.substring(bar + 1))
+                    }
+                    pressedMeasure = ""
+                    mode = "idle"
+                    return
+                }
                 if (mode === "toggle") {
                     // Only if the release is on the SAME control the press was on.
                     if (root._toggleAt(p.x, p.y) === pressedToggle)
@@ -966,8 +1101,8 @@ Item {
                 mode = "idle"
             }
 
-            onCanceled: { holdTimer.stop(); mode = "idle"; pressedToggle = "" }
-            onExited:   root._hotToggle = ""
+            onCanceled: { holdTimer.stop(); mode = "idle"; pressedToggle = ""; pressedMeasure = "" }
+            onExited:   { root._hotToggle = ""; root._hotMeasure = "" }
 
             Timer {
                 id: holdTimer
