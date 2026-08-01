@@ -2925,6 +2925,11 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
     opt.maxW       = num("maxW", opt.maxW);
     opt.depth      = int(num("depth", opt.depth));
     opt.maxPerRank = int(num("maxPerRank", opt.maxPerRank));
+    // The boxes the reader has opened. An id in here that is not in this neighbourhood is ignored
+    // rather than refused — the list is a wish, and the layout answers with what it can, so the
+    // view never has to prune it against a picture it has not seen yet.
+    opt.expanded     = options.value(QStringLiteral("expanded")).toStringList();
+    opt.maxPerExpand = int(num("maxPerExpand", opt.maxPerExpand));
     opt.includeMeasures =
         options.value(QStringLiteral("includeMeasures"), opt.includeMeasures).toBool();
 
@@ -2955,6 +2960,7 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
         m.insert(QStringLiteral("coverage"), n.coverage);
         m.insert(QStringLiteral("hiddenCauses"), n.hiddenCauses);
         m.insert(QStringLiteral("hiddenEffects"), n.hiddenEffects);
+        m.insert(QStringLiteral("expanded"), n.expanded);
         m.insert(QStringLiteral("groupLabel"), n.groupLabel);
         m.insert(QStringLiteral("statusLabel"), n.statusLabel);
         m.insert(QStringLiteral("metricKey"), n.metricKey);

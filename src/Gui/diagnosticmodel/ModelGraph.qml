@@ -162,8 +162,15 @@ Item {
     }
     // The three things §2.1 says drop a nudge, stated where they happen rather than left to the
     // reader to infer. None of them needs a warning, because nothing was ever at stake.
-    onFocusIdChanged: root._clearNudges()
-    onScopeChanged:   root._clearNudges()
+    //
+    // Opening or closing a box drops them for the scope change's reason, and it is the same event
+    // under a different name: a rank appears or goes, every column is re-ordered against its
+    // neighbour, and an offset chosen against the old arrangement would hold a box away from a
+    // position it no longer has.
+    onFocusIdChanged:       root._clearNudges()
+    onScopeChanged:         root._clearNudges()
+    onExpandToggled:        root._clearNudges()
+    onCollapseAllRequested: root._clearNudges()
 
     // Colour by TYPE, from the theme's own chart palette — so the graph reads as a legend of the
     // rail beside it, and no colour is invented here.
@@ -209,6 +216,62 @@ Item {
             if (Math.abs(x - lx) <= Theme.sp(16) && Math.abs(y - ly) <= Theme.sp(9)) return e
         }
         return null
+    }
+
+    // ── Opening a box ─────────────────────────────────────────────────────────
+    //
+    // The hidden-neighbour count is drawn on the side of the node the layout would open towards,
+    // and on that side it is a CONTROL rather than a caption. A number with no way to act on it is
+    // a reader told what they cannot have.
+    //
+    // The AIMED way past the bound, next to `expand`, which is the broad one. They answer different
+    // questions and neither replaces the other: `expand` is "show me more of everything", and this
+    // is "show me what is behind THIS box" — which `expand` cannot do on its own, because the
+    // per-rank cap spends the new slots on that rank's other parents before it reaches the twelve
+    // you were pointing at.
+    //
+    // Hit-tested here, in layout coordinates, for the same reason every other press on this canvas
+    // is: `input` accepts them all, so a PpPressable inside a node delegate would never see one.
+    // The rects below and the badges in the node delegate are ONE target and must be read from the
+    // same numbers — a control you can see but not click is worse than no control.
+    readonly property real _togW: Theme.sp(20)
+    readonly property real _togH: Theme.sp(15)
+
+    // Which side a node opens towards: a cause opens further left, an effect further right, and
+    // rank 0 — the focus and its partners — opens both ways, so it gets a control on each side.
+    function _opensLeft(n)  { return n.kind !== "measure" && (n.rank || 0) <= 0 }
+    function _opensRight(n) { return n.kind !== "measure" && (n.rank || 0) >= 0 }
+
+    // "" when the point is on no control, else "<id>|L" or "<id>|R". A string rather than the node,
+    // so a press and its release can be compared for the SAME control without relying on the
+    // identity of an object the layout may have rebuilt in between.
+    function _toggleAt(x, y) {
+        for (var i = 0; i < _nodes.length; i++) {
+            var n = _nodes[i]
+            if (n.kind === "measure") continue
+            var nx = n.x + root._ndx(n.id, root._nudgeRev)
+            var ny = n.y + root._ndy(n.id, root._nudgeRev)
+            var ty = ny + n.h / 2 - root._togH / 2
+            if (y < ty || y > ty + root._togH) continue
+            if (root._opensLeft(n) && (n.expanded === true || (n.hiddenCauses || 0) > 0)) {
+                var lx = nx - Theme.sp(3) - root._togW
+                if (x >= lx && x <= lx + root._togW) return n.id + "|L"
+            }
+            if (root._opensRight(n) && (n.expanded === true || (n.hiddenEffects || 0) > 0)) {
+                var rx = nx + n.w + Theme.sp(3)
+                if (x >= rx && x <= rx + root._togW) return n.id + "|R"
+            }
+        }
+        return ""
+    }
+
+    // The control under the pointer, so it can look like one before it is pressed. Static text that
+    // turns out to be clickable is a control nobody finds.
+    property string _hotToggle: ""
+
+    function _anyOpen() {
+        for (var i = 0; i < _nodes.length; i++) if (_nodes[i].expanded === true) return true
+        return false
     }
 
     function _nodeById(id) {
@@ -480,6 +543,9 @@ Item {
                 readonly property bool isFocus:   modelData.kind === "focus"
                 readonly property bool isMeasure: modelData.kind === "measure"
                 readonly property bool inSelection: root.selectedNodeIds.indexOf(modelData.id) >= 0
+                // Asked of the LAYOUT, not of the view's own list of opened ids: a box the reader
+                // opened and then navigated away from is not open on a graph it is no longer in.
+                readonly property bool opened: modelData.expanded === true
 
                 readonly property var  refusal: root._dragging ? root._refusalOf(modelData.id) : null
                 readonly property bool refused: refusal !== null
@@ -589,25 +655,62 @@ Item {
 
                 // Whatever the depth bound cut off is COUNTED on the node it was cut from. A graph
                 // that silently omitted half of what it knows is worse than one that drew nothing.
-                Text {
+                //
+                // On the side the node OPENS towards it is also the way past the bound: press it and
+                // that box admits its own neighbours, however far the picture reaches on its own.
+                // The sign is the verb and the number is what is behind it — `+3` is three not
+                // drawn, `−` is opened with nothing left, `−2` is opened with two still past the
+                // per-node budget. On the other side, where opening would fold the graph back on
+                // itself, it stays a plain count.
+                //
+                // Geometry is read from root._togW / _togH and the same sp(3) margin the hit test
+                // uses. These are one target; they must not be able to disagree about where it is.
+                component Opener: Item {
+                    id: op
+                    required property bool live      // this side is the one the node opens towards
+                    required property int  count
+                    width:  root._togW
+                    height: root._togH
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: op.live ? (nodeItem.opened || op.count > 0) : op.count > 0
+
+                    property bool hot: false
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius:  height / 2
+                        visible: op.live
+                        color:   op.hot ? Theme.colorAccentLight : "transparent"
+                        border.width: 1
+                        border.color: op.hot ? Theme.colorAccent : Theme.colorBorderMid
+                        opacity: op.hot ? 1.0 : 0.7
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: (!op.live || !nodeItem.opened) ? "+" + op.count
+                            : op.count > 0                   ? "−" + op.count
+                                                             : "−"
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          op.hot ? Theme.colorAccent : Theme.colorText3
+                    }
+                }
+
+                Opener {
                     anchors.right: parent.left
                     anchors.rightMargin: Theme.sp(3)
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: (nodeItem.modelData.hiddenCauses || 0) > 0
-                    text:    "+" + nodeItem.modelData.hiddenCauses
-                    font.family:    Theme.fontData
-                    font.pixelSize: Theme.fontSzMicro
-                    color:          Theme.colorText3
+                    live:  root._opensLeft(nodeItem.modelData)
+                    count: nodeItem.modelData.hiddenCauses || 0
+                    hot:   root._opensLeft(nodeItem.modelData)
+                           && root._hotToggle === nodeItem.modelData.id + "|L"
                 }
-                Text {
+                Opener {
                     anchors.left: parent.right
                     anchors.leftMargin: Theme.sp(3)
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: (nodeItem.modelData.hiddenEffects || 0) > 0
-                    text:    "+" + nodeItem.modelData.hiddenEffects
-                    font.family:    Theme.fontData
-                    font.pixelSize: Theme.fontSzMicro
-                    color:          Theme.colorText3
+                    live:  root._opensRight(nodeItem.modelData)
+                    count: nodeItem.modelData.hiddenEffects || 0
+                    hot:   root._opensRight(nodeItem.modelData)
+                           && root._hotToggle === nodeItem.modelData.id + "|R"
                 }
             }
         }
@@ -731,9 +834,11 @@ Item {
             z: 60
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            cursorShape: root._dragging ? Qt.CrossCursor : Qt.ArrowCursor
+            cursorShape: root._dragging          ? Qt.CrossCursor
+                       : root._hotToggle !== ""  ? Qt.PointingHandCursor
+                                                 : Qt.ArrowCursor
 
-            // "idle" | "pending" | "nudge" | "marquee" | "ring" | "armed"
+            // "idle" | "pending" | "nudge" | "marquee" | "ring" | "armed" | "toggle"
             property string mode: "idle"
             property real   pressLX: 0     // press point, in LAYOUT coordinates
             property real   pressLY: 0
@@ -741,6 +846,7 @@ Item {
             property real   moveLY:  0
             property var    pressedNode: null
             property var    pressedEdge: null
+            property string pressedToggle: ""
             property var    nudgeBase:   ({})
 
             function toLayout(mx, my) { return inner.mapFromItem(input, mx, my) }
@@ -756,6 +862,15 @@ Item {
 
                 pressLX = p.x; pressLY = p.y
                 moveLX  = p.x; moveLY  = p.y
+
+                // The open/close control sits OUTSIDE its node's box, so it is tested before the
+                // node and before anything else this press could mean. It is neither a selection
+                // nor a hold target: opening a box says nothing about what the author is acting on,
+                // and letting the hold timer run would put a menu about the node over the control
+                // that was actually pressed.
+                pressedToggle = mouse.button === Qt.LeftButton ? root._toggleAt(p.x, p.y) : ""
+                if (pressedToggle !== "") { mode = "toggle"; return }
+
                 pressedNode = root._nodeAt(p.x, p.y)
                 pressedEdge = pressedNode ? null : root._edgeAt(p.x, p.y)
 
@@ -779,6 +894,17 @@ Item {
             onPositionChanged: (mouse) => {
                 var p = toLayout(mouse.x, mouse.y)
                 moveLX = p.x; moveLY = p.y
+
+                // Only while nothing else is in flight — a control lighting up under a marquee or a
+                // link drag would offer something this gesture cannot do.
+                root._hotToggle = (mode === "idle" || mode === "pending" || mode === "toggle")
+                                  && !root._dragging
+                                      ? root._toggleAt(p.x, p.y) : ""
+
+                // A press on a control that then travels off it is abandoned, exactly as a button
+                // is. It never becomes a nudge: the control is not the node, and dragging it would
+                // move a box the author was only trying to open.
+                if (mode === "toggle") return
 
                 if (mode === "ring") {
                     var q = root.mapFromItem(input, mouse.x, mouse.y)
@@ -818,6 +944,14 @@ Item {
                 holdTimer.stop()
                 var p = toLayout(mouse.x, mouse.y)
 
+                if (mode === "toggle") {
+                    // Only if the release is on the SAME control the press was on.
+                    if (root._toggleAt(p.x, p.y) === pressedToggle)
+                        root.expandToggled(pressedToggle.substring(0, pressedToggle.length - 2))
+                    pressedToggle = ""
+                    mode = "idle"
+                    return
+                }
                 if (mode === "ring")  { ring.release(); mode = "idle"; return }
                 if (root._dragging)   { root._dropDrag(p.x, p.y); mode = "idle"; return }
                 if (mode === "marquee") { root._applyMarquee(); mode = "idle"; return }
@@ -832,7 +966,8 @@ Item {
                 mode = "idle"
             }
 
-            onCanceled: { holdTimer.stop(); mode = "idle" }
+            onCanceled: { holdTimer.stop(); mode = "idle"; pressedToggle = "" }
+            onExited:   root._hotToggle = ""
 
             Timer {
                 id: holdTimer
@@ -1026,14 +1161,17 @@ Item {
     }
 
     function _canvasRing() {
-        // Radius is a VIEW setting, so its three cells are built here rather than asked of the
-        // model — there is nothing about it in the pack to ask about.
+        // Scope is a VIEW setting, so its cells are built here rather than asked of the model —
+        // there is nothing about it in the pack to ask about. Worded as the pill words it: the
+        // spoke is a second way to the same control, not a second control.
         var vals = []
-        var lo = Math.max(1, Math.min(2, root.scope - 1))
+        var lo = Math.max(1, Math.min(root._scopeMax - 2, root.scope - 1))
         for (var i = 0; i < 3; i++) {
             var v = lo + i
-            if (v > 4) break
-            vals.push({ value: String(v), label: qsTr("scope %1").arg(v), current: v === root.scope })
+            if (v > root._scopeMax) break
+            vals.push({ value: String(v),
+                        label: qsTr("%1 of %2").arg(v).arg(root._scopeMax),
+                        current: v === root.scope })
         }
         return [
             _spoke("⤢", qsTr("Fit to window"), qsTr("Back to the fitted view"), "fit"),
@@ -1042,11 +1180,16 @@ Item {
             // Nothing on this canvas can be copied yet, so there is nothing to paste. The slot is a
             // gap rather than a button that would exist only to refuse.
             null,
-            _spoke("▤", qsTr("Radius"), qsTr("How far around the focus to draw"),
-                   "radius", { kind: "value", values: vals }),
+            _spoke("▤", qsTr("Scope"), qsTr("How far around the focus to draw"),
+                   "scope", { kind: "value", values: vals }),
             _spoke("↯", root.hideWeak ? qsTr("Show weak links") : qsTr("Hide weak links"),
                    qsTr("Weak claims, drawn or not"), "toggleWeak"),
-            null,
+            // The way back from a picture opened one box at a time. Absent rather than disabled
+            // when nothing is open, which is this ring's rule for every other slot.
+            root._anyOpen()
+                ? _spoke("⊖", qsTr("Close every open box"),
+                         qsTr("Back to the picture this opened from"), "collapseAll")
+                : null,
             _spoke("▦", qsTr("Switch to table"), qsTr("The same content, as rows"), "toTable")
         ]
     }
@@ -1121,8 +1264,9 @@ Item {
         // The pane's own business — a view state, so it never reaches the model or the undo stack.
         case "fit":        root._userZoom = 1.0; return
         case "tidy":       root._clearNudges(); root.verbInvoked("tidy", null); return
-        case "radius":     root.scopeRequested(parseInt(value)); return
+        case "scope":      root.scopeRequested(parseInt(value)); return
         case "toggleWeak": root.switchToggled("weak"); return
+        case "collapseAll": root.collapseAllRequested(); return
 
         // Everything else is the panel's, because it is either a command or a navigation.
         case "focus":
@@ -1416,11 +1560,21 @@ Item {
         }
     }
 
-    // ── Scope ─────────────────────────────────────────────────────────────────
+    // ── Scope, and the switches ───────────────────────────────────────────────
     //
-    // Overlaid on the picture rather than parked under it: it changes what you are looking at, so it
-    // belongs where you are looking.
+    // Overlaid on the picture rather than parked under it: they change what you are looking at, so
+    // they belong where you are looking.
+    //
+    // EXPAND and REDUCE, in words, not `−` and `+` against a number. The number was never the thing
+    // being chosen — nobody wants "scope 3", they want one more ring of explanation — and a pair of
+    // arithmetic signs made the reader work out which direction was more. The level is still shown,
+    // because "how far out am I, and is there further to go" is a fair question, but it reads as a
+    // position rather than as the setting.
     property int  scope: 2
+    // The same bound dag_layout.h clamps to. Stated once because the pill and the ring both offer
+    // it, and a control that offers a step the layout ignores is a control that lies — which is
+    // what the `+` did while the layout still stopped at 2.
+    readonly property int _scopeMax: 4
     property bool includeMeasures: false
     property bool hideWeak: false
     property bool hideProposed: false
@@ -1428,12 +1582,17 @@ Item {
     signal scopeRequested(int scope)
     signal switchToggled(string which)
 
+    // Open or close ONE box. The pane holds no list of its own — which boxes are open is a view
+    // state the panel owns, and it arrives back through layoutData.
+    signal expandToggled(string id)
+    signal collapseAllRequested()
+
     Rectangle {
         anchors.top:   parent.top
         anchors.right: parent.right
         anchors.margins: Theme.sp(10)
         visible: root._nodes.length > 0
-        width:   scopeRow.implicitWidth + Theme.sp(18)
+        width:   switchRow.implicitWidth + Theme.sp(18)
         height:  Theme.sp(26)
         radius:  height / 2
         color:   Theme.colorSurface
@@ -1442,7 +1601,7 @@ Item {
         z: 30
 
         RowLayout {
-            id: scopeRow
+            id: switchRow
             anchors.centerIn: parent
             spacing: Theme.sp(8)
 
@@ -1458,33 +1617,40 @@ Item {
                 PpPressable { hoverScale: 1.0; onClicked: root.switchToggled(sw.key) }
             }
 
-            Text {
-                text: "−"
-                font.family:    Theme.fontData
-                font.pixelSize: Theme.fontSzBody
-                color: root.scope > 1 ? Theme.colorText2 : Theme.colorText3
+            // A step out and a step in, said as verbs. Greyed at the ends rather than hidden: a
+            // control that disappears at its limit takes the answer to "is there more?" with it.
+            component Step: Text {
+                id: st
+                required property string label
+                required property bool   can
+                required property int    to
+                text:           label
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                color:          st.can ? Theme.colorText2 : Theme.colorText3
+                opacity:        st.can ? 1.0 : 0.45
                 PpPressable {
                     hoverScale: 1.0
-                    enabled:    root.scope > 1
-                    onClicked:  root.scopeRequested(root.scope - 1)
+                    enabled:    st.can
+                    onClicked:  root.scopeRequested(st.to)
                 }
             }
+
+            Step {
+                label: qsTr("reduce")
+                can:   root.scope > 1
+                to:    root.scope - 1
+            }
             Text {
-                text: qsTr("scope %1").arg(root.scope)
+                text: qsTr("%1 of %2").arg(root.scope).arg(root._scopeMax)
                 font.family:    Theme.fontData
                 font.pixelSize: Theme.fontSzMicro
-                color:          Theme.colorText2
+                color:          Theme.colorText3
             }
-            Text {
-                text: "+"
-                font.family:    Theme.fontData
-                font.pixelSize: Theme.fontSzBody
-                color: root.scope < 4 ? Theme.colorText2 : Theme.colorText3
-                PpPressable {
-                    hoverScale: 1.0
-                    enabled:    root.scope < 4
-                    onClicked:  root.scopeRequested(root.scope + 1)
-                }
+            Step {
+                label: qsTr("expand")
+                can:   root.scope < root._scopeMax
+                to:    root.scope + 1
             }
 
             Rectangle {

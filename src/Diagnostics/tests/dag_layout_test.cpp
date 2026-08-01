@@ -8,7 +8,9 @@
 //      — it hides a node, and a hidden node reads as a graph that does not contain it.
 //   2. DETERMINISM. The same focus must produce the same picture every time. A graph that
 //      reshuffles between visits teaches the reader that position means nothing.
-//   3. THE DEPTH BOUND HOLDS, and whatever it cut off is counted rather than dropped silently.
+//   3. THE DEPTH BOUND HOLDS, every step the UI offers is a step the layout takes, and whatever the
+//      bound cut off is counted rather than dropped silently — and reachable, by opening the box it
+//      was counted on.
 //   4. AN ISOLATED NODE lays out. It is the empty state of this view and the most likely one for a
 //      freshly authored characteristic.
 //
@@ -18,6 +20,8 @@
 #include "../dag_layout.h"
 
 #include <cstdio>
+#include <set>
+#include <utility>
 
 using namespace pinpoint::analysis;
 
@@ -38,6 +42,15 @@ static void check(bool c, const char *label)
 //
 // Plus a latent screened cause, a measure with no producer behind the focus, and a node connected
 // to nothing at all.
+//
+// And a chain running away from the focus on both sides, deep enough to reach past every bound:
+//
+//   far ─► origin ─► root1 ─┐
+//                           ├─► deepA ─► cause1 ─► FOCUS ─► effect1 ─► deepEffect ─► farEffect
+//                    root2 ─┘
+//
+// `far` sits at rank -5 and can therefore never be drawn — which is what makes the clamp
+// assertable rather than assumed.
 static CharacteristicPack fixture()
 {
     CharacteristicPack p;
@@ -89,6 +102,11 @@ static CharacteristicPack fixture()
     cond("effect2",    "Second effect",   ConfirmedBy::Measured, Observability::Observable, { "sLive" });
     cond("deepEffect", "Deep effect",     ConfirmedBy::Measured, Observability::Observable, { "sLive" });
     cond("island",     "Connected to nothing", ConfirmedBy::Measured, Observability::Observable, { "sLive" });
+    cond("root1",      "Root cause one",  ConfirmedBy::Measured, Observability::Observable, { "sLive" });
+    cond("root2",      "Root cause two",  ConfirmedBy::Measured, Observability::Observable, { "sLive" });
+    cond("origin",     "The origin",      ConfirmedBy::Measured, Observability::Observable, { "sLive" });
+    cond("far",        "Further than any bound", ConfirmedBy::Measured, Observability::Observable, { "sLive" });
+    cond("farEffect",  "Far effect",      ConfirmedBy::Measured, Observability::Observable, { "sLive" });
 
     auto edge = [&](const char *from, const char *to, Strength st) {
         Edge e;
@@ -110,6 +128,13 @@ static CharacteristicPack fixture()
     // A cause that ALSO causes an effect: rank -1 straight to rank +1, across the focus column.
     // This is the edge that used to be drawn as one long curve through the focus box.
     edge("cause2", "effect2", Strength::Moderate);
+    // The deep chain. Two causes on `deepA` so an opened node has more than one thing to admit, and
+    // one more hop past `origin` than any bound can reach.
+    edge("root1", "deepA", Strength::Moderate);
+    edge("root2", "deepA", Strength::Moderate);
+    edge("origin", "root1", Strength::Moderate);
+    edge("far", "origin", Strength::Moderate);
+    edge("deepEffect", "farEffect", Strength::Moderate);
     return p;
 }
 
@@ -203,15 +228,142 @@ int main()
         check(nodeById(d2, "deepEffect") && nodeById(d2, "deepEffect")->rank == 2, "and rank +2");
         check(nodeById(d2, "cause1")->hiddenCauses == 0, "and cause1 has nothing left hidden");
 
-        // The bound is a bound, not a suggestion: 3 clamps to 2 rather than walking the library.
+        // Every step the control offers is a step the layout takes. The `+` on the scope pill went
+        // to 4 while this clamped at 2, so two of its four positions changed the number in the pill
+        // and nothing else — which is how the causes of `over the top` came to be unreachable from
+        // `slice` by any setting the UI had.
         DagLayoutOptions o3;
         o3.depth = 3;
         const DagLayout d3 = layoutDag(p, QStringLiteral("focus"), o3);
-        for (const DagNode &n : d3.nodes)
+        check(nodeById(d3, "root1") && nodeById(d3, "root1")->rank == -3, "scope 3 reaches rank -3");
+        check(!nodeById(d3, "origin"), "and stops there");
+
+        DagLayoutOptions o4;
+        o4.depth = 4;
+        const DagLayout d4 = layoutDag(p, QStringLiteral("focus"), o4);
+        check(nodeById(d4, "origin") && nodeById(d4, "origin")->rank == -4, "scope 4 reaches rank -4");
+        check(nodeById(d4, "farEffect") && nodeById(d4, "farEffect")->rank == 3,
+              "and the effects side runs as far as it has anything to draw");
+
+        // The bound is still a bound: 5 clamps to 4 rather than walking the library.
+        DagLayoutOptions o5;
+        o5.depth = 5;
+        const DagLayout d5 = layoutDag(p, QStringLiteral("focus"), o5);
+        for (const DagNode &n : d5.nodes)
             if (n.kind != DagNodeKind::Measure)
-                check(std::abs(n.rank) <= 2, "depth clamps at 2");
+                check(std::abs(n.rank) <= 4, "depth clamps at 4");
+        check(!nodeById(d5, "far"), "and the node past it is not drawn");
 
         check(!nodeById(d2, "island"), "an unconnected condition is not in someone else's graph");
+    }
+
+    // ── Opening one box ─────────────────────────────────────────────────────
+    //
+    // The reason this exists at all: raising the scope to reach ONE box widens every rank at once,
+    // and hands back a hairball to answer a question about one node. Opening is the local answer.
+    std::printf("An opened node admits its own neighbours, whatever the bound says\n");
+    {
+        DagLayoutOptions o;
+        o.depth    = 1;
+        o.expanded = { QStringLiteral("cause1") };
+        const DagLayout l = layoutDag(p, QStringLiteral("focus"), o);
+
+        check(nodeById(l, "deepA") && nodeById(l, "deepA")->rank == -2,
+              "its causes arrive past the bound");
+        check(nodeById(l, "deepB") != nullptr, "all of them, not the first");
+        check(nodeById(l, "cause1")->expanded, "and it says it is open");
+        check(!nodeById(l, "cause2")->expanded, "while its neighbours do not");
+        check(nodeById(l, "cause1")->hiddenCauses == 0, "nothing of its own is left hidden");
+
+        // LOCAL, which is the whole claim. Opening one box must not quietly become scope 2.
+        check(!nodeById(l, "deepEffect"), "no other rank was widened");
+        check(!nodeById(l, "root1"), "and it opened one hop, not the rest of the chain");
+
+        // Direction follows the side of the picture. A cause opens towards ITS causes; pulling its
+        // effects in would put them in a column that means "effects of the focus".
+        DagLayoutOptions oc;
+        oc.depth    = 1;
+        oc.expanded = { QStringLiteral("cause2") };
+        const DagLayout lc = layoutDag(p, QStringLiteral("focus"), oc);
+        check(!nodeById(lc, "effect2") || nodeById(lc, "effect2")->rank == 1,
+              "an opened cause does not drag its effects to a rank of its own");
+
+        // An id that is not on this picture costs nothing — which is what lets the view keep one
+        // list rather than pruning it against every redraw.
+        DagLayoutOptions og;
+        og.depth    = 1;
+        og.expanded = { QStringLiteral("nosuch"), QStringLiteral("far") };
+        const DagLayout lg = layoutDag(p, QStringLiteral("focus"), og);
+        check(lg.nodes.size() == layoutDag(p, QStringLiteral("focus")).nodes.size(),
+              "an opened id that is off the picture changes nothing");
+    }
+
+    std::printf("Opening chains, in whichever order the boxes were opened\n");
+    {
+        // `deepA` is only reachable once `cause1` is open, so a single pass in list order would
+        // drop it whenever the author happened to open the far one first. Both orders must agree.
+        for (int order = 0; order < 2; ++order) {
+            DagLayoutOptions o;
+            o.depth = 1;
+            o.expanded = order == 0
+                             ? QStringList{ QStringLiteral("cause1"), QStringLiteral("deepA") }
+                             : QStringList{ QStringLiteral("deepA"), QStringLiteral("cause1") };
+            const DagLayout l = layoutDag(p, QStringLiteral("focus"), o);
+            check(nodeById(l, "root1") && nodeById(l, "root1")->rank == -3,
+                  order == 0 ? "near box opened first" : "far box opened first");
+            check(nodeById(l, "root2") != nullptr, "and the chain arrives whole");
+        }
+    }
+
+    std::printf("An opened node answers to its OWN budget, not to the rank's\n");
+    {
+        // maxPerRank exists to stop an automatic walk fanning out; it must not be what decides how
+        // much an explicit request returns. With room for one node per rank, opening cause1 still
+        // brings both of its causes.
+        DagLayoutOptions o;
+        o.depth      = 2;
+        o.maxPerRank = 1;
+        o.expanded   = { QStringLiteral("cause1") };
+        const DagLayout l = layoutDag(p, QStringLiteral("focus"), o);
+        check(nodeById(l, "deepA") && nodeById(l, "deepB"),
+              "the per-rank cap does not apply to what was asked for");
+
+        // Its own budget does apply, and what it drops is counted rather than lost.
+        DagLayoutOptions ob;
+        ob.depth        = 1;
+        ob.maxPerExpand = 1;
+        ob.expanded     = { QStringLiteral("cause1") };
+        const DagLayout lb = layoutDag(p, QStringLiteral("focus"), ob);
+        int drawn = (nodeById(lb, "deepA") ? 1 : 0) + (nodeById(lb, "deepB") ? 1 : 0);
+        check(drawn == 1, "the budget bounds it");
+        check(nodeById(lb, "cause1")->hiddenCauses == 1, "and the remainder is still counted");
+        check(lb.truncated, "the layout still says it is showing a part");
+    }
+
+    std::printf("An opened graph is still a laid-out graph\n");
+    {
+        DagLayoutOptions o;
+        o.depth    = 2;
+        o.expanded = { QStringLiteral("deepA"), QStringLiteral("root1"), QStringLiteral("effect1") };
+        const DagLayout l = layoutDag(p, QStringLiteral("focus"), o);
+
+        bool ok = true;
+        for (size_t i = 0; i < l.nodes.size(); ++i)
+            for (size_t j = i + 1; j < l.nodes.size(); ++j)
+                if (overlaps(l.nodes[i], l.nodes[j])) ok = false;
+        check(ok, "no two nodes overlap");
+
+        QString why;
+        const bool bad = linesCrossBoxes(l, &why);
+        if (bad) std::printf("      %s\n", qPrintable(why));
+        check(!bad, "no line is drawn through a box that is not its own end");
+
+        const DagLayout again = layoutDag(p, QStringLiteral("focus"), o);
+        bool same = l.nodes.size() == again.nodes.size();
+        for (size_t i = 0; same && i < l.nodes.size(); ++i)
+            same = l.nodes[i].id == again.nodes[i].id && l.nodes[i].x == again.nodes[i].x
+                   && l.nodes[i].y == again.nodes[i].y;
+        check(same, "and it lays out the same way every time");
     }
 
     // ── Overlap ─────────────────────────────────────────────────────────────
@@ -251,7 +403,7 @@ int main()
     // ends could catch it — the picture just read as several arrows fighting for one box.
     std::printf("No line is drawn through a box that is not its own end\n");
     {
-        for (int depth : { 1, 2 }) {
+        for (int depth : { 1, 2, 3, 4 }) {
             DagLayoutOptions o;
             o.depth = depth;
             for (const char *focus : { "focus", "cause1", "effect1", "deepA", "island" }) {
@@ -361,9 +513,36 @@ int main()
             if (n.kind != DagNodeKind::Measure) bandBottom = std::max(bandBottom, n.y + n.h);
         check(m->y >= bandBottom, "in its own lane beneath the band");
 
-        int detects = 0, causal = 0;
-        for (const DagEdge &e : l.edges) (e.detects ? detects : causal)++;
-        check(detects == 1, "one detection edge");
+        // The lane answers for the whole PICTURE, not for the focus. `cause2` is detected by a
+        // different measure, and a lane that drew only the focus's left it looking like a condition
+        // nothing can see — which is a claim about the pack, and the wrong one.
+        check(nodeById(l, "mGhost") != nullptr, "a measure of a NON-focus condition is drawn too");
+
+        // Once, however many of the drawn conditions it detects. Two boxes for one measure would
+        // read as two ways of seeing where the pack holds one — and the shared detector is exactly
+        // what makes two conditions hard to tell apart, so it has to be visible as shared.
+        int copies = 0;
+        for (const DagNode &n : l.nodes)
+            if (n.id == QLatin1String("mLive")) ++copies;
+        check(copies == 1, "and a measure serving several of them is drawn once");
+
+        std::set<std::pair<QString, QString>> detectPairs;
+        int                                   causal = 0;
+        for (const DagEdge &e : l.edges) {
+            if (e.detects) detectPairs.insert({ e.from, e.to });
+            else           ++causal;
+        }
+        // mLive detects focus, cause1, effect1 and effect2; mGhost detects cause2. cause3 has no
+        // measure and gets no line — an unmeasurable cause drawn with one would be the worst
+        // possible thing this lane could say.
+        check(detectPairs.size() == 5, "one line from each measure to each condition it detects");
+        for (const auto &pr : detectPairs)
+            check(nodeById(l, pr.second.toLatin1().constData()) != nullptr,
+                  "and never to a condition that is not on the picture");
+        check(!detectPairs.count({ QStringLiteral("mLive"), QStringLiteral("cause3") }),
+              "a condition nothing detects gets no detection line");
+        check(!detectPairs.count({ QStringLiteral("mLive"), QStringLiteral("deepEffect") }),
+              "nor does one that is off the picture");
         // Every Causes edge whose BOTH ends are drawn — the three into the focus, the two out of
         // it, the same-rank cause3 -> cause1, and cause2 -> effect2, which spans the focus column
         // and is therefore emitted as TWO segments. Cross-links are not extra: an edge dropped for

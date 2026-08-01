@@ -185,7 +185,8 @@ Item {
     //
     // Order of concession under pressure: fold the sidenav → collapse the facet rail → drop the
     // inspector. The first step is the author's to take, which is why it is a control and not a
-    // threshold.
+    // threshold — and so, now, are the other two: the filter list and the inspector both fold by
+    // hand as well as by width. The thresholds are the floor, not the only way down.
     readonly property int  _inspectorWidth: Theme.sp(528)
 
     // Folded away by hand, and it STAYS folded — persisted in AppSettings for the same reason the
@@ -198,6 +199,20 @@ Item {
     readonly property bool _inspectorFolded: appSettings.diagnosticsInspectorCollapsed
     readonly property bool _showFacets:     width > Theme.sp(1225)
     readonly property bool _showInspector:  width > Theme.sp(1051)
+
+    // Two folds on the left, nested: the RAIL is the pane, the filter list is a section inside it.
+    // Separate because they are separate decisions — an author who knows which content type they
+    // are in wants the width for the table and does not want to give up the filters to get it, and
+    // one who filters once then reads for an hour wants the opposite.
+    readonly property bool _railFolded:   appSettings.diagnosticsRailCollapsed
+    readonly property bool _facetsFolded: appSettings.diagnosticsFacetsCollapsed
+
+    // Whether the filter list is ON SCREEN, which is a different question from either fold. Three
+    // ways to lose it — the panel too narrow for it, the rail folded away, the list folded away —
+    // and everything downstream should ask THIS rather than any one of them. A surface that made up
+    // for a hidden filter by checking only the width would cover one case and leave the other two
+    // silently filtering rows nobody can see a reason for.
+    readonly property bool _facetsVisible: _showFacets && !_railFolded && !_facetsFolded
 
     // ── Data, all derived in C++ ──────────────────────────────────────────────
     readonly property var _columns: {
@@ -919,11 +934,15 @@ Item {
                 elide:          Text.ElideRight
             }
 
-            // A collapsed facet rail hides the fact that a filter is ON, which would leave
-            // the reader looking at a short list with no way to see why. The chips are the
+            // A facet rail that is not on screen hides the fact that a filter is ON, which would
+            // leave the reader looking at a short list with no way to see why. The chips are the
             // filter, said where the list is.
+            //
+            // Keyed on _facetsVisible rather than on the width alone: the rail and the list inside
+            // it are both foldable by hand now, and a reader who folded one away is MORE likely to
+            // forget what it was doing than one the window shrank out from under.
             Repeater {
-                model: root._showFacets ? [] : root._facetChips
+                model: root._facetsVisible ? [] : root._facetChips
                 delegate: Rectangle {
                     id: facetChip
                     required property var modelData
@@ -1035,37 +1054,87 @@ Item {
             Layout.fillHeight: true
             spacing: 0
 
-            ModelTypeRail {
-                Layout.preferredWidth: Theme.sp(214)
+            // ── Content rail ──────────────────────────────────────────────────
+            // Folded, it keeps a strip just wide enough to hold the way back — zero width would be
+            // tidier and would strand the author, exactly as it would on the inspector.
+            Item {
+                Layout.preferredWidth: root._railFolded ? Theme.sp(26) : Theme.sp(214)
                 Layout.fillHeight:     true
-                types:        browser.types
-                facets: {
-                    if (root._revision < 0) return []
-                    return root._showFacets ? browser.facets(root._type) : []
+
+                Behavior on Layout.preferredWidth {
+                    NumberAnimation { duration: Theme.durationFast; easing.type: Easing.OutCubic }
                 }
-                activeFacets: root._facets
-                selectedType: root._type
-                totalObjects: browser.totalObjects
-                onTypePicked: (key) => {
-                    // Close any open editor BEFORE the rows change under it — see
-                    // ModelTable.endEdit()'s comment for what a stale editor looks like.
-                    table.endEdit()
-                    // NARROWS the search rather than ending it: the text stays, the scope becomes
-                    // this one type. See `_searchAllTypes`.
-                    root._searchAllTypes = false
-                    root._type = key
-                    root._sort = ""
-                    root._facets = ({})
-                    root._selection = []
+
+                // Points RIGHT, because that is the way the pane comes back — the mirror of the
+                // inspector's, which points left for the same reason at the other edge.
+                Rectangle {
+                    id: railUnfoldButton
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top:              parent.top
+                    anchors.topMargin:        Theme.sp(12)
+                    visible: root._railFolded
+                    width:   Theme.sp(22)
+                    height:  Theme.sp(20)
+                    radius:  Theme.radius
+                    color:   railUnfoldMa.containsMouse ? Theme.colorBg2 : "transparent"
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "››"
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzBody2
+                        color: railUnfoldMa.containsMouse ? Theme.colorText2 : Theme.colorText3
+                    }
+
+                    ToolTip.visible: railUnfoldMa.containsMouse
+                    ToolTip.text: qsTr("Show the content rail")
+                                  + (Qt.platform.os === "osx" ? "  ⌥\\" : "  Alt+\\")
+                    ToolTip.delay: 400
+
+                    PpPressable {
+                        id: railUnfoldMa
+                        hoverScale: 1.0
+                        onClicked: appSettings.diagnosticsRailCollapsed = false
+                    }
                 }
-                // A facet narrows ONE type's rows, so it cannot apply to a cross-type result list —
-                // touching one scopes the search to the type being looked at, exactly as picking the
-                // type would.
-                onFacetToggled: (key, value) => {
-                    root._searchAllTypes = false
-                    root.toggleFacet(key, value)
+
+                ModelTypeRail {
+                    anchors.fill: parent
+                    visible: !root._railFolded
+                    onCollapseRequested: appSettings.diagnosticsRailCollapsed = true
+                    types:        browser.types
+                    facets: {
+                        if (root._revision < 0) return []
+                        return root._showFacets ? browser.facets(root._type) : []
+                    }
+                    activeFacets: root._facets
+                    facetsFolded: root._facetsFolded
+                    onFacetsFoldToggled: appSettings.diagnosticsFacetsCollapsed =
+                                             !appSettings.diagnosticsFacetsCollapsed
+                    selectedType: root._type
+                    totalObjects: browser.totalObjects
+                    onTypePicked: (key) => {
+                        // Close any open editor BEFORE the rows change under it — see
+                        // ModelTable.endEdit()'s comment for what a stale editor looks like.
+                        table.endEdit()
+                        // NARROWS the search rather than ending it: the text stays, the scope becomes
+                        // this one type. See `_searchAllTypes`.
+                        root._searchAllTypes = false
+                        root._type = key
+                        root._sort = ""
+                        root._facets = ({})
+                        root._selection = []
+                    }
+                    // A facet narrows ONE type's rows, so it cannot apply to a cross-type result list —
+                    // touching one scopes the search to the type being looked at, exactly as picking the
+                    // type would.
+                    onFacetToggled: (key, value) => {
+                        root._searchAllTypes = false
+                        root.toggleFacet(key, value)
+                    }
+                    onFacetsCleared: { table.endEdit(); root._facets = ({}) }
                 }
-                onFacetsCleared: { table.endEdit(); root._facets = ({}) }
             }
 
             Rectangle {
@@ -1184,6 +1253,7 @@ Item {
                             laneGap: Theme.sp(96), padX: Theme.sp(12), charW: Theme.sp(6.4),
                             minW: Theme.sp(110), maxW: Theme.sp(210),
                             depth: middlePane.graphDepth, maxPerRank: 8,
+                            expanded: middlePane.graphExpanded, maxPerExpand: 16,
                             includeMeasures: middlePane.graphMeasures,
                             hideWeak: middlePane.graphHideWeak,
                             hideProposed: middlePane.graphHideProposed
@@ -1210,6 +1280,17 @@ Item {
                     hideWeak:        middlePane.graphHideWeak
                     hideProposed:    middlePane.graphHideProposed
                     onScopeRequested: (v) => middlePane.graphDepth = v
+                    // A NEW array every time, never a push into the existing one: a `var` property
+                    // holding a JS array notifies on assignment and not on mutation, so an in-place
+                    // push would open the box and redraw nothing.
+                    onExpandToggled: (id) => {
+                        var next = middlePane.graphExpanded.slice()
+                        var at   = next.indexOf(id)
+                        if (at >= 0) next.splice(at, 1)
+                        else         next.push(id)
+                        middlePane.graphExpanded = next
+                    }
+                    onCollapseAllRequested: middlePane.graphExpanded = []
                     onSwitchToggled: (which) => {
                         if (which === "measures")      middlePane.graphMeasures     = !middlePane.graphMeasures
                         else if (which === "weak")     middlePane.graphHideWeak     = !middlePane.graphHideWeak
@@ -1270,10 +1351,25 @@ Item {
 
                 // Graph view options. The controls that set them are overlaid on the graph —
                 // they change what you are looking at, so they belong where you are looking.
+                // How far the graph walks on its own — the pane's `expand` / `reduce` pair. Every
+                // step it offers is a step dag_layout takes; it stopped at 2 while the control went
+                // to 4, which is how the causes of `over the top` were unreachable from `slice`.
                 property int  graphDepth: 2
                 property bool graphMeasures: false
                 property bool graphHideWeak: false
                 property bool graphHideProposed: false
+
+                // Which boxes the reader has opened by hand. Held here rather than in the pane so
+                // it survives a redraw, and so the pane stays a thing that draws what it is given
+                // rather than one that remembers.
+                //
+                // Dropped when the graph re-centres. The ids would still resolve — they are global
+                // — but "opened" is a fact about ONE picture, and carrying a set of them into a
+                // different neighbourhood makes the next graph arrive with boxes already unfolded
+                // for reasons the reader cannot see.
+                property var graphExpanded: []
+                readonly property string graphFocusId: root._graphFocus.id || ""
+                onGraphFocusIdChanged: middlePane.graphExpanded = []
 
                 // ── Status bar ────────────────────────────────────────────────
                 Rectangle {
@@ -1694,6 +1790,22 @@ Item {
         sequence: "Ctrl+Shift+\\"
         onActivated: appSettings.diagnosticsInspectorCollapsed =
                          !appSettings.diagnosticsInspectorCollapsed
+    }
+    // ⌥\ and ⌥⇧\ fold the two panes on the LEFT, which is why they take the odd modifier out rather
+    // than more Shifts on ⌘. Within each family the plain chord is the PANE and Shift is the
+    // section inside it — the same relationship ⌘\ and ⌘⇧\ already have.
+    //
+    // Ungated, unlike "G". A chord with a modifier is not a character anybody types into a search
+    // box, so it has nothing to stand down for.
+    Shortcut {
+        sequence: "Alt+\\"
+        onActivated: appSettings.diagnosticsRailCollapsed =
+                         !appSettings.diagnosticsRailCollapsed
+    }
+    Shortcut {
+        sequence: "Alt+Shift+\\"
+        onActivated: appSettings.diagnosticsFacetsCollapsed =
+                         !appSettings.diagnosticsFacetsCollapsed
     }
     Shortcut {
         sequence: "G"

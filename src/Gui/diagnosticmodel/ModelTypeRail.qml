@@ -34,26 +34,71 @@ Item {
     property string selectedType: ""
     property int    totalObjects: 0
 
+    // Folded away by hand. The HEADING stays when it is — a filter list that vanished completely
+    // would have nothing left to press to bring it back, and the count of what is still filtering
+    // has to be readable from the fold or the rail is quietly lying about the rows.
+    property bool   facetsFolded: false
+
     signal typePicked(string key)
     signal facetToggled(string key, string value)
     signal facetsCleared()
+    signal facetsFoldToggled()
+    signal collapseRequested()
+
+    readonly property int _activeFacetCount: {
+        var n = 0
+        for (var k in root.activeFacets) n += (root.activeFacets[k] || []).length
+        return n
+    }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        Text {
+        // The heading and the way out of the pane, on one line. Mirrors the inspector's fold at the
+        // other edge of the panel — same glyph pair, same tooltip shape, pointing the way the pane
+        // goes — so learning either teaches the other.
+        RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: Theme.sp(18)
-            Layout.topMargin:  Theme.sp(12)
+            Layout.leftMargin:   Theme.sp(18)
+            Layout.rightMargin:  Theme.sp(10)
+            Layout.topMargin:    Theme.sp(12)
             Layout.bottomMargin: Theme.sp(6)
-            text:                qsTr("CONTENT")
-            font.family:         Theme.fontBody
-            font.pixelSize:      Theme.fontSzMicro
-            font.weight:         Theme.fontBodyWeight
-            font.letterSpacing:  Theme.trackingMicro
-            font.capitalization: Font.AllUppercase
-            color:               Theme.colorText3
+
+            Text {
+                Layout.fillWidth:    true
+                text:                qsTr("CONTENT")
+                font.family:         Theme.fontBody
+                font.pixelSize:      Theme.fontSzMicro
+                font.weight:         Theme.fontBodyWeight
+                font.letterSpacing:  Theme.trackingMicro
+                font.capitalization: Font.AllUppercase
+                color:               Theme.colorText3
+            }
+
+            Rectangle {
+                id: foldButton
+                Layout.preferredWidth:  Theme.sp(24)
+                Layout.preferredHeight: Theme.sp(20)
+                radius: Theme.radius
+                color:  foldMa.containsMouse ? Theme.colorBg2 : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "‹‹"
+                    font.family:    Theme.fontData
+                    font.pixelSize: Theme.fontSzBody2
+                    color: foldMa.containsMouse ? Theme.colorText2 : Theme.colorText3
+                }
+
+                ToolTip.visible: foldMa.containsMouse
+                ToolTip.text: qsTr("Hide the content rail")
+                              + (Qt.platform.os === "osx" ? "  ⌥\\" : "  Alt+\\")
+                ToolTip.delay: 400
+
+                PpPressable { id: foldMa; hoverScale: 1.0; onClicked: root.collapseRequested() }
+            }
         }
 
         Repeater {
@@ -142,24 +187,56 @@ Item {
             Layout.topMargin:   Theme.sp(12)
             visible: root.facets.length > 0
 
+            // The heading is the fold's own control, so there is no separate strip to explain: the
+            // thing you press to put the filters away is the thing that names them. Folded, it
+            // carries the count of what is still narrowing the rows — the rail owes the reader that
+            // whether or not the list itself is on screen.
             Text {
                 Layout.fillWidth:    true
-                text:                qsTr("FILTERS")
+                text: root.facetsFolded && root._activeFacetCount > 0
+                          ? qsTr("FILTERS (%1)").arg(root._activeFacetCount)
+                          : qsTr("FILTERS")
                 font.family:         Theme.fontBody
                 font.pixelSize:      Theme.fontSzMicro
                 font.weight:         Theme.fontBodyWeight
                 font.letterSpacing:  Theme.trackingMicro
                 font.capitalization: Font.AllUppercase
-                color:               Theme.colorText3
+                color: root.facetsFolded && root._activeFacetCount > 0 ? Theme.colorAccent
+                                                                       : Theme.colorText3
+                PpPressable { hoverScale: 1.0; onClicked: root.facetsFoldToggled() }
             }
 
             Text {
                 text:    qsTr("clear")
-                visible: Object.keys(root.activeFacets).length > 0
+                // Offered while folded too. The count beside FILTERS says something is on; taking
+                // away the one control that turns it off would make that a complaint rather than a
+                // fact the reader can act on.
+                visible: root._activeFacetCount > 0
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorAccent
                 PpPressable { hoverScale: 1.0; onClicked: root.facetsCleared() }
+            }
+
+            // A word, not a chevron. `hide` and `show` say which way the press goes; a caret only
+            // says which way something points and leaves the reader to work out the rest.
+            Text {
+                text:    root.facetsFolded ? qsTr("show") : qsTr("hide")
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                color:          facetFoldMa.containsMouse ? Theme.colorText2 : Theme.colorText3
+
+                ToolTip.visible: facetFoldMa.containsMouse
+                ToolTip.text: (root.facetsFolded ? qsTr("Show the filters")
+                                                 : qsTr("Hide the filters"))
+                              + (Qt.platform.os === "osx" ? "  ⌥⇧\\" : "  Alt+Shift+\\")
+                ToolTip.delay: 400
+
+                PpPressable {
+                    id: facetFoldMa
+                    hoverScale: 1.0
+                    onClicked: root.facetsFoldToggled()
+                }
             }
         }
 
@@ -182,7 +259,9 @@ Item {
             Layout.minimumHeight:   Theme.sp(140)
             Layout.bottomMargin:    Theme.sp(12)
             clip: true
-            visible: root.facets.length > 0
+            // A layout excludes an invisible child outright, so the floor above goes with it and a
+            // folded list keeps none of the rail.
+            visible: root.facets.length > 0 && !root.facetsFolded
 
             Column {
                 id: facetColumn

@@ -144,7 +144,9 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     if (!focus) return out;   // a stale link lands on nothing, never on a nearest guess
 
     DagLayoutOptions opt = optIn;
-    opt.depth = std::clamp(opt.depth, 1, 2);
+    opt.depth = std::clamp(opt.depth, 1, 4);
+
+    const QSet<QString> openSet(opt.expanded.begin(), opt.expanded.end());
 
     // ── 1. Rank assignment ──────────────────────────────────────────────────
     // Breadth-first in each direction, FIRST VISIT WINS, so a node reachable by two paths takes the
@@ -214,11 +216,63 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
         }
     }
 
+    // ── 1c. What the reader opened by hand ─────────────────────────────────
+    //
+    // Runs AFTER the automatic walk and after the partners, so neither can be displaced by it: a
+    // node admitted by the walk keeps its shortest-path rank, and a partner of the focus keeps its
+    // seat beside the focus. Opening only ever ADDS.
+    //
+    // Direction follows the side of the picture the node is on. A cause opens further left, an
+    // effect further right, and rank 0 — the focus and its partners — opens both ways. The
+    // alternative, opening every neighbour in both directions, would put a cause's effects to the
+    // right of it in a column that means "effects of the FOCUS", which is a claim the pack does not
+    // hold.
+    //
+    // maxPerRank is deliberately not consulted here. It exists to stop an automatic walk from
+    // fanning a rank into a hairball nobody asked for; this fan-out is precisely what was asked
+    // for, and it answers to its own budget instead.
+    //
+    // Iterated to a fixed point rather than swept once: opening a node two hops out only puts it on
+    // the picture once whatever opened its parent has run, and a single pass in pack order would
+    // silently drop whichever of the two the author happened to open second.
+    if (!openSet.isEmpty()) {
+        QHash<QString, int> spent;   // per opened node, across both directions
+        bool                grew = true;
+        while (grew) {
+            grew = false;
+            for (const QString &id : opt.expanded) {
+                const auto rit = rankOf.constFind(id);
+                if (rit == rankOf.constEnd()) continue;   // opened, but not on this picture
+                const int r = rit.value();
+                for (int dir : { -1, 1 }) {
+                    if ((r < 0 && dir > 0) || (r > 0 && dir < 0)) continue;
+                    const int         nr = r + dir;
+                    const QStringList nb = dir < 0 ? causesOf(pack, id) : effectsOf(pack, id);
+                    for (const QString &n : nb) {
+                        if (rankOf.contains(n)) continue;
+                        if (!pack.condition(n)) continue;
+                        if (opt.maxPerExpand > 0 && spent.value(id) >= opt.maxPerExpand) break;
+                        ++spent[id];
+                        rankOf.insert(n, nr);
+                        byRank[nr].push_back(n);
+                        grew = true;
+                    }
+                }
+            }
+        }
+    }
+
     // ── 2. Ordering within each rank — barycentre, sweeping OUTWARD ─────────
     // Each rank is ordered against the rank one step closer to the focus, which by then is fixed.
     // Sweeping outward rather than iterating to convergence keeps it deterministic in one pass, and
-    // at the depths this view allows (two either side) the extra passes buy nothing.
-    for (int k = 1; k <= opt.depth; ++k) {
+    // at the depths this view allows the extra passes buy nothing.
+    //
+    // The sweep runs to the OUTERMOST RANK PRESENT, not to `depth`. An opened node puts a rank past
+    // the bound on the picture, and bounding the sweep by `depth` instead left exactly those ranks
+    // in pack order — the one place the reader has just said they are looking.
+    int outermost = 0;
+    for (const auto &entry : byRank) outermost = std::max(outermost, std::abs(entry.first));
+    for (int k = 1; k <= outermost; ++k) {
         for (int dir : { -1, 1 }) {
             const int r    = dir * k;
             const int prev = dir * (k - 1);
@@ -279,7 +333,15 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
         r.to        = e.to;
         r.rankFrom  = rf.value();
         r.rankTo    = rt.value();
-        for (int rr = r.rankFrom + 1; rr < r.rankTo; ++rr) r.waypointRanks.push_back(rr);
+        // In TRAVEL order, whichever way that runs. An edge whose cause sits further from the focus
+        // than its effect walks right-to-left, and the ranks it crosses need waypoints just as much
+        // — bounding this to the ascending case left those lines to be drawn as one long curve over
+        // whatever was in between, which is the defect waypoints exist to prevent. Rare at depth 2,
+        // ordinary once a node is opened three ranks out.
+        if (r.rankTo != r.rankFrom) {
+            const int step = r.rankTo > r.rankFrom ? 1 : -1;
+            for (int rr = r.rankFrom + step; rr != r.rankTo; rr += step) r.waypointRanks.push_back(rr);
+        }
         routes.push_back(r);
     }
 
@@ -401,6 +463,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             n.reach       = confirmedByName(c->confirmedBy);
             n.reachLabel  = reachLabel(c->confirmedBy);
             n.coverage    = coverageOf(pack, s.id);
+            n.expanded    = openSet.contains(s.id);
             n.groupLabel  = conditionGroupLabel(c->group);
             resolveAvailability(pack, *c, n.available, n.unavailableReason);
 
@@ -413,43 +476,130 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     const double  focusCentreX = focusNode.x + focusNode.w / 2.0;
 
     // ── 6. The detection lane ───────────────────────────────────────────────
+    //
     // Below the causal band and never inside it: a measure detects a condition, and putting it in
     // the same left-to-right flow would state a causal relationship the pack does not hold.
+    //
+    // EVERY condition on the picture, not only the focus. The switch is called "measures" and the
+    // reader asks it a question about the picture, not about one box in it — a lane that answered
+    // for the focus alone left the other boxes looking like conditions nothing can see, which is a
+    // claim about the pack and a false one. A cause the app cannot detect is exactly the thing this
+    // view exists to make obvious, and it can only be obvious next to the ones it can.
+    //
+    // A measure is drawn ONCE however many of the drawn conditions it detects, and gets one line to
+    // each. Two boxes for one measure would read as two ways of seeing when there is one, and the
+    // shared detector — the reason two conditions are hard to tell apart — is precisely what the
+    // reader is being shown.
     const size_t firstLaneNode = out.nodes.size();
     double       laneY         = 0.0;
     double       laneX0 = 0.0, laneX1 = 0.0;
+
+    // Who each lane node detects, indexed as out.nodes[firstLaneNode + i]. Held here so the edge
+    // pass below draws from what the lane was BUILT from rather than re-deriving it and risking a
+    // different answer.
+    std::vector<QStringList> laneDetects;
+
+    // The band's underside, and the x range of every column. The edge pass needs both to decide how
+    // a detection line reaches its condition without going through the ones stacked beneath it.
+    double                    bandBottom = 0.0;
+    std::map<int, std::pair<double, double>> colSpan;
+
     if (opt.includeMeasures) {
-        QStringList measureIds;
-        for (const QString &sid : focus->detectedBy) {
-            const Signal *s = pack.signal(sid);
-            if (!s) continue;
-            for (const QString &mid : s->measures)
-                if (!measureIds.contains(mid) && pack.measure(mid)) measureIds << mid;
+        // In drawn order, which is column-major left to right — so a measure's first sighting is
+        // already near where it belongs, and the ordering below only has to refine that.
+        QStringList              measureIds;
+        QHash<QString, int>      laneIndex;
+        std::vector<double>      bary;      // mean x-centre of the conditions it detects
+        std::vector<int>         nearest;   // |rank| of the closest of them, for DagNode::rank
+        std::vector<int>         nearestSigned;
+
+        for (size_t i = 0; i < firstLaneNode; ++i) {
+            const DagNode   &cn = out.nodes[i];
+            const Condition *c  = pack.condition(cn.id);
+            if (!c) continue;
+            const double cx = cn.x + cn.w / 2.0;
+            for (const QString &sid : c->detectedBy) {
+                const Signal *s = pack.signal(sid);
+                if (!s) continue;
+                for (const QString &mid : s->measures) {
+                    if (!pack.measure(mid)) continue;
+                    auto it = laneIndex.constFind(mid);
+                    if (it == laneIndex.constEnd()) {
+                        laneIndex.insert(mid, int(measureIds.size()));
+                        measureIds << mid;
+                        laneDetects.push_back({ cn.id });
+                        bary.push_back(cx);
+                        nearest.push_back(std::abs(cn.rank));
+                        nearestSigned.push_back(cn.rank);
+                        continue;
+                    }
+                    const int k = it.value();
+                    if (laneDetects[size_t(k)].contains(cn.id)) continue;
+                    // Running mean, so a measure shared across the picture settles between the
+                    // boxes it serves rather than under whichever it happened to be found from.
+                    const int n = laneDetects[size_t(k)].size();
+                    bary[size_t(k)] = (bary[size_t(k)] * n + cx) / double(n + 1);
+                    laneDetects[size_t(k)] << cn.id;
+                    if (std::abs(cn.rank) < nearest[size_t(k)]) {
+                        nearest[size_t(k)]       = std::abs(cn.rank);
+                        nearestSigned[size_t(k)] = cn.rank;
+                    }
+                }
+            }
         }
 
         if (!measureIds.isEmpty()) {
-            double bandBottom = 0.0;
+            // Ordered by where the boxes they answer for actually are, then packed. Placing each
+            // one AT its barycentre would overlap the moment two conditions share a column; packing
+            // a barycentre-sorted row keeps the left-to-right correspondence without it.
+            std::vector<int> order(measureIds.size());
+            for (int i = 0; i < int(order.size()); ++i) order[i] = i;
+            std::stable_sort(order.begin(), order.end(),
+                             [&](int a, int b) { return bary[size_t(a)] < bary[size_t(b)]; });
+
+            double bandX0 = 0.0, bandX1 = 0.0;
+            bool   firstSlot  = true;
             for (auto &entry : cols)
-                for (const Slot &s : entry.second) bandBottom = std::max(bandBottom, s.y + s.h);
+                for (const Slot &s : entry.second) {
+                    bandBottom = std::max(bandBottom, s.y + s.h);
+                    if (s.isWaypoint()) continue;
+                    auto it = colSpan.find(entry.first);
+                    if (it == colSpan.end()) colSpan.insert({ entry.first, { s.x, s.x + s.w } });
+                    else {
+                        it->second.first  = std::min(it->second.first, s.x);
+                        it->second.second = std::max(it->second.second, s.x + s.w);
+                    }
+                    bandX0    = firstSlot ? s.x : std::min(bandX0, s.x);
+                    bandX1    = firstSlot ? s.x + s.w : std::max(bandX1, s.x + s.w);
+                    firstSlot = false;
+                }
             laneY            = bandBottom + opt.laneGap;
             const double gap = opt.gapX * 0.5;
 
             double rowW = 0.0;
-            for (const QString &mid : measureIds)
-                rowW += nodeWidth(measureLabelOf(*pack.measure(mid)), opt) + gap;
+            for (int i : order)
+                rowW += nodeWidth(measureLabelOf(*pack.measure(measureIds[i])), opt) + gap;
             rowW -= gap;
 
-            double x = focusCentreX - rowW / 2.0;
+            // Centred on the BAND, not on the focus. The lane now answers for the whole picture, and
+            // a row of a dozen measures centred on one box would sit off to one side of the thing it
+            // is describing.
+            double x = (firstSlot ? focusCentreX : (bandX0 + bandX1) / 2.0) - rowW / 2.0;
             laneX0   = x;
             laneX1   = x + rowW;
-            for (const QString &mid : measureIds) {
-                const Measure *m = pack.measure(mid);
+
+            std::vector<QStringList> orderedDetects;
+            orderedDetects.reserve(order.size());
+            for (int i : order) {
+                const Measure *m = pack.measure(measureIds[i]);
 
                 DagNode n;
-                n.id          = mid;
+                n.id          = measureIds[i];
                 n.kind        = DagNodeKind::Measure;
                 n.label       = measureLabelOf(*m);
-                n.rank        = 0;
+                // A measure carries the rank of the nearest condition it detects — it is not in the
+                // ranking, and this is the only sense in which it has a place in it.
+                n.rank        = nearestSigned[size_t(i)];
                 n.w           = nodeWidth(n.label, opt);
                 n.h           = opt.nodeH;
                 n.x           = x;
@@ -460,9 +610,13 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                 if (!n.available) n.unavailableReason = m->gapReason;
                 x += n.w + gap;
 
-                nodeIndex.insert(mid, int(out.nodes.size()));
+                nodeIndex.insert(n.id, int(out.nodes.size()));
                 out.nodes.push_back(n);
+                orderedDetects.push_back(laneDetects[size_t(i)]);
             }
+            laneDetects = orderedDetects;
+        } else {
+            laneDetects.clear();
         }
     }
 
@@ -745,30 +899,113 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
         }
     }
 
-    // Detection edges run UP from the lane into the focus, so they read as "this is how that is
-    // seen" rather than as another arrow in the causal flow. No arrowhead and no strength: neither
-    // would be true of a measure.
+    // Detection edges run UP from the lane into the condition they detect, so they read as "this is
+    // how that is seen" rather than as another arrow in the causal flow. No arrowhead and no
+    // strength: neither would be true of a measure.
+    //
+    // Both ends FAN, for the reason the causal edges do. A condition with three detectors and a
+    // measure serving three conditions are both ordinary here, and lines that all met at one point
+    // would be a smudge at exactly the box the reader is counting them on.
     {
-        int laneCount = 0;
-        for (size_t i = firstLaneNode; i < out.nodes.size(); ++i) ++laneCount;
-        int k = 0;
-        for (size_t i = firstLaneNode; i < out.nodes.size(); ++i, ++k) {
-            const DagNode &n = out.nodes[i];
-            const DagNode &f = out.nodes[nodeIndex.value(focusId, 0)];
+        // Arrivals per condition, so each line lands on its own point along that box's underside.
+        // Counted first because the spread depends on the total, which is not known until every
+        // lane node has been walked.
+        QHash<QString, int> arrivals;
+        for (size_t i = firstLaneNode; i < out.nodes.size(); ++i)
+            for (const QString &cid : laneDetects[i - firstLaneNode]) ++arrivals[cid];
 
-            DagEdge e;
-            e.from    = n.id;
-            e.to      = focusId;
-            e.detects = true;
-            e.weight  = 1;
-            e.x1 = n.x + n.w / 2.0; e.y1 = n.y;
-            const double t = laneCount == 1 ? 0.5
-                                            : (0.3 + 0.4 * (double(k) + 0.5) / double(laneCount));
-            e.x2 = f.x + f.w * t;   e.y2 = f.y + f.h;
-            const double dy = (e.y1 - e.y2) * 0.5;
-            e.c1x = e.x1; e.c1y = e.y1 - dy;
-            e.c2x = e.x2; e.c2y = e.y2 + dy;
-            out.edges.push_back(e);
+        QHash<QString, int> arrived;
+        for (size_t i = firstLaneNode; i < out.nodes.size(); ++i) {
+            const DagNode    &n  = out.nodes[i];
+            const QStringList &to = laneDetects[i - firstLaneNode];
+
+            int departed = 0;
+            for (const QString &cid : to) {
+                const auto ci = nodeIndex.constFind(cid);
+                if (ci == nodeIndex.constEnd()) continue;
+                const DagNode &f = out.nodes[ci.value()];
+
+                // The middle 40% of each edge, which is where a line can leave or arrive without
+                // reaching the corners a neighbouring box's line is heading for.
+                auto spread = [](int k, int n) {
+                    return n <= 1 ? 0.5 : (0.3 + 0.4 * (double(k) + 0.5) / double(n));
+                };
+                const int  na = arrivals.value(cid, 1);
+                const int  ka = arrived[cid]++;
+                const double td = spread(departed++, to.size());
+                const double ta = spread(ka, na);
+
+                const double mx = n.x + n.w * td;
+
+                // Which way in. Straight up into the underside is the calm route and the right one
+                // whenever the box is the lowest thing in the band — the line then travels sideways
+                // only in the empty strip between the band and the lane, and can meet nothing.
+                //
+                // Any HIGHER box has its own column stacked beneath it, and a line to its underside
+                // would be drawn through every one of them. That one goes up the GUTTER beside the
+                // column instead and comes in from the side: the gutter is the gap between columns
+                // and holds no boxes at any height, so the route is clear by construction rather
+                // than by luck. Same reasoning as the same-rank causal bulge, one lane down.
+                const bool lowestInBand = (f.y + f.h) >= bandBottom - 0.5;
+
+                DagEdge e;
+                e.from    = n.id;
+                e.to      = cid;
+                e.detects = true;
+                e.weight  = 1;
+
+                if (lowestInBand) {
+                    e.x1 = mx;              e.y1 = n.y;
+                    e.x2 = f.x + f.w * ta;  e.y2 = f.y + f.h;
+                    // Vertical tangents at both ends, so it reads as rising out of the lane rather
+                    // than as another line in the flow.
+                    const double dy = (e.y1 - e.y2) * 0.5;
+                    e.c1x = e.x1; e.c1y = e.y1 - dy;
+                    e.c2x = e.x2; e.c2y = e.y2 + dy;
+                    out.edges.push_back(e);
+                    continue;
+                }
+
+                const auto span = colSpan.find(f.rank);
+                const double cx0 = span == colSpan.end() ? f.x : span->second.first;
+                const double cx1 = span == colSpan.end() ? f.x + f.w : span->second.second;
+                // The gutter nearest the measure, unless that is the outer edge of the picture —
+                // the outermost column has a neighbour on one side only, and the other side is
+                // empty canvas the bounding box does not cover.
+                const bool haveLeft  = colSpan.count(f.rank - 1) > 0;
+                const bool haveRight = colSpan.count(f.rank + 1) > 0;
+                bool       useLeft   = mx < (cx0 + cx1) / 2.0;
+                if (useLeft && !haveLeft)  useLeft = !haveRight;
+                if (!useLeft && !haveRight) useLeft = haveLeft;
+                const double gx = useLeft ? cx0 - opt.gapX * 0.5 : cx1 + opt.gapX * 0.5;
+
+                // Where the riser leaves the strip: high enough to be clear of the lane row, below
+                // the band so the sideways half of the trip meets nothing.
+                const double riserY = bandBottom + opt.laneGap * 0.45;
+                const double by     = f.y + f.h * ta;
+
+                // Two segments meeting at the riser, both with VERTICAL tangents at the join, so the
+                // corner reads as one continuous line rather than two.
+                DagEdge a = e, b = e;
+                a.segment = 0; a.segments = 2;
+                b.segment = 1; b.segments = 2;
+
+                a.x1 = mx;  a.y1 = n.y;
+                a.x2 = gx;  a.y2 = riserY;
+                a.c1x = a.x1; a.c1y = a.y1 - (a.y1 - a.y2) * 0.5;
+                a.c2x = a.x2; a.c2y = a.y2 + (a.y1 - a.y2) * 0.5;
+
+                b.x1 = gx;                          b.y1 = riserY;
+                b.x2 = useLeft ? f.x : f.x + f.w;   b.y2 = by;
+                b.c1x = b.x1; b.c1y = b.y1 - (b.y1 - b.y2) * 0.55;
+                // Horizontal into the side of the box, which is what makes it read as arriving
+                // rather than as passing through.
+                b.c2x = b.x2 + (useLeft ? -opt.gapX * 0.25 : opt.gapX * 0.25);
+                b.c2y = b.y2;
+
+                out.edges.push_back(a);
+                out.edges.push_back(b);
+            }
         }
     }
 

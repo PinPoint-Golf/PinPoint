@@ -85,6 +85,14 @@ class AppSettings : public QObject
     // because they are separate decisions: an author reading a wide table wants the inspector out of
     // the way and the sidenav where it was, or the other way round.
     Q_PROPERTY(bool diagnosticsInspectorCollapsed READ diagnosticsInspectorCollapsed WRITE setDiagnosticsInspectorCollapsed NOTIFY diagnosticsInspectorCollapsedChanged)
+    // …and the filter list at the foot of the type rail. A third key rather than a share of the
+    // inspector's, on the same reasoning: an author who filters once and then reads for an hour
+    // wants the filters out of the way and the inspector where it was.
+    Q_PROPERTY(bool diagnosticsFacetsCollapsed READ diagnosticsFacetsCollapsed WRITE setDiagnosticsFacetsCollapsed NOTIFY diagnosticsFacetsCollapsedChanged)
+    // …and the whole type rail it sits in. The outer fold of the two: an author who knows the
+    // content type they are working in wants the width for the table, and does not want to give up
+    // the filters to get it.
+    Q_PROPERTY(bool diagnosticsRailCollapsed READ diagnosticsRailCollapsed WRITE setDiagnosticsRailCollapsed NOTIFY diagnosticsRailCollapsedChanged)
     // Global replay behaviour (surfaced in the View menu alongside the timeline
     // options, not per-mode): whether a just-captured shot auto-replays, and
     // whether replay playback is trimmed to the detected swing (Address → Finish).
@@ -262,6 +270,10 @@ public:
             ppSettings().value(QStringLiteral("ui/settingsNavCollapsed"), false).toBool();
         m_diagnosticsInspectorCollapsed =
             ppSettings().value(QStringLiteral("ui/diagnosticsInspectorCollapsed"), false).toBool();
+        m_diagnosticsFacetsCollapsed =
+            ppSettings().value(QStringLiteral("ui/diagnosticsFacetsCollapsed"), false).toBool();
+        m_diagnosticsRailCollapsed =
+            ppSettings().value(QStringLiteral("ui/diagnosticsRailCollapsed"), false).toBool();
         m_autoReplayAfterCapture = ppSettings().value(QStringLiteral("ui/autoReplayAfterCapture"), true).toBool();
         m_replayTrimToSwing = ppSettings().value(QStringLiteral("ui/replayTrimToSwing"), false).toBool();
         m_reduceMotion    = ppSettings().value(QStringLiteral("ui/reduceMotion"),    false).toBool();
@@ -390,6 +402,8 @@ public:
     bool    diagnosticsBaseModelWarningAck() const { return m_diagnosticsBaseModelWarningAck; }
     bool    settingsNavCollapsed() const { return m_settingsNavCollapsed; }
     bool    diagnosticsInspectorCollapsed() const { return m_diagnosticsInspectorCollapsed; }
+    bool    diagnosticsFacetsCollapsed() const { return m_diagnosticsFacetsCollapsed; }
+    bool    diagnosticsRailCollapsed() const { return m_diagnosticsRailCollapsed; }
     bool    autoReplayAfterCapture() const { return m_autoReplayAfterCapture; }
     bool    replayTrimToSwing()   const { return m_replayTrimToSwing; }
     bool    reduceMotion()  const { return m_reduceMotion; }
@@ -601,6 +615,22 @@ public:
         m_diagnosticsInspectorCollapsed = v;
         ppSettings().setValue(QStringLiteral("ui/diagnosticsInspectorCollapsed"), v);
         emit diagnosticsInspectorCollapsedChanged();
+    }
+
+    void setDiagnosticsFacetsCollapsed(bool v)
+    {
+        if (m_diagnosticsFacetsCollapsed == v) return;
+        m_diagnosticsFacetsCollapsed = v;
+        ppSettings().setValue(QStringLiteral("ui/diagnosticsFacetsCollapsed"), v);
+        emit diagnosticsFacetsCollapsedChanged();
+    }
+
+    void setDiagnosticsRailCollapsed(bool v)
+    {
+        if (m_diagnosticsRailCollapsed == v) return;
+        m_diagnosticsRailCollapsed = v;
+        ppSettings().setValue(QStringLiteral("ui/diagnosticsRailCollapsed"), v);
+        emit diagnosticsRailCollapsedChanged();
     }
 
     void setAutoReplayAfterCapture(bool v)
@@ -1276,6 +1306,8 @@ signals:
     void diagnosticsBaseModelWarningAckChanged();
     void settingsNavCollapsedChanged();
     void diagnosticsInspectorCollapsedChanged();
+    void diagnosticsFacetsCollapsedChanged();
+    void diagnosticsRailCollapsedChanged();
     void autoReplayAfterCaptureChanged();
     void replayTrimToSwingChanged();
     void reduceMotionChanged();
@@ -1374,6 +1406,8 @@ private:
     bool        m_diagnosticsBaseModelWarningAck = false;
     bool        m_settingsNavCollapsed = false;
     bool        m_diagnosticsInspectorCollapsed = false;
+    bool        m_diagnosticsFacetsCollapsed = false;
+    bool        m_diagnosticsRailCollapsed = false;
     bool    m_autoReplayAfterCapture = true;
     bool    m_replayTrimToSwing = false;
     bool    m_reduceMotion    = false;

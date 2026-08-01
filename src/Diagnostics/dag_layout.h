@@ -21,6 +21,7 @@
 #include "characteristic_pack.h"
 
 #include <QString>
+#include <QStringList>
 
 #include <vector>
 
@@ -45,6 +46,12 @@
 // bound cuts off is COUNTED on the node it was cut from (`hiddenCauses` / `hiddenEffects`) — a graph
 // that silently omits half of what it knows is worse than one that draws nothing.
 //
+// A count is not an answer, though, and `expanded` is the answer: the reader names the boxes they
+// want opened and those boxes admit their own neighbours whatever the bound says. That keeps the
+// picture local where it is not being asked about and complete where it is, which a single global
+// radius cannot do — raising it widens every rank at once to reach the one node in question, and
+// hands back a hairball to answer a question about one box.
+//
 // ── Lines must not cross boxes ─────────────────────────────────────────────────────────────────
 //
 // An edge that spans more than one rank is routed through WAYPOINTS in the ranks it crosses, and
@@ -60,10 +67,21 @@
 //
 // ── Measures are not causes ────────────────────────────────────────────────────────────────────
 //
-// The focus's measures are drawn, because "what would have to be true to see this" is the other
-// half of the question the page answers — but they live in their own LANE below the causal band,
-// never in the ranking. A measure does not cause a condition; it detects one, and placing it in the
-// same left-to-right flow as the causes would state a relationship the pack does not hold.
+// The measures are drawn, because "what would have to be true to see this" is the other half of the
+// question the page answers — but they live in their own LANE below the causal band, never in the
+// ranking. A measure does not cause a condition; it detects one, and placing it in the same
+// left-to-right flow as the causes would state a relationship the pack does not hold.
+//
+// The lane answers for EVERY drawn condition, not for the focus alone. The reader turns it on to
+// ask a question about the picture, and a lane that answered for one box left the rest looking
+// undetectable — a claim about the pack, and a false one. Which causes the app cannot see is the
+// thing this view is best placed to make obvious, and it is only obvious beside the ones it can.
+//
+// A measure appears ONCE however many of the drawn conditions it detects, with one line to each: a
+// shared detector is why two conditions are hard to tell apart, and drawing it twice would hide the
+// very thing worth seeing. Lines into a box that is not the lowest in its column come up the GUTTER
+// beside that column and in from the side, because the direct route to its underside would pass
+// through every box stacked below it.
 
 namespace pinpoint::analysis {
 
@@ -117,6 +135,11 @@ struct DagNode {
     int     coverage      = 0;   // how many conditions it explains directly
     int     hiddenCauses  = 0;   // neighbours the depth bound (or the per-rank cap) cut off
     int     hiddenEffects = 0;
+
+    // The reader opened this one — it is in DagLayoutOptions::expanded AND it made it onto the
+    // picture. Reported rather than left for the view to re-derive from the same list, so a node
+    // opened and then walked away from cannot draw itself as open on a graph it is not in.
+    bool    expanded      = false;
     QString groupLabel;
     QString statusLabel;         // measure nodes only — "Live", "No producer", …
     QString metricKey;           // measure nodes only
@@ -186,8 +209,10 @@ struct DagLayoutOptions {
     double maxW    = 260;
     double headerH = 26;    // reserved above the band for the headings
 
-    // 1 by default, 2 on Expand, and it stops there. Values outside [1, 2] are clamped rather than
-    // honoured: this is a local view by design, and "show me everything" is a different surface.
+    // How far the automatic walk reaches, either side. Values outside [1, 4] are clamped rather
+    // than honoured: this is a local view by design, and "show me everything" is a different
+    // surface. Four is where a real chain in the pack runs out — slice ← out-to-in ← over the top ←
+    // its own causes is already three — and past it the per-rank cap does all the work anyway.
     int    depth = 1;
 
     // Per-rank cap. A hub cause explains a dozen conditions, and at depth 2 an uncapped fan-out
@@ -195,6 +220,23 @@ struct DagLayoutOptions {
     // are dropped in pack order and reappear in their parent's hidden counts, so nothing is lost
     // silently. 0 disables the cap.
     int    maxPerRank = 10;
+
+    // Nodes the reader has opened BY HAND. Their neighbours are admitted whatever `depth` says.
+    //
+    // This is the other half of the answer to a bounded picture, and the better half: raising the
+    // radius widens every rank at once to reach the one box you were actually asking about, which
+    // costs the reader the picture they had. Opening one node costs them nothing.
+    //
+    // Direction follows the side the node is on — a CAUSE opens further left, an EFFECT further
+    // right, and rank 0 opens both ways. Opening a cause towards its effects would fold the graph
+    // back over itself and break the one claim the shape makes.
+    QStringList expanded;
+
+    // Per-OPENED-NODE fan-out, not per rank. Sharing the rank's cap is what would make opening a
+    // hub useless: its dozen causes arrive at a rank already holding somebody else's eight, and the
+    // reader gets nothing for the click. Same bargain as maxPerRank — what it drops is counted on
+    // the node it was dropped from. 0 disables it.
+    int    maxPerExpand = 12;
 
     bool   includeMeasures = true;
 };
