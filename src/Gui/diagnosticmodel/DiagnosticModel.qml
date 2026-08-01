@@ -418,9 +418,14 @@ Item {
         popup.open()
     }
 
+    // An export answers with the path it wrote, and that path is the point of the notice — the file
+    // is somewhere the author now has to go. So it travels onto the toast as a copy action, the
+    // same as the resource monitor's log export, and the toast reads it back to the clipboard.
+    // Cleared for everything else: the toast is shared, and a stale path would offer the wrong file.
     function _report(result) {
         if (!result) return
         toast.severity = result.ok === true ? "info" : "warn"
+        toast.copyText = result.path || ""
         toast.show(result.message || "")
     }
 
@@ -1637,6 +1642,9 @@ Item {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Theme.sp(44)
         showUndo: false
+        // Most of what reaches this toast is a removal, so 🗑 stays the default — but a notice that
+        // carries a written file's path is a save, and a trash can on it says the opposite.
+        glyph: toast.copyText.length > 0 ? "💾" : "🗑"
     }
 
     // ── Keyboard ──────────────────────────────────────────────────────────────
