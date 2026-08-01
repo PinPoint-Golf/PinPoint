@@ -1161,9 +1161,27 @@ Item {
                             || root._graphFocus.id === "") return ({})
                         // The theme's own metrics travel INTO the layout — the layout does the
                         // positioning, but it has to be told what a row is worth in this aesthetic.
+                        //
+                        // THE GAPS ARE THE LAYOUT'S OWN, WIDENED — not this panel's idea of tidy.
+                        // They were sp(52) / sp(14) / sp(36) against dag_layout.h's stated 110 / 26
+                        // / 64: the panel was passing less than half the column gap the layout asks
+                        // for, so the picture arrived pre-compressed and the only way to read a
+                        // busy one was to drag the boxes apart by hand. That is a default doing the
+                        // opposite of its job.
+                        //
+                        // gapX is the one that carries a second meaning. dag_layout.h calls 110
+                        // "wide enough for a label to sit on the line", and an edge label is
+                        // sp(32) plus its margins — at 52 there was no room for the strength word
+                        // between two columns, so it crowded the boxes it was meant to sit between.
+                        //
+                        // Widened to three times the layout's baseline, which is what reading a
+                        // real graph actually takes. The cost is honest and bounded: a wide graph
+                        // needs the zoom pill sooner. Everything else here is unchanged — node
+                        // height, padding and the width clamps are about the BOX, and the boxes
+                        // were never the problem.
                         return browser.graph(root._graphFocus.type, root._graphFocus.id, {
-                            nodeH: Theme.sp(34), gapX: Theme.sp(52), gapY: Theme.sp(14),
-                            laneGap: Theme.sp(36), padX: Theme.sp(12), charW: Theme.sp(6.4),
+                            nodeH: Theme.sp(34), gapX: Theme.sp(165), gapY: Theme.sp(39),
+                            laneGap: Theme.sp(96), padX: Theme.sp(12), charW: Theme.sp(6.4),
                             minW: Theme.sp(110), maxW: Theme.sp(210),
                             depth: middlePane.graphDepth, maxPerRank: 8,
                             includeMeasures: middlePane.graphMeasures,
