@@ -129,6 +129,32 @@ Item {
     function _ndx(id, rev) { var n = root._nudges[id]; return n ? n.dx : 0 }
     function _ndy(id, rev) { var n = root._nudges[id]; return n ? n.dy : 0 }
 
+    // How far an edge's LABEL moves when the nodes at its ends are nudged.
+    //
+    // The label is not on the line by accident — the layout puts it at the curve's midpoint,
+    // `cubicAt(P0, C1, C2, P3, 0.5)` (dag_layout.cpp) — so it has to move by whatever that midpoint
+    // moves by, or a dragged node leaves its strength word stranded over the gap the line used to
+    // cross. Nudging the start moves P0 and C1; nudging the end moves C2 and P3. A cubic at t = 0.5
+    // is (P0 + 3·C1 + 3·C2 + P3) / 8, so the midpoint shifts by (4·from + 4·to) / 8 — the MEAN of
+    // the two nudges, not either one and not their sum.
+    //
+    // Gated by the same head/tail test the curve itself uses, so the two cannot disagree: only the
+    // segment touching a node follows it, and a label sitting on a middle segment of a waypointed
+    // edge is anchored to joints that did not move and correctly stays put. On a single-segment
+    // edge that one segment is both ends, which is the ordinary case.
+    function _edgeLabelDX(e, rev) {
+        var f = ((e.segment || 0) === 0) ? root._ndx(e.from, rev) : 0
+        var t = ((e.segment || 0) === Math.max(0, (e.segments || 1) - 1))
+                    ? root._ndx(e.to, rev) : 0
+        return (f + t) / 2
+    }
+    function _edgeLabelDY(e, rev) {
+        var f = ((e.segment || 0) === 0) ? root._ndy(e.from, rev) : 0
+        var t = ((e.segment || 0) === Math.max(0, (e.segments || 1) - 1))
+                    ? root._ndy(e.to, rev) : 0
+        return (f + t) / 2
+    }
+
     function _clearNudges() {
         if (Object.keys(root._nudges).length === 0) return
         root._nudges = ({})
@@ -170,11 +196,16 @@ Item {
 
     // A curve is unhittable at one pixel, so a link is picked up at its label point — which is the
     // part of the line a reader is already looking at.
+    //
+    // Nudged by the same amount the label is DRAWN by, from the same function. These are one
+    // target: a label that moves with its line but is still picked up where the layout first put it
+    // would be a link you select by clicking empty canvas, and cannot select by clicking the word.
     function _edgeAt(x, y) {
         for (var i = 0; i < _edges.length; i++) {
             var e = _edges[i]
             if (e.rowId === undefined) continue
-            var lx = e.labelX || 0, ly = e.labelY || 0
+            var lx = (e.labelX || 0) + root._edgeLabelDX(e, root._nudgeRev)
+            var ly = (e.labelY || 0) + root._edgeLabelDY(e, root._nudgeRev)
             if (Math.abs(x - lx) <= Theme.sp(16) && Math.abs(y - ly) <= Theme.sp(9)) return e
         }
         return null
@@ -399,15 +430,18 @@ Item {
                 id: edgeLabel
                 required property var modelData
 
-                readonly property bool tailSeg:
-                    (modelData.segment || 0) === Math.max(0, (modelData.segments || 1) - 1)
                 readonly property bool selected:
                     modelData.rowId === root.selectedEdgeId
                     || root.selectedEdgeIds.indexOf(modelData.rowId) >= 0
 
                 visible: modelData.rowId !== undefined
-                x: (modelData.labelX || 0) - Theme.sp(16)
-                y: (modelData.labelY || 0) - Theme.sp(9)
+                // Follows the line it names. `_nudgeRev` is passed as an ARGUMENT rather than read
+                // as a bare statement — a mention would be compiled away and this would subscribe
+                // to nothing, which is exactly the failure qml_reactivity_test exists to catch.
+                x: (modelData.labelX || 0) + root._edgeLabelDX(modelData, root._nudgeRev)
+                   - Theme.sp(16)
+                y: (modelData.labelY || 0) + root._edgeLabelDY(modelData, root._nudgeRev)
+                   - Theme.sp(9)
                 width:  Theme.sp(32)
                 height: Theme.sp(18)
                 z: 4
@@ -1310,7 +1344,11 @@ Item {
         for (var j = 0; j < root._edges.length; j++) {
             var e = root._edges[j]
             if (e.rowId === undefined) continue
-            var lx = e.labelX || 0, ly = e.labelY || 0
+            // Nudged, exactly as the nodes above already are and as the label is drawn. A marquee
+            // that swept the layout's original label points would take links whose word is no
+            // longer inside the band and miss the ones that are.
+            var lx = (e.labelX || 0) + root._edgeLabelDX(e, root._nudgeRev)
+            var ly = (e.labelY || 0) + root._edgeLabelDY(e, root._nudgeRev)
             if (lx >= x0 && lx <= x1 && ly >= y0 && ly <= y1 && edges.indexOf(e.rowId) < 0)
                 edges.push(e.rowId)
         }
