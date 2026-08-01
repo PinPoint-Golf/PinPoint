@@ -1058,6 +1058,66 @@ int main(int argc, char **argv)
         check(!m.graph(QStringLiteral("metrics"), QStringLiteral("ballPosition"), gopt)
                    .value(QStringLiteral("nodes")).toList().isEmpty(),
               "a metric has a neighbourhood");
+
+        // ── Every line in a neighbourhood is ANCHORED ───────────────────────
+        //
+        // A one-hop neighbourhood is three columns and a line from each node to the focus. Both
+        // ends of every line must sit on the EDGE of a box, and nothing was checking it: the
+        // crossing that built the endpoints paired each column's x with the OTHER row's y, so a
+        // right-hand node drew between two points belonging to neither box — and anchored the far
+        // end on the focus's left edge, sending the line back across the focus to get there.
+        //
+        // Why it survived is the part worth keeping. A column holding ONE node centres that node on
+        // the focus's own row, so the two y values coincide and the crossed pair lands correctly by
+        // accident. It only breaks once a column holds several, which is why `measures` shows it
+        // and `metrics` and `signals` — one relation each way — do not. All three are asserted
+        // anyway: they run through the same arithmetic and the next content change decides which of
+        // them has two nodes in a column.
+        for (const auto &pair : { std::make_pair(QStringLiteral("measures"),
+                                                 QStringLiteral("m_ballPosition")),
+                                  std::make_pair(QStringLiteral("metrics"),
+                                                 QStringLiteral("ballPosition")),
+                                  std::make_pair(QStringLiteral("signals"),
+                                                 QStringLiteral("sig_ballForward")) }) {
+            const QVariantMap g = m.graph(pair.first, pair.second, gopt);
+            const QVariantList ns = g.value(QStringLiteral("nodes")).toList();
+            const QVariantList es = g.value(QStringLiteral("edges")).toList();
+            if (ns.isEmpty()) continue;
+
+            // Every drawn box, as a rect.
+            struct Box { double x, y, w, h; };
+            std::vector<Box> boxes;
+            for (const QVariant &v : ns) {
+                const QVariantMap n = v.toMap();
+                boxes.push_back({ n.value(QStringLiteral("x")).toDouble(),
+                                  n.value(QStringLiteral("y")).toDouble(),
+                                  n.value(QStringLiteral("w")).toDouble(),
+                                  n.value(QStringLiteral("h")).toDouble() });
+            }
+            // On an edge of SOME box: the x is one of its two vertical sides and the y lies within
+            // its height. A point floating between columns satisfies neither.
+            auto onABoxEdge = [&](double x, double y) {
+                for (const Box &b : boxes) {
+                    const bool onSide = std::abs(x - b.x) < 0.5 || std::abs(x - (b.x + b.w)) < 0.5;
+                    if (onSide && y >= b.y - 0.5 && y <= b.y + b.h + 0.5) return true;
+                }
+                return false;
+            };
+
+            int loose = 0;
+            for (const QVariant &v : es) {
+                const QVariantMap e = v.toMap();
+                if (!onABoxEdge(e.value(QStringLiteral("x1")).toDouble(),
+                                e.value(QStringLiteral("y1")).toDouble())) ++loose;
+                if (!onABoxEdge(e.value(QStringLiteral("x2")).toDouble(),
+                                e.value(QStringLiteral("y2")).toDouble())) ++loose;
+            }
+            check(!es.isEmpty(),
+                  qPrintable(QStringLiteral("%1 draws lines at all").arg(pair.first)));
+            check(loose == 0,
+                  qPrintable(QStringLiteral("%1: both ends of every line sit on a box")
+                                 .arg(pair.first)));
+        }
     }
 
     std::printf("=== read-only types say so rather than pretending ===\n");

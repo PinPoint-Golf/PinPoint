@@ -6412,25 +6412,43 @@ QVariantMap ModelBrowser::neighbourhood(const QString &type, const QString &id,
     for (const QVariant &v : nodes) {
         const QVariantMap n = v.toMap();
         if (n.value(QStringLiteral("kind")).toString() == QStringLiteral("focus")) continue;
-        const double nx    = n.value(QStringLiteral("x")).toDouble();
+        const double nx     = n.value(QStringLiteral("x")).toDouble();
+        const double ny      = n.value(QStringLiteral("y")).toDouble();
         const bool   isLeft = nx < centreX;
-        const double x1 = isLeft ? nx + colW : centreX;
-        const double y1 = n.value(QStringLiteral("y")).toDouble() + nodeH / 2.0;
-        const double x2 = isLeft ? centreX : nx;
-        const double y2 = focusY + nodeH / 2.0;
+
+        // The two ends as POINTS, each x kept with its own y.
+        //
+        // These used to be four loose doubles crossed by a pair of ternaries, and for the RIGHT
+        // column the crossing paired the node's x with the focus's y and the focus's x with the
+        // node's y — two points belonging to neither box, so the line was drawn between thin air
+        // and thin air. It also left both ends on the focus's LEFT edge, so a line to a node on the
+        // right set off across the focus box to get there. The left column happened to come out
+        // right, which is why it looked like a rendering fault rather than an arithmetic one.
+        const double nodeX  = isLeft ? nx + colW : nx;                 // the edge facing the focus
+        const double nodeY  = ny + nodeH / 2.0;
+        const double focX   = isLeft ? centreX : centreX + colW;       // …and the focus's, facing back
+        const double focY   = focusY + nodeH / 2.0;
+
+        // Direction is a claim about the RELATION and says nothing about which end is where: a
+        // left-column node points at the focus, a right-column one is pointed at by it.
+        const double x1 = isLeft ? nodeX : focX;
+        const double y1 = isLeft ? nodeY : focY;
+        const double x2 = isLeft ? focX  : nodeX;
+        const double y2 = isLeft ? focY  : nodeY;
 
         QVariantMap e;
         e.insert(QStringLiteral("from"), isLeft ? n.value(QStringLiteral("id")) : QVariant(id));
         e.insert(QStringLiteral("to"), isLeft ? QVariant(id) : n.value(QStringLiteral("id")));
-        e.insert(QStringLiteral("x1"), isLeft ? x1 : x2);
-        e.insert(QStringLiteral("y1"), isLeft ? y1 : y2);
-        e.insert(QStringLiteral("x2"), isLeft ? x2 : x1);
-        e.insert(QStringLiteral("y2"), isLeft ? y2 : y1);
-        // A gentle S through the gutter, so several lines into one box stay several lines.
+        e.insert(QStringLiteral("x1"), x1);
+        e.insert(QStringLiteral("y1"), y1);
+        e.insert(QStringLiteral("x2"), x2);
+        e.insert(QStringLiteral("y2"), y2);
+        // Horizontal tangents at both ends, so the curve leaves and arrives along the edge it is
+        // anchored to rather than cutting the corner of the box.
         e.insert(QStringLiteral("c1x"), (x1 + x2) / 2.0);
-        e.insert(QStringLiteral("c1y"), isLeft ? y1 : y2);
+        e.insert(QStringLiteral("c1y"), y1);
         e.insert(QStringLiteral("c2x"), (x1 + x2) / 2.0);
-        e.insert(QStringLiteral("c2y"), isLeft ? y2 : y1);
+        e.insert(QStringLiteral("c2y"), y2);
         e.insert(QStringLiteral("weight"), 1.0);
         e.insert(QStringLiteral("detects"), false);
         e.insert(QStringLiteral("symmetric"), true);   // one hop, no direction to claim
