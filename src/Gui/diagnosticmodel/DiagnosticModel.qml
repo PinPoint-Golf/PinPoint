@@ -314,6 +314,24 @@ Item {
 
     property string _selectedEdgeId: ""
 
+    // What the graph has picked up, which is NOT the same as where it is standing. A press or a
+    // marquee on the canvas sets the scope of the next ring; the focus only moves when somebody
+    // asks it to. Kept apart from `_selection` for exactly that reason — the table's selection
+    // means "these rows", and this one means "the next gesture is about these".
+    property var _graphNodeSel: []
+    property var _graphEdgeSel: []
+
+    // For the ring's hub census — "11 of 108 drawn". Taken from the type rail's own counts, so it
+    // cannot disagree with the number beside the type in the list.
+    readonly property int _conditionCount: {
+        if (root._revision < 0) return 0
+        var t = browser.types
+        var n = 0
+        for (var i = 0; i < t.length; i++)
+            if (t[i].key === "characteristics" || t[i].key === "causes") n += t[i].count
+        return n
+    }
+
     // Where the GRAPH stands, which is not always where the table's selection is.
     //
     // Selecting an edge sets the selection to the LINK, and a link has a neighbourhood of its own —
@@ -458,6 +476,137 @@ Item {
         // The copy appears in the table and is selected there. Same rule as picking it by hand: it
         // begins a trail rather than hanging off whatever chain the original was the end of.
         if (r.ok === true) selectFresh(r.type, r.id)
+    }
+
+    // ── What the graph's ring asks for ────────────────────────────────────────
+    //
+    // ONE entry point for every spoke that is not the pane's own view state. The ring is a menu of
+    // verbs this panel already has — that is the rule §7 rests on, and it is what makes shipping
+    // the gesture safe: an author who never discovers the hold loses no capability, because the
+    // inspector and the table reach every one of these by another route.
+    //
+    // Nothing here is new behaviour. `Revert to shipped` and `Move to trash` are the SAME call,
+    // because dropping your copy of a shipped object restores it and dropping your own deletes it —
+    // the model decides which of the two happened and words the message accordingly.
+    function doGraphVerb(verb, arg) {
+        var ids  = arg && arg.ids  ? arg.ids  : []
+        var type = arg && arg.type ? arg.type : root._type
+        var one  = ids.length > 0 ? ids[0] : ""
+
+        switch (verb) {
+        case "focus":
+            root._graphNodeSel = []
+            root.navigateTo(type, one)
+            return
+        case "inspect":
+            root._selectedEdgeId = one
+            root.select("links", one, false)
+            return
+
+        case "showInTable":
+        case "showNInTable":
+            root._view = "table"
+            root._search = ""
+            searchField.text = ""
+            root._type = type
+            root._selection = ids
+            if (one !== "") root.selectFresh(type, one)
+            return
+        case "toTable":
+            root._view = "table"
+            return
+
+        case "duplicate":
+            root.doDuplicate(one, type)
+            return
+        case "duplicateN":
+            // Not collapsed into one command, and deliberately not claimed to be: §5.5 promises a
+            // single step for bulk STRENGTH and bulk DELETE, which are the two the author asked
+            // for. n copies is n creations, and each is separately worth taking back.
+            for (var i = 0; i < ids.length; i++) root._report(browser.duplicate(type, ids[i]))
+            return
+
+        case "revert":
+        case "trash":
+            root._report(browser.removeObject(type, one))
+            return
+        case "deleteLink":
+            root._report(browser.removeObject("links", one))
+            root._selectedEdgeId = ""
+            root._graphEdgeSel = []
+            return
+        case "revertN":
+        case "trashN":
+            root._report(browser.removeObjects(type, ids))
+            root._graphNodeSel = []
+            root._graphEdgeSel = []
+            root._selectedEdgeId = ""
+            return
+
+        case "group":
+        case "groupN":
+            root._report(browser.setFieldOnAll(type, ids, "group", arg.value))
+            return
+        case "strength":
+        case "strengthN":
+            root._report(browser.setCauseStrength(ids, arg.value))
+            return
+
+        // `New cause here` is gone from the node ring: the SE slot pays for `Add effect…`. The
+        // capability is not gone with it — both make-drags create from their drop popover, and the
+        // inspector's `Add a cause` creates too — so §7's rule that no verb is ring-only still holds.
+        case "newHere":
+            var r = browser.createObject("characteristics")
+            root._report(r)
+            if (r.ok === true) root.selectFresh(r.type, r.id)
+            return
+
+        case "tidy":
+            // The nudges are already gone — the pane dropped them. This re-runs the layout, which
+            // is the other half of what the spoke says it does.
+            root._revision++
+            return
+        }
+    }
+
+    // Create an object at the end of a drag and attach it in the one way its type attaches, as ONE
+    // undo step. A measure is the exception and routes to the mint, because a measure IS its facets
+    // and a name cannot stand in for them.
+    function doCreateAttached(objType, name, otherId, end) {
+        if (objType === "measures") {
+            root._pendingMeasureHost = otherId
+            mintPopup.open()
+            return
+        }
+        var r = browser.createAndAttach(objType, name, otherId, end)
+        root._report(r)
+        if (r.ok === true) root.selectFresh(r.type, r.id)
+    }
+
+    // Which condition a measure minted from the canvas should be attached to, remembered across the
+    // mint because the mint itself has no idea it was opened from a graph drag.
+    property string _pendingMeasureHost: ""
+
+    // ── Re-pointing from the inspector ────────────────────────────────────────
+    //
+    // The same edit the ring's `Re-point from…` / `Re-point to…` spokes make, reached by anybody
+    // who did not think to hold the link. One gesture, two entrances — not two features.
+    //
+    // On the graph it arms the identical drag, because there is a picture to drag across. In the
+    // table there is not, so it falls back to the type-ahead every other link edit in this panel
+    // uses. Both are fed the SAME pre-filtered legal set, so neither can offer something the write
+    // would then refuse.
+    property string _repointEdgeId: ""
+    property string _repointEnd:    ""
+
+    function doRepoint(edgeId, end) {
+        if (edgeId === "") return
+        if (root._view === "graph" && graph.armRepoint(edgeId, end)) return
+
+        root._repointEdgeId = edgeId
+        root._repointEnd    = end
+        repointPopup.title  = end === "from" ? qsTr("Re-point from…") : qsTr("Re-point to…")
+        root._openPickerNear(repointPopup, inspector, inspector.actionOrigin)
     }
 
     function doRemove(id, type) {
@@ -1002,7 +1151,21 @@ Item {
                             hideProposed: middlePane.graphHideProposed
                         })
                     }
-                    legalityProbe: (from, to) => browser.linkLegality(from, to, "causes")
+                    // Asked ONCE per drag, not per hover, and answered in C++ — a node that is off
+                    // this canvas is still in the graph, and a reachability check written over the
+                    // drawn nodes would happily draw a cycle through one of them.
+                    refusalsProbe:   (fixed, ids, end) => browser.linkRefusals(fixed, ids, end)
+                    ringValuesProbe: (t, id, field)    => browser.ringValues(t, id, field)
+                    // Over the whole library, not the drawn nodes — the conditions worth linking to
+                    // are precisely the ones this neighbourhood does not already contain.
+                    causeCandidatesProbe: (fixed, text, end) => {
+                        if (root._revision < 0) return []
+                        return browser.linkCandidates("causes", fixed, text, end)
+                    }
+
+                    selectedNodeIds: root._graphNodeSel
+                    selectedEdgeIds: root._graphEdgeSel
+                    totalConditions: root._conditionCount
 
                     scope:           middlePane.graphDepth
                     includeMeasures: middlePane.graphMeasures
@@ -1017,15 +1180,54 @@ Item {
 
                     onNodeActivated: (nodeType, id) => {
                         root._selectedEdgeId = ""
+                        root._graphEdgeSel = []
                         // The node says what it is. A measure in the detection lane is a measure,
                         // and centring the graph on it is the whole point of it being drawn.
                         root.navigateTo(nodeType !== "" ? nodeType : "characteristics", id)
                     }
                     onEdgeActivated: (rowId) => {
                         root._selectedEdgeId = rowId
+                        root._graphNodeSel = []
+                        root._graphEdgeSel = [ rowId ]
                         root.select("links", rowId, false)
                     }
-                    onLinkRequested: (from, to) => root._report(browser.addLink(from, to, "causes"))
+
+                    // A press or a marquee sets the SCOPE of the next gesture. It deliberately does
+                    // not move the graph's focus: `Focus here` is its own spoke precisely because
+                    // choosing what to act on and choosing what to look at are different decisions,
+                    // and a canvas that re-centred every time you picked something up would throw
+                    // away the picture the pick was made from.
+                    onSelectionRequested: (nodeIds, edgeIds) => {
+                        root._graphNodeSel = nodeIds
+                        root._graphEdgeSel = edgeIds
+                        root._selectedEdgeId = edgeIds.length === 1 ? edgeIds[0] : ""
+                        root._selection = edgeIds.length > 0 ? edgeIds : nodeIds
+                    }
+
+                    onLinkRequested: (from, to) => {
+                        var r = browser.addLink(from, to, "causes")
+                        root._report(r)
+                        // The inspector opens on the new claim, where strength is one click away —
+                        // which is the whole reason the drag does not stop to ask for it.
+                        if (r.ok === true && r.edgeId) {
+                            root._selectedEdgeId = r.edgeId
+                            root._graphEdgeSel = [ r.edgeId ]
+                            root.select("links", r.edgeId, false)
+                        }
+                    }
+                    onRepointRequested: (edgeId, end, newId) => {
+                        var r = browser.repointCause(edgeId, end, newId)
+                        root._report(r)
+                        if (r.ok === true && r.edgeId) {
+                            root._selectedEdgeId = r.edgeId
+                            root._graphEdgeSel = [ r.edgeId ]
+                            root.select("links", r.edgeId, false)
+                        }
+                    }
+                    onCreateLinkedRequested: (objType, name, otherId, end) =>
+                        root.doCreateAttached(objType, name, otherId, end)
+
+                    onVerbInvoked: (verb, arg) => root.doGraphVerb(verb, arg)
                 }
 
                 // Graph view options. The controls that set them are overlaid on the graph —
@@ -1185,6 +1387,9 @@ Item {
                         } else if (action === "openDoi") {
                             var url = browser.referenceDoiUrl(root._selectedId)
                             if (url !== "") Qt.openUrlExternally(url)
+                        } else if (action === "repointFrom" || action === "repointTo") {
+                            root.doRepoint(root._selectedId,
+                                           action === "repointFrom" ? "from" : "to")
                         }
                     }
                     // The one live control on an otherwise imported page.
@@ -1218,13 +1423,53 @@ Item {
     }
 
     // ── Type-ahead pickers ────────────────────────────────────────────────────
-    ModelPicker {
+    // The inspector's entrance to the same question the canvas asks, with the same control and the
+    // same words: which condition causes this one, existing or new.
+    //
+    // The candidate list is computed for the end that MOVES. It used to be computed for the other
+    // one — `linkCandidates("causes", selectedId)` answers "what could this cause", while the write
+    // underneath is `picked → selected`, which is the opposite question — so it offered targets
+    // addLink() then refused as cycles. Two different directions, one of them silently wrong; the
+    // `end` argument is what makes them the same question now.
+    ModelCausePicker {
         id: causePicker
         parent: root
-        title: qsTr("Add cause")
-        candidateSource: (text) => { root._revision
-                                     return browser.linkCandidates("causes", root._selectedId, text) }
+        title: qsTr("Add a cause")
+        candidateSource: (text) => {
+            if (root._revision < 0 || root._selectedId === "") return []
+            return browser.linkCandidates("causes", root._selectedId, text, "to")
+        }
         onPicked: (id) => root._report(browser.addLink(id, root._selectedId, "causes"))
+        onCreated: (objType, name) =>
+            root.doCreateAttached(objType, name, root._selectedId, "to")
+    }
+
+    // The table-side entrance to a re-point. The candidate list is pre-filtered for the end that is
+    // MOVING, against the one that is staying put — so the picker cannot offer a target the write
+    // would refuse, and the two entrances agree about what is legal because they ask the same layer.
+    ModelPicker {
+        id: repointPopup
+        parent: root
+        candidateSource: (text) => {
+            if (root._revision < 0 || root._repointEdgeId === "") return []
+            var row = browser.rows("links", { ids: [ root._repointEdgeId ] })
+            if (row.length === 0) return []
+            // The end that STAYS is the opposite of the one being moved, and it is what the legal
+            // set is computed against.
+            var staying = root._repointEnd === "from" ? row[0].toId : row[0].fromId
+            return browser.linkCandidates("causes", staying, text,
+                                          root._repointEnd === "from" ? "to" : "from")
+        }
+        onPicked: (id) => {
+            var r = browser.repointCause(root._repointEdgeId, root._repointEnd, id)
+            root._report(r)
+            if (r.ok === true && r.edgeId) {
+                root._selectedEdgeId = r.edgeId
+                root._graphEdgeSel = [ r.edgeId ]
+                root.select("links", r.edgeId, false)
+            }
+            root._repointEdgeId = ""
+        }
     }
 
     ModelPicker {
@@ -1286,7 +1531,18 @@ Item {
         id: mintPopup
         parent:  root
         browser: browser
-        onMinted: (id) => { root._type = "measures"; root.selectFresh("measures", id) }
+        onMinted: (id) => {
+            // Minted from a graph drag: attach it to the condition the drag came from, which is
+            // what the author was in the middle of doing. A measure DETECTS a characteristic — it
+            // is not a cause of one — so the attachment is the detection join, not an edge.
+            if (root._pendingMeasureHost !== "") {
+                root._report(browser.addMeasureTo(root._pendingMeasureHost, id))
+                root._pendingMeasureHost = ""
+            }
+            root._type = "measures"
+            root.selectFresh("measures", id)
+        }
+        onClosed: root._pendingMeasureHost = ""
     }
 
     ModelPolicyPicker {

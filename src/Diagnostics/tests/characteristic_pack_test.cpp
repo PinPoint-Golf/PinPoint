@@ -802,6 +802,43 @@ int main()
               "causallyReaches follows the arrow");
         check(!causallyReaches(p, QStringLiteral("stanceWide"), QStringLiteral("limitedHipIr")),
               "and NOT against it — which is the whole difference from hasCausalPath");
+
+        // ── The closure ──────────────────────────────────────────────────────
+        //
+        // causallyReaches() asked of every condition at once, in one walk. The graph's link drag
+        // computes its whole refusal set from this at the moment the drag ARMS, so the answer has
+        // to agree with the singular form for every id — a closure that disagreed would refuse a
+        // legal target, or worse, offer an illegal one and let the write reject it afterwards.
+        const QSet<QString> down = causalClosure(p, QStringLiteral("limitedHipIr"), true);
+        const QSet<QString> up   = causalClosure(p, QStringLiteral("stanceWide"), false);
+        check(down.contains(QStringLiteral("stanceWide")), "the closure follows the arrow");
+        check(!down.contains(QStringLiteral("limitedHipIr")),
+              "and never contains the node it started from");
+        check(up.contains(QStringLiteral("limitedHipIr")), "and walks upstream when asked to");
+        check(int(down.size()) == effectsOf(p, QStringLiteral("limitedHipIr")).size(),
+              "the fixture's effects are all direct, so the closure is exactly them");
+
+        // The agreement, asserted rather than assumed: for every condition, membership of the
+        // closure and the answer causallyReaches() gives are the same fact.
+        bool agrees = true;
+        for (const Condition &c : p.conditions)
+            if (down.contains(c.id)
+                != causallyReaches(p, QStringLiteral("limitedHipIr"), c.id))
+                agrees = false;
+        check(agrees, "the closure agrees with causallyReaches for every condition in the pack");
+
+        // A pack that ALREADY holds a cycle must terminate rather than hang the drag that asked.
+        // The validator rejects such a pack, but it can exist in a working copy mid-edit, and the
+        // drag has to survive meeting one.
+        CharacteristicPack cyc = p;
+        Edge back;
+        back.from = QStringLiteral("stanceWide");
+        back.to   = QStringLiteral("limitedHipIr");
+        back.type = EdgeType::Causes;
+        cyc.edges.push_back(back);
+        const QSet<QString> looped = causalClosure(cyc, QStringLiteral("limitedHipIr"), true);
+        check(looped.contains(QStringLiteral("stanceWide")),
+              "a closure over a cyclic pack terminates and still reports what it reached");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");

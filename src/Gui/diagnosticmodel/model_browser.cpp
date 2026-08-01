@@ -2427,6 +2427,22 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
         ends.append(hubRow(kCharacteristics, to, o ? o->label : to, tr("the effect")));
         sections.append(section(tr("Between"), ends));
 
+        // Either end can be moved from here, worded exactly as the graph's ring words it. That is
+        // not a convenience: the ring is the fast path and it has no resting affordance at all, so
+        // an author who never discovers press-and-hold has to lose nothing by it. Two entrances to
+        // one gesture — not two features, and never two vocabularies for the same edit.
+        if (t == EdgeType::Causes) {
+            QVariantList moves;
+            moves.append(hubRow(QString(), QStringLiteral("repointFrom"), tr("Re-point from…"),
+                                f ? f->label : from, QString(), false));
+            moves.append(hubRow(QString(), QStringLiteral("repointTo"), tr("Re-point to…"),
+                                o ? o->label : to, QString(), false));
+            sections.append(section(tr("Move an end"), moves,
+                                    tr("The claim keeps its strength and its evidence; only who it "
+                                       "is about changes."),
+                                    QStringLiteral("actions")));
+        }
+
 
         QVariantList ev;
         if (!edge->provenance.citation.isEmpty()) {
@@ -2758,6 +2774,7 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
             }
             m.insert(QStringLiteral("rowId"), rid);
             m.insert(QStringLiteral("dirty"), dirtyIds().contains(rid));
+            m.insert(QStringLiteral("source"), sourceOf(rid));
         }
         edges.append(m);
     }
@@ -2786,25 +2803,33 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
 
 // ── Legal targets ───────────────────────────────────────────────────────────
 
-QVariantList ModelBrowser::linkCandidates(const QString &relation, const QString &fromId,
-                                          const QString &search) const
+QVariantList ModelBrowser::linkCandidates(const QString &relation, const QString &fixedId,
+                                          const QString &search, const QString &end) const
 {
     const CharacteristicPack &p = pack();
 
     EdgeType type = EdgeType::Causes;
     if (!edgeTypeFromName(relation, type)) return {};
 
+    // Which end the FIXED condition occupies. "from" is the ordinary case — legal things this one
+    // could cause — and "to" is its mirror, which is what re-pointing the `from` end of an existing
+    // claim asks for: legal things that could cause this one.
+    const bool fixedIsFrom = end != QStringLiteral("to");
+
     QVariantList out;
     for (const Condition &c : p.conditions) {
         // A self-edge is refused by the validator, so it is never offered.
-        if (c.id == fromId) continue;
+        if (c.id == fixedId) continue;
+
+        const QString candFrom = fixedIsFrom ? fixedId : c.id;
+        const QString candTo   = fixedIsFrom ? c.id    : fixedId;
 
         // Already linked this way — offering it would produce a duplicate row rather than an edit.
         bool exists = false;
         for (const Edge &e : p.edges)
             if (e.type == type
-                && ((e.from == fromId && e.to == c.id)
-                    || (type != EdgeType::Causes && e.from == c.id && e.to == fromId)))
+                && ((e.from == candFrom && e.to == candTo)
+                    || (type != EdgeType::Causes && e.from == candTo && e.to == candFrom)))
                 exists = true;
         if (exists) continue;
 
@@ -2813,12 +2838,12 @@ QVariantList ModelBrowser::linkCandidates(const QString &relation, const QString
             // cycle is the reverse path already existing — a DIRECTED question, and it used to be
             // asked of hasCausalPath(), which answers a symmetric one. That withheld every legal
             // shortcut: with `A → X → B` in the pack, `A → B` was never offered.
-            if (causallyReaches(p, c.id, fromId)) continue;
+            if (causallyReaches(p, candTo, candFrom)) continue;
         } else if (type == EdgeType::Corroborates) {
             // Corroborates is illegal between conditions that already have a causal path in either
             // direction — the pair would double-count in the confidence ranking, and the validator
             // rejects the whole library over it.
-            if (hasCausalPath(p, fromId, c.id) || hasCausalPath(p, c.id, fromId)) continue;
+            if (hasCausalPath(p, fixedId, c.id) || hasCausalPath(p, c.id, fixedId)) continue;
         }
 
         if (!search.trimmed().isEmpty()) {
@@ -3832,6 +3857,119 @@ QVariantMap ModelBrowser::linkLegality(const QString &fromId, const QString &toI
     return r;
 }
 
+QVariantList ModelBrowser::ringValues(const QString &type, const QString &id,
+                                      const QString &field) const
+{
+    const CharacteristicPack &p = pack();
+
+    // What this object holds now, so the collar can mark it — and so releasing on it is the no-op
+    // the gesture depends on.
+    QString current;
+    QVariantList options;
+
+    if (type == kLinks && field == QStringLiteral("strength")) {
+        QString  from, to;
+        EdgeType et = EdgeType::Causes;
+        if (!splitEdgeId(id, from, to, et) || et != EdgeType::Causes) return {};
+        for (const Edge &e : p.edges)
+            if (e.type == et && e.from == from && e.to == to) current = strengthName(e.strength);
+        // The whole ladder, in ladder order. Three rungs, three cells — the one case where the cap
+        // costs nothing, and reordering it to centre the current value would destroy the reading.
+        options = strengthOptions();
+    } else if ((type == kCharacteristics || type == kCauses) && field == QStringLiteral("group")) {
+        const Condition *c = p.condition(id);
+        if (!c) return {};
+        current = conditionGroupName(c->group);
+
+        // The three most used in THIS library, because the useful shortcut is the group the author
+        // keeps reaching for, not the first three in the enum.
+        QHash<QString, int> uses;
+        for (const Condition &o : p.conditions) uses[conditionGroupName(o.group)]++;
+        options = groupOptions();
+        std::stable_sort(options.begin(), options.end(),
+                         [&uses](const QVariant &a, const QVariant &b) {
+                             return uses.value(a.toMap().value(QStringLiteral("value")).toString())
+                                  > uses.value(b.toMap().value(QStringLiteral("value")).toString());
+                         });
+    } else {
+        return {};
+    }
+
+    // Cap at three, and never at the cost of the current value: a collar that could not show what
+    // this object already is would offer three changes and no way to see what is being changed.
+    QVariantList out;
+    bool         haveCurrent = false;
+    for (const QVariant &v : options) {
+        if (out.size() >= 3) break;
+        QVariantMap o = v.toMap();
+        const bool  is = o.value(QStringLiteral("value")).toString() == current;
+        if (is) haveCurrent = true;
+        o.insert(QStringLiteral("current"), is);
+        out.append(o);
+    }
+    if (!haveCurrent && !current.isEmpty()) {
+        for (const QVariant &v : options) {
+            QVariantMap o = v.toMap();
+            if (o.value(QStringLiteral("value")).toString() != current) continue;
+            o.insert(QStringLiteral("current"), true);
+            if (!out.isEmpty()) out.removeLast();   // the least used of the three makes way
+            out.append(o);
+            break;
+        }
+    }
+    return out;
+}
+
+QVariantMap ModelBrowser::linkRefusals(const QString &fixedId, const QStringList &ids,
+                                       const QString &end) const
+{
+    QVariantMap out;
+
+    const CharacteristicPack &p     = pack();
+    const Condition          *fixed = p.condition(fixedId);
+    if (!fixed) return out;
+
+    // Which end the moving candidate would occupy is the mirror of the fixed one.
+    const bool fixedIsTo = end != QStringLiteral("from");
+
+    // THE traversal, once. `X → fixed` closes a cycle exactly when fixed already reaches X, so the
+    // refused-for-cycle set is everything downstream of fixed; with the ends swapped it is
+    // everything upstream. Either way it is one walk, and every candidate is then a set lookup.
+    const QSet<QString> closes = causalClosure(p, fixedId, /*downstream=*/fixedIsTo);
+
+    // The already-linked set, likewise gathered in one pass rather than searched per candidate.
+    QSet<QString> linked;
+    for (const Edge &e : p.edges) {
+        if (e.type != EdgeType::Causes) continue;
+        if (fixedIsTo && e.to == fixedId)   linked.insert(e.from);
+        if (!fixedIsTo && e.from == fixedId) linked.insert(e.to);
+    }
+
+    auto refusal = [&out](const QString &id, const char *reason, const QString &text) {
+        QVariantMap r;
+        r.insert(QStringLiteral("reason"), QString::fromLatin1(reason));
+        r.insert(QStringLiteral("text"), text);
+        out.insert(id, r);
+    };
+
+    for (const QString &id : ids) {
+        if (id == fixedId) {
+            refusal(id, "self", tr("cannot cause itself"));
+            continue;
+        }
+        // A candidate that is not a condition is not a drop target at all — a measure in the
+        // detection lane has no causal end to be. Left out of the map rather than refused: the
+        // view never offers it, so a reason on it would be an explanation of something nobody did.
+        if (!p.condition(id)) continue;
+        if (linked.contains(id)) {
+            refusal(id, "exists", tr("already linked"));
+            continue;
+        }
+        if (closes.contains(id)) refusal(id, "cycle", tr("cycle"));
+    }
+    return out;
+}
+
 QVariantMap ModelBrowser::addLink(const QString &fromId, const QString &toId,
                                   const QString &relation, const QString &strength)
 {
@@ -3874,7 +4012,12 @@ QVariantMap ModelBrowser::addLink(const QString &fromId, const QString &toId,
     rebuild();
     const QString what = tr("%1 %2 %3").arg(fromLabel, relation, toLabel);
     pushCommand(tr("Link added"), what, before, m_workingNorms);
-    return accept(what);
+    QVariantMap r = accept(what);
+    // The id of what was just made, so the caller can select it. The graph's drag opens the
+    // inspector on the new link — strength is one click away there, which is the whole reason the
+    // drag does not stop to ask for it.
+    r.insert(QStringLiteral("edgeId"), edgeId(fromId, toId, type));
+    return r;
 }
 
 QVariantMap ModelBrowser::removeLink(const QString &fromId, const QString &toId,
@@ -3920,6 +4063,148 @@ QVariantMap ModelBrowser::removeLink(const QString &fromId, const QString &toId,
     const QString what = tr("%1 %2 %3").arg(fromLabel, relation, toLabel);
     pushCommand(tr("Link removed"), what, before, m_workingNorms);
     return accept(tr("Removed: %1").arg(what));
+}
+
+QVariantMap ModelBrowser::repointCause(const QString &edgeIdIn, const QString &end,
+                                       const QString &newId)
+{
+    QString  oldFrom, oldTo;
+    EdgeType type = EdgeType::Causes;
+    if (!splitEdgeId(edgeIdIn, oldFrom, oldTo, type))
+        return refuse(tr("Not a link id: %1.").arg(edgeIdIn));
+    // The canvas draws `causes` and re-points `causes`. The other two relations have their own
+    // rules and their own controls in the link inspector; moving one of their ends from here would
+    // be this function guessing at rules it does not hold.
+    if (type != EdgeType::Causes) return refuse(tr("Only a causal link can be re-pointed here."));
+    if (end != QStringLiteral("from") && end != QStringLiteral("to"))
+        return refuse(tr("%1 is not an end of a link.").arg(end));
+
+    const bool    movingFrom = end == QStringLiteral("from");
+    const QString newFrom    = movingFrom ? newId : oldFrom;
+    const QString newTo      = movingFrom ? oldTo : newId;
+    if (newFrom == oldFrom && newTo == oldTo) return refuse(tr("That end is already there."));
+
+    // Refused through the SAME function the drag consulted, so a drag cannot say yes to something
+    // this then rejects.
+    const QVariantMap legal = linkLegality(newFrom, newTo, edgeTypeName(type));
+    if (!legal.value(QStringLiteral("ok")).toBool())
+        return refuse(legal.value(QStringLiteral("reason")).toString());
+
+    const CharacteristicPack &p = pack();
+
+    // The whole edge, COPIED. Strength, provenance tier and citations travel with it: re-pointing
+    // corrects who a claim is about, and a claim that silently lost its evidence on being corrected
+    // would be a downgrade the author never asked for and would not be told about.
+    const Edge *existing = nullptr;
+    for (const Edge &e : p.edges)
+        if (e.type == type && e.from == oldFrom && e.to == oldTo) { existing = &e; break; }
+    if (!existing) return refuse(tr("No such link."));
+    Edge moved = *existing;
+
+    // Labels resolved BEFORE rebuild() frees the assembly they point into.
+    const Condition *oldEndC = p.condition(movingFrom ? oldFrom : oldTo);
+    const Condition *newEndC = p.condition(newId);
+    const Condition *keptC   = p.condition(movingFrom ? oldTo : oldFrom);
+    const QString    oldLabel = oldEndC ? oldEndC->label : (movingFrom ? oldFrom : oldTo);
+    const QString    newLabel = newEndC ? newEndC->label : newId;
+    const QString    keptLabel = keptC ? keptC->label : (movingFrom ? oldTo : oldFrom);
+
+    const CharacteristicPack before = m_working;
+
+    // BOTH incoming sets, because the edge may be leaving one condition's set and joining another's,
+    // and an override replaces the whole set at each end it touches.
+    materialiseCausesOf(oldTo);
+    if (newTo != oldTo) materialiseCausesOf(newTo);
+
+    for (auto it = m_working.edges.begin(); it != m_working.edges.end(); ++it)
+        if (it->from == oldFrom && it->to == oldTo && it->type == type) {
+            m_working.edges.erase(it);
+            break;
+        }
+    moved.from = newFrom;
+    moved.to   = newTo;
+    m_working.edges.push_back(moved);
+
+    rebuild();
+    const QString what = movingFrom ? tr("%1 → %2, from %3").arg(newLabel, keptLabel, oldLabel)
+                                    : tr("%1 → %2, was %3").arg(keptLabel, newLabel, oldLabel);
+    pushCommand(tr("Link re-pointed"), what, before, m_workingNorms);
+    QVariantMap r = accept(what);
+    r.insert(QStringLiteral("edgeId"), edgeId(newFrom, newTo, type));
+    return r;
+}
+
+// ── The list forms ──────────────────────────────────────────────────────────
+//
+// Both collapse the per-row commands their singular calls pushed back into one, exactly as
+// setFieldOnAll() does and for the same reason. The commands were pushed against intermediate
+// states, so dropping them and re-pushing from `before` is what makes the whole selection a single
+// undo step rather than N of them.
+
+QVariantMap ModelBrowser::removeCause(const QStringList &edgeIds)
+{
+    if (edgeIds.isEmpty()) return refuse(tr("Nothing selected."));
+    if (edgeIds.size() == 1) return removeObject(kLinks, edgeIds.first());
+
+    const CharacteristicPack before = m_working;
+    const int                mark   = m_stackIndex;
+
+    int     done = 0;
+    QString firstRefusal;
+    for (const QString &id : edgeIds) {
+        const QVariantMap r = removeObject(kLinks, id);
+        if (r.value(QStringLiteral("ok")).toBool()) ++done;
+        else if (firstRefusal.isEmpty()) firstRefusal = r.value(QStringLiteral("message")).toString();
+    }
+
+    if (done > 0) {
+        m_stack.erase(m_stack.begin() + (mark + 1), m_stack.begin() + (m_stackIndex + 1));
+        m_stackIndex = mark;
+        pushCommand(tr("Links removed"), tr("%n link(s)", "", done), before, m_workingNorms);
+    }
+
+    if (done == 0) return refuse(firstRefusal.isEmpty() ? tr("Nothing removed.") : firstRefusal);
+    if (!firstRefusal.isEmpty())
+        return accept(tr("%n link(s) removed. %1", "", done).arg(firstRefusal));
+    return accept(tr("%n link(s) removed", "", done));
+}
+
+QVariantMap ModelBrowser::removeObjects(const QString &type, const QStringList &ids)
+{
+    if (ids.isEmpty()) return refuse(tr("Nothing selected."));
+    if (type == kLinks) return removeCause(ids);
+    if (ids.size() == 1) return removeObject(type, ids.first());
+
+    const CharacteristicPack before        = m_working;
+    const NormPack           normsBefore   = m_workingNorms;
+    const ScreenSet          screensBefore = m_workingScreens;
+    const DrillSet           drillsBefore  = m_workingDrills;
+    const int                mark          = m_stackIndex;
+
+    int     done = 0;
+    QString firstRefusal;
+    for (const QString &id : ids) {
+        const QVariantMap r = removeObject(type, id);
+        if (r.value(QStringLiteral("ok")).toBool()) ++done;
+        else if (firstRefusal.isEmpty()) firstRefusal = r.value(QStringLiteral("message")).toString();
+    }
+
+    if (done > 0) {
+        m_stack.erase(m_stack.begin() + (mark + 1), m_stack.begin() + (m_stackIndex + 1));
+        m_stackIndex = mark;
+        pushCommand(tr("Deleted"), tr("%n object(s)", "", done), before, normsBefore, screensBefore,
+                    drillsBefore);
+    }
+
+    if (done == 0) return refuse(firstRefusal.isEmpty() ? tr("Nothing removed.") : firstRefusal);
+    if (!firstRefusal.isEmpty())
+        return accept(tr("%n object(s) removed. %1", "", done).arg(firstRefusal));
+    return accept(tr("%n object(s) removed", "", done));
+}
+
+QVariantMap ModelBrowser::setCauseStrength(const QStringList &edgeIds, const QString &strength)
+{
+    return setFieldOnAll(kLinks, edgeIds, QStringLiteral("strength"), strength);
 }
 
 QVariantMap ModelBrowser::addMeasureTo(const QString &conditionId, const QString &measureId,
@@ -5015,13 +5300,18 @@ QVariantList ModelBrowser::phases() const
 
 // ── A blank object ──────────────────────────────────────────────────────────
 
-QVariantMap ModelBrowser::createObject(const QString &type)
+QVariantMap ModelBrowser::createObject(const QString &type, const QString &name)
 {
+    // An author who has already said what this is keeps their words, and the row lands named. The
+    // fallback is the placeholder, and the message below still says "give it a name" only when
+    // there is one to give.
+    const QString given = name.trimmed();
+
     if (type == kScreens) {
         const ScreenSet screensBefore = m_workingScreens;
 
         Screen s;
-        s.label = tr("New screen");
+        s.label = given.isEmpty() ? tr("New screen") : given;
         s.id    = mintId(s.label, QStringLiteral("screen."), QStringLiteral("screen"),
                          [this](const QString &x) { return m_screens.screen(x) != nullptr; });
         m_workingScreens.screens.push_back(s);
@@ -5032,7 +5322,8 @@ QVariantMap ModelBrowser::createObject(const QString &type)
         // It lands carrying two validation warnings — no protocol, no pass criterion — and that is
         // correct: a screen nobody could run and whose answer is unrecordable is exactly what a
         // blank one is, and the health list should say so from the first second.
-        QVariantMap r = accept(tr("Created %1 — give it a name").arg(s.label));
+        QVariantMap r = accept(given.isEmpty() ? tr("Created %1 — give it a name").arg(s.label)
+                                               : tr("Created %1").arg(s.label));
         r.insert(QStringLiteral("id"), s.id);
         r.insert(QStringLiteral("type"), kScreens);
         return r;
@@ -5041,7 +5332,7 @@ QVariantMap ModelBrowser::createObject(const QString &type)
         const DrillSet drillsBefore = m_workingDrills;
 
         Drill d;
-        d.label = tr("New drill");
+        d.label = given.isEmpty() ? tr("New drill") : given;
         d.id    = mintId(d.label, QStringLiteral("drill."), QStringLiteral("drill"),
                          [this](const QString &x) { return m_drills.drill(x) != nullptr; });
         m_workingDrills.drills.push_back(d);
@@ -5049,7 +5340,8 @@ QVariantMap ModelBrowser::createObject(const QString &type)
         rebuild();
         pushCommand(tr("Created"), d.label, m_working, m_workingNorms, m_workingScreens,
                     drillsBefore);
-        QVariantMap r = accept(tr("Created %1 — give it a name").arg(d.label));
+        QVariantMap r = accept(given.isEmpty() ? tr("Created %1 — give it a name").arg(d.label)
+                                               : tr("Created %1").arg(d.label));
         r.insert(QStringLiteral("id"), d.id);
         r.insert(QStringLiteral("type"), kDrills);
         return r;
@@ -5061,14 +5353,15 @@ QVariantMap ModelBrowser::createObject(const QString &type)
     const CharacteristicPack before      = m_working;
     const NormPack           normsBefore = m_workingNorms;
 
-    QString id = QStringLiteral("new_characteristic");
-    int     n  = 2;
-    while (pack().condition(id) != nullptr)
-        id = QStringLiteral("new_characteristic_%1").arg(n++);
+    // Minted from the NAME when there is one, so the id reads as what it is everywhere it is later
+    // mentioned — an edge list of `new_characteristic_4` is a file nobody can read.
+    const QString label = given.isEmpty() ? tr("New characteristic") : given;
+    const QString id    = mintId(label, QString(), QStringLiteral("new_characteristic"),
+                                 [this](const QString &x) { return pack().condition(x) != nullptr; });
 
     Condition c;
     c.id    = id;
-    c.label = tr("New characteristic");
+    c.label = label;
     // A draft nobody has been to the literature for. Badging it honestly from the start is what
     // stops an unsourced claim quietly acquiring the appearance of one.
     c.state           = ConditionState::Draft;
@@ -5078,9 +5371,99 @@ QVariantMap ModelBrowser::createObject(const QString &type)
     rebuild();
     pushCommand(tr("Created"), c.label, before, normsBefore);
 
-    QVariantMap r = accept(tr("Created %1 — give it a name").arg(c.label));
+    QVariantMap r = accept(given.isEmpty() ? tr("Created %1 — give it a name").arg(c.label)
+                                           : tr("Created %1").arg(c.label));
     r.insert(QStringLiteral("id"), id);
     r.insert(QStringLiteral("type"), kCharacteristics);
+    return r;
+}
+
+QVariantMap ModelBrowser::createAndAttach(const QString &type, const QString &name,
+                                          const QString &otherId, const QString &end)
+{
+    if (!pack().condition(otherId))
+        return refuse(tr("No characteristic with id %1.").arg(otherId));
+    const bool isCondition = type == kCharacteristics || type == kCauses;
+    if (isCondition && end != QStringLiteral("from") && end != QStringLiteral("to"))
+        return refuse(tr("%1 is not an end of a link.").arg(end));
+    if (!isCondition && type != kScreens && type != kDrills)
+        return refuse(tr("%1 cannot be created here.").arg(typeLabelFor(type)));
+
+    // ONE step, from here down. Both writes push their own command; the pair is collapsed into a
+    // single entry below, because an author who undoes this undid one gesture — and undoing the
+    // object while keeping the attachment would leave a dangling reference that fails the whole
+    // library.
+    const CharacteristicPack before        = m_working;
+    const NormPack           normsBefore   = m_workingNorms;
+    const ScreenSet          screensBefore = m_workingScreens;
+    const DrillSet           drillsBefore  = m_workingDrills;
+    const int                mark          = m_stackIndex;
+
+    auto rollBack = [&] {
+        m_working        = before;
+        m_workingNorms   = normsBefore;
+        m_workingScreens = screensBefore;
+        m_workingDrills  = drillsBefore;
+        m_stack.erase(m_stack.begin() + (mark + 1), m_stack.end());
+        m_stackIndex = mark;
+        rebuild();
+    };
+
+    const QVariantMap made = createObject(type, name);
+    if (!made.value(QStringLiteral("ok")).toBool()) return made;
+    const QString newId = made.value(QStringLiteral("id")).toString();
+
+    // A screen settles the condition; a drill answers it. Neither is a causal claim, so neither
+    // goes anywhere near addLink — the attachment each type actually has is the one it gets.
+    if (!isCondition) {
+        const QVariantMap joined = type == kScreens ? addScreenSettles(newId, otherId)
+                                                    : addDrillAnswers(newId, otherId);
+        if (!joined.value(QStringLiteral("ok")).toBool()) { rollBack(); return joined; }
+
+        const Condition *otherC = pack().condition(otherId);
+        const QString  otherLbl = otherC ? otherC->label : otherId;
+        m_stack.erase(m_stack.begin() + (mark + 1), m_stack.begin() + (m_stackIndex + 1));
+        m_stackIndex = mark;
+        pushCommand(tr("Created and attached"), tr("%1 · %2").arg(name.trimmed(), otherLbl), before,
+                    normsBefore, screensBefore, drillsBefore);
+        QVariantMap r = accept(tr("Created %1 and attached it").arg(name.trimmed()));
+        r.insert(QStringLiteral("id"), newId);
+        r.insert(QStringLiteral("type"), type);
+        return r;
+    }
+
+    const bool    newIsFrom = end == QStringLiteral("to");   // the EXISTING node holds `end`
+    const QString fromId    = newIsFrom ? newId : otherId;
+    const QString toId      = newIsFrom ? otherId : newId;
+
+    const QVariantMap linked = addLink(fromId, toId, QStringLiteral("causes"));
+    if (!linked.value(QStringLiteral("ok")).toBool()) {
+        // Wind the create back rather than leaving a node the author did not ask for standing on
+        // its own. Refusals are not expected here — a condition nothing points at has no ancestors,
+        // so it cannot close a cycle — but a half-landed macro is exactly what this function exists
+        // to prevent, so the failure path prevents it too. The commands go as well as the state: a
+        // rolled-back macro that left a redoable create behind would offer to restore half of it.
+        rollBack();
+        return linked;
+    }
+
+    // The labels as CREATED, not as asked for: an empty name lands the placeholder, and the undo
+    // entry has to say what is actually in the pack.
+    const Condition *newC     = pack().condition(newId);
+    const Condition *otherC   = pack().condition(otherId);
+    const QString    newLabel = newC ? newC->label : newId;
+    const QString  otherLabel = otherC ? otherC->label : otherId;
+
+    m_stack.erase(m_stack.begin() + (mark + 1), m_stack.begin() + (m_stackIndex + 1));
+    m_stackIndex = mark;
+    const QString what = newIsFrom ? tr("%1 → %2").arg(newLabel, otherLabel)
+                                   : tr("%1 → %2").arg(otherLabel, newLabel);
+    pushCommand(tr("Created and linked"), what, before, m_workingNorms);
+
+    QVariantMap r = accept(tr("Created %1 and linked it").arg(newLabel));
+    r.insert(QStringLiteral("id"), newId);
+    r.insert(QStringLiteral("type"), kCharacteristics);
+    r.insert(QStringLiteral("edgeId"), linked.value(QStringLiteral("edgeId")));
     return r;
 }
 
@@ -5584,6 +5967,11 @@ void ModelBrowser::decorateNode(QVariantMap &node, const QString &type, const QS
     };
     node.insert(QStringLiteral("nodeType"), type);
     node.insert(QStringLiteral("glyph"), glyphs.value(type));
+    // Whose content this is, on the node itself. The graph's ring offers `Revert to shipped` and
+    // `Move to trash` from the same slot depending on this answer — they are the same call, and it
+    // is the source that decides which of the two it means — so the picture has to carry it rather
+    // than the ring asking a second question at the moment it opens.
+    node.insert(QStringLiteral("source"), sourceOf(id));
 
     // One line the node can say about itself. For a measure that is its corridor: the number a
     // reader is actually asking about when they look at a measure in a graph, and until now it was

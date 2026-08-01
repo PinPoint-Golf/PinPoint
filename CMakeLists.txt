@@ -421,6 +421,8 @@ qt_add_qml_module(PinPointStudio
         src/Gui/diagnosticmodel/ModelInspector.qml
         src/Gui/diagnosticmodel/ModelTrail.qml
         src/Gui/diagnosticmodel/ModelGraph.qml
+        src/Gui/diagnosticmodel/RingMenu.qml
+        src/Gui/diagnosticmodel/ModelCausePicker.qml
         src/Gui/diagnosticmodel/ModelPicker.qml
         src/Gui/diagnosticmodel/ModelEdits.qml
         src/Gui/diagnosticmodel/ModelMint.qml

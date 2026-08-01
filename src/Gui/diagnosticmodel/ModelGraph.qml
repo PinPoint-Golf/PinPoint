@@ -27,17 +27,45 @@ import PinPointStudio
 // The graph pane. It SWAPS the middle pane and keeps the rail and the inspector, so switching views
 // keeps your place — selection is shared with the table.
 //
-// EVERY coordinate comes from ModelBrowser.dag(), which is dag_layout.h. QML positions nothing: rank
-// assignment, ordering, routing and overlap are the only things about this surface that can be
+// EVERY coordinate comes from ModelBrowser.graph(), which is dag_layout.h. QML positions nothing:
+// rank assignment, ordering, routing and overlap are the only things about this surface that can be
 // tested, and a layout computed inside delegate bindings is a layout nothing can assert. What this
 // file does is draw, hit-test and drag.
+//
+// ── Editing: the gesture is the permission ──────────────────────────────────────────────────────
+//
+// There is NO editing mode and no editing toggle. A structural edit begins with a deliberate
+// press-and-hold on the thing you mean, which opens the ring (RingMenu.qml). A mode would make
+// permission a place you are standing rather than something you did: it has to be found, remembered
+// and turned off, it is invisible at the moment of the accident it exists to prevent, and it forces
+// affordance chrome onto every node for ever to advertise a state. 350 ms of pressure is a stronger
+// consent signal than a switch flipped twenty minutes ago, and it cannot be left on.
+//
+// The price is that structural editing has no resting affordance here at all. It is paid three ways,
+// and all three are load-bearing rather than nice: right-click opens the SAME ring (every desktop
+// author tries it); the first hold of a session holds its labels a beat longer; and the inspector
+// keeps every verb this ring has, worded identically, so an author who never discovers the ring
+// loses no capability whatsoever.
+//
+// ── One input layer, not a handler per item ─────────────────────────────────────────────────────
+//
+// Every press on this canvas arrives at ONE MouseArea, which hit-tests the point itself. It cannot
+// be a handler per node: the ring has to open on a link and on bare canvas too, and per-item
+// handlers fight each other for the grab during exactly the held drag this whole surface is made
+// of. So the nodes and the edge labels are drawn items with no input of their own, and everything
+// below decides what a press meant.
 Item {
     id: root
 
-    property var    layoutData: ({})     // from ModelBrowser.dag()
+    property var    layoutData: ({})     // from ModelBrowser.graph()
     property string focusId:    ""
     property string selectedEdgeId: ""
     property bool   editable:   true
+
+    // The marquee's selection, shared with the table's. Node ids and link row ids, kept apart
+    // because §5.5's rule is that a marquee is one or the other and never a mixture.
+    property var selectedNodeIds: []
+    property var selectedEdgeIds: []
 
     // The node's own TYPE travels with it. Without it the receiver has to assume one, and the
     // measures lane is full of nodes that are not conditions — clicking one then asked for the
@@ -45,9 +73,19 @@ Item {
     signal nodeActivated(string nodeType, string id)
     signal edgeActivated(string rowId)
     signal linkRequested(string fromId, string toId)
-    // Asked DURING a drag, not on release: { ok, reason }. A refusal has to be visible while the
-    // pointer is still moving, or the author has already committed to the gesture.
-    property var legalityProbe: null
+    signal repointRequested(string edgeId, string end, string newId)
+    signal createLinkedRequested(string objType, string name, string otherId, string end)
+    signal selectionRequested(var nodeIds, var edgeIds)
+
+    // Every ring spoke that is not this pane's own business. One signal rather than one per verb:
+    // the ring is a menu, and a menu that needed a new signal per entry would be a menu the panel
+    // had to be edited to extend.
+    signal verbInvoked(string verb, var arg)
+
+    // Asked ONCE, when a link drag arms — never per hover. { id: { reason, text } } for the refused.
+    property var refusalsProbe: null
+    // (type, id, field) -> [{ value, label, current }], at most three. The collar's contents.
+    property var ringValuesProbe: null
 
     readonly property var _nodes: layoutData && layoutData.nodes ? layoutData.nodes : []
     readonly property var _edges: layoutData && layoutData.edges ? layoutData.edges : []
@@ -72,16 +110,34 @@ Item {
     // chosen for something else.
     onLayoutDataChanged: _userZoom = 1.0
 
-    // The layout centres itself on the focus rather than on the origin. layoutDag() reports where
-    // the focus landed for exactly this reason: a graph wider than its pane that opens at 0,0 shows
-    // whatever happens to be top-left, which is rarely the condition you asked about.
-    // ── Drag state ────────────────────────────────────────────────────────────
-    property string _dragFrom:   ""
-    property real   _dragX:      0
-    property real   _dragY:      0
-    property string _dragTarget: ""
-    property bool   _dragLegal:  false
-    property string _dragReason: ""
+    // ── Nudge: position is decoration, not data ───────────────────────────────
+    //
+    // Dragging a node BODY moves it for this session only. It is not written to the pack, not in
+    // the unsaved list, not undoable, and gone on reload, radius change or focus change. That
+    // preserves the rule the whole panel rests on — everything in the unsaved popover is content,
+    // and everything content is in the unsaved popover — which a nudge that produced an undo entry
+    // would break at both ends.
+    //
+    // If saved layouts are ever asked for, that is a VIEW feature (a named arrangement per user),
+    // not a pack feature. It must not come in through this door.
+    property var _nudges: ({})
+    // Bumped on every change, and PASSED AS AN ARGUMENT to the lookup below. A binding that merely
+    // mentioned a revision property would be dropped as a dead statement and would subscribe to
+    // nothing; taking it as a parameter is what makes the dependency real.
+    property int _nudgeRev: 0
+
+    function _ndx(id, rev) { var n = root._nudges[id]; return n ? n.dx : 0 }
+    function _ndy(id, rev) { var n = root._nudges[id]; return n ? n.dy : 0 }
+
+    function _clearNudges() {
+        if (Object.keys(root._nudges).length === 0) return
+        root._nudges = ({})
+        root._nudgeRev++
+    }
+    // The three things §2.1 says drop a nudge, stated where they happen rather than left to the
+    // reader to infer. None of them needs a warning, because nothing was ever at stake.
+    onFocusIdChanged: root._clearNudges()
+    onScopeChanged:   root._clearNudges()
 
     // Colour by TYPE, from the theme's own chart palette — so the graph reads as a legend of the
     // rail beside it, and no colour is invented here.
@@ -100,14 +156,71 @@ Item {
         return Theme.colorBorderStrong
     }
 
+    // ── Hit testing, in LAYOUT coordinates ────────────────────────────────────
     function _nodeAt(x, y) {
         for (var i = 0; i < _nodes.length; i++) {
             var n = _nodes[i]
             if (n.kind === "measure") continue
-            if (x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.h) return n
+            var nx = n.x + root._ndx(n.id, root._nudgeRev)
+            var ny = n.y + root._ndy(n.id, root._nudgeRev)
+            if (x >= nx && x <= nx + n.w && y >= ny && y <= ny + n.h) return n
         }
         return null
     }
+
+    // A curve is unhittable at one pixel, so a link is picked up at its label point — which is the
+    // part of the line a reader is already looking at.
+    function _edgeAt(x, y) {
+        for (var i = 0; i < _edges.length; i++) {
+            var e = _edges[i]
+            if (e.rowId === undefined) continue
+            var lx = e.labelX || 0, ly = e.labelY || 0
+            if (Math.abs(x - lx) <= Theme.sp(16) && Math.abs(y - ly) <= Theme.sp(9)) return e
+        }
+        return null
+    }
+
+    function _nodeById(id) {
+        for (var i = 0; i < _nodes.length; i++) if (_nodes[i].id === id) return _nodes[i]
+        return null
+    }
+    function _edgeById(rowId) {
+        for (var i = 0; i < _edges.length; i++) if (_edges[i].rowId === rowId) return _edges[i]
+        return null
+    }
+
+    // Every node that could be an end of a causal link — the refusal set is computed over exactly
+    // these, once, when a drag arms.
+    function _conditionIds() {
+        var out = []
+        for (var i = 0; i < _nodes.length; i++)
+            if (_nodes[i].kind !== "measure") out.push(_nodes[i].id)
+        return out
+    }
+
+    // ── The armed drag ────────────────────────────────────────────────────────
+    //
+    // `_armEnd` is which end of the proposed link the FIXED node occupies: "to" for `Add cause of
+    // this…`, and either for a re-point, depending on which end is being moved.
+    property string _armKind:   ""     // "" | "link" | "repoint"
+    property string _armFixed:  ""     // the condition that is not moving
+    property string _armEnd:    "to"
+    property string _armEdgeId: ""     // the link being re-pointed
+    property real   _dragX:     0
+    property real   _dragY:     0
+    property string _dragTarget: ""
+    // A plain JS object for the life of the drag, cleared on release. Never re-queried per
+    // positionChanged — that is the shape this replaces.
+    property var    _refusals:  ({})
+
+    readonly property bool _dragging: _armKind !== ""
+
+    function _refusalOf(id) {
+        var r = root._refusals ? root._refusals[id] : null
+        return r ? r : null
+    }
+
+    property bool _firstHoldOfSession: true
 
     Flickable {
         id: canvas
@@ -116,9 +229,12 @@ Item {
         contentHeight: content.height
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        // A drag on this canvas is a marquee, a nudge or a link — never a pan. The wheel and the
+        // scrollbars are how it is panned, which is what leaves the drag free to mean something.
+        interactive: false
 
-        ScrollBar.vertical:   ScrollBar { policy: ScrollBar.AsNeeded }
-        ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical:   ScrollBar { policy: ScrollBar.AsNeeded; interactive: true }
+        ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded; interactive: true }
 
         // An explicit, SIZED item to hang everything on.
         //
@@ -133,6 +249,16 @@ Item {
             onWheel: (event) => {
                 root._userZoom = Math.max(0.2, Math.min(4.0,
                                           root._userZoom * (event.angleDelta.y > 0 ? 1.12 : 1 / 1.12)))
+                event.accepted = true
+            }
+        }
+        WheelHandler {
+            acceptedModifiers: Qt.NoModifier
+            onWheel: (event) => {
+                canvas.contentY = Math.max(0, Math.min(canvas.contentHeight - canvas.height,
+                                                       canvas.contentY - event.angleDelta.y))
+                canvas.contentX = Math.max(0, Math.min(canvas.contentWidth - canvas.width,
+                                                       canvas.contentX - event.angleDelta.x))
                 event.accepted = true
             }
         }
@@ -185,11 +311,26 @@ Item {
                 z: selected ? 3 : 1
 
                 readonly property bool selected:
-                    modelData.rowId !== undefined && modelData.rowId === root.selectedEdgeId
+                    modelData.rowId !== undefined
+                    && (modelData.rowId === root.selectedEdgeId
+                        || root.selectedEdgeIds.indexOf(modelData.rowId) >= 0)
                 // The selected edge must be identifiable ON THE CANVAS: drawn heavier, with the
                 // rest muted. A selection that only shows in the inspector is a selection the
                 // reader has to hold in their head.
-                readonly property real muting: root.selectedEdgeId !== "" && !selected ? 0.28 : 1.0
+                readonly property bool anySelected:
+                    root.selectedEdgeId !== "" || root.selectedEdgeIds.length > 0
+                readonly property real muting: anySelected && !selected ? 0.28 : 1.0
+
+                // A nudged node drags its lines with it. Only the segment that actually touches the
+                // node moves — a long edge routed through waypoints keeps every joint where the
+                // layout put it, so the routing is never quietly re-invented here.
+                readonly property bool headSeg: (modelData.segment || 0) === 0
+                readonly property bool tailSeg:
+                    (modelData.segment || 0) === Math.max(0, (modelData.segments || 1) - 1)
+                readonly property real fdx: headSeg ? root._ndx(modelData.from, root._nudgeRev) : 0
+                readonly property real fdy: headSeg ? root._ndy(modelData.from, root._nudgeRev) : 0
+                readonly property real tdx: tailSeg ? root._ndx(modelData.to,   root._nudgeRev) : 0
+                readonly property real tdy: tailSeg ? root._ndy(modelData.to,   root._nudgeRev) : 0
 
                 ShapePath {
                     strokeColor: edgeShape.modelData.detects
@@ -202,15 +343,15 @@ Item {
                     dashPattern: [ 3, 3 ]
                     capStyle:    ShapePath.RoundCap
 
-                    startX: edgeShape.modelData.x1
-                    startY: edgeShape.modelData.y1
+                    startX: edgeShape.modelData.x1 + edgeShape.fdx
+                    startY: edgeShape.modelData.y1 + edgeShape.fdy
                     PathCubic {
-                        x:         edgeShape.modelData.x2
-                        y:         edgeShape.modelData.y2
-                        control1X: edgeShape.modelData.c1x
-                        control1Y: edgeShape.modelData.c1y
-                        control2X: edgeShape.modelData.c2x
-                        control2Y: edgeShape.modelData.c2y
+                        x:         edgeShape.modelData.x2  + edgeShape.tdx
+                        y:         edgeShape.modelData.y2  + edgeShape.tdy
+                        control1X: edgeShape.modelData.c1x + edgeShape.fdx
+                        control1Y: edgeShape.modelData.c1y + edgeShape.fdy
+                        control2X: edgeShape.modelData.c2x + edgeShape.tdx
+                        control2Y: edgeShape.modelData.c2y + edgeShape.tdy
                     }
                 }
 
@@ -221,27 +362,27 @@ Item {
                     strokeWidth: 0
                     strokeColor: "transparent"
                     // Symmetric relations carry no direction, so they carry no head.
-                    startX: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                                ? edgeShape.modelData.tipAx : 0
-                    startY: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                                ? edgeShape.modelData.tipAy : 0
+                    readonly property bool shown:
+                        edgeShape.modelData.tip && !edgeShape.modelData.symmetric
+                    startX: shown ? edgeShape.modelData.tipAx + edgeShape.tdx : 0
+                    startY: shown ? edgeShape.modelData.tipAy + edgeShape.tdy : 0
                     PathLine {
                         x: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                               ? edgeShape.modelData.tipBx : 0
+                               ? edgeShape.modelData.tipBx + edgeShape.tdx : 0
                         y: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                               ? edgeShape.modelData.tipBy : 0
+                               ? edgeShape.modelData.tipBy + edgeShape.tdy : 0
                     }
                     PathLine {
                         x: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                               ? edgeShape.modelData.tipCx : 0
+                               ? edgeShape.modelData.tipCx + edgeShape.tdx : 0
                         y: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                               ? edgeShape.modelData.tipCy : 0
+                               ? edgeShape.modelData.tipCy + edgeShape.tdy : 0
                     }
                     PathLine {
                         x: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                               ? edgeShape.modelData.tipAx : 0
+                               ? edgeShape.modelData.tipAx + edgeShape.tdx : 0
                         y: edgeShape.modelData.tip && !edgeShape.modelData.symmetric
-                               ? edgeShape.modelData.tipAy : 0
+                               ? edgeShape.modelData.tipAy + edgeShape.tdy : 0
                     }
                 }
 
@@ -250,13 +391,19 @@ Item {
             }
         }
 
-        // Edge hit targets. A curve is unclickable at 1px, so each one gets a small box at its
-        // label point — which is the part of the line a reader is already looking at.
+        // Edge labels. Drawn only — the press that picks one up is hit-tested by the input layer,
+        // because the same press may be about to become a hold, and a handler here would take it.
         Repeater {
             model: root._edges
             delegate: Item {
-                id: edgeHit
+                id: edgeLabel
                 required property var modelData
+
+                readonly property bool tailSeg:
+                    (modelData.segment || 0) === Math.max(0, (modelData.segments || 1) - 1)
+                readonly property bool selected:
+                    modelData.rowId === root.selectedEdgeId
+                    || root.selectedEdgeIds.indexOf(modelData.rowId) >= 0
 
                 visible: modelData.rowId !== undefined
                 x: (modelData.labelX || 0) - Theme.sp(16)
@@ -269,23 +416,16 @@ Item {
                     anchors.fill: parent
                     radius:  Theme.radius
                     color:   Theme.colorBg
-                    visible: edgeHit.modelData.label !== "" || edgeHover.hovered
+                    visible: edgeLabel.modelData.label !== "" || edgeLabel.selected
                     opacity: 0.9
                 }
 
                 Text {
                     anchors.centerIn: parent
-                    text: edgeHit.modelData.label || ""
+                    text: edgeLabel.modelData.label || ""
                     font.family:    Theme.fontData
                     font.pixelSize: Theme.fontSzMicro
-                    color: edgeHit.modelData.rowId === root.selectedEdgeId
-                               ? Theme.colorAccent : Theme.colorText3
-                }
-
-                HoverHandler { id: edgeHover }
-                PpPressable {
-                    hoverScale: 1.0
-                    onClicked:  root.edgeActivated(edgeHit.modelData.rowId)
+                    color: edgeLabel.selected ? Theme.colorAccent : Theme.colorText3
                 }
             }
         }
@@ -297,16 +437,28 @@ Item {
                 id: nodeItem
                 required property var modelData
 
-                x: modelData.x
-                y: modelData.y
+                x: modelData.x + root._ndx(modelData.id, root._nudgeRev)
+                y: modelData.y + root._ndy(modelData.id, root._nudgeRev)
                 width:  modelData.w
                 height: modelData.h
                 z: 2
 
                 readonly property bool isFocus:   modelData.kind === "focus"
                 readonly property bool isMeasure: modelData.kind === "measure"
+                readonly property bool inSelection: root.selectedNodeIds.indexOf(modelData.id) >= 0
+
+                readonly property var  refusal: root._dragging ? root._refusalOf(modelData.id) : null
+                readonly property bool refused: refusal !== null
+                readonly property bool hotTarget:
+                    root._dragging && root._dragTarget === modelData.id && !refused
 
                 readonly property color tint: root._typeColor(nodeItem.modelData.nodeType)
+
+                // Refused nodes drop back and say why. Legality is settled INSIDE the gesture and
+                // never after it: the validation strip is for problems that already exist in the
+                // pack, and it must never be how an author discovers the UI let them make one.
+                opacity: refused ? 0.35 : 1.0
+                Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
 
                 Rectangle {
                     anchors.fill: parent
@@ -314,18 +466,37 @@ Item {
                     // Tinted by type, faintly — enough to tell a measure from a characteristic at a
                     // glance without the colour becoming the subject. Latent conditions stay an
                     // outline, so a reader can still tell what the app SAW from what it worked out.
-                    color: nodeItem.modelData.latent
+                    color: nodeItem.hotTarget
+                               ? Theme.colorAccentLight
+                           : nodeItem.modelData.latent
                                ? "transparent"
                                : Qt.rgba(nodeItem.tint.r, nodeItem.tint.g, nodeItem.tint.b,
                                          nodeItem.isFocus ? 0.22 : 0.10)
-                    border.width: nodeItem.isFocus ? 2 : 1
-                    border.color: nodeItem.isFocus               ? nodeItem.tint
-                                : nodeItem.modelData.dirty       ? Theme.colorAccent
-                                : nodeItem.modelData.offeredOnly ? Theme.colorBorderMid
-                                                                 : nodeItem.tint
+                    border.width: nodeItem.hotTarget ? 2 : nodeItem.isFocus ? 2 : 1
+                    border.color: nodeItem.hotTarget              ? Theme.colorAccent
+                                : nodeItem.inSelection            ? Theme.colorAccent
+                                : nodeItem.isFocus                ? nodeItem.tint
+                                : nodeItem.modelData.dirty        ? Theme.colorAccent
+                                : nodeItem.modelData.offeredOnly  ? Theme.colorBorderMid
+                                                                  : nodeItem.tint
                     // An offered-only condition may never be concluded, so it has to look different
                     // everywhere it appears, including here.
                     opacity: nodeItem.modelData.available ? 1.0 : 0.55
+                }
+
+                // The 3px accent ring on the node a legal drop is hovering. Outside the box rather
+                // than on its border, so it reads as an invitation rather than as a state the node
+                // has acquired.
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: -3
+                    visible: nodeItem.hotTarget
+                    radius:  Theme.radius + 2
+                    color:   "transparent"
+                    border.width: 3
+                    border.color: Theme.colorAccent
+                    opacity: 0.5
+                    z: -1
                 }
 
                 RowLayout {
@@ -361,15 +532,23 @@ Item {
                         }
 
                         // The one line the node can say about itself — a measure's corridor, a
-                        // relation's kind. Empty for anything with nothing to add.
+                        // relation's kind. During a drag it is given over to the answer the author
+                        // needs at that instant instead: why this one is refused, or that it is the
+                        // one about to be taken.
                         Text {
                             Layout.fillWidth: true
-                            text:    nodeItem.modelData.note || nodeItem.modelData.statusLabel || ""
+                            text: nodeItem.refused   ? nodeItem.refusal.text
+                                : nodeItem.hotTarget ? root._dropHint()
+                                                     : (nodeItem.modelData.note
+                                                        || nodeItem.modelData.statusLabel || "")
                             visible: text.length > 0
                             font.family:    Theme.fontData
                             font.pixelSize: Theme.fontSzMicro
-                            color:          Theme.colorText3
-                            elide:          Text.ElideRight
+                            color: nodeItem.hotTarget ? Theme.colorAccent
+                                 : !nodeItem.refused  ? Theme.colorText3
+                                 : nodeItem.refusal.reason === "cycle" ? Theme.colorWarn
+                                                                       : Theme.colorText3
+                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -396,121 +575,754 @@ Item {
                     font.pixelSize: Theme.fontSzMicro
                     color:          Theme.colorText3
                 }
-
-                PpPressable {
-                    hoverScale: 1.0
-                    onClicked:  root.nodeActivated(nodeItem.modelData.nodeType || "",
-                                                   nodeItem.modelData.id)
-                }
-
-                // ── The drag handle ───────────────────────────────────────────
-                // Drag from a node's TRAILING edge onto another to add a cause. On the trailing
-                // edge because that is the direction the graph reads: left-to-right is "causes".
-                Rectangle {
-                    id: handle
-                    visible: root.editable && !nodeItem.isMeasure
-                             && (nodeHover.hovered || root._dragFrom === nodeItem.modelData.id)
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right
-                    anchors.rightMargin: -Theme.sp(4)
-                    width:  Theme.sp(9)
-                    height: Theme.sp(9)
-                    radius: width / 2
-                    color:  Theme.colorAccent
-                    z: 5
-
-                    MouseArea {
-                        anchors.fill: parent
-                        anchors.margins: -Theme.sp(4)
-                        cursorShape: Qt.CrossCursor
-                        onPressed: {
-                            root._dragFrom = nodeItem.modelData.id
-                            root._dragX = nodeItem.x + nodeItem.width
-                            root._dragY = nodeItem.y + nodeItem.height / 2
-                        }
-                        onPositionChanged: (mouse) => {
-                            var p = mapToItem(inner, mouse.x, mouse.y)
-                            root._dragX = p.x
-                            root._dragY = p.y
-                            var over = root._nodeAt(p.x, p.y)
-                            var id   = over && over.id !== root._dragFrom ? over.id : ""
-                            if (id !== root._dragTarget) {
-                                root._dragTarget = id
-                                // The rules are asked of C++ while the pointer is still moving, so
-                                // an illegal target refuses DURING the drag with the reason stated
-                                // — not on release, by which point the gesture is already made.
-                                if (id !== "" && root.legalityProbe) {
-                                    var v = root.legalityProbe(root._dragFrom, id)
-                                    root._dragLegal  = v.ok === true
-                                    root._dragReason = v.reason || ""
-                                } else {
-                                    root._dragLegal  = false
-                                    root._dragReason = ""
-                                }
-                            }
-                        }
-                        onReleased: {
-                            if (root._dragTarget !== "" && root._dragLegal)
-                                root.linkRequested(root._dragFrom, root._dragTarget)
-                            root._dragFrom = ""
-                            root._dragTarget = ""
-                            root._dragReason = ""
-                        }
-                    }
-                }
-
-                HoverHandler { id: nodeHover }
-
-                // The drop target reads as legal or not while the pointer is over it.
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: -2
-                    visible: root._dragTarget === nodeItem.modelData.id
-                    radius: Theme.radius
-                    color:  "transparent"
-                    border.width: 2
-                    border.color: root._dragLegal ? Theme.colorGood : Theme.colorError
-                    z: 6
-                }
             }
         }
 
-        // The rubber-band line, and the refusal beside it.
+        // ── The armed drag's own line ─────────────────────────────────────────
+        //
+        // The SAME curve the drawn edges use — control points half way along in x, exactly as
+        // dag_layout computes them — so the thing being made reads as the same kind of object as
+        // the things already there. Dashed, because it is not one yet.
         Shape {
-            visible: root._dragFrom !== ""
+            id: dragShape
+            visible: root._dragging
             anchors.fill: parent
             z: 7
+            preferredRendererType: Shape.CurveRenderer
+
+            // A ShapePath is not an Item and has no `parent` to read these off, so they are held
+            // here and addressed by id.
+            readonly property real ax: root._armAnchor().x
+            readonly property real ay: root._armAnchor().y
+            // The line is always drawn cause → effect, whichever end the hand is holding, because
+            // that is the direction the claim will read in once it exists.
+            readonly property bool outward: root._armEnd === "from"
+            readonly property real x1: outward ? ax : root._dragX
+            readonly property real y1: outward ? ay : root._dragY
+            readonly property real x2: outward ? root._dragX : ax
+            readonly property real y2: outward ? root._dragY : ay
+
             ShapePath {
-                strokeColor: root._dragTarget === "" ? Theme.colorAccent
-                           : root._dragLegal         ? Theme.colorGood
-                                                     : Theme.colorError
+                strokeColor: Theme.colorAccent
                 strokeWidth: 2
                 fillColor:   "transparent"
                 strokeStyle: ShapePath.DashLine
                 dashPattern: [ 4, 3 ]
-                startX: {
-                    for (var i = 0; i < root._nodes.length; i++)
-                        if (root._nodes[i].id === root._dragFrom)
-                            return root._nodes[i].x + root._nodes[i].w
-                    return 0
+                capStyle:    ShapePath.RoundCap
+
+                startX: dragShape.x1
+                startY: dragShape.y1
+                PathCubic {
+                    x:         dragShape.x2
+                    y:         dragShape.y2
+                    control1X: dragShape.x1 + (dragShape.x2 - dragShape.x1) * 0.5
+                    control1Y: dragShape.y1
+                    control2X: dragShape.x2 - (dragShape.x2 - dragShape.x1) * 0.5
+                    control2Y: dragShape.y2
                 }
-                startY: {
-                    for (var i = 0; i < root._nodes.length; i++)
-                        if (root._nodes[i].id === root._dragFrom)
-                            return root._nodes[i].y + root._nodes[i].h / 2
-                    return 0
+            }
+
+            // The arrowhead is drawn AT THE HELD NODE from the first frame. It is the third of the
+            // three places the direction is stated — the spoke's wording and the target's own line
+            // being the other two — and it is the one that is true before anything is hovered.
+            ShapePath {
+                fillColor:   Theme.colorAccent
+                strokeWidth: 0
+                strokeColor: "transparent"
+
+                startX: dragShape.x2
+                startY: dragShape.y2
+                PathLine {
+                    x: dragShape.x2 - Theme.sp(7)
+                    y: dragShape.y2 - Theme.sp(7) * 0.55
                 }
-                PathLine { x: root._dragX; y: root._dragY }
+                PathLine {
+                    x: dragShape.x2 - Theme.sp(7)
+                    y: dragShape.y2 + Theme.sp(7) * 0.55
+                }
+                PathLine { x: dragShape.x2; y: dragShape.y2 }
             }
         }
+
+        // The ghost of a node that does not exist yet, at the point the drag was released over
+        // empty canvas. It is dashed because it is a proposal, and it stays put while the popover
+        // under it asks the only two questions that cannot be answered later.
+        Rectangle {
+            visible: cause.visible && cause.hasGhost
+            x: cause.ghostX
+            y: cause.ghostY
+            width:  Theme.sp(160)
+            height: Theme.sp(34)
+            radius: Theme.radius
+            color:  "transparent"
+            border.width: 1
+            border.color: Theme.colorAccent
+            z: 8
+            Rectangle {
+                anchors.fill: parent
+                radius: Theme.radius
+                color:  Theme.colorAccentLight
+                opacity: 0.35
+            }
+        }
+
+        // ── The marquee ───────────────────────────────────────────────────────
+        Rectangle {
+            visible: input.mode === "marquee"
+            x: Math.min(input.pressLX, input.moveLX)
+            y: Math.min(input.pressLY, input.moveLY)
+            width:  Math.abs(input.moveLX - input.pressLX)
+            height: Math.abs(input.moveLY - input.pressLY)
+            color:  Theme.colorAccentLight
+            opacity: 0.3
+            border.width: 1
+            border.color: Theme.colorAccent
+            z: 9
+        }
+        }
+
+        // ── The one input layer ───────────────────────────────────────────────
+        //
+        // Everything a press can mean is decided here, from the press point and how the hand moved
+        // after it. Nothing else on this canvas accepts a press.
+        //
+        // A child of `content` rather than of the Flickable, and that is load-bearing: an item
+        // declared straight inside a Flickable is reparented to its contentItem, which has no
+        // geometry of its own, so `anchors.fill: parent` there resolves to 0×0 and this would
+        // silently accept nothing. `content` is the explicitly sized item, and it also leaves the
+        // scroll bars — which live outside it — clickable.
+        MouseArea {
+            id: input
+            anchors.fill: parent
+            z: 60
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            cursorShape: root._dragging ? Qt.CrossCursor : Qt.ArrowCursor
+
+            // "idle" | "pending" | "nudge" | "marquee" | "ring" | "armed"
+            property string mode: "idle"
+            property real   pressLX: 0     // press point, in LAYOUT coordinates
+            property real   pressLY: 0
+            property real   moveLX:  0
+            property real   moveLY:  0
+            property var    pressedNode: null
+            property var    pressedEdge: null
+            property var    nudgeBase:   ({})
+
+            function toLayout(mx, my) { return inner.mapFromItem(input, mx, my) }
+
+            onPressed: (mouse) => {
+                var p = toLayout(mouse.x, mouse.y)
+
+                // A drag armed from a LATCHED ring — or from the inspector — has no button held, so
+                // the gesture ends with a click rather than a release. That click arrives here
+                // first, and it is the drop; letting it fall through would re-enter hit-testing and
+                // throw the armed drag away on the way to committing it.
+                if (root._dragging) { root._dropDrag(p.x, p.y); mode = "idle"; return }
+
+                pressLX = p.x; pressLY = p.y
+                moveLX  = p.x; moveLY  = p.y
+                pressedNode = root._nodeAt(p.x, p.y)
+                pressedEdge = pressedNode ? null : root._edgeAt(p.x, p.y)
+
+                // The scope of the ring is whatever is SELECTED at the press; pressing an unselected
+                // node selects it first, so the menu is never about something the author cannot see
+                // they had chosen.
+                root._adoptPressSelection(pressedNode, pressedEdge)
+
+                if (mouse.button === Qt.RightButton) {
+                    // Every desktop author tries this, so it must not open a different menu. Latched
+                    // — nothing is held — and a click commits.
+                    mode = "idle"
+                    root._openRing(mouse.x, mouse.y, true)
+                    return
+                }
+
+                mode = "pending"
+                holdTimer.restart()
+            }
+
+            onPositionChanged: (mouse) => {
+                var p = toLayout(mouse.x, mouse.y)
+                moveLX = p.x; moveLY = p.y
+
+                if (mode === "ring") {
+                    var q = root.mapFromItem(input, mouse.x, mouse.y)
+                    ring.track(q.x, q.y)
+                    return
+                }
+                if (mode === "armed" || root._dragging) { root._trackDrag(p.x, p.y); return }
+
+                if (mode === "pending") {
+                    // Movement before the hold matures is a nudge or a marquee, not a hold. The
+                    // timer is cancelled rather than allowed to fire under the moving hand.
+                    var far = Math.abs(p.x - pressLX) > Theme.sp(6)
+                           || Math.abs(p.y - pressLY) > Theme.sp(6)
+                    if (!far) return
+                    holdTimer.stop()
+                    if (pressedNode && root.editable) {
+                        mode = "nudge"
+                        nudgeBase = { dx: root._ndx(pressedNode.id, root._nudgeRev),
+                                      dy: root._ndy(pressedNode.id, root._nudgeRev) }
+                    } else if (!pressedNode && !pressedEdge) {
+                        mode = "marquee"
+                    } else {
+                        mode = "idle"
+                    }
+                }
+
+                if (mode === "nudge" && pressedNode) {
+                    var n = root._nudges
+                    n[pressedNode.id] = { dx: nudgeBase.dx + (p.x - pressLX),
+                                          dy: nudgeBase.dy + (p.y - pressLY) }
+                    root._nudges = n
+                    root._nudgeRev++
+                }
+            }
+
+            onReleased: (mouse) => {
+                holdTimer.stop()
+                var p = toLayout(mouse.x, mouse.y)
+
+                if (mode === "ring")  { ring.release(); mode = "idle"; return }
+                if (root._dragging)   { root._dropDrag(p.x, p.y); mode = "idle"; return }
+                if (mode === "marquee") { root._applyMarquee(); mode = "idle"; return }
+                if (mode === "nudge")   { mode = "idle"; return }
+
+                // A press that neither held nor travelled is a click.
+                if (mode === "pending") {
+                    if (pressedNode) root.nodeActivated(pressedNode.nodeType || "", pressedNode.id)
+                    else if (pressedEdge) root.edgeActivated(pressedEdge.rowId)
+                    else root.selectionRequested([], [])
+                }
+                mode = "idle"
+            }
+
+            onCanceled: { holdTimer.stop(); mode = "idle" }
+
+            Timer {
+                id: holdTimer
+                interval: 350
+                onTriggered: {
+                    input.mode = "ring"
+                    root._openRing(input.mouseX, input.mouseY, false)
+                }
+            }
         }
         }
     }
 
-    // The reason, stated in the author's own terms, while the drag is still live.
+    // ── The ring ──────────────────────────────────────────────────────────────
+    //
+    // Parented to this PANE rather than to the window's overlay, so it cannot escape the pane the
+    // way the old status bar did — and so its clamping has a viewport to clamp against.
+    RingMenu {
+        id: ring
+        parent: root
+        firstOfSession: root._firstHoldOfSession
+        onCommitted: (slot, entry, value) => root._commitSpoke(entry, value)
+    }
+
+    // Keyboard equivalents live on the PANE, not inside the ring — the ring is one way to reach
+    // these verbs and it must not be the only thing that knows about them. Escape abandons whatever
+    // gesture is in flight, which is the one key an author will try without being told.
+    Shortcut {
+        sequences: [ StandardKey.Cancel ]
+        enabled:   root.visible && root._dragging
+        onActivated: root._disarm()
+    }
+
+    // Where a link drag actually lands, most of the time. The canvas draws a NEIGHBOURHOOD, so
+    // nearly everything on it is already linked to the focus and therefore refused — which makes
+    // dropping on open canvas the ordinary outcome rather than the escape hatch, and makes the list
+    // of legal conditions OFF the canvas the thing an author is usually reaching for.
+    ModelCausePicker {
+        id: cause
+        parent: root
+        title: root._upstreamDrag ? qsTr("Add a cause") : qsTr("Add an effect")
+        upstream: root._upstreamDrag
+        candidateSource: (text) => root.causeCandidatesProbe
+                                       ? root.causeCandidatesProbe(root._armFixed, text, root._armEnd)
+                                       : []
+        onPicked: (id) => {
+            if (root._armEnd === "to") root.linkRequested(id, root._armFixed)
+            else                       root.linkRequested(root._armFixed, id)
+            root._disarm()
+        }
+        onCreated: (objType, name) => {
+            root.createLinkedRequested(objType, name, root._armFixed, root._armEnd)
+            root._disarm()
+        }
+        onRejected: root._disarm()
+    }
+
+    // (fixedId, searchText, end) -> legal existing conditions. Pre-filtered in C++, and over the
+    // WHOLE library rather than the drawn nodes — which is the entire point: the ones worth linking
+    // to are the ones this picture does not contain.
+    property var causeCandidatesProbe: null
+
+    // ── Building the ring's eight slots ───────────────────────────────────────
+    //
+    // Clockwise from north: look · make · set · unmake. A direction means the same thing for every
+    // selection type, so the arrays below differ in what fills a slot and NEVER in which slot a
+    // meaning lives in. `null` is a gap; there is no disabled state.
+    // WHICH ring is decided by what was pressed, not by what happens to be selected: holding bare
+    // canvas opens the canvas ring even with a node still picked up from a moment ago, because the
+    // author pressed the canvas. What the SELECTION decides is the scope — pressing inside a
+    // multi-selection keeps all of it, which is the only way the bulk ring is ever reached.
+    function _ringModel() {
+        if (input.pressedNode) {
+            if (root.selectedNodeIds.length > 1) return root._bulkRing()
+            return root._nodeRing(input.pressedNode.id)
+        }
+        if (input.pressedEdge) {
+            if (root.selectedEdgeIds.length > 1) return root._bulkRing()
+            return root._linkRing(input.pressedEdge.rowId)
+        }
+        return root._canvasRing()
+    }
+
+    function _spoke(icon, label, hint, verb, opts) {
+        var e = { icon: icon, label: label, hint: hint, verb: verb,
+                  kind: "action", enabled: true, danger: false, values: [] }
+        if (opts) for (var k in opts) e[k] = opts[k]
+        return e
+    }
+
+    function _nodeRing(id) {
+        var n = root._nodeById(id)
+        if (!n) return root._canvasRing()
+        var vals = root.ringValuesProbe
+                       ? root.ringValuesProbe(n.nodeType || "characteristics", id, "group") : []
+        // `Revert to shipped` and `Move to trash` are the SAME call, and the object's source is
+        // what decides which of the two it means. An object that ships and has been changed here
+        // reverts; one authored here goes to the trash; one that ships untouched has neither, and
+        // its slot is a gap rather than a button that would explain itself by refusing.
+        var src   = n.source || "shipped"
+        var mine  = src === "yours"
+        var over  = src === "both"
+        return [
+            _spoke("◎", qsTr("Focus here"),  qsTr("Centre the graph on this"), "focus"),
+            _spoke("⧉", qsTr("Duplicate"),   qsTr("A copy, pre-filled from this one"), "duplicate"),
+            // TWO make-a-link spokes, not one, and the make column is doubled to pay for it.
+            //
+            // The brief argued for a single `Add cause of this…` with the direction carried by the
+            // wording, the arrowhead and the hover text, and it costs the SE slot that `New cause
+            // here` occupied. That was weighed and reversed: the DAG is read in both directions —
+            // "what does this cause" is as ordinary a question as "what causes this" — and an
+            // inversion the author has to know about (a held modifier, undiscoverable, invisible at
+            // rest) is not the equal of a spoke they can see. `New cause here` is not lost with the
+            // slot: the drag's own drop popover creates, and so does the inspector's `Add a cause`.
+            _spoke("→", qsTr("Add cause…"),
+                   qsTr("Drag to the condition that causes this"), "addCause", { kind: "drag" }),
+            _spoke("←", qsTr("Add effect…"),
+                   qsTr("Drag to the condition this one causes"), "addEffect", { kind: "drag" }),
+            vals && vals.length > 0
+                ? _spoke("▤", qsTr("Group"), qsTr("Which part of the swing this belongs to"),
+                         "group", { kind: "value", values: vals })
+                : null,
+            over ? _spoke("↺", qsTr("Revert to shipped"),
+                          qsTr("Drop your changes and take the shipped version"), "revert") : null,
+            mine ? _spoke("␡", qsTr("Move to trash"), qsTr("Remove this condition"),
+                          "trash", { danger: true })
+                 : null,
+            _spoke("▦", qsTr("Show in table"), qsTr("Find this row in the table"), "showInTable")
+        ]
+    }
+
+    function _linkRing(rowId) {
+        var e = root._edgeById(rowId)
+        var vals = root.ringValuesProbe ? root.ringValuesProbe("links", rowId, "strength") : []
+        var over = e && e.source === "both"
+        return [
+            _spoke("◎", qsTr("Open in inspector"), qsTr("This claim, in full"), "inspect"),
+            null,
+            _spoke("→", qsTr("Re-point from…"),
+                   qsTr("Drag to the condition this should come from"),
+                   "repointFrom", { kind: "drag" }),
+            _spoke("→", qsTr("Re-point to…"),
+                   qsTr("Drag to the condition this should point at"),
+                   "repointTo", { kind: "drag" }),
+            vals && vals.length > 0
+                ? _spoke("▤", qsTr("Strength"), qsTr("How strongly this cause explains it"),
+                         "strength", { kind: "value", values: vals })
+                : null,
+            over ? _spoke("↺", qsTr("Revert to shipped"),
+                          qsTr("Drop your changes and take the shipped claim"), "revert") : null,
+            // A link is a row that ceases to exist, so it is never "moved to trash" — there is no
+            // trash it could be found in. Undo is the whole of its recoverability, and the wording
+            // has to be honest about that.
+            _spoke("␡", qsTr("Delete link"), qsTr("This claim stops existing"),
+                   "deleteLink", { danger: true }),
+            _spoke("▦", qsTr("Show in table"), qsTr("Find this row in the table"), "showInTable")
+        ]
+    }
+
+    function _bulkRing() {
+        var nodes = root.selectedNodeIds.length
+        var edges = root.selectedEdgeIds.length
+        var onNodes = nodes > 0
+        var n = onNodes ? nodes : edges
+        var vals = onNodes
+            ? (root.ringValuesProbe
+                   ? root.ringValuesProbe("characteristics", root.selectedNodeIds[0], "group") : [])
+            : (root.ringValuesProbe
+                   ? root.ringValuesProbe("links", root.selectedEdgeIds[0], "strength") : [])
+        // Every live spoke is the bulk form with the count in the label, and each is ONE command
+        // over a list — so one ⌘Z restores all of them rather than the last one.
+        return [
+            null,
+            onNodes ? _spoke("⧉", qsTr("Duplicate %1").arg(n), qsTr("A copy of each"), "duplicateN")
+                    : null,
+            null,
+            null,
+            vals && vals.length > 0
+                ? _spoke("▤", onNodes ? qsTr("Group") : qsTr("Strength"),
+                         qsTr("Set it on all %1").arg(n),
+                         onNodes ? "groupN" : "strengthN", { kind: "value", values: vals })
+                : null,
+            _spoke("↺", qsTr("Revert %1 to shipped").arg(n),
+                   qsTr("Drop your changes to these"), "revertN"),
+            _spoke("␡", onNodes ? qsTr("Trash %1 conditions").arg(n)
+                                : qsTr("Delete %1 links").arg(n),
+                   qsTr("All %1 at once, as one step").arg(n), "trashN", { danger: true }),
+            _spoke("▦", qsTr("Show %1 in table").arg(n), qsTr("These rows, in the table"),
+                   "showNInTable")
+        ]
+    }
+
+    function _canvasRing() {
+        // Radius is a VIEW setting, so its three cells are built here rather than asked of the
+        // model — there is nothing about it in the pack to ask about.
+        var vals = []
+        var lo = Math.max(1, Math.min(2, root.scope - 1))
+        for (var i = 0; i < 3; i++) {
+            var v = lo + i
+            if (v > 4) break
+            vals.push({ value: String(v), label: qsTr("scope %1").arg(v), current: v === root.scope })
+        }
+        return [
+            _spoke("⤢", qsTr("Fit to window"), qsTr("Back to the fitted view"), "fit"),
+            _spoke("≡", qsTr("Tidy layout"), qsTr("Re-run the layout and drop every nudge"), "tidy"),
+            _spoke("✚", qsTr("New condition here"), qsTr("A new condition, unattached"), "newHere"),
+            // Nothing on this canvas can be copied yet, so there is nothing to paste. The slot is a
+            // gap rather than a button that would exist only to refuse.
+            null,
+            _spoke("▤", qsTr("Radius"), qsTr("How far around the focus to draw"),
+                   "radius", { kind: "value", values: vals }),
+            _spoke("↯", root.hideWeak ? qsTr("Show weak links") : qsTr("Hide weak links"),
+                   qsTr("Weak claims, drawn or not"), "toggleWeak"),
+            null,
+            _spoke("▦", qsTr("Switch to table"), qsTr("The same content, as rows"), "toTable")
+        ]
+    }
+
+    // ── Opening it ────────────────────────────────────────────────────────────
+    function _openRing(mx, my, latched) {
+        var p = root.mapFromItem(input, mx, my)
+        ring.openAt(p.x, p.y, root._ringModel(), root._hubTitle(), root._hubMeta(), latched)
+        root._firstHoldOfSession = false
+    }
+
+    // The hub says what the selection IS. Line two is replaced by the hot spoke's spoken label the
+    // moment one is hot, which is the only place the ring explains itself.
+    function _hubTitle() {
+        if (input.pressedNode) {
+            if (root.selectedNodeIds.length > 1)
+                return qsTr("%1 conditions").arg(root.selectedNodeIds.length)
+            var n = root._nodeById(input.pressedNode.id)
+            return n ? n.label : ""
+        }
+        if (input.pressedEdge) {
+            if (root.selectedEdgeIds.length > 1)
+                return qsTr("%1 links").arg(root.selectedEdgeIds.length)
+            var e = root._edgeById(input.pressedEdge.rowId)
+            var f = e ? root._nodeById(e.from) : null
+            var t = e ? root._nodeById(e.to)   : null
+            return f && t ? (f.label + " → " + t.label) : qsTr("Causal link")
+        }
+        return qsTr("Canvas")
+    }
+
+    function _sourceWord(src) {
+        return src === "both"  ? qsTr("yours over shipped")
+             : src === "yours" ? qsTr("yours")
+                               : qsTr("shipped")
+    }
+
+    function _hubMeta() {
+        if (input.pressedNode) {
+            if (root.selectedNodeIds.length > 1)
+                return qsTr("%1 selected").arg(root.selectedNodeIds.length)
+            var n = root._nodeById(input.pressedNode.id)
+            if (!n) return ""
+            return (n.latent ? qsTr("cause") : qsTr("condition")) + " · " + root._sourceWord(n.source)
+        }
+        if (input.pressedEdge) {
+            if (root.selectedEdgeIds.length > 1)
+                return qsTr("%1 selected").arg(root.selectedEdgeIds.length)
+            var e = root._edgeById(input.pressedEdge.rowId)
+            return qsTr("causal link") + " · " + root._sourceWord(e ? e.source : "")
+        }
+        // The honest census of what is on screen, which is also the answer to the question a
+        // truncated graph raises.
+        return qsTr("%1 of %2 drawn").arg(root._nodes.length).arg(root.totalConditions > 0
+                                                                  ? root.totalConditions
+                                                                  : root._nodes.length)
+    }
+
+    // How many conditions exist in all, for the hub's census line. Supplied by the panel because
+    // this pane only ever holds a neighbourhood.
+    property int totalConditions: 0
+
+    // ── What a committed spoke does ───────────────────────────────────────────
+    function _commitSpoke(entry, value) {
+        if (!entry) return
+
+        // A drag spoke does not do anything yet: it hands off to a drag with the button still down,
+        // and the edit happens on release. One continuous gesture from hold to drop.
+        if (entry.kind === "drag") { root._arm(entry.verb); return }
+
+        switch (entry.verb) {
+        // The pane's own business — a view state, so it never reaches the model or the undo stack.
+        case "fit":        root._userZoom = 1.0; return
+        case "tidy":       root._clearNudges(); root.verbInvoked("tidy", null); return
+        case "radius":     root.scopeRequested(parseInt(value)); return
+        case "toggleWeak": root.switchToggled("weak"); return
+
+        // Everything else is the panel's, because it is either a command or a navigation.
+        case "focus":
+        case "showInTable":
+        case "inspect":
+        case "duplicate":
+        case "revert":
+        case "trash":
+        case "deleteLink":
+        case "newHere":
+        case "toTable":
+        case "duplicateN":
+        case "revertN":
+        case "trashN":
+        case "showNInTable":
+            root.verbInvoked(entry.verb, root._verbArg())
+            return
+        case "group":
+        case "strength":
+        case "groupN":
+        case "strengthN":
+            root.verbInvoked(entry.verb, { ids: root._verbArg().ids, value: value })
+            return
+        }
+    }
+
+    function _verbArg() {
+        var onEdges = root.selectedEdgeIds.length > 0 || root.selectedEdgeId !== ""
+        var ids = root.selectedEdgeIds.length > 0 ? root.selectedEdgeIds
+                : root.selectedEdgeId !== ""      ? [ root.selectedEdgeId ]
+                : root.selectedNodeIds
+        // The TYPE travels with the ids. A latent cause and a characteristic are different rows in
+        // different lists, and a verb that assumed one of them would act on the wrong table the
+        // first time it met the other.
+        var t = "characteristics"
+        if (onEdges) t = "links"
+        else if (ids.length > 0) {
+            var n = root._nodeById(ids[0])
+            if (n && n.nodeType) t = n.nodeType
+        }
+        return {
+            ids: ids,
+            type: t,
+            // Where a `new … here` lands, so the panel does not have to guess at the middle.
+            x: input.pressLX,
+            y: input.pressLY
+        }
+    }
+
+    // ── Arming a drag ─────────────────────────────────────────────────────────
+    //
+    // The refusal set is computed HERE, once, at the moment the drag arms — not per hover. The
+    // predicate is authoritative and it lives in C++: a node that is off this canvas is still in
+    // the graph, and a reachability check written over the drawn nodes would happily draw a cycle
+    // through one of them.
+    function _arm(verb) {
+        var fixed = "", end = "to", edgeId = ""
+        var making = verb === "addCause" || verb === "addEffect"
+        if (making) {
+            if (root.selectedNodeIds.length !== 1) return
+            fixed = root.selectedNodeIds[0]
+            // Which END the held node occupies is the whole of the difference between the two make
+            // spokes, and everything downstream of here reads it off this one value: the anchor
+            // side of the box, which way the curve is drawn, where the arrowhead sits, which
+            // direction the refusal traversal runs, and which end a dropped-on-canvas node takes.
+            //
+            // `Add cause…`  — the target becomes the cause, so the held node is the `to`.
+            // `Add effect…` — the held node causes the target, so it is the `from`.
+            end = verb === "addCause" ? "to" : "from"
+        } else {
+            edgeId = root.selectedEdgeId
+            var e  = root._edgeById(edgeId)
+            if (!e) return
+            // The end that STAYS PUT is the one the refusal set is computed for.
+            if (verb === "repointFrom") { fixed = e.to;   end = "to" }
+            else                        { fixed = e.from; end = "from" }
+        }
+
+        root._armKind   = making ? "link" : "repoint"
+        root._armFixed  = fixed
+        root._armEnd    = end
+        root._armEdgeId = edgeId
+        root._refusals  = root.refusalsProbe
+                              ? root.refusalsProbe(fixed, root._conditionIds(), end) : ({})
+        var a = root._armAnchor()
+        root._dragX = a.x
+        root._dragY = a.y
+        root._dragTarget = ""
+        input.mode = "armed"
+    }
+
+    // The inspector's entrance to the identical drag. Returns false when this pane cannot serve it
+    // — the link is not on screen, or its ends are not — so the caller can fall back to a picker
+    // rather than arming a drag with nothing to aim at.
+    function armRepoint(edgeId, end) {
+        var e = root._edgeById(edgeId)
+        if (!e) return false
+        if (!root._nodeById(e.from) || !root._nodeById(e.to)) return false
+        root.selectionRequested([], [ edgeId ])
+        root._arm(end === "from" ? "repointFrom" : "repointTo")
+        return root._dragging
+    }
+
+    function _disarm() {
+        root._armKind = ""
+        root._armFixed = ""
+        root._armEdgeId = ""
+        root._refusals = ({})
+        root._dragTarget = ""
+        input.mode = "idle"
+    }
+
+    // The point the drag line is pinned to: the fixed node's edge, on the side the claim will read
+    // from, so the line leaves the box where a real one would.
+    function _armAnchor() {
+        var n = root._nodeById(root._armFixed)
+        if (!n) return { x: 0, y: 0 }
+        var nx = n.x + root._ndx(n.id, root._nudgeRev)
+        var ny = n.y + root._ndy(n.id, root._nudgeRev)
+        return { x: root._armEnd === "from" ? nx + n.w : nx, y: ny + n.h / 2 }
+    }
+
+    // Said on the node under the cursor, in a whole sentence, naming the other end. It is the third
+    // statement of the direction — the spoke's label and the arrowhead being the other two — and it
+    // is the only one that names both conditions, which is what makes it checkable by a reader who
+    // has lost track of which way round they are.
+    function _dropHint() {
+        if (root._armKind === "repoint") return qsTr("drop to re-point here")
+        var n = root._nodeById(root._armFixed)
+        if (!n) return root._upstream() ? qsTr("drop to add cause") : qsTr("drop to add effect")
+        return root._upstream() ? qsTr("drop to make this a cause of %1").arg(n.label)
+                                : qsTr("drop to make this an effect of %1").arg(n.label)
+    }
+
+    // True while the drag is looking for a CAUSE of the held node — the held node is the `to` end.
+    readonly property bool _upstreamDrag: root._armEnd === "to"
+    function _upstream() { return root._armEnd === "to" }
+
+    function _trackDrag(lx, ly) {
+        root._dragX = lx
+        root._dragY = ly
+        var over = root._nodeAt(lx, ly)
+        root._dragTarget = over ? over.id : ""
+    }
+
+    function _dropDrag(lx, ly) {
+        var over = root._nodeAt(lx, ly)
+        // Releasing over a refused node cancels. It was never a drop target, and saying so a second
+        // time at the moment of release would be the refusal-after-the-fact the whole design avoids.
+        if (over && !root._refusalOf(over.id)) {
+            if (root._armKind === "link") {
+                if (root._armEnd === "to") root.linkRequested(over.id, root._armFixed)
+                else                       root.linkRequested(root._armFixed, over.id)
+            } else {
+                root.repointRequested(root._armEdgeId,
+                                      root._armEnd === "to" ? "from" : "to", over.id)
+            }
+            root._disarm()
+            return
+        }
+        if (over) { root._disarm(); return }
+
+        // Empty canvas: ask which cause, over the whole library. This is the ordinary end of the
+        // gesture rather than a fallback — see ModelCausePicker for why the drawn nodes are the
+        // wrong place to look for one.
+        //
+        // A re-point stops here instead: it has an existing claim to move and nowhere out here to
+        // move it to. Its own picker is the inspector's.
+        if (root._armKind === "link") {
+            var p = inner.mapToItem(root, lx, ly)
+            cause.openAt(p.x, p.y, lx, ly)
+            return
+        }
+        root._disarm()
+    }
+
+    // ── Selection ─────────────────────────────────────────────────────────────
+    function _adoptPressSelection(node, edge) {
+        if (node) {
+            // Already in scope AND nothing else is — a press inside a multi-selection keeps it,
+            // which is what makes the bulk ring reachable at all. The second half of the test is
+            // load-bearing: a link left selected from a moment ago would otherwise decide which
+            // ring opens over the node actually under the finger.
+            if (root.selectedNodeIds.indexOf(node.id) >= 0 && root.selectedEdgeId === ""
+                && root.selectedEdgeIds.length === 0) return
+            root.selectionRequested([ node.id ], [])
+            return
+        }
+        if (edge) {
+            if (root.selectedEdgeIds.indexOf(edge.rowId) >= 0
+                && root.selectedNodeIds.length === 0) return
+            root.selectionRequested([], [ edge.rowId ])
+            return
+        }
+        // Bare canvas keeps whatever is selected until the press turns out to be a click or a
+        // marquee: a hold on empty space opens the canvas ring, and clearing here would make that
+        // ring depend on how close to a node the author happened to press.
+    }
+
+    // A marquee touching only edges selects EDGES; if it touches any node at all it is a node
+    // selection, and behaves exactly as the table's does. One rule, so the result of a sloppy drag
+    // is predictable rather than a mixture nothing has a verb for.
+    function _applyMarquee() {
+        var x0 = Math.min(input.pressLX, input.moveLX), x1 = Math.max(input.pressLX, input.moveLX)
+        var y0 = Math.min(input.pressLY, input.moveLY), y1 = Math.max(input.pressLY, input.moveLY)
+        if (x1 - x0 < Theme.sp(4) && y1 - y0 < Theme.sp(4)) { root.selectionRequested([], []); return }
+
+        var nodes = []
+        for (var i = 0; i < root._nodes.length; i++) {
+            var n = root._nodes[i]
+            if (n.kind === "measure") continue
+            var nx = n.x + root._ndx(n.id, root._nudgeRev)
+            var ny = n.y + root._ndy(n.id, root._nudgeRev)
+            if (nx + n.w >= x0 && nx <= x1 && ny + n.h >= y0 && ny <= y1) nodes.push(n.id)
+        }
+        if (nodes.length > 0) { root.selectionRequested(nodes, []); return }
+
+        var edges = []
+        for (var j = 0; j < root._edges.length; j++) {
+            var e = root._edges[j]
+            if (e.rowId === undefined) continue
+            var lx = e.labelX || 0, ly = e.labelY || 0
+            if (lx >= x0 && lx <= x1 && ly >= y0 && ly <= y1 && edges.indexOf(e.rowId) < 0)
+                edges.push(e.rowId)
+        }
+        root.selectionRequested([], edges)
+    }
+
+    // The reason, stated in the author's own terms, while the drag is still live. Only for the
+    // node under the cursor — every other refusal is already written on its own node.
     Rectangle {
-        visible: root._dragFrom !== "" && root._dragTarget !== "" && !root._dragLegal
-                 && root._dragReason !== ""
+        readonly property var hovered: root._dragging && root._dragTarget !== ""
+                                           ? root._refusalOf(root._dragTarget) : null
+        visible: hovered !== null
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Theme.sp(16)
@@ -526,12 +1338,43 @@ Item {
             id: reasonText
             anchors.centerIn: parent
             width: parent.width - Theme.sp(24)
-            text:  root._dragReason
+            text:  parent.hovered ? parent.hovered.text : ""
             font.family:    Theme.fontBody
             font.pixelSize: Theme.fontSzBody2
             color:          Theme.colorError
             wrapMode:       Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
+        }
+    }
+
+    // Where the gesture actually ends, said while it is still in flight.
+    //
+    // Nearly every node drawn here is already linked to the focus — that is WHY it is drawn — so
+    // most of them refuse, and an author watching a canvas full of dimmed boxes has no way to know
+    // that open space is the answer rather than a dead end. Stating it is the difference between a
+    // gesture that looks broken and one that looks finished.
+    Rectangle {
+        visible: root._dragging && root._armKind === "link" && root._dragTarget === ""
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Theme.sp(16)
+        width:  hintText.implicitWidth + Theme.sp(24)
+        height: hintText.implicitHeight + Theme.sp(14)
+        radius: Theme.radius
+        color:  Theme.colorAccentLight
+        border.width: 1
+        border.color: Theme.colorAccent
+        z: 19
+
+        Text {
+            id: hintText
+            anchors.centerIn: parent
+            text: root._upstreamDrag
+                      ? qsTr("Release on open canvas to choose or create a cause")
+                      : qsTr("Release on open canvas to choose or create an effect")
+            font.family:    Theme.fontBody
+            font.pixelSize: Theme.fontSzBody2
+            color:          Theme.colorAccent
         }
     }
 

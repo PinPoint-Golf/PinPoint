@@ -346,6 +346,28 @@ bool hasCausalPath(const CharacteristicPack &pack, const QString &fromId, const 
     return causallyReaches(pack, fromId, toId) || causallyReaches(pack, toId, fromId);
 }
 
+QSet<QString> causalClosure(const CharacteristicPack &pack, const QString &id, bool downstream)
+{
+    // One pass over the edge list per frontier node rather than an adjacency map built up front:
+    // the frontier is bounded by the condition count, and building the map would cost the same walk
+    // it saves. `seen` is the visited set AND the result, so a cycle already in the pack terminates
+    // here instead of hanging the drag that asked.
+    QSet<QString> seen;
+    QStringList   stack{ id };
+    while (!stack.isEmpty()) {
+        const QString cur = stack.takeLast();
+        for (const QString &next : downstream ? effectsOf(pack, cur) : causesOf(pack, cur)) {
+            if (seen.contains(next)) continue;
+            seen.insert(next);
+            stack << next;
+        }
+    }
+    // Only if a cycle led back to it. The contract is "what this reaches", and a self entry would
+    // read as a self-loop that is not in the pack.
+    seen.remove(id);
+    return seen;
+}
+
 QStringList tailsOfAxis(const CharacteristicPack &pack, const QString &axis)
 {
     QStringList out;

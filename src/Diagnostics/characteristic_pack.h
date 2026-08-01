@@ -22,6 +22,7 @@
 
 #include <QByteArray>
 #include <QJsonObject>
+#include <QSet>
 #include <QString>
 
 #include <vector>
@@ -170,6 +171,18 @@ bool causallyReaches(const CharacteristicPack &pack, const QString &fromId, cons
 // edge refuses every legal shortcut (`A → B` where `A → X → B` already runs), and says "cycle" while
 // doing it; that is what it used to do here, and it is what the two names now prevent.
 bool hasCausalPath(const CharacteristicPack &pack, const QString &fromId, const QString &toId);
+
+// Everything `id` reaches, in ONE walk. `downstream` picks the direction: true follows effects and
+// answers "what does this cause, transitively", false follows causes and answers "what causes this".
+// `id` itself is never in the result — a condition does not reach itself, and including it would
+// make every caller subtract it back out.
+//
+// This is causallyReaches() asked of every condition at once, and it exists because asking the
+// singular form per candidate is the same traversal repeated N times. The graph's link drag needs
+// the whole refusal set at the moment the drag arms (one walk, then O(1) per node); doing it per
+// hover was measurably the wrong shape on a pack this size, and it also has to be answered for
+// conditions that are OFF SCREEN, which is why it cannot be a UI-side check over drawn nodes.
+QSet<QString> causalClosure(const CharacteristicPack &pack, const QString &id, bool downstream);
 
 // Both tails of an axis, in pack order. Empty for a condition with no axis.
 QStringList tailsOfAxis(const CharacteristicPack &pack, const QString &axis);

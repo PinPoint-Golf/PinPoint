@@ -237,8 +237,14 @@ public:
     // and for `corroborates` no pair that already has a causal path (which the validator forbids).
     // The filtering is the point — an illegal edit cannot be CONSTRUCTED, rather than being built
     // and refused afterwards.
-    Q_INVOKABLE QVariantList linkCandidates(const QString &relation, const QString &fromId,
-                                            const QString &search = QString()) const;
+    //
+    // `end` says which end `fixedId` occupies, and defaults to the ordinary "what could this
+    // cause". "to" asks the mirror — what could cause this — which is what re-pointing the `from`
+    // end of an existing claim needs, and which no amount of swapping the arguments would give,
+    // because the acyclicity question is directed.
+    Q_INVOKABLE QVariantList linkCandidates(const QString &relation, const QString &fixedId,
+                                            const QString &search = QString(),
+                                            const QString &end = QStringLiteral("from")) const;
 
     // Measures a characteristic could be detected by, minus the ones it already reads.
     Q_INVOKABLE QVariantList measureCandidates(const QString &conditionId,
@@ -253,6 +259,37 @@ public:
     // to something the write would then reject.
     Q_INVOKABLE QVariantMap linkLegality(const QString &fromId, const QString &toId,
                                          const QString &relation = QStringLiteral("causes")) const;
+
+    // Every refusal for a whole candidate set at once, computed ONCE when a link drag arms.
+    //
+    // `fixedId` is the endpoint that is not moving and `end` says which end of the proposed edge it
+    // occupies — "to" for `Add cause of this…` (the target becomes a cause of the held node), "from"
+    // for the mirrored case, and both for re-point, where the endpoint staying put can be either.
+    // That parameter is why this is not linkLegality() in a loop with the arguments swapped: the
+    // caller states the geometry once and the traversal follows it.
+    //
+    // Returns { id: { reason, text } } for the REFUSED ids only — absent means legal. `reason` is
+    // one of self · exists · cycle for the view to key a tone off; `text` is the words to show,
+    // written here because a phrase assembled in a delegate is a phrase nothing can translate.
+    //
+    // One traversal, then O(1) per candidate. The cycle case is the expensive one and it is the
+    // reason this exists: `X → fixed` closes a cycle exactly when fixed already reaches X, so one
+    // causalClosure() of the fixed end answers it for every candidate at once. Per-hover was the
+    // shape this replaces.
+    Q_INVOKABLE QVariantMap linkRefusals(const QString &fixedId, const QStringList &ids,
+                                         const QString &end = QStringLiteral("to")) const;
+
+    // At most THREE options for one enum field, ordered, with the one this object already has
+    // marked: [{ value, label, current }].
+    //
+    // This is the graph ring's collar, and the cap is the whole reason it is a model call rather
+    // than a filter in the delegate. A collar is one level and three cells, full stop, so which
+    // three is a decision — for `strength` it is the whole ladder in ladder order, and for `group`
+    // it is the three most used in this library, with the object's own kept in whatever happens.
+    // A field with more options than fit does not get a longer collar; it gets the inspector, and
+    // the ring says so by opening it.
+    Q_INVOKABLE QVariantList ringValues(const QString &type, const QString &id,
+                                        const QString &field) const;
 
     // ── Editing ─────────────────────────────────────────────────────────────
     //
@@ -277,6 +314,42 @@ public:
                                     const QString &strength = QStringLiteral("moderate"));
     Q_INVOKABLE QVariantMap removeLink(const QString &fromId, const QString &toId,
                                        const QString &relation = QStringLiteral("causes"));
+
+    // Move one END of an existing causal claim to another condition. `end` is "from" or "to".
+    //
+    // Not a remove plus an add, and the difference is the whole point: the claim keeps its strength,
+    // its provenance tier and its citations, because re-pointing is a correction to WHO the claim is
+    // about, not a retraction of it. It is also ONE command, so a re-point that the author changes
+    // their mind about undoes in one step rather than leaving a deleted edge behind.
+    //
+    // Refused through linkLegality() like every other write, so the drag and the write cannot
+    // disagree.
+    Q_INVOKABLE QVariantMap repointCause(const QString &edgeId, const QString &end,
+                                         const QString &newId);
+
+    // List forms, so a marquee selection is ONE undo step. Singular calls exist for both and are
+    // still the right thing for a single row; these exist because twelve undos to reverse one
+    // gesture is a stack that punishes the shortcut it is there to enable.
+    Q_INVOKABLE QVariantMap removeCause(const QStringList &edgeIds);
+    Q_INVOKABLE QVariantMap removeObjects(const QString &type, const QStringList &ids);
+
+    // Strength over a list. A thin name over setFieldOnAll(), because the ring spoke says "Strength"
+    // and a caller should not have to know the field is spelled the same way.
+    Q_INVOKABLE QVariantMap setCauseStrength(const QStringList &edgeIds, const QString &strength);
+
+    // A new object AND its attachment to `otherId`, as ONE command — the graph drag released over
+    // empty canvas. `end` says which end of the new causal link the existing condition occupies,
+    // and is ignored by the types that do not attach with one.
+    //
+    // What "attached" means is per type, because it is per type everywhere else too: a
+    // characteristic becomes a cause, a screen becomes what settles it, a drill becomes what
+    // answers it. A measure is not here — it is minted through previewMeasure/mintMeasure, which
+    // asks questions a name cannot answer, and the caller routes that chip there.
+    //
+    // Two commands would let an author undo the object and keep an attachment to nothing. That is
+    // not a half-finished edit; it is a pack that fails validation with a dangling reference.
+    Q_INVOKABLE QVariantMap createAndAttach(const QString &type, const QString &name,
+                                            const QString &otherId, const QString &end);
 
     // Attach a measure to a characteristic at a tail, minting the signal that reads it.
     Q_INVOKABLE QVariantMap addMeasureTo(const QString &conditionId, const QString &measureId,
@@ -389,7 +462,13 @@ public:
 
     // A blank object of this type. Duplicate is the fast path and this is the second one, but
     // "second" is not "absent" — there has to be a way to author something unlike anything here.
-    Q_INVOKABLE QVariantMap createObject(const QString &type);
+    //
+    // `name` is optional and names it on creation rather than leaving "New characteristic" to be
+    // typed over: the graph's create-on-drop asks for a name inside the gesture, and landing a row
+    // called "New characteristic" that the author has already named would be a second edit and a
+    // second undo step for one thing they did once. The id is minted from the name when there is
+    // one, so it reads as what it is in every file that later mentions it.
+    Q_INVOKABLE QVariantMap createObject(const QString &type, const QString &name = QString());
 
     // ── Pack-wide settings ──────────────────────────────────────────────────
     //
