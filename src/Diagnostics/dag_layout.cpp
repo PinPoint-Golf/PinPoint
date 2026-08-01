@@ -148,6 +148,17 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
 
     const QSet<QString> openSet(opt.expanded.begin(), opt.expanded.end());
 
+    // One admission gate for every route into the picture — the automatic walk, the focus's
+    // symmetric partners and the opened boxes all ask this, so a filter cannot apply to some of
+    // them and quietly not to others. The focus itself never comes through here: it is seated
+    // before the walk starts.
+    auto admissible = [&](const QString &id) {
+        const Condition *c = pack.condition(id);
+        if (!c) return false;
+        if (!opt.includeScreened && c->confirmedBy == ConfirmedBy::Screened) return false;
+        return true;
+    };
+
     // ── 1. Rank assignment ──────────────────────────────────────────────────
     // Breadth-first in each direction, FIRST VISIT WINS, so a node reachable by two paths takes the
     // shortest one. Drawing it at both distances would make one condition look like two, and the
@@ -167,7 +178,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                 const QStringList nb = dir < 0 ? causesOf(pack, id) : effectsOf(pack, id);
                 for (const QString &n : nb) {
                     if (rankOf.contains(n)) continue;
-                    if (!pack.condition(n)) continue;
+                    if (!admissible(n)) continue;
                     // Past the cap the node is simply not admitted. It is not lost: it has no rank,
                     // so it lands in its parent's hidden count below, which is where the view says
                     // how much is off screen.
@@ -204,7 +215,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             const QString other = (e.from == focusId) ? e.to
                                 : (e.to == focusId)   ? e.from
                                                       : QString();
-            if (other.isEmpty() || rankOf.contains(other) || !pack.condition(other)) continue;
+            if (other.isEmpty() || rankOf.contains(other) || !admissible(other)) continue;
             if (opt.maxPerRank > 0 && int(byRank[0].size()) >= opt.maxPerRank) continue;
             rankOf.insert(other, 0);
             // ABOVE the focus, so the focus stays at the bottom of its own column. The detection
@@ -250,7 +261,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                     const QStringList nb = dir < 0 ? causesOf(pack, id) : effectsOf(pack, id);
                     for (const QString &n : nb) {
                         if (rankOf.contains(n)) continue;
-                        if (!pack.condition(n)) continue;
+                        if (!admissible(n)) continue;
                         if (opt.maxPerExpand > 0 && spent.value(id) >= opt.maxPerExpand) break;
                         ++spent[id];
                         rankOf.insert(n, nr);

@@ -1255,6 +1255,7 @@ Item {
                             depth: middlePane.graphDepth, maxPerRank: 8,
                             expanded: middlePane.graphExpanded, maxPerExpand: 16,
                             includeMeasures: middlePane.graphMeasures,
+                            includeScreened: middlePane.graphScreened,
                             hideWeak: middlePane.graphHideWeak,
                             hideProposed: middlePane.graphHideProposed
                         })
@@ -1277,6 +1278,7 @@ Item {
 
                     scope:           middlePane.graphDepth
                     includeMeasures: middlePane.graphMeasures
+                    includeScreened: middlePane.graphScreened
                     hideWeak:        middlePane.graphHideWeak
                     hideProposed:    middlePane.graphHideProposed
                     onScopeRequested: (v) => middlePane.graphDepth = v
@@ -1293,6 +1295,7 @@ Item {
                     onCollapseAllRequested: middlePane.graphExpanded = []
                     onSwitchToggled: (which) => {
                         if (which === "measures")      middlePane.graphMeasures     = !middlePane.graphMeasures
+                        else if (which === "screened") middlePane.graphScreened     = !middlePane.graphScreened
                         else if (which === "weak")     middlePane.graphHideWeak     = !middlePane.graphHideWeak
                         else                           middlePane.graphHideProposed = !middlePane.graphHideProposed
                     }
@@ -1356,6 +1359,9 @@ Item {
                 // to 4, which is how the causes of `over the top` were unreachable from `slice`.
                 property int  graphDepth: 2
                 property bool graphMeasures: false
+                // The physical-screen layer, ON by default — see the note on includeScreened in
+                // ModelGraph.qml for why this one opens the other way round from measures.
+                property bool graphScreened: true
                 property bool graphHideWeak: false
                 property bool graphHideProposed: false
 

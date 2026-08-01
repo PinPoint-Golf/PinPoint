@@ -99,6 +99,30 @@ Item {
             }
         }
 
+        // The switch row. `health` is the physical-screen layer and is the one switch that opens
+        // ON — the screened causes are where the chain of technique faults bottoms out, so a
+        // picture without them shows the swing and hides the reason for it.
+        function test_the_switches_read_their_own_state() {
+            var w = words(g)
+            verify(w.indexOf("measures") >= 0)
+            verify(w.indexOf("health") >= 0)
+            verify(w.indexOf("weak") >= 0)
+            verify(w.indexOf("proposed") >= 0)
+            // Defaults, and they are deliberately not the same: measures opens off, health on.
+            compare(g.includeMeasures, false)
+            compare(g.includeScreened, true)
+        }
+
+        function test_every_switch_asks_by_its_own_key() {
+            var asked = []
+            function grab(k) { asked.push(k) }
+            g.switchToggled.connect(grab)
+            g.switchToggled("screened")
+            g.switchToggled("measures")
+            g.switchToggled.disconnect(grab)
+            compare(asked, [ "screened", "measures" ])
+        }
+
         function test_the_ends_are_shown_not_hidden() {
             g.scope = 1
             // Still drawn at the floor, just not pressable — a control that vanished at its limit

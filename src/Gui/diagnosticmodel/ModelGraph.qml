@@ -1576,6 +1576,10 @@ Item {
     // what the `+` did while the layout still stopped at 2.
     readonly property int _scopeMax: 4
     property bool includeMeasures: false
+    // ON by default, unlike measures. The screened causes are the far left of the causal band
+    // rather than a detail hung under it, and a picture that opened without them would show a
+    // golfer their swing and hide the reason for it.
+    property bool includeScreened: true
     property bool hideWeak: false
     property bool hideProposed: false
 
@@ -1660,6 +1664,7 @@ Item {
             }
 
             Switch { label: qsTr("measures"); on: root.includeMeasures; key: "measures" }
+            Switch { label: qsTr("health");   on: root.includeScreened; key: "screened" }
             Switch { label: qsTr("weak");     on: !root.hideWeak;       key: "weak" }
             Switch { label: qsTr("proposed"); on: !root.hideProposed;   key: "proposed" }
         }

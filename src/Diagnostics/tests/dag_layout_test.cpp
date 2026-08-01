@@ -340,6 +340,51 @@ int main()
         check(lb.truncated, "the layout still says it is showing a part");
     }
 
+    // ── The physical-screen layer ────────────────────────────────────────────
+    //
+    // ON by default and removable, which is the opposite way round from measures. It is a NODE
+    // filter and not an edge one, so what it removes has to reappear in the hidden counts or the
+    // picture would claim the chain simply ends there.
+    std::printf("The screened layer can be taken out, and says that it was\n");
+    {
+        DagLayoutOptions on;
+        on.depth = 2;
+        const DagLayout lOn = layoutDag(p, QStringLiteral("focus"), on);
+        check(nodeById(lOn, "deepA") != nullptr, "a screened cause is drawn by default");
+
+        DagLayoutOptions off = on;
+        off.includeScreened = false;
+        const DagLayout lOff = layoutDag(p, QStringLiteral("focus"), off);
+        check(!nodeById(lOff, "deepA"), "and is gone when the layer is off");
+        check(nodeById(lOff, "deepB") != nullptr, "while a MEASURED cause at the same rank stays");
+
+        // Counted, not silently dropped — the same bargain every other bound here makes.
+        const DagNode *c1On  = nodeById(lOn,  "cause1");
+        const DagNode *c1Off = nodeById(lOff, "cause1");
+        check(c1On->hiddenCauses == 0, "with the layer on, cause1 has nothing hidden");
+        check(c1Off->hiddenCauses == 1, "with it off, cause1 reports the one it lost");
+        check(lOff.truncated, "and the layout says it is showing a part");
+
+        // The FOCUS is exempt. A filter that deleted the thing it was asked to draw would leave a
+        // reader on an empty canvas with no way to tell it from a stale link.
+        DagLayoutOptions fo;
+        fo.includeScreened = false;
+        const DagLayout lFocus = layoutDag(p, QStringLiteral("deepA"), fo);
+        check(nodeById(lFocus, "deepA") != nullptr,
+              "centring on a screened cause still draws it with the layer off");
+        check(lFocus.nodes.size() >= 1 && lFocus.width > 0, "…and lays out around it");
+
+        // It must apply to an OPENED box too, or the filter would hold on the automatic walk and
+        // quietly not on the one route the reader asked for by name.
+        DagLayoutOptions ex;
+        ex.depth = 1;
+        ex.includeScreened = false;
+        ex.expanded = { QStringLiteral("cause1") };
+        const DagLayout lEx = layoutDag(p, QStringLiteral("focus"), ex);
+        check(!nodeById(lEx, "deepA"), "an opened box does not smuggle a screened cause back in");
+        check(nodeById(lEx, "deepB") != nullptr, "…while still opening everything else");
+    }
+
     std::printf("An opened graph is still a laid-out graph\n");
     {
         DagLayoutOptions o;

@@ -2932,6 +2932,8 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
     opt.maxPerExpand = int(num("maxPerExpand", opt.maxPerExpand));
     opt.includeMeasures =
         options.value(QStringLiteral("includeMeasures"), opt.includeMeasures).toBool();
+    opt.includeScreened =
+        options.value(QStringLiteral("includeScreened"), opt.includeScreened).toBool();
 
     // Over the WORKING assembly, so an unsaved edge is drawn. Every coordinate comes from
     // dag_layout.h; QML positions nothing.

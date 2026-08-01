@@ -239,6 +239,21 @@ struct DagLayoutOptions {
     int    maxPerExpand = 12;
 
     bool   includeMeasures = true;
+
+    // The physical-screen layer: conditions whose ConfirmedBy is Screened — limited trail-hip
+    // internal rotation, poor core stability, thoracic kyphosis and the rest. ON by default, unlike
+    // measures, because they are the far LEFT of the causal band rather than a detail hung under
+    // it: they are where the chain of technique faults bottoms out, and a picture that opened
+    // without them would show a golfer their swing and hide the reason for it.
+    //
+    // Turning it off is for reading the swing on its own terms — a coach working on the move today
+    // does not need a mobility finding they cannot change in the lesson. What it removes is COUNTED
+    // like every other bound: a screened cause dropped here lands in its child's hiddenCauses, so
+    // the picture still says the explanation continues.
+    //
+    // The FOCUS is exempt. Centring the graph on a screened cause and having it vanish would be a
+    // filter deleting the thing it was asked to draw.
+    bool   includeScreened = true;
 };
 
 struct DagLayout {
