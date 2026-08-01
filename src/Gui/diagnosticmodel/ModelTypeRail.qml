@@ -121,7 +121,10 @@ Item {
             elide:          Text.ElideRight
         }
 
-        Item { Layout.fillHeight: true }
+        // Pushes the filters to the bottom of the rail — but it YIELDS to them, which is the whole
+        // point of the minimum. It used to be the only greedy child here, so it took every spare
+        // pixel and left the facet list on a fixed cap it routinely overflowed.
+        Item { Layout.fillHeight: true; Layout.minimumHeight: Theme.sp(8) }
 
         // ── Facets ────────────────────────────────────────────────────────────
         Rectangle {
@@ -162,11 +165,22 @@ Item {
 
         // Scrolled, because a facet list over a nine-value vocabulary is taller than the rail once
         // three of them are stacked.
+        //
+        // Takes the height it is ASKED for, up to what it needs, rather than a fixed cap. The cap
+        // was Theme.sp(300), which fitted a nine-value vocabulary and one more — so the third facet
+        // was already below the fold before the ranking facets were added, and those landed under
+        // it. A scroll area with nothing to say it continues reads as a list that has ended, so the
+        // rows past the cap were not merely awkward to reach: nobody knew they were there.
+        //
+        // The floor keeps it honest the other way. On a short window the list still scrolls rather
+        // than collapsing to a sliver that looks like a rendering fault.
         ScrollView {
             Layout.fillWidth:  true
-            Layout.maximumHeight: Theme.sp(300)
-            Layout.bottomMargin:  Theme.sp(12)
+            Layout.fillHeight: true
             Layout.preferredHeight: facetColumn.implicitHeight
+            Layout.maximumHeight:   facetColumn.implicitHeight
+            Layout.minimumHeight:   Theme.sp(140)
+            Layout.bottomMargin:    Theme.sp(12)
             clip: true
             visible: root.facets.length > 0
 

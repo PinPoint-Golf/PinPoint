@@ -483,7 +483,23 @@ const CharacteristicPack &ModelBrowser::pack() const { return m_assembled->pack(
 void ModelBrowser::invalidateDerived()
 {
     m_dirtyIdsValid = false;
+    // Every reach count is a fact about the causal edges, so one added link changes an unknown
+    // number of them — the whole memo goes rather than any attempt to work out which entries moved.
+    m_reach.clear();
     emit modelChanged();
+}
+
+const ModelBrowser::Reach &ModelBrowser::reachOf(const QString &conditionId) const
+{
+    const auto it = m_reach.constFind(conditionId);
+    if (it != m_reach.constEnd()) return it.value();
+
+    const CharacteristicPack &p = pack();
+    Reach                     r;
+    r.leadsTo  = int(causalClosure(p, conditionId, /*downstream*/ true).size());
+    r.outcomes = outcomeReachOf(p, conditionId);
+    r.causedBy = int(causalClosure(p, conditionId, /*downstream*/ false).size());
+    return *m_reach.insert(conditionId, r);
 }
 
 void ModelBrowser::refresh()
@@ -716,12 +732,26 @@ QVariantList ModelBrowser::columns(const QString &type) const
         c.append(column(QStringLiteral("measures"), tr("Meas"), 52, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("causes"), tr("Caus"), 52, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("explains"), tr("Expl"), 52, false, QStringLiteral("right"), true));
+        // What CONVERGES here — how many faults eventually produce this. A characteristic is
+        // interesting for what leads to it: slice causes nothing at all, so every out-edge column
+        // reads zero for it while 37 conditions eventually produce one, and without this the list
+        // cannot surface an outcome at all.
+        //
+        // Titled `Faults` rather than by the arithmetic ("fed by", "paths in"): it is the count of
+        // faults leading here, and a row with a lot of them is what a coach calls a common outcome —
+        // which is exactly what the facet over this column is called. See ADDENDUM-03.
+        c.append(column(QStringLiteral("causedBy"), tr("Faults"), 64, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("reach"), tr("Reach"), 100));
         c.append(column(QStringLiteral("evidence"), tr("Evidence"), 128));
     } else if (type == kCauses) {
         c.append(column(QStringLiteral("name"), tr("Name"), 240, true));
         c.append(column(QStringLiteral("group"), tr("Group"), 120));
         c.append(column(QStringLiteral("explains"), tr("Explains"), 68, false, QStringLiteral("right"), true));
+        // The two that make this list a ranking rather than a register. `Explains` beside them is
+        // kept deliberately: it is what the author DREW, and the gap between it and `Leads to` is
+        // the chain they built without noticing.
+        c.append(column(QStringLiteral("leadsTo"), tr("Leads to"), 64, false, QStringLiteral("right"), true));
+        c.append(column(QStringLiteral("outcomes"), tr("Shots"), 56, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("reach"), tr("Reach"), 100));
         c.append(column(QStringLiteral("screen"), tr("Screen"), 150));
         c.append(column(QStringLiteral("evidence"), tr("Evidence"), 128));
@@ -839,11 +869,20 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
     editable(tierCell, QStringLiteral("tier"), QStringLiteral("enum"),
              provenanceTierName(c.provenance.tier), tierOptions());
 
+    // How far this condition reaches, both ways. Memoised — see reachOf().
+    const Reach reach = reachOf(c.id);
+
     QVariantList cells;
     cells.append(nameCell);
     cells.append(groupCell);
     if (asCause) {
         cells.append(cell(QString::number(coverageOf(p, c.id)), QString(), true, QStringLiteral("right")));
+        cells.append(cell(QString::number(reach.leadsTo), QString(), true, QStringLiteral("right")));
+        // Toned when it explains no bad shot at all: a cause that reaches nothing a golfer would
+        // complain about is not wrong, but it is the row an author wants to see is which.
+        cells.append(cell(QString::number(reach.outcomes),
+                          reach.outcomes == 0 ? QStringLiteral("dim") : QString(), true,
+                          QStringLiteral("right")));
         cells.append(reachCell);
         cells.append(cell(c.screenRef, c.screenRef.isEmpty() ? QStringLiteral("dim") : QString()));
         cells.append(tierCell);
@@ -851,6 +890,14 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
         cells.append(cell(QString::number(measureN), QString(), true, QStringLiteral("right")));
         cells.append(cell(QString::number(causesOf(p, c.id).size()), QString(), true, QStringLiteral("right")));
         cells.append(cell(QString::number(effectsOf(p, c.id).size()), QString(), true, QStringLiteral("right")));
+        // Dimmed at zero, never WARNED. Nothing leading here has two readings and the cell cannot
+        // tell them apart: a root cause is *supposed* to have nothing above it, and a characteristic
+        // whose causes nobody has authored yet looks identical. Colouring both as a fault would
+        // badge every legitimate root in the pack. The facet's `none` bucket is where an author goes
+        // to read the twenty and decide which they are.
+        cells.append(cell(QString::number(reach.causedBy),
+                          reach.causedBy == 0 ? QStringLiteral("dim") : QString(), true,
+                          QStringLiteral("right")));
         cells.append(reachCell);
         cells.append(tierCell);
     }
@@ -868,6 +915,12 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
     keys.insert(QStringLiteral("measures"), measureN);
     keys.insert(QStringLiteral("causes"), int(causesOf(p, c.id).size()));
     keys.insert(QStringLiteral("explains"), coverageOf(p, c.id));
+    // All THREE on both row types, whichever columns this list happens to draw. A sort key is not
+    // required to have a column — `axis` below has none either — and the quantile facets read these
+    // rather than cell text, so either list can be faceted on any of them.
+    keys.insert(QStringLiteral("leadsTo"), reach.leadsTo);
+    keys.insert(QStringLiteral("outcomes"), reach.outcomes);
+    keys.insert(QStringLiteral("causedBy"), reach.causedBy);
     keys.insert(QStringLiteral("evidence"), int(c.provenance.tier));
     keys.insert(QStringLiteral("reach"), int(c.confirmedBy));
     keys.insert(QStringLiteral("name"), c.label.isEmpty() ? c.id : c.label);
@@ -1437,6 +1490,23 @@ QVariantList ModelBrowser::rows(const QString &type, const QVariantMap &filters)
     // ── Facets ──────────────────────────────────────────────────────────────
     const QVariantMap facetFilters = filters.value(QStringLiteral("facets")).toMap();
     if (!facetFilters.isEmpty()) {
+        // The QUANTILE buckets, as the facet rail advertised them. Read back from the same call the
+        // chips were built by rather than re-derived here: two derivations of one percentile is how
+        // a chip ends up saying twelve and returning nine, which is the invariant the vocabulary
+        // facets keep by matching cell text and this kind has to keep some other way.
+        //
+        // Keyed on the facet key, then the bucket value, so the lookup below is O(1) per row.
+        QHash<QString, QHash<QString, QVariantMap>> qBuckets;
+        for (const QVariant &fv : quantileFacets(type)) {
+            const QVariantMap f = fv.toMap();
+            QHash<QString, QVariantMap> byValue;
+            for (const QVariant &ov : f.value(QStringLiteral("options")).toList()) {
+                const QVariantMap o = ov.toMap();
+                byValue.insert(o.value(QStringLiteral("value")).toString(), o);
+            }
+            qBuckets.insert(f.value(QStringLiteral("key")).toString(), byValue);
+        }
+
         QVariantList kept;
         for (const QVariant &v : out) {
             const QVariantMap r    = v.toMap();
@@ -1445,6 +1515,24 @@ QVariantList ModelBrowser::rows(const QString &type, const QVariantMap &filters)
             for (auto it = facetFilters.constBegin(); it != facetFilters.constEnd() && ok; ++it) {
                 const QStringList wanted = it.value().toStringList();
                 if (wanted.isEmpty()) continue;
+
+                // A numeric facet: the row's SORT KEY against the bucket's range. Several buckets
+                // of one facet are OR'd, exactly as several values of a vocabulary facet are.
+                const auto qb = qBuckets.constFind(it.key());
+                if (qb != qBuckets.constEnd()) {
+                    const int n   = keys.value(it.key()).toInt();
+                    bool      hit = false;
+                    for (const QString &w : wanted) {
+                        const auto b = qb.value().constFind(w);
+                        if (b == qb.value().constEnd()) continue;
+                        const int  lo    = b.value().value(QStringLiteral("lo")).toInt();
+                        const int  hi    = b.value().value(QStringLiteral("hi")).toInt();
+                        const bool hasHi = b.value().value(QStringLiteral("hasHi")).toBool();
+                        if (n >= lo && (!hasHi || n <= hi)) { hit = true; break; }
+                    }
+                    ok = hit;
+                    continue;
+                }
                 // Facet values are matched against the CELL TEXT of the facet's column, which is
                 // what the rail counted — one source for the count and the filter, so a chip can
                 // never say 12 and return 9.
@@ -1501,7 +1589,13 @@ QVariantList ModelBrowser::rows(const QString &type, const QVariantMap &filters)
         } else if (type == kHealth) {
             sortKey = QStringLiteral("severity");
         } else if (type == kCauses) {
-            sortKey = QStringLiteral("explains");
+            // BAD SHOTS EXPLAINED, not direct out-degree. This defaulted to `explains`, which counts
+            // only the arrows leaving a node, so "settled tempo habit" — one arrow out, 29
+            // conditions and eleven ball-flight outcomes downstream — sorted near the bottom of 95
+            // rows and read as trivial content. Direct out-degree systematically buries long chains,
+            // which is the shape a root cause has, so leaving it as the default would ship the
+            // ranking ADDENDUM-03 exists to correct. `leadsTo` is the tie-break, below.
+            sortKey = QStringLiteral("outcomes");
             descending = true;
         } else if (type == kMetrics) {
             // By group, the way the catalogue itself is organised.
@@ -1525,6 +1619,7 @@ QVariantList ModelBrowser::rows(const QString &type, const QVariantMap &filters)
 
     const bool measuresDefault = (type == kMeasures && !explicitSort);
     const bool charsDefault    = (type == kCharacteristics && !explicitSort);
+    const bool causesDefault   = (type == kCauses && !explicitSort);
 
     std::stable_sort(out.begin(), out.end(), [&](const QVariant &av, const QVariant &bv) {
         const QVariantMap a = av.toMap().value(QStringLiteral("sortKeys")).toMap();
@@ -1565,6 +1660,14 @@ QVariantList ModelBrowser::rows(const QString &type, const QVariantMap &filters)
             const int ra = a.value(QStringLiteral("readBy")).toInt();
             const int rb = b.value(QStringLiteral("readBy")).toInt();
             if (ra != rb) return ra < rb;
+        }
+        // Bad shots, then total reach. The outcome count is coarse — thirteen values over 95 rows —
+        // so without a second key the top of the list is an arbitrary order among everything that
+        // explains eight shots, and the cause reaching 46 conditions could sit below one reaching 12.
+        if (causesDefault) {
+            const int la = a.value(QStringLiteral("leadsTo")).toInt();
+            const int lb = b.value(QStringLiteral("leadsTo")).toInt();
+            if (la != lb) return la > lb;
         }
         // Group → axis pair → label: the two tails of one measure land adjacent instead of reading
         // as two near-duplicate faults several rows apart.
@@ -1607,7 +1710,14 @@ QVariantList ModelBrowser::facets(const QString &type) const
     const QVariantList all  = rawRows(type);
     const QVariantList cols = columns(type);
 
-    QVariantList out;
+    // The numeric facets go FIRST, above the vocabularies.
+    //
+    // They were appended last on the reasoning that "how much" is asked after "what kind". That was
+    // wrong for a reason no ordering argument reaches: the rail is a scroll area, the vocabularies
+    // ahead of them are long — `group` alone is nine values — and anything past the fold is not a
+    // lower priority, it is invisible. Ranking is what an author opens this rail for now, so it goes
+    // where it can be seen without scrolling.
+    QVariantList out = quantileFacets(type);
     for (const QString &key : keys) {
         QString title;
         int     colIndex = -1;
@@ -1644,6 +1754,133 @@ QVariantList ModelBrowser::facets(const QString &type) const
         QVariantMap f;
         f.insert(QStringLiteral("key"), key);
         f.insert(QStringLiteral("label"), title);
+        f.insert(QStringLiteral("kind"), QStringLiteral("value"));
+        f.insert(QStringLiteral("options"), options);
+        out.append(f);
+    }
+    return out;
+}
+
+// ── Facets cut from the data ────────────────────────────────────────────────
+
+QVariantList ModelBrowser::quantileFacets(const QString &type) const
+{
+    // Which numeric sort key each type offers a bucketed facet on, and what a ZERO reads as in that
+    // key's own words. Deliberately few, and per list rather than everywhere: a cause is interesting
+    // for what it reaches, a characteristic for what converges on it. Both lists carry all three
+    // sort keys, so widening this table is the only work a fourth facet needs.
+    // The bucket WORDS are per facet, not one ladder reused. "Very common" is right for a facet that
+    // ranks how much of the model converges somewhere and wrong for one that ranks how much a fault
+    // drags along with it — that second question is about breadth, and answering it in the language
+    // of frequency would say something the count does not.
+    //
+    // Deciles and quartiles are gone from the labels. Nobody ranks a swing fault by percentile, and
+    // a chip reading "Top tenth" made the author translate before they could use it. The numeric
+    // RANGE stays, in brackets: it is what keeps a chip arguable, and it is also what stops "very
+    // common" being read as a measured frequency — this counts paths through the model, not swings
+    // observed. See ADDENDUM-03 on why the empirical version is a separate piece of work.
+    struct Def { QString key; QString label; QString high; QString mid; QString low; QString zero; };
+    std::vector<Def> defs;
+    if (type == kCauses) {
+        defs.push_back({ QStringLiteral("outcomes"), tr("Most common faults"),
+                         tr("Very common"), tr("Common"), tr("Less common"),
+                         tr("No shot outcomes") });
+        // Breadth, not frequency — so it counts in its own words.
+        defs.push_back({ QStringLiteral("leadsTo"), tr("Knock-on effects"),
+                         tr("A lot"), tr("Some"), tr("A few"), tr("None") });
+    } else if (type == kCharacteristics) {
+        // `causedBy` only, and NOT `leadsTo` as well. This list already carries three vocabulary
+        // facets; a fourth and fifth push the rail past its scroll height, and "what does this lead
+        // to" is the Causes list's question asked on the wrong list — every row there with anything
+        // downstream is on that list by definition. The sort key is still present, so a column-header
+        // sort answers it without spending rail on it.
+        defs.push_back({ QStringLiteral("causedBy"), tr("Most common outcomes"),
+                         tr("Very common"), tr("Common"), tr("Less common"),
+                         tr("Nothing leads here") });
+    } else {
+        return {};
+    }
+
+    const QVariantList all = rawRows(type);
+
+    // Nearest rank, NO interpolation. An interpolated percentile over integer counts produces a
+    // fractional cut, and a chip reading "≥ 11.75" is one nobody can act on. Taken over the NON-ZERO
+    // population: zero is its own bucket, and letting twenty rows of nothing drag the quartile down
+    // would put the cut where the data is not.
+    auto nearestRank = [](const std::vector<int> &sortedAsc, double p) -> int {
+        if (sortedAsc.empty()) return 0;
+        const int k = int(std::ceil(p / 100.0 * double(sortedAsc.size()))) - 1;
+        return sortedAsc[size_t(std::clamp(k, 0, int(sortedAsc.size()) - 1))];
+    };
+
+    QVariantList out;
+    for (const Def &d : defs) {
+        std::vector<int> values, nonZero;
+        values.reserve(size_t(all.size()));
+        for (const QVariant &v : all) {
+            const int n = v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                              .value(d.key).toInt();
+            values.push_back(n);
+            if (n > 0) nonZero.push_back(n);
+        }
+        if (nonZero.empty()) continue;
+        std::sort(nonZero.begin(), nonZero.end());
+
+        const int p75 = nearestRank(nonZero, 75.0);
+        const int p90 = nearestRank(nonZero, 90.0);
+        const int max = nonZero.back();
+
+        // Half-open ranges with an explicit "no upper bound" flag rather than a sentinel, so the
+        // filter never has to guess whether some large number means infinity.
+        struct Bucket { QString value; QString label; int lo; int hi; bool hasHi; };
+        std::vector<Bucket> buckets;
+        // Each label states its own CUT, in brackets after the word. A chip that will not say its
+        // threshold is one the author cannot argue with, and a ranking they cannot argue with is one
+        // they will not trust.
+        buckets.push_back({ QStringLiteral("top"),
+                            tr("%1 (%2+)").arg(d.high).arg(p90), p90, 0, false });
+        if (p75 < p90)
+            buckets.push_back({ QStringLiteral("high"),
+                                tr("%1 (%2–%3)").arg(d.mid).arg(p75).arg(p90 - 1),
+                                p75, p90 - 1, true });
+        if (p75 > 1)
+            buckets.push_back({ QStringLiteral("rest"),
+                                tr("%1 (1–%2)").arg(d.low).arg(p75 - 1), 1, p75 - 1, true });
+        buckets.push_back({ QStringLiteral("none"), d.zero, 0, 0, true });
+
+        QVariantList options;
+        int          live = 0;
+        for (const Bucket &b : buckets) {
+            int n = 0;
+            for (int v : values)
+                if (v >= b.lo && (!b.hasHi || v <= b.hi)) ++n;
+            // An empty bucket is dropped rather than drawn as a zero — a chip that returns nothing
+            // is a click the author has to spend to learn it was worthless.
+            if (n == 0) continue;
+            ++live;
+
+            QVariantMap o;
+            o.insert(QStringLiteral("value"), b.value);
+            o.insert(QStringLiteral("label"), b.label);
+            o.insert(QStringLiteral("count"), n);
+            // The bounds travel WITH the option, and rows() filters by reading them back from here
+            // rather than re-deriving the percentiles. That is what makes "a chip cannot say twelve
+            // and return nine" true by construction for a facet whose values are ranges. QML binds
+            // only value/label/count and ignores these.
+            o.insert(QStringLiteral("lo"), b.lo);
+            o.insert(QStringLiteral("hi"), b.hi);
+            o.insert(QStringLiteral("hasHi"), b.hasHi);
+            options.append(o);
+        }
+        // The same rule the vocabularies follow: one bucket filters nothing. A pack where every
+        // condition reaches the same amount offers no chips rather than one that means "all".
+        if (live < 2) continue;
+
+        QVariantMap f;
+        f.insert(QStringLiteral("key"), d.key);
+        f.insert(QStringLiteral("label"), d.label);
+        f.insert(QStringLiteral("kind"), QStringLiteral("quantile"));
+        f.insert(QStringLiteral("max"), max);
         f.insert(QStringLiteral("options"), options);
         out.append(f);
     }

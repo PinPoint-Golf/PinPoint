@@ -368,6 +368,15 @@ QSet<QString> causalClosure(const CharacteristicPack &pack, const QString &id, b
     return seen;
 }
 
+int outcomeReachOf(const CharacteristicPack &pack, const QString &conditionId)
+{
+    int n = 0;
+    for (const QString &id : causalClosure(pack, conditionId, /*downstream*/ true))
+        if (const Condition *c = pack.condition(id))
+            if (c->group == ConditionGroup::BallFlight) ++n;
+    return n;
+}
+
 QStringList tailsOfAxis(const CharacteristicPack &pack, const QString &axis)
 {
     QStringList out;

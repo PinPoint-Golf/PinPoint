@@ -36,6 +36,7 @@
 #include <QCoreApplication>
 #include <QFile>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -255,6 +256,234 @@ int main(int argc, char **argv)
             }
         }
         check(countsMatch, "every facet chip returns exactly the number it advertises");
+    }
+
+    std::printf("=== a condition ranks by how far it REACHES, not by its out-degree ===\n");
+    {
+        // Direct out-degree buries a long chain, and a long chain is the shape a root cause has.
+        // "Settled tempo habit" is the regression case: ONE arrow leaves it, and it reaches 29
+        // conditions and eleven ball-flight outcomes. Ranked on `explains` it sat near the bottom
+        // of 95 rows and read as trivial content.
+        const QVariantList causes = m.rows(QStringLiteral("causes"));
+        check(!causes.isEmpty(), "the causes list is populated");
+
+        QVariantMap tempo;
+        for (const QVariant &v : causes)
+            if (v.toMap().value(QStringLiteral("label")).toString()
+                == QStringLiteral("Settled tempo habit"))
+                tempo = v.toMap();
+        check(!tempo.isEmpty(), "the shipped pack still carries the long-chain case");
+        if (!tempo.isEmpty()) {
+            const QVariantMap k = tempo.value(QStringLiteral("sortKeys")).toMap();
+            check(k.value(QStringLiteral("explains")).toInt() == 1,
+                  "it has exactly one arrow leaving it");
+            check(k.value(QStringLiteral("leadsTo")).toInt() > 20,
+                  "and reaches twenty-plus conditions through the chain");
+            check(k.value(QStringLiteral("outcomes")).toInt() > 5,
+                  "explaining a spread of bad shots the old column could not see");
+        }
+
+        // Transitive reach can never be smaller than the direct count, and the outcomes are a
+        // SUBSET of what is reached — a stricter statement than "both are positive", and the one
+        // that catches a walk run in the wrong direction.
+        bool consistent = true;
+        for (const QVariant &v : causes) {
+            const QVariantMap k = v.toMap().value(QStringLiteral("sortKeys")).toMap();
+            const int direct = k.value(QStringLiteral("explains")).toInt();
+            const int reach  = k.value(QStringLiteral("leadsTo")).toInt();
+            const int shots  = k.value(QStringLiteral("outcomes")).toInt();
+            if (reach < direct || shots > reach) consistent = false;
+        }
+        check(consistent, "reach >= direct, and outcomes are a subset of what is reached");
+
+        // Every counted outcome really is a BallFlight condition. Asserted against the pack rather
+        // than against the façade, or the count could agree with itself and be wrong.
+        {
+            const auto                provider = makeResourcePackProvider();
+            const CharacteristicPack &p        = provider->pack();
+            bool                      matched  = true;
+            for (const Condition &c : p.conditions) {
+                int n = 0;
+                for (const QString &id : causalClosure(p, c.id, /*downstream*/ true))
+                    if (const Condition *e = p.condition(id))
+                        if (e->group == ConditionGroup::BallFlight) ++n;
+                if (outcomeReachOf(p, c.id) != n) matched = false;
+            }
+            check(matched, "outcomeReachOf counts the BallFlight members of the closure and no others");
+        }
+
+        // The default ordering is the whole point of the change: the first row must be a top-reach
+        // cause, not whichever leaf happens to carry the most direct arrows.
+        const QVariantMap first = causes.value(0).toMap().value(QStringLiteral("sortKeys")).toMap();
+        int               bestShots = 0;
+        for (const QVariant &v : causes)
+            bestShots = std::max(bestShots, v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                                                .value(QStringLiteral("outcomes")).toInt());
+        check(first.value(QStringLiteral("outcomes")).toInt() == bestShots,
+              "causes default to the bad shots they explain, best first");
+
+        // Slice is the mirror case: it causes NOTHING, so every out-edge column reads zero for it,
+        // and it is reachable only by what converges on it.
+        QVariantMap slice;
+        for (const QVariant &v : m.rows(QStringLiteral("characteristics")))
+            if (v.toMap().value(QStringLiteral("label")).toString() == QStringLiteral("Slice"))
+                slice = v.toMap();
+        check(!slice.isEmpty(), "slice is on the characteristics list");
+        if (!slice.isEmpty()) {
+            const QVariantMap k = slice.value(QStringLiteral("sortKeys")).toMap();
+            check(k.value(QStringLiteral("leadsTo")).toInt() == 0,
+                  "an outcome leads nowhere, so no out-edge measure can surface it");
+            check(k.value(QStringLiteral("causedBy")).toInt() > 20,
+                  "but a large part of the library converges on it");
+        }
+
+        // Sort keys exist on BOTH condition lists whichever columns are drawn, so either can be
+        // sorted or faceted on any of the three.
+        bool keyed = true;
+        for (const QString &type : { QStringLiteral("characteristics"), QStringLiteral("causes") })
+            for (const QVariant &v : m.rows(type)) {
+                const QVariantMap k = v.toMap().value(QStringLiteral("sortKeys")).toMap();
+                if (!k.contains(QStringLiteral("leadsTo")) || !k.contains(QStringLiteral("outcomes"))
+                    || !k.contains(QStringLiteral("causedBy")))
+                    keyed = false;
+            }
+        check(keyed, "all three reach keys ride on both condition lists");
+    }
+
+    std::printf("=== quantile facets are cut from the data, and count what they return ===\n");
+    {
+        for (const QString &type : { QStringLiteral("causes"), QStringLiteral("characteristics") }) {
+            QVariantList quantiles;
+            for (const QVariant &fv : m.facets(type))
+                if (fv.toMap().value(QStringLiteral("kind")).toString()
+                    == QStringLiteral("quantile"))
+                    quantiles.append(fv);
+            check(!quantiles.isEmpty(),
+                  qPrintable(QStringLiteral("%1 offers at least one numeric facet").arg(type)));
+
+            // FIRST in the rail, and this is a visibility rule rather than a taste one: the rail
+            // scrolls, `group` alone is nine values, and a facet emitted after the vocabularies
+            // lands below the fold where an author has no reason to think anything exists.
+            check(m.facets(type).value(0).toMap().value(QStringLiteral("kind")).toString()
+                      == QStringLiteral("quantile"),
+                  qPrintable(QStringLiteral("%1 leads its rail with the ranking facets").arg(type)));
+
+            for (const QVariant &fv : quantiles) {
+                const QVariantMap  f    = fv.toMap();
+                const QString      key  = f.value(QStringLiteral("key")).toString();
+                const QVariantList opts = f.value(QStringLiteral("options")).toList();
+
+                // One bucket filters nothing — the same rule the vocabulary facets follow.
+                check(opts.size() >= 2,
+                      qPrintable(QStringLiteral("%1 · %2 offers more than one bucket")
+                                     .arg(type, key)));
+
+                // THE invariant, extended to the new kind: the chip's count and the rows it
+                // returns come from one computation, so it cannot advertise twelve and return nine.
+                bool countsMatch = true, bounded = true, nonEmpty = true;
+                int  covered = 0;
+                for (const QVariant &ov : opts) {
+                    const QVariantMap o = ov.toMap();
+                    QVariantMap sel;
+                    sel.insert(key, QStringList{ o.value(QStringLiteral("value")).toString() });
+                    QVariantMap filters;
+                    filters.insert(QStringLiteral("facets"), sel);
+                    const int got = m.rows(type, filters).size();
+                    const int adv = o.value(QStringLiteral("count")).toInt();
+                    if (got != adv) countsMatch = false;
+                    if (adv == 0)   nonEmpty    = false;
+                    covered += adv;
+
+                    // Every returned row really is inside the bucket's range.
+                    const int  lo    = o.value(QStringLiteral("lo")).toInt();
+                    const int  hi    = o.value(QStringLiteral("hi")).toInt();
+                    const bool hasHi = o.value(QStringLiteral("hasHi")).toBool();
+                    for (const QVariant &rv : m.rows(type, filters)) {
+                        const int n = rv.toMap().value(QStringLiteral("sortKeys")).toMap()
+                                          .value(key).toInt();
+                        if (n < lo || (hasHi && n > hi)) bounded = false;
+                    }
+                }
+                check(countsMatch,
+                      qPrintable(QStringLiteral("%1 · %2: every bucket returns what it advertises")
+                                     .arg(type, key)));
+                check(bounded,
+                      qPrintable(QStringLiteral("%1 · %2: every row lands inside its bucket")
+                                     .arg(type, key)));
+                check(nonEmpty,
+                      qPrintable(QStringLiteral("%1 · %2: no bucket is drawn empty").arg(type, key)));
+                // Buckets partition the list: no row in two, none left out. A gap would hide rows
+                // from every chip at once, which is the failure an author would never think to look
+                // for.
+                check(covered == m.rows(type).size(),
+                      qPrintable(QStringLiteral("%1 · %2: the buckets cover the list exactly")
+                                     .arg(type, key)));
+
+                // Selecting two buckets ORs them, exactly as two values of a vocabulary facet do.
+                if (opts.size() >= 2) {
+                    QVariantMap sel;
+                    sel.insert(key, QStringList{ opts.at(0).toMap().value(QStringLiteral("value")).toString(),
+                                                 opts.at(1).toMap().value(QStringLiteral("value")).toString() });
+                    QVariantMap filters;
+                    filters.insert(QStringLiteral("facets"), sel);
+                    check(m.rows(type, filters).size()
+                              == opts.at(0).toMap().value(QStringLiteral("count")).toInt()
+                                     + opts.at(1).toMap().value(QStringLiteral("count")).toInt(),
+                          qPrintable(QStringLiteral("%1 · %2: two buckets OR together").arg(type, key)));
+                }
+            }
+        }
+
+        // A type with no numeric key offers none rather than an empty rail.
+        for (const QVariant &fv : m.facets(QStringLiteral("measures")))
+            check(fv.toMap().value(QStringLiteral("kind")).toString() != QStringLiteral("quantile"),
+                  "measures offer no quantile facet");
+    }
+
+    std::printf("=== an edit re-cuts the counts, it does not leave them stale ===\n");
+    {
+        // The memo is the risk this change introduces: a cached reach surviving an edit would show
+        // yesterday's ranking against today's graph, and nothing else in the panel would disagree
+        // with it. Adding one edge has to move the count of everything upstream of the new target.
+        const QVariantList causes = m.rows(QStringLiteral("causes"));
+        QString            from;
+        int                before = -1;
+        for (const QVariant &v : causes) {
+            const QVariantMap r = v.toMap();
+            const int reach = r.value(QStringLiteral("sortKeys")).toMap()
+                                  .value(QStringLiteral("leadsTo")).toInt();
+            if (reach > 0 && reach < 20) { from = r.value(QStringLiteral("id")).toString(); before = reach; break; }
+        }
+        check(!from.isEmpty(), "a cause with room to grow");
+
+        // Any legal target the graph would allow — asked of the same function the drag asks.
+        QString to;
+        for (const QVariant &v : m.linkCandidates(QStringLiteral("causes"), from)) {
+            const QString id = v.toMap().value(QStringLiteral("id")).toString();
+            if (id.isEmpty()) continue;
+            to = id;
+            break;
+        }
+        check(!to.isEmpty(), "and a legal thing to point it at");
+
+        if (!from.isEmpty() && !to.isEmpty()) {
+            check(m.addLink(from, to).value(QStringLiteral("ok")).toBool(), "the link lands");
+            int after = -1;
+            for (const QVariant &v : m.rows(QStringLiteral("causes")))
+                if (v.toMap().value(QStringLiteral("id")).toString() == from)
+                    after = v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                                .value(QStringLiteral("leadsTo")).toInt();
+            check(after > before, "and the reach count grew with it — the memo was invalidated");
+
+            m.undo();
+            int restored = -1;
+            for (const QVariant &v : m.rows(QStringLiteral("causes")))
+                if (v.toMap().value(QStringLiteral("id")).toString() == from)
+                    restored = v.toMap().value(QStringLiteral("sortKeys")).toMap()
+                                   .value(QStringLiteral("leadsTo")).toInt();
+            check(restored == before, "undo puts the count back too");
+        }
+        while (m.canUndo()) m.undo();
     }
 
     std::printf("=== cross-type search spans every registry ===\n");

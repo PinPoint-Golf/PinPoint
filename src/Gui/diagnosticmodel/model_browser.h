@@ -609,6 +609,39 @@ private:
     // The type's own colour key and glyph, and whatever one line a node can say about itself.
     void        decorateNode(QVariantMap &node, const QString &type, const QString &id) const;
 
+    // ── How far a condition reaches, and how much reaches it ────────────────
+    //
+    // The three derived counts every condition row carries, and the two condition lists rank on.
+    // Direct out-degree (`coverageOf`) buries a long chain — "settled tempo habit" has ONE arrow out
+    // of it and reaches 29 conditions and eleven distinct bad shots — so a list sorted on it puts
+    // the root causes at the bottom. See ADDENDUM-03.
+    //
+    // Counts, never a score. Each is the size of a set the inspector can list, which is what lets
+    // the ranking answer "why is this above that"; a strength-weighted magnitude could not.
+    struct Reach {
+        int leadsTo  = 0;   // causalClosure(downstream): everything this eventually causes
+        int outcomes = 0;   // of those, the BallFlight ones — the bad shots it explains
+        int causedBy = 0;   // causalClosure(upstream): everything that eventually causes this
+    };
+    // Memoised, because causalClosure() re-scans the whole edge list per frontier node by design
+    // (characteristic_pack.cpp says so) and three closures over 140 conditions is ~3.5M edge visits
+    // that rows(), facets() and types() would each pay again. Cleared by invalidateDerived() with
+    // m_dirtyIds, off the one invalidation point every mutation already goes through — a second
+    // place to remember would be a stale count on screen after an edit.
+    const Reach &reachOf(const QString &conditionId) const;
+    mutable QHash<QString, Reach> m_reach;
+
+    // ── Facets cut from the data, rather than from a closed vocabulary ──────
+    //
+    // A numeric facet ("leads to a lot of things") has no vocabulary to enumerate, so its chips are
+    // quantile buckets over the CURRENT distribution: top tenth, top quarter, the rest, and zero —
+    // which is always its own bucket, because "leads nowhere" is a category and not a low score.
+    //
+    // Bounds travel INSIDE each option map, and rows() filters by calling this rather than by
+    // re-deriving them. That is what keeps "a chip cannot say twelve and return nine" true by
+    // construction for a kind whose values are ranges instead of strings.
+    QVariantList quantileFacets(const QString &type) const;
+
     int  measureUsers(const QString &measureId) const;     // blast radius, as a count
     QVariantList measureUserRows(const QString &measureId) const;   // and as the actual list
 

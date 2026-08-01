@@ -184,6 +184,20 @@ bool hasCausalPath(const CharacteristicPack &pack, const QString &fromId, const 
 // conditions that are OFF SCREEN, which is why it cannot be a UI-side check over drawn nodes.
 QSet<QString> causalClosure(const CharacteristicPack &pack, const QString &id, bool downstream);
 
+// How many BALL-FLIGHT conditions this one eventually reaches — the bad shots it explains.
+//
+// A separate question from the size of the downstream closure, and the pack is what proves it is not
+// a proxy for it: limited TRAIL-hip internal rotation reaches 27 conditions and 6 outcomes, while
+// limited LEAD-hip internal rotation reaches 27 and 10. Identical apparent size, materially different
+// consequence, and the second is the one a coach is asking about.
+//
+// Lives here rather than at the call site because it is a GRAPH RULE, and the browser holds none —
+// see model_browser.h. It is deliberately a COUNT of a set that can be listed, never a score: this
+// repo has twice refused to weight a graph claim into a magnitude (Strength's three values,
+// Corroboration's refusal to multiply) on the grounds that nobody can defend the resulting number
+// when asked why one cause outranked another. A count always answers that with the members.
+int outcomeReachOf(const CharacteristicPack &pack, const QString &conditionId);
+
 // Both tails of an axis, in pack order. Empty for a condition with no axis.
 QStringList tailsOfAxis(const CharacteristicPack &pack, const QString &axis);
 
