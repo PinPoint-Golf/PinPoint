@@ -1120,6 +1120,21 @@ Item {
                         // were — so the trail starts here rather than growing by one.
                         root.selectFresh(root._typeOfRow(row), id)
                     }
+                    // The row's Graph chip. Selection has already happened — the table emits this
+                    // after activated(), and selectFresh() is synchronous — so _graphFocus has
+                    // already moved and this only has to swap the pane. Nothing is handed to the
+                    // graph; it centres on the selection, which is the same thing `G` relies on.
+                    //
+                    // The guard is the last check that there is a picture to show, not the only
+                    // one: rows the graph cannot draw do not offer the chip in the first place
+                    // (ModelTable's `canGraph`). It stays because the two conditions are decided in
+                    // different places — one from the row's type, one from what the selection
+                    // actually resolved to — and swapping to an empty canvas would leave the author
+                    // looking at nothing, with the row they clicked no longer on screen.
+                    onGraphRequested: (id) => {
+                        if (root._graphFocus.id === undefined || root._graphFocus.id === "") return
+                        root._view = "graph"
+                    }
                     onCommit: (id, field, value) => root.doCommit(id, field, value)
                     onDuplicateRequested: (id) => root.doDuplicate(id)
                     onRemoveRequested:    (id) => root.doRemove(id)

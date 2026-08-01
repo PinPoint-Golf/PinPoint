@@ -59,6 +59,9 @@ Item {
     signal duplicateRequested(string id)
     signal removeRequested(string id)
     signal sortRequested(string key)
+    // Draw this row's graph. Emitted AFTER activated(), so whoever is listening has already been
+    // told what to centre on before it is asked to show the picture.
+    signal graphRequested(string id)
 
     readonly property int rowHeight: Theme.sp(32)     // INCLUSIVE of its 1px separator
 
@@ -74,6 +77,22 @@ Item {
         Math.max(Theme.sp(240), listView.width - _fixedWidth - Theme.sp(36))
 
     function _columnWidth(col) { return col.flex ? _flexWidth : Theme.sp(col.width) }
+
+    // The x of the FLEX column's right edge — where the row's Graph chip sits.
+    //
+    // The flex column, not column zero. It is the one holding the label and taking the slack, which
+    // is the column a reader is actually scanning; on a cross-type search result that is `name` at
+    // index 1, with `Type` ahead of it, and hard-coding zero would park the chip over the type
+    // badge. Exactly one column flexes — the row-shape test asserts it — so this cannot be ambiguous.
+    readonly property int _flexColumnRight: {
+        var x = Theme.sp(18)                       // the Row's own left margin
+        for (var i = 0; i < columns.length; i++) {
+            var w = _columnWidth(columns[i])
+            if (columns[i].flex) return x + w
+            x += w
+        }
+        return x
+    }
 
     function _toneColor(tone) {
         switch (tone) {
@@ -242,6 +261,15 @@ Item {
             readonly property bool isCurrent:  root.selectedId === modelData.id
             readonly property bool hovered:    rowHover.hovered
 
+            // Whether this row is a thing the graph can draw. A search result knows its own type;
+            // an ordinary row carries the type it came from. Health is the one exclusion, and the
+            // façade agrees — graph() returns nothing for it, because a finding is a statement
+            // ABOUT an object rather than an object with a neighbourhood of its own.
+            readonly property bool canGraph: {
+                var t = modelData.resultType || modelData.type || ""
+                return t !== "" && t !== "health"
+            }
+
             Rectangle {
                 anchors.fill: parent
                 color: rowItem.isCurrent  ? Theme.colorAccentLight
@@ -304,7 +332,15 @@ Item {
                             anchors.left:       parent.left
                             anchors.leftMargin: dot.visible ? Theme.sp(7) + Theme.sp(9) : 0
                             anchors.right:      parent.right
-                            anchors.rightMargin: Theme.sp(10)
+                            // The flex column yields to the Graph chip rather than being covered by
+                            // it. The chip is opaque and could simply occlude, but this is the
+                            // column holding the NAME: what it would hide is the end of the very
+                            // word the reader is scanning for, and an elision they can see is
+                            // honest where a covered tail is not.
+                            anchors.rightMargin: (cellItem.col && cellItem.col.flex
+                                                  && graphChip.visible)
+                                                     ? graphChip.width + Theme.sp(14)
+                                                     : Theme.sp(10)
                             horizontalAlignment: cellItem.col && cellItem.col.align === "right"
                                                      ? Text.AlignRight : Text.AlignLeft
                             text: cellItem.modelData.text
@@ -588,6 +624,89 @@ Item {
                                 root.activated(id)
                             }
                         }
+
+                    }
+                }
+            }
+
+            // ── Draw this row ─────────────────────────────────────────────────
+            //
+            // The graph already answers for any selected row — `G` toggles the middle pane — but
+            // that is a keyboard fact, and nothing on a row said the picture was a click away. The
+            // reach and commonality columns made that worse rather than better: they rank a row by
+            // what it connects to, which invites exactly the question ("connected to WHAT?") that
+            // only the graph answers.
+            //
+            // It sits at the right edge of the FLEX column — the one holding the name — for the
+            // same reason the status dot rides in that column: it is where the eye already is. At
+            // the row's trailing edge it was a cursor journey across every numeric column to reach
+            // a control about the row you were already reading, and on a wide window that journey
+            // is most of the panel.
+            //
+            // Shown on HOVER as well as on the selected row, so it costs one click from a row you
+            // have not visited rather than two. It never appears on a row that is neither: 95 live
+            // buttons down a list is the wall of equal-weight chrome this panel keeps refusing.
+            //
+            // Declared after the Row and NOT inside the name cell, on purpose. Inside the delegate
+            // it would be built once per cell — eight columns' worth of hidden chips per row, for
+            // one that can ever show — and "the name" is not reliably cell zero anyway: a
+            // cross-type search result puts `Type` there and the name second.
+            Rectangle {
+                id: graphChip
+
+                // Never over an open editor. The editor owns the row while it is up, and a control
+                // floating on a caret is one misclick from committing something.
+                visible: rowItem.canGraph
+                         && (rowItem.hovered || rowItem.isCurrent)
+                         && root._editRowId !== rowItem.modelData.id
+
+                anchors.verticalCenter: parent.verticalCenter
+                x: root._flexColumnRight - width - Theme.sp(10)
+
+                width:  graphChipText.implicitWidth + Theme.sp(14)
+                height: Theme.sp(20)
+                radius: Theme.radius
+                color:  graphPress.containsMouse ? Theme.colorAccentLight : Theme.colorBg3
+                border.width: 1
+                border.color: graphPress.containsMouse ? Theme.colorAccent : Theme.colorBorderMid
+                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                // The word the Table/Graph toggle already uses, not a glyph — there is nothing to
+                // learn, and no font-coverage gamble on a symbol for "network". The shortcut rides
+                // in the tooltip, so the mouse path teaches the keyboard one.
+                Text {
+                    id: graphChipText
+                    anchors.centerIn: parent
+                    text:                qsTr("Graph")
+                    font.family:         Theme.fontBody
+                    font.pixelSize:      Theme.fontSzMicro
+                    font.weight:         Theme.fontBodyWeight
+                    font.letterSpacing:  Theme.trackingMicro
+                    font.capitalization: Font.AllUppercase
+                    color: graphPress.containsMouse ? Theme.colorAccent : Theme.colorText2
+                }
+
+                ToolTip.visible: graphPress.containsMouse
+                ToolTip.text:    qsTr("Show in graph  ·  G")
+                ToolTip.delay:   400
+
+                PpPressable {
+                    id: graphPress
+                    hoverScale: 1.0
+                    enabled:    graphChip.visible
+                    onClicked: {
+                        var id = rowItem.modelData.id
+                        // Selects exactly as a plain click on the row would, THEN asks for the
+                        // picture. Two steps rather than one because the graph centres on the
+                        // selection: asking without selecting first would draw whatever was
+                        // selected before, which on a hovered row is another row entirely — the
+                        // pointer over one thing and the canvas showing another.
+                        root.endEdit()
+                        root.selectedId = id
+                        root.selection  = [ id ]
+                        listView.currentIndex = rowItem.index
+                        root.activated(id)
+                        root.graphRequested(id)
                     }
                 }
             }
