@@ -85,6 +85,8 @@ Item {
     signal corridorScanRequested()
 
     readonly property bool _found: detail && detail.found === true
+    // A link is not an object with a place to go when it is removed — see the footer's comment.
+    readonly property bool _isLink: _found && detail.type === "links"
 
     function _toneColor(tone) {
         switch (tone) {
@@ -807,6 +809,11 @@ Item {
         // meant. Delete wears colorError because that is how this app draws a write that removes
         // something, and because "Move to trash" being recoverable
         // is a reason to allow it, not a reason to hide it.
+        //
+        // A LINK is the exception to the wording. The trash reading is right for objects, which go
+        // somewhere recoverable; a link is a row that ceases to exist, and the undo stack is the
+        // whole of its recoverability. Promising a place to go and find it afterwards would be a
+        // promise nothing here keeps.
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 1
@@ -862,13 +869,14 @@ Item {
                 Text {
                     id: delLbl
                     anchors.centerIn: parent
-                    text: qsTr("Delete")
+                    text: root._isLink ? qsTr("Delete link") : qsTr("Delete")
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzBody2
                     color:          Theme.colorError
                 }
                 ToolTip.visible: delMa.containsMouse
-                ToolTip.text: qsTr("Move to trash — ⌘Z brings it back")
+                ToolTip.text: root._isLink ? qsTr("⌘Z brings it back")
+                                           : qsTr("Move to trash — ⌘Z brings it back")
                 ToolTip.delay: 400
                 PpPressable { id: delMa; hoverScale: 1.0; onClicked: root.removeRequested() }
             }

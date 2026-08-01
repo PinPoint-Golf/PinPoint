@@ -159,8 +159,16 @@ QStringList effectsOf(const CharacteristicPack &pack, const QString &conditionId
 // over many characteristics is the model's whole point, so this is a first-class query.
 int  coverageOf(const CharacteristicPack &pack, const QString &conditionId);
 
+// True when `fromId` causes `toId`, directly or through any chain. DIRECTED — this is the acyclicity
+// question, and it is the one to ask before drawing a causal edge: `from → to` closes a cycle
+// exactly when `to` already reaches `from`.
+bool causallyReaches(const CharacteristicPack &pack, const QString &fromId, const QString &toId);
+
 // True when a `Corroborates` edge would be illegal between these two: a causal path already exists
-// in either direction.
+// in either direction. SYMMETRIC, because corroboration is — which is why it is a separate function
+// from causallyReaches() rather than a call to it with a comment. Asking this one about a CAUSAL
+// edge refuses every legal shortcut (`A → B` where `A → X → B` already runs), and says "cycle" while
+// doing it; that is what it used to do here, and it is what the two names now prevent.
 bool hasCausalPath(const CharacteristicPack &pack, const QString &fromId, const QString &toId);
 
 // Both tails of an axis, in pack order. Empty for a condition with no axis.

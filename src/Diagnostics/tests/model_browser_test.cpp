@@ -2045,6 +2045,62 @@ int main(int argc, char **argv)
         while (m.canUndo()) m.undo();
     }
 
+    std::printf("=== a shortcut is not a cycle ===\n");
+    {
+        // The acyclicity question is DIRECTED, and linkLegality() used to ask it of a symmetric
+        // helper. With `A → X → B` in the pack, drawing `A → B` is a legal shortcut edge — but
+        // hasCausalPath() answers "these two are connected either way", so the edge was refused,
+        // and refused with a sentence that named the two conditions in the order making it false.
+        //
+        // Asserted through linkLegality() and linkCandidates() rather than against the graph helper
+        // directly — characteristic_pack_test covers the helper. What matters here is that the two
+        // surfaces an author meets, the refusal and the candidate list, now agree with it.
+        const QString a = m.createObject(QStringLiteral("characteristics"))
+                              .value(QStringLiteral("id")).toString();
+        const QString x = m.createObject(QStringLiteral("characteristics"))
+                              .value(QStringLiteral("id")).toString();
+        const QString b = m.createObject(QStringLiteral("characteristics"))
+                              .value(QStringLiteral("id")).toString();
+        check(!a.isEmpty() && a != x && x != b, "three fresh characteristics to wire up");
+
+        check(m.addLink(a, x).value(QStringLiteral("ok")).toBool(), "A causes X");
+        check(m.addLink(x, b).value(QStringLiteral("ok")).toBool(), "X causes B");
+
+        check(m.linkLegality(a, b).value(QStringLiteral("ok")).toBool(),
+              "A → B is legal even though A already reaches B the long way");
+        const QVariantMap back = m.linkLegality(b, a);
+        check(!back.value(QStringLiteral("ok")).toBool(),
+              "B → A is refused — that one really is a cycle");
+        check(back.value(QStringLiteral("reason")).toString().contains(QStringLiteral("cycle")),
+              "and says so");
+
+        bool offered = false;
+        for (const QVariant &v : m.linkCandidates(QStringLiteral("causes"), a))
+            if (v.toMap().value(QStringLiteral("id")).toString() == b) offered = true;
+        check(offered, "and the candidate list offers it, rather than withholding it silently");
+
+        // ── Where the graph stands ──────────────────────────────────────────
+        //
+        // A link is not a place to stand. It HAS a neighbourhood — its two ends and the line
+        // between them — so centring the picture on it replaces the drawing the reader picked the
+        // line out of, and the selected-link stroke can never be seen. It centres on its cause.
+        const QVariantMap self = m.graphFocus(QStringLiteral("characteristics"), a);
+        check(self.value(QStringLiteral("id")).toString() == a
+                  && self.value(QStringLiteral("type")).toString()
+                         == QStringLiteral("characteristics"),
+              "an ordinary object is its own graph focus");
+
+        const QVariantMap onLink =
+            m.graphFocus(QStringLiteral("links"),
+                         a + QStringLiteral("|") + x + QStringLiteral("|causes"));
+        check(onLink.value(QStringLiteral("id")).toString() == a,
+              "a link centres on its CAUSE, so the line stays drawn in the picture");
+        check(onLink.value(QStringLiteral("type")).toString() == QStringLiteral("characteristics"),
+              "as a condition, which is what graph() knows how to lay out");
+
+        while (m.canUndo()) m.undo();
+    }
+
     // Leave no user pack behind: a test with a side effect on the product is not a test.
     QFile::remove(userPackPath());
     QFile::remove(userNormPath());

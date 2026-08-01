@@ -322,26 +322,28 @@ int coverageOf(const CharacteristicPack &pack, const QString &conditionId)
     return int(effectsOf(pack, conditionId).size());
 }
 
+bool causallyReaches(const CharacteristicPack &pack, const QString &fromId, const QString &toId)
+{
+    QSet<QString> seen;
+    QStringList   stack{ fromId };
+    while (!stack.isEmpty()) {
+        const QString cur = stack.takeLast();
+        if (cur == toId && cur != fromId) return true;
+        if (seen.contains(cur)) continue;
+        seen.insert(cur);
+        for (const QString &next : effectsOf(pack, cur)) {
+            if (next == toId) return true;
+            stack << next;
+        }
+    }
+    return false;
+}
+
 bool hasCausalPath(const CharacteristicPack &pack, const QString &fromId, const QString &toId)
 {
     // Either direction: a Corroborates edge is symmetric in meaning, so a causal path either way
     // makes it a double count.
-    auto reaches = [&pack](const QString &start, const QString &goal) {
-        QSet<QString>  seen;
-        QStringList    stack{ start };
-        while (!stack.isEmpty()) {
-            const QString cur = stack.takeLast();
-            if (cur == goal && cur != start) return true;
-            if (seen.contains(cur)) continue;
-            seen.insert(cur);
-            for (const QString &next : effectsOf(pack, cur)) {
-                if (next == goal) return true;
-                stack << next;
-            }
-        }
-        return false;
-    };
-    return reaches(fromId, toId) || reaches(toId, fromId);
+    return causallyReaches(pack, fromId, toId) || causallyReaches(pack, toId, fromId);
 }
 
 QStringList tailsOfAxis(const CharacteristicPack &pack, const QString &axis)

@@ -219,6 +219,15 @@ public:
     Q_INVOKABLE QVariantMap graph(const QString &type, const QString &id,
                                   const QVariantMap &options = {}) const;
 
+    // Which object the GRAPH should centre on when this one is selected, as { type, id }.
+    //
+    // Almost always the selection itself. A LINK is the exception: it has a neighbourhood of its
+    // own — two nodes and the line between them — and drawing that in place of the causal picture
+    // replaces the very drawing the reader picked the line out of. Everything that marks a selected
+    // link on the canvas — the heavier stroke, the muting of everything else — is invisible if
+    // selecting it changes the picture. So a claim centres on its cause and stays drawn.
+    Q_INVOKABLE QVariantMap graphFocus(const QString &type, const QString &id) const;
+
     // The laid-out causal DAG around one condition — every coordinate from dag_layout.h, over the
     // WORKING assembly so an unsaved edge is drawn. Same shape as
     // the graph pane renders.

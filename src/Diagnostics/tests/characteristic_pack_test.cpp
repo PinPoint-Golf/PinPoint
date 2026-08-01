@@ -786,6 +786,22 @@ int main()
         check(!hasCausalPath(p, QStringLiteral("stanceWide"), QStringLiteral("stanceNarrow")),
               "unrelated conditions have no causal path");
         check(tailsOfAxis(p, QStringLiteral("stanceWidth")).size() == 2, "both tails of an axis are found");
+
+        // ── Directed vs symmetric ────────────────────────────────────────────
+        //
+        // hasCausalPath() is SYMMETRIC — it answers the Corroborates question, "are these two
+        // causally connected either way". causallyReaches() is DIRECTED, and it is the one to ask
+        // before drawing a causal edge.
+        //
+        // The two were conflated. linkLegality() asked the symmetric one whether `from → to` would
+        // close a cycle, so with `limitedHipIr → stanceWide` in the pack it refused BOTH directions
+        // — and refused the legal one with the word "cycle", naming the two conditions in the order
+        // that made the sentence untrue. The names now make the difference impossible to miss;
+        // these two lines are what stops them being conflated again.
+        check(causallyReaches(p, QStringLiteral("limitedHipIr"), QStringLiteral("stanceWide")),
+              "causallyReaches follows the arrow");
+        check(!causallyReaches(p, QStringLiteral("stanceWide"), QStringLiteral("limitedHipIr")),
+              "and NOT against it — which is the whole difference from hasCausalPath");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");

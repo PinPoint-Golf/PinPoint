@@ -2810,8 +2810,10 @@ QVariantList ModelBrowser::linkCandidates(const QString &relation, const QString
 
         if (type == EdgeType::Causes) {
             // Acyclicity, checked BEFORE the edge can be constructed. `from` causes `to`, so the
-            // cycle is the reverse path already existing.
-            if (hasCausalPath(p, c.id, fromId)) continue;
+            // cycle is the reverse path already existing — a DIRECTED question, and it used to be
+            // asked of hasCausalPath(), which answers a symmetric one. That withheld every legal
+            // shortcut: with `A → X → B` in the pack, `A → B` was never offered.
+            if (causallyReaches(p, c.id, fromId)) continue;
         } else if (type == EdgeType::Corroborates) {
             // Corroborates is illegal between conditions that already have a causal path in either
             // direction — the pair would double-count in the confidence ranking, and the validator
@@ -3812,7 +3814,11 @@ QVariantMap ModelBrowser::linkLegality(const QString &fromId, const QString &toI
     for (const Edge &e : p.edges)
         if (e.type == type && e.from == fromId && e.to == toId)
             return no(tr("%1 already %2 %3.").arg(f->label, relation, o->label));
-    if (type == EdgeType::Causes && hasCausalPath(p, toId, fromId))
+    // DIRECTED. `from → to` closes a cycle exactly when `to` already reaches `from`; asking the
+    // symmetric hasCausalPath() also refused the case where `from` reaches `to` by a longer route,
+    // which is a legal shortcut edge — and it announced that refusal as a cycle, naming two
+    // conditions in the order that made the sentence false.
+    if (type == EdgeType::Causes && causallyReaches(p, toId, fromId))
         return no(tr("%1 already leads to %2, so this would create a cycle.")
                       .arg(o->label, f->label));
     if (type == EdgeType::Corroborates
@@ -5811,6 +5817,30 @@ QVariantMap ModelBrowser::neighbourhood(const QString &type, const QString &id,
     out.insert(QStringLiteral("focusX"), centreX + colW / 2.0);
     out.insert(QStringLiteral("focusY"), focusY + nodeH / 2.0);
     out.insert(QStringLiteral("truncated"), false);
+    return out;
+}
+
+QVariantMap ModelBrowser::graphFocus(const QString &type, const QString &id) const
+{
+    QString focusType = type;
+    QString focusId   = id;
+
+    if (type == kLinks) {
+        QString  from, to;
+        EdgeType t{};
+        // The CAUSE end, because the graph reads left to right and a claim centred on its effect
+        // would put the line the reader selected at the left edge of the picture.
+        if (splitEdgeId(id, from, to, t)) {
+            focusId = from;
+            // graph() draws kCharacteristics and kCauses identically — both are conditions and both
+            // get the causal DAG — so the distinction does not need to be made here.
+            focusType = kCharacteristics;
+        }
+    }
+
+    QVariantMap out;
+    out.insert(QStringLiteral("type"), focusType);
+    out.insert(QStringLiteral("id"), focusId);
     return out;
 }
 

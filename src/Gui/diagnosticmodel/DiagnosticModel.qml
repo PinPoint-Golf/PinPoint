@@ -314,6 +314,18 @@ Item {
 
     property string _selectedEdgeId: ""
 
+    // Where the GRAPH stands, which is not always where the table's selection is.
+    //
+    // Selecting an edge sets the selection to the LINK, and a link has a neighbourhood of its own —
+    // two nodes and the line between them. Drawing that in place of the causal picture replaces the
+    // very drawing the reader picked the line out of, so the heavier stroke and the muting of
+    // everything else could never be seen. A claim centres on its cause and stays drawn.
+    //
+    // Decided in C++ — see graphFocus() — because "a link is not a place to stand" is a fact about
+    // links, and a rule written in a binding is a rule nothing can test.
+    readonly property var _graphFocus:
+        root._revision < 0 ? ({}) : browser.graphFocus(root._selectedType, root._selectedId)
+
     // When a CORRIDOR is selected, the measure it grades. Corridor actions are addressed by measure
     // plus context, and the row id carries both — this unpacks the half the pickers need.
     readonly property string _corridorMeasureId: {
@@ -969,17 +981,18 @@ Item {
                     Layout.fillHeight: true
                     visible: root._view === "graph"
                     editable: root._typeEditable
-                    focusId:  root._selectedId
+                    focusId:  root._graphFocus.id || ""
                     selectedEdgeId: root._selectedEdgeId
                     // ANY selected row, not only a characteristic. A condition gets the causal
                     // DAG because it has ranks; everything else gets its neighbourhood, which is
                     // the honest shape for a relation that is one hop and has no direction.
                     layoutData: {
-                        if (root._revision < 0
-                            || root._view !== "graph" || root._selectedId === "") return ({})
+                        if (root._revision < 0 || root._view !== "graph"
+                            || root._graphFocus.id === undefined
+                            || root._graphFocus.id === "") return ({})
                         // The theme's own metrics travel INTO the layout — the layout does the
                         // positioning, but it has to be told what a row is worth in this aesthetic.
-                        return browser.graph(root._selectedType, root._selectedId, {
+                        return browser.graph(root._graphFocus.type, root._graphFocus.id, {
                             nodeH: Theme.sp(34), gapX: Theme.sp(52), gapY: Theme.sp(14),
                             laneGap: Theme.sp(36), padX: Theme.sp(12), charW: Theme.sp(6.4),
                             minW: Theme.sp(110), maxW: Theme.sp(210),
