@@ -8,6 +8,15 @@
 #
 # Qt6::Qml is required because the Gui headers use QML_ELEMENT (qqmlregistration.h);
 # the QML_ELEMENT classes carry Q_OBJECT, so every target enables AUTOMOC.
+#
+# NOT here: the QML UI suite in qml/, which loads real components offscreen and presses them. It
+# needs the app's QML module — the one attached to the PinPointStudio executable — so it is built by
+# the root CMakeLists and run from the app's build directory:
+#
+#   ctest --test-dir <app build> -R qml_ui --output-on-failure
+#
+# Keeping it out of here is what preserves the property stated at the top of
+# tests/cmake/PinPointTests.cmake: nothing in these suites pulls in the app.
 
 if(NOT COMMAND pp_add_test)
     cmake_minimum_required(VERSION 3.16)

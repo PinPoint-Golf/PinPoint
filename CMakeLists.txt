@@ -2809,6 +2809,79 @@ if(PINPOINT_BUILD_TOOLS)
     message(STATUS "SwingLab tools: swing_window_parity_test enabled")
 endif()
 
+# ── QML UI tests ─────────────────────────────────────────────────────────────
+#
+# The only suite that lives in the APP build rather than under src/<Sub>/tests. That is deliberate
+# and it is the one thing tests/cmake/PinPointTests.cmake will not do: it keeps every other suite
+# decoupled from the app, and this one asserts the behaviour of QML components that import the app's
+# QML module. The module is attached to the PinPointStudio executable, so there is nothing to link
+# and nowhere else for the test to be.
+#
+# What it needs on top of the sources:
+#
+#   A LOADABLE MODULE. qt_add_qml_module writes `prefer :/qt/qml/PinPointStudio/` into the qmldir,
+#   pointing the engine at resources compiled into the app binary — which the test binary does not
+#   have. So the module directory is staged to a copy with that line stripped, leaving the app's own
+#   untouched. cmake/StripQmlPrefer.cmake says what that trades away.
+#
+#   OFFSCREEN. Tests press real components, so they need a real scene graph and no window. QT_QPA_
+#   PLATFORM=offscreen is set on the test rather than asked of whoever runs it, so `ctest` in a
+#   headless CI and `ctest` on a developer's desk do the same thing and neither steals focus.
+#
+# ON by default because a test nobody runs is not a test. It is one small executable against Qt
+# libraries the app has already built and linked.
+option(PINPOINT_BUILD_QML_TESTS "Build the offscreen QML UI test suite" ON)
+
+if(PINPOINT_BUILD_QML_TESTS)
+    find_package(Qt6 QUIET COMPONENTS QuickTest)
+    if(NOT Qt6QuickTest_FOUND)
+        message(STATUS "QML UI tests: Qt6::QuickTest not found — suite skipped")
+    else()
+        enable_testing()
+
+        set(_pp_qml_stage    "${CMAKE_CURRENT_BINARY_DIR}/qml-test-imports")
+        set(_pp_qml_src      "${CMAKE_CURRENT_BINARY_DIR}/qml/PinPointStudio")
+        set(_pp_qml_stamp    "${_pp_qml_stage}/PinPointStudio/qmldir")
+
+        # Depends on the app target, not merely on its qml copy step: the staged qmldir lists every
+        # type in the module, and a stage taken while the module was half-written would fail an
+        # import with no hint as to why.
+        add_custom_command(
+            OUTPUT  "${_pp_qml_stamp}"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_pp_qml_stage}/PinPointStudio"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${_pp_qml_src}" "${_pp_qml_stage}/PinPointStudio"
+            COMMAND ${CMAKE_COMMAND} -D "PP_QMLDIR=${_pp_qml_stamp}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/StripQmlPrefer.cmake"
+            DEPENDS PinPointStudio
+            COMMENT "Staging a prefer-free PinPointStudio module for the QML UI tests"
+            VERBATIM)
+        add_custom_target(pinpoint_qml_test_imports DEPENDS "${_pp_qml_stamp}")
+
+        # app_settings.cpp comes along for its out-of-line member AND so AUTOMOC sees the header
+        # beside it — the class is a QObject and the test constructs one, so without it the link
+        # fails on a missing vtable rather than on anything the test did.
+        qt_add_executable(qml_ui_test
+            src/Gui/tests/qml/qml_ui_test.cpp
+            src/Gui/app/app_settings.cpp)
+        add_dependencies(qml_ui_test pinpoint_qml_test_imports)
+        set_target_properties(qml_ui_test PROPERTIES AUTOMOC ON MACOSX_BUNDLE OFF)
+        target_include_directories(qml_ui_test PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/app"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Core"
+            "${CMAKE_BINARY_DIR}/generated")
+        target_compile_definitions(qml_ui_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/tests/qml"
+            PP_QML_TEST_IMPORTS="${_pp_qml_stage}")
+        target_link_libraries(qml_ui_test PRIVATE
+            Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickTest)
+
+        add_test(NAME qml_ui COMMAND qml_ui_test)
+        set_tests_properties(qml_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        message(STATUS "QML UI tests: qml_ui_test enabled (ctest -R qml_ui)")
+    endif()
+endif()
+
 # ── Dependency version header for the About box ──────────────────────────────
 # Generated LAST so every find_package / FetchContent version variable above is
 # already resolved (the pp_version.h configure at the top runs too early for
