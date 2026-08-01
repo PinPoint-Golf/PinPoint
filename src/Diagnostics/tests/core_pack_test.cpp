@@ -81,7 +81,11 @@ int main()
         check(coverage("poor_pelvic_disassociation") == 12, "poor pelvic disassociation explains 12");
         check(coverage("limited_thoracic_rotation") == 11, "limited thoracic rotation explains 11");
         check(coverage("limited_lead_hip_ir") == 8, "limited lead-hip internal rotation explains 8");
-        check(coverage("limited_trail_hip_ir") == 10, "limited trail-hip internal rotation explains 10");
+        // 10 -> 11 when the trail hip was given its route to over-the-top: a pelvis that cannot
+        // finish turning away leaves the downswing no room to rotate into, and the arms take it
+        // over the top. Updated deliberately, per the note below on the pelvis-sway count — these
+        // are the numbers somebody chose, and a `>=` here would stop the test noticing a change.
+        check(coverage("limited_trail_hip_ir") == 11, "limited trail-hip internal rotation explains 11");
         check(coverage("poor_core_stability") == 10, "poor core stability explains 10");
 
         const int topFive = coverage("poor_pelvic_disassociation") + coverage("limited_thoracic_rotation")

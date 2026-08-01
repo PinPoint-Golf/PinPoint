@@ -72,7 +72,7 @@
     "is bounded by loft, so driver, iron and wedge cap differently while all three are the same",
     "one-sided quantity. Either bound may appear alone.",
     "",
-    "TEN measures are one-sided. m_smashFactor was the first; nine more were converted in the",
+    "ELEVEN measures are one-sided. m_smashFactor was the first; nine more were converted in the",
     "unwatched-tails pass, where the question arrived from the other end — each was a measure",
     "whose second tail GRADED with no fault behind it, so the choice was between authoring a",
     "condition that does not exist and saying the tail is not a fault at all:",
@@ -94,6 +94,18 @@
     "still accelerating into the ball'. More acceleration into the ball is not a fault at any",
     "level, whichever side of the release argument you take, so the shape does not depend on",
     "settling it.",
+    "",
+    "The ELEVENTH was AUTHORED one-sided rather than converted, and is written down here because",
+    "the count above is a gate rather than a tally:",
+    "",
+    "  m_pelvisRotP4            floor    the fault is a pelvis that never got round; a deep hip",
+    "                                    turn at the top is not one",
+    "",
+    "Its high tail is not this measure’s to grade. Turning too far AT THE TOP is a chest fault and",
+    "over_rotation_at_top already holds it, on thorax_rotation_top — so a target shape here would",
+    "have put a second colour on the dashboard for a deep hip turn, with no fault name behind it.",
+    "That is the exact defect the unwatched-tails pass existed to clear, and authoring a new",
+    "measure straight into it would have been a poor way to repay that work.",
     "",
     "One candidate was considered again and NOT converted, and the reason is the same one it",
     "was refused for the first time:",
@@ -1529,6 +1541,42 @@
       "sigmaLo": 2000.0,
       "unit": "rpm",
       "source": "heuristic"
+    },
+    {
+      "measure": "m_pelvisRotP4",
+      "context": "any",
+      "mu": 45.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281. The catalogue's own howToRead for pelvisRotation states roughly 45° of pelvic turn at the top, which is what these are seated on until the curves are read off."
+    },
+    {
+      "measure": "m_pelvisRotP4",
+      "context": "driver",
+      "mu": 48.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281. The catalogue's own howToRead for pelvisRotation states roughly 45° of pelvic turn at the top, which is what these are seated on until the curves are read off."
+    },
+    {
+      "measure": "m_pelvisRotP4",
+      "context": "iron",
+      "mu": 44.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281. The catalogue's own howToRead for pelvisRotation states roughly 45° of pelvic turn at the top, which is what these are seated on until the curves are read off."
+    },
+    {
+      "measure": "m_pelvisRotP4",
+      "context": "wedge",
+      "mu": 38.0,
+      "sigmaLo": 10.0,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281. The catalogue's own howToRead for pelvisRotation states roughly 45° of pelvic turn at the top, which is what these are seated on until the curves are read off."
     }
   ]
 }

@@ -829,7 +829,8 @@
       },
       "status": "live",
       "label": "Lead forearm roll — change from address at P7",
-      "unit": "°"
+      "unit": "°",
+      "highMeans": "the lead forearm rotated further away from the target at impact — the face arriving open; the low end is the face rotated shut"
     },
     {
       "id": "m_leadForearmRot_p8",
@@ -1635,6 +1636,20 @@
       "unit": "°",
       "highMeans": "a larger angle between delivered loft and the path — more spin, less speed",
       "gapReason": "Requires launch monitor: derived from delivered loft, which needs face orientation at impact."
+    },
+    {
+      "id": "m_pelvisRotP4",
+      "kind": "provided",
+      "metricKey": "pelvisRotation",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "shape": "floor",
+      "status": "planned",
+      "label": "Pelvis rotation, at the top",
+      "unit": "°",
+      "highMeans": "a deeper hip turn at the top, and more room to unwind into"
     }
   ],
   "signals": [
@@ -2533,6 +2548,30 @@
         "m_headSwayBack"
       ],
       "direction": "low"
+    },
+    {
+      "id": "sig_hipsUnderRotatedTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisRotP4"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_faceRolledShutImpact",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadForearmRot_p7"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_faceHeldOpenImpact",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadForearmRot_p7"
+      ],
+      "direction": "high"
     }
   ],
   "conditions": [
@@ -3126,8 +3165,10 @@
       "aliases": [
         "flip",
         "flipping",
+        "scoop",
         "breakdown through impact",
-        "adding loft"
+        "adding loft",
+        "hands behind the ball"
       ],
       "group": "release",
       "observability": "observable",
@@ -3136,7 +3177,7 @@
         "sig_scooping"
       ],
       "state": "active",
-      "consequence": "Adding loft through impact with the lead wrist means the club is rising at the ball, costing compression and distance control.",
+      "consequence": "Adding loft through impact with the lead wrist means the club is rising at the ball, costing compression and distance control. `Flipping` is the same fault under the commoner name — the field uses the two interchangeably and so does this, rather than splitting a term coaches do not split. What IS separate is the axis beside it: the forearms rolling the face shut is a rotation, not a loft, and it has its own condition on its own measure.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
@@ -5489,6 +5530,78 @@
       "detectedBy": [
         "sig_outToInPath"
       ]
+    },
+    {
+      "id": "hips_under_rotated_at_top",
+      "label": "Hips under-rotated at the top",
+      "aliases": [
+        "no hip depth",
+        "hips never got round",
+        "stopped turning going back"
+      ],
+      "group": "armsAndClub",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_hipsUnderRotatedTop"
+      ],
+      "state": "active",
+      "consequence": "A pelvis that has not finished turning away by the top has little left to unwind from, so the downswing gets started by something else — and what is available is the arms and the chest, which can only start it from outside. This is the pelvis's ABSOLUTE turn and not its separation from the chest: a golfer whose chest kept turning over a stalled pelvis scores well on separation while having exactly this.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "pelvis rotation at top of backswing hip turn depth downswing space golf"
+      },
+      "axis": "pelvis_rotation_top"
+    },
+    {
+      "id": "face_rolled_shut_impact",
+      "label": "Face rolled shut through impact",
+      "aliases": [
+        "rolling the hands over",
+        "hands turning it over",
+        "over-releasing",
+        "turning it over"
+      ],
+      "group": "release",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_faceRolledShutImpact"
+      ],
+      "state": "active",
+      "consequence": "The forearms roll the face shut through the ball rather than the body carrying it round, so the face is still turning when it meets the ball and arrives closed. This is the ROTATION axis and not the loft one: a golfer can roll it shut with the shaft leaning correctly forward, and can scoop with the face square. Squaring the face with the hands is a timing window measured in milliseconds; squaring it by continuing to turn is not.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "flipping at impact hands rotating clubface closing body stalls golf release forearm rotation hands rolling over duck hook"
+      },
+      "axis": "lead_forearm_impact"
+    },
+    {
+      "id": "face_held_open_impact",
+      "label": "Face held open through impact",
+      "aliases": [
+        "holding it off",
+        "holding the face off",
+        "held-off finish",
+        "face open at impact",
+        "blocking it"
+      ],
+      "group": "release",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_faceHeldOpenImpact"
+      ],
+      "state": "active",
+      "consequence": "The lead forearm has not rotated back to where it started by impact, so the face arrives open. A BAND-AID when it is the standard swing: holding the face off is how a hook gets managed without fixing what is turning it over, and it is bought with release speed and distance every swing, not just the ones where it was wanted. That is why it is reported rather than excused — a golfer who does this on every shot is paying for a compensation they may not know they have made. Shaping a fade with it on a given shot is a choice, and so is bending a hook round a tree; the model reads one swing at a time and cannot tell either from a habit, which is the same reason `slice` and `hook` are conditions here and not styles. The mirror of the face being rolled shut on the same axis, and the two share a cause: the face is being squared by the arms rather than carried round by the body.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "holding the face off through impact lead forearm rotation open clubface block golf"
+      },
+      "axis": "lead_forearm_impact"
     }
   ],
   "edges": [
@@ -8529,6 +8642,128 @@
         "tier": "practice",
         "searchedOn": "2026-07-28",
         "searchTerms": "steep shoulder plane over the top downswing same pattern golf"
+      }
+    },
+    {
+      "from": "over_the_top",
+      "to": "attack_too_steep",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "over the top downswing steep angle of attack club path golf biomechanics"
+      }
+    },
+    {
+      "from": "over_the_top",
+      "to": "strike_heel",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "out-to-in club path heel side impact location hosel exposed golf strike pattern"
+      }
+    },
+    {
+      "from": "strike_heel",
+      "to": "shank",
+      "type": "corroborates",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "heel side impact location hosel strike golf face contact axis"
+      }
+    },
+    {
+      "from": "out_to_in_path",
+      "to": "shank",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "out-to-in club path hosel exposed shank golf strike pattern slicer"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "hips_under_rotated_at_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "indirect",
+        "citation": "10.1177/0363546514555698",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "limited hip internal rotation pelvic rotation backswing golf compensation"
+      }
+    },
+    {
+      "from": "hips_under_rotated_at_top",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "hip turn at top space for downswing arms take over the top golf"
+      }
+    },
+    {
+      "from": "hip_stall",
+      "to": "face_rolled_shut_impact",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "hips stall through impact hands take over flip clubface closing golf"
+      }
+    },
+    {
+      "from": "face_rolled_shut_impact",
+      "to": "closed_face_to_path",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "hands rolling over clubface shuts closed at impact hook duck hook golf"
+      }
+    },
+    {
+      "from": "face_held_open_impact",
+      "to": "open_face_to_path",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "face open at impact forearm rotation face to path open golf"
+      }
+    },
+    {
+      "from": "early_face_roll",
+      "to": "face_held_open_impact",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "face rolled open takeaway arrives open at impact lead forearm golf"
+      }
+    },
+    {
+      "from": "under_plane_stuck",
+      "to": "face_held_open_impact",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-01",
+        "searchTerms": "stuck under plane block hold the face off open at impact golf"
       }
     }
   ]

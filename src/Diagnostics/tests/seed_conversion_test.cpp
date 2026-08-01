@@ -55,16 +55,17 @@ int main(int argc, char **argv)
     check(!m->highMeans.isEmpty(),
           "…and says what a high value means, which is what the shape line reads out");
 
-    // The one-sided family is ten measures: m_smashFactor, plus the nine converted by the
-    // unwatched-tails pass. Not a number pinned for its own sake — the reason for each conversion
-    // is recorded in the norms.json header, and an ELEVENTH shape appearing without that
-    // conversation is the thing this catches. The count is updated deliberately when a measure is
-    // converted, never loosened to a `>=`: the claim is that these are the shapes somebody argued
-    // for, not that there are some.
+    // The one-sided family is eleven measures: m_smashFactor, the nine converted by the
+    // unwatched-tails pass, and m_pelvisRotP4, which was authored one-sided rather than converted
+    // — its high tail is the chest's story and over_rotation_at_top already holds it. Not a number
+    // pinned for its own sake — the reason for each is recorded in the norms.json header, and a
+    // TWELFTH shape appearing without that conversation is the thing this catches. The count is
+    // updated deliberately when a measure is added or converted, never loosened to a `>=`: the
+    // claim is that these are the shapes somebody argued for, not that there are some.
     int oneSided = 0;
     for (const Measure &mm : pack.measures)
         if (shapeIsOneSided(mm.shape)) ++oneSided;
-    check(oneSided == 10, "…and one of exactly ten one-sided measures in the shipped pack");
+    check(oneSided == 11, "…and one of exactly eleven one-sided measures in the shipped pack");
 
     // ── The rows ────────────────────────────────────────────────────────────
     //

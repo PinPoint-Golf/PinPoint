@@ -208,7 +208,9 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("chart:review"),
                     QStringLiteral("score:wrist"),
                     QStringLiteral("characteristic:early_face_roll"),
-                    QStringLiteral("characteristic:face_held_shut_takeaway") },
+                    QStringLiteral("characteristic:face_held_shut_takeaway"),
+                    QStringLiteral("characteristic:face_rolled_shut_impact"),
+                    QStringLiteral("characteristic:face_held_open_impact") },
     });
 
     cat.addDescriptor({
@@ -298,7 +300,8 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("characteristic:hips_closed_at_impact"),
                     QStringLiteral("characteristic:sequence_order"),
                     QStringLiteral("characteristic:hips_too_open_at_impact"),
-                    QStringLiteral("characteristic:late_pelvis_rotation") },
+                    QStringLiteral("characteristic:late_pelvis_rotation"),
+                    QStringLiteral("characteristic:hips_under_rotated_at_top") },
     });
 
     cat.addDescriptor({

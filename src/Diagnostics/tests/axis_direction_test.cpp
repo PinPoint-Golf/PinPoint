@@ -306,6 +306,19 @@ static const Expect kExpected[] = {
     { "sig_excessiveSeparationStretch", Direction::High,
       "m_xFactorStretch highMeans 'more separation added between chest and pelvis through "
       "transition'; stretching past control is the high end, where sig_xfactorDeficit takes the low" },
+    { "sig_faceHeldOpenImpact",     Direction::High,
+      "m_leadForearmRot_p7 highMeans 'the face arriving open'; holding it off IS that high end, "
+      "where sig_flipping takes the low — the impact-side mirror of the P2 pair" },
+    { "sig_faceRolledShutImpact",   Direction::Low,
+      "m_leadForearmRot_p7 highMeans 'the lead forearm rotated further away from the target at "
+      "impact — the face arriving open'; rolling the hands over turns it the other way, so the face "
+      "arriving SHUT "
+      "is the low end. Same convention its P2 sibling uses, where sig_earlyFaceRoll takes the high "
+      "and sig_faceHeldShutTakeaway the low" },
+    { "sig_hipsUnderRotatedTop",    Direction::Low,
+      "m_pelvisRotP4 highMeans 'a deeper hip turn at the top'; not getting round is the low end. "
+      "The high end of THIS axis is deliberately unclaimed — turning too far at the top is a chest "
+      "fault and sig_overRotationAtTop already holds it on thorax_rotation_top" },
 };
 
 // Signals whose metric states NO sign convention anywhere, so their direction cannot be checked
