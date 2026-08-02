@@ -693,13 +693,13 @@ int main(int argc, char **argv)
         check(m.unsavedCount() == 0, "back to the file");
     }
 
-    std::printf("=== the ring collar windows a five-rung ladder ===\n");
+    std::printf("=== the ring collar offers the whole strength ladder ===\n");
     {
-        // The collar draws three cells and the ladder has five, so the window has to MOVE. The bug
-        // this guards against is silent: take the first three every time and `always` can never be
-        // reached from the graph at all, and a link that already is `always` opens a collar in which
-        // none of the three cells is the one it holds — which is exactly the state the gesture's
-        // release-on-current no-op depends on being impossible.
+        // The collar draws five cells, so every rung is reachable in one hold and none of them is
+        // shortlisted away. The bug this guards against is silent: cap the list below the number of
+        // rungs and `always` can never be reached from the graph at all, while a link that already
+        // IS `always` opens a collar in which no cell is the one it holds — which is exactly the
+        // state the gesture's release-on-current no-op depends on being impossible.
         QString linkId;
         for (const QVariant &v : m.rows(QStringLiteral("links"))) {
             const QVariantMap r = v.toMap();
@@ -726,29 +726,27 @@ int main(int argc, char **argv)
             return QString();
         };
 
-        for (const QString &rung : { QStringLiteral("veryWeak"), QStringLiteral("weak"),
-                                     QStringLiteral("moderate"), QStringLiteral("strong"),
-                                     QStringLiteral("veryStrong") }) {
-            const QStringList w = windowAt(rung);
-            check(w.size() == 3, "three cells, whatever the rung");
-            check(w.contains(rung), "and the rung it holds is one of them");
+        // The whole ladder, in ladder order, whichever rung the link is on — and the one it holds is
+        // always the marked cell. Ladder order is the contract: the collar's cells are laid out in
+        // list order, so a re-sorted list would put `often` next to `always` on the canvas.
+        const QStringList ladder{ QStringLiteral("veryWeak"), QStringLiteral("weak"),
+                                  QStringLiteral("moderate"), QStringLiteral("strong"),
+                                  QStringLiteral("veryStrong") };
+        for (const QString &rung : ladder) {
+            check(windowAt(rung) == ladder, "five cells in ladder order, whatever the rung");
             check(currentOf() == rung, "marked as current, so releasing on it changes nothing");
         }
 
-        // In ladder order and contiguous, because the gesture is "one rung along in the direction
-        // the hand is already travelling" — a re-sorted collar would break that reading.
-        check(windowAt(QStringLiteral("veryWeak"))
-                  == QStringList({ QStringLiteral("veryWeak"), QStringLiteral("weak"),
-                                   QStringLiteral("moderate") }),
-              "at the bottom the window clamps rather than centring");
-        check(windowAt(QStringLiteral("moderate"))
-                  == QStringList({ QStringLiteral("weak"), QStringLiteral("moderate"),
-                                   QStringLiteral("strong") }),
-              "in the middle it centres, so either neighbour is one hold away");
-        check(windowAt(QStringLiteral("veryStrong"))
-                  == QStringList({ QStringLiteral("moderate"), QStringLiteral("strong"),
-                                   QStringLiteral("veryStrong") }),
-              "at the top it clamps the other way — `always` is reachable");
+        // The cap is what the collar draws, not a number that happens to be three. A field with more
+        // options than cells still shortlists, and must still contain what the object holds.
+        const QString condId = firstShippedId(m.rows(QStringLiteral("characteristics")));
+        const QVariantList groups =
+            m.ringValues(QStringLiteral("characteristics"), condId, QStringLiteral("group"));
+        check(groups.size() == 5, "nine groups shortlist to the five the collar draws");
+        bool groupCurrent = false;
+        for (const QVariant &v : groups)
+            if (v.toMap().value(QStringLiteral("current")).toBool()) groupCurrent = true;
+        check(groupCurrent, "and the shortlist never drops the value being changed");
 
         while (m.canUndo()) m.undo();
         check(m.unsavedCount() == 0, "back to the file");

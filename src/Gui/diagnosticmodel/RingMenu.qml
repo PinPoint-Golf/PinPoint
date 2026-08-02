@@ -44,7 +44,7 @@ import PinPointStudio
 //           "value"   carries `▸` and opens the collar
 //   hint    the spoken label — what the hub says while this spoke is hot, and the ONLY place the
 //           ring explains itself. It is why the wedge itself can stay icon-plus-short-label.
-//   values  [{ value, label, current }] for a `value` spoke. Three or fewer, always.
+//   values  [{ value, label, current }] for a `value` spoke. Five or fewer, always.
 //
 // ── This component reads no input of its own while the button is held ───────────────────────────
 //
@@ -90,6 +90,27 @@ Popup {
     readonly property real _gapDeg: 3
     readonly property real _sweep:  45 - _gapDeg     // 42° of wedge, 3° of air
 
+    // ── The collar is WIDER than the spoke that opens it ──────────────────────
+    //
+    // Nothing else is drawn past the rim, and only one spoke's collar can ever be open — the slot is
+    // latched when it opens (`_collarSlot`), so travelling sideways picks a CELL and can no longer
+    // arrive at a neighbouring spoke. That is what buys the width: the collar is not sharing the
+    // outer ring with anything, so it need not fit inside 42°.
+    //
+    // Sized per cell rather than fixed, so it is only ever as wide as it has to be — a two-cell
+    // collar stays compact and a five-cell one earns its arc. 26° is a comfortable target at this
+    // radius and nearly double what three cells used to get inside a wedge.
+    readonly property real _cellDeg:  26
+    readonly property int  _maxCells: 5
+    readonly property int  _collarCells: {
+        const e = _hotEntry
+        return e && e.values ? Math.min(_maxCells, e.values.length) : 0
+    }
+    // Never narrower than the wedge itself: a one-cell collar that undercut its own spoke would look
+    // like a rendering fault rather than a choice.
+    readonly property real _collarSweep: Math.max(_sweep, _collarCells * _cellDeg)
+    readonly property real _collarBase:  -90 + _hotSlot * 45 - _collarSweep / 2
+
     // ── Where the cursor is, in ring-centred coordinates ──────────────────────
     property real _dx: 0
     property real _dy: 0
@@ -97,6 +118,11 @@ Popup {
     // spoke's collar: crossing back inside the rim must not snap the collar shut mid-choice, or a
     // hand that wobbles loses the menu it is halfway through reading.
     property bool _inCollar: false
+    // WHICH spoke's collar is open, latched at the moment it opens. The hot slot is derived from the
+    // angle everywhere else, and it has to stop being once the collar is wider than a slot — or
+    // moving to the far cell would land on the neighbouring spoke, swap `_hotEntry` underneath the
+    // gesture, and commit a value to the wrong field.
+    property int  _collarSlot: -1
     property bool _verbose:  false
 
     readonly property real _dist: Math.sqrt(_dx * _dx + _dy * _dy)
@@ -109,7 +135,10 @@ Popup {
     readonly property int _hotSlot: {
         if (_dist < _r0) return -1                        // the hub: nothing is hot
         if (_dist > _outer) return -1                     // flung past everything
-        if (_dist > _r1 && !_inCollar) return -1          // past the rim on a spoke with no collar
+        // An open collar OWNS the ring until it closes. Its slot is the one it opened on, whatever
+        // the angle now says — the cells reach past their own wedge by design.
+        if (_inCollar) return root._entryAt(_collarSlot) ? _collarSlot : -1
+        if (_dist > _r1) return -1                        // past the rim on a spoke with no collar
         var s = Math.round((_angDeg + 90) / 45)
         s = ((s % 8) + 8) % 8
         return root._entryAt(s) ? s : -1
@@ -117,18 +146,22 @@ Popup {
 
     readonly property var _hotEntry: _hotSlot >= 0 ? root._entryAt(_hotSlot) : null
 
-    // Which of the collar's three cells, or -1 when the collar is not open. The cells divide the
-    // spoke's own arc, so the choice is made in the direction the hand is already travelling.
+    // Which collar cell, or -1 when the collar is not open. The cells divide the collar's arc, which
+    // is centred on the spoke, so the choice is still made in the direction the hand is travelling.
     readonly property int _hotCell: {
         if (!_inCollar || _hotSlot < 0) return -1
         var e = root._hotEntry
         if (!e || !e.values || e.values.length === 0) return -1
         if (_dist <= _r1 || _dist > _outer) return -1
         var centre = -90 + _hotSlot * 45
-        var off    = root._norm(_angDeg - centre) + _sweep / 2      // 0 … _sweep across the wedge
-        var n      = Math.min(3, e.values.length)
-        var c      = Math.floor(off / (_sweep / n))
-        return Math.max(0, Math.min(n - 1, c))
+        var off    = root._norm(_angDeg - centre) + _collarSweep / 2   // 0 … _collarSweep
+        var n      = root._collarCells
+        if (n <= 0 || off < 0 || off >= _collarSweep) return -1
+        // Past the end of the arc is NOTHING, not the nearest end cell. It was clamped while the
+        // collar was one wedge wide, where overshooting meant crossing into a neighbour's slot and
+        // the entry changed anyway. A wide collar leaves most of the outer ring beyond its own ends,
+        // and clamping there would let a fling commit `rarely` or `always` by accident.
+        return Math.max(0, Math.min(n - 1, Math.floor(off / (_collarSweep / n))))
     }
 
     // ── Popup plumbing ────────────────────────────────────────────────────────
@@ -143,7 +176,7 @@ Popup {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     background: null
 
-    onClosed: { _inCollar = false; _verbose = false }
+    onClosed: { _inCollar = false; _collarSlot = -1; _verbose = false }
     // Esc reaches here through closePolicy. Whichever way it closed without a commit is a cancel,
     // and a cancelled gesture is not an error — nothing is said about it anywhere.
     onAboutToHide: if (!_committing) root.cancelled()
@@ -166,7 +199,8 @@ Popup {
 
         root._dx = 0
         root._dy = 0
-        root._inCollar  = false
+        root._inCollar   = false
+        root._collarSlot = -1
         root._committing = false
         root._verbose   = root.firstOfSession
         if (root.firstOfSession) settleTimer.restart()
@@ -182,7 +216,12 @@ Popup {
         if (!root._inCollar && root._dist > root._r1) {
             var s = ((Math.round((root._angDeg + 90) / 45) % 8) + 8) % 8
             var e = root._entryAt(s)
-            if (e && e.values && e.values.length > 0) root._inCollar = true
+            // Latch the SLOT with the collar, in that order — `_hotSlot` reads `_collarSlot` as soon
+            // as `_inCollar` is true, so setting the flag first would read -1 for a frame.
+            if (e && e.values && e.values.length > 0) {
+                root._collarSlot = s
+                root._inCollar   = true
+            }
         }
     }
 
@@ -197,7 +236,7 @@ Popup {
             // Releasing on the value it already has changes nothing and says nothing. The collar's
             // whole safety property is that a hold with no travel cannot alter anything, and this is
             // where that is enforced — rather than by reordering the cells, which would break the
-            // reading of a ladder like sometimes · often · usually.
+            // reading of a ladder like rarely · sometimes · often · usually · always.
             if (v.current === true) { root.close(); return }
             root._committing = true
             root.committed(root._hotSlot, e, v.value)
@@ -400,9 +439,10 @@ Popup {
 
         // ── The collar ────────────────────────────────────────────────────────
         //
-        // One level, three cells, past the rim, aligned to its own spoke's arc. A value with more
-        // than three options gets no collar at all — its spoke opens the inspector — so there is
-        // nothing here to paginate and never will be.
+        // One level, up to five cells, past the rim, CENTRED on its spoke but not bounded by it —
+        // see `_collarSweep`. A value with more options than that gets a shortlist rather than a
+        // collar; its spoke opens the inspector for the rest, so there is nothing here to paginate
+        // and never will be.
         Shape {
             visible: root._inCollar && root._hotEntry
                      && root._hotEntry.values && root._hotEntry.values.length > 0
@@ -413,14 +453,11 @@ Popup {
                 id: cell
                 required property int idx
 
-                readonly property var  vals: root._hotEntry && root._hotEntry.values
-                                                 ? root._hotEntry.values : []
-                readonly property int  n:    Math.min(3, vals.length)
+                readonly property int  n:    root._collarCells
                 readonly property bool live: idx < n
-                readonly property real span: root._sweep / Math.max(1, n)
-                readonly property real base: -90 + root._hotSlot * 45 - root._sweep / 2
-                readonly property real a0:   base + idx * span
-                readonly property real a1:   base + (idx + 1) * span
+                readonly property real span: root._collarSweep / Math.max(1, n)
+                readonly property real a0:   root._collarBase + idx * span
+                readonly property real a1:   root._collarBase + (idx + 1) * span
                 readonly property bool hot:  root._hotCell === idx
 
                 fillColor: !live ? "transparent"
@@ -461,24 +498,34 @@ Popup {
             Cell { idx: 0 }
             Cell { idx: 1 }
             Cell { idx: 2 }
+            Cell { idx: 3 }
+            Cell { idx: 4 }
         }
 
         Repeater {
-            model: 3
+            model: root._maxCells
             delegate: Item {
                 id: cellLab
                 required property int index
 
                 readonly property var  vals: root._hotEntry && root._hotEntry.values
                                                  ? root._hotEntry.values : []
-                readonly property int  n:    Math.min(3, vals.length)
-                readonly property real span: root._sweep / Math.max(1, n)
-                readonly property real ang:  -90 + root._hotSlot * 45 - root._sweep / 2
-                                             + (index + 0.5) * span
+                // Derived from `vals` HERE rather than read off root._collarCells, which is the same
+                // number by a different route. Two bindings onto one entry do not update in step: as
+                // the collar closes, a cell that still believed n was 5 while `vals` had already
+                // emptied indexed past the end and threw on every close.
+                readonly property int  n:    Math.min(root._maxCells, vals.length)
+                readonly property var  cell: index < vals.length ? vals[index] : null
+                readonly property real span: root._collarSweep / Math.max(1, n)
+                readonly property real ang:  root._collarBase + (index + 0.5) * span
                 readonly property real mid:  root._r1 + root._collar / 2
 
-                visible: root._inCollar && index < n
-                width:   root._collar - Theme.sp(6)
+                visible: root._inCollar && cell !== null
+                // The label box was the collar's DEPTH, which is what it had to be when a cell was
+                // 14° of arc and no wider than the band was deep. A cell is now the wider of the
+                // two, so the word gets the chord it actually sits on and "sometimes" stops eliding.
+                width:   Math.max(root._collar,
+                                  2 * mid * Math.sin(span * Math.PI / 360)) - Theme.sp(6)
                 height:  Theme.sp(30)
                 x: face.px(mid, ang) - width / 2
                 y: face.py(mid, ang) - height / 2
@@ -487,19 +534,16 @@ Popup {
                     anchors.centerIn: parent
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
-                    text: cellLab.index < cellLab.n ? (cellLab.vals[cellLab.index].label || "") : ""
+                    text: cellLab.cell ? (cellLab.cell.label || "") : ""
                     font.family:    Theme.fontBody
                     font.pixelSize: Theme.fontSzMicro
                     // The value it already has, marked. Releasing there is the no-op, and the mark
                     // is what tells the author which direction is a change before they make one.
-                    font.weight: cellLab.index < cellLab.n
-                                 && cellLab.vals[cellLab.index].current === true
+                    font.weight: cellLab.cell && cellLab.cell.current === true
                                      ? Font.DemiBold : Theme.fontBodyWeight
                     color: root._hotCell === cellLab.index ? Theme.colorText
-                         : cellLab.index < cellLab.n
-                           && cellLab.vals[cellLab.index].current === true
-                                                           ? Theme.colorText
-                                                           : Theme.colorText2
+                         : cellLab.cell && cellLab.cell.current === true ? Theme.colorText
+                                                                        : Theme.colorText2
                     elide: Text.ElideRight
                 }
             }

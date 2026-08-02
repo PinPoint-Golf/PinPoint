@@ -4231,32 +4231,18 @@ QVariantList ModelBrowser::ringValues(const QString &type, const QString &id,
         if (!splitEdgeId(id, from, to, et) || et != EdgeType::Causes) return {};
         for (const Edge &e : p.edges)
             if (e.type == et && e.from == from && e.to == to) current = strengthName(e.strength);
-        // Five rungs into three cells, as a CONTIGUOUS WINDOW CENTRED ON THE CURRENT ONE, clamped at
-        // the ends of the ladder. The generic cap below would take the first three every time, which
-        // on this field means `always` is unreachable from the ring and a link that already IS
-        // `always` sees three cells none of which is it.
-        //
-        // A window rather than a re-sort because the reading is the whole point: the cells stay in
-        // ladder order, so the gesture is "one rung up" or "one rung down" in the direction the hand
-        // is already going. Getting from `rarely` to `always` is two holds, which is the honest cost
-        // of a three-cell collar over a five-rung ladder — the table and the inspector still offer
-        // all five in one click.
+        // The whole ladder, in ladder order — the collar holds five, so every rung is one hold away
+        // and none of this needs a shortlist. Reordering it to put the likely ones first would
+        // destroy the reading, which is the one thing a ladder has.
         options = strengthOptions();
-
-        int at = -1;
-        for (int i = 0; i < options.size(); ++i)
-            if (options[i].toMap().value(QStringLiteral("value")).toString() == current) at = i;
-        if (at >= 0 && options.size() > 3) {
-            const int first = std::clamp(at - 1, 0, int(options.size()) - 3);
-            options = options.mid(first, 3);
-        }
     } else if ((type == kCharacteristics || type == kCauses) && field == QStringLiteral("group")) {
         const Condition *c = p.condition(id);
         if (!c) return {};
         current = conditionGroupName(c->group);
 
-        // The three most used in THIS library, because the useful shortcut is the group the author
-        // keeps reaching for, not the first three in the enum.
+        // The most used in THIS library, because the useful shortcut is the group the author keeps
+        // reaching for, not the first few in the enum. Nine groups and five cells, so this one still
+        // shortlists — unlike the strength ladder above, which now fits whole.
         QHash<QString, int> uses;
         for (const Condition &o : p.conditions) uses[conditionGroupName(o.group)]++;
         options = groupOptions();
@@ -4269,12 +4255,16 @@ QVariantList ModelBrowser::ringValues(const QString &type, const QString &id,
         return {};
     }
 
-    // Cap at three, and never at the cost of the current value: a collar that could not show what
-    // this object already is would offer three changes and no way to see what is being changed.
+    // Cap at what the collar draws, and never at the cost of the current value: a collar that could
+    // not show what this object already is would offer changes and no way to see what is being
+    // changed — and releasing on the current value is the gesture's own no-op, which needs a cell to
+    // release on. Must match RingMenu's `_maxCells`.
+    static constexpr int kCollarCells = 5;
+
     QVariantList out;
     bool         haveCurrent = false;
     for (const QVariant &v : options) {
-        if (out.size() >= 3) break;
+        if (out.size() >= kCollarCells) break;
         QVariantMap o = v.toMap();
         const bool  is = o.value(QStringLiteral("value")).toString() == current;
         if (is) haveCurrent = true;
