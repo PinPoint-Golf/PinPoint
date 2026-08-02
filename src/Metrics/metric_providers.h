@@ -20,16 +20,24 @@
 
 #include "metric_provider.h"
 
-// Capability declarations for the three live MetricSeries producers (design §6). Each maps its
-// producer's keys to per-shot availability, encoding the session-profile gating the analyzer applies
-// (wrist/foot metrics run only in the Wrist Motion profile; kinematics runs in every profile). None
-// of these compute anything — production stays in the analysis stages. sessionType == -1 (directory
-// browse with no shot loaded) is treated as session-agnostic so "available with my setup" is useful.
+// Capability declarations for the live MetricSeries producers (design §6). Each maps its producer's
+// keys to per-shot availability. None of these compute anything — production stays in the analysis
+// stages.
+//
+// NO PROVIDER LOOKS AT `ShotContext::sessionType`, and none may. Availability answers one question —
+// can this shot's data and devices support this metric — and a session type is neither: it is what
+// the operator meant to record, not evidence about what was recorded. The gates here therefore
+// mirror the stages' own canRun() conditions exactly (a face-on camera, a club track, a ball track,
+// a bound IMU role) and nothing else. The field survives on ShotContext because swing.json carries
+// it and the resolver's callers pass it through, but reading it here is a defect: an earlier
+// `wristSessionOk()` gate made half the catalogue answer "produced in Wrist Motion sessions only",
+// which the golfer reads as a statement about their equipment. See appendBodyMetricStages() in
+// wrist_analyzer.cpp, which removed the matching gate on the production side.
 
 namespace pinpoint::analysis {
 
-// metric_extractor.cpp — Wrist Motion session only. leadWristFlexExt / leadWristRadUln need
-// LeadForearm + LeadHand; forearmPronation / leadArmFlexion additionally need LeadUpperArm.
+// metric_extractor.cpp. leadWristFlexExt / leadWristRadUln need LeadForearm + LeadHand;
+// forearmPronation / leadArmFlexion additionally need LeadUpperArm.
 class WristMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
@@ -44,41 +52,82 @@ public:
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// foot_metrics.cpp + ball_position.cpp — Wrist Motion session only today. All need face-on
-// whole-body pose (foot keypoints); ballPosition additionally needs the ball track, so this
-// provider is NOT key-agnostic.
+// foot_metrics.cpp + ball_position.cpp. All need face-on whole-body pose (foot keypoints);
+// ballPosition additionally needs the ball track, so this provider is NOT key-agnostic.
 class FootMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// lower_body_metrics.cpp — Wrist Motion session only. leadKneeDrift / pelvisSway / pelvisLift /
-// hipLineTilt are frontal-plane readings off the COCO body hips, knees and ankles. Same gate as the
-// feet, and deliberately a separate provider: these keypoints exist in BOTH pose layouts, so this
-// answers on tracks where FootMetricProvider cannot.
+// lower_body_metrics.cpp — leadKneeDrift / pelvisSway / pelvisLift / hipLineTilt / feetAlignment /
+// comOverLeadFoot are frontal-plane readings off the COCO body hips, knees and ankles. Deliberately
+// a separate provider from the feet: these keypoints exist in BOTH pose layouts, so this answers on
+// tracks where FootMetricProvider cannot.
 class LowerBodyMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// head_track.cpp — Wrist Motion session only. headSway / headLift / headTilt need face-on pose.
+// upper_body_metrics.cpp — the chest, shoulder and arm frontal-plane channels. Same input as the
+// lower body (face-on pose, COCO body only), and separate for the same reason: different keypoints,
+// different failure.
+class UpperBodyMetricProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
+};
+
+// pose_wrist_angle_source.cpp buildTrailWristSeries — trailWristFlexExt from the face-on pose.
+//
+// A REQUIREMENT THIS SEAM CANNOT EXPRESS: it needs the WholeBody hand keypoints, and MetricRequirement
+// has no pose-layout field. Declaring one for a single metric would put a field on every descriptor
+// to serve one; the producer refuses a 17-keypoint track outright instead, so the failure is honest
+// at analysis time even though the capability answer here is optimistic. Stated rather than hidden.
+class TrailWristProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
+};
+
+// body_rotation.cpp — the one provider that answers Bridged, and the reason the state exists.
+//
+// A bound Pelvis / Thorax IMU measures axial turn directly: Measured. With only a face-on camera the
+// same producer estimates it from the collapse of the hip or shoulder span in the image, which is a
+// real reading at reduced fidelity: Bridged, with a reason that says which. xFactor and its stretch
+// need BOTH segments, so they resolve at the weaker of the two.
+class BodyRotationProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
+};
+
+// club_delivery.cpp — shaftAngleVsHorizontal / attackAngle from the measured clubhead;
+// lowPointAhead additionally needs the ball (the reference it is stated against) and its diameter
+// ruler (the unit it is stated in).
+class ClubDeliveryProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
+};
+
+// head_track.cpp — headSway / headLift / headTilt need face-on pose.
 class HeadMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// wrist_analyzer.cpp ShaftLeanStage — Wrist Motion session only. impactShaftLean needs the club track.
+// wrist_analyzer.cpp ShaftLeanStage — impactShaftLean needs the club track.
 class ShaftLeanProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// tempo_metrics.cpp — Wrist Motion session only today. Needs NO devices beyond whatever produced
-// a confident phase ladder: an IMU-only swing and a camera-only swing both qualify, which is a
+// tempo_metrics.cpp — needs NO devices beyond whatever produced a confident phase ladder: an
+// IMU-only swing and a camera-only swing both qualify, which is a
 // disjunction MetricRequirement cannot express — hence the empty requirement plus the note that
 // availability here means "the pipeline can produce it", not "this shot's ladder was good enough"
 // (the producer refuses an unreliable ladder at analysis time; see tempo_metrics.h).

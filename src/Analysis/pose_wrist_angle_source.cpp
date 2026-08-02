@@ -23,6 +23,7 @@
 #include <limits>
 
 #include "hand_axis.h"                 // kHand*Mcp / kLeftHandFirstKp / kRightHandFirstKp
+#include "metric_channel.h"            // MetricChannel / buildChannelSeries (trail-wrist series)
 #include "wrist_analysis_adapter.h"    // wristCheckpoints() — shared checkpoint→Phase map
 
 namespace pinpoint::analysis {
@@ -149,6 +150,60 @@ PoseWristAngleSource::PoseWristAngleSource(const PoseTrack2D &pose,
         }
     }
     setTimeline(tl);
+}
+
+std::vector<MetricSeries> buildTrailWristSeries(const PoseTrack2D &pose,
+                                                const std::vector<PhaseEvent> &phases,
+                                                int handedness, int frameW, int frameH,
+                                                const PoseWristAngleConfig &cfg)
+{
+    std::vector<MetricSeries> out;
+
+    const std::vector<PoseFrame2D> &frames =
+        pose.smoothed.empty() ? pose.frames : pose.smoothed;
+    if (frameW <= 0 || frameH <= 0 || frames.empty())
+        return out;
+
+    const bool leftLeads = (handedness != 2);
+    // The TRAIL side: the opposite elbow, wrist and hand block from the lead-side constructor above.
+    const int elbow     = leftLeads ? 8 : 7;      // COCO trail elbow (R / L)
+    const int wrist     = leftLeads ? 10 : 9;     // COCO trail wrist
+    const int base      = leftLeads ? kRightHandFirstKp : kLeftHandFirstKp;
+    const int wristRoot = base;
+    const int middleMcp = base + kHandMiddleMcp;
+
+    // See the header for the derivation. Face-on, the two hands are mirror images seen from the
+    // same side, so the raw signed image angle already reads EXTENSION-positive on the trail hand
+    // for a left-leading golfer; a left-handed swing is the whole-image mirror of that.
+    const double mirror = leftLeads ? 1.0 : -1.0;
+
+    MetricChannel ch;
+    std::vector<int64_t> grid;
+    grid.reserve(frames.size());
+    for (const PoseFrame2D &f : frames) {
+        grid.push_back(f.t_us);
+
+        const double fx = (f.kp[wrist].x()     - f.kp[elbow].x())     * frameW;   // forearm elbow→wrist
+        const double fy = (f.kp[wrist].y()     - f.kp[elbow].y())     * frameH;
+        const double ax = (f.kp[middleMcp].x() - f.kp[wristRoot].x()) * frameW;   // hand axis root→middle-MCP
+        const double ay = (f.kp[middleMcp].y() - f.kp[wristRoot].y()) * frameH;
+
+        const double v = signedAngleDeg(fx, fy, ax, ay) * mirror;
+        if (std::isnan(v))
+            continue;
+        // The same four-endpoint gate the lead side applies. A frame below it is ABSENT from the
+        // channel and bridged by the resample — never a fabricated zero.
+        const double minConf = std::min(std::min(f.conf[elbow], f.conf[wrist]),
+                                        std::min(f.conf[wristRoot], f.conf[middleMcp]));
+        if (minConf < cfg.confMin)
+            continue;
+        ch.push(f.t_us, v);
+    }
+
+    appendIfProduced(out, buildChannelSeries(grid, ch, QStringLiteral("trailWristFlexExt"),
+                                             QStringLiteral("Trail wrist — bow / cup"),
+                                             QStringLiteral("°"), phases));
+    return out;
 }
 
 } // namespace pinpoint::analysis

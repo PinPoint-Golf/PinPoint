@@ -137,12 +137,11 @@ Taken with Mark before any code was written. Do not reopen without him.
   catalogue's own sign convention. A signal with no row **fails the test** — that is the design.
   So every new measure needs a `MetricDescriptor` whose `howToRead` states the convention *before*
   its signal can exist. That is why stage 4 precedes stages 5–7.
-- **Most pose metrics are session-gated to Wrist Motion.** `wristSessionOk(sessionType)` returns true
-  only for `1` (Wrist) and `-1` (directory browse), and gates `WristMetricProvider`,
-  `FootMetricProvider`, `TempoProvider`, `HeadMetricProvider`, `ShaftLeanProvider` and `ScoreProvider`.
-  This is a documented catalogue design (`metric_catalogue_developer_guide.md:105`), not a bug — but
-  it means new conditions over `headSway`, `leadHeelLift`, `impactShaftLean` and the foot metrics fire
-  in Wrist sessions only until it is revisited. Ledgered as `X1`.
+- ~~**Most pose metrics are session-gated to Wrist Motion.**~~ **NO LONGER TRUE, 2026-08-02.**
+  `wristSessionOk()` is deleted and no provider reads `sessionType`; the body-metric stages are
+  listed once in `appendBodyMetricStages()` (`wrist_analyzer.cpp`) and every profile runs them, each
+  gating in its own `canRun()` on the data it needs. Conditions over `headSway`, `leadHeelLift`,
+  `impactShaftLean` and the foot metrics fire in any session that captured the data. `X1` closed.
 
 ### The zero-cost win the brief missed
 
@@ -327,7 +326,7 @@ Open items. Rows are added, never silently removed; a closed row keeps its reaso
 
 | # | Item | State |
 |---|---|---|
-| `X1` | Most pose metrics are session-gated to Wrist Motion, so new conditions over head / foot / shaft-lean metrics cannot fire in a Swing session. Documented catalogue design, not a bug — but it caps this package's practical reach and should be revisited when the Swing session grows a metric profile. | open — for Mark |
+| `X1` | ~~Most pose metrics are session-gated to Wrist Motion…~~ **CLOSED 2026-08-02.** The gate is gone on both sides. `appendBodyMetricStages()` (`wrist_analyzer.cpp`) lists the body-metric block once and EVERY profile runs it, each stage gating in its own `canRun()` on the data it needs; `wristSessionOk()` / `wristSessionOnly()` are deleted from `metric_providers.cpp` and no provider reads `sessionType`. The standing rule is now explicit in the metric-catalogue guide: **analysis is agnostic of session type** — a session type is what the operator meant to capture, and only the sensors are evidence about what was captured. | closed |
 | `X2` | The 38 wrist-grid cell measures carry no `highMeans`. They bear no corridor signal so nothing can invert, but the field is the direction-audit mechanism and the grid will eventually want signals. | open |
 | `X3` | Screen-answer storage and the asserted-outcome intake ("what's your bad shot?") have no home: nothing in the app stores a per-athlete assertion or screen result. Downstream of engine wiring. | open — next package |
 | `X4` | A shot resolves to ONE context node, so club and archetype (and any future intent axis) cannot both apply. Latent today only because the archetype rows and the club rows touch disjoint measures. Adding club rows to a wrist measure, or archetype rows to a club-contextual one, makes it bite. | open — design |

@@ -271,41 +271,51 @@ int main()
     // separately spreads it across rows of "unblocks 1" and buries the item that should lead, which
     // is exactly what happened before this was fixed.
     //
-    // The example was pelvisSway until the lower-body producer landed and took it OFF the roadmap
-    // — which is the roadmap working, and is why this now uses pelvis rotation instead. That is a
-    // deeper quantity than a face-on camera can supply (it is rotation about the vertical axis, and
-    // a frontal projection cannot see it), so it stays planned and stays the best available example
-    // of the shape: five reducers over one series, seven characteristics behind them.
+    // The example was pelvisSway, then pelvisRotation, and BOTH have since left — which is the
+    // roadmap working exactly as intended and is the reason this assertion keeps having to move.
+    // Pelvis rotation left when body_rotation.cpp landed: it is rotation about the vertical axis, so
+    // a frontal projection cannot see it directly, but the image span of the hip line collapses by
+    // its cosine, and an honest estimate with a stated uncertainty beat leaving seven
+    // characteristics dark.
+    //
+    // The exemplar is now spine forward bend, which is a genuinely different case: it is SAGITTAL,
+    // the plane a face-on camera foreshortens to almost nothing, and no clever reading of the
+    // frontal projection recovers it. Two reducers over one series, four characteristics behind
+    // them.
     {
         ModelBrowser       model;
         const QVariantList rows = model.roadmap();
 
         check(!rows.isEmpty(), "the roadmap has rows");
 
-        int  pelvisRotRows = 0, pelvisRotBlocks = 0, pelvisRotSamples = 0;
+        int  exemplarRows = 0, exemplarBlocks = 0, exemplarSamples = 0;
         for (const QVariant &v : rows) {
             const QVariantMap r = v.toMap();
-            if (r.value(QStringLiteral("metricKey")).toString() != QStringLiteral("pelvisRotation"))
+            if (r.value(QStringLiteral("metricKey")).toString()
+                != QStringLiteral("spineForwardBend"))
                 continue;
-            ++pelvisRotRows;
-            pelvisRotBlocks  = r.value(QStringLiteral("blocks")).toInt();
-            pelvisRotSamples = r.value(QStringLiteral("samples")).toInt();
+            ++exemplarRows;
+            exemplarBlocks  = r.value(QStringLiteral("blocks")).toInt();
+            exemplarSamples = r.value(QStringLiteral("samples")).toInt();
         }
-        check(pelvisRotRows == 1, "a series with several reducers is ONE roadmap row");
-        check(pelvisRotSamples == 5, "that row knows it carries five reducers");
-        check(pelvisRotBlocks == 7, "and that it unblocks seven characteristics");
+        check(exemplarRows == 1, "a series with several reducers is ONE roadmap row");
+        check(exemplarSamples == 2, "that row knows it carries two reducers");
+        check(exemplarBlocks == 4, "and that it unblocks four characteristics");
 
-        // And the metric that just LEFT the roadmap must really be gone: a producer landing has to
+        // And the metrics that LEFT the roadmap must really be gone: a producer landing has to
         // remove its row, or the roadmap keeps advertising work that is finished.
-        int pelvisSwayRows = 0;
-        for (const QVariant &v : rows)
-            if (v.toMap().value(QStringLiteral("metricKey")).toString()
-                == QStringLiteral("pelvisSway"))
-                ++pelvisSwayRows;
-        check(pelvisSwayRows == 0, "a series that gained a producer leaves the roadmap");
+        int goneRows = 0;
+        for (const QVariant &v : rows) {
+            const QString k = v.toMap().value(QStringLiteral("metricKey")).toString();
+            for (const char *done : { "pelvisSway", "pelvisRotation", "thoraxRotation",
+                                      "secondaryAxisTilt", "lowPointAhead", "attackAngle",
+                                      "trailWristFlexExt", "comOverLeadFoot" })
+                if (k == QLatin1String(done)) ++goneRows;
+        }
+        check(goneRows == 0, "a series that gained a producer leaves the roadmap");
 
         check(!rows.isEmpty()
-                  && rows.first().toMap().value(QStringLiteral("blocks")).toInt() >= pelvisRotBlocks,
+                  && rows.first().toMap().value(QStringLiteral("blocks")).toInt() >= exemplarBlocks,
               "rows are ranked by how much they unblock");
 
         // A capture gap must never appear as roadmap work, however many characteristics it blocks.

@@ -181,8 +181,23 @@ Two telemetry layers — do not conflate them:
 
 ## 4. The Wrist Profile, Stage by Stage
 
-`wristProfile()` (file-local in `wrist_analyzer.cpp` — deliberately not
-shared until the Swing session needs it, §10.5 step 4):
+`wristProfile()` is file-local in `wrist_analyzer.cpp`, but its **body-metric block is not**: stages
+13–14 below and the four that joined them live in `appendBodyMetricStages()`, which BOTH
+`wristProfile()` and `cameraKinematicsProfile()` call.
+
+> **Analysis is agnostic of session type.** The body-metric stages used to be listed only in the
+> Wrist profile, which put a second, invisible gate in front of conditions each stage already states
+> for itself — a face-on camera and a pose track, a bound trunk IMU, a valid shaft track, a
+> confident phase ladder. A swing recorded perfectly well under the Swing session produced no head,
+> foot, lower-body or tempo metrics, and the metric catalogue then reported "produced in Wrist
+> Motion sessions only", which reads to the golfer as a statement about their equipment. A session
+> type is a capture INTENT; it is not evidence about what was captured. **Put the gate in
+> `canRun()`, never in the choice of profile.**
+>
+> One consequence to know when adding to the block: `cameraKinematicsProfile()` has **no
+> EventRefine**, so these stages read the SegResolve ladder rather than the refined one. Each of
+> them already tolerates that (they read `ctx.seg.events` and fall back per phase) — a coarser
+> Address is a slightly noisier reference, not a wrong one.
 
 | # | Stage | Gate (`canRun`) | Writes |
 |---|-------|-----------------|--------|
@@ -200,6 +215,11 @@ shared until the Swing session needs it, §10.5 step 4):
 | 12 | BindDetail | always | `detail->series/phases/segmentation` ← local products |
 | 13 | HeadTrack | FaceOn && pose frames | appends to `detail->series` only (unscored) |
 | 14 | FootMetrics | FaceOn && pose frames | appends to `detail->series` only (unscored) |
+| 14a | LowerBodyMetrics | FaceOn && pose frames | 6 frontal-plane series (unscored) |
+| 14b | UpperBodyMetrics | FaceOn && pose frames | 9 upper-body series + `trailWristFlexExt` (unscored) |
+| 14c | BodyRotation | pose frames **OR** a bound Pelvis/Thorax stream | pelvis/thorax turn, X-factor + stretch (unscored) |
+| 14d | ClubDelivery | `shaft.valid` && samples | shaft-vs-horizontal, attack angle, low point (unscored) |
+| 14e | Tempo | confident Address/Top/Impact ladder | tempo backswing + ratio (unscored) |
 | 15 | Bindings | always | `detail->bindings` (calibration snapshot per device) |
 | 16 | Resemblance | always | `detail->score` + §B.7 interval + tier |
 | 17 | Assessment | `runAssessment` && IMU streams && local series | findings; **overrides** headline score, clears interval |

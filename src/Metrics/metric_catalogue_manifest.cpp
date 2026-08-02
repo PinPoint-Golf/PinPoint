@@ -21,13 +21,31 @@
 // The one place every descriptor is declared (design §3.3 / build order §3) — the full design
 // catalogue (shot_analyzer_design.md §A), each metric either LIVE or a PLANNED placeholder.
 //
-// LIVE (21) — a producer emits it today: metric_extractor ×4, kinematic_series ×3 + shaft-lean,
-//   foot_metrics ×5 + ball_position ×1, head_track ×3, tempo_metrics ×2, plus wristScore /
-//   wristResemblance (Summary, from a ScoreBreakdown, Wrist session).
-// PLANNED (22, `.planned = true`) — in the design catalogue but no producer in this build: the
-//   whole-body rotation / spine / pelvis / club-delivery / kinematic-sequence / alignment
-//   metrics and swingScore. The PlannedMetricProvider claims these so they resolve "planned", and
-//   their `.requirement` reads as "will need …" on the detail page.
+// 70 descriptors. 54 have a producer; 16 are `.planned = true` placeholders.
+//
+// PRODUCED — metric_extractor ×4, kinematic_series ×3 + shaft-lean, foot_metrics ×5 +
+//   ball_position ×1, head_track ×3, lower_body_metrics ×6, upper_body_metrics ×9,
+//   body_rotation ×4, club_delivery ×3, the trail-wrist series ×1, tempo_metrics ×2, the two
+//   wrist Summary scores, and the nine launch-monitor readings (a device, not a producer we write).
+//
+// PLANNED (16) — no producer in this build, and each says WHY in its own howToRead rather than
+//   leaving the reader to guess. They fall into five groups: the DEPTH axis a face-on camera cannot
+//   see (pelvisThrust, clubPath, swingPlane, shaftDirection, launchDirection, ballBodyDistance);
+//   SAGITTAL quantities the frontal projection foreshortens to noise (spineForwardBend, the two
+//   knee flexions); the spinal regions NO pose layout carries a keypoint for (thoracicFlexion,
+//   lumbarExtension); sensors we do not place (hipInternalRotation); and the three that need work
+//   we have not done — launchAngle and ballSpeed need a ball-FLIGHT tracker (the detector we have
+//   is an at-spot presence tracker), kinematicSequence needs angular-SPEED series, and swingScore
+//   needs a live adherence scorer.
+//
+//   The PlannedMetricProvider claims all of them so they resolve "planned" — a declared roadmap
+//   item — rather than falling to the resolver's "no producer available" branch, which is the
+//   answer a key the catalogue has never heard of deserves. Their `.requirement` reads as
+//   "will need …" on the detail page.
+//
+// NO DESCRIPTOR AND NO PROVIDER MAY READ `sessionType`. Availability is about the shot's data and
+//   devices; a session type is what the operator meant to capture, which is not evidence about what
+//   was captured. See metric_providers.h.
 //
 // See the metric-catalogue developer guide for promoting a placeholder to live (add the producer,
 // drop `.planned`, move the key from PlannedMetricProvider to a real provider).
@@ -254,26 +272,34 @@ void installMetricManifest(MetricCatalogue &cat)
             "wrist's cup at the top is what the lead wrist's bow has to answer, so reading only one "
             "side tells half the story of what the clubface is doing."),
         .howToRead = QStringLiteral(
-            "Positive is flexion, negative is extension, read as a change from address. The trail "
-            "wrist typically cups going back and retains some of that cup deep into the downswing. "
-            "Planned: it needs a trail-side hand and forearm IMU, which the current rig does not "
-            "carry."),
-        .flexPositive = true,
+            "POSITIVE IS EXTENSION (CUP), negative is flexion — the OPPOSITE polarity to the lead "
+            "wrist, and not an inconsistency: the two hands are mirror images, so seen face-on one "
+            "signed image-plane angle means flexion on the lead side and extension on the trail "
+            "side. The trail wrist typically cups going back, reaching around 45° at the top, and "
+            "retains some of that cup deep into the downswing. Read as a change from address. "
+            "This is an APPARENT camera-plane angle rather than an anatomical one — a trail-side "
+            "hand and forearm IMU would measure the true wrist angle, and the rig does not carry "
+            "one — so read it for shape and change rather than as a clinical number."),
+        // flexPositive = FALSE: the stored sign is extension-positive. The lead wrist stores
+        // flexion-positive, and the two differ because the hands are mirror images seen from the
+        // same side — see howToRead. The seven pack corridors are seated on this polarity
+        // (m_trailWristFlexExt_p4 at +45°, which is the trail wrist CUPPING at the top).
+        .flexPositive = false,
         .phases = { P::Top, P::Impact },
-        // PLANNED, not live: PpJointDof lists the trail side as reserved for a later instrumentation
-        // pass. The corridors have existed in the reference table since v1 with nothing producing a
-        // value for them, and the wrist grid greys those cells — this descriptor is what makes that
-        // state legible instead of leaving seven pack measures pointing at a metric key that does
-        // not exist.
-        .planned = true,
-        // No imuRoles: SegmentRole has no trail-side arm roles yet, and inventing them for a
-        // producer nobody has built would put model surface in the enum ahead of anything that
-        // uses it. The requirement is stated in howToRead until the instrumentation pass adds them.
-        .requirement = {},
+        // LIVE from the face-on pose (pose_wrist_angle_source.cpp buildTrailWristSeries), as an
+        // APPARENT camera-plane angle. It is not the anatomical DOF: SegmentRole still has no
+        // trail-side arm roles, and PpJointDof no trail-side member, so this is deliberately a
+        // METRIC and not a wrist-assessment DOF — adding one would pull the assessment engine, the
+        // DOF metadata table and the reference bands into a change that produces one curve.
+        //
+        // It additionally needs the WholeBody hand keypoints, which MetricRequirement cannot state
+        // (there is no pose-layout field, and adding one to every descriptor to serve a single
+        // metric is the wrong trade). The producer refuses a 17-keypoint track outright instead.
+        .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("assessment:wrist") },
     });
 
-    // ---------------------------------------------------- Body rotation (PLANNED — body IMUs, no producer)
+    // -------------------------------- Body rotation (LIVE — body_rotation.cpp; IMU or face-on estimate)
 
     cat.addDescriptor({
         .key = QStringLiteral("pelvisRotation"),
@@ -290,11 +316,16 @@ void installMetricManifest(MetricCatalogue &cat)
         .howToRead = QStringLiteral(
             "Read at the Top and Impact. As a guide the pelvis reaches roughly 45° of turn at the "
             "top and is already re-rotating to about 35–45° open by impact — the pelvis leading the "
-            "chest open is a hallmark of an efficient downswing. Planned: it needs a dedicated "
-            "pelvis IMU, which today's placement slots do not yet provide."),
+            "chest open is a hallmark of an efficient downswing. THE NUMBER IS A MAGNITUDE OF "
+            "TURN AWAY FROM ADDRESS, so it is positive at the top and positive again at impact and "
+            "passes through zero as the body squares up. With a pelvis IMU bound this is measured "
+            "directly; with only a face-on camera it is ESTIMATED from the collapse of the hip "
+            "span in the image, which is honest but weakest near square — read small values with "
+            "the stated uncertainty rather than at face value."),
         .phases = { P::Top, P::Impact },
-        .planned = true,
-        .requirement = { .imuRoles = { R::Pelvis } },
+        // A face-on camera is enough to ESTIMATE this; a pelvis IMU measures it. The requirement
+        // states the lower bar, because that is the one that decides whether anything is produced.
+        .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:hip_spin_out"),
                     QStringLiteral("characteristic:hip_stall"),
                     QStringLiteral("characteristic:hips_closed_at_impact"),
@@ -319,10 +350,12 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read at the Top and Impact; the shoulders typically reach around 90° of turn at the "
             "top of a full swing. The relationship between chest and pelvis turn — how much the "
             "chest outruns the pelvis going back, and how the pelvis leads coming down — is where "
-            "the power story lives (see X-factor). Planned: needs a thorax IMU."),
+            "the power story lives (see X-factor). A MAGNITUDE OF TURN from address, measured "
+            "from a thorax IMU when one is bound and otherwise estimated from the collapse of the "
+            "shoulder span in the face-on image. A full shoulder turn sits near the top of what "
+            "that estimate can resolve, which is why the corridor over it is wide."),
         .phases = { P::Top, P::Impact },
-        .planned = true,
-        .requirement = { .imuRoles = { R::Thorax } },
+        .requirement = { .faceOnCamera = true },   // estimated; a thorax IMU measures it
         .usedBy = { QStringLiteral("characteristic:abbreviated_finish"),
                     QStringLiteral("characteristic:sequence_order"),
                     QStringLiteral("characteristic:short_backswing"),
@@ -345,10 +378,11 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read at the top of the backswing. Tour players commonly show around 40–42° of "
             "separation (TPI), but more is not automatically better — it has to be separation the "
             "player can actually use going down. Pair it with X-factor stretch, which captures how "
-            "much the gap grows early in the downswing. Planned: needs pelvis and thorax IMUs."),
+            "much the gap grows early in the downswing. It is the difference of the two turn "
+            "magnitudes, so it inherits the weaker of them: with no trunk IMUs both halves are "
+            "camera estimates and the separation carries both uncertainties."),
         .phases = { P::Top },
-        .planned = true,
-        .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
+        .requirement = { .faceOnCamera = true },   // both halves estimated; trunk IMUs measure them
     });
 
     cat.addDescriptor({
@@ -367,10 +401,11 @@ void installMetricManifest(MetricCatalogue &cat)
             "Look for a positive spike through transition into early downswing; roughly 5° of added "
             "stretch is typical, and skilled players add proportionally more. A player who reaches "
             "the top with big separation but no stretch is not using the coil — the fix is "
-            "sequencing, not more turn. Planned: needs pelvis and thorax IMUs."),
+            "sequencing, not more turn. Measured against the X-factor at the top, so it needs a "
+            "segmented top of backswing; without one it is absent rather than anchored to an "
+            "arbitrary instant."),
         .phases = { P::Transition, P::Downswing },
-        .planned = true,
-        .requirement = { .imuRoles = { R::Pelvis, R::Thorax } },
+        .requirement = { .faceOnCamera = true },   // both halves estimated; trunk IMUs measure them
         .usedBy = { QStringLiteral("characteristic:xfactor_deficit"),
                     QStringLiteral("characteristic:excessive_separation_stretch") },
     });
@@ -397,7 +432,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .requirement = { .imuRoles = { R::Pelvis, R::LeadThigh, R::TrailThigh } },
     });
 
-    // ------------------------------------------------ Spine & pelvis (PLANNED — camera-3D / fused)
+    // ------------------------ Spine & pelvis (part LIVE — lower_body_metrics.cpp / upper_body_metrics.cpp)
 
     cat.addDescriptor({
         .key = QStringLiteral("spineForwardBend"),
@@ -440,10 +475,12 @@ void installMetricManifest(MetricCatalogue &cat)
         .howToRead = QStringLiteral(
             "Read at Impact; at driver impact the thorax commonly shows around 32° of side bend "
             "versus about 10° at the pelvis. Too little side bend often goes with a steep, "
-            "over-the-top delivery; too much can throw the low point behind the ball. Planned: "
-            "needs a face-on camera (or IMUs)."),
+            "over-the-top delivery; too much can throw the low point behind the ball. Taken as "
+            "the shoulder line against the hip line: with no keypoint between them, two segments "
+            "that both exist is the honest reading of thorax-relative-to-pelvis, and the "
+            "difference cancels the whole-body lean that secondary axis tilt already reports. "
+            "POSITIVE IS SIDE BEND TOWARD THE TRAIL SIDE. Needs a face-on camera."),
         .phases = { P::Impact },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
     });
 
@@ -462,10 +499,11 @@ void installMetricManifest(MetricCatalogue &cat)
         .howToRead = QStringLiteral(
             "Read at Impact. Players tend to set roughly 6–8° of tilt at address and increase it to "
             "about 20–25° by impact; a driver wants more of this than an iron. Too little tilt at "
-            "impact is a classic reverse-pivot or early-extension signature. Planned: needs a "
-            "face-on camera."),
+            "impact is a classic reverse-pivot or early-extension signature. POSITIVE IS AWAY "
+            "FROM THE TARGET — the one lateral channel that is trail-positive rather than "
+            "lead-positive, because the quantity is named for the lean away from the target and "
+            "inverting it would leave every sentence about it backwards. Needs a face-on camera."),
         .phases = { P::Impact },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:excessive_axis_tilt_impact"),
                     QStringLiteral("characteristic:insufficient_axis_tilt_impact"),
@@ -570,11 +608,16 @@ void installMetricManifest(MetricCatalogue &cat)
             "hip at the top for everybody, and the question is how much. It is measured in the "
             "image plane, so a golfer standing at an angle to the camera will read differently from "
             "one square to it — read it alongside pelvis lift, which rises when the whole pelvis "
-            "comes up rather than one side of it. Needs a face-on camera."),
-        .phases = { P::Top },
+            "comes up rather than one side of it. Needs a face-on camera. IT IS ALSO THE HIP "
+            "ALIGNMENT READING: at address and impact the same line answers open / square / closed, "
+            "which is why `hipAlignment` is not a separate metric — one curve, sampled at different "
+            "phases, and positive still means the trail hip sits higher."),
+        .phases = { P::Address, P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review"),
-                    QStringLiteral("characteristic:trail_hip_hike") },
+                    QStringLiteral("characteristic:trail_hip_hike"),
+                    QStringLiteral("characteristic:hip_alignment_open"),
+                    QStringLiteral("characteristic:hip_alignment_closed") },
     });
 
     cat.addDescriptor({
@@ -700,7 +743,7 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("characteristic:excessive_shaft_lean") },
     });
 
-    // ------------------------------------------------ Club delivery (PLANNED — club track / DTL)
+    // ------------------ Club delivery (part LIVE — club_delivery.cpp; the rest is down-the-line work)
 
     cat.addDescriptor({
         .key = QStringLiteral("swingPlane"),
@@ -767,11 +810,15 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read at Impact. HIGHER MEANS A MORE UPWARD STRIKE: widely-published references run "
             "about −1.3° for the driver (many good drives are positive, +3 to +5°) and about −4.5° "
             "for a 7-iron. A too-steep iron angle "
-            "digs and loses speed; a downward driver angle costs carry. A down-the-line camera "
-            "makes it fully in-plane. Planned: needs the club track."),
+            "digs and loses speed; a downward driver angle costs carry. THIS IS A FACE-ON READING, "
+            "and this descriptor used to say the opposite. The angle lives in the vertical plane "
+            "containing the target line, which IS the face-on image plane; a down-the-line camera "
+            "puts that same direction on its own optical axis and is the one view that cannot "
+            "measure it. What remains is a small cosine term from the path's depth component. "
+            "Needs the club track with a MEASURED clubhead — a projected head carries the grip's "
+            "motion, and differentiating it gives a confident number about the wrong thing."),
         .phases = { P::Impact },
-        .planned = true,
-        .requirement = { .clubTrack = true, .minTier = ReconstructionTier::Stereo3D },
+        .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("characteristic:attack_too_shallow"),
                     QStringLiteral("characteristic:attack_too_steep") },
     });
@@ -819,10 +866,13 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read near impact; a positive value (low point ahead of the ball) is the descending, "
             "ball-first strike you want with irons, while the driver is normally struck with the "
             "low point behind the ball. A low point behind the ball on an iron is the fat/thin "
-            "signature. Planned: needs a face-on camera with shaft-head and ball tracking, and is "
-            "deferred until the measured-clubhead detector lands so the head is measured, not projected."),
+            "signature. Read from the MEASURED clubhead only, with the arc vertex refined below "
+            "frame spacing by a local parabola — at impact speeds a whole frame is inches. The "
+            "target direction comes from the head's own travel across impact rather than from "
+            "handedness, so a mirrored camera cannot invert the sign. Needs a face-on camera, the "
+            "club track and the ball (which supplies both the reference the answer is stated "
+            "against and, through its diameter, the inches it is stated in)."),
         .phases = { P::Impact },
-        .planned = true,
         .requirement = { .faceOnCamera = true, .clubTrack = true, .ballTrack = true },
         .usedBy = { QStringLiteral("characteristic:low_point_behind_ball"),
                     QStringLiteral("characteristic:low_point_too_far_ahead") },
@@ -1071,33 +1121,16 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("characteristic:excessive_heel_lift") },
     });
 
-    // -------------------------------------------- Alignment (PLANNED — pose lines at address/impact)
+    // -------------------------------------------- Alignment (pose lines at address / impact)
+    //
+    // `shoulderAlignment` and `hipAlignment` USED TO LIVE HERE and are gone. Each was geometrically
+    // identical to a line this catalogue already carries — the shoulder line's angle is
+    // `shoulderPlaneAngle`, the hip line's is `hipLineTilt` — differing only in which phases it was
+    // read at, which metric_reducer.h exists to express: a series is what a producer produces, a
+    // reducer is how it is sampled. Two descriptors for one curve would have been two names for one
+    // number, under two different sign conventions. The pack measures `m_shoulderAlignment` and
+    // `m_hipAlignment` now point at the surviving series.
 
-    cat.addDescriptor({
-        .key = QStringLiteral("shoulderAlignment"),
-        .type = MetricType::PointInTime,
-        .label = QStringLiteral("Shoulder alignment"),
-        .shortLabel = QStringLiteral("Shoulders"),
-        .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Alignment"),
-        .description = QStringLiteral(
-            "Which way the shoulder line points — the angle of the line joining the lead and trail "
-            "shoulders in the image plane — read at address and again at impact. OPEN IS NEGATIVE "
-            "AND CLOSED IS POSITIVE, the same convention as club path, which an open line and an "
-            "out-to-in path share. The shoulders are the most influential alignment line for a "
-            "player's start direction, and how they return at impact tells a different story from "
-            "how they were set."),
-        .howToRead = QStringLiteral(
-            "Read at Address and Impact. A common pattern is close to square at address and a touch "
-            "open by impact as the upper body clears; shoulders open at address, or slammed wide "
-            "open at impact, often signal an out-to-in delivery. Planned: needs a face-on camera "
-            "for the image-plane line, with a down-the-line view giving true target-line alignment."),
-        .phases = { P::Address, P::Impact },
-        .planned = true,
-        .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:alignment_closed"),
-                    QStringLiteral("characteristic:alignment_open") },
-    });
 
     cat.addDescriptor({
         .key = QStringLiteral("elbowAlignment"),
@@ -1114,37 +1147,13 @@ void installMetricManifest(MetricCatalogue &cat)
         .howToRead = QStringLiteral(
             "Read at Address and Impact; the change between the two reflects how the arms fold, "
             "rotate and re-deliver through the strike (for example the trail elbow tucking on the "
-            "way down). Read it together with lead-arm flexion and shoulder alignment. Planned: "
-            "needs a face-on camera."),
+            "way down). Read it together with lead-arm flexion and the shoulder line. POSITIVE "
+            "MEANS THE TRAIL ELBOW SITS ABOVE THE LEAD ELBOW, the same convention every body line "
+            "in the product uses. Needs a face-on camera."),
         .phases = { P::Address, P::Impact },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
     });
 
-    cat.addDescriptor({
-        .key = QStringLiteral("hipAlignment"),
-        .type = MetricType::PointInTime,
-        .label = QStringLiteral("Hip alignment"),
-        .shortLabel = QStringLiteral("Hips"),
-        .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Alignment"),
-        .description = QStringLiteral(
-            "Which way the hip line points — the angle of the line joining the lead and trail hips "
-            "in the image plane — read at address and at impact. OPEN IS NEGATIVE AND CLOSED IS "
-            "POSITIVE, the same convention as shoulder alignment and club path. The hips both set a "
-            "player's aim and, by how far they open by impact, reveal how well the lower body is "
-            "leading the downswing."),
-        .howToRead = QStringLiteral(
-            "Read at Address and Impact. Near-square at address is typical, and by impact the hips "
-            "are usually more open than the shoulders — a lower body that clears ahead of the upper "
-            "body is a good sign, whereas hips that stay closed into impact often force the arms to "
-            "take over. Planned: needs a face-on camera (down-the-line for true target-line alignment)."),
-        .phases = { P::Address, P::Impact },
-        .planned = true,
-        .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:hip_alignment_closed"),
-                    QStringLiteral("characteristic:hip_alignment_open") },
-    });
 
     cat.addDescriptor({
         .key = QStringLiteral("feetAlignment"),
@@ -1162,10 +1171,14 @@ void installMetricManifest(MetricCatalogue &cat)
         .howToRead = QStringLiteral(
             "Read at Address and Impact. At address it reports the stance line (open / square / "
             "closed); the impact read shows how the feet and lower legs have worked — for example "
-            "the trail foot rolling and the ankles re-orienting as the player pushes off. Planned: "
-            "needs a face-on camera."),
+            "the trail foot rolling and the ankles re-orienting as the player pushes off. "
+            "POSITIVE MEANS THE TRAIL ANKLE SITS ABOVE THE LEAD ANKLE in the image, which for a "
+            "golfer standing on level ground is the trail foot set further from the camera — a "
+            "closed stance. Like the toe line it reads the APPARENT line rather than true "
+            "target-line alignment, which a down-the-line or overhead view would resolve directly; "
+            "unlike the toe line its sign does not invert for a left-handed golfer or a mirrored "
+            "camera. Needs a face-on camera."),
         .phases = { P::Address, P::Impact },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:feet_alignment_closed"),
                     QStringLiteral("characteristic:feet_alignment_open") },
@@ -1321,12 +1334,16 @@ void installMetricManifest(MetricCatalogue &cat)
             "A per-frame curve; the reading that matters is at the top. Lower means flatter, more "
             "horizontal shoulders. It is a consequence of how the golfer is built and how they set "
             "up as much as of what they did, so read it alongside address posture rather than on "
-            "its own. Needs a face-on camera."),
-        .phases = { P::Top },
-        .planned = true,
+            "its own. POSITIVE MEANS THE TRAIL SHOULDER SITS ABOVE THE LEAD SHOULDER, the same "
+            "convention as the hip line. Needs a face-on camera. IT IS ALSO THE SHOULDER ALIGNMENT "
+            "READING: at address and impact the same line answers open / square / closed, which is "
+            "why `shoulderAlignment` is not a separate metric."),
+        .phases = { P::Address, P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:flat_shoulder_plane"),
-                    QStringLiteral("characteristic:steep_shoulder_plane") },
+                    QStringLiteral("characteristic:steep_shoulder_plane"),
+                    QStringLiteral("characteristic:alignment_open"),
+                    QStringLiteral("characteristic:alignment_closed") },
     });
 
     cat.addDescriptor({
@@ -1370,7 +1387,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "matters. A rising angle there means the arm is separating from the body rather than "
             "extending down the line. Needs a face-on camera."),
         .phases = { P::Impact, P::ShaftParallelThrough },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:chicken_wing") },
     });
@@ -1421,7 +1437,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "stance width so it compares across golfers and camera distances. Needs a face-on "
             "camera."),
         .phases = { P::Address, P::ArmParallelDown },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:forward_lunge"),
                     QStringLiteral("characteristic:hanging_back") },
@@ -1444,7 +1459,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "in millimetres, so the same reading means the same thing for any golfer. Needs a "
             "face-on camera."),
         .phases = { P::Top },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:flying_elbow"),
                     QStringLiteral("characteristic:trail_elbow_deep") },
@@ -1467,7 +1481,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "actually available to them rather than as an absolute distance. Needs a face-on "
             "camera."),
         .phases = { P::Top },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:loss_of_width") },
     });
@@ -1522,7 +1535,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "low end. It is a proxy for balance, not a measurement of it: without pressure data "
             "this reads geometry only. Needs a face-on camera."),
         .phases = { P::Impact, P::Finish },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:off_balance_finish") },
     });
@@ -1547,7 +1559,6 @@ void installMetricManifest(MetricCatalogue &cat)
             "normal and a value of zero would mean the arm is pinned, which is its own fault. Needs "
             "a face-on camera."),
         .phases = { P::Top },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:disconnection"),
                     QStringLiteral("characteristic:arms_over_connected") },
@@ -1597,9 +1608,11 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read at the Top. ZERO IS PARALLEL TO THE GROUND; POSITIVE IS PAST PARALLEL and "
             "negative is short of it. Length is strongly club-dependent and partly a matter of "
             "flexibility and style, so the corridor is wide and a reading outside it is a "
-            "conversation, not a verdict. Planned: needs the club track and a face-on camera."),
+            "conversation, not a verdict. Taken from the grip-to-head vector rather than from the "
+            "shaft angle itself, because a line carries a 180° ambiguity that the endpoint pair "
+            "resolves for free. Needs the club track with a MEASURED clubhead and a face-on "
+            "camera."),
         .phases = { P::Top },
-        .planned = true,
         .requirement = { .faceOnCamera = true, .clubTrack = true },
         .usedBy = { QStringLiteral("characteristic:overswing"),
                     QStringLiteral("characteristic:club_short_of_parallel") },
@@ -1607,9 +1620,12 @@ void installMetricManifest(MetricCatalogue &cat)
 
     // ---------------------------------------------------- Ball flight (ball track, face-on)
     //
-    // Start line and launch are resolvable from our own ball track; CURVATURE is not, because it
-    // develops over a flight we do not see indoors. That split is the whole reason the ball-flight
-    // outcomes divide into camera-measured and launch-monitor ones.
+    // Start line and launch would be resolvable from a ball-FLIGHT track; CURVATURE would not,
+    // because it develops over a flight we do not see indoors. Both halves are still planned, and
+    // for a reason the descriptors below now state plainly rather than implying it is nearly done:
+    // the ball detector we have is an AT-SPOT PRESENCE tracker, not a flight tracker. It answers
+    // "is the ball still there" and "when did it go", which is exactly what shot detection and the
+    // address ruler need and exactly not what a launch reading needs.
 
     cat.addDescriptor({
         .key = QStringLiteral("launchDirection"),
@@ -1627,10 +1643,16 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read just after Impact from the ball track. POSITIVE IS RIGHT OF THE TARGET for a "
             "right-handed golfer, negative is left — the same convention as club path and the "
             "alignment lines. It says nothing about curvature, which needs a launch monitor. "
-            "Planned: needs the ball track and a face-on camera."),
+            "Planned, and TWICE blocked. THE BALL TRACK IS NOT A BALL-FLIGHT TRACK: the detector "
+            "locks the stationary ball, reports whether it is still at that spot and records the "
+            "instant it vanishes, so BallSample2D::center is always the locked spot and never a "
+            "ball in the air. What this metric needs is a tracker that FOLLOWS the ball after it "
+            "leaves. Beyond that, start direction is "
+            "left and right of the target — the depth axis of a face-on camera — so even with a "
+            "flight track this one needs a down-the-line or overhead view."),
         .phases = { P::Impact },
         .planned = true,
-        .requirement = { .faceOnCamera = true, .ballTrack = true },
+        .requirement = { .ballTrack = true },   // a ball-FLIGHT track, plus a view that sees depth
         .usedBy = { QStringLiteral("characteristic:pull"),
                     QStringLiteral("characteristic:push") },
     });
@@ -1650,10 +1672,15 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read just after Impact from the ball track. HIGHER MEANS A HIGHER LAUNCH. Strongly "
             "club-dependent — a driver and a wedge have nothing to say to each other here — so the "
             "corridor is authored per club and reading it at the general context means little. "
-            "Planned: needs the ball track and a face-on camera."),
+            "The angle itself is a face-on reading — the ball rises in the plane the camera sees — "
+            "so unlike start direction this needs no second view. Planned all the same, because "
+            "THE BALL TRACK IS NOT A BALL-FLIGHT TRACK: the detector locks the stationary ball, "
+            "reports whether it is still at that spot and records the instant it vanishes, so "
+            "BallSample2D::center is always the locked spot and never a ball in the air. What this "
+            "metric needs is a tracker that FOLLOWS the ball after it leaves."),
         .phases = { P::Impact },
         .planned = true,
-        .requirement = { .faceOnCamera = true, .ballTrack = true },
+        .requirement = { .faceOnCamera = true, .ballTrack = true },   // a ball-FLIGHT track
         .usedBy = { QStringLiteral("characteristic:launch_high"),
                     QStringLiteral("characteristic:launch_low") },
     });
@@ -1672,11 +1699,15 @@ void installMetricManifest(MetricCatalogue &cat)
         .howToRead = QStringLiteral(
             "Read just after Impact, averaged over several streaks rather than one — a single "
             "frame-pair estimate is noisy. HIGHER IS FASTER. Club- and athlete-dependent, so it is "
-            "read against the golfer's own normal rather than a population figure. Planned: needs "
-            "the ball track and a face-on camera."),
+            "read against the golfer's own normal rather than a population figure. Planned. THE "
+            "BALL TRACK IS NOT A BALL-FLIGHT TRACK. The detector locks the stationary ball, reports "
+            "whether it is still at that spot and records the instant it vanishes; "
+            "BallSample2D::center is always the locked spot and never a ball in the air. What this "
+            "metric needs is a tracker that FOLLOWS the ball after it leaves, which is a different "
+            "piece of work from the one we have."),
         .phases = { P::Impact },
         .planned = true,
-        .requirement = { .faceOnCamera = true, .ballTrack = true },
+        .requirement = { .faceOnCamera = true, .ballTrack = true },   // a ball-FLIGHT track
         .usedBy = { QStringLiteral("characteristic:ball_speed_deficit") },
     });
 

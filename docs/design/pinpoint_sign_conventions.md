@@ -19,8 +19,21 @@ in-to-out and closed are POSITIVE.** This is what every launch monitor reports, 
 |---|---|
 | `clubPath` | in-to-out. Out-to-in — the over-the-top delivery — is negative. |
 | `faceAngle` | closed. Open is negative. |
-| `shoulderAlignment` | closed. An open shoulder line at address is negative. |
 | `toeLineAngle` | closed stance. An open stance is negative. |
+
+> **`shoulderAlignment` and `hipAlignment` used to be in this table and are gone.** Each named a
+> metric that was geometrically identical to a body-line tilt the catalogue already carried —
+> `shoulderPlaneAngle` and `hipLineTilt` — read at a different phase. Two descriptors for one curve
+> is two names for one number, and worse here than usual, because the two carried OPPOSITE sign
+> conventions: closed-positive on one and trail-end-above-positive on the other. The measures
+> `m_shoulderAlignment` and `m_hipAlignment` now point at the surviving series and are stated in
+> ITS convention. `feetAlignment` survived as its own metric — the ankle line is genuinely not the
+> toe line — but moved to the body-line convention below for the same reason.
+>
+> A face-on camera reads the APPARENT line, not true target-line alignment. The reading is still
+> informative: a golfer on level ground with a foot set further from the camera shows that foot
+> higher in the image, so the image-plane tilt does carry open / closed. It is a proxy, and the
+> descriptors say so.
 
 **Ball position along the stance** — **`0 %` at the LEAD heel, `100 %` at the trail heel**, so a
 high value means the ball is further BACK. This is the scale other golf software uses. Unclamped:
@@ -107,10 +120,45 @@ All written right-handed; handedness is a transform applied at read time, never 
 | `dynamicLoft`, `spinLoft` | more loft delivered / a larger loft-to-path angle |
 | `shaftDirection` | pointing right of the target — across the line at the top, outside in the takeaway |
 | `shaftAngleVsHorizontal` | past parallel; zero IS parallel to the ground |
-| `hipAlignment`, `feetAlignment` | closed — following `shoulderAlignment` and club path, where open is negative |
 | `trailKneeFlexion` | more bend, matching the lead knee |
 | `leadUpperArmToChest` | a larger gap — the arm further from the chest |
-| `comOverLeadFoot` | further FROM the lead ankle, so a balanced finish is the low end |
+| `comOverLeadFoot` | further FROM the lead ankle, so a balanced finish is the low end. UNSIGNED: still back and fallen through are the same fault seen from either side |
+| `attackAngle` | a more UPWARD strike |
+| `lowPointAhead` | the arc bottoming out AHEAD of the ball, on the target side |
+| `leadArmToTorso` | the arm further from the torso. Unsigned, 0–180°: a frontal projection cannot say which side the arm left on |
+| `trailElbowHeight` | the elbow higher above the shoulder line |
+| `leadHandWidth` | the hands further from the chest — a wider arc |
+| `thoraxLateralDrift` | toward the LEAD side, the same convention as `pelvisSway`, of which this is the chest's counterpart |
+
+### Body lines — ONE convention, and it does not flip
+
+`hipLineTilt`, `shoulderPlaneAngle`, `elbowAlignment` and `feetAlignment` are all the image-plane
+tilt of a line between a lead point and its trail partner, and all four mean the same thing:
+
+> **Positive means the TRAIL end sits ABOVE the lead end.**
+
+They are computed against the **absolute** horizontal separation — `atan2(leadY − trailY, |Δx|)` —
+which is what makes the sign independent of which image side the lead is on. The alternative, a raw
+`atan2` of the lead→trail vector, inverts for a left-handed golfer or a mirrored camera while
+describing the same posture. `toeLineAngle` is that alternative and predates the rule; it is the
+one line metric that does flip, which is half the reason `feetAlignment` exists beside it.
+
+### The two that deliberately break the lead-positive default
+
+| Metric | Positive means | Why not lead-positive |
+|---|---|---|
+| `secondaryAxisTilt` | leaning AWAY from the target — trail-side lean | The quantity is NAMED for the lean away from the target. Inverting it to satisfy the default would leave every coach-facing sentence about it backwards. |
+| `trailWristFlexExt` | EXTENSION (cup) — the opposite of the lead wrist's `+ = bowed` | The hands are mirror images. Seen face-on from one side, one signed image-plane angle means flexion on the lead hand and extension on the trail hand. The shipped corridors agree: `m_trailWristFlexExt_p4` is seated at +45°, and 45° at the top is the trail wrist cupping. |
+
+### Turn magnitudes
+
+`pelvisRotation`, `thoraxRotation` and `xFactor` are **unsigned magnitudes of turn from address**,
+not signed away/toward readings. Positive at the top AND positive at impact, passing through zero as
+the body squares up. This is not a shortcut of the camera estimator — it is what the shipped
+corridors require (`m_pelvisRotP4` at +45° for the top, `m_pelvisRotP7` at +40° for impact; a signed
+curve cannot satisfy both). It does mean a peak reducer spanning the top to impact sees the larger
+of the two excursions rather than the open one. See
+[`body_rotation_estimation.md`](body_rotation_estimation.md).
 
 ## Not covered by either rule
 

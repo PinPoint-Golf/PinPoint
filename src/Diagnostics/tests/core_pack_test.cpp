@@ -79,8 +79,14 @@ int main()
 
         auto coverage = [&](const char *id) { return coverageOf(p, QString::fromLatin1(id)); };
         check(coverage("poor_pelvic_disassociation") == 13, "poor pelvic disassociation explains 13");
-        check(coverage("limited_thoracic_rotation") == 13, "limited thoracic rotation explains 13");
-        check(coverage("limited_lead_hip_ir") == 8, "limited lead-hip internal rotation explains 8");
+        // 15 and 9, up from 13 and 8. The face-on producer batch made six authored conditions
+        // gradeable for the first time, and the "everything that can fire has a cause" check below
+        // caught that they had nothing behind them. Two of the six route to a thoracic-rotation
+        // restriction (a chest that cannot turn is why the arms run away and why the finish stops
+        // short) and one to the lead hip (a hip that cannot internally rotate spins the pelvis out
+        // rather than turning over a stable lead leg).
+        check(coverage("limited_thoracic_rotation") == 15, "limited thoracic rotation explains 15");
+        check(coverage("limited_lead_hip_ir") == 9, "limited lead-hip internal rotation explains 9");
         // 10 -> 11 when the trail hip was given its route to over-the-top: a pelvis that cannot
         // finish turning away leaves the downswing no room to rotate into, and the arms take it
         // over the top. Updated deliberately, per the note below on the pelvis-sway count — these

@@ -1011,9 +1011,11 @@ positive, which is exactly how the three inversions got in.
 
 ### Also noticed, not acted on
 
-`m_axisTiltAtTop` reads `secondaryAxisTilt` **at P4**, but that metric's `howToRead` says *"read at
-Impact"* and quotes its figures there. The reverse-spine reading may want P4 anyway — worth a look
-when its producer lands.
+~~`m_axisTiltAtTop` reads `secondaryAxisTilt` **at P4**, but that metric's `howToRead` says *"read at
+Impact"* and quotes its figures there.~~ **Resolved 2026-08-02 (C13): the reverse-spine reading did
+want P4.** `upper_body_metrics.cpp` emits `secondaryAxisTilt` as a per-frame curve, so P4 and P7 are
+two reducers over one series and neither is a compromise — exactly the distinction `metric_reducer.h`
+exists to make. The `howToRead` still quotes Impact figures because that is where the literature is.
 
 ---
 
@@ -1294,9 +1296,9 @@ stage that owes this*.
 | C8 | **Literature review of every normative corridor**; `m_lagAngleDown` is the weakest | before the numbers are trusted | ☐ open |
 | C9 | Tempo band re-cut (its low-side Watch band is empty — Good → Action at 1.8). ⚠ ALSO retires the last migration pin in the suite: `manifest_migration_test`'s four tempo numbers | with C8 | ☐ open |
 | C10 | 20 norms for producer-less measures — author each **with its producer**, never in a batch | per producer | ☐ open |
-| C11 | `trailWristFlexExt` is a `planned` descriptor with **no** `imuRoles`; its 7 cells mint `NoProducer` | when the trail side is instrumented | ☐ open |
+| C11 | `trailWristFlexExt` is a `planned` descriptor with **no** `imuRoles`; its 7 cells mint `NoProducer` | ~~when the trail side is instrumented~~ | ☑ **closed 2026-08-02** — closed WITHOUT instrumenting the trail side. `buildTrailWristSeries` (`pose_wrist_angle_source.cpp`) produces it as an APPARENT camera-plane angle, the same honest construction the lead side already uses IMU-less, and all 7 measures are live. An IMU would still measure the anatomical DOF; this is a metric, not a DOF |
 | C12 | P1 cell-measures use an `at` reducer; revisit if the reducer model gains a zero-width delta | if ever | ☐ open |
-| C13 | `m_axisTiltAtTop` reads `secondaryAxisTilt` at P4; the metric's `howToRead` says Impact. `status: planned`, so nothing grades it yet | when its producer lands | ☐ open |
+| C13 | `m_axisTiltAtTop` reads `secondaryAxisTilt` at P4; the metric's `howToRead` says Impact | ~~when its producer lands~~ | ☑ **closed 2026-08-02** — the producer landed (`upper_body_metrics.cpp`) and the answer is that BOTH readings are wanted: `m_axisTiltAtTop` (P4) backs `excessive_axis_tilt_top` / `reverse_spine`, `m_axisTiltImpact` (P7) backs the two impact conditions. The series is per-frame, so one producer serves both — which is the reducer model working. The descriptor's `howToRead` names Impact because that is where the published figures are, and now also states the sign |
 | C14 | Two direction/measure errors on single-tail signals (`sig_scooping`, `sig_insufficientSet`) | 4 | ☑ closed |
 | C15 | `pelvisSway` and `shoulderAlignment` sign conventions undocumented, so unauditable | 4 | ☑ closed |
 | C16 | `ragOf(Grade)` existed only inside the parity test | 5 | ☑ closed |

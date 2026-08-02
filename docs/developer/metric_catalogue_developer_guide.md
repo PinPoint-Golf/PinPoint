@@ -59,7 +59,14 @@ Design invariants (do not break):
   of *what it will need*, surfaced as "will need …" on the detail page and a **Planned** badge in the
   directory. **Promoting a placeholder to live:** add the producer, drop `.planned`, move the key out
   of `PlannedMetricProvider::provides()` into a real provider that returns `Measured` when capable,
-  and update the metric_catalogue_test counts.
+  flip the matching `core.json` measures from `planned` to `live`, and update the
+  metric_catalogue_test counts. Then **re-run `core_pack_test`**: a condition that could not fire
+  before may now fire with nothing behind it, which is a defect in what ships rather than a backlog
+  item, and that test is the thing that catches it.
+- **`PlannedMetricProvider::provides()` is grouped by WHY, and keep it that way.** Depth, sagittal,
+  no-keypoint-in-any-layout, sensors-we-do-not-place, and work-we-have-not-done are five different
+  statements, and a flat list of keys loses all of them. A reader deciding what to build next needs
+  to know which group a key is in before anything else.
 
 Two easy traps:
 - The descriptor member is `requirement`, **not** `requires` — `requires` is a C++20 keyword and
@@ -114,11 +121,33 @@ cat.addDescriptor({
 A metric is `Unavailable` until a provider claims its key. Either extend an existing provider or add a
 new one in `src/Analysis/metric_providers.{h,cpp}`:
 - Add the key to that provider's `provides()`.
-- Handle it in `availability(key, ctx)`. Encode **session-profile gating here** (not in the
-  requirement struct): e.g. wrist/foot metrics return `wristSessionOnly()` unless
-  `ctx.sessionType` is `1` or `-1` (`-1` = directory browse → session-agnostic). Build the
-  sensor/camera/club verdict from a `MetricRequirement` via the shared `fromRequirement()` helper so
-  reasons read identically to the resolver's `describeRequirement()`.
+- Handle it in `availability(key, ctx)`. Build the sensor/camera/club verdict from a
+  `MetricRequirement` via the shared `fromRequirement()` helper so reasons read identically to the
+  resolver's `describeRequirement()`.
+
+> ### ⛔ NEVER READ `ShotContext::sessionType`
+>
+> There used to be a `wristSessionOk()` gate here, and this guide used to tell you to add one. It is
+> gone and must not come back. Availability answers one question — *can this shot's data and devices
+> support this metric* — and a session type is not evidence about that: it is what the operator
+> meant to capture. The gate made half the catalogue answer *"produced in Wrist Motion sessions
+> only"*, which a golfer reads as a statement about their equipment, and it silently produced
+> nothing on swings that were recorded perfectly well under the wrong session.
+>
+> The field survives on `ShotContext` because `swing.json` carries it and callers pass it through.
+> Reading it in a provider is a defect. The production side matches:
+> `appendBodyMetricStages()` in `wrist_analyzer.cpp` lists the body-metric stages ONCE and every
+> profile runs them, with each stage gating in its own `canRun()` on the data it actually needs.
+
+**Returning `Bridged`.** Three states, and the middle one is not decoration. Use it when the metric
+IS produced but by a weaker route than the ideal sensor — `BodyRotationProvider` is the worked
+example: a bound `SegmentRole::Pelvis` stream measures axial turn directly (`Measured`), and with
+only a face-on camera the same producer estimates it from the collapse of the hip span in the image
+(`Bridged`). Two rules follow. The reason must name the **method**, not the missing device
+("estimated from the face-on camera — a pelvis / thorax IMU would measure it directly"), because
+"needs a pelvis IMU" reads as a refusal when a value is in fact produced. And the producer must
+carry the cost: `body_rotation.cpp` propagates its span noise into `MetricSeries::sigma` so a reader
+can see how much to trust a small turn.
 - If you add a **new** provider class, register a process-lifetime instance of it in
   `makeMetricCatalogue()` (`metric_catalogue.cpp`) with `cat.addProvider(&yourProvider)`.
 

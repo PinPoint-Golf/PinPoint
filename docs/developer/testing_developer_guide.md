@@ -368,6 +368,23 @@ Qt6::Qml), `find_package` it in the suite — that is additive and cached.
   projects), and CTest needs Qt's `bin` + OpenCV's `bin` on `PATH` or the test
   exes fail with `0xc0000135` (DLL not found).
 - **`build/` is gitignored.** Build dirs are disposable; never commit them.
+- **Never name a lambda `emit`.** It is a Qt keyword macro. The symptom is not "redefinition" but a
+  wall of `left operand of comma operator has no effect` on every call site, because the macro
+  expands to nothing and `push(a, b, c)` becomes a comma expression.
+- **A `find()` helper returns a pointer INTO a vector — bind the vector.**
+  `find(buildXSeries(...), "key")` dangles the moment the full expression ends, and the crash is a
+  null deref somewhere later that looks nothing like the cause. `club_delivery_test` was written
+  that way first and segfaulted; every call there now goes through a named `const auto`.
+- **Make a synthetic swing look like a swing, in TIME as well as geometry.** Producers resolve their
+  address reference over a ±250 ms window about the Address event. A fixture compressed into 160 ms
+  puts the TOP inside that window and contaminates the very reference the metric is measured
+  against — which reads as a producer bug and is not one. `body_rotation_test` builds ~1.6 s at 240
+  fps for exactly this reason.
+- **Assert SIGNS on synthetic tracks, accuracy on a corpus.** A sign is the one thing a synthetic
+  fixture can pin exactly, and it is also the thing that silently grades every swing backwards when
+  it is wrong. `upper_body_metrics_test` runs its whole sign suite twice — once normally, once
+  through a MIRRORED camera with a left-handed golfer — because a convention that only holds for a
+  right-hander filmed from one side is not a convention.
 
 ---
 

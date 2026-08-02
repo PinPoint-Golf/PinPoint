@@ -192,6 +192,34 @@ pp_add_test(foot_metrics_test SOURCES foot_metrics_test.cpp ${ANALYSIS}/foot_met
 pp_add_test(lower_body_metrics_test SOURCES lower_body_metrics_test.cpp
             ${ANALYSIS}/lower_body_metrics.cpp)
 
+# Upper-body frontal-plane metrics (upper_body_metrics.{h,cpp}): the trail-positive
+# axis tilt against the lead-positive everything-else, spine side bend as the
+# shoulder line AGAINST the hip line (so a whole-body lean reads zero), the
+# absolute — not address-referenced — thorax drift the pack's Delta reducer needs,
+# and the denominator floor. Every sign is asserted a second time through a
+# MIRRORED camera with a left-handed golfer, which is what a synthetic track can
+# pin and a corpus cannot. Links anatomy_vocabulary.cpp: this producer resolves
+# points and segments through the vocabulary rather than spelling keypoint indices,
+# so the geometry it measures is the geometry the content facets name.
+pp_add_test(upper_body_metrics_test SOURCES upper_body_metrics_test.cpp
+            ${ANALYSIS}/upper_body_metrics.cpp ${SRC}/Diagnostics/anatomy_vocabulary.cpp)
+
+# Axial body rotation (body_rotation.{h,cpp}): the per-segment tier choice (a bound
+# Pelvis/Thorax stream beats the camera, independently for each), the cosine
+# inversion the camera tier is built on, and the MAGNITUDE convention — positive at
+# the top AND positive at impact, which is the only reading consistent with the
+# shipped corridors and the thing that would grade every downswing backwards if it
+# were wrong. Qt-only; synthetic pose tracks and synthetic quaternion streams.
+pp_add_test(body_rotation_test SOURCES body_rotation_test.cpp
+            ${ANALYSIS}/body_rotation.cpp)
+
+# Face-on club delivery (club_delivery.{h,cpp}): past-parallel / short-of-parallel
+# sign, upward-is-positive attack angle, the sub-frame parabola vertex the low point
+# needs (a whole frame is inches at impact speeds), and — the one that matters most —
+# that a PROJECTED clubhead produces nothing at all rather than something plausible.
+pp_add_test(club_delivery_test SOURCES club_delivery_test.cpp
+            ${ANALYSIS}/club_delivery.cpp)
+
 # Ball position at address (ball_position.{h,cpp}): the heel-line projection, the
 # order-independent median lock (leading detector mis-locks must not win), the
 # ball-diameter px→mm ruler, and the refuse-don't-fabricate contract. Qt-only, no

@@ -243,6 +243,32 @@ reports release-style classifications and uncocking velocities, not per-P-positi
 
 ---
 
+## 6e. The six `causes` edges added with the face-on producers (2026-08-02)
+
+Six conditions became gradeable the moment their producers landed and had **nothing behind them** —
+`core_pack_test`'s "every condition that can fire today has at least one cause" caught it, which is
+the check drawing its intended line: a `noCause` on a producer-less condition is a backlog, and a
+condition that fires TODAY with nothing behind it is a defect in what ships.
+
+All six edges are `practice` tier, searched 2026-08-02. **None is cited, and none should be** — they
+are coaching doctrine, and §3 of this log explains why most of the graph is and stays that way.
+
+| From | To | Strength | The mechanism claimed |
+|---|---|---|---|
+| `limited_thoracic_rotation` | `disconnection` | moderate | A chest that cannot turn makes the backswing feel short, and the arms lift and run away from it to find length. |
+| `limited_thoracic_rotation` | `abbreviated_finish` | moderate | The same restriction on the through-side: the turn runs out before the follow-through does. |
+| `limited_lead_hip_ir` | `hip_spin_out` | moderate | A lead hip that cannot internally rotate cannot receive a pelvis turning over a stable lead leg, so the pelvis spins out instead. Consistent with the pack's existing `limited_lead_hip_ir → early_extension` and `→ hanging_back` edges. |
+| `excessive_axis_tilt_impact` | `attack_too_shallow` | moderate | More trail-side lean at impact shallows the approach. Geometric, and the pack already carries `excessive_axis_tilt_impact → low_point_behind_ball`. |
+| `reverse_spine` | `insufficient_axis_tilt_impact` | moderate | Tilt set the wrong way at the top leaves none of the right kind at impact. |
+| `excessive_axis_tilt_top` | `excessive_axis_tilt_impact` | moderate | Too much tilt at the top is carried into impact. |
+
+`moderate` throughout, and deliberately: each is a plausible single mechanism for a fault with
+several, and §115's editorial rule — rank causes, do not assert one — applies. Two of the six raise
+`limited_thoracic_rotation`'s fan-out to 15 and one raises `limited_lead_hip_ir`'s to 9;
+`core_pack_test` pins both counts so the next author sees the change rather than absorbing it.
+
+---
+
 ## 7. Leads encountered but NOT verified — do not cite from this list
 
 A citation must never be written from here. These were seen in reference lists and not confirmed

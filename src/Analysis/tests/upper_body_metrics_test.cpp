@@ -1,0 +1,325 @@
+/*
+ * Copyright (c) 2026 Mark Liversedge (liversedge@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
+// Standalone test for the upper-body frontal-plane metrics
+// (src/Analysis/upper_body_metrics.{h,cpp}). Synthetic tracks only — no fixture.
+// Mirrors lower_body_metrics_test.cpp in structure and style.
+//
+// WHAT THIS TEST IS FOR: every channel here carries a SIGN, and a sign is the one thing a synthetic
+// track can pin exactly and a corpus cannot. Half the cases below therefore build a pose whose
+// answer is known by construction and assert the direction, not just the magnitude — and §5 runs
+// the whole suite again through a MIRRORED camera with a left-handed golfer, because a convention
+// that only holds for a right-hander filmed from one side is not a convention.
+
+#include "../upper_body_metrics.h"
+
+#include <cmath>
+#include <cstdio>
+#include <vector>
+
+using namespace pinpoint::analysis;
+
+static int g_fail = 0;
+
+#define CHECK(label, cond)                                        \
+    do {                                                          \
+        const bool ok = (cond);                                   \
+        std::printf("  [%s] %s\n", ok ? "PASS" : "FAIL", label);  \
+        if (!ok) ++g_fail;                                        \
+    } while (0)
+
+static bool near(double a, double b, double tol) { return std::fabs(a - b) <= tol; }
+
+// COCO-17 body indices.
+constexpr int kLSh = 5, kRSh = 6, kLEl = 7, kREl = 8, kLWr = 9, kRWr = 10;
+constexpr int kLHip = 11, kRHip = 12, kLAnk = 15, kRAnk = 16;
+
+constexpr int kW = 1000, kH = 1000;   // square frame: normalized == px/1000, so angles are readable
+
+struct Upper {
+    QPointF lSh, rSh, lEl, rEl, lWr, rWr, lHip, rHip, lAnk, rAnk;
+};
+
+static PoseFrame2D makeUpper(int64_t t, const Upper &p, float conf = 0.9f)
+{
+    PoseFrame2D f;
+    f.t_us = t;
+    const auto set = [&](int i, QPointF v) { f.kp[i] = v; f.conf[i] = conf; };
+    set(kLSh, p.lSh);   set(kRSh, p.rSh);
+    set(kLEl, p.lEl);   set(kREl, p.rEl);
+    set(kLWr, p.lWr);   set(kRWr, p.rWr);
+    set(kLHip, p.lHip); set(kRHip, p.rHip);
+    set(kLAnk, p.lAnk); set(kRAnk, p.rAnk);
+    return f;
+}
+
+// A square, level address pose. LEAD = LEFT keypoints, and the lead ankle sits at the SMALLER x, so
+// the lead side is image −x — the same deliberately awkward arrangement lower_body_metrics_test
+// uses, because a producer that assumed lead == +x would pass a friendlier fixture.
+static Upper addressPose()
+{
+    Upper p;
+    p.lSh  = QPointF(0.42, 0.30);   p.rSh  = QPointF(0.58, 0.30);
+    p.lEl  = QPointF(0.40, 0.42);   p.rEl  = QPointF(0.60, 0.42);
+    p.lWr  = QPointF(0.48, 0.52);   p.rWr  = QPointF(0.52, 0.52);
+    p.lHip = QPointF(0.45, 0.55);   p.rHip = QPointF(0.55, 0.55);
+    p.lAnk = QPointF(0.44, 0.90);   p.rAnk = QPointF(0.56, 0.90);
+    return p;
+}
+
+// Mirror a pose about x = 0.5 and swap left/right, which is exactly what a mirrored camera filming
+// a left-handed golfer produces: the SAME posture, every image coordinate flipped.
+static Upper mirrored(const Upper &p)
+{
+    const auto mx = [](QPointF v) { return QPointF(1.0 - v.x(), v.y()); };
+    Upper m;
+    m.lSh  = mx(p.rSh);   m.rSh  = mx(p.lSh);
+    m.lEl  = mx(p.rEl);   m.rEl  = mx(p.lEl);
+    m.lWr  = mx(p.rWr);   m.rWr  = mx(p.lWr);
+    m.lHip = mx(p.rHip);  m.rHip = mx(p.lHip);
+    m.lAnk = mx(p.rAnk);  m.rAnk = mx(p.lAnk);
+    return m;
+}
+
+static PoseTrack2D trackOf(const std::vector<Upper> &poses)
+{
+    PoseTrack2D t;
+    int64_t us = 0;
+    for (const Upper &p : poses) {
+        t.frames.push_back(makeUpper(us, p));
+        us += 10000;   // 100 fps
+    }
+    return t;
+}
+
+static std::vector<PhaseEvent> phasesAt(int64_t addrUs, int64_t topUs, int64_t impactUs)
+{
+    return { { Phase::Address, addrUs, 1.f, SegmentRole::Unknown },
+             { Phase::Top,     topUs,  1.f, SegmentRole::Unknown },
+             { Phase::Impact,  impactUs, 1.f, SegmentRole::Unknown } };
+}
+
+// Value of a named series at the given phase sample.
+static bool seriesAt(const std::vector<MetricSeries> &all, const char *key, Phase p, double &out)
+{
+    for (const MetricSeries &m : all) {
+        if (m.key != QLatin1String(key)) continue;
+        for (const PhaseSample &s : m.phaseSamples)
+            if (s.phase == p) { out = s.value; return true; }
+    }
+    return false;
+}
+
+static bool hasSeries(const std::vector<MetricSeries> &all, const char *key)
+{
+    for (const MetricSeries &m : all)
+        if (m.key == QLatin1String(key)) return true;
+    return false;
+}
+
+// Run the producer over a two-pose track (address held, then the test pose at the Top) and return
+// the emitted series.
+static std::vector<MetricSeries> runOn(const Upper &addr, const Upper &top, bool leadIsLeft = true)
+{
+    std::vector<Upper> poses;
+    for (int i = 0; i < 6; ++i) poses.push_back(addr);    // a held address for the robust reference
+    for (int i = 0; i < 6; ++i) poses.push_back(top);
+    const PoseTrack2D track = trackOf(poses);
+    const UpperBodyResult r = trackUpperBody(track, kW, kH, leadIsLeft, 20000);
+    return buildUpperBodySeries(r, phasesAt(20000, 90000, 110000));
+}
+
+int main()
+{
+    std::printf("=== upper body metrics ===\n");
+
+    // ── 1. Address: a square, level pose reads ~zero on every signed channel ────────────────────
+    {
+        const Upper a = addressPose();
+        const auto series = runOn(a, a);
+        CHECK("all nine series produced", series.size() == 9);
+
+        double v = 0.0;
+        CHECK("secondaryAxisTilt present", seriesAt(series, "secondaryAxisTilt", Phase::Address, v));
+        CHECK("square address ⇒ axis tilt ~0", near(v, 0.0, 0.5));
+        CHECK("shoulderPlaneAngle present", seriesAt(series, "shoulderPlaneAngle", Phase::Address, v));
+        CHECK("level shoulders ⇒ plane ~0", near(v, 0.0, 0.5));
+        CHECK("spineSideBend present", seriesAt(series, "spineSideBend", Phase::Address, v));
+        CHECK("level lines ⇒ side bend ~0", near(v, 0.0, 0.5));
+        CHECK("elbowAlignment present", seriesAt(series, "elbowAlignment", Phase::Address, v));
+        CHECK("level elbows ⇒ elbow line ~0", near(v, 0.0, 0.5));
+        CHECK("trailElbowHeight present", seriesAt(series, "trailElbowHeight", Phase::Address, v));
+        // The elbows sit 0.12 BELOW the shoulder line; the span is 0.16. −0.12/0.16 = −75 %.
+        CHECK("elbow below the shoulder line reads negative", near(v, -75.0, 1.0));
+    }
+
+    // ── 2. secondaryAxisTilt is TRAIL-positive ─────────────────────────────────────────────────
+    // The one lateral channel that is not lead-positive. Lead is image −x here, so leaning the
+    // spine AWAY from the target moves the neck toward +x, and the answer must be POSITIVE.
+    {
+        const Upper a = addressPose();
+        Upper t = a;
+        t.lSh = QPointF(0.47, 0.30);   t.rSh = QPointF(0.63, 0.30);   // whole shoulder girdle → +x
+        const auto series = runOn(a, t);
+
+        double v = 0.0;
+        CHECK("axis tilt at the top", seriesAt(series, "secondaryAxisTilt", Phase::Top, v));
+        CHECK("spine leaning away from the target is POSITIVE", v > 3.0);
+    }
+
+    // ── 3. spineSideBend is the shoulder line AGAINST the hip line ─────────────────────────────
+    // Tilting BOTH lines together is a whole-body lean, not side bend, and must read ~zero. Tilting
+    // only the shoulders is side bend and must not.
+    {
+        const Upper a = addressPose();
+
+        // Both lines tilted by the same ANGLE, which is not the same as the same rise: the
+        // shoulders span 0.16 and the hips 0.10, so equal drops would be 14° and 22° and the
+        // difference — the thing being measured — would not be zero. Equal ratios, equal angles.
+        Upper both = a;
+        both.lSh  = QPointF(0.42, 0.28);  both.rSh  = QPointF(0.58, 0.32);   // dy 0.04 / 0.16
+        both.lHip = QPointF(0.45, 0.5375); both.rHip = QPointF(0.55, 0.5625); // dy 0.025 / 0.10
+        double v = 0.0;
+        CHECK("side bend at the top (parallel lines)",
+              seriesAt(runOn(a, both), "spineSideBend", Phase::Top, v));
+        CHECK("a whole-body lean is NOT side bend", near(v, 0.0, 0.6));
+
+        Upper shoulders = a;                             // trail shoulder dropped, hips level
+        shoulders.lSh = QPointF(0.42, 0.28);  shoulders.rSh = QPointF(0.58, 0.34);
+        CHECK("side bend at the top (shoulders only)",
+              seriesAt(runOn(a, shoulders), "spineSideBend", Phase::Top, v));
+        // Trail (right, +x) shoulder LOWER ⇒ shoulder tilt negative ⇒ hip − shoulder positive.
+        CHECK("trail shoulder dropping under the turn is POSITIVE side bend", v > 5.0);
+    }
+
+    // ── 4. thoraxLateralDrift is measured from the TRAIL ankle, lead-positive ──────────────────
+    // NOT address-referenced: the measure over it is a Delta, so the series must carry the absolute
+    // distance and let the reducer do the referencing. Address is checked non-zero for that reason.
+    {
+        const Upper a = addressPose();
+        Upper t = a;
+        t.lSh = QPointF(0.40, 0.30);   t.rSh = QPointF(0.56, 0.30);   // chest toward the LEAD side (−x)
+        t.lHip = QPointF(0.45, 0.55);  t.rHip = QPointF(0.55, 0.55);
+        const auto series = runOn(a, t);
+
+        double addr = 0.0, top = 0.0;
+        CHECK("thoraxLateralDrift at address", seriesAt(series, "thoraxLateralDrift", Phase::Address, addr));
+        CHECK("thoraxLateralDrift at the top", seriesAt(series, "thoraxLateralDrift", Phase::Top, top));
+        CHECK("absolute, not address-referenced (address is not zero)", std::fabs(addr) > 10.0);
+        CHECK("chest moving toward the lead side INCREASES it", top > addr);
+    }
+
+    // ── 5. Every sign survives a mirrored camera and a left-handed golfer ──────────────────────
+    // The whole point of the absolute-denominator line form and of resolving lead-ness from the
+    // address geometry. Same posture, flipped image, opposite handedness — same numbers.
+    {
+        const Upper a = addressPose();
+        Upper t = a;
+        t.lSh = QPointF(0.47, 0.30);   t.rSh = QPointF(0.63, 0.30);   // lean away from the target
+
+        const auto plain    = runOn(a, t, true);
+        const auto flipped  = runOn(mirrored(a), mirrored(t), false);
+
+        for (const char *key : { "secondaryAxisTilt", "spineSideBend", "shoulderPlaneAngle",
+                                 "elbowAlignment", "trailElbowHeight", "leadHandWidth",
+                                 "leadUpperArmToChest", "leadArmToTorso", "thoraxLateralDrift" }) {
+            double p = 0.0, f = 0.0;
+            const bool okP = seriesAt(plain, key, Phase::Top, p);
+            const bool okF = seriesAt(flipped, key, Phase::Top, f);
+            std::printf("    %-20s plain %8.3f   mirrored %8.3f\n", key, p, f);
+            CHECK(key, okP && okF && near(p, f, 0.5));
+        }
+    }
+
+    // ── 6. leadArmToTorso: zero when the arm hangs along the torso, larger as it leaves ────────
+    {
+        const Upper a = addressPose();
+        Upper hang = a;
+        // Lead arm straight down the torso line: shoulder→elbow parallel to neck→pelvis.
+        hang.lSh = QPointF(0.50, 0.30);   hang.rSh = QPointF(0.50, 0.30);
+        hang.lHip = QPointF(0.50, 0.55);  hang.rHip = QPointF(0.50, 0.55);
+        hang.lEl = QPointF(0.50, 0.45);
+        double v = 0.0;
+        // Degenerate shoulder/hip lines make the tilts refuse, but the arm-vs-torso angle does not
+        // depend on them — which is itself worth pinning: channels fail independently.
+        const auto series = runOn(a, hang);
+        CHECK("leadArmToTorso at the top", seriesAt(series, "leadArmToTorso", Phase::Top, v));
+        CHECK("arm hanging along the torso reads ~0", near(v, 0.0, 2.0));
+
+        Upper out = a;
+        out.lEl = QPointF(0.28, 0.30);    // arm straight out to the lead side
+        CHECK("leadArmToTorso, arm out", seriesAt(runOn(a, out), "leadArmToTorso", Phase::Top, v));
+        CHECK("an arm away from the torso reads much larger", v > 60.0);
+    }
+
+    // ── 7. Refusals: no fabricated numbers ─────────────────────────────────────────────────────
+    {
+        // A shoulder span under the floor is a denominator that cannot carry a percentage.
+        Upper narrow = addressPose();
+        narrow.lSh = QPointF(0.499, 0.30);   narrow.rSh = QPointF(0.501, 0.30);   // 2 px apart
+        const auto tiny = runOn(narrow, narrow);
+        CHECK("a sub-floor shoulder span produces NOTHING", tiny.empty());
+
+        // Below the confidence gate every point is unresolved, so there is no reference at all.
+        PoseTrack2D dark = trackOf({ addressPose(), addressPose(), addressPose() });
+        for (PoseFrame2D &f : dark.frames)
+            f.conf.fill(0.05f);
+        const UpperBodyResult r = trackUpperBody(dark, kW, kH, true, 0);
+        CHECK("an all-low-confidence track produces NOTHING",
+              buildUpperBodySeries(r, phasesAt(0, 10000, 20000)).empty());
+
+        // Zero frame dimensions cannot de-normalize anything.
+        const UpperBodyResult z = trackUpperBody(trackOf({ addressPose() }), 0, 0, true, 0);
+        CHECK("zero frame dims refuse", !z.valid);
+
+        // An empty track is not an error, it is an absence.
+        const UpperBodyResult e = trackUpperBody(PoseTrack2D{}, kW, kH, true, 0);
+        CHECK("an empty track refuses", !e.valid);
+    }
+
+    // ── 8. The smoothed companion track wins when it exists ────────────────────────────────────
+    {
+        PoseTrack2D t = trackOf(std::vector<Upper>(8, addressPose()));
+        Upper tilted = addressPose();
+        tilted.lSh = QPointF(0.42, 0.26);   tilted.rSh = QPointF(0.58, 0.34);
+        t.smoothed = trackOf(std::vector<Upper>(8, tilted)).frames;
+
+        const UpperBodyResult r = trackUpperBody(t, kW, kH, true, 0);
+        const auto series = buildUpperBodySeries(r, phasesAt(0, 40000, 70000));
+        double v = 0.0;
+        CHECK("shoulderPlaneAngle from the smoothed track",
+              seriesAt(series, "shoulderPlaneAngle", Phase::Address, v));
+        CHECK("the SMOOTHED pose is what was measured", std::fabs(v) > 20.0);
+    }
+
+    // ── 9. Every series carries the finish sample the balance measures read ────────────────────
+    {
+        const Upper a = addressPose();
+        const auto series = runOn(a, a);
+        bool allFour = !series.empty();
+        for (const MetricSeries &m : series)
+            allFour = allFour && m.phaseSamples.size() == 4;
+        CHECK("every series samples Address / Top / Impact / Finish", allFour);
+        CHECK("no stray keys", hasSeries(series, "leadHandWidth")
+                                   && !hasSeries(series, "hipAlignment")
+                                   && !hasSeries(series, "shoulderAlignment"));
+    }
+
+    std::printf(g_fail == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+}

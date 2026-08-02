@@ -31,8 +31,11 @@
 #include "analysis_tuning.h"
 #include "ball_position.h"
 #include "ball_runner.h"
+#include "body_rotation.h"
+#include "club_delivery.h"
 #include "event_refine.h"
 #include "foot_metrics.h"
+#include "upper_body_metrics.h"
 #include "hand_axis.h"
 #include "head_track.h"
 #include "lower_body_metrics.h"
@@ -741,6 +744,135 @@ struct LowerBodyMetricsStage : AnalysisStage {
     }
 };
 
+// 13c. Upper-body frontal-plane metrics — secondary axis tilt, spine side bend,
+//      thorax lateral drift, the shoulder and elbow lines, trail elbow height,
+//      swing width, lead-arm connection and the lead-arm-to-torso angle. DETAIL
+//      series only, UNSCORED.
+//
+//      The chest-and-arms counterpart to LowerBodyMetricsStage, and a separate
+//      stage for the same reason that one is separate from the feet: they read
+//      different keypoints and do not fail together. It reads only COCO body
+//      5–16 through the anatomy vocabulary, so like the lower body it answers on
+//      a legacy 17-keypoint track.
+struct UpperBodyMetricsStage : AnalysisStage {
+    QString name() const override { return QStringLiteral("UpperBodyMetrics"); }
+    bool canRun(const AnalysisContext &ctx) const override
+    {
+        return ctx.caps.hasCamera(CameraPlacement::FaceOn) && !ctx.detail->pose2d.frames.empty();
+    }
+    void run(AnalysisContext &ctx) override
+    {
+        const pinpoint::FormatDescriptor &fd = ctx.window->formatOf(ctx.job.cameraSources.front());
+        const auto *cfmt = std::get_if<pinpoint::CameraFormat>(&fd.format);
+        if (cfmt == nullptr || cfmt->width <= 0 || cfmt->height <= 0)
+            return;
+
+        int64_t addressUs = -1;
+        if (ctx.seg.conf > 0.f)
+            if (const PhaseEvent *a = ctx.seg.eventFor(Phase::Address))
+                addressUs = a->t_us;
+        const UpperBodyResult ub =
+            trackUpperBody(ctx.detail->pose2d, int(cfmt->width), int(cfmt->height),
+                           ctx.job.handedness != 2, addressUs,
+                           UpperBodyConfig::fromOverrides(ctx.job.tuningOverrides));
+        for (const MetricSeries &m : buildUpperBodySeries(ub, ctx.seg.events))
+            ctx.detail->series.push_back(m);
+
+        // The trail wrist's apparent bow / cup, from the same pose track. It lives with the
+        // upper body rather than in its own stage because it shares this stage's inputs exactly
+        // and adds no gate of its own beyond the WholeBody hand keypoints, which it checks
+        // itself by producing nothing when they are absent.
+        for (const MetricSeries &m :
+             buildTrailWristSeries(ctx.detail->pose2d, ctx.seg.events, ctx.job.handedness,
+                                   int(cfmt->width), int(cfmt->height),
+                                   PoseWristAngleConfig::fromOverrides(ctx.job.tuningOverrides)))
+            ctx.detail->series.push_back(m);
+    }
+};
+
+// 13d. Axial body rotation — pelvis turn, thorax turn, X-factor and X-factor
+//      stretch. DETAIL series only, UNSCORED.
+//
+//      The one stage that reads BOTH an IMU and the camera, and prefers whichever
+//      it has: a bound Pelvis or Thorax stream is used directly, and where there
+//      is none the turn is estimated from the collapse of the hip or shoulder span
+//      in the image. canRun therefore admits either input — refusing because the
+//      ideal sensor is absent would produce nothing on every swing this product
+//      actually records.
+struct BodyRotationStage : AnalysisStage {
+    QString name() const override { return QStringLiteral("BodyRotation"); }
+    bool canRun(const AnalysisContext &ctx) const override
+    {
+        const bool hasPose = ctx.caps.hasCamera(CameraPlacement::FaceOn)
+                             && !ctx.detail->pose2d.frames.empty();
+        const bool hasTrunkImu = ctx.streams.streamFor(SegmentRole::Pelvis) != nullptr
+                                 || ctx.streams.streamFor(SegmentRole::Thorax) != nullptr;
+        return hasPose || hasTrunkImu;
+    }
+    QString skipReason(const AnalysisContext &) const override
+    {
+        return QStringLiteral("no face-on pose track and no pelvis/thorax IMU");
+    }
+    void run(AnalysisContext &ctx) override
+    {
+        const pinpoint::FormatDescriptor &fd = ctx.window->formatOf(ctx.job.cameraSources.front());
+        const auto *cfmt = std::get_if<pinpoint::CameraFormat>(&fd.format);
+        const int w = cfmt ? int(cfmt->width) : 0;
+        const int h = cfmt ? int(cfmt->height) : 0;
+
+        const BodyRotationResult br =
+            trackBodyRotation(ctx.detail->pose2d, ctx.streams, w, h, ctx.job.handedness != 2,
+                              ctx.seg.events,
+                              BodyRotationConfig::fromOverrides(ctx.job.tuningOverrides));
+        for (const MetricSeries &m : buildBodyRotationSeries(br, ctx.seg.events))
+            ctx.detail->series.push_back(m);
+    }
+};
+
+// 13e. Club delivery from the face-on camera — backswing length at the top, attack
+//      angle and low point relative to the ball. DETAIL series only, UNSCORED.
+//
+//      Needs the shaft track WITH a measured clubhead: every reading here is taken
+//      from headPx, and a projected head carries the grip's motion rather than the
+//      club's. The producer enforces that per sample; canRun only checks that a
+//      valid track exists at all.
+struct ClubDeliveryStage : AnalysisStage {
+    QString name() const override { return QStringLiteral("ClubDelivery"); }
+    bool canRun(const AnalysisContext &ctx) const override
+    {
+        return ctx.detail->shaft.valid && !ctx.detail->shaft.samples.empty();
+    }
+    QString skipReason(const AnalysisContext &) const override
+    {
+        return QStringLiteral("no valid shaft track");
+    }
+    void run(AnalysisContext &ctx) override
+    {
+        const pinpoint::FormatDescriptor &fd = ctx.window->formatOf(ctx.job.cameraSources.front());
+        const auto *cfmt = std::get_if<pinpoint::CameraFormat>(&fd.format);
+        if (cfmt == nullptr || cfmt->width <= 0 || cfmt->height <= 0)
+            return;
+
+        // The address ball centre and the px→mm ruler, from the same robust pass FootMetricsStage
+        // uses. Deliberately called with a degenerate heel pair: this stage does not need the
+        // stance geometry, and computeBallPosition resolves the centre and the ruler BEFORE it
+        // gates on the heels — the documented "ruler survives, position does not" path. Reaching
+        // for the feet here would make a club metric fail because a foot was occluded.
+        const BallPositionResult bp =
+            computeBallPosition(ctx.detail->ball, QPointF(), QPointF(), -1,
+                                int(cfmt->width), int(cfmt->height),
+                                BallPositionConfig::fromOverrides(ctx.job.tuningOverrides));
+        const bool ballOk = bp.samples > 0 && bp.mmPerPx > 0.0;
+
+        const ClubDeliveryResult cd =
+            trackClubDelivery(ctx.detail->shaft, ctx.seg.events, bp.addressBallPx, ballOk,
+                              bp.mmPerPx,
+                              ClubDeliveryConfig::fromOverrides(ctx.job.tuningOverrides));
+        for (const MetricSeries &m : buildClubDeliverySeries(cd, ctx.seg.events))
+            ctx.detail->series.push_back(m);
+    }
+};
+
 // 13a. Tempo — backswing duration (Address→Top) and the tempo ratio
 //      ((Top−Address)/(Impact−Top)). DETAIL series only, UNSCORED.
 //
@@ -917,8 +1049,32 @@ struct PoseAssessmentStage : AnalysisStage {
     }
 };
 
-// The Wrist session's stage list, in analysis block order. File-local until the
-// Swing session needs to share it (§10.5 step 4 — explicitly not now).
+// The body-metric block, shared by EVERY profile.
+//
+// ANALYSIS IS AGNOSTIC OF SESSION TYPE. What a stage may produce is decided by the data and the
+// devices actually present for the shot, never by which session the operator happened to pick, and
+// every stage below already states its own requirement in canRun() — a face-on camera and a pose
+// track, a bound trunk IMU, a valid shaft track, a confident phase ladder. Listing them in one
+// profile and not the other put a second, invisible gate in front of those: a swing recorded
+// perfectly well under the Swing session produced no head, foot, lower-body or tempo metrics, and
+// the metric catalogue then reported "produced in Wrist Motion sessions only", which reads to the
+// golfer as a statement about their equipment. A session type is a capture INTENT; it is not
+// evidence about what was captured.
+//
+// Order still matters and is the only contract: every stage here appends to detail->series, which
+// BindDetail assigns wholesale, so all of them must sit after it.
+void appendBodyMetricStages(SessionProfile &p)
+{
+    p.stages.push_back(std::make_unique<HeadTrackStage>());
+    p.stages.push_back(std::make_unique<FootMetricsStage>());
+    p.stages.push_back(std::make_unique<LowerBodyMetricsStage>());
+    p.stages.push_back(std::make_unique<UpperBodyMetricsStage>());
+    p.stages.push_back(std::make_unique<BodyRotationStage>());
+    p.stages.push_back(std::make_unique<ClubDeliveryStage>());
+    p.stages.push_back(std::make_unique<TempoStage>());
+}
+
+// The Wrist session's stage list, in analysis block order.
 SessionProfile wristProfile()
 {
     SessionProfile p;
@@ -935,10 +1091,7 @@ SessionProfile wristProfile()
     p.stages.push_back(std::make_unique<RequireProductsStage>());
     p.stages.push_back(std::make_unique<EventRefineStage>());
     p.stages.push_back(std::make_unique<BindDetailStage>());
-    p.stages.push_back(std::make_unique<HeadTrackStage>());
-    p.stages.push_back(std::make_unique<FootMetricsStage>());
-    p.stages.push_back(std::make_unique<LowerBodyMetricsStage>());
-    p.stages.push_back(std::make_unique<TempoStage>());
+    appendBodyMetricStages(p);
     p.stages.push_back(std::make_unique<KinematicsStage>());
     p.stages.push_back(std::make_unique<BindingsStage>());
     p.stages.push_back(std::make_unique<ResemblanceStage>());
@@ -1009,6 +1162,13 @@ SessionProfile cameraKinematicsProfile()
     p.stages.push_back(std::make_unique<ShaftStage>());
     p.stages.push_back(std::make_unique<SegResolveStage>());
     p.stages.push_back(std::make_unique<BindDetailStage>());
+    // The same body-metric block the Wrist profile runs. It used to be absent here, which is what
+    // made a face-on metric look like a property of the session rather than of the camera — see
+    // appendBodyMetricStages. There is no EventRefine in this profile, so these stages read the
+    // SegResolve ladder rather than the refined one; each of them already tolerates a coarser
+    // ladder (they read ctx.seg.events and fall back per phase), and a coarser Address is a
+    // slightly noisier reference, not a wrong one.
+    appendBodyMetricStages(p);
     p.stages.push_back(std::make_unique<KinematicsStage>());
     return p;
 }

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <initializer_list>
 
 namespace pinpoint::analysis {
 namespace {
@@ -38,17 +39,21 @@ double medianOf(std::vector<double> v)
     return (n & 1u) ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
 }
 
-// Signed angle (deg) of the hip line, POSITIVE when the trail hip sits above the lead hip.
+// Signed angle (deg) of a body line, POSITIVE when the trail end sits above the lead end.
 // Image y grows downward, so "trail higher" is trailY < leadY and the numerator is leadY − trailY.
 // The denominator is the ABSOLUTE horizontal separation, which is what makes the sign independent
 // of which image side the lead is on — the alternative (a raw atan2 of the lead→trail vector)
 // flips its answer for a left-handed golfer, or for a mirrored camera, while describing the same
-// posture.
-double hipTiltDeg(const QPointF &leadHip, const QPointF &trailHip)
+// posture. `toeLineAngle` in foot_metrics IS that alternative, which is one of the two reasons
+// `feetAlignment` exists beside it (see the header).
+//
+// Shared by the hip line and the ankle line here, and by the shoulder and elbow lines in
+// upper_body_metrics.cpp — one convention for every body line in the product.
+double lineTiltDeg(const QPointF &lead, const QPointF &trail)
 {
-    const double dx = std::abs(trailHip.x() - leadHip.x());
-    if (dx <= 1e-9) return 0.0;                 // hips vertically stacked — no line to measure
-    return std::atan2(leadHip.y() - trailHip.y(), dx) * kRadToDeg;
+    const double dx = std::abs(trail.x() - lead.x());
+    if (dx <= 1e-9) return 0.0;                 // ends vertically stacked — no line to measure
+    return std::atan2(lead.y() - trail.y(), dx) * kRadToDeg;
 }
 
 // Per-frame lower-body state from hips / knees / ankles.
@@ -224,7 +229,29 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
             res.pelvisLift.value.push_back((addrMidY - midY) * toPct);
             // ABSOLUTE, not address-referenced — see the header.
             res.hipTilt.t_us.push_back(s.t_us);
-            res.hipTilt.value.push_back(hipTiltDeg(s.leadHipPx, s.trailHipPx));
+            res.hipTilt.value.push_back(lineTiltDeg(s.leadHipPx, s.trailHipPx));
+        }
+        // feetAlignment — the ankle line, absolute, in the same convention as the hip line.
+        if (s.anklesValid) {
+            res.feetAlign.t_us.push_back(s.t_us);
+            res.feetAlign.value.push_back(lineTiltDeg(s.leadAnklePx, s.trailAnklePx));
+        }
+        // comOverLeadFoot — how far the pelvis centre sits from the lead ankle ALONG the stance
+        // line. Unsigned: "further from the lead ankle" is the fault whether the golfer is still
+        // back over the trail side or has fallen through, and a signed reading would grade those
+        // two as opposites when they are the same finish.
+        if (s.hipsValid && s.anklesValid) {
+            const double ux = s.leadAnklePx.x() - s.trailAnklePx.x();
+            const double uy = s.leadAnklePx.y() - s.trailAnklePx.y();
+            const double ul = std::sqrt(ux * ux + uy * uy);
+            if (ul > 1e-9) {
+                const double midX = 0.5 * (s.leadHipPx.x() + s.trailHipPx.x());
+                const double midY = 0.5 * (s.leadHipPx.y() + s.trailHipPx.y());
+                const double along = ((midX - s.leadAnklePx.x()) * ux
+                                      + (midY - s.leadAnklePx.y()) * uy) / ul;
+                res.comOverLead.t_us.push_back(s.t_us);
+                res.comOverLead.value.push_back(std::abs(along) * toPct);
+            }
         }
     }
 
@@ -247,7 +274,9 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
         grid.push_back(s.t_us);
 
     const auto pushSeries = [&](const LowerBodyChannel &ch, const QString &key, const QString &label,
-                                const QString &unit) {
+                                const QString &unit,
+                                std::initializer_list<Phase> at = { Phase::Address, Phase::Top,
+                                                                    Phase::Impact }) {
         if (ch.t_us.empty())
             return;
         std::vector<double> vals(grid.size());
@@ -259,9 +288,13 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
         m.unit  = unit;
         m.t_us  = grid;
         m.value = vals;
-        // Address / Top / Impact, the same three every other frontal-plane channel samples. Top is
-        // P4 — the reading the knee-drift and hip-tilt corridors are both keyed on.
-        for (const Phase p : { Phase::Address, Phase::Top, Phase::Impact }) {
+        // Address / Top / Impact by default, the same three every other frontal-plane channel
+        // samples. Top is P4 — the reading the knee-drift and hip-tilt corridors are both keyed on.
+        // The caller may ask for more: comOverLeadFoot is read at the FINISH, which nothing sampled
+        // before it existed. The four original channels keep the original list deliberately, so
+        // their serialized phaseSamples stay byte-identical and no corpus gate has to be re-run to
+        // prove this change was additive.
+        for (const Phase p : at) {
             const int idx = nearestIndex(grid, phaseTime(phases, p, grid.front()));
             m.phaseSamples.push_back({ p, grid[idx], vals[idx], QString() });
         }
@@ -277,6 +310,11 @@ std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,
                QStringLiteral("Pelvis lift"), pct);
     pushSeries(res.hipTilt,    QStringLiteral("hipLineTilt"),
                QStringLiteral("Hip line tilt"), QStringLiteral("°"));
+    pushSeries(res.feetAlign,  QStringLiteral("feetAlignment"),
+               QStringLiteral("Feet alignment"), QStringLiteral("°"));
+    pushSeries(res.comOverLead, QStringLiteral("comOverLeadFoot"),
+               QStringLiteral("Balance over the lead foot"), pct,
+               { Phase::Address, Phase::Top, Phase::Impact, Phase::Finish });
     return out;
 }
 

@@ -540,12 +540,23 @@ on content nobody can capture yet. `core_pack_test` now gates it directly — sc
 because a `noCause` on a producer-less condition is a backlog and a condition that fires TODAY with
 nothing behind it is a defect in what ships.
 
-**A constraint that caps all of this**: most pose metrics are session-gated to Wrist Motion
-(`wristSessionOk`, sessionType 1 or −1) — a documented catalogue design, not a bug — so the head,
-foot and shaft-lean signals read Unavailable in a Swing session today. See the metric catalogue
-guide, and ledger `X1` in the content-extension plan.
+> **~~A constraint that caps all of this~~ — REMOVED, 2026-08-02.** Most pose metrics used to be
+> session-gated to Wrist Motion (`wristSessionOk`, sessionType 1 or −1), so the head, foot and
+> shaft-lean signals read Unavailable in a Swing session. That gate is **gone**, on both sides: the
+> body-metric stages are now listed once in `appendBodyMetricStages()` and run in every profile, and
+> no provider reads `sessionType`. **Analysis is agnostic of session type** — a session type is what
+> the operator meant to capture, and only the sensors are evidence about what was captured. Ledger
+> `X1` in the content-extension plan is closed by this.
 
-The 9 `Composed` measures (facet-built rather than metric-backed) are all `planned` or `noProducer` and none has a norm: the whole Composed path is content-complete and production-dormant.
+> **The measure counts below are from before the face-on producer batch (2026-08-02).** After it:
+> **83 measures live** (was 51), 15 planned, 9 external-device, 2 noProducer, and **0 of the 72
+> conditions that can fire lack a cause** — six did, briefly, the moment their producers landed, and
+> `core_pack_test` caught it. Six `causes` edges were authored to close that.
+
+The 9 `Composed` measures (facet-built rather than metric-backed) are no longer all planned: five of
+them — `m_shoulderPlane`, `m_thoraxDrift`, `m_trailElbowRise`, `m_leadArmToTorso`, `m_leadHandWidth`
+— went live with `upper_body_metrics.cpp`, which was built to the geometry their `series` facets
+already named. The Composed path is production-live for the first time.
 
 Condition fields in use: `consequence` 112/112, `provenance` 112/112, `aliases` 86, `drills` 23,
 `screenRef` 13, `injuryNote` 7, `bindings` **0**.

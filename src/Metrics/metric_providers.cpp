@@ -24,9 +24,6 @@ namespace pinpoint::analysis {
 
 namespace {
 
-// Wrist Motion (sessionType 1) profile gate. -1 (no shot / directory browse) is session-agnostic.
-bool wristSessionOk(int sessionType) { return sessionType == -1 || sessionType == 1; }
-
 // Turn a requirement into a Measured/Unavailable verdict for one shot, reusing the shared reason
 // renderer so provider reasons and the no-provider fallback read identically.
 MetricAvailability fromRequirement(const MetricRequirement &req, const ShotContext &ctx)
@@ -43,14 +40,6 @@ MetricAvailability fromRequirement(const MetricRequirement &req, const ShotConte
     return a;
 }
 
-MetricAvailability wristSessionOnly()
-{
-    MetricAvailability a;
-    a.state  = MetricAvailability::Unavailable;
-    a.reason = QStringLiteral("produced in Wrist Motion sessions only");
-    return a;
-}
-
 } // namespace
 
 // ---------------------------------------------------------------------------- WristMetricProvider
@@ -63,9 +52,6 @@ std::vector<QString> WristMetricProvider::provides() const
 
 MetricAvailability WristMetricProvider::availability(const QString &key, const ShotContext &ctx) const
 {
-    if (!wristSessionOk(ctx.sessionType))
-        return wristSessionOnly();
-
     MetricRequirement req;
     req.imuRoles = { SegmentRole::LeadForearm, SegmentRole::LeadHand };
     if (key == QLatin1String("forearmPronation") || key == QLatin1String("leadArmFlexion"))
@@ -101,9 +87,6 @@ std::vector<QString> FootMetricProvider::provides() const
 
 MetricAvailability FootMetricProvider::availability(const QString &key, const ShotContext &ctx) const
 {
-    if (!wristSessionOk(ctx.sessionType))
-        return wristSessionOnly();
-
     MetricRequirement req;
     req.faceOnCamera = true;                       // whole-body pose feet keypoints
     // ballPosition is the one key here that needs more than the feet: without a
@@ -118,19 +101,111 @@ MetricAvailability FootMetricProvider::availability(const QString &key, const Sh
 
 std::vector<QString> LowerBodyMetricProvider::provides() const
 {
-    return { QStringLiteral("leadKneeDrift"), QStringLiteral("pelvisSway"),
-             QStringLiteral("pelvisLift"),    QStringLiteral("hipLineTilt") };
+    return { QStringLiteral("leadKneeDrift"),  QStringLiteral("pelvisSway"),
+             QStringLiteral("pelvisLift"),     QStringLiteral("hipLineTilt"),
+             QStringLiteral("feetAlignment"),  QStringLiteral("comOverLeadFoot") };
 }
 
 MetricAvailability LowerBodyMetricProvider::availability(const QString &key,
                                                          const ShotContext &ctx) const
 {
     Q_UNUSED(key)
-    if (!wristSessionOk(ctx.sessionType))
-        return wristSessionOnly();
-
     MetricRequirement req;
     req.faceOnCamera = true;      // frontal-plane pose: hips, knees, ankles
+    return fromRequirement(req, ctx);
+}
+
+// ------------------------------------------------------------------- UpperBodyMetricProvider
+
+std::vector<QString> UpperBodyMetricProvider::provides() const
+{
+    return { QStringLiteral("secondaryAxisTilt"),   QStringLiteral("spineSideBend"),
+             QStringLiteral("thoraxLateralDrift"),  QStringLiteral("shoulderPlaneAngle"),
+             QStringLiteral("elbowAlignment"),      QStringLiteral("trailElbowHeight"),
+             QStringLiteral("leadHandWidth"),       QStringLiteral("leadUpperArmToChest"),
+             QStringLiteral("leadArmToTorso") };
+}
+
+MetricAvailability UpperBodyMetricProvider::availability(const QString &key,
+                                                         const ShotContext &ctx) const
+{
+    Q_UNUSED(key)
+    MetricRequirement req;
+    req.faceOnCamera = true;      // frontal-plane pose: shoulders, elbows, wrists, hips, ankles
+    return fromRequirement(req, ctx);
+}
+
+// ------------------------------------------------------------------------- TrailWristProvider
+
+std::vector<QString> TrailWristProvider::provides() const
+{
+    return { QStringLiteral("trailWristFlexExt") };
+}
+
+MetricAvailability TrailWristProvider::availability(const QString &key, const ShotContext &ctx) const
+{
+    Q_UNUSED(key)
+    MetricRequirement req;
+    req.faceOnCamera = true;      // and the WholeBody hand keypoints — see the header
+    return fromRequirement(req, ctx);
+}
+
+// ----------------------------------------------------------------------- BodyRotationProvider
+
+std::vector<QString> BodyRotationProvider::provides() const
+{
+    return { QStringLiteral("pelvisRotation"), QStringLiteral("thoraxRotation"),
+             QStringLiteral("xFactor"),        QStringLiteral("xFactorStretch") };
+}
+
+MetricAvailability BodyRotationProvider::availability(const QString &key, const ShotContext &ctx) const
+{
+    // Per-segment: which roles does THIS key need, and does the shot have them?
+    const bool needsPelvis = key != QLatin1String("thoraxRotation");
+    const bool needsThorax = key != QLatin1String("pelvisRotation");
+    const bool hasPelvis   = !needsPelvis || ctx.hasRole(SegmentRole::Pelvis);
+    const bool hasThorax   = !needsThorax || ctx.hasRole(SegmentRole::Thorax);
+
+    MetricAvailability a;
+    a.tier = ctx.tier;
+
+    // Every segment this key needs is instrumented — the turn is measured, not inferred.
+    if (hasPelvis && hasThorax) {
+        a.state = MetricAvailability::Measured;
+        return a;
+    }
+
+    // Otherwise the camera estimates it. BRIDGED, not Measured and not Unavailable: the number is
+    // real and the method is weaker, which is the exact distinction the state exists to carry. The
+    // reason names the method rather than the missing device, because "needs a pelvis IMU" would
+    // read as a refusal when a value is in fact produced.
+    if (ctx.hasFaceOn) {
+        a.state  = MetricAvailability::Bridged;
+        a.reason = QStringLiteral("estimated from the face-on camera — a pelvis / thorax IMU "
+                                  "would measure it directly");
+        return a;
+    }
+
+    a.state  = MetricAvailability::Unavailable;
+    a.reason = QStringLiteral("needs a face-on camera, or a pelvis / thorax IMU");
+    return a;
+}
+
+// ----------------------------------------------------------------------- ClubDeliveryProvider
+
+std::vector<QString> ClubDeliveryProvider::provides() const
+{
+    return { QStringLiteral("shaftAngleVsHorizontal"), QStringLiteral("attackAngle"),
+             QStringLiteral("lowPointAhead") };
+}
+
+MetricAvailability ClubDeliveryProvider::availability(const QString &key, const ShotContext &ctx) const
+{
+    MetricRequirement req;
+    req.faceOnCamera = true;
+    req.clubTrack    = true;                       // every reading comes off the measured clubhead
+    if (key == QLatin1String("lowPointAhead"))
+        req.ballTrack = true;                      // the reference it is stated against, and its ruler
     return fromRequirement(req, ctx);
 }
 
@@ -144,8 +219,6 @@ std::vector<QString> TempoProvider::provides() const
 MetricAvailability TempoProvider::availability(const QString &key, const ShotContext &ctx) const
 {
     Q_UNUSED(key)
-    if (!wristSessionOk(ctx.sessionType))
-        return wristSessionOnly();
     // Deliberately EMPTY: tempo needs only a phase ladder, and either an IMU or a
     // face-on camera can produce one. Requiring both would be wrong and requiring
     // either is not expressible here — so the capability answer is "yes", and the
@@ -164,8 +237,6 @@ std::vector<QString> HeadMetricProvider::provides() const
 MetricAvailability HeadMetricProvider::availability(const QString &key, const ShotContext &ctx) const
 {
     Q_UNUSED(key)
-    if (!wristSessionOk(ctx.sessionType))
-        return wristSessionOnly();
     MetricRequirement req;
     req.faceOnCamera = true;                       // head keypoints from the face-on pose
     return fromRequirement(req, ctx);
@@ -181,8 +252,6 @@ std::vector<QString> ShaftLeanProvider::provides() const
 MetricAvailability ShaftLeanProvider::availability(const QString &key, const ShotContext &ctx) const
 {
     Q_UNUSED(key)
-    if (!wristSessionOk(ctx.sessionType))
-        return wristSessionOnly();
     MetricRequirement req;
     req.faceOnCamera = true;
     req.clubTrack    = true;                        // shaft lean from the club/shaft track
@@ -209,9 +278,7 @@ MetricAvailability ScoreProvider::availability(const QString &key, const ShotCon
         return a;
     }
 
-    // wristScore / wristResemblance: live for the Wrist session, from the lead-wrist series.
-    if (!wristSessionOk(ctx.sessionType))
-        return wristSessionOnly();
+    // wristScore / wristResemblance: from the lead-wrist series, so the wrist IMUs are the gate.
     MetricRequirement req;
     req.imuRoles = { SegmentRole::LeadForearm, SegmentRole::LeadHand };
     return fromRequirement(req, ctx);
@@ -224,41 +291,45 @@ std::vector<QString> PlannedMetricProvider::provides() const
     // The design-catalogue metrics with no producer in this build. Keep in sync with the manifest's
     // `.planned = true` descriptors (the metric_catalogue_test asserts they resolve Unavailable).
     return {
-        QStringLiteral("pelvisRotation"),   QStringLiteral("thoraxRotation"),
-        QStringLiteral("xFactor"),          QStringLiteral("xFactorStretch"),
-        QStringLiteral("hipInternalRotation"),
-        QStringLiteral("spineForwardBend"), QStringLiteral("spineSideBend"),
-        QStringLiteral("secondaryAxisTilt"),
-        // pelvisSway and pelvisLift LEFT this list: LowerBodyMetricProvider produces both. Only
-        // pelvisThrust remains, and it is not an oversight — thrust is toward and away from the
-        // camera, and a face-on view resolves nothing in depth.
+        // ── Depth. A face-on camera's blind axis, and no amount of pipeline work changes that ──
+        // pelvisThrust is toward and away from the camera. clubPath's discriminating axis is the
+        // same one. swingPlane needs the plane's azimuth and shaftDirection its bearing on the
+        // target line. launchDirection is where the ball left relative to the target line, which is
+        // also depth — its descriptor used to claim a face-on camera could read it, and could not.
         QStringLiteral("pelvisThrust"),
         QStringLiteral("swingPlane"),       QStringLiteral("clubPath"),
-        QStringLiteral("attackAngle"),
-        QStringLiteral("lowPointAhead"),
-        QStringLiteral("kinematicSequence"),
-        QStringLiteral("shoulderAlignment"), QStringLiteral("elbowAlignment"),
-        QStringLiteral("hipAlignment"),      QStringLiteral("feetAlignment"),
-        // Added with the content extension. `faceAngle` LEFT this list in the same change: it is
-        // not a producer we are going to write, it is a device we are going to talk to.
-        QStringLiteral("trailKneeFlexion"), QStringLiteral("comOverLeadFoot"),
-        QStringLiteral("leadUpperArmToChest"),
-        QStringLiteral("shaftDirection"),   QStringLiteral("shaftAngleVsHorizontal"),
-        QStringLiteral("launchDirection"),  QStringLiteral("launchAngle"),
-        QStringLiteral("ballSpeed"),
-        // These ten were `.planned = true` in the manifest and claimed by NOBODY, so they fell to
-        // the resolver's no-provider branch and reported "no producer available" — which is the
-        // reason a key the catalogue has never heard of gets, not the reason a declared roadmap item
-        // deserves. The distinction is the whole point of the planned flag: one says "we have not
-        // written this yet", the other says "this is not a thing". The gap survived because the test
-        // enumerates a hand-written list rather than deriving it, so a descriptor added with the
-        // flag and no provider entry passed every count.
-        QStringLiteral("trailWristFlexExt"),
+        QStringLiteral("shaftDirection"),   QStringLiteral("launchDirection"),
+        QStringLiteral("ballBodyDistance"),
+
+        // ── Sagittal. Present in the image, foreshortened to noise by the frontal projection ──
+        // The knee angles are the strongest argument for a down-the-line pipeline: four
+        // characteristics sit over them and would be graded almost entirely off projection error.
+        QStringLiteral("spineForwardBend"),
+        QStringLiteral("leadKneeFlexion"),  QStringLiteral("trailKneeFlexion"),
+
+        // ── No keypoint exists, in either layout ────────────────────────────────────────────────
+        // Nothing sits between the shoulders and the hips, so the spinal regions cannot come from
+        // the skeleton at all. They are still roadmap items rather than capture gaps because the
+        // back CONTOUR of a down-the-line silhouette shows both plainly.
         QStringLiteral("thoracicFlexion"),  QStringLiteral("lumbarExtension"),
-        QStringLiteral("shoulderPlaneAngle"),
-        QStringLiteral("leadKneeFlexion"),  QStringLiteral("leadArmToTorso"),
-        QStringLiteral("ballBodyDistance"), QStringLiteral("thoraxLateralDrift"),
-        QStringLiteral("trailElbowHeight"), QStringLiteral("leadHandWidth"),
+
+        // ── Needs sensors we do not place ──────────────────────────────────────────────────────
+        QStringLiteral("hipInternalRotation"),   // a pelvis IMU plus thigh IMUs
+
+        // ── Needs a ball-FLIGHT track, which is not what the ball detector is ───────────────────
+        // The detector is an at-spot presence tracker: it locks the stationary ball, reports
+        // whether it is still there, and records the instant it vanishes. `BallSample2D::center`
+        // is always the locked spot and never a ball in the air, so there is no trajectory to take
+        // a launch angle or a speed from. Their descriptors said "needs the ball track", which we
+        // have; what they need is a tracker that follows the ball after it leaves.
+        QStringLiteral("launchAngle"),      QStringLiteral("ballSpeed"),
+
+        // ── Has a reduction, has no series to reduce ────────────────────────────────────────────
+        // kinematic_sequence.h already computes the ordered peak-speed nodes and the dashboard
+        // already consumes them; what is missing is angular-SPEED series for the pelvis and thorax.
+        // The angle series now exist (body_rotation.cpp), so this is a short follow-on — but it
+        // carries no measure and no corridor, so promoting it today would unblock nothing.
+        QStringLiteral("kinematicSequence"),
     };
 }
 

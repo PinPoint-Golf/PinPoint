@@ -299,6 +299,45 @@ ground-plane depth (face-on, essentially the feet's depth — so it is the right
 rests on a ~9.5 px radius measurement: ±1 px of radius is ~10 % of scale. No corridor has been set for
 `stanceWidth` because no measured distribution exists yet.
 
+### 2.15 `upperBody.*` / `bodyRotation.*` / `clubDelivery.*` — the face-on producer batch (2026-08-02)
+
+Three new namespaces, all in `src/Core/pp_tuned_constants.h`, all swept without a rebuild.
+
+**`upperBody.*`** (`UpperBodyConfig`, `upper_body_metrics.h`). Nine frontal-plane chest / shoulder /
+arm channels. Keys: `confMin` (0.30) / `addrMinFrames` (5) / `addrWindowUs` (250000) /
+`minShoulderSpanPx` (30.0). The first three deliberately mirror `foot.*`, `head.*` and `lowerBody.*`
+exactly — a fourth set of defaults for the same conf-gate / address-window job would be four things
+to sweep and one thing to reason about. `minShoulderSpanPx` guards the DENOMINATOR the same way
+`lowerBody.minStanceSpanPx` does, and is smaller (30 vs 40 px) because the shoulder span really is
+narrower than the stance in the same framing; reusing the stance floor would refuse usable swings
+rather than absurd ones.
+
+**`bodyRotation.*`** (`BodyRotationConfig`, `body_rotation.h`). Keys: `confMin` (0.30) /
+`addrMinFrames` (5) / `addrWindowUs` (250000) / `minSpanPx` (30.0) / **`spanNoisePx` (3.0)** /
+**`sinFloor` (0.0872 = sin 5°)**.
+
+⚠ **The last two are an error budget, not a fudge factor, and they are the most consequential knobs
+in this batch.** The camera tier inverts a cosine, so `dθ/dw = −1/(w₀·sin θ)` diverges as the body
+squares up: the producer propagates `spanNoisePx` through that derivative into
+`MetricSeries::sigma`, and `sinFloor` is what keeps the reported uncertainty finite instead of
+infinite near zero turn. `spanNoisePx` is the pose endpoint jitter carried through a difference of
+two endpoints — 3 px is a starting figure and **no measured distribution exists**. `sinFloor` caps
+the reported sigma at roughly 11× the span noise expressed in radians. Sweeping either changes what
+the app claims about its own confidence, so treat them as a validation target rather than a tuning
+lever. See [`body_rotation_estimation.md`](../design/body_rotation_estimation.md) §4.
+
+**`clubDelivery.*`** (`ClubDeliveryConfig`, `club_delivery.h`). Keys: `velHalfSpan` (2 samples) /
+`lowPointWinUs` (60000) / `lowPointMinSamples` (5) / `headConfMin` (0.30). `velHalfSpan` is the
+half-width of the centred difference the head velocity — and therefore `attackAngle` — is taken
+over; one frame either side of a ~9 px head is mostly quantisation noise landing squarely on a
+single-instant reading, so a few frames of span buys a usable angle at the cost of a little time
+resolution. It has not been swept against truth.
+
+⚠ **None of these three namespaces has been corpus-tuned.** Every default is a starting figure
+chosen for shape, and the producers' unit tests pin their SIGNS and refusal gates rather than their
+accuracy. Signs are what a synthetic track can pin exactly and a corpus cannot; accuracy is the
+other way round, and is outstanding for all three.
+
 ## 3. The frozen-defaults header — the single freeze edit-point
 
 `src/Core/pp_tuned_constants.h` (`namespace pinpoint::tuned`) is the **single source of truth** for every

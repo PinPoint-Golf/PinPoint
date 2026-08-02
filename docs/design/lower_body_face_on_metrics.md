@@ -387,18 +387,36 @@ construction. It now derives the list from the catalogue.
 ## 9. What is deliberately still planned
 
 Restating §4 as a work queue, because "why didn't you just do the knee angles too" is the obvious
-question:
+question.
+
+> **Updated 2026-08-02.** Three of the four items below have since been resolved, and the module
+> gained two more channels — `feetAlignment` (the ankle-line tilt, through the swing) and
+> `comOverLeadFoot`. What is left is the one item that genuinely needs a second camera.
 
 - **`pelvisThrust`** — depth. Genuinely needs a second camera or stereo. Its descriptor already says
-  so and already requires `ReconstructionTier::Stereo3D`.
+  so and already requires `ReconstructionTier::Stereo3D`. **Still open, and correctly so.**
 - **`leadKneeFlexion` / `trailKneeFlexion`** — sagittal. A face-on projection foreshortens knee bend
   almost to nothing, and the four characteristics over them (`late_buckle`, `excessive_knee_flex`,
   `insufficient_knee_flex`, `trail_knee_straighten`) would be graded off a number that is mostly
-  projection error. They are the strongest argument for a down-the-line pipeline.
-- **`comOverLeadFoot`** — needs a segment-mass model, which is a different piece of work from a
-  keypoint reading.
-- **`pelvisRotation`** — the actual turn depth, and the thing the knee metric is a proxy *for*. It
-  now leads the roadmap: one series, five reducers, seven characteristics.
+  projection error. They are the strongest argument for a down-the-line pipeline. **Still open, and
+  deliberately: this is the one item on the original list nobody should be tempted to close.**
+- ~~**`comOverLeadFoot`** — needs a segment-mass model~~ — **RESOLVED, by changing the question.**
+  The descriptor was rewritten to read the pelvis centre's distance from the lead ankle along the
+  stance line, and to say out loud that it is a proxy for balance rather than a measurement of it:
+  *"without pressure data this reads geometry only"*. That is a keypoint reading, it ships, and it
+  is honest. A true centre of mass would still need the segment-mass model — but nobody asked for
+  one; they asked whether the golfer finished balanced.
+- ~~**`pelvisRotation`** — the actual turn depth… it now leads the roadmap~~ — **RESOLVED, by
+  accepting a weaker method.** It is not a frontal-plane quantity and never will be, but the image
+  span of the hip line collapses by the cosine of the turn, so it can be ESTIMATED from this view
+  and MEASURED when a pelvis IMU is bound. It resolves `Bridged` with a propagated uncertainty
+  rather than `Unavailable`. Five reducers and seven characteristics went live with it. See
+  [`body_rotation_estimation.md`](body_rotation_estimation.md).
+
+The pattern in those two resolutions is worth naming, because it is the standing rule: **the
+frontal-plane rule decides what this module may measure DIRECTLY; it does not decide what the
+product may report.** A quantity outside the plane can still be estimated, provided the estimate
+says what it is, carries its uncertainty, and improves automatically when a better sensor arrives.
 
 ---
 
@@ -415,9 +433,10 @@ question:
    a driver. `clubDependentNoContext` will start reporting it the moment the descriptor's
    `howToRead` says "club-dependent" in those words; it currently does not, which is arguably
    letting it off.
-4. **The session gate still applies.** `LowerBodyMetricProvider` is `wristSessionOk`-gated like every
-   other pose provider, so all of this reads Unavailable in a Swing session. Ledger `X1` in the
-   content-extension plan.
+4. ~~**The session gate still applies.**~~ **CLOSED 2026-08-02.** It does not: `wristSessionOk()`
+   is deleted, no provider reads `sessionType`, and the body-metric stages are listed once in
+   `appendBodyMetricStages()` and run in every profile. **Analysis is agnostic of session type.**
+   Ledger `X1` is closed.
 5. **None of it produces a finding yet.** `detect()` and `relation_resolver` remain dormant for want
    of an `IMeasureValueSource` adapter over `measure_sample`, and — the real blocker — a decision
    about where findings surface for a coach.

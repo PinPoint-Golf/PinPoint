@@ -374,6 +374,30 @@ This section specifies the biomechanical metric catalog produced by `MetricExtra
 
 ### A) Metric catalog
 
+> **⚠ Read this table as the DESIGN catalogue, not as build status (note added 2026-08-02).** The
+> `source` column states the ideal sensing for each metric and several entries have since been
+> produced by a weaker but honest route, which is the standing rule at work — *produce the
+> measurement from whatever is available, refine when a better sensor arrives*. What actually ships
+> is `src/Metrics/metric_catalogue_manifest.cpp`; 70 descriptors, 54 produced, 16 planned.
+>
+> Three rows are now wrong on the merits and are worth correcting here rather than only in the code:
+>
+> * **`attackAngle` — "DTL makes it fully in-plane" is backwards.** The angle lives in the vertical
+>   plane containing the target line, which IS the face-on image plane; a down-the-line camera puts
+>   that direction on its own optical axis and is the one view that cannot measure it. It ships
+>   face-on, from the measured clubhead.
+> * **`pelvisRotation` / `thoraxRotation` / `spineSideBend` / `secondaryAxisTilt` are marked
+>   `camera-3D` or `fused`** and ship from a single face-on camera — the first two as `Bridged`
+>   estimates from the cosine collapse of the hip and shoulder spans, with a propagated uncertainty
+>   (see [`body_rotation_estimation.md`](body_rotation_estimation.md)).
+> * **`kinematicSequence`'s blocker is not body IMUs.** `kinematic_sequence.h` already computes the
+>   ordered peak-speed nodes; what is missing is angular-SPEED series, which the rotation angle
+>   series now make a short follow-on.
+>
+> The rows that remain correct and unbudged are the depth ones — `pelvisThrust`, `clubPath`,
+> `swingPlane`, `shaftDirection` — and the sagittal ones the frontal projection foreshortens
+> (`spineForwardBend`, the knee flexions). Those are the down-the-line case, and it is unchanged.
+
 Notation: `R_seg` = a segment's right-handed anatomical frame (built per the architecture's `SkeletonFrame.segQuat`); `q_seg` its quaternion; lab frame X = target line, Y = down-the-line/away-from-ball, Z = up (Cheetham convention). `twist(q, axis)` = swing-twist axial component of `q` about `axis`. `turn(e_ml)` = `atan2(dot(e_ml_h, Y), dot(e_ml_h, X))` of the segment medio-lateral axis projected to horizontal, **relative to its Address value**. "Input" states the data source. Per-metric **single-camera viability and the minimum capability** that yields each metric at full fidelity are in the companion *"Single-camera (face-on) viability"* table immediately below — not a column here, because viability is driven by camera *count* × IMU *placement*, not a single linear tier.
 
 | Metric (key) | Definition & formula | Input | Phase | Unit | Pro / ideal range (source) |

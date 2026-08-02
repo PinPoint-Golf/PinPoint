@@ -355,12 +355,19 @@ causes the club to come from under, and that causes the block right.
 
 Two things are worth understanding about them.
 
-**Some are camera-work and some need a launch monitor.** Where the ball STARTS is something two
-cameras can see: pulls, pushes, launch height, ball speed. How it CURVES develops over a flight an
-indoor capture never sees, so slice, hook, spin and strike location need a launch monitor. Until one
-is connected those read *"needs a launch monitor"* rather than going quietly blank — the same way a
-metric says *"needs a face-on camera"* when a camera is missing. Launch-monitor integration is
-planned; when it arrives those readings simply start working, with no change to the library.
+**Some need a launch monitor, and — for now — so do the rest.** How the ball CURVES develops over a
+flight an indoor capture never sees, so slice, hook, spin and strike location need a launch monitor.
+Until one is connected those read *"needs a launch monitor"* rather than going quietly blank — the
+same way a metric says *"needs a face-on camera"* when a camera is missing. Launch-monitor
+integration is planned; when it arrives those readings simply start working, with no change to the
+library.
+
+Where the ball STARTS — start direction, launch height, ball speed — is in principle camera work,
+and we do not have it yet either. The reason is worth stating plainly rather than leaving as a
+vague "coming soon": the app watches the ball to know **when you hit it**, not where it went. It
+locks onto the ball sitting at address and notices the instant it disappears, which is exactly what
+shot detection needs and exactly not what a launch reading needs. Following the ball through the
+air is a different piece of work, and until it is built those readings stay marked as planned.
 
 **Some the app cannot yet tell apart, and says so.** A chunk is the ground struck before the ball
 AND a collapse in ball speed — two readings at once — and the app currently judges one reading at a
@@ -371,6 +378,35 @@ chains; the app simply does not claim to have seen one.
 **Draw and fade are deliberately absent.** A draw is a hook you meant. The shape is identical and the
 app has no way to know your intention, so it reports the curvature and leaves whether it was wanted
 to you — the same reason nothing in this model calls a finding good or bad.
+
+---
+
+## 4c. What the camera can and cannot see — and what it says when it is unsure
+
+Every reading in the app comes from one camera, in front of you. That camera sees the plane you
+stand in — up and down, and side to side — with real precision. What it cannot see directly is
+**depth**: movement toward and away from it.
+
+That single fact explains most of what is and is not in the library:
+
+- **Side-to-side and up-and-down readings are straightforward.** How far your hips slide, whether
+  your shoulders are level at the top, how high the trail elbow gets, whether you finish balanced
+  over the lead foot — all of these are read directly, and this release added nine more of them.
+- **Rotation is not, but it can be estimated — and the app tells you so.** How far your hips and
+  chest have turned is rotation about your own axis, which a camera in front of you cannot see
+  head-on. What it CAN see is that your shoulders look narrower as you turn away from it, and how
+  much narrower says how far you have turned. That is a real reading, and it is a weaker one than a
+  sensor strapped to your back would give. So the app labels it **estimated** rather than measured,
+  and it is least certain when you are nearly square — right at address and right at impact. If body
+  sensors are ever added, the same reading quietly becomes a measurement, with nothing else
+  changing.
+- **Some things it genuinely cannot do, and will not pretend to.** How far your hips push toward the
+  ball, which way the club is travelling in-to-out or out-to-in, and how far you stand from the ball
+  are all depth. They need a second camera down the line, and they are marked as such rather than
+  guessed at.
+
+The principle behind all three: **give you the best reading the equipment can support, say which
+kind of reading it is, and never put a confident number on something that was not measured.**
 
 ---
 

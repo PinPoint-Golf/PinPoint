@@ -37,6 +37,30 @@
 // tracks as well as WholeBody ones — there is no keypoint here that a swing
 // recorded before WB0 does not have.
 //
+// ── feetAlignment, and why it exists next to toeLineAngle ───────────────────
+//
+// `toeLineAngle` (foot_metrics) already reports a stance line, from the big toes
+// at address. `feetAlignment` reports the same kind of reading from the ANKLES and
+// through the whole swing, and it is not a duplicate for two reasons the content
+// states: the ankle joints are far less affected by foot flare than the toes are,
+// and the impact read — how the trail foot has rolled and the ankles re-oriented
+// as the player pushes off — has no counterpart in an address-only scalar.
+//
+// It also fixes a sign defect by construction. `toeLineAngle` is a RAW atan2 of
+// the lead→trail vector, which inverts for a left-handed golfer or a mirrored
+// camera; `feetAlignment` uses the same absolute-denominator form as the hip line
+// below, so it describes the same posture whichever way the camera was pointed.
+//
+// ── comOverLeadFoot is a PROXY, and says so ────────────────────────────────
+//
+// It is the pelvis centre's distance from the lead ankle along the stance line, not
+// a centre of mass: without a segment-mass model or pressure data this reads
+// geometry only, which is exactly what its descriptor tells the golfer. The reading
+// that matters is at the finish, where a player who used the ground is stacked over
+// the lead foot and one who did not is still falling. It is UNSIGNED — "further
+// from the lead ankle" covers both still-back and fallen-through, and those are the
+// same fault seen from either side.
+//
 // ── leadKneeDrift, and why it is a DIFFERENCE ───────────────────────────────
 //
 // The coaching observation is that the lead knee working in toward the trail
@@ -147,11 +171,13 @@ struct LowerBodyChannel {
 struct LowerBodyResult {
     std::vector<LowerBodyState> states;   // one per input frame (time order)
 
-    // All four already in their final units — % of address ankle span for the
-    // three displacements, degrees for the tilt. kneeDrift/pelvisSway are
-    // lead-positive; pelvisLift is positive UP; hipLineTilt is positive when the
-    // TRAIL hip sits above the lead hip.
+    // All already in their final units — % of address ankle span for the
+    // displacements, degrees for the angles. kneeDrift/pelvisSway are
+    // lead-positive; pelvisLift is positive UP; hipLineTilt and feetAlignment are
+    // positive when the TRAIL end sits above the lead end; comOverLead is an
+    // unsigned distance.
     LowerBodyChannel kneeDrift, pelvisSway, pelvisLift, hipTilt;
+    LowerBodyChannel feetAlign, comOverLead;
 
     QPointF addrLeadHipPx, addrTrailHipPx;
     QPointF addrLeadKneePx;
@@ -172,7 +198,9 @@ LowerBodyResult trackLowerBody(const PoseTrack2D &pose, int frameW, int frameH, 
 
 // Resample the sparse channels onto the full per-frame grid (linear interp, hold
 // at ends, gaps bridged — NEVER NaN) and emit leadKneeDrift / pelvisSway /
-// pelvisLift / hipLineTilt with Address/Top/Impact phase samples. UNSCORED here
+// pelvisLift / hipLineTilt / feetAlignment / comOverLeadFoot with phase samples.
+// The finish is sampled alongside Address/Top/Impact because comOverLeadFoot is
+// read there and nothing sampled it before. UNSCORED here
 // (the corridors live in the diagnostics norm set, not in the producer). Empty
 // when the address reference is unresolved or the stance span is unusable.
 std::vector<MetricSeries> buildLowerBodySeries(const LowerBodyResult &res,

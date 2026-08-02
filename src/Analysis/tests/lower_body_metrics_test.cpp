@@ -247,7 +247,10 @@ int main()
         LowerBodyConfig cfg; cfg.addrWindowUs = 30000;
         const LowerBodyResult res = trackLowerBody(pose, W, H, true, 2 * dt, cfg);
         CHECK("resolved with no WholeBody keypoints at all", res.valid);
-        CHECK("all four channels present", buildLowerBodySeries(res, {}).size() == 4);
+        // SIX now, not four: feetAlignment and comOverLeadFoot joined the module, and they read the
+        // same COCO body 11–16 as everything else here — which is the point of asserting it on a
+        // legacy track. A swing recorded before the WholeBody tail existed gets the full set.
+        CHECK("all six channels present", buildLowerBodySeries(res, {}).size() == 6);
     }
 
     // ── 5) Low-confidence gap coasts without NaN ───────────────────────────
@@ -310,6 +313,60 @@ int main()
         CHECK("…and emits nothing", buildLowerBodySeries(res, {}).empty());
 
         CHECK("zero frame size ⇒ invalid", !trackLowerBody(dark, 0, 0, true, -1, {}).valid);
+    }
+
+    // ── 6b) feetAlignment and comOverLeadFoot ──────────────────────────────
+    //
+    // Both arrived with the face-on producer batch. feetAlignment is the ANKLE line, and it exists
+    // beside foot_metrics' toeLineAngle for two reasons: the ankles are far less affected by foot
+    // flare than the toes, and the impact read has no counterpart in an address-only scalar. It
+    // also uses the ABSOLUTE-denominator line form, so — unlike toeLineAngle, which is a raw atan2
+    // of the lead→trail vector — its sign describes the same posture whichever way the camera was
+    // pointed. That is the property asserted here.
+    {
+        std::printf("=== 6b) feet alignment + balance ===\n");
+        std::vector<PoseFrame2D> frames;
+        for (int k = 0; k < 6; ++k) frames.push_back(makeLower(k * dt, addressPose()));
+        // Trail (RIGHT keypoints, the larger x) ankle set further from the camera: on level ground
+        // that is HIGHER in the image, which is a closed stance and must read POSITIVE.
+        for (int k = 6; k < 12; ++k) {
+            Lower p = addressPose();
+            p.rAnkle = QPointF(0.56, 0.87);
+            frames.push_back(makeLower(k * dt, p));
+        }
+        PoseTrack2D track; track.frames = frames;
+        const LowerBodyResult res = trackLowerBody(track, W, H, true, 2 * dt, {});
+        const auto series = buildLowerBodySeries(res, {});
+
+        const MetricSeries *fa = findSeries(series, "feetAlignment");
+        CHECK("feetAlignment emitted", fa != nullptr);
+        if (fa) {
+            CHECK("a level stance reads 0°", near(valueAt(*fa, 2 * dt), 0.0, 0.05));
+            CHECK("the trail ankle sitting higher is POSITIVE", valueAt(*fa, 10 * dt) > 5.0);
+        }
+
+        const MetricSeries *com = findSeries(series, "comOverLeadFoot");
+        CHECK("comOverLeadFoot emitted", com != nullptr);
+        if (com) {
+            // Address: pelvis centre at x 0.50, lead ankle at 0.44, span 0.12 ⇒ 0.06/0.12 = 50 %.
+            CHECK("a centred pelvis is half a stance from the lead ankle",
+                  near(valueAt(*com, 2 * dt), 50.0, 2.0));
+            CHECK("it is UNSIGNED — a distance, not a displacement",
+                  valueAt(*com, 2 * dt) > 0.0 && valueAt(*com, 10 * dt) > 0.0);
+            // It is the only channel read at the finish, so it is the only one that samples there.
+            bool hasFinish = false;
+            for (const PhaseSample &s : com->phaseSamples)
+                if (s.phase == Phase::Finish) hasFinish = true;
+            CHECK("comOverLeadFoot samples the FINISH, which is where it is read", hasFinish);
+        }
+
+        // The four original channels keep the original three-phase list, so their serialized
+        // phaseSamples are byte-identical to what they were before this batch and no corpus gate
+        // has to be re-run to prove the change was additive.
+        for (const char *k : { "leadKneeDrift", "pelvisSway", "pelvisLift", "hipLineTilt" }) {
+            const MetricSeries *m = findSeries(series, k);
+            CHECK(k, m && m->phaseSamples.size() == 3);
+        }
     }
 
     // ── 7) fromOverrides ───────────────────────────────────────────────────

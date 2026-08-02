@@ -86,4 +86,32 @@ public:
                          const PoseWristAngleConfig &cfg = {});
 };
 
+// ── trailWristFlexExt ──────────────────────────────────────────────────────────────────────────
+//
+// The trail wrist's apparent bow / cup, as a plain MetricSeries. Same geometry as the lead-side
+// `apparentFlexExt` above, same apparent-angle caveat, same confidence gate — and deliberately NOT
+// routed through PoseWristAngleSource, because `PpJointDof` has no trail-side member and adding one
+// would pull the assessment engine, the DOF metadata table and the reference bands into a change
+// that produces exactly one curve. A metric is not a DOF.
+//
+// SIGN: POSITIVE IS EXTENSION (CUP), which is the OPPOSITE of the lead wrist's "+ = bowed". That is
+// not an inconsistency, it is the two hands being mirror images. Face-on, both wrists are seen from
+// the same side, so one signed image-plane angle means flexion on the lead hand and extension on
+// the trail hand. It is also what the shipped corridors ask for: `m_trailWristFlexExt_p4` is seated
+// at +45°, and 45° at the top is the trail wrist CUPPING, which every source describes as the
+// normal backswing shape. The catalogue's howToRead was corrected to match rather than the other
+// way round — the corridor is seated content, the sentence was boilerplate copied from the lead
+// wrist. See docs/design/pinpoint_sign_conventions.md.
+//
+// NOT address-referenced. Every measure over it but the first is a `delta` anchored at P1, which
+// does the referencing; a pre-subtracted series would make those deltas differences of differences.
+//
+// REQUIRES THE WHOLEBODY HAND KEYPOINTS. A legacy 17-keypoint track has no knuckles, so this
+// returns empty rather than substituting the wrist joint for the hand axis — a hand axis measured
+// from a point that is not on the hand is a confident number about nothing.
+std::vector<MetricSeries> buildTrailWristSeries(const PoseTrack2D &pose,
+                                                const std::vector<PhaseEvent> &phases,
+                                                int handedness, int frameW, int frameH,
+                                                const PoseWristAngleConfig &cfg = {});
+
 } // namespace pinpoint::analysis

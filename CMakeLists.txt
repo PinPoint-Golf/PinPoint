@@ -2385,6 +2385,13 @@ target_sources(PinPointStudio PRIVATE
     src/Analysis/foot_metrics.h
     src/Analysis/foot_metrics.cpp
     src/Analysis/lower_body_metrics.cpp
+    src/Analysis/metric_channel.h
+    src/Analysis/upper_body_metrics.h
+    src/Analysis/upper_body_metrics.cpp
+    src/Analysis/body_rotation.h
+    src/Analysis/body_rotation.cpp
+    src/Analysis/club_delivery.h
+    src/Analysis/club_delivery.cpp
     src/Analysis/ball_position.h
     src/Analysis/ball_position.cpp
     src/Analysis/tempo_metrics.h
@@ -2703,6 +2710,9 @@ if(PINPOINT_BUILD_TOOLS)
         src/Analysis/head_track.cpp
         src/Analysis/foot_metrics.cpp
         src/Analysis/lower_body_metrics.cpp
+        src/Analysis/upper_body_metrics.cpp
+        src/Analysis/body_rotation.cpp
+        src/Analysis/club_delivery.cpp
         src/Analysis/ball_position.cpp
         src/Analysis/tempo_metrics.cpp
         src/Analysis/pose_wrist_angle_source.cpp

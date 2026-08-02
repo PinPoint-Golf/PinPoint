@@ -1,20 +1,27 @@
 # PinPoint — Low-Point-Ahead-of-Ball: Technical Design
 
-> **⚠ Ball-position source changed (2026-07-08, `d44c728`/ball-detection v2).** This design assumes the
-> ball position/radius comes from the **v1 calibration profile** (`setup.ballDetection.center` populated
-> from `CameraInstance::ballCalHasPosition()`/`ballCalCenterX/Y()`/`ballCalRadiusNorm()`). That whole v1
-> calibration stack has been **deleted** — those getters no longer exist, and `swing.json` currently
-> carries no ball position (`ballDetection.calibrated:false`, no `center`/`radiusNorm`). The replacement
-> is the **v2 temporal detector's auto-detected locked position**, which is the deferred **"Provenance v2"**
-> follow-up (record `positionSource:"auto"` + the locked centre/radius + `satFrac` — see
-> [`ball_detection_v2_impl_plan.md`](../implementation/ball_detection_v2_impl_plan.md)). **This metric now
-> waits on Provenance v2 for its ball input.** Also: `kBallDiameterMm` moved from `src/Pose/ball_model.h`
-> (deleted) to `src/Pose/ball_temporal.h` (`pinpoint::balltemporal::kBallDiameterMm`).
-
-**Status:** v1 **enabling work landed** (this change): the ball-diameter scale
-constant and the persisted, co-registered ball position/radius are now in
-`swing.json`. **The metric computation and any UI display are deferred** — see
-§6. No user-facing number ships in v1.
+> ## ✅ SHIPPED, 2026-08-02 — both blockers cleared
+>
+> This design's two stated blockers are resolved and the metric is **live** in
+> `src/Analysis/club_delivery.{h,cpp}` (`ClubDeliveryStage`, `ClubDeliveryProvider`). Read the two
+> historical banners below as the record of what stood in the way, not as current status.
+>
+> * **"Deferred until the measured-clubhead detector lands."** It landed: `clubhead_track.{h,cpp}`
+>   shipped in `cbe68cd` and went default-ON in `df76fe9`. The producer reads `headPx` from
+>   MEASURED samples only and refuses `ShaftHeadProjected` outright — a projected head is a rigid
+>   function of the grip and the shaft angle, so its arc vertex is the grip's, not the club's.
+> * **"Waits on Provenance v2 for its ball input."** It does not, and this was the discovery that
+>   unblocked the work. `ball_position.cpp` already derives a robust address ball centre (a
+>   component-wise median with a cluster gate) AND the ball-diameter px→mm ruler from the LIVE v2
+>   track, and it yields both even when the heel pair is unusable. `ClubDeliveryStage` calls it with
+>   a deliberately degenerate heel pair for exactly that reason.
+>
+> **As built, two things differ from §1–§6 below.** The arc vertex is refined below frame spacing
+> with a three-point parabola through the lowest sample's neighbours (accepted only if it lands
+> inside the bracket it was fitted through) — at impact speeds one frame of quantisation is inches.
+> And the target direction is taken from the **clubhead's own horizontal travel across impact**
+> rather than from pose handedness, so a mirrored camera cannot invert the sign and the metric needs
+> no skeleton at all.
 
 **Scope:** define, as a drop-in contract, the club-delivery metric *low-point
 distance ahead of the ball* — how far target-side of the ball the clubhead

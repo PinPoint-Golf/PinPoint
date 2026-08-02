@@ -54,13 +54,13 @@ int main()
     std::printf("=== metric catalogue ===\n");
     const MetricCatalogue cat = makeMetricCatalogue();
 
-    // 1. Manifest completeness — the full design catalogue (21 live + 31 planned), each resolvable.
+    // 1. Manifest completeness — the full design catalogue (54 produced + 16 planned), each resolvable.
     // The nine additions are the measures the shipped diagnostics pack depends on: every
     // characteristic must resolve to a catalogue metric, so the pack cannot become a second
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 72, "descriptor count == 72");
+        checkEqI(static_cast<int>(cat.all().size()), 70, "descriptor count == 70");
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -68,12 +68,20 @@ int main()
                                "ballPosition",
                                "headSway",        "headLift",        "headTilt",
                                "tempoBackswing",  "tempoRatio",
-                               "wristScore",      "wristResemblance" };
+                               "wristScore",      "wristResemblance",
+                               // The face-on producer batch.
+                               "feetAlignment",   "comOverLeadFoot",
+                               "secondaryAxisTilt", "spineSideBend", "thoraxLateralDrift",
+                               "shoulderPlaneAngle", "elbowAlignment", "trailElbowHeight",
+                               "leadHandWidth",   "leadUpperArmToChest", "leadArmToTorso",
+                               "pelvisRotation",  "thoraxRotation", "xFactor", "xFactorStretch",
+                               "shaftAngleVsHorizontal", "attackAngle", "lowPointAhead",
+                               "trailWristFlexExt" };
         bool allPresent = true;
         for (const char *k : live)
             if (!cat.descriptor(QString::fromLatin1(k))) { allPresent = false;
                 std::printf("    missing live descriptor: %s\n", k); }
-        check(allPresent, "all 21 live keys have a descriptor");
+        check(allPresent, "every produced key has a descriptor");
         check(cat.descriptor(QStringLiteral("tempo")) == nullptr, "tempo absent (use tempoBackswing)");
         // ballPosition used to be asserted ABSENT here; it now has a producer
         // (ball_position.cpp via FootMetricsStage), so it is in the live list above.
@@ -82,7 +90,9 @@ int main()
     // 2. Type / group / scored filtering.
     {
         checkEqI(countType(cat, MetricType::TimeSeries),  38, "TimeSeries count");
-        checkEqI(countType(cat, MetricType::PointInTime), 28, "PointInTime count");
+        // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
+        // as duplicates of a series the catalogue already carries.
+        checkEqI(countType(cat, MetricType::PointInTime), 26, "PointInTime count");
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
@@ -112,8 +122,16 @@ int main()
         MetricQuery stq; stq.group = QStringLiteral("Strike");
         checkEqI(static_cast<int>(cat.query(stq).size()), 2, "group 'Strike' == 2");
 
+        // Alignment lost `shoulderAlignment` and `hipAlignment`: each was geometrically the same
+        // image-plane line as a series the catalogue already carried, read at other phases, which
+        // metric_reducer.h exists to express. Two descriptors for one curve is two names for one
+        // number. What is left is the elbow and foot lines.
         MetricQuery alq; alq.group = QStringLiteral("Alignment");
-        checkEqI(static_cast<int>(cat.query(alq).size()), 4, "group 'Alignment' == 4");
+        checkEqI(static_cast<int>(cat.query(alq).size()), 2, "group 'Alignment' == 2");
+        check(cat.descriptor(QStringLiteral("shoulderAlignment")) == nullptr,
+              "shoulderAlignment retired — shoulderPlaneAngle is that line");
+        check(cat.descriptor(QStringLiteral("hipAlignment")) == nullptr,
+              "hipAlignment retired — hipLineTilt is that line");
 
         MetricQuery sq; sq.scored = true;
         checkEqI(static_cast<int>(cat.query(sq).size()), 4, "scored == true → 4 (wrist DOFs)");
@@ -132,15 +150,22 @@ int main()
         check(cat.resolve(QStringLiteral("forearmPronation"), full).state == MetricAvailability::Measured,
               "roll Measured with upper-arm added");
 
-        ShotContext swing = core; swing.sessionType = 0;   // Swing session
-        const MetricAvailability sw = cat.resolve(QStringLiteral("leadWristFlexExt"), swing);
-        check(sw.state == MetricAvailability::Unavailable, "wrist Unavailable in a Swing session");
-        check(sw.reason.contains(QStringLiteral("Wrist Motion")), "reason names Wrist Motion");
-
-        // sessionType -1 (directory browse) is session-agnostic → available if sensors present.
-        ShotContext browse = core; browse.sessionType = -1;
-        check(cat.resolve(QStringLiteral("leadWristFlexExt"), browse).state == MetricAvailability::Measured,
-              "wrist Measured when browsing (no session) with sensors");
+        // ANALYSIS IS AGNOSTIC OF SESSION TYPE. This block used to assert the opposite — that a
+        // Swing-session shot lost the wrist metrics with the reason "produced in Wrist Motion
+        // sessions only" — and that behaviour is deliberately gone. A session type is what the
+        // operator meant to capture; the sensors are what was captured, and only the sensors may
+        // decide. The assertion is now that the answer does NOT move with the session.
+        for (const int type : { -1, 0, 1, 2, 7 }) {
+            ShotContext any = core; any.sessionType = type;
+            check(cat.resolve(QStringLiteral("leadWristFlexExt"), any).state
+                      == MetricAvailability::Measured,
+                  "wrist Measured whatever the session, given the sensors");
+        }
+        ShotContext noImu = wristShot({});
+        noImu.sessionType = 1;
+        check(cat.resolve(QStringLiteral("leadWristFlexExt"), noImu).state
+                  == MetricAvailability::Unavailable,
+              "and Unavailable without them, even in a Wrist session");
     }
 
     // 3b. resolve() — Summary scores (ScoreProvider).
@@ -152,8 +177,8 @@ int main()
               "wristResemblance Measured on a Wrist shot with forearm+hand");
 
         ShotContext swing = core; swing.sessionType = 0;
-        check(cat.resolve(QStringLiteral("wristScore"), swing).state == MetricAvailability::Unavailable,
-              "wristScore Unavailable in a Swing session");
+        check(cat.resolve(QStringLiteral("wristScore"), swing).state == MetricAvailability::Measured,
+              "wristScore follows the IMUs, not the session");
 
         // swingScore is aspirational — no live scorer, always Unavailable.
         const MetricAvailability sw = cat.resolve(QStringLiteral("swingScore"), swing);
@@ -174,6 +199,80 @@ int main()
         check(cat.resolve(QStringLiteral("impactShaftLean"), club).state == MetricAvailability::Measured,
               "impactShaftLean Measured with face-on + club track");
         check(cat.descriptor(QStringLiteral("headSway"))->planned == false, "headSway not planned");
+    }
+
+    // 3c-bis. The face-on producer batch, and the BRIDGED state.
+    //
+    // Bridged is the state the standing rule needs: a metric that a face-on camera can estimate but
+    // an IMU could measure is neither Measured nor Unavailable, and collapsing it to either would be
+    // a lie in one direction or the other. Body rotation is the only producer that answers it, and
+    // it must answer PER SEGMENT — a shot with a pelvis IMU and no thorax IMU has one of each.
+    {
+        const ShotContext cam = wristShot({}, /*faceOn*/ true);
+        for (const char *k : { "secondaryAxisTilt", "spineSideBend", "thoraxLateralDrift",
+                               "shoulderPlaneAngle", "elbowAlignment", "trailElbowHeight",
+                               "leadHandWidth", "leadUpperArmToChest", "leadArmToTorso",
+                               "feetAlignment", "comOverLeadFoot", "trailWristFlexExt" }) {
+            const MetricAvailability a = cat.resolve(QString::fromLatin1(k), cam);
+            if (a.state != MetricAvailability::Measured)
+                std::printf("    expected Measured with a face-on camera: %s\n", k);
+            check(a.state == MetricAvailability::Measured, k);
+        }
+
+        const ShotContext noCam = wristShot({}, /*faceOn*/ false);
+        check(cat.resolve(QStringLiteral("secondaryAxisTilt"), noCam).state
+                  == MetricAvailability::Unavailable,
+              "the upper body needs the camera");
+
+        // Body rotation: camera only ⇒ Bridged, and the reason names the METHOD rather than a
+        // missing device, because a value IS produced.
+        const MetricAvailability est = cat.resolve(QStringLiteral("pelvisRotation"), cam);
+        check(est.state == MetricAvailability::Bridged, "pelvisRotation Bridged from the camera");
+        check(est.reason.contains(QStringLiteral("estimated")),
+              "…and says it was estimated, not that something is missing");
+
+        ShotContext pelvisImu = wristShot({ SegmentRole::Pelvis }, /*faceOn*/ true);
+        check(cat.resolve(QStringLiteral("pelvisRotation"), pelvisImu).state
+                  == MetricAvailability::Measured,
+              "a bound pelvis IMU upgrades pelvisRotation to Measured");
+        check(cat.resolve(QStringLiteral("thoraxRotation"), pelvisImu).state
+                  == MetricAvailability::Bridged,
+              "…while the chest, uninstrumented, stays an estimate");
+        check(cat.resolve(QStringLiteral("xFactor"), pelvisImu).state == MetricAvailability::Bridged,
+              "…and the separation inherits the weaker half");
+
+        ShotContext bothImu = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax }, false);
+        check(cat.resolve(QStringLiteral("xFactor"), bothImu).state == MetricAvailability::Measured,
+              "both trunk IMUs Measure the separation, with no camera at all");
+
+        ShotContext nothing = wristShot({}, /*faceOn*/ false);
+        check(cat.resolve(QStringLiteral("pelvisRotation"), nothing).state
+                  == MetricAvailability::Unavailable,
+              "no camera and no trunk IMU is genuinely Unavailable");
+
+        // Club delivery: the measured head, and the ball only where it is genuinely needed.
+        ShotContext club = wristShot({}, /*faceOn*/ true, /*club*/ true);
+        check(cat.resolve(QStringLiteral("attackAngle"), club).state == MetricAvailability::Measured,
+              "attackAngle Measured from a face-on club track — it is NOT a DTL metric");
+        check(cat.resolve(QStringLiteral("shaftAngleVsHorizontal"), club).state
+                  == MetricAvailability::Measured,
+              "shaftAngleVsHorizontal Measured with face-on + club");
+        check(cat.resolve(QStringLiteral("lowPointAhead"), club).state
+                  == MetricAvailability::Unavailable,
+              "lowPointAhead still needs the ball it is measured against");
+        ShotContext clubBall = club;
+        clubBall.hasBallTrack = true;
+        check(cat.resolve(QStringLiteral("lowPointAhead"), clubBall).state
+                  == MetricAvailability::Measured,
+              "…and lands once the ball is there");
+
+        // attackAngle no longer demands a stereo tier. It never should have: the angle lives in the
+        // vertical plane containing the target line, which is the face-on image plane.
+        check(cat.descriptor(QStringLiteral("attackAngle"))->requirement.minTier
+                  == ReconstructionTier::Angles2D,
+              "attackAngle does not require a stereo reconstruction");
+        check(cat.descriptor(QStringLiteral("attackAngle"))->requirement.faceOnCamera,
+              "…and does require the face-on camera it is actually read from");
     }
 
     // 3d. Planned placeholders — declared, flagged, and always resolving 'planned'.

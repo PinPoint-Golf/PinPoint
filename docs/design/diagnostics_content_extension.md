@@ -18,12 +18,12 @@ Conventions for all additions:
 1. **23 measures have no norm row in any context** — every corridor signal over them is dead: `m_axisTiltAtTop, m_ballBodyGap, m_clubPathAtImpact, m_leadArmToTorso, m_leadHandWidth, m_leadKneeFlex, m_leadWristAtTop, m_lumbarCurve, m_pelvisLiftTop, m_pelvisRotPeak, m_pelvisSwayBack, m_pelvisSwayDown, m_pelvisSwayImpact, m_pelvisThrustDown, m_shoulderAlignment, m_shoulderPlane, m_spineBendAtAddress, m_spineBendLoss, m_thoracicCurve, m_thoraxDrift, m_thoraxRotPeak, m_trailElbowRise, m_xFactorStretch`. Seed norms are given in §5.
 2. **`m_leadWristAtTop` is an orphan** — no signal references it and it has no norm. Either wire it into a `sig_cuppedAtTop` / `sig_bowedAtTop` pair (see §3.2, `across_the_line` context) or delete it; `m_leadWristFlexExt_p4` already covers the reading.
 3. **Unit hygiene:** many measures carry `"unit": "-"` (e.g. `m_lagAngleDown`, `m_tempoRatio`, all `planned` measures). The norm loader hard-fails on unit mismatch; give every measure its real unit (`°`, `ratio`, `% stance width`, `cm`, `mph`) before authoring its norm.
-4. **`alignment_open` / `alignment_closed` use shoulders only**, while `feetAlignment` and `hipAlignment` producers already exist in the metric catalogue. Add `m_feetAlignment` and `m_hipAlignment` measures and either (a) split the conditions into shoulder/hip/feet variants, or (b) keep two conditions and add `corroborates` edges from feet/hip signals. Option (b) is less noisy on the dashboard.
+4. **`alignment_open` / `alignment_closed` use shoulders only**… — **RESOLVED 2026-08-02, and the premise was wrong.** `feetAlignment` and `hipAlignment` producers did NOT already exist; both were `.planned`. All three measures now exist and are live, but `hipAlignment` and `shoulderAlignment` were RETIRED as metrics: each was geometrically identical to a body-line tilt already in the catalogue (`hipLineTilt`, `shoulderPlaneAngle`) read at a different phase, which `metric_reducer.h` exists to express. `m_hipAlignment` and `m_shoulderAlignment` now point at the surviving series, restated in ITS sign convention. `feetAlignment` survived as its own metric — the ankle line genuinely is not the toe line, and it fixes `toeLineAngle`'s mirror-inverting sign. Note that a face-on camera reads the APPARENT line, not true target-line alignment; every descriptor says so.
 5. **No `corroborates` or `excludes` edges exist** (all 81 edges are `causes`), although the schema, cycle-detection and shadowing gates were built for them. §6 lists the first tranche.
 6. **`drills` is empty on all 50 conditions.** The stated purpose of the rules is to drive the "so what" conversation; every observable fault needs at least one drill id. Establish a `drill.*` namespace now (like `screen.*`) even if drill content lands later.
 7. **All 50 conditions are `tier: proposed`.** Create a research backlog: conditions whose direction/phase is well supported in the biomechanics literature (kinematic sequence order, X-factor stretch, early extension, reverse spine ↔ low-back load) should be upgraded to `supported` with a DOI as citations are verified. Do not upgrade without a verifiable DOI/PMID.
 8. **Latent screened conditions have `screenRef` but no screen protocol or norm anywhere.** §7 defines them generically (clinical ROM literature only — no branded screening protocols).
-9. **metricKey drift:** composed measures reference `thoracicFlexion`, `lumbarExtension`, `shoulderPlaneAngle`, `ballBodyDistance`, `thoraxLateralDrift`, `leadKneeFlexion`, `trailElbowHeight`, `leadArmToTorso`, `leadHandWidth`, `trailWristFlexExt` — none exist in `metric_providers.cpp`. Confirm each is intentionally `noProducer`/`planned` roadmap work and that the facet-derived id will match the eventual producer key, or the join will silently miss.
+9. **metricKey drift** — **RESOLVED 2026-08-02, and this item is why it went smoothly.** Six of the ten now have producers (`shoulderPlaneAngle`, `thoraxLateralDrift`, `trailElbowHeight`, `leadArmToTorso`, `leadHandWidth`, `trailWristFlexExt`) and the join did NOT silently miss — because `upper_body_metrics.cpp` was built to the geometry the `series` facets already named (`shoulderLine · angle · ground`, `thoraxCentre · distance · trailAnkle`, `trailElbow · height · shoulderLine`, …). **The facet triple was the producer specification**, authored before the producer, and treating it that way is what made the ids match. The remaining four are intentional: `thoracicFlexion` / `lumbarExtension` have no keypoint in either pose layout, `ballBodyDistance` is depth, `leadKneeFlexion` is sagittal.
 
 ---
 
@@ -204,6 +204,17 @@ All need `highMeans`, real units, and `viewNeeded`. Statuses: **live** = produce
 | `m_thoraxRotFinish` | `thoraxRotation` | at finish | ° | planned |
 | `m_spineSideBendTop` | `spineSideBend` | at p4 | ° | planned (producer exists; corroborates reverse_spine) |
 | `m_leadUpperArmToChest` | lead upper arm, distance to thorax centre | extremum p1→p4 | cm (or % torso length) | noProducer — drives `disconnection` |
+
+> **⚠ The `status` column in the tables below is FROZEN AT AUTHORING TIME (2026-07) and is now
+> stale.** The face-on producer batch (2026-08-02) moved 32 measures to `live`, including
+> `m_axisTiltAtTop` / `m_axisTiltImpact`, `m_thoraxDrift`, `m_shoulderPlane`, `m_trailElbowRise`,
+> `m_leadHandWidth`, `m_leadUpperArmToChest`, `m_leadArmToTorso`, `m_comOverLeadFootFinish`,
+> `m_spineSideBendTop`, `m_feetAlignment`, `m_hipAlignment`, `m_shaftAngleP4`, `m_lowPointAhead`,
+> `m_attackAngle`, all five `m_pelvisRot*`, all three `m_thoraxRot*`, `m_xFactorStretch` and the
+> seven `m_trailWristFlexExt_*`. **`core.json` is the source of truth for status; this table is the
+> authoring record.** Two rows are also wrong on the merits: `m_attackAngle` is noted as needing an
+> accuracy caveat versus a launch monitor, which stands, but it is a FACE-ON metric rather than one
+> awaiting a second camera; and `m_lowPointAhead`'s unit is inches, not cm.
 
 ### Shaft
 

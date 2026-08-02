@@ -315,6 +315,64 @@ inline constexpr std::int64_t kAddrWindowUs   = 250000;  // lowerBody.addrWindow
 inline constexpr double       kMinStanceSpanPx = 40.0;   // lowerBody.minStanceSpanPx
 } // namespace lowerBody
 
+// --- Upper-body frontal-plane metrics (src/Analysis/upper_body_metrics.h) -----
+// secondaryAxisTilt / spineSideBend / thoraxLateralDrift / shoulderPlaneAngle /
+// elbowAlignment / trailElbowHeight / leadHandWidth / leadUpperArmToChest /
+// leadArmToTorso, resolved through the anatomy vocabulary rather than raw keypoint
+// indices. Consumed by UpperBodyConfig::fromOverrides via "upperBody.*" dotted keys.
+//
+// Same conf-gate / address-window shape as foot::, head:: and lowerBody::,
+// deliberately — a fourth set of defaults for the same job would be four things to
+// sweep and one thing to reason about.
+//
+// kMinShoulderSpanPx guards the DENOMINATOR, exactly as kMinStanceSpanPx does for
+// the lower body. It is smaller (30 px) because the shoulder span is genuinely
+// narrower than the stance in the same framing, so reusing the stance floor would
+// refuse usable swings rather than absurd ones.
+namespace upperBody {
+inline constexpr double       kConfMin           = 0.30;    // upperBody.confMin — per-keypoint gate
+inline constexpr int          kAddrMinFrames     = 5;       // upperBody.addrMinFrames
+inline constexpr std::int64_t kAddrWindowUs      = 250000;  // upperBody.addrWindowUs
+inline constexpr double       kMinShoulderSpanPx = 30.0;    // upperBody.minShoulderSpanPx
+} // namespace upperBody
+
+// --- Axial body rotation (src/Analysis/body_rotation.h) -----------------------
+// pelvisRotation / thoraxRotation / xFactor / xFactorStretch, from a bound Pelvis /
+// Thorax IMU where one exists and from the face-on collapse of the hip and shoulder
+// spans where one does not. Consumed by BodyRotationConfig::fromOverrides via
+// "bodyRotation.*" dotted keys.
+//
+// kSpanNoisePx and kSinFloor are NOT cosmetic. The camera tier inverts a cosine, so
+// dθ/dw = −1/(w₀·sin θ) diverges as the body squares up: the producer propagates the
+// span noise through that derivative into MetricSeries::sigma, and the floor is what
+// keeps the reported uncertainty finite instead of infinite near zero turn. 3 px is
+// the pose endpoint jitter carried through a difference of two endpoints; sin 5°
+// caps the reported sigma at roughly 11× the span noise expressed in radians.
+namespace bodyRotation {
+inline constexpr double       kConfMin       = 0.30;    // bodyRotation.confMin
+inline constexpr int          kAddrMinFrames = 5;       // bodyRotation.addrMinFrames
+inline constexpr std::int64_t kAddrWindowUs  = 250000;  // bodyRotation.addrWindowUs
+inline constexpr double       kMinSpanPx     = 30.0;    // bodyRotation.minSpanPx — denominator floor
+inline constexpr double       kSpanNoisePx   = 3.0;     // bodyRotation.spanNoisePx — 1σ of the span
+inline constexpr double       kSinFloor      = 0.0872;  // bodyRotation.sinFloor — sin 5°
+} // namespace bodyRotation
+
+// --- Club delivery from a face-on camera (src/Analysis/club_delivery.h) -------
+// shaftAngleVsHorizontal / attackAngle / lowPointAhead, read off the MEASURED
+// clubhead terminus only. Consumed by ClubDeliveryConfig::fromOverrides via
+// "clubDelivery.*" dotted keys.
+//
+// kVelHalfSpan is the half-width of the centred difference the head velocity — and
+// therefore the attack angle — is taken over. One frame either side of a ~9 px head
+// is mostly quantisation noise landing squarely on a single-instant reading, so a
+// few frames of span buys a usable angle at the cost of a little time resolution.
+namespace clubDelivery {
+inline constexpr int          kVelHalfSpan        = 2;        // clubDelivery.velHalfSpan (samples)
+inline constexpr std::int64_t kLowPointWinUs      = 60000;    // clubDelivery.lowPointWinUs — ±60 ms about Impact
+inline constexpr int          kLowPointMinSamples = 5;        // clubDelivery.lowPointMinSamples
+inline constexpr double       kHeadConfMin        = 0.30;     // clubDelivery.headConfMin
+} // namespace clubDelivery
+
 // --- Tempo metrics (src/Analysis/tempo_metrics.h) -----------------------------
 // tempoBackswing (Address→Top, s) and tempoRatio ((Top−Address)/(Impact−Top)).
 // Consumed by TempoConfig::fromOverrides via "tempo.*" dotted keys.
