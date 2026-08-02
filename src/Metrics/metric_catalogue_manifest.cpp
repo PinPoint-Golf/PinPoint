@@ -1126,9 +1126,14 @@ void installMetricManifest(MetricCatalogue &cat)
             "legitimate stylistic choice for stability. Read the trend rather than any single "
             "value. The centimetre scale comes from the ball-diameter ruler at the ground plane, so "
             "the metric is absent rather than rescaled when no ball was detected. Needs a face-on "
-            "whole-body camera."),
+            "whole-body camera and a detected ball."),
         .phases = { P::Top },
-        .requirement = { .faceOnCamera = true },
+        // ballTrack is not optional decoration: foot_metrics.cpp emits this curve only when
+        // mmPerPx resolved, because the reading is centimetres and the ball diameter is the only
+        // ruler at the ground plane. The requirement said face-on camera alone, so a ball-less
+        // shot was told the metric was Measured while the producer had declined to emit it. The
+        // howToRead below it had described the ball dependency correctly all along.
+        .requirement = { .faceOnCamera = true, .ballTrack = true },
         .usedBy = { QStringLiteral("chart:review"),
                     QStringLiteral("characteristic:excessive_heel_lift") },
     });

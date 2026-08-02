@@ -13,6 +13,7 @@
 
 #include "metric_catalogue.h"
 
+#include <algorithm>   // std::find — the "is this key claimed" sweep
 #include <cstdio>
 
 using namespace pinpoint::analysis;
@@ -318,6 +319,36 @@ int main()
               "…and the exception is swingScore, which ScoreProvider answers more specifically");
     }
 
+    // 3d-bis. EVERY descriptor is claimed by SOME provider.
+    //
+    // The sweeps above check that planned metrics answer the roadmap reason and that live ones
+    // resolve where they should — but both walk descriptors the test names, and neither can see a
+    // descriptor that simply fell out of every provider's provides(). That is a real and silent
+    // failure mode: MetricCatalogue::resolve() falls back to rendering the descriptor's own
+    // requirement as the reason, so an unclaimed metric reads as a plausible "needs a face-on
+    // camera" on a shot that HAS one, and stays Unavailable however capable the shot is. Nothing
+    // about it looks like a bug from the directory.
+    //
+    // stanceWidthMm shipped exactly that way: declared, produced by foot_metrics.cpp on every
+    // ruler-resolved swing, and absent from FootMetricProvider::provides(), so it was reported
+    // unavailable on all of them. A per-metric case would not have caught it — this one does,
+    // for every key at once and for every key added later.
+    {
+        int unclaimed = 0;
+        for (const MetricDescriptor *d : cat.all()) {
+            bool claimed = false;
+            for (const IMetricProvider *p : cat.providers()) {
+                const auto keys = p->provides();
+                if (std::find(keys.begin(), keys.end(), d->key) != keys.end()) { claimed = true; break; }
+            }
+            if (!claimed) {
+                ++unclaimed;
+                std::printf("    NO PROVIDER CLAIMS: %s\n", qPrintable(d->key));
+            }
+        }
+        checkEqI(unclaimed, 0, "every descriptor is claimed by at least one provider");
+    }
+
     // 3e. Launch-monitor metrics — a REQUIREMENT, not a planned promise.
     //
     // The distinction is the whole point of the split: a planned metric has no producer and always
@@ -380,8 +411,8 @@ int main()
         check(cat.resolve(QStringLiteral("stanceWidth"), noCam).state == MetricAvailability::Unavailable,
               "stanceWidth Unavailable without face-on camera");
 
-        // ballPosition is the one foot-group key that needs more than the feet.
-        // FootMetricProvider used to be key-agnostic; these two pin that it is not.
+        // THREE foot-group keys need more than the feet, and all three need a ball. FootMetricProvider
+        // used to be key-agnostic; these pin that it is not.
         check(cat.resolve(QStringLiteral("ballPosition"), feet).state == MetricAvailability::Unavailable,
               "ballPosition Unavailable with face-on camera but no ball track");
         ShotContext ballCtx = wristShot({}, /*faceOn*/ true);
@@ -390,6 +421,21 @@ int main()
               "ballPosition Measured with face-on camera + ball track");
         check(cat.resolve(QStringLiteral("stanceWidth"), ballCtx).state == MetricAvailability::Measured,
               "stanceWidth still Measured without needing a ball track");
+
+        // stanceWidthMm and leadHeelLift are the two foot readings in real-world units, and the ball
+        // diameter is the only ruler at the ground plane — foot_metrics.cpp emits neither without it.
+        // stanceWidthMm was claimed by NO provider and so read Unavailable on every shot ever taken;
+        // leadHeelLift was claimed but understated its requirement, so a ball-less shot was told it
+        // was Measured while the producer had declined to emit it. Opposite mistakes, one root: the
+        // availability answer has to match what the producer actually does.
+        check(cat.resolve(QStringLiteral("stanceWidthMm"), ballCtx).state == MetricAvailability::Measured,
+              "stanceWidthMm Measured with face-on camera + ball track");
+        check(cat.resolve(QStringLiteral("stanceWidthMm"), feet).state == MetricAvailability::Unavailable,
+              "stanceWidthMm Unavailable without the ball-diameter ruler");
+        check(cat.resolve(QStringLiteral("leadHeelLift"), ballCtx).state == MetricAvailability::Measured,
+              "leadHeelLift Measured with face-on camera + ball track");
+        check(cat.resolve(QStringLiteral("leadHeelLift"), feet).state == MetricAvailability::Unavailable,
+              "leadHeelLift Unavailable without the ball-diameter ruler (it reads in cm)");
 
         // Tempo needs no devices at all beyond something that segmented the swing —
         // an IMU-only shot with no camera and no club must still resolve Measured.

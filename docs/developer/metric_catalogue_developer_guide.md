@@ -231,10 +231,10 @@ Add cases to `src/Metrics/tests/metric_catalogue_test.cpp` (the source lives bes
 the `pp_add_test` that registers it is in `src/Analysis/tests/CMakeLists.txt`):
 - **completeness**: your key resolves via `descriptor()`; bump the expected count and the per-type
   counts.
-- **a claimant**: some provider lists your key. There is no blanket assertion that every non-planned
-  descriptor is claimed by one, and `stanceWidthMm` has been produced-but-unclaimed — and therefore
-  permanently `Unavailable` — for exactly that reason. Adding the blanket case is worth more than
-  adding your own.
+- **a claimant**: nothing to add — section 3d-bis already sweeps every descriptor for one, so
+  forgetting to list your key in a provider's `provides()` fails the suite by name. Do not weaken
+  that sweep to make a new metric pass; an unclaimed key is `Unavailable` on every shot forever,
+  which is what it was written to catch.
 - **resolve()**: a `ShotContext` where it is `Measured`, and one where it is `Unavailable` with the
   right reason (**missing sensor or camera — never a session type**; see the ⛔ box in Step C).
 - **corridors**: nothing goes in this test — the catalogue no longer resolves them. If your metric
@@ -383,25 +383,30 @@ the same frontal plane as sway and lift, and it is read alongside them.
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
 | `stanceWidth` | live | FaceCam | `buildFootSeries` heel-to-heel ÷ shoulder width ✓ | none — a body-relative ratio. **ABSENT when the shoulders do not resolve**, never re-expressed in another unit | `foot_metrics_test` · distribution owed (no corridor yet) |
-| `stanceWidthMm` | live | FaceCam + Ball | same span through the ball-diameter ruler ✓ | **px→mm** | `foot_metrics_test` · **see the defect note below** |
+| `stanceWidthMm` | live | FaceCam + Ball | same span through the ball-diameter ruler ✓ | **px→mm** | `foot_metrics_test` · (corpus) |
 | `ballPosition` | live | FaceCam + Ball | ball projected on the heel line ÷ stance width (`ball_position.cpp`) | none — a same-plane ratio, scale-free | `ball_position_test` · per-club distribution owed |
 | `leadFootFlare` | live | FaceCam | foot heel→bigtoe angle ✓ | none | `foot_metrics_test` · (corpus) |
 | `trailFootFlare` | live | FaceCam | foot heel→bigtoe angle ✓ | none | `foot_metrics_test` · (corpus) |
 | `toeLineAngle` | live | FaceCam | bigtoe→bigtoe line angle ✓ | none | `foot_metrics_test` · (corpus) |
-| `leadHeelLift` | live | FaceCam + Ball | heel-vs-toe elevation curve, in **cm** ✓ | **px→mm**; absent without the ruler | `foot_metrics_test` · (corpus) |
+| `leadHeelLift` | live | FaceCam + **Ball** | heel-vs-toe elevation curve, in **cm** ✓ | **px→mm**; absent without the ruler | `foot_metrics_test` · (corpus) |
 | `leadKneeDrift` | live | FaceCam + ground | `buildLowerBodySeries` lead-knee lateral travel ✓ | camCal, ground | `lower_body_metrics_test` · (corpus) |
 | `comOverLeadFoot` | live | FaceCam + ground | balance point vs lead foot, sampled to Finish ✓ | camCal, ground | `lower_body_metrics_test` · (corpus) |
 | `leadKneeFlexion` | planned | FaceCam (DTL better) | knee angle — sagittal, face-on cannot see it | camCal / stereo | new unit · (mocap) |
 | `trailKneeFlexion` | planned | FaceCam (DTL better) | knee angle — sagittal | camCal / stereo | new unit · (mocap) |
 | `ballBodyDistance` | planned | **DTL** + Ball | ball standoff from the body — depth axis | stereo | new unit · (corpus) |
 
-> **Known defect (2026-08-02).** `stanceWidthMm` is declared in the manifest and emitted by
-> `foot_metrics.cpp`, but **no provider claims it** — it is absent from `FootMetricProvider::provides()`
-> and from `PlannedMetricProvider`. `MetricCatalogue::resolve()` therefore answers `Unavailable` for
-> every shot, so a metric that is genuinely produced never appears as Measured in the directory. The
-> fix is one entry in `FootMetricProvider::provides()` (plus a `ballTrack` capability check, since the
-> mm reading needs the ruler). Nothing catches this today: `metric_catalogue_test` asserts descriptor
-> counts, not that every non-planned descriptor has a claimant — a gap worth closing at the same time.
+> **Fixed 2026-08-02 — worth knowing about, because the failure was silent.** `stanceWidthMm` was
+> declared and produced but claimed by **no provider**, so `MetricCatalogue::resolve()` fell back to
+> rendering the descriptor's own requirement and answered `Unavailable` on every shot ever taken. It
+> reads as a plausible "needs a face-on camera" on a shot that has one, so nothing about it looks
+> wrong from the directory. `leadHeelLift` had the mirror-image bug: claimed, but understating its
+> requirement, so a ball-less shot was told it was `Measured` while `foot_metrics.cpp` had declined
+> to emit it (the reading is centimetres and the ball diameter is the only ruler at the ground plane
+> — its own `howToRead` had said so all along).
+>
+> **An availability answer has to match what the producer actually does**, in both directions.
+> `metric_catalogue_test` now sweeps every descriptor for a claimant, which is the check that would
+> have caught the first one on the day it landed; a per-metric case would not have.
 
 ### Club & speed
 

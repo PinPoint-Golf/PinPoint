@@ -55,6 +55,13 @@ public:
     const MetricDescriptor *descriptor(const QString &key) const;
     std::vector<const MetricDescriptor *> all() const;
 
+    // The registered providers, in registration order — the mirror of all(). Exists so a test can
+    // ask the structural question resolve() cannot: is every descriptor claimed by SOMEBODY? An
+    // unclaimed key does not fail loudly — resolve() falls back to rendering the descriptor's own
+    // requirement, so it reads as a plausible "needs a face-on camera" on a shot that has one and
+    // is Unavailable however capable the shot is. Non-owning, like the members themselves.
+    std::vector<const IMetricProvider *> providers() const { return m_providers; }
+
     // Filtered directory list. With availableOnly + a ctx, drops metrics that resolve to
     // Unavailable. Without a ctx, availability is not evaluated (directory "all" mode).
     std::vector<const MetricDescriptor *> query(const MetricQuery &q,

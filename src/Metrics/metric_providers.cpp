@@ -80,7 +80,8 @@ MetricAvailability KinematicSeriesProvider::availability(const QString &key, con
 
 std::vector<QString> FootMetricProvider::provides() const
 {
-    return { QStringLiteral("stanceWidth"), QStringLiteral("leadFootFlare"),
+    return { QStringLiteral("stanceWidth"), QStringLiteral("stanceWidthMm"),
+             QStringLiteral("leadFootFlare"),
              QStringLiteral("trailFootFlare"), QStringLiteral("toeLineAngle"),
              QStringLiteral("leadHeelLift"), QStringLiteral("ballPosition") };
 }
@@ -89,10 +90,17 @@ MetricAvailability FootMetricProvider::availability(const QString &key, const Sh
 {
     MetricRequirement req;
     req.faceOnCamera = true;                       // whole-body pose feet keypoints
-    // ballPosition is the one key here that needs more than the feet: without a
-    // detected ball there is nothing to locate along the stance. (This provider
-    // used to be key-agnostic; it no longer can be.)
-    if (key == QStringLiteral("ballPosition"))
+    // Three keys here need more than the feet, and all three need it for the same reason: a
+    // ball. ballPosition has nothing to locate along the stance without one; stanceWidthMm and
+    // leadHeelLift are the two readings in real-world units, and the ball diameter IS the ruler
+    // that gets them there (foot_metrics.cpp emits both only when mmPerPx resolved).
+    //
+    // Omitting a key from this list does not make it planned or hidden — it makes it belong to
+    // NO provider, and MetricCatalogue::resolve() then answers Unavailable on every shot however
+    // capable. stanceWidthMm shipped that way: produced on every ruler-resolved swing and
+    // reported as unavailable on all of them. Keep this list and provides() in step.
+    if (key == QStringLiteral("ballPosition") || key == QStringLiteral("stanceWidthMm")
+        || key == QStringLiteral("leadHeelLift"))
         req.ballTrack = true;
     return fromRequirement(req, ctx);
 }
