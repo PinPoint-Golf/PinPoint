@@ -693,6 +693,67 @@ int main(int argc, char **argv)
         check(m.unsavedCount() == 0, "back to the file");
     }
 
+    std::printf("=== the ring collar windows a five-rung ladder ===\n");
+    {
+        // The collar draws three cells and the ladder has five, so the window has to MOVE. The bug
+        // this guards against is silent: take the first three every time and `always` can never be
+        // reached from the graph at all, and a link that already is `always` opens a collar in which
+        // none of the three cells is the one it holds — which is exactly the state the gesture's
+        // release-on-current no-op depends on being impossible.
+        QString linkId;
+        for (const QVariant &v : m.rows(QStringLiteral("links"))) {
+            const QVariantMap r = v.toMap();
+            if (cellFor(r, QStringLiteral("strength")).value(QStringLiteral("editable")).toBool()) {
+                linkId = r.value(QStringLiteral("id")).toString();
+                break;
+            }
+        }
+        check(!linkId.isEmpty(), "a causal link to hold on");
+
+        const auto windowAt = [&](const QString &rung) {
+            m.setField(QStringLiteral("links"), linkId, QStringLiteral("strength"), rung);
+            QStringList vals;
+            for (const QVariant &v :
+                 m.ringValues(QStringLiteral("links"), linkId, QStringLiteral("strength")))
+                vals << v.toMap().value(QStringLiteral("value")).toString();
+            return vals;
+        };
+        const auto currentOf = [&]() {
+            for (const QVariant &v :
+                 m.ringValues(QStringLiteral("links"), linkId, QStringLiteral("strength")))
+                if (v.toMap().value(QStringLiteral("current")).toBool())
+                    return v.toMap().value(QStringLiteral("value")).toString();
+            return QString();
+        };
+
+        for (const QString &rung : { QStringLiteral("veryWeak"), QStringLiteral("weak"),
+                                     QStringLiteral("moderate"), QStringLiteral("strong"),
+                                     QStringLiteral("veryStrong") }) {
+            const QStringList w = windowAt(rung);
+            check(w.size() == 3, "three cells, whatever the rung");
+            check(w.contains(rung), "and the rung it holds is one of them");
+            check(currentOf() == rung, "marked as current, so releasing on it changes nothing");
+        }
+
+        // In ladder order and contiguous, because the gesture is "one rung along in the direction
+        // the hand is already travelling" — a re-sorted collar would break that reading.
+        check(windowAt(QStringLiteral("veryWeak"))
+                  == QStringList({ QStringLiteral("veryWeak"), QStringLiteral("weak"),
+                                   QStringLiteral("moderate") }),
+              "at the bottom the window clamps rather than centring");
+        check(windowAt(QStringLiteral("moderate"))
+                  == QStringList({ QStringLiteral("weak"), QStringLiteral("moderate"),
+                                   QStringLiteral("strong") }),
+              "in the middle it centres, so either neighbour is one hold away");
+        check(windowAt(QStringLiteral("veryStrong"))
+                  == QStringList({ QStringLiteral("moderate"), QStringLiteral("strong"),
+                                   QStringLiteral("veryStrong") }),
+              "at the top it clamps the other way — `always` is reachable");
+
+        while (m.canUndo()) m.undo();
+        check(m.unsavedCount() == 0, "back to the file");
+    }
+
     std::printf("=== removing one cause keeps the others ===\n");
     {
         // The failure this guards against is silent and total: a user pack REPLACES a condition's

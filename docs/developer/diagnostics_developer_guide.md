@@ -178,13 +178,25 @@ Three distinctions the UI must never blur:
 
 ```cpp
 struct Edge { QString from, to; EdgeType type; Strength strength; Provenance provenance; };
-// EdgeType: Causes | Corroborates | Excludes      Strength: Weak | Moderate | Strong
+// EdgeType: Causes | Corroborates | Excludes
+// Strength: VeryWeak | Weak | Moderate | Strong | VeryStrong
 // An edge carries the SAME Provenance as a condition — tier, citation, searchedOn, searchTerms.
 // (A bare `QString citation` is the pre-pass-1 shape; the loader still migrates it, promoting a
 //  legacy top-level citation to Supported. Do not author that form.)
 ```
 
 `Causes` must form a DAG — `validatePack()` refuses a cycle, because the assembled library is re-validated after every merge and one circular edge would fail every characteristic, not just the two involved. `Corroborates` is refused between a pair that already has a causal path either way: the pair would double-count when the explanation is ranked.
+
+**Strength is authored in words and read in words.** The stored names are a magnitude ladder; the labels a reader sees are a frequency one — `veryWeak` reads "rarely", `strong` reads "usually" — and the two have never matched. That is deliberate: the outer rungs were added in the naming idiom rather than the label's so `weak`, `moderate` and `strong` keep the spelling every shipped and user pack already stores, and no pack migrates. Nothing renders a strength as a percentage.
+
+`strengthWeight()` (`characteristic.h`) is the one weight the ladder carries: **P(effect | cause)**, 0.10 / 0.30 / 0.60 / 0.80 / 0.95. It is the quantity the labels have always described — how often this cause produces this effect — and it stays strictly inside 0…1. Neither bound is available: `edgeWeight()` returns 0 for "no such edge" and an immaterial finding is weighted 0, so a rung at 0 would be indistinguishable from the claim's absence; and a probability of exactly 1 is absorbing under Bayes, which no authored coaching claim earns.
+
+Two things it is not, both of which it resembles:
+
+- **Not P(cause | effect)**, which is what ranking causes from an observed effect actually wants. Bayes needs a base rate for how common each cause is, and no `Condition` carries one. Treat this as a posterior and you rank by out-degree — most outgoing edges wins — while looking rigorous.
+- **`RankedCause::score` is not a probability either.** It sums one weight per covered finding, so a cause explaining four of them scores past 1 and is meant to. The sum is ordinal and only ever reaches a comparison; normalising it would break the greedy set cover it feeds.
+
+The values were re-cut once, from an ordinal ladder running to 1.5, after measuring that the rescale preserved 98% of cause pairings on the shipped pack and that every pair it reordered was a near-tie. Anything that moves them owes the same measurement.
 
 ### Norm — what normal looks like
 

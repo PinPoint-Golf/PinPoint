@@ -193,7 +193,7 @@ QSet<QString> causalClosure(const CharacteristicPack &pack, const QString &id, b
 //
 // Lives here rather than at the call site because it is a GRAPH RULE, and the browser holds none —
 // see model_browser.h. It is deliberately a COUNT of a set that can be listed, never a score: this
-// repo has twice refused to weight a graph claim into a magnitude (Strength's three values,
+// repo has twice refused to weight a graph claim into a magnitude (Strength's authored rungs,
 // Corroboration's refusal to multiply) on the grounds that nobody can defend the resulting number
 // when asked why one cause outranked another. A count always answers that with the members.
 int outcomeReachOf(const CharacteristicPack &pack, const QString &conditionId);

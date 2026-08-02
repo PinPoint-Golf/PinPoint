@@ -801,14 +801,26 @@ int main()
         check(nodeById(l, "cause3")->available, "an asserted condition is not 'unavailable'");
         check(nodeById(l, "cause1")->available, "a live one is available");
 
-        // Strength is a weight, never a probability. Three words in, three weights out.
+        // Strength is a weight, never a probability. Asserted as an ORDER rather than as three
+        // numbers: the band is spread over however many rungs the ladder has, so pinning 1/2/3 here
+        // would fail the next time one is added without anything actually being wrong.
+        double wStrong = 0, wModerate = 0, wWeak = 0;
         for (const DagEdge &e : l.edges) {
             if (e.detects) continue;
-            if (e.from == QLatin1String("cause1")) check(e.weight == 3, "strong is the heaviest line");
-            if (e.from == QLatin1String("cause2")) check(e.weight == 2, "moderate is the middle");
-            if (e.from == QLatin1String("cause3") && e.to == QLatin1String("focus"))
-                check(e.weight == 1, "weak is the lightest");
+            if (e.from == QLatin1String("cause1")) wStrong = e.weight;
+            if (e.from == QLatin1String("cause2")) wModerate = e.weight;
+            if (e.from == QLatin1String("cause3") && e.to == QLatin1String("focus")) wWeak = e.weight;
         }
+        check(wStrong > wModerate, "strong is the heavier line");
+        check(wModerate > wWeak, "moderate outdraws weak");
+        check(wWeak >= 1.0, "and the lightest is still drawn");
+
+        // The two outer rungs sit outside the three the fixture uses, and inside the band the view
+        // is allowed to stroke — this is what the even spread has to keep true.
+        check(strokeWidthFor(Strength::VeryWeak) < wWeak, "rarely is lighter than sometimes");
+        check(strokeWidthFor(Strength::VeryStrong) > wStrong, "always is heavier than usually");
+        check(strokeWidthFor(Strength::VeryWeak) >= 1.0 && strokeWidthFor(Strength::VeryStrong) <= 3.0,
+              "and the whole ladder stays inside 1..3px");
 
         // An edge whose CAUSE is asserted carries that forward: a solid arrow into the focus reads
         // as a finding on its own, whatever the box at its tail looks like.

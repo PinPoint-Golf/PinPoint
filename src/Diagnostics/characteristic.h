@@ -329,9 +329,14 @@ enum class EdgeType {
     Excludes,
 };
 
-// Three-valued and never continuous: nobody can author 0.73 meaningfully, and rendering strength as
+// Five-valued and never continuous: nobody can author 0.73 meaningfully, and rendering strength as
 // a percentage would imply a probability it is not.
-enum class Strength { Weak, Moderate, Strong };
+//
+// The two outer rungs are spelled in the same MAGNITUDE idiom as the middle three so that `weak`,
+// `moderate` and `strong` keep the spelling every shipped and user pack already stores — the words a
+// reader actually sees are the labels (rarely · sometimes · often · usually · always), and they have
+// never matched the stored names. See `strengthLabel()`.
+enum class Strength { VeryWeak, Weak, Moderate, Strong, VeryStrong };
 
 // ORIENTATION, NORMATIVE: `from` is the CAUSE, `to` is the EFFECT.
 //
@@ -425,6 +430,32 @@ bool    edgeTypeFromName(const QString &s, EdgeType &out);
 QString strengthName(Strength s);
 QString strengthLabel(Strength s);      // words, never a percentage
 bool    strengthFromName(const QString &s, Strength &out);
+
+// The rungs, weakest first. One definition, for the same reason allConditionGroups() exists: the
+// order IS the ladder, and the editor's picker, the graph's collar and the analysis weight below all
+// have to walk it the same way.
+const std::vector<Strength> &allStrengths();
+
+// The ONE weight a strength carries: P(effect | cause), in 0…1 exclusive of both bounds. It is the
+// quantity the labels have always described — how OFTEN this cause produces this effect — and the
+// five rungs are the only values of it anybody may author, because nobody can defend 0.73.
+//
+// TWO THINGS IT IS NOT, both of which it looks like.
+//
+// It is not P(cause | effect), which is what ranking causes from an observed effect actually wants.
+// Bayes needs a base rate for how common each cause is, and no Condition carries one. Until the pack
+// can supply that half, a caller that treats this as a posterior is ranking by out-degree — the
+// cause with the most outgoing edges wins — while looking rigorous.
+//
+// And `RankedCause::score` is not a probability, whatever these are: it SUMS one of these per
+// covered finding, so a cause explaining four of them scores past 1 and is meant to. The sum is
+// ordinal and only ever reaches a comparison. Normalising it would break the greedy set cover it
+// feeds, which depends on the additive behaviour.
+//
+// Values are not free to move. They were re-cut once, from an ordinal ladder that ran to 1.5, after
+// measuring that the rescale preserved 98% of cause pairings on the shipped pack and that every
+// pair it reordered was a near-tie. Anything that changes them owes the same measurement.
+double strengthWeight(Strength s);
 
 // The UI badge for how a condition can be reached. "Physical" and "Behavioural" are preferred over
 // "biomechanical", which does not discriminate the body's CAPACITY from what it did with the club —

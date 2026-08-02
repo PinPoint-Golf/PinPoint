@@ -214,12 +214,14 @@ struct DagNode {
 struct DagEdge {
     QString from;      // the CAUSE (Edge's own orientation, unchanged)
     QString to;        // the EFFECT
-    QString strength;  // weak | moderate | strong; empty on a detection edge
+    QString strength;  // veryWeak | weak | moderate | strong | veryStrong; empty on a detection edge
     QString strengthLabel;
 
-    // 1..3, for stroke weight. It is a RANKING WEIGHT and never a probability — the same reason
-    // strength is three words and not a percentage. The view scales a line by it; nothing prints it.
-    int     weight = 2;
+    // STROKE WIDTH in px, 1..3, spread evenly across the five rungs — not strengthWeight(), which
+    // orders causes and has no business setting a line width. The band is what it always was, so the
+    // two new rungs cost half a pixel each at the ends rather than a fatter graph. The view scales a
+    // line by it; nothing prints it.
+    double  weight = 2.0;
 
     // The detection lane: measure -> condition. Not a causal claim, and drawn differently.
     bool    detects = false;
@@ -252,6 +254,12 @@ struct DagEdge {
     bool    tip = false;
     double  tipAx = 0, tipAy = 0, tipBx = 0, tipBy = 0, tipCx = 0, tipCy = 0;
 };
+
+// The stroke width `DagEdge::weight` carries, 1..3px, spread evenly over the strength ladder. Public
+// because it is the view's rule about the ladder and not a private detail of one walk — the layout
+// is where the picture's numbers are decided, and a test that pins three literals instead breaks
+// every time a rung is added without anything being wrong.
+double strokeWidthFor(Strength s);
 
 // A word over a region of the picture: "Caused by", "Leads to", "Measured by". The direction of a
 // causal graph is not self-evident from arrowheads alone, and a reader should not have to work out

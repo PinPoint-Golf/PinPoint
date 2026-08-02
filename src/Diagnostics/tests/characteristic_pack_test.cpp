@@ -151,6 +151,64 @@ int main()
         check(c && c->axis == QStringLiteral("stanceWidth"), "axis survives");
     }
 
+    // ── The strength ladder ─────────────────────────────────────────────────────
+    {
+        // Five rungs, weakest first, and the ORDER is the contract: the picker, the graph's collar
+        // and the ranking weight all walk this one list, so a rung inserted in the wrong place would
+        // reorder a coach's causes without touching a single edge.
+        const std::vector<Strength> &rungs = allStrengths();
+        check(rungs.size() == 5, "five rungs");
+        check(rungs.front() == Strength::VeryWeak && rungs.back() == Strength::VeryStrong,
+              "weakest first, strongest last");
+        for (size_t i = 1; i < rungs.size(); ++i)
+            check(strengthWeight(rungs[i]) > strengthWeight(rungs[i - 1]),
+                  qPrintable(QStringLiteral("%1 outweighs %2").arg(strengthLabel(rungs[i]),
+                                                                   strengthLabel(rungs[i - 1]))));
+
+        // A PROBABILITY — P(effect | cause) — so it may not leave 0…1, and may not touch either
+        // bound. 0 is what edgeWeight() returns for "no such edge" and what an immaterial finding
+        // is weighted, so a rung there would be indistinguishable from the claim not existing; 1 is
+        // absorbing under Bayes and no later evidence could revise it.
+        for (Strength r : rungs) {
+            check(strengthWeight(r) > 0.0 && strengthWeight(r) < 1.0,
+                  qPrintable(QStringLiteral("%1 is a probability, strictly inside 0…1")
+                                 .arg(strengthLabel(r))));
+        }
+
+        // The stored NAMES of those three may not move either — 300-odd shipped edges and every
+        // user pack spell them this way, and a rename would silently default them all to moderate.
+        check(strengthName(Strength::Weak) == QLatin1String("weak")
+                  && strengthName(Strength::Moderate) == QLatin1String("moderate")
+                  && strengthName(Strength::Strong) == QLatin1String("strong"),
+              "the three original spellings are untouched");
+
+        Strength s = Strength::Moderate;
+        check(strengthFromName(QStringLiteral("veryWeak"), s) && s == Strength::VeryWeak,
+              "the new rungs parse");
+        check(strengthFromName(QStringLiteral("veryStrong"), s) && s == Strength::VeryStrong,
+              "at both ends");
+
+        // What a reader sees is the FREQUENCY word, which has never been the stored name.
+        check(strengthLabel(Strength::VeryWeak) == QLatin1String("rarely")
+                  && strengthLabel(Strength::VeryStrong) == QLatin1String("always"),
+              "and read as rarely / always");
+
+        const QByteArray json = R"({
+          "id": "rungs", "version": "1", "schemaVersion": 1,
+          "conditions": [ { "id": "a", "label": "a", "observability": "latent" },
+                          { "id": "b", "label": "b", "observability": "latent" },
+                          { "id": "c", "label": "c", "observability": "latent" } ],
+          "edges": [ { "from": "a", "to": "b", "type": "causes", "strength": "veryStrong" },
+                     { "from": "a", "to": "c", "type": "causes", "strength": "weak" } ]
+        })";
+        const PackLoadResult res  = loadPack(json, QStringLiteral("rungs"));
+        const PackLoadResult back = loadPack(savePack(res.pack), QStringLiteral("rungs2"));
+        check(back.pack.edges.size() == 2 && back.pack.edges.front().strength == Strength::VeryStrong,
+              "a new rung survives the round-trip");
+        check(back.pack.edges.back().strength == Strength::Weak,
+              "beside an old one, unchanged");
+    }
+
     // ── Localised text: a bare string is accepted as English ────────────────────
     {
         const QByteArray json = R"({

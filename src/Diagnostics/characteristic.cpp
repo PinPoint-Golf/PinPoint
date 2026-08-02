@@ -143,10 +143,17 @@ const Row<EdgeType> kEdgeTypes[] = {
 };
 
 // Words only. Strengths are not probabilities and must never be rendered as percentages.
+//
+// The labels are a FREQUENCY ladder and the names a magnitude one. They have never agreed, and the
+// names are the ones that must not move: they are what 300-odd shipped edges and every user pack
+// already store. The outer two follow the naming idiom rather than the label's, for that reason
+// alone.
 const Row<Strength> kStrengths[] = {
-    { Strength::Weak,     "weak",     "sometimes" },
-    { Strength::Moderate, "moderate", "often" },
-    { Strength::Strong,   "strong",   "usually" },
+    { Strength::VeryWeak,   "veryWeak",   "rarely" },
+    { Strength::Weak,       "weak",       "sometimes" },
+    { Strength::Moderate,   "moderate",   "often" },
+    { Strength::Strong,     "strong",     "usually" },
+    { Strength::VeryStrong, "veryStrong", "always" },
 };
 
 } // namespace
@@ -222,6 +229,37 @@ bool    edgeTypeFromName(const QString &s, EdgeType &out) { return fromName(kEdg
 QString strengthName(Strength s)  { return nameOf(kStrengths, s); }
 QString strengthLabel(Strength s) { return labelOf(kStrengths, s); }
 bool    strengthFromName(const QString &s, Strength &out) { return fromName(kStrengths, s, out); }
+
+const std::vector<Strength> &allStrengths()
+{
+    static const std::vector<Strength> v = [] {
+        std::vector<Strength> r;
+        for (const auto &row : kStrengths) r.push_back(row.value);
+        return r;
+    }();
+    return v;
+}
+
+double strengthWeight(Strength s)
+{
+    // P(effect | cause), which is what the labels have always described: how OFTEN this cause
+    // produces this effect. See the header for what may and may not be built on that.
+    //
+    // Neither end touches its bound. 0 is taken — edgeWeight() returns it for "there is no such
+    // edge", and an immaterial finding is deliberately weighted 0 — so a rung there would make a
+    // claim indistinguishable from its own absence. 1 is worse: a probability of exactly 1 is
+    // absorbing, and no evidence can ever revise it afterwards. An author writing "always" is
+    // stating a very strong regularity, not a law with no exceptions, and the ceiling has to leave
+    // room for them to be wrong.
+    switch (s) {
+    case Strength::VeryStrong: return 0.95;
+    case Strength::Strong:     return 0.80;
+    case Strength::Moderate:   return 0.60;
+    case Strength::Weak:       return 0.30;
+    case Strength::VeryWeak:   return 0.10;
+    }
+    return 0.60;
+}
 
 QString reachLabel(ConfirmedBy c) { return labelOf(kConfirmedBys, c); }
 

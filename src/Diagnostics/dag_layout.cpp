@@ -144,6 +144,17 @@ QPointF cubicAt(QPointF p0, QPointF c1, QPointF c2, QPointF p3, double t)
 
 } // namespace
 
+double strokeWidthFor(Strength s)
+{
+    // Read off the rung's POSITION rather than the enum's value, so adding a rung re-spreads the
+    // band instead of silently falling off the end of a switch and drawing at the default.
+    const auto  &rungs = allStrengths();
+    const auto   it    = std::find(rungs.begin(), rungs.end(), s);
+    const double n     = double(rungs.size() - 1);
+    if (it == rungs.end() || n <= 0) return 2.0;
+    return 1.0 + 2.0 * double(std::distance(rungs.begin(), it)) / n;
+}
+
 QString dagNodeKindName(DagNodeKind k)
 {
     switch (k) {
@@ -196,8 +207,8 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     // last on any out-edge key.
     //
     // Counts, never a strength-weighted score. Same refusal this repo has already made twice, for
-    // the same reason: Strength is three-valued because nobody can author 0.73 meaningfully, and a
-    // count can always answer "why is this above that" by naming its members.
+    // the same reason: Strength has a handful of authored rungs because nobody can author 0.73
+    // meaningfully, and a count can always answer "why is this above that" by naming its members.
     struct Reach {
         int outcomes = 0, leadsTo = 0, causedBy = 0;
     };
@@ -868,8 +879,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             e.to            = r.to;
             e.strength      = strengthName(src.strength);
             e.strengthLabel = strengthLabel(src.strength);
-            e.weight        = src.strength == Strength::Weak ? 1
-                            : (src.strength == Strength::Strong ? 3 : 2);
+            e.weight        = strokeWidthFor(src.strength);
             e.offeredOnly   = offeredOnly;
             e.relation      = edgeTypeName(src.type);
             e.symmetric     = (src.type != EdgeType::Causes);
@@ -881,7 +891,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             // no weight, and saying "usually" on one would invent a certainty nobody authored.
             if (src.type == EdgeType::Excludes) {
                 e.strengthLabel.clear();
-                e.weight = 1;
+                e.weight = 1.0;
             }
 
             const double ay = h.a->isWaypoint()

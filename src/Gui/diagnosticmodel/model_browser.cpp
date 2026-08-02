@@ -162,7 +162,7 @@ QVariantList tierOptions()
 QVariantList strengthOptions()
 {
     QVariantList l;
-    for (Strength s : { Strength::Weak, Strength::Moderate, Strength::Strong })
+    for (Strength s : allStrengths())
         l.append(option(strengthName(s), strengthLabel(s)));
     return l;
 }
@@ -1099,11 +1099,21 @@ QVariantMap ModelBrowser::edgeRow(const Edge &e) const
     r.insert(QStringLiteral("type"), kLinks);
     r.insert(QStringLiteral("label"), tr("%1 → %2").arg(from ? from->label : e.from,
                                                         to ? to->label : e.to));
-    r.insert(QStringLiteral("dot"), e.type == EdgeType::Causes
-                                        ? (e.strength == Strength::Strong ? QStringLiteral("good")
-                                           : e.strength == Strength::Weak ? QStringLiteral("none")
-                                                                          : QStringLiteral("watch"))
-                                        : QStringLiteral("none"));
+    // Three dot colours over five rungs: the outer pair reads with the neighbour it is a stronger
+    // form of, because the dot is a scan cue down a column and not a second copy of the word in the
+    // cell beside it.
+    const auto dotFor = [](Strength s) {
+        switch (s) {
+        case Strength::VeryStrong:
+        case Strength::Strong:     return QStringLiteral("good");
+        case Strength::Moderate:   return QStringLiteral("watch");
+        case Strength::Weak:
+        case Strength::VeryWeak:   break;
+        }
+        return QStringLiteral("none");
+    };
+    r.insert(QStringLiteral("dot"), e.type == EdgeType::Causes ? dotFor(e.strength)
+                                                               : QStringLiteral("none"));
     r.insert(QStringLiteral("cells"), cells);
     r.insert(QStringLiteral("fromId"), e.from);
     r.insert(QStringLiteral("toId"), e.to);
@@ -3064,9 +3074,18 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
         nodes.append(m);
     }
 
+    // "Hide weak links" means AT OR BELOW weak, not the rung spelled `weak`. Matching the one name
+    // would have left `rarely` drawn by a switch whose whole purpose is to thin the picture of the
+    // claims least worth reading — the faintest line on the canvas surviving the filter that removed
+    // the one above it.
+    const auto atOrBelowWeak = [](const QString &name) {
+        Strength s = Strength::Moderate;
+        return strengthFromName(name, s) && strengthWeight(s) <= strengthWeight(Strength::Weak);
+    };
+
     QVariantList edges;
     for (const DagEdge &e : l.edges) {
-        if (hideWeak && e.strength == QStringLiteral("weak")) continue;
+        if (hideWeak && atOrBelowWeak(e.strength)) continue;
 
         QVariantMap m;
         m.insert(QStringLiteral("from"), e.from);
@@ -4212,9 +4231,25 @@ QVariantList ModelBrowser::ringValues(const QString &type, const QString &id,
         if (!splitEdgeId(id, from, to, et) || et != EdgeType::Causes) return {};
         for (const Edge &e : p.edges)
             if (e.type == et && e.from == from && e.to == to) current = strengthName(e.strength);
-        // The whole ladder, in ladder order. Three rungs, three cells — the one case where the cap
-        // costs nothing, and reordering it to centre the current value would destroy the reading.
+        // Five rungs into three cells, as a CONTIGUOUS WINDOW CENTRED ON THE CURRENT ONE, clamped at
+        // the ends of the ladder. The generic cap below would take the first three every time, which
+        // on this field means `always` is unreachable from the ring and a link that already IS
+        // `always` sees three cells none of which is it.
+        //
+        // A window rather than a re-sort because the reading is the whole point: the cells stay in
+        // ladder order, so the gesture is "one rung up" or "one rung down" in the direction the hand
+        // is already going. Getting from `rarely` to `always` is two holds, which is the honest cost
+        // of a three-cell collar over a five-rung ladder — the table and the inspector still offer
+        // all five in one click.
         options = strengthOptions();
+
+        int at = -1;
+        for (int i = 0; i < options.size(); ++i)
+            if (options[i].toMap().value(QStringLiteral("value")).toString() == current) at = i;
+        if (at >= 0 && options.size() > 3) {
+            const int first = std::clamp(at - 1, 0, int(options.size()) - 3);
+            options = options.mid(first, 3);
+        }
     } else if ((type == kCharacteristics || type == kCauses) && field == QStringLiteral("group")) {
         const Condition *c = p.condition(id);
         if (!c) return {};

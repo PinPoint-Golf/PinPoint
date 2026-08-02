@@ -26,18 +26,8 @@ namespace pinpoint::analysis {
 
 namespace {
 
-double strengthWeight(Strength s)
-{
-    // Three-valued by design; these are ranking weights, not probabilities, and must never be
-    // rendered as percentages.
-    switch (s) {
-    case Strength::Strong:   return 1.0;
-    case Strength::Moderate: return 0.6;
-    case Strength::Weak:     return 0.3;
-    }
-    return 0.6;
-}
-
+// The ladder itself now lives beside the enum, in characteristic.h — this file was where it was
+// first needed, not where it belongs, and the graph view had already grown a second copy of it.
 double edgeWeight(const CharacteristicPack &pack, const QString &from, const QString &to)
 {
     for (const Edge &e : pack.edges)

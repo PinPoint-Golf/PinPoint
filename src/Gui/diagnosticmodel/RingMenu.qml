@@ -197,7 +197,7 @@ Popup {
             // Releasing on the value it already has changes nothing and says nothing. The collar's
             // whole safety property is that a hold with no travel cannot alter anything, and this is
             // where that is enforced — rather than by reordering the cells, which would break the
-            // reading of a ladder like weak · moderate · strong.
+            // reading of a ladder like sometimes · often · usually.
             if (v.current === true) { root.close(); return }
             root._committing = true
             root.committed(root._hotSlot, e, v.value)
