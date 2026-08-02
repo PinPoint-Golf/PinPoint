@@ -195,6 +195,12 @@ ValidationReport validateReferenceSet(const ReferenceSet &set);
 //
 // Returns a string for DISPLAY ONLY. The stored citation stays the bare identifier — it is the
 // join key, and "PMID 30479527" joins to nothing.
+//
+// Two forms. The one-argument version reads the shared registry and is what almost every caller
+// wants; the overload takes the set explicitly, for code that has already been HANDED one and must
+// not reach for a global instead — a label that disagreed with the resolution the caller just made
+// would be the same citation rendered two ways on one screen.
+QString citationLabel(const QString &citation, const ReferenceSet &set);
 QString citationLabel(const QString &citation);
 
 struct ReferenceLoadResult {

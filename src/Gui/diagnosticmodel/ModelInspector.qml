@@ -497,6 +497,35 @@ Item {
                                             opacity: 0.8
                                             elide:   Text.ElideRight
                                         }
+
+                                        // What the field's value RESOLVES TO, as a link.
+                                        //
+                                        // Only the citation carries one today, and it is the whole
+                                        // reason this exists: the value is a DOI, which is a join
+                                        // key and unreadable, so the field says what it found and
+                                        // one click opens the paper. An author typing an identifier
+                                        // gets the answer where they typed it rather than having to
+                                        // look for a section further down the pane.
+                                        //
+                                        // Absent when the value resolves to nothing — the façade
+                                        // hangs no link on a citation it could not join, because a
+                                        // dead link is worse than none.
+                                        Text {
+                                            Layout.maximumWidth: sectionItem.width * 0.42
+                                            text: hubRow.modelData.linkLabel || ""
+                                            visible: text.length > 0
+                                            font.family:    Theme.fontBody
+                                            font.pixelSize: Theme.fontSzMicro
+                                            color: linkPress.containsMouse ? Theme.colorAccent
+                                                                           : Theme.colorText2
+                                            elide: Text.ElideRight
+                                            PpPressable {
+                                                id: linkPress
+                                                hoverScale: 1.0
+                                                onClicked: root.navigate(hubRow.modelData.linkType,
+                                                                         hubRow.modelData.linkId)
+                                            }
+                                        }
                                     }
 
                                     // text · number — one line, commits on Enter or focus-out, the

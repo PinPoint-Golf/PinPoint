@@ -267,10 +267,16 @@ Item {
 
     // How tall the condition's OWN row is, whatever else the box carries. The delegate anchors the
     // name to this and the toggle centres on it; deriving it twice is how the two drift apart.
+    //
+    // Measured by SUBTRACTING what the inner rows took, rather than by reading nodeH back out of the
+    // options — the box grew by exactly that much and this is the same arithmetic in reverse.
     function _condRowH(n) {
-        var rows = (n.measures || []).length
-        if (rows === 0) return n.h
-        return n.h - rows * (n.measures[0].h || 0)
+        var h = n.h
+        var ms = n.measures || []
+        for (var i = 0; i < ms.length; i++)   h -= (ms[i].h || 0)
+        var rs = n.references || []
+        for (var k = 0; k < rs.length; k++)   h -= (rs[k].h || 0)
+        return h
     }
 
     // Which measure row is under this point, as "<conditionId>|<measureId>", or "". The rows carry
@@ -292,6 +298,29 @@ Item {
         return ""
     }
     property string _hotMeasure: ""
+
+    // The same, for the citation row: "<conditionId>|<referenceId>", or "".
+    //
+    // A row whose citation resolved to NOTHING is skipped — it has no reference id, so there is no
+    // page for a press to open, and a hover highlight on it would offer a click that does nothing.
+    // The row is still drawn; it is simply not a control.
+    function _referenceAt(x, y) {
+        for (var i = 0; i < _nodes.length; i++) {
+            var n = _nodes[i]
+            var rs = n.references || []
+            if (rs.length === 0) continue
+            var nx = n.x + root._ndx(n.id, root._nudgeRev)
+            if (x < nx || x > nx + n.w) continue
+            var dy = root._ndy(n.id, root._nudgeRev)
+            for (var k = 0; k < rs.length; k++) {
+                if (!rs[k].id) continue
+                var top = rs[k].y + dy
+                if (y >= top && y <= top + rs[k].h) return n.id + "|" + rs[k].id
+            }
+        }
+        return ""
+    }
+    property string _hotReference: ""
 
     // The control under the pointer, so it can look like one before it is pressed. Static text that
     // turns out to be clickable is a control nobody finds.
@@ -709,8 +738,12 @@ Item {
                         height: mrow.modelData.h
 
                         required property int index
+                        // Last in the BOX, not last in its own stack. With references on, a
+                        // citation row sits below these, and a measure that rounded its corners
+                        // there would cut a notch out of the middle of the frame.
                         readonly property bool last:
                             mrow.index === (nodeItem.modelData.measures || []).length - 1
+                            && (nodeItem.modelData.references || []).length === 0
                         readonly property bool hot:
                             root._hotMeasure === nodeItem.modelData.id + "|" + mrow.modelData.id
 
@@ -761,6 +794,94 @@ Item {
                                 font.family:    Theme.fontData
                                 font.pixelSize: Theme.fontSzMicro
                                 color:          Theme.colorText3
+                            }
+                        }
+                    }
+                }
+
+                // ── The citation, under the measures ─────────────────────────
+                //
+                // Same geometry contract as the measure rows above and drawn the same way, because
+                // it is the same kind of thing: a fact about the condition that is not a cause, and
+                // that had nowhere to appear on this picture at all.
+                //
+                // A citation the bibliography has never heard of is drawn as the gap it is and is
+                // NOT a control — see root._referenceAt. It stays visible because a dangling
+                // citation and no citation must not look the same.
+                Repeater {
+                    model: nodeItem.modelData.references || []
+                    delegate: Item {
+                        id: rrow
+                        required property var modelData
+                        x: 0
+                        y: rrow.modelData.y - nodeItem.modelData.y
+                        width:  nodeItem.width
+                        height: rrow.modelData.h
+
+                        required property int index
+                        // The citations are always the LAST rows in the box — the layout stacks them
+                        // under the measures — so this one rounds its corners into the frame whether
+                        // or not anything sits above it.
+                        readonly property bool last:
+                            rrow.index === (nodeItem.modelData.references || []).length - 1
+                        readonly property bool hot:
+                            rrow.modelData.id
+                            && root._hotReference === nodeItem.modelData.id + "|" + rrow.modelData.id
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.leftMargin:   nodeItem.borderW
+                            anchors.rightMargin:  nodeItem.borderW
+                            anchors.bottomMargin: rrow.last ? nodeItem.borderW : 0
+                            bottomLeftRadius:  rrow.last ? Theme.radius : 0
+                            bottomRightRadius: rrow.last ? Theme.radius : 0
+                            color: rrow.hot ? Theme.colorBg2 : "transparent"
+                            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                        }
+
+                        Rectangle {
+                            anchors { left: parent.left; right: parent.right; top: parent.top }
+                            anchors.leftMargin:  Theme.sp(6)
+                            anchors.rightMargin: Theme.sp(6)
+                            height: 1
+                            color: Theme.colorBorderMid
+                            opacity: Theme.borderOpacityNormal
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin:  Theme.sp(9)
+                            anchors.rightMargin: Theme.sp(7)
+                            spacing: Theme.sp(5)
+
+                            // The type glyph the rest of the app gives a reference. A row that is a
+                            // paper rather than a measure has to say so without being read — the
+                            // two stacks are otherwise the same size, in the same box, in the same
+                            // small type.
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text:           "§"
+                                font.family:    Theme.fontSymbol
+                                font.pixelSize: Theme.fontSzMicro
+                                color:          rrow.modelData.resolved ? Theme.colorText3
+                                                                        : Theme.colorWarn
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: rrow.modelData.label
+                                font.family:    Theme.fontData
+                                font.pixelSize: Theme.fontSzMicro
+                                color: !rrow.modelData.resolved ? Theme.colorText3
+                                     : rrow.hot                 ? Theme.colorText
+                                                                : Theme.colorText2
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text:    rrow.modelData.detailLabel || ""
+                                visible: text.length > 0
+                                font.family:    Theme.fontData
+                                font.pixelSize: Theme.fontSzMicro
+                                color: rrow.modelData.resolved ? Theme.colorText3 : Theme.colorWarn
                             }
                         }
                     }
@@ -947,12 +1068,14 @@ Item {
             z: 60
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            cursorShape: root._dragging           ? Qt.CrossCursor
-                       : root._hotToggle !== ""   ? Qt.PointingHandCursor
-                       : root._hotMeasure !== ""  ? Qt.PointingHandCursor
-                                                  : Qt.ArrowCursor
+            cursorShape: root._dragging             ? Qt.CrossCursor
+                       : root._hotToggle !== ""     ? Qt.PointingHandCursor
+                       : root._hotMeasure !== ""    ? Qt.PointingHandCursor
+                       : root._hotReference !== ""  ? Qt.PointingHandCursor
+                                                    : Qt.ArrowCursor
 
             // "idle" | "pending" | "nudge" | "marquee" | "ring" | "armed" | "toggle" | "measure"
+            //        | "reference"
             property string mode: "idle"
             property real   pressLX: 0     // press point, in LAYOUT coordinates
             property real   pressLY: 0
@@ -962,6 +1085,7 @@ Item {
             property var    pressedEdge: null
             property string pressedToggle: ""
             property string pressedMeasure: ""
+            property string pressedReference: ""
             property var    nudgeBase:   ({})
 
             function toLayout(mx, my) { return inner.mapFromItem(input, mx, my) }
@@ -992,6 +1116,10 @@ Item {
                 pressedMeasure = mouse.button === Qt.LeftButton ? root._measureAt(p.x, p.y) : ""
                 if (pressedMeasure !== "") { mode = "measure"; return }
 
+                // And the citation row for the same reason, and on the same terms.
+                pressedReference = mouse.button === Qt.LeftButton ? root._referenceAt(p.x, p.y) : ""
+                if (pressedReference !== "") { mode = "reference"; return }
+
                 pressedNode = root._nodeAt(p.x, p.y)
                 pressedEdge = pressedNode ? null : root._edgeAt(p.x, p.y)
 
@@ -1019,11 +1147,16 @@ Item {
                 // Only while nothing else is in flight — a control lighting up under a marquee or a
                 // link drag would offer something this gesture cannot do.
                 var quiet = (mode === "idle" || mode === "pending" || mode === "toggle"
-                             || mode === "measure") && !root._dragging
+                             || mode === "measure" || mode === "reference") && !root._dragging
                 root._hotToggle  = quiet ? root._toggleAt(p.x, p.y) : ""
                 root._hotMeasure = quiet && root._hotToggle === "" ? root._measureAt(p.x, p.y) : ""
+                // Tested after the measures, though the two stacks cannot overlap — the layout gives
+                // each row its own band of the box. Ordered anyway so that if they ever could, one
+                // of them wins rather than both lighting up.
+                root._hotReference = quiet && root._hotToggle === "" && root._hotMeasure === ""
+                                         ? root._referenceAt(p.x, p.y) : ""
 
-                if (mode === "measure") return
+                if (mode === "measure" || mode === "reference") return
 
                 // A press on a control that then travels off it is abandoned, exactly as a button
                 // is. It never becomes a nudge: the control is not the node, and dragging it would
@@ -1079,6 +1212,17 @@ Item {
                     mode = "idle"
                     return
                 }
+                if (mode === "reference") {
+                    if (root._referenceAt(p.x, p.y) === pressedReference) {
+                        // The paper is its own object with its own page, and opening it does not
+                        // re-centre the graph either — a citation is not a place in the causal band.
+                        var rbar = pressedReference.indexOf("|")
+                        root.nodeActivated("references", pressedReference.substring(rbar + 1))
+                    }
+                    pressedReference = ""
+                    mode = "idle"
+                    return
+                }
                 if (mode === "toggle") {
                     // Only if the release is on the SAME control the press was on.
                     if (root._toggleAt(p.x, p.y) === pressedToggle)
@@ -1101,8 +1245,11 @@ Item {
                 mode = "idle"
             }
 
-            onCanceled: { holdTimer.stop(); mode = "idle"; pressedToggle = ""; pressedMeasure = "" }
-            onExited:   { root._hotToggle = ""; root._hotMeasure = "" }
+            onCanceled: {
+                holdTimer.stop(); mode = "idle"
+                pressedToggle = ""; pressedMeasure = ""; pressedReference = ""
+            }
+            onExited:   { root._hotToggle = ""; root._hotMeasure = ""; root._hotReference = "" }
 
             Timer {
                 id: holdTimer
@@ -1711,6 +1858,10 @@ Item {
     // what the `+` did while the layout still stopped at 2.
     readonly property int _scopeMax: 4
     property bool includeMeasures: false
+    // OFF for the same reason measures are: the causal band is the subject, and the sources behind
+    // it are a detail hung under every box. Sparse, too — a fifth of the shipped conditions carry a
+    // citation — so left on it would widen the picture for rows most boxes do not have.
+    property bool includeReferences: false
     // ON by default, unlike measures. The screened causes are the far left of the causal band
     // rather than a detail hung under it, and a picture that opened without them would show a
     // golfer their swing and hide the reason for it.
@@ -1798,8 +1949,9 @@ Item {
                 color: Theme.colorBorderMid
             }
 
-            Switch { label: qsTr("measures"); on: root.includeMeasures; key: "measures" }
-            Switch { label: qsTr("health");   on: root.includeScreened; key: "screened" }
+            Switch { label: qsTr("measures"); on: root.includeMeasures;   key: "measures" }
+            Switch { label: qsTr("sources");  on: root.includeReferences; key: "references" }
+            Switch { label: qsTr("health");   on: root.includeScreened;   key: "screened" }
             Switch { label: qsTr("weak");     on: !root.hideWeak;       key: "weak" }
             Switch { label: qsTr("proposed"); on: !root.hideProposed;   key: "proposed" }
         }

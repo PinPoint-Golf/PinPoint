@@ -2004,6 +2004,33 @@ QVariantMap fieldRow(const QString &field, const QString &label, const QString &
     return r;
 }
 
+// The citation field, with the paper it resolves to hung on it as a LINK.
+//
+// The value stays the bare identifier, because that is the join key and nothing else can be. But an
+// author typing a DOI has no way to tell a good one from a typo, and the registry already knows: a
+// citation that resolves shows the TITLE beside the field, and clicking it opens the record. So the
+// field answers "did that work, and what did it find" at the moment it is typed, which is the one
+// place the question is actually being asked.
+//
+// The same destination as the "Cited from" section below — two entrances to one place, exactly as
+// `Re-point from…` duplicates the graph's ring rather than making the author discover the gesture.
+// An author reading the pane finds the section; an author editing the field finds this.
+//
+// Nothing is hung on a citation that does NOT resolve. A dead link is worse than no link, and the
+// section below is where an unresolved citation is called out.
+QVariantMap citationField(const QString &citation, const QString &hint = QString())
+{
+    QVariantMap r = fieldRow(QStringLiteral("citation"), QObject::tr("Citation"),
+                             QStringLiteral("text"), citation, {}, hint);
+    if (const Reference *ref = sharedReferenceSet().byCitation(citation)) {
+        r.insert(QStringLiteral("linkType"), kReferences);
+        r.insert(QStringLiteral("linkId"), ref->id);
+        r.insert(QStringLiteral("linkLabel"),
+                 ref->title.isEmpty() ? ref->identifierLabel() : ref->title);
+    }
+    return r;
+}
+
 // One record, as a citation reads. A book, a chapter and a paper take different shapes and the
 // difference is not cosmetic — a publisher rendered where a journal goes is a small, checkable lie,
 // which is why the two fields were separated in the first place (reference_pack.h).
@@ -2042,6 +2069,35 @@ QVariantMap prose(const QString &title, const QString &text, const QString &tone
     QVariantList rows;
     if (!text.isEmpty()) rows.append(hubRow(QString(), QString(), text, QString(), tone, false));
     return section(title, rows, QString(), QStringLiteral("prose"));
+}
+
+// The paper a claim rests on, as a row that OPENS it.
+//
+// The Fields section above holds the citation as an editable DOI, which is the right thing to type
+// into and the wrong thing to read: `10.1088/0034-4885/66/2/202` answers nothing on its own. This is
+// the join back to a title somebody can recognise, and to the record's own page — every other
+// related object in this pane is one click away and the source was the last one that was not.
+//
+// A citation the bibliography has never heard of STILL gets a row, unnavigable and marked. Drawing
+// nothing would make a dangling citation look exactly like no citation at all, which is the one
+// reading that is certainly wrong.
+//
+// `onlyWhenResolved` is for the types whose `citation` doubles as a free-text note. A norm's may be
+// a paragraph explaining a provisional figure (norm.h) rather than an identifier, and rendering that
+// as a failed lookup would accuse the author of a typo they did not make.
+void appendCitation(QVariantList &sections, const QString &citation, bool onlyWhenResolved = false)
+{
+    if (citation.isEmpty()) return;
+
+    const Reference *ref = sharedReferenceSet().byCitation(citation);
+    if (!ref && onlyWhenResolved) return;
+
+    QVariantList rows;
+    rows.append(ref ? hubRow(kReferences, ref->id, ref->title, ref->identifierLabel())
+                    : hubRow(QString(), QString(), citationLabel(citation),
+                             QObject::tr("not in the bibliography"), QStringLiteral("warn"),
+                             false));
+    sections.append(section(QObject::tr("Cited from"), rows));
 }
 
 } // namespace
@@ -2205,8 +2261,7 @@ QVariantList ModelBrowser::fieldsOf(const QString &type, const QString &id) cons
                           provenanceTierName(c->provenance.tier), tierOptions(),
                           citationRequired(c->provenance.tier) ? tr("needs a citation")
                                                                : QString()));
-        f.append(fieldRow(QStringLiteral("citation"), tr("Citation"), QStringLiteral("text"),
-                          c->provenance.citation, {}, tr("DOI, PMID or ISBN")));
+        f.append(citationField(c->provenance.citation, tr("DOI, PMID or ISBN")));
 
     } else if (type == kMeasures) {
         const Measure *m = p.measure(id);
@@ -2252,8 +2307,7 @@ QVariantList ModelBrowser::fieldsOf(const QString &type, const QString &id) cons
                           provenanceTierName(e->provenance.tier), tierOptions(),
                           citationRequired(e->provenance.tier) ? tr("needs a citation")
                                                                : QString()));
-        f.append(fieldRow(QStringLiteral("citation"), tr("Citation"), QStringLiteral("text"),
-                          e->provenance.citation, {}, tr("DOI, PMID or ISBN")));
+        f.append(citationField(e->provenance.citation, tr("DOI, PMID or ISBN")));
 
     } else if (type == kCorridors) {
         QString mid, ctx;
@@ -2277,8 +2331,10 @@ QVariantList ModelBrowser::fieldsOf(const QString &type, const QString &id) cons
         f.append(fieldRow(QStringLiteral("unit"), tr("Unit"), QStringLiteral("text"), n->unit));
         f.append(fieldRow(QStringLiteral("source"), tr("Source"), QStringLiteral("enum"),
                           normSourceName(n->source), normSourceOptions()));
-        f.append(fieldRow(QStringLiteral("citation"), tr("Citation"), QStringLiteral("text"),
-                          n->citation));
+        // No hint on this one, deliberately: a norm's citation doubles as the note explaining a
+        // provisional figure (norm.h), so "DOI, PMID or ISBN" would be telling the author the wrong
+        // thing about most of the rows in the library. It still links when it happens to be one.
+        f.append(citationField(n->citation));
 
     } else if (type == kScreens) {
         const Screen *sc = m_screens.screen(id);
@@ -2300,8 +2356,7 @@ QVariantList ModelBrowser::fieldsOf(const QString &type, const QString &id) cons
                                                           : QString()));
         f.append(fieldRow(QStringLiteral("note"), tr("What it does not settle"),
                           QStringLiteral("prose"), sc->note));
-        f.append(fieldRow(QStringLiteral("citation"), tr("Citation"), QStringLiteral("text"),
-                          sc->citation));
+        f.append(citationField(sc->citation, tr("DOI or PMID")));
 
     } else if (type == kDrills) {
         const Drill *d = m_drills.drill(id);
@@ -2481,13 +2536,7 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
                                     QStringLiteral("bindings"), QStringLiteral("binding")));
         }
 
-        if (!c->provenance.citation.isEmpty()) {
-            QVariantList rows;
-            const Reference *ref = sharedReferenceSet().byCitation(c->provenance.citation);
-            rows.append(ref ? hubRow(kReferences, ref->id, ref->title, ref->identifierLabel())
-                            : hubRow(QString(), QString(), citationLabel(c->provenance.citation),
-                                     QString(), QString(), false));
-        }
+        appendCitation(sections, c->provenance.citation);
 
     } else if (type == kMeasures) {
         const Measure *m = p.measure(id);
@@ -2681,13 +2730,7 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
         }
 
 
-        QVariantList ev;
-        if (!edge->provenance.citation.isEmpty()) {
-            const Reference *ref = sharedReferenceSet().byCitation(edge->provenance.citation);
-            ev.append(ref ? hubRow(kReferences, ref->id, ref->title, ref->identifierLabel())
-                          : hubRow(QString(), QString(), citationLabel(edge->provenance.citation),
-                                   QString(), QString(), false));
-        }
+        appendCitation(sections, edge->provenance.citation);
 
     } else if (type == kCorridors) {
         QString mid, ctx;
@@ -2758,6 +2801,11 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
         }
         sections.append(section(tr("Same measure, other contexts"), siblings));
 
+        // Only when it resolves. A norm's `citation` doubles as the note explaining a provisional
+        // figure — most of the shipped ones are a paragraph, not an identifier — and running those
+        // through the failed-lookup row would report a typo on every corridor in the library.
+        appendCitation(sections, res.norm->citation, /*onlyWhenResolved*/ true);
+
     } else if (type == kScreens) {
         // From the ASSEMBLY, so an unsaved edit is what the pane shows.
         const Screen *s = m_screens.screen(id);
@@ -2780,6 +2828,9 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
                                          "suggested.")
                                     : QString(),
                                 QStringLiteral("list"), QStringLiteral("settles")));
+        // A screen's citation IS an identifier — screen_pack.h says DOI or PMID and nothing else —
+        // so an unresolved one here is a real gap and is shown as one.
+        appendCitation(sections, s->citation);
 
     } else if (type == kDrills) {
         const Drill *d = m_drills.drill(id);
@@ -2918,9 +2969,9 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
     opt.nodeH      = num("nodeH", opt.nodeH);
     opt.gapX       = num("gapX", opt.gapX);
     opt.gapY       = num("gapY", opt.gapY);
-    opt.measureRowH = num("measureRowH", opt.measureRowH);
-    opt.measureCharW = num("measureCharW", opt.measureCharW);
-    opt.measureMaxW  = num("measureMaxW", opt.measureMaxW);
+    opt.rowH       = num("rowH", opt.rowH);
+    opt.rowCharW   = num("rowCharW", opt.rowCharW);
+    opt.rowMaxW    = num("rowMaxW", opt.rowMaxW);
     opt.padX       = num("padX", opt.padX);
     opt.charW      = num("charW", opt.charW);
     opt.minW       = num("minW", opt.minW);
@@ -2934,8 +2985,14 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
     opt.maxPerExpand = int(num("maxPerExpand", opt.maxPerExpand));
     opt.includeMeasures =
         options.value(QStringLiteral("includeMeasures"), opt.includeMeasures).toBool();
+    opt.includeReferences =
+        options.value(QStringLiteral("includeReferences"), opt.includeReferences).toBool();
     opt.includeScreened =
         options.value(QStringLiteral("includeScreened"), opt.includeScreened).toBool();
+    // The layout resolves citations against what it is HANDED — see the note on the field. This is
+    // the one place that decides which bibliography the graph is drawn against, and it is the same
+    // one the inspector's citation links join through.
+    opt.references = &sharedReferenceSet();
 
     // Over the WORKING assembly, so an unsaved edge is drawn. Every coordinate comes from
     // dag_layout.h; QML positions nothing.
@@ -2983,6 +3040,23 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
             rows.append(r);
         }
         m.insert(QStringLiteral("measures"), rows);
+
+        // …and what it is cited from, as one more row under those. `id` is empty when the citation
+        // resolves to nothing, and that is what the view keys its hit test off — a row with no
+        // reference behind it has no page to open and must not look pressable.
+        QVariantList refRows;
+        for (const DagReference &dr : n.references) {
+            QVariantMap r;
+            r.insert(QStringLiteral("id"), dr.id);
+            r.insert(QStringLiteral("citation"), dr.citation);
+            r.insert(QStringLiteral("label"), dr.label);
+            r.insert(QStringLiteral("detailLabel"), dr.detailLabel);
+            r.insert(QStringLiteral("resolved"), dr.resolved);
+            r.insert(QStringLiteral("y"), dr.y);
+            r.insert(QStringLiteral("h"), dr.h);
+            refRows.append(r);
+        }
+        m.insert(QStringLiteral("references"), refRows);
         m.insert(QStringLiteral("groupLabel"), n.groupLabel);
         m.insert(QStringLiteral("statusLabel"), n.statusLabel);
         m.insert(QStringLiteral("metricKey"), n.metricKey);

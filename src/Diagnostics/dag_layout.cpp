@@ -18,6 +18,8 @@
 
 #include "dag_layout.h"
 
+#include "reference_pack.h"
+
 #include <QHash>
 #include <QPointF>
 #include <QSet>
@@ -44,16 +46,23 @@ double nodeWidth(const QString &label, const DagLayoutOptions &opt)
     return std::clamp(raw, opt.minW, opt.maxW);
 }
 
-// The same estimate at the measure row's own text size, and against its own cap. A row is INSET
-// from the box edge and an unavailable one carries its status beside the label, so both are charged
-// for here — a box sized for the label alone puts the gap word into the ellipsis, which is the half
-// of the row that says the app cannot see this yet.
+// The same estimate at an inner row's own text size, and against its own cap. A row is INSET from
+// the box edge and carries a second word to the right of its label, so both are charged for here —
+// a box sized for the label alone puts that word into the ellipsis, and on a measure row that word
+// is the half that says the app cannot see this yet.
+double rowWidth(const QString &label, const QString &detail, const DagLayoutOptions &opt)
+{
+    int chars = label.size();
+    if (!detail.isEmpty()) chars += detail.size() + 1;
+    const double raw = opt.padX * 2.0 + opt.rowCharW * double(chars);
+    return std::clamp(raw, opt.minW, std::max(opt.maxW, opt.rowMaxW));
+}
+
+// What a measure row actually charges for: its status word appears only when the measure is a gap,
+// so a live one is sized on its label alone.
 double measureRowWidth(const DagMeasure &dm, const DagLayoutOptions &opt)
 {
-    int chars = dm.label.size();
-    if (!dm.available && !dm.statusLabel.isEmpty()) chars += dm.statusLabel.size() + 1;
-    const double raw = opt.padX * 2.0 + opt.measureCharW * double(chars);
-    return std::clamp(raw, opt.minW, std::max(opt.maxW, opt.measureMaxW));
+    return rowWidth(dm.label, dm.available ? QString() : dm.statusLabel, opt);
 }
 
 QString measureLabelOf(const Measure &m)
@@ -457,11 +466,50 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                         dm.metricKey   = m->metricKey;
                         dm.available   = m->status == MeasureStatus::Live;
                         if (!dm.available) dm.unavailableReason = m->gapReason;
-                        dm.h           = opt.measureRowH;
+                        dm.h           = opt.rowH;
                         rows.push_back(dm);
                     }
                 }
                 if (!rows.empty()) measuresFor.insert(cid, rows);
+            }
+        }
+    }
+
+    // ── 3c. What each drawn condition is cited from ─────────────────────────
+    //
+    // Gathered here for the same reason the measures are: these rows add to the box height, and the
+    // columns are stacked from that height.
+    //
+    // No registry means no rows at all, rather than a box full of dangling citations. The layout has
+    // no bibliography of its own to fall back on and must not invent the claim that the pack's
+    // sources are missing when it is the caller that did not supply them.
+    QHash<QString, std::vector<DagReference>> referencesFor;
+    if (opt.includeReferences && opt.references) {
+        for (const auto &entry : byRank) {
+            for (const QString &cid : entry.second) {
+                const Condition *c = pack.condition(cid);
+                if (!c || c->provenance.citation.isEmpty()) continue;
+
+                const Reference *ref = opt.references->byCitation(c->provenance.citation);
+                DagReference     dr;
+                dr.citation = c->provenance.citation;
+                dr.resolved = ref != nullptr;
+                dr.h        = opt.rowH;
+                if (ref) {
+                    dr.id    = ref->id;
+                    dr.label = ref->title.isEmpty() ? ref->identifierLabel() : ref->title;
+                    // The YEAR beside the title, not the identifier. A DOI is what the join is made
+                    // on and it is unreadable — reference_pack.h says so in its opening lines — while
+                    // how current a source is is a judgement the reader can actually make from four
+                    // characters, and it survives the title being elided.
+                    dr.detailLabel = ref->year > 0 ? QString::number(ref->year) : QString();
+                } else {
+                    // The citation as a reader should SEE it, which is where the "PMID " and "ISBN "
+                    // prefixes come from — a bare eight digits could be a year or a count.
+                    dr.label       = citationLabel(c->provenance.citation, *opt.references);
+                    dr.detailLabel = QStringLiteral("not in the bibliography");
+                }
+                referencesFor.insert(cid, { dr });
             }
         }
     }
@@ -479,14 +527,21 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             s.id = id;
             s.w  = nodeWidth(c ? c->label : id, opt);
             s.h  = opt.nodeH;
-            // A measure label is routinely longer than the condition's, so the box takes the widest
-            // of what it has to hold — clamped by maxW like everything else, with the view eliding
-            // past that. A row that has to be elided is still a row the reader can see is there.
+            // A measure label — and a paper's title even more so — is routinely longer than the
+            // condition's, so the box takes the widest of what it has to hold, clamped by maxW like
+            // everything else with the view eliding past that. A row that has to be elided is still
+            // a row the reader can see is there.
             const auto mit = measuresFor.constFind(id);
             if (mit != measuresFor.constEnd()) {
                 for (const DagMeasure &dm : mit.value())
                     s.w = std::max(s.w, measureRowWidth(dm, opt));
-                s.h += double(mit.value().size()) * opt.measureRowH;
+                s.h += double(mit.value().size()) * opt.rowH;
+            }
+            const auto rit = referencesFor.constFind(id);
+            if (rit != referencesFor.constEnd()) {
+                for (const DagReference &dr : rit.value())
+                    s.w = std::max(s.w, rowWidth(dr.label, dr.detailLabel, opt));
+                s.h += double(rit.value().size()) * opt.rowH;
             }
             cols[entry.first].push_back(s);
         }
@@ -594,13 +649,20 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             n.reachLabel  = reachLabel(c->confirmedBy);
             n.coverage    = coverageOf(pack, s.id);
             n.expanded    = openSet.contains(s.id);
+            // Absolute, stacked under the condition's own row — measures first, then the citation
+            // beneath them. The view draws from these and so does the hit test; neither adds an
+            // offset of its own, and ONE cursor runs through both kinds so the two stacks cannot
+            // disagree about where the second one starts.
+            double rowY = s.y + opt.nodeH;
             const auto mit = measuresFor.constFind(s.id);
             if (mit != measuresFor.constEnd()) {
                 n.measures = mit.value();
-                // Absolute, stacked under the condition's own row. The view draws from these and so
-                // does the hit test; neither adds an offset of its own.
-                double my = s.y + opt.nodeH;
-                for (DagMeasure &dm : n.measures) { dm.y = my; my += dm.h; }
+                for (DagMeasure &dm : n.measures) { dm.y = rowY; rowY += dm.h; }
+            }
+            const auto rit = referencesFor.constFind(s.id);
+            if (rit != referencesFor.constEnd()) {
+                n.references = rit.value();
+                for (DagReference &dr : n.references) { dr.y = rowY; rowY += dr.h; }
             }
             n.groupLabel  = conditionGroupLabel(c->group);
             resolveAvailability(pack, *c, n.available, n.unavailableReason);
@@ -655,8 +717,10 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
         for (DagHeading &h : out.headings)    { h.x -= minX; h.y -= minY; }
         for (auto &entry : cols)
             for (Slot &s : entry.second)      { s.x -= minX; s.y -= minY; }
-        for (DagNode &n : out.nodes)
-            for (DagMeasure &dm : n.measures) dm.y -= minY;
+        for (DagNode &n : out.nodes) {
+            for (DagMeasure &dm : n.measures)   dm.y -= minY;
+            for (DagReference &dr : n.references) dr.y -= minY;
+        }
 
         out.width  = maxX - minX;
         out.height = maxY - minY;

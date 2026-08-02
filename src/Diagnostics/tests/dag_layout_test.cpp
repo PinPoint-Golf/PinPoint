@@ -18,6 +18,7 @@
 //   ctest --test-dir build/analyzer-tests -R dag_layout --output-on-failure
 
 #include "../dag_layout.h"
+#include "../reference_pack.h"
 
 #include <cstdio>
 #include <set>
@@ -135,7 +136,30 @@ static CharacteristicPack fixture()
     edge("origin", "root1", Strength::Moderate);
     edge("far", "origin", Strength::Moderate);
     edge("deepEffect", "farEffect", Strength::Moderate);
+
+    // Citations, for the bibliography rows. `focus` cites a paper the registry knows and also
+    // carries a measure, so the two stacks meet in one box; `cause2` cites one it has never heard
+    // of; `cause3` cites nothing. Between them that is every state a citation row can be in.
+    for (Condition &c : p.conditions) {
+        if (c.id == QLatin1String("focus"))  c.provenance.citation = QStringLiteral("10.1234/known");
+        if (c.id == QLatin1String("cause2")) c.provenance.citation = QStringLiteral("30479527");
+    }
     return p;
+}
+
+// The bibliography, HANDED to the layout rather than read out of the shared registry — see the note
+// on DagLayoutOptions::references. It is what lets this test state what resolves and what does not.
+static ReferenceSet referenceFixture()
+{
+    ReferenceSet set;
+    Reference    r;
+    r.id      = QStringLiteral("ref.known");
+    r.doi     = QStringLiteral("10.1234/known");
+    r.title   = QStringLiteral("A paper the registry knows");
+    r.authors = QStringLiteral("Someone");
+    r.year    = 2005;
+    set.references.push_back(r);
+    return set;
 }
 
 static const DagNode *nodeById(const DagLayout &l, const char *id)
@@ -603,12 +627,12 @@ int main()
                     mm.label = QStringLiteral("Thorax centre distance relative to the trail "
                                               "ankle, change from P1 to P5");
             DagLayoutOptions o;
-            o.maxW = 200;          // the condition-name cap…
-            o.measureMaxW = 360;   // …and the roomier one the rows answer to
+            o.maxW = 200;      // the condition-name cap…
+            o.rowMaxW = 360;   // …and the roomier one the rows answer to
             const DagLayout lw = layoutDag(wide, QStringLiteral("focus"), o);
             const DagNode *f = nodeById(lw, "focus");
             check(f->w > o.maxW, "a long measure label widens the box past the NAME cap");
-            check(f->w <= o.measureMaxW + 0.001, "…and no further than the row cap");
+            check(f->w <= o.rowMaxW + 0.001, "…and no further than the row cap");
 
             // Only the box that carries it. A wide row must not widen the picture wholesale.
             const DagNode *c3 = nodeById(lw, "cause3");
@@ -639,6 +663,120 @@ int main()
             for (size_t j = i + 1; j < l2.nodes.size(); ++j)
                 if (overlaps(l2.nodes[i], l2.nodes[j])) ok = false;
         check(ok, "grown boxes still do not overlap");
+        QString why;
+        const bool bad = linesCrossBoxes(l2, &why);
+        if (bad) std::printf("      %s\n", qPrintable(why));
+        check(!bad, "and no line is drawn through one");
+    }
+
+    // ── Citations are rows too ──────────────────────────────────────────────
+    //
+    // Same contract as the measures and for the same reason: a source is not a cause, so it takes a
+    // row inside the box rather than a node with a line to it. What is worth asserting beyond the
+    // shared geometry is the resolution — a citation the bibliography does not hold must be drawn
+    // as the gap it is, and must not be pressable, because there is no page behind it to open.
+    std::printf("Citations are drawn inside the condition that rests on them\n");
+    {
+        const ReferenceSet refs = referenceFixture();
+        DagLayoutOptions   on;
+        on.includeReferences = true;
+        on.references        = &refs;
+
+        const DagLayout l = layoutDag(p, QStringLiteral("focus"), on);
+
+        const DagNode *f = nodeById(l, "focus");
+        check(f && f->references.size() == 1, "a cited condition carries its source as a row");
+        check(f->references[0].id == QLatin1String("ref.known"), "…named by reference id");
+        check(f->references[0].resolved, "…and resolved");
+        check(f->references[0].label == QLatin1String("A paper the registry knows"),
+              "the row says the TITLE, not the DOI — a DOI answers nothing on its own");
+        check(f->references[0].detailLabel == QLatin1String("2005"),
+              "with the year beside it, which survives the title being elided");
+        check(f->references[0].citation == QLatin1String("10.1234/known"),
+              "and it keeps the join key it was resolved from");
+
+        // The dangling citation. This is the one the pane is best placed to surface: it is invisible
+        // everywhere else in the view, and drawing nothing would make it look like no citation.
+        const DagNode *c2 = nodeById(l, "cause2");
+        check(c2 && c2->references.size() == 1, "an unresolved citation still gets its row");
+        check(!c2->references[0].resolved, "marked as unresolved");
+        check(c2->references[0].id.isEmpty(),
+              "…with no reference id, which is what makes it unpressable");
+        check(c2->references[0].label.contains(QLatin1String("30479527")),
+              "and rendered as the identifier a reader would recognise");
+
+        const DagNode *c3 = nodeById(l, "cause3");
+        check(c3 && c3->references.empty(), "a condition citing nothing carries no row");
+
+        // The box grew, and the rows sit inside it — below the condition's own row, and below the
+        // measures, which is the order the layout fixes rather than the view.
+        check(f->h > c3->h, "a box with a citation is taller than one without");
+        for (const DagReference &dr : f->references) {
+            check(dr.y >= f->y && dr.y + dr.h <= f->y + f->h + 0.001,
+                  "every citation row lies inside its own box");
+            for (const DagMeasure &dm : f->measures)
+                check(dr.y >= dm.y + dm.h - 0.001, "…and below the measures, never over them");
+        }
+
+        // Both stacks in one box, with no gap and no overlap between them: the two are placed from
+        // ONE cursor, and a second cursor is how the second stack starts in the wrong place.
+        {
+            DagLayoutOptions both = on;
+            both.includeMeasures = true;
+            // The layout is held in a named local, deliberately: nodeById() returns a pointer INTO
+            // it, and reading that out of a temporary is a dangle the optimiser is free to fill with
+            // anything.
+            const DagLayout lb = layoutDag(p, QStringLiteral("focus"), both);
+            const DagNode  *fb = nodeById(lb, "focus");
+            check(fb->measures.size() == 1 && fb->references.size() == 1,
+                  "a box can carry a measure and a citation at once");
+            check(std::abs(fb->references[0].y - (fb->measures[0].y + fb->measures[0].h)) < 0.001,
+                  "and the citation begins exactly where the measures stopped");
+            check(std::abs(fb->y + fb->h - (fb->references[0].y + fb->references[0].h)) < 0.001,
+                  "…with the last row reaching the bottom of the box");
+        }
+
+        // A long title widens the box against the SAME cap the measure rows answer to. One geometry
+        // for both kinds; two would be two numbers that must never differ.
+        {
+            ReferenceSet wide = refs;
+            wide.references[0].title = QStringLiteral("Kinematic sequencing of the golf swing and "
+                                                     "its relationship to clubhead speed in "
+                                                     "low-handicap players");
+            DagLayoutOptions o = on;
+            o.references = &wide;
+            o.maxW       = 200;
+            o.rowMaxW    = 360;
+            const DagLayout lw2 = layoutDag(p, QStringLiteral("focus"), o);
+            const DagNode  *fw  = nodeById(lw2, "focus");
+            check(fw->w > o.maxW, "a long title widens the box past the NAME cap");
+            check(fw->w <= o.rowMaxW + 0.001, "…and no further than the row cap");
+        }
+
+        // Switched off, the rows go and the boxes shrink back — and a registry the caller did not
+        // supply is the same answer, rather than every citation drawn as a dangling one.
+        DagLayoutOptions off = on;
+        off.includeReferences = false;
+        check(nodeById(layoutDag(p, QStringLiteral("focus"), off), "focus")->references.empty(),
+              "no rows when sources are off");
+        check(nodeById(layoutDag(p, QStringLiteral("focus"), off), "focus")->h < f->h,
+              "and the box is back to one row high");
+
+        DagLayoutOptions noSet = on;
+        noSet.references = nullptr;
+        check(nodeById(layoutDag(p, QStringLiteral("focus"), noSet), "focus")->references.empty(),
+              "no registry means no rows, never a box full of dangling citations");
+
+        // And the picture still holds together once the boxes have grown.
+        DagLayoutOptions deep = on;
+        deep.includeMeasures = true;
+        deep.depth           = 2;
+        const DagLayout l2 = layoutDag(p, QStringLiteral("focus"), deep);
+        bool ok = true;
+        for (size_t i = 0; i < l2.nodes.size(); ++i)
+            for (size_t j = i + 1; j < l2.nodes.size(); ++j)
+                if (overlaps(l2.nodes[i], l2.nodes[j])) ok = false;
+        check(ok, "boxes carrying both kinds of row still do not overlap");
         QString why;
         const bool bad = linesCrossBoxes(l2, &why);
         if (bad) std::printf("      %s\n", qPrintable(why));

@@ -127,14 +127,14 @@ QString userReferencePath()
 
 } // namespace
 
-QString citationLabel(const QString &citation)
+QString citationLabel(const QString &citation, const ReferenceSet &set)
 {
     const QString c = citation.trimmed();
     if (c.isEmpty()) return QString();
 
     // Ask the registry first: it knows which field this string came out of, so the label is a
     // fact. Everything shipped resolves — `reference_sets_test` fails the build otherwise.
-    if (const Reference *ref = sharedReferenceSet().byCitation(c)) return ref->identifierLabel();
+    if (const Reference *ref = set.byCitation(c)) return ref->identifierLabel();
 
     // A user-layer citation naming a source the registry has never heard of still has to render as
     // something. Shape is enough to tell the three apart, PROVIDED the ISBN test runs first: an
@@ -143,6 +143,11 @@ QString citationLabel(const QString &citation)
     if (looksLikeIsbn(c)) return QStringLiteral("ISBN ") + c;
     const bool allDigits = std::all_of(c.begin(), c.end(), [](QChar ch) { return ch.isDigit(); });
     return allDigits ? QStringLiteral("PMID ") + c : c;
+}
+
+QString citationLabel(const QString &citation)
+{
+    return citationLabel(citation, sharedReferenceSet());
 }
 
 ValidationReport validateReferenceSet(const ReferenceSet &set)

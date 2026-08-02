@@ -1250,13 +1250,14 @@ Item {
                         // were never the problem.
                         return browser.graph(root._graphFocus.type, root._graphFocus.id, {
                             nodeH: Theme.sp(34), gapX: Theme.sp(165), gapY: Theme.sp(39),
-                            measureRowH: Theme.sp(24), padX: Theme.sp(12), charW: Theme.sp(6.4),
-                            // The rows render at fontSzMicro against the name's fontSzBody2, so
-                            // their advance is scaled by that ratio rather than sharing charW.
-                            measureCharW: Theme.sp(6.4) * (Theme.fontSzMicro / Theme.fontSzBody2),
-                            // Wider than maxW on purpose — a measure label is a sentence. See the
-                            // note on measureMaxW in dag_layout.h for the 32 %/95 % figures.
-                            measureMaxW: Theme.sp(340),
+                            rowH: Theme.sp(24), padX: Theme.sp(12), charW: Theme.sp(6.4),
+                            // The inner rows render at fontSzMicro against the name's fontSzBody2,
+                            // so their advance is scaled by that ratio rather than sharing charW.
+                            rowCharW: Theme.sp(6.4) * (Theme.fontSzMicro / Theme.fontSzBody2),
+                            // Wider than maxW on purpose — a measure label is a sentence and a
+                            // paper's title is longer. See the note on rowMaxW in dag_layout.h for
+                            // the 32 %/95 % figures.
+                            rowMaxW: Theme.sp(340),
                             minW: Theme.sp(110), maxW: Theme.sp(210),
                             // No maxPerRank. It was 8 here, which is below the 13 causes
                             // `over_the_top` carries, so the picture dropped five of them — the
@@ -1266,6 +1267,7 @@ Item {
                             depth: middlePane.graphDepth,
                             expanded: middlePane.graphExpanded, maxPerExpand: 16,
                             includeMeasures: middlePane.graphMeasures,
+                            includeReferences: middlePane.graphReferences,
                             includeScreened: middlePane.graphScreened,
                             hideWeak: middlePane.graphHideWeak,
                             hideProposed: middlePane.graphHideProposed
@@ -1288,8 +1290,9 @@ Item {
                     totalConditions: root._conditionCount
 
                     scope:           middlePane.graphDepth
-                    includeMeasures: middlePane.graphMeasures
-                    includeScreened: middlePane.graphScreened
+                    includeMeasures:   middlePane.graphMeasures
+                    includeReferences: middlePane.graphReferences
+                    includeScreened:   middlePane.graphScreened
                     hideWeak:        middlePane.graphHideWeak
                     hideProposed:    middlePane.graphHideProposed
                     onScopeRequested: (v) => middlePane.graphDepth = v
@@ -1305,10 +1308,11 @@ Item {
                     }
                     onCollapseAllRequested: middlePane.graphExpanded = []
                     onSwitchToggled: (which) => {
-                        if (which === "measures")      middlePane.graphMeasures     = !middlePane.graphMeasures
-                        else if (which === "screened") middlePane.graphScreened     = !middlePane.graphScreened
-                        else if (which === "weak")     middlePane.graphHideWeak     = !middlePane.graphHideWeak
-                        else                           middlePane.graphHideProposed = !middlePane.graphHideProposed
+                        if (which === "measures")        middlePane.graphMeasures     = !middlePane.graphMeasures
+                        else if (which === "references") middlePane.graphReferences   = !middlePane.graphReferences
+                        else if (which === "screened")   middlePane.graphScreened     = !middlePane.graphScreened
+                        else if (which === "weak")       middlePane.graphHideWeak     = !middlePane.graphHideWeak
+                        else                             middlePane.graphHideProposed = !middlePane.graphHideProposed
                     }
 
                     onNodeActivated: (nodeType, id) => {
@@ -1370,6 +1374,9 @@ Item {
                 // to 4, which is how the causes of `over the top` were unreachable from `slice`.
                 property int  graphDepth: 2
                 property bool graphMeasures: false
+                // The bibliography rows, off with the measures — see the note on includeReferences
+                // in ModelGraph.qml.
+                property bool graphReferences: false
                 // The physical-screen layer, ON by default — see the note on includeScreened in
                 // ModelGraph.qml for why this one opens the other way round from measures.
                 property bool graphScreened: true

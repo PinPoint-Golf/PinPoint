@@ -86,8 +86,27 @@
 //
 // Every drawn condition answers, not the focus alone. A picture that listed detectors for one box
 // left the rest looking undetectable, which is a claim about the pack and a false one.
+//
+// ── And neither is a citation ─────────────────────────────────────────────────────────────────
+//
+// The references are drawn the SAME WAY and for the same reason. "What does the app think it knows
+// this from" is the third question the page answers, next to what a condition costs and what would
+// have to be true to see it — and it was the one the graph could not answer at all. A citation is
+// no more a cause than a measure is, so it takes a row inside the box rather than a node, and
+// pressing it opens the paper.
+//
+// One row at most, because a condition carries one `provenance.citation`. The citations on the
+// EDGES are deliberately not gathered into the boxes at either end: an edge's paper backs the LINK,
+// and lifting it into the effect's box would make it read as backing the effect. An edge's evidence
+// belongs on the edge, and the inspector is where it is shown.
+//
+// A citation the bibliography has never heard of still gets its row, marked as the gap it is —
+// exactly as a measure nothing can produce does. A dangling citation is invisible everywhere else
+// in this view, and the box that carries it is the only place the reader is asking about it.
 
 namespace pinpoint::analysis {
+
+struct ReferenceSet;
 
 // NB `Related` shares rank 0 with the focus but is NOT the focus. Typing it as one — which is what
 // "rank 0 means focus" did — gave it the focus's frame and made every menu item skip it, so a
@@ -113,6 +132,18 @@ struct DagMeasure {
     QString metricKey;
     bool    available = true;   // Live; anything else is a gap and is drawn as one
     QString unavailableReason;
+    double  y = 0, h = 0;
+};
+
+// One citation, drawn as a row inside the box of the condition that rests on it. Same geometry
+// contract as DagMeasure — absolute `y`, one number for the drawing and the hit test both.
+struct DagReference {
+    QString id;             // `ref.*`. EMPTY when the citation resolves to nothing, which is what
+                            // makes an unresolved row unpressable: there is no page to open.
+    QString citation;       // the DOI, PMID or ISBN as the pack stores it — the join key itself
+    QString label;          // the paper's title; the citation's own label when it does not resolve
+    QString detailLabel;    // the year, or the reason the row is a gap
+    bool    resolved = true;
     double  y = 0, h = 0;
 };
 
@@ -154,6 +185,15 @@ struct DagNode {
     // is taller than `nodeH` whenever this is non-empty. Empty when the caller did not ask for
     // measures, and on a condition nothing detects.
     std::vector<DagMeasure> measures;
+
+    // What this condition is cited from, as one more row under the measures. At most one — a
+    // condition carries a single `provenance.citation` — and empty when the caller did not ask for
+    // references, or the condition cites nothing.
+    //
+    // BELOW the measures, always, so the stack reads the way the question does: what this is, what
+    // would show it, then what says so. The order is fixed here rather than left to the view, which
+    // hit-tests the same y values it draws from.
+    std::vector<DagReference> references;
 
     int     coverage      = 0;   // how many conditions it explains directly
     int     hiddenCauses  = 0;   // neighbours the depth bound (or the per-rank cap) cut off
@@ -225,25 +265,29 @@ struct DagLayoutOptions {
     double nodeH   = 40;    // every node is one row high — the boxes differ in width, never in rank
     double gapX    = 110;   // between columns; wide enough for a label to sit on the line
     double gapY    = 26;    // between nodes within a column
-    double measureRowH = 26;   // one measure row inside a condition's box
+    // ── The rows INSIDE a box ──────────────────────────────────────────────
+    // One geometry for both kinds. A measure row and a reference row are the same object drawn with
+    // different words — same height, same text size, same cap — and giving each its own triple of
+    // options would be three numbers that must never differ, which is three ways for them to.
+    double rowH = 26;      // one inner row, measure or reference
 
-    // The advance for a MEASURE row's text, which the view draws smaller than the condition's own
+    // The advance for an inner row's text, which the view draws smaller than the condition's own
     // name. Sizing those rows with `charW` overestimated their width by the ratio between the two
     // font sizes and pushed almost every box with a measure straight to `maxW` — a graph that
     // doubled in width when the switch was flipped, for text that was never that wide. Supplied by
     // the caller for the same reason charW is: the layout has no font metrics and must be told.
-    double measureCharW = 5.8;
+    double rowCharW = 5.8;
 
-    // The width cap for a box carrying MEASURE rows, separate from maxW and deliberately larger.
+    // The width cap for a box carrying inner rows, separate from maxW and deliberately larger.
     // maxW bounds a condition's own name, which is a phrase; a measure's label is a sentence —
-    // "thorax centre distance relative to trail ankle, change P1 to P5" is 63 characters. Sharing
-    // the one cap fitted 32 % of the shipped rows whole and elided the rest, which is a row the
-    // reader can see is there and cannot read. At 360 it is 95 %, and the remainder elide as long
-    // condition labels always have.
+    // "thorax centre distance relative to trail ankle, change P1 to P5" is 63 characters, and a
+    // paper's title is longer again. Sharing the one cap fitted 32 % of the shipped measure rows
+    // whole and elided the rest, which is a row the reader can see is there and cannot read. At 360
+    // it is 95 %, and the remainder elide as long condition labels always have.
     //
-    // The cost is a wider graph whenever measures are on. That is the trade the switch makes: the
+    // The cost is a wider graph whenever the rows are on. That is the trade the switches make: the
     // view opens fitted, so a wider picture arrives more zoomed out rather than off the canvas.
-    double measureMaxW = 360;
+    double rowMaxW = 360;
     double padX    = 16;    // horizontal padding inside a node
     double charW   = 7.0;   // approximate advance per character; see the note in the .cpp
     double minW    = 110;
@@ -296,6 +340,19 @@ struct DagLayoutOptions {
     int    maxPerExpand = 12;
 
     bool   includeMeasures = true;
+
+    // The bibliography rows. OFF by default like measures, and for the same reason: the causal band
+    // is what the picture is about, and a detail hung under every box belongs behind a switch.
+    //
+    // Needs `references` to be set as well. A layout asked for citation rows with no registry to
+    // resolve them against would draw every one of them as a dangling citation, which is a claim
+    // about the pack and would be a false one — so it draws none instead.
+    bool   includeReferences = false;
+
+    // The bibliography to resolve `provenance.citation` against. NOT reached for through
+    // sharedReferenceSet() from inside the layout: this module takes what it needs as arguments, and
+    // a global read here would make the picture depend on process state no test could set.
+    const ReferenceSet *references = nullptr;
 
     // The physical-screen layer: conditions whose ConfirmedBy is Screened — limited trail-hip
     // internal rotation, poor core stability, thoracic kyphosis and the rest. ON by default, unlike

@@ -996,6 +996,45 @@ int main(int argc, char **argv)
             check(empty == 0, qPrintable(QStringLiteral("%1: rows have a graph").arg(type)));
         }
 
+        // The bibliography rows, over the SHIPPED pack and through the façade the panel calls. The
+        // layout's own test proves the geometry on a fixture; what can only be wrong here is the
+        // wiring — an option key the panel spells one way and the façade reads another leaves the
+        // switch doing nothing at all, and both sides compile perfectly.
+        {
+            QVariantMap ro = opts;
+            ro.insert(QStringLiteral("includeReferences"), true);
+            ro.insert(QStringLiteral("rowH"), 24);
+
+            // A cited condition, so there is something to draw. `s_posture` carries a DOI the shipped
+            // bibliography resolves.
+            const QVariantMap rg = m.dag(QStringLiteral("s_posture"), ro);
+            int rows = 0, resolved = 0;
+            for (const QVariant &nv : rg.value(QStringLiteral("nodes")).toList())
+                for (const QVariant &rv :
+                     nv.toMap().value(QStringLiteral("references")).toList()) {
+                    ++rows;
+                    const QVariantMap r = rv.toMap();
+                    if (r.value(QStringLiteral("resolved")).toBool()
+                        && !r.value(QStringLiteral("id")).toString().isEmpty()
+                        && !r.value(QStringLiteral("label")).toString().isEmpty()
+                        && r.value(QStringLiteral("h")).toDouble() > 0)
+                        ++resolved;
+                }
+            check(rows > 0, "the graph carries citation rows when the switch is on");
+            check(resolved == rows,
+                  "and every shipped citation it draws resolves to a paper with a title");
+
+            // Off, they go — the switch has to be the thing that decides, not the presence of a
+            // citation in the pack.
+            QVariantMap off = ro;
+            off.insert(QStringLiteral("includeReferences"), false);
+            int stillThere = 0;
+            for (const QVariant &nv :
+                 m.dag(QStringLiteral("s_posture"), off).value(QStringLiteral("nodes")).toList())
+                stillThere += nv.toMap().value(QStringLiteral("references")).toList().size();
+            check(stillThere == 0, "and none when it is off");
+        }
+
         // A measure's node says what grades it, which is the question a reader has when they see a
         // measure in a graph at all.
         const QVariantMap mg = m.graph(QStringLiteral("measures"),
@@ -2275,6 +2314,166 @@ int main(int argc, char **argv)
             check(m.undo().value(QStringLiteral("ok")).toBool(), "and undoes");
         }
         while (m.canUndo()) m.undo();
+    }
+
+    std::printf("=== a citation is a way through to the paper, not just a DOI to read ===\n");
+    {
+        // The Fields section holds the citation as an editable identifier, which is the right thing
+        // to type into and the wrong thing to read: `10.1088/0034-4885/66/2/202` answers nothing on
+        // its own. This is the row that turns it back into a title somebody can recognise — it was
+        // built for characteristics and links and then never appended to the pane, so the pane
+        // showed the DOI and no way to reach what it named.
+        //
+        // Asserted on the ROW TYPE rather than on the section's title, for the same reason a section
+        // carries an `action` key: a translated title is a contract that holds in one locale.
+        auto citedRow = [&](const QString &type, const QString &id) {
+            for (const QVariant &sv : m.inspect(type, id).value(QStringLiteral("sections")).toList())
+                for (const QVariant &rv : sv.toMap().value(QStringLiteral("rows")).toList()) {
+                    const QVariantMap r = rv.toMap();
+                    if (r.value(QStringLiteral("type")).toString() == QStringLiteral("references"))
+                        return r;
+                }
+            return QVariantMap();
+        };
+
+        auto firstCited = [&](const QString &type) {
+            for (const QVariant &rv : m.rows(type)) {
+                const QVariantMap r =
+                    citedRow(type, rv.toMap().value(QStringLiteral("id")).toString());
+                if (!r.isEmpty()) return r;
+            }
+            return QVariantMap();
+        };
+
+        auto checkRow = [&](const QVariantMap &row, const char *what) {
+            check(!row.isEmpty(), what);
+            if (row.isEmpty()) return;
+            check(row.value(QStringLiteral("navigable")).toBool(), "…which is navigable");
+            check(!row.value(QStringLiteral("label")).toString().isEmpty(),
+                  "…and says the title rather than the identifier it was joined on");
+            // The id it names has to OPEN. A link that navigates to nothing is worse than no link:
+            // the reader is told there is a paper and then shown an empty pane.
+            check(m.inspect(QStringLiteral("references"),
+                            row.value(QStringLiteral("id")).toString())
+                      .value(QStringLiteral("found")).toBool(),
+                  "…and the reference it names actually opens");
+        };
+
+        // Both types the shipped pack cites from, because the row was built for both and appended to
+        // neither — a fix on the characteristic alone would leave the causal links silent.
+        checkRow(firstCited(QStringLiteral("characteristics")),
+                 "a cited characteristic offers a row into the bibliography");
+        checkRow(firstCited(QStringLiteral("links")), "and so does a cited causal link");
+
+        // A screen carries the same kind of citation — screen_pack.h says DOI or PMID and nothing
+        // else — but no SHIPPED screen carries one yet, so the row is exercised by writing one. That
+        // is the honest way to assert it: skipping the type because the content is thin would leave
+        // it uncovered on the day somebody adds the first citation.
+        {
+            QString aCitation;
+            for (const QVariant &rv : m.rows(QStringLiteral("characteristics"))) {
+                const QString cid = rv.toMap().value(QStringLiteral("id")).toString();
+                for (const QVariant &sv :
+                     m.inspect(QStringLiteral("characteristics"), cid)
+                         .value(QStringLiteral("sections")).toList()) {
+                    const QVariantMap s = sv.toMap();
+                    if (s.value(QStringLiteral("kind")).toString() != QStringLiteral("fields"))
+                        continue;
+                    for (const QVariant &fv : s.value(QStringLiteral("rows")).toList()) {
+                        const QVariantMap f = fv.toMap();
+                        if (f.value(QStringLiteral("field")).toString()
+                                == QStringLiteral("citation")
+                            && !f.value(QStringLiteral("value")).toString().isEmpty())
+                            aCitation = f.value(QStringLiteral("value")).toString();
+                    }
+                }
+                if (!aCitation.isEmpty()) break;
+            }
+            check(!aCitation.isEmpty(), "the shipped pack cites something to reuse");
+
+            const QString screenId =
+                m.rows(QStringLiteral("screens")).first().toMap()
+                    .value(QStringLiteral("id")).toString();
+            check(m.setField(QStringLiteral("screens"), screenId, QStringLiteral("citation"),
+                             aCitation)
+                      .value(QStringLiteral("ok")).toBool(),
+                  "a screen takes a citation");
+            checkRow(citedRow(QStringLiteral("screens"), screenId),
+                     "…and its pane grows the row into the bibliography");
+            while (m.canUndo()) m.undo();
+        }
+
+        // The link is on the FIELD too, not only in the section below it. The value has to stay the
+        // bare identifier — it is the join key — so this is what tells an author that the DOI they
+        // typed resolves, and to what, at the place they typed it.
+        {
+            auto citationFieldOf = [&](const QString &type, const QString &id) {
+                for (const QVariant &sv :
+                     m.inspect(type, id).value(QStringLiteral("sections")).toList()) {
+                    const QVariantMap s = sv.toMap();
+                    if (s.value(QStringLiteral("kind")).toString() != QStringLiteral("fields"))
+                        continue;
+                    for (const QVariant &fv : s.value(QStringLiteral("rows")).toList()) {
+                        const QVariantMap f = fv.toMap();
+                        if (f.value(QStringLiteral("field")).toString()
+                                == QStringLiteral("citation"))
+                            return f;
+                    }
+                }
+                return QVariantMap();
+            };
+
+            QVariantMap cited, uncited;
+            for (const QVariant &rv : m.rows(QStringLiteral("characteristics"))) {
+                const QVariantMap f =
+                    citationFieldOf(QStringLiteral("characteristics"),
+                                    rv.toMap().value(QStringLiteral("id")).toString());
+                if (f.isEmpty()) continue;
+                if (f.value(QStringLiteral("value")).toString().isEmpty()) {
+                    if (uncited.isEmpty()) uncited = f;
+                } else if (cited.isEmpty()) {
+                    cited = f;
+                }
+                if (!cited.isEmpty() && !uncited.isEmpty()) break;
+            }
+
+            check(!cited.isEmpty(), "a cited characteristic has a citation field");
+            check(cited.value(QStringLiteral("linkType")).toString()
+                      == QStringLiteral("references"),
+                  "…which carries the link to the paper it resolves to");
+            check(!cited.value(QStringLiteral("linkLabel")).toString().isEmpty(),
+                  "…labelled with the title rather than the DOI already in the field");
+            check(m.inspect(QStringLiteral("references"),
+                            cited.value(QStringLiteral("linkId")).toString())
+                      .value(QStringLiteral("found")).toBool(),
+                  "…and the record it points at opens");
+            // The field is still an EDITOR. A link that turned it read-only would trade one
+            // affordance for the other.
+            check(cited.value(QStringLiteral("kind")).toString() == QStringLiteral("text"),
+                  "…while the field stays editable text");
+            check(cited.value(QStringLiteral("value")).toString()
+                      != cited.value(QStringLiteral("linkLabel")).toString(),
+                  "…holding the identifier, never the title — the identifier is the join key");
+
+            // No link where there is nothing to link to. A dead link is worse than none.
+            check(!uncited.isEmpty(), "an uncited characteristic has one too");
+            check(!uncited.contains(QStringLiteral("linkType")),
+                  "…and it carries no link at all");
+        }
+
+        // A corridor's `citation` doubles as the note explaining a provisional figure — most of the
+        // shipped ones are a paragraph, not an identifier — so those must NOT be run through the
+        // failed-lookup row. Nothing here asserts a corridor has the row; what it asserts is that
+        // any corridor that does have one resolves, rather than reporting a typo on every norm.
+        for (const QVariant &rv : m.rows(QStringLiteral("corridors"))) {
+            const QString id = rv.toMap().value(QStringLiteral("id")).toString();
+            const QVariantMap row = citedRow(QStringLiteral("corridors"), id);
+            if (row.isEmpty()) continue;
+            check(m.inspect(QStringLiteral("references"),
+                            row.value(QStringLiteral("id")).toString())
+                      .value(QStringLiteral("found")).toBool(),
+                  "a corridor's citation row is only drawn when it resolves");
+        }
     }
 
     std::printf("=== the way back to the standard model ===\n");
