@@ -1258,7 +1258,12 @@ Item {
                             // note on measureMaxW in dag_layout.h for the 32 %/95 % figures.
                             measureMaxW: Theme.sp(340),
                             minW: Theme.sp(110), maxW: Theme.sp(210),
-                            depth: middlePane.graphDepth, maxPerRank: 8,
+                            // No maxPerRank. It was 8 here, which is below the 13 causes
+                            // `over_the_top` carries, so the picture dropped five of them — the
+                            // strongest among them — and said only how many. `depth` is the bound,
+                            // and it is the reader's own; see the note in dag_layout.h for what an
+                            // uncapped walk actually costs over this pack.
+                            depth: middlePane.graphDepth,
                             expanded: middlePane.graphExpanded, maxPerExpand: 16,
                             includeMeasures: middlePane.graphMeasures,
                             includeScreened: middlePane.graphScreened,

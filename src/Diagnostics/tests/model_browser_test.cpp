@@ -936,7 +936,8 @@ int main(int argc, char **argv)
             o.insert(QStringLiteral("minW"), 110);
             o.insert(QStringLiteral("maxW"), 210);
             o.insert(QStringLiteral("depth"), 2);
-            o.insert(QStringLiteral("maxPerRank"), 8);
+            // No maxPerRank, because the panel no longer sends one — see dag_layout.h. Leaving it
+            // here would have this run the one configuration the app never uses.
             o.insert(QStringLiteral("includeMeasures"), false);
             return o;
         }();

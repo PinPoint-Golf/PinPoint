@@ -256,11 +256,27 @@ struct DagLayoutOptions {
     // its own causes is already three — and past it the per-rank cap does all the work anyway.
     int    depth = 1;
 
-    // Per-rank cap. A hub cause explains a dozen conditions, and at depth 2 an uncapped fan-out
-    // turns the navigation surface back into the hairball this exists to avoid. Nodes past the cap
-    // are dropped in pack order and reappear in their parent's hidden counts, so nothing is lost
-    // silently. 0 disables the cap.
-    int    maxPerRank = 10;
+    // Per-rank cap, OFF. It was 10 here and 8 at the call site, and it was answering a fear rather
+    // than a measurement: the worry was that a hub cause explains a dozen conditions and an
+    // uncapped depth-2 fan-out returns the hairball this view exists to avoid.
+    //
+    // Measured over the shipped pack, that does not happen, because FIRST VISIT WINS converges the
+    // walk fast — a node already ranked is never admitted again, so the second rank is the frontier
+    // minus everything the first already took. The worst focus in the pack is `over_the_top`:
+    //
+    //     depth 1   19 nodes, widest rank 13        depth 3   44 nodes, widest rank 24
+    //     depth 2   32 nodes, widest rank 18        depth 4   50 nodes, widest rank 24
+    //
+    // Fifty boxes at the maximum depth the UI offers, and depth is already the reader's own choice.
+    // What the cap bought against that was a picture that silently omitted five of `over_the_top`'s
+    // thirteen causes at the default depth — including the strongest one — and the reader had no
+    // way to know which five, because the count says how many and never which.
+    //
+    // Kept as an option rather than deleted: it is the only backstop if the pack grows several
+    // times over, and it costs one comparison. A caller that sets one gets the same bargain as
+    // before, improved — what it drops is the LOWEST RANKED (see the ordering note in the .cpp),
+    // not whatever was authored last, and it still reappears in the parent's hidden counts.
+    int    maxPerRank = 0;
 
     // Nodes the reader has opened BY HAND. Their neighbours are admitted whatever `depth` says.
     //

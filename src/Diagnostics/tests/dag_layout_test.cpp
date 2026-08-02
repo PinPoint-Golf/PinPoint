@@ -316,15 +316,22 @@ int main()
     std::printf("An opened node answers to its OWN budget, not to the rank's\n");
     {
         // maxPerRank exists to stop an automatic walk fanning out; it must not be what decides how
-        // much an explicit request returns. With room for one node per rank, opening cause1 still
-        // brings both of its causes.
+        // much an explicit request returns. With room for one node per rank, opening the focus
+        // still brings every cause it has.
+        //
+        // The FOCUS is opened rather than cause1, and that is not arbitrary. Under a cap of one the
+        // single seat on rank -1 goes to cause3, which reaches furthest — so cause1 is not on the
+        // picture to be opened, and an `expanded` id that is not drawn is ignored by design. Opening
+        // the box the cap actually cut from is the case this is really about anyway: it is what a
+        // reader does when a node says there are more causes behind it.
         DagLayoutOptions o;
         o.depth      = 2;
         o.maxPerRank = 1;
-        o.expanded   = { QStringLiteral("cause1") };
+        o.expanded   = { QStringLiteral("focus") };
         const DagLayout l = layoutDag(p, QStringLiteral("focus"), o);
-        check(nodeById(l, "deepA") && nodeById(l, "deepB"),
+        check(nodeById(l, "cause1") && nodeById(l, "cause2"),
               "the per-rank cap does not apply to what was asked for");
+        check(nodeById(l, "focus")->hiddenCauses == 0, "and the box it was asked of has nothing left");
 
         // Its own budget does apply, and what it drops is counted rather than lost.
         DagLayoutOptions ob;
@@ -672,8 +679,12 @@ int main()
                 check(e.offeredOnly, "an offered cause draws an offered link");
     }
 
-    // ── The per-rank cap ────────────────────────────────────────────────────
-    std::printf("A hub does not become a hairball\n");
+    // ── The per-rank cap, and the order it cuts in ──────────────────────────
+    //
+    // The cap is OFF by default now. It was 10 here and 8 at the call site, and over the shipped
+    // pack it was removing five of `over_the_top`'s thirteen causes at the default depth while
+    // reporting only a number. What replaces it is the depth bound, which is the reader's own.
+    std::printf("A hub is drawn whole unless a caller asks for a cap\n");
     {
         CharacteristicPack hub = p;
         for (int i = 0; i < 20; ++i) {
@@ -688,6 +699,19 @@ int main()
             hub.edges.push_back(e);
         }
 
+        // Twenty-two effects, and by default all twenty-two are on the picture. `truncated` is not
+        // asserted either way: the causes behind cause1 are past depth 1 and it is right that they
+        // still say so.
+        DagLayoutOptions def;
+        def.depth = 1;
+        const DagLayout wide = layoutDag(hub, QStringLiteral("focus"), def);
+        int atPlusOneWide = 0;
+        for (const DagNode &n : wide.nodes)
+            if (n.rank == 1) ++atPlusOneWide;
+        check(atPlusOneWide == 22, "no cap by default: a hub keeps every effect it has");
+        check(nodeById(wide, "focus")->hiddenEffects == 0, "and claims nothing is hidden");
+
+        // Still available to a caller who wants one, unchanged.
         DagLayoutOptions o;
         o.maxPerRank = 6;
         const DagLayout l = layoutDag(hub, QStringLiteral("focus"), o);
@@ -695,9 +719,46 @@ int main()
         int atPlusOne = 0;
         for (const DagNode &n : l.nodes)
             if (n.rank == 1) ++atPlusOne;
-        check(atPlusOne == 6, "the cap holds");
+        check(atPlusOne == 6, "the cap holds when asked for");
         check(l.truncated, "and the layout says so");
         check(nodeById(l, "focus")->hiddenEffects == 16, "the rest are counted on the focus");
+    }
+
+    // ── Ranked, not authored ────────────────────────────────────────────────
+    //
+    // A rank arrives in the order ADDENDUM-03 established for the Causes list — how far a cause
+    // reaches — rather than in the order the edges happen to sit in the file. Pack order decided
+    // both the column's reading order and, whenever a budget bit, which claims survived; the newest
+    // edge was always the first to fall off, whatever it said.
+    //
+    // In this fixture cause3 reaches six conditions (it causes cause1 as well as the focus) while
+    // cause1 and cause2 reach five each. Pack order alone reads cause1, cause2, cause3.
+    std::printf("A rank is ordered by reach, not by the order the edges were written\n");
+    {
+        DagLayoutOptions o;
+        o.depth = 1;
+        const DagLayout l = layoutDag(p, QStringLiteral("focus"), o);
+
+        const DagNode *c1 = nodeById(l, "cause1");
+        const DagNode *c2 = nodeById(l, "cause2");
+        const DagNode *c3 = nodeById(l, "cause3");
+        check(c1 && c2 && c3, "all three causes are drawn");
+        check(c3->y < c1->y, "the furthest-reaching cause leads the column");
+        check(c1->y < c2->y, "and a tie keeps the authored order behind it");
+    }
+
+    std::printf("What a cap drops is the least-reaching, not the last-authored\n");
+    {
+        // The property that matters more than the cap's existence: with room for one, the seat goes
+        // to the cause that explains the most, and the two that stand down are still counted.
+        DagLayoutOptions o;
+        o.depth      = 1;
+        o.maxPerRank = 1;
+        const DagLayout l = layoutDag(p, QStringLiteral("focus"), o);
+
+        check(nodeById(l, "cause3") != nullptr, "the one seat goes to the cause that reaches furthest");
+        check(!nodeById(l, "cause1") && !nodeById(l, "cause2"), "and the shorter reaches stand down");
+        check(nodeById(l, "focus")->hiddenCauses == 2, "counted on the focus, as always");
     }
 
     // ── The non-causal relations ────────────────────────────────────────────

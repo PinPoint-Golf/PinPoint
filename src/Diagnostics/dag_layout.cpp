@@ -170,6 +170,57 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
         return true;
     };
 
+    // ── 0. The order the neighbours arrive in ───────────────────────────────
+    //
+    // RANKED, not pack order. Pack order is the order an author happened to append the edges in,
+    // and it silently decided two things it has no business deciding: which nodes survive a budget,
+    // and — at rank ±1, where every barycentre ties and the stable sort below therefore keeps what
+    // it was given — the top-to-bottom order of the column. The newest claim was always the first
+    // to fall off, whatever it said: `hips_under_rotated_at_top -> over_the_top` is `strong` and
+    // was written last, so it lost its seat to the eight edges authored before it, six of which are
+    // only `moderate`.
+    //
+    // The ranking is the one ADDENDUM-03 established for the Causes and Characteristics lists, so
+    // the picture and the tables agree about which cause matters. Causes rank by WHAT THEY REACH
+    // (bad shots explained, then total downstream reach); effects rank by WHAT REACHES THEM, which
+    // is the only measure an endpoint can score on at all — `slice` causes nothing and would sit
+    // last on any out-edge key.
+    //
+    // Counts, never a strength-weighted score. Same refusal this repo has already made twice, for
+    // the same reason: Strength is three-valued because nobody can author 0.73 meaningfully, and a
+    // count can always answer "why is this above that" by naming its members.
+    struct Reach {
+        int outcomes = 0, leadsTo = 0, causedBy = 0;
+    };
+    // Memoised for the reason the browser memoises the same three numbers: causalClosure() re-scans
+    // the whole edge list per frontier node by design, and this walk asks about the same node once
+    // per parent that reaches it. Returned BY VALUE — a reference into the hash would dangle the
+    // moment the comparator's second lookup rehashed it.
+    QHash<QString, Reach> reachMemo;
+    auto reachOf = [&](const QString &id) -> Reach {
+        const auto it = reachMemo.constFind(id);
+        if (it != reachMemo.constEnd()) return it.value();
+        Reach r;
+        r.leadsTo  = int(causalClosure(pack, id, /*downstream*/ true).size());
+        r.outcomes = outcomeReachOf(pack, id);
+        r.causedBy = int(causalClosure(pack, id, /*downstream*/ false).size());
+        reachMemo.insert(id, r);
+        return r;
+    };
+    // Stable, so pack order remains the tie-break and the picture stays deterministic between
+    // visits — which is the one property a reader has to be able to rely on here.
+    auto rankedNeighbours = [&](const QString &id, int dir) {
+        QStringList nb = dir < 0 ? causesOf(pack, id) : effectsOf(pack, id);
+        std::stable_sort(nb.begin(), nb.end(), [&](const QString &a, const QString &b) {
+            const Reach ra = reachOf(a);
+            const Reach rb = reachOf(b);
+            if (dir > 0) return ra.causedBy > rb.causedBy;
+            if (ra.outcomes != rb.outcomes) return ra.outcomes > rb.outcomes;
+            return ra.leadsTo > rb.leadsTo;
+        });
+        return nb;
+    };
+
     // ── 1. Rank assignment ──────────────────────────────────────────────────
     // Breadth-first in each direction, FIRST VISIT WINS, so a node reachable by two paths takes the
     // shortest one. Drawing it at both distances would make one condition look like two, and the
@@ -186,13 +237,15 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             const int            r = dir * d;
             std::vector<QString> next;
             for (const QString &id : frontier) {
-                const QStringList nb = dir < 0 ? causesOf(pack, id) : effectsOf(pack, id);
+                const QStringList nb = rankedNeighbours(id, dir);
                 for (const QString &n : nb) {
                     if (rankOf.contains(n)) continue;
                     if (!admissible(n)) continue;
-                    // Past the cap the node is simply not admitted. It is not lost: it has no rank,
-                    // so it lands in its parent's hidden count below, which is where the view says
-                    // how much is off screen.
+                    // OFF by default — see the note on maxPerRank in the header. When a caller does
+                    // set one, the node past it is simply not admitted. It is not lost: it has no
+                    // rank, so it lands in its parent's hidden count below, which is where the view
+                    // says how much is off screen. What falls off is now the lowest-ranked rather
+                    // than the last-authored.
                     if (opt.maxPerRank > 0 && int(byRank[r].size()) >= opt.maxPerRank) continue;
                     rankOf.insert(n, r);
                     byRank[r].push_back(n);
@@ -269,7 +322,9 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                 for (int dir : { -1, 1 }) {
                     if ((r < 0 && dir > 0) || (r > 0 && dir < 0)) continue;
                     const int         nr = r + dir;
-                    const QStringList nb = dir < 0 ? causesOf(pack, id) : effectsOf(pack, id);
+                    // Ranked here too. maxPerExpand is a real budget and still bites, so what it
+                    // drops must be the least of what was asked for rather than the most recent.
+                    const QStringList nb = rankedNeighbours(id, dir);
                     for (const QString &n : nb) {
                         if (rankOf.contains(n)) continue;
                         if (!admissible(n)) continue;
@@ -291,7 +346,15 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     //
     // The sweep runs to the OUTERMOST RANK PRESENT, not to `depth`. An opened node puts a rank past
     // the bound on the picture, and bounding the sweep by `depth` instead left exactly those ranks
-    // in pack order — the one place the reader has just said they are looking.
+    // in admission order — the one place the reader has just said they are looking.
+    //
+    // The sort is STABLE and the admission order is ranked, so the two compose rather than compete:
+    // crossing minimisation decides the column wherever it has an opinion, and the reach ranking
+    // decides it wherever the barycentres tie. At rank ±1 they tie in the ordinary case — the focus
+    // is the only thing on rank 0 for every one of them to point at — so that column reads
+    // top-to-bottom in exactly the order the Causes list would put it in. A focus carrying
+    // corroborating partners puts other boxes on rank 0 and the barycentres separate again, which
+    // is correct: those lines are on the picture and should not be made to cross for this.
     int outermost = 0;
     for (const auto &entry : byRank) outermost = std::max(outermost, std::abs(entry.first));
     for (int k = 1; k <= outermost; ++k) {
@@ -316,7 +379,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                     ++n;
                 }
                 // No neighbour on the adjacent rank (it is reached through a skip edge): hold its
-                // position rather than inventing one, so pack order survives.
+                // position rather than inventing one, so the ranked admission order survives.
                 bary[i] = n > 0 ? sum / n : double(i);
             }
 
