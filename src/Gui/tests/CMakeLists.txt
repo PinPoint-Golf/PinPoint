@@ -37,6 +37,32 @@ pp_add_test(timeline_labels_test
     INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core
     LINK    Qt6::Qml  AUTOMOC)
 
+# ChartMetrics::seriesGroups — the chart's METRICS presets, which are the metric catalogue's
+# `.group` field joined against the series a swing actually produced. It links the REAL manifest
+# (not a fixture) on purpose: the whole design is that the chart and the Metric Library share one
+# grouping vocabulary, so a descriptor changing group has to be able to fail this test.
+#
+# The norm stack comes along because metric_providers.cpp -> reference_bands.cpp pulls it in, the
+# same chain metric_catalogue_test links; pp_norm_env's JSON is not read by anything here, so the
+# shipped resources are not needed and the env is left unset.
+pp_add_test(chart_metrics_test
+    SOURCES chart_metrics_test.cpp
+            ${GUI}/review/chart_metrics.cpp
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${SRC}/Analysis/reference_bands.cpp
+            ${SRC}/Diagnostics/norm_pack.cpp ${SRC}/Diagnostics/context_tree.cpp
+            ${SRC}/Diagnostics/characteristic_pack.cpp ${SRC}/Diagnostics/characteristic.cpp
+            ${SRC}/Diagnostics/reference_pack.cpp
+            ${SRC}/Diagnostics/measure_facets.cpp ${SRC}/Diagnostics/anatomy_vocabulary.cpp
+            ${SRC}/Diagnostics/resource_norm_provider.cpp
+            ${SRC}/Diagnostics/file_norm_provider.cpp
+            ${SRC}/Diagnostics/merged_norm_provider.cpp
+    INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core ${SRC}/Metrics ${SRC}/Analysis ${SRC}/Diagnostics
+    LINK    Qt6::Qml  AUTOMOC)
+
 # SwingSeriesModel — playhead→row mapping (rowForTimeUs) for the table cross-highlight.
 pp_add_test(swing_series_model_test
     SOURCES swing_series_model_test.cpp ${GUI}/review/swing_series_model.cpp

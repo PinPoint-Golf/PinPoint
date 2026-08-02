@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "../../Metrics/metric_catalogue.h"
+
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -26,9 +28,13 @@
 #include <QtQml/qqmlregistration.h>
 
 // ChartMetrics — the C++ home for the derivation maths that the "no JavaScript logic
-// in QML" rule keeps out of PpMetricChart, exactly the TimelineLabels shape. Stateless:
-// every method is const and depends only on its arguments, so one shared instance can be
-// declared declaratively (ChartMetrics { id: metrics }) and reused by every chart.
+// in QML" rule keeps out of PpMetricChart, exactly the TimelineLabels shape. Every method is
+// const and depends only on its arguments, so one shared instance can be declared
+// declaratively (ChartMetrics { id: metrics }) and reused by every chart.
+//
+// It is no longer literally stateless: seriesGroups() needs the metric catalogue, so one is
+// assembled in the constructor and read-only thereafter (the same "built once, then const"
+// shape MetricCatalog uses). No method mutates it, so the reuse property above is unchanged.
 //
 // Phase names/tags are NOT duplicated here — the chart composes segment labels in QML from
 // phaseA/phaseB via TimelineLabels.phaseShortTag, and the crosshair value-at-cursor reuses
@@ -40,7 +46,8 @@ class ChartMetrics : public QObject
     QML_ELEMENT
 
 public:
-    explicit ChartMetrics(QObject *parent = nullptr) : QObject(parent) {}
+    explicit ChartMetrics(QObject *parent = nullptr)
+        : QObject(parent), m_catalogue(pinpoint::analysis::makeMetricCatalogue()) {}
 
     // Segment list for a swing. [0] = Full ({startUs:0, endUs:spanUs, phaseA:-1, phaseB:-1});
     // then one entry per adjacent phase pair, ordered by time:
@@ -154,4 +161,29 @@ public:
     // the Setup zone's PpOrientationGlyph; inside the corridor is always square,
     // even when the corridor is deliberately not centred on zero.
     Q_INVOKABLE QString orientationLabel(double value, double greenLo, double greenHi) const;
+
+    // ── Chart metric presets ────────────────────────────────────────────────────
+    //
+    // The swing's series bucketed by the catalogue's `.group` — the combo in the chart's
+    // CONTROLS section. `seriesList` is analysisDetail.series; returns
+    //   [{ group:QString, keys:[QString…] }]
+    // in MANIFEST order (MetricCatalogue::all()'s order, which is also the order the Metric
+    // Library lists groups in, so the two surfaces agree).
+    //
+    // Only PLOTTABLE series count — a curve of at least two samples, the same test the chart's
+    // own `_visible` applies. The setup scalars (stance width, tempo, attack angle …) carry one
+    // phaseSample and an empty curve, so a group made only of those is omitted rather than
+    // offered as a preset that draws nothing.
+    //
+    // A group is present only when this swing produced at least one of its members, which is
+    // what makes the control degrade honestly: no IMU wrist data and there is simply no "Wrist
+    // & forearm" preset. That gating is on the DATA, never on the session type.
+    //
+    // Curve keys the catalogue has never heard of are collected into a trailing "Other" group
+    // rather than dropped: a metric added to the pipeline before the manifest should be awkward
+    // to find, not invisible.
+    Q_INVOKABLE QVariantList seriesGroups(const QVariantList &seriesList) const;
+
+private:
+    pinpoint::analysis::MetricCatalogue m_catalogue;   // built once in the ctor; never mutated
 };

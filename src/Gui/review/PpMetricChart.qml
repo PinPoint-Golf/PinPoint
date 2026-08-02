@@ -25,8 +25,13 @@
 //
 // Phase 1: split/overlay, axes, phase bands, traces, P-dots, playhead, hover crosshair +
 // tooltip, legend chips. Phase 2 adds the segment brush + chips → viewStartUs/viewEndUs.
-// Phase 3 adds the summary cards. Heavy maths lives in ChartMetrics; phase tags/value
-// lookup in TimelineLabels; colours/sizes/fonts in Theme.
+// Phase 3 adds the summary cards. Phase 4 adds the METRICS preset combo — which catalogue
+// group of series to plot, since a full capture now produces far more curves than one panel
+// can show. Heavy maths lives in ChartMetrics; phase tags/value lookup in TimelineLabels;
+// colours/sizes/fonts in Theme.
+//
+// TWO independent narrowings, deliberately kept apart: the preset chooses WHICH SERIES
+// (enabledKeys), the segment chips/brush choose WHICH TIME SPAN (viewStartUs/viewEndUs).
 
 pragma ComponentBehavior: Bound
 
@@ -120,6 +125,11 @@ Item {
         root.showCursor = (m[b + "cursor"] !== undefined) ? (m[b + "cursor"] === true) : true
         root.enabledKeys = (m[b + "series"] && typeof m[b + "series"] === "object")
                            ? m[b + "series"] : ({})
+        root.preset      = (m[b + "preset"]     !== undefined) ? String(m[b + "preset"])     : ""
+        root._presetBase = (m[b + "presetBase"] !== undefined) ? String(m[b + "presetBase"]) : ""
+        // Restore runs on creation and on every screen+mode change, and the series may already
+        // be in hand by then — re-resolve so the restored preset actually reaches enabledKeys.
+        root._syncPreset()
     }
     function _persistPref(name, val) {
         if (root.sessionType < 0) return            // compact / transient — don't persist
@@ -142,8 +152,82 @@ Item {
         e[key] = !root._isOn(key)
         root.enabledKeys = e
         root._persistPref("series", root.enabledKeys)
+        // The selection is no longer whatever group the combo names — say so.
+        if (!root.compact && root.preset !== "Custom") {
+            root.preset = "Custom"
+            root._persistPref("preset", "Custom")
+        }
     }
     function _color(i) { return Theme.chartSeriesColor(i) }
+
+    // ── Metric presets ────────────────────────────────────────────────────────────
+    // A fully-instrumented swing produces well over thirty plottable curves in six different
+    // units, which is thirty stacked facets in Split and a meaningless shared Y in Overlay. The
+    // combo picks ONE catalogue group at a time; the groups themselves come from C++
+    // (ChartMetrics.seriesGroups, keyed on MetricDescriptor.group) so the chart and the Metric
+    // Library section the same metrics the same way, and so a group this swing did not measure is
+    // never offered.
+    //
+    // A preset is not a second visibility mechanism — it WRITES root.enabledKeys, the map the
+    // legend chips already toggle and the plot already reads. Which is also why hand-toggling a
+    // chip drops the combo to "Custom": the selection has left the group, and claiming otherwise
+    // would be a label that lies about what is on screen.
+    property string preset: ""                      // "" = unresolved; "All" / "Custom" / group name
+
+    // The last preset that was actually PICKED — "Custom" is a state the chart falls into, never a
+    // set of metrics, so it cannot answer "which metrics is the reader working with". This can,
+    // and it is what the legend lists. Persisted with the preset so a restored "Custom" comes back
+    // to the same vocabulary rather than to everything.
+    property string _presetBase: ""
+
+    readonly property var _groups: cm.seriesGroups(root.seriesList)
+    readonly property var _presetOptions: {
+        var out = ["All"]
+        for (var i = 0; i < root._groups.length; ++i) out.push(root._groups[i].group)
+        if (root.preset === "Custom") out.push("Custom")   // only reachable by hand, so listed only then
+        return out
+    }
+    function _keysFor(name) {
+        for (var i = 0; i < root._groups.length; ++i)
+            if (root._groups[i].group === name) return root._groups[i].keys
+        return []
+    }
+    // "All" clears the map — _isOn treats an absent key as on, so an empty map is every series
+    // visible, and it stays correct for a swing that later produces a series this one did not.
+    function _applyPreset(name, persist) {
+        root.preset = name
+        if (persist) root._persistPref("preset", name)
+        if (name === "Custom") return               // enabledKeys already holds the hand selection
+        root._presetBase = name
+        if (persist) root._persistPref("presetBase", name)
+        var e = {}
+        if (name !== "All") {
+            var keys = root._keysFor(name)
+            for (var i = 0; i < root._plottable.length; ++i) {
+                var k = root._plottable[i].key
+                e[k] = keys.indexOf(k) >= 0
+            }
+        }
+        root.enabledKeys = e
+        if (persist) root._persistPref("series", e)
+    }
+    // Re-resolve against the swing on screen. Called when the groups change (a new swing) and
+    // after prefs are restored. A remembered preset is re-APPLIED rather than trusted, because
+    // the enabledKeys restored alongside it were computed for a different swing's series.
+    function _syncPreset() {
+        if (root.compact || root._groups.length === 0) return
+        // Does the preset the chart is sitting on still mean anything for THIS swing? "All"
+        // always does; a group does when the swing measured some of it. Custom is judged on the
+        // group it was picked from — with that group unmeasured there is neither a plot nor a
+        // legend left, so it is not a selection worth keeping.
+        const name  = root.preset === "Custom" ? root._presetBase : root.preset
+        const known = name === "All" || root._keysFor(name).length > 0
+        if (!known) { root._applyPreset(root._groups[0].group, false); return }
+        // The hand-picked map is the user's own — re-applying a preset over it would discard it.
+        if (root.preset === "Custom") return
+        root._applyPreset(root.preset, false)
+    }
+    on_GroupsChanged: root._syncPreset()
     function _name(s)  { return cm.shortLabel(s.key) || s.label || s.key }
     // Format a value in its series' own unit. Degrees keep the signed-deviation
     // convention ("+12°", no separator); other units (e.g. "mph") read as "75 mph"
@@ -156,23 +240,59 @@ Item {
         return sign + r + sep + u
     }
 
-    readonly property bool _hasAny: {
-        for (var i = 0; i < root._list.length; ++i)
-            if (root._list[i] && root._list[i].t_us && root._list[i].t_us.length > 1) return true
-        return false
-    }
-    // Enabled series with data, decorated with their (stable, full-list) palette colour.
-    readonly property var _visible: {
+    readonly property bool _hasAny: root._plottable.length > 0
+
+    // Every series this swing can DRAW — a curve of at least two samples, with a matching value
+    // array — decorated with its (stable, full-list) palette colour. The list also carries the
+    // ones currently toggled off, because the legend has to keep offering them.
+    //
+    // The setup scalars (stance width, tempo, attack angle, low point …) are MetricSeries with an
+    // empty curve and a single phaseSample, and they are dropped here. They had been reaching the
+    // legend, which iterated the raw series list: a dozen chips that toggled a trace that does not
+    // exist, on a panel already too crowded to read.
+    readonly property var _plottable: {
         var out = []
         for (var i = 0; i < root._list.length; ++i) {
             var s = root._list[i]
-            if (s && s.t_us && s.t_us.length > 1 && s.value && s.value.length === s.t_us.length
-                  && root._isOn(s.key)) {
+            if (s && s.t_us && s.t_us.length > 1 && s.value && s.value.length === s.t_us.length) {
                 var d = Object.assign({}, s)
                 d.color = root._color(i)
                 out.push(d)
             }
         }
+        return out
+    }
+    // What the LEGEND lists — the preset's metrics, not the swing's. Listing every plottable
+    // series here put the whole wall of metrics back on screen one row further down, which is
+    // exactly what the combo exists to stop; the chips are part of the same crowding problem as
+    // the facets, not an index to it.
+    //
+    // It lists the preset's MEMBERS rather than the visible ones, so a chip switched off stays
+    // present and dimmed and can be switched back on — a legend you can only subtract from is a
+    // one-way door.
+    //
+    // Under "Custom" it stays on _presetBase, the group the reader was in when they started
+    // hand-picking: that is the vocabulary being edited. Picking freely across everything is what
+    // "All" is for, and going there first widens the legend to match.
+    readonly property var _legendSeries: {
+        if (root._presetBase === "" || root._presetBase === "All") return root._plottable
+        var keys = root._keysFor(root._presetBase), out = []
+        for (var i = 0; i < root._plottable.length; ++i)
+            if (keys.indexOf(root._plottable[i].key) >= 0) out.push(root._plottable[i])
+        return out
+    }
+
+    // …of those, the ones currently switched on. Derived from _legendSeries, NOT from _plottable,
+    // and that is the load-bearing part: nothing can be on screen that the legend does not offer.
+    //
+    // Taken off _plottable it was wrong under "Custom". enabledKeys only carries the keys the
+    // preset wrote, and _isOn reads an ABSENT key as on, so the moment a new swing produced a
+    // series the hand-picked map had never heard of, that series drew itself into a selection
+    // nobody had chosen — a chart showing curves with no chip to switch them off.
+    readonly property var _visible: {
+        var out = []
+        for (var i = 0; i < root._legendSeries.length; ++i)
+            if (root._isOn(root._legendSeries[i].key)) out.push(root._legendSeries[i])
         return out
     }
 
@@ -334,6 +454,25 @@ Item {
                                       root._persistPref("split", root.splitMode) }
             }
 
+            Text {
+                text: qsTr("METRICS")
+                Layout.leftMargin: Theme.sp(4)
+                font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
+                font.letterSpacing: Theme.trackingLabel
+                color: Theme.colorText3
+            }
+
+            PpComboBox {
+                Layout.preferredWidth: Theme.sp(190)
+                // Hidden rather than empty when the catalogue matched nothing — with no groups
+                // the only option would be "All", a control whose one choice is the state it is
+                // already in.
+                visible: root._groups.length > 0
+                model: root._presetOptions
+                currentIndex: root._presetOptions.indexOf(root.preset)
+                onActivated: (i) => root._applyPreset(root._presetOptions[i], true)
+            }
+
             Item { Layout.fillWidth: true }      // spacer
 
             Repeater {
@@ -474,8 +613,11 @@ Item {
                 color: Theme.colorText
             }
             Text {
+                // "shown of plottable", not the raw series count: the raw count included the
+                // setup scalars, so it never matched the number of traces on screen.
                 text: Math.round((root.viewEndUs - root.viewStartUs) / 1000) + qsTr(" ms")
-                      + " · " + root._list.length + qsTr(" metrics") + " · "
+                      + " · " + root._visible.length + "/" + root._plottable.length
+                      + qsTr(" metrics") + " · "
                       + labels.phaseShortTag(root._nearStart) + "→" + labels.phaseShortTag(root._nearEnd)
                 font.family: Theme.fontData; font.pixelSize: Theme.fontSzLabel
                 font.letterSpacing: Theme.trackingData
@@ -621,11 +763,13 @@ Item {
             spacing: Theme.sp(10)
 
             Repeater {
-                model: root._list
+                // The preset's metrics — see _legendSeries. The colour rides on the model entry, so
+                // it stays the series' full-list palette colour and matches its trace whatever the
+                // preset is showing.
+                model: root._legendSeries
                 delegate: Row {
                     id: chip
                     required property var modelData
-                    required property int index
                     readonly property bool on: root._isOn(chip.modelData.key)
                     readonly property real val: labels.valueAtNearest(chip.modelData.t_us,
                                                                       chip.modelData.value, root._readoutUs)
@@ -635,7 +779,7 @@ Item {
                     Rectangle {
                         width: Theme.sp(8); height: Theme.sp(8); radius: Theme.sp(2)
                         anchors.verticalCenter: parent.verticalCenter
-                        color: chip.on ? root._color(chip.index) : Theme.colorText3
+                        color: chip.on ? chip.modelData.color : Theme.colorText3
                     }
                     Text {
                         text: root._name(chip.modelData)

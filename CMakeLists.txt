@@ -2873,14 +2873,42 @@ if(PINPOINT_BUILD_QML_TESTS)
         # app_settings.cpp comes along for its out-of-line member AND so AUTOMOC sees the header
         # beside it — the class is a QObject and the test constructs one, so without it the link
         # fails on a missing vtable rather than on anything the test did.
+        # ChartMetrics + TimelineLabels are compiled in and registered by hand in the setup object
+        # (see the comment there): the chart components declare them, so without these the whole
+        # PpMetricChart family is "Type unavailable" and cannot be probed at all. ChartMetrics now
+        # holds a MetricCatalogue, which is what drags the Metrics manifest and — through
+        # metric_providers -> reference_bands — the norm stack in behind it.
         qt_add_executable(qml_ui_test
             src/Gui/tests/qml/qml_ui_test.cpp
-            src/Gui/app/app_settings.cpp)
+            src/Gui/app/app_settings.cpp
+            src/Gui/review/chart_metrics.cpp
+            src/Gui/review/timeline_labels.cpp
+            src/Metrics/metric_catalogue.cpp
+            src/Metrics/metric_resolver.cpp
+            src/Metrics/metric_catalogue_manifest.cpp
+            src/Metrics/metric_providers.cpp
+            src/Analysis/reference_bands.cpp
+            src/Diagnostics/norm_pack.cpp
+            src/Diagnostics/context_tree.cpp
+            src/Diagnostics/characteristic_pack.cpp
+            src/Diagnostics/characteristic.cpp
+            src/Diagnostics/reference_pack.cpp
+            src/Diagnostics/measure_facets.cpp
+            src/Diagnostics/anatomy_vocabulary.cpp
+            src/Diagnostics/resource_norm_provider.cpp
+            src/Diagnostics/file_norm_provider.cpp
+            src/Diagnostics/merged_norm_provider.cpp)
         add_dependencies(qml_ui_test pinpoint_qml_test_imports)
         set_target_properties(qml_ui_test PROPERTIES AUTOMOC ON MACOSX_BUNDLE OFF)
         target_include_directories(qml_ui_test PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/app"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/review"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/Core"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Buffer"   # swing_analysis.h -> types.h (SourceId)
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Metrics"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Analysis"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Diagnostics"
             "${CMAKE_BINARY_DIR}/generated")
         target_compile_definitions(qml_ui_test PRIVATE
             QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/tests/qml"

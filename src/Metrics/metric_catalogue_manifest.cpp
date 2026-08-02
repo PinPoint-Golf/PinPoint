@@ -432,7 +432,19 @@ void installMetricManifest(MetricCatalogue &cat)
         .requirement = { .imuRoles = { R::Pelvis, R::LeadThigh, R::TrailThigh } },
     });
 
-    // ------------------------ Spine & pelvis (part LIVE — lower_body_metrics.cpp / upper_body_metrics.cpp)
+    // ------------------------ Spine & tilt, then Pelvis & lateral
+    //                          (part LIVE — lower_body_metrics.cpp / upper_body_metrics.cpp)
+    //
+    // These were one "Spine & pelvis" group and are now two, along the line between an ANGLE of the
+    // trunk and a TRANSLATION of the centre. The split is not cosmetic: the chart's metric presets
+    // are derived from `.group` (ChartMetrics::seriesGroups), so a group is also the unit a reader
+    // plots together, and ten members made the one useful group unreadable. Angles and displacements
+    // also rarely share a y-axis honestly — side bend and axis tilt are degrees about the same
+    // corridor, whereas sway/lift/drift are all % stance width.
+    //
+    // hipLineTilt is named for an angle but lives with the LATERAL half deliberately: it is a pelvis
+    // reading, it is measured in the same frontal plane as sway and lift, and it is read alongside
+    // them. Grouping is by what a coach reads together, not by unit.
 
     cat.addDescriptor({
         .key = QStringLiteral("spineForwardBend"),
@@ -440,7 +452,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Spine forward bend"),
         .shortLabel = QStringLiteral("Fwd bend"),
         .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Spine & tilt"),
         .description = QStringLiteral(
             "The forward tilt of the trunk over the ball — the flexion/extension of the thorax "
             "relative to the pelvis — which sets the posture the whole swing rotates around. Losing "
@@ -466,7 +478,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Spine side bend"),
         .shortLabel = QStringLiteral("Side bend"),
         .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Spine & tilt"),
         .description = QStringLiteral(
             "Lateral flexion of the trunk toward the trail side — the side-bend of the thorax "
             "relative to the pelvis — which naturally appears in the downswing as the trail "
@@ -490,7 +502,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Secondary axis tilt"),
         .shortLabel = QStringLiteral("Axis tilt"),
         .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Spine & tilt"),
         .description = QStringLiteral(
             "How much the spine leans away from the target at impact — the angle of the mid-hip-to-"
             "mid-shoulder line from vertical in the frontal (face-on) plane. It reflects the "
@@ -517,7 +529,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Pelvis sway"),
         .shortLabel = QStringLiteral("Sway"),
         .unit = QStringLiteral("% stance width"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Pelvis & lateral"),
         .description = QStringLiteral(
             "How far the pelvis slides laterally relative to address — the linear partner to "
             "pelvis rotation — as a percentage of the golfer's own stance. POSITIVE IS TOWARD THE "
@@ -547,7 +559,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Pelvis thrust"),
         .shortLabel = QStringLiteral("Thrust"),
         .unit = QStringLiteral("cm"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Pelvis & lateral"),
         .description = QStringLiteral(
             "How far the pelvis pushes toward the ball (along the line from the player to the ball) "
             "relative to address — the depth-axis partner to sway. A late, controlled move is "
@@ -572,7 +584,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Pelvis lift"),
         .shortLabel = QStringLiteral("Lift"),
         .unit = QStringLiteral("% stance width"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Pelvis & lateral"),
         .description = QStringLiteral(
             "How much the pelvis rises or drops vertically relative to address, as a percentage of "
             "the golfer's own stance — the up/down component of pelvis motion. HIGHER MEANS THE "
@@ -596,7 +608,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Hip line tilt"),
         .shortLabel = QStringLiteral("Hip tilt"),
         .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Pelvis & lateral"),
         .description = QStringLiteral(
             "The tilt of the line between the two hips, seen face-on. POSITIVE MEANS THE TRAIL HIP "
             "SITS ABOVE THE LEAD HIP. The trail hip riding upward at the top is the signature of a "
@@ -1276,7 +1288,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Thoracic flexion at address"),
         .shortLabel = QStringLiteral("Upper-back round"),
         .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Spine & tilt"),
         .description = QStringLiteral(
             "How far the upper back is rounded forward at address, measured as the thoracic "
             "segment's angle from vertical. This is the C-posture axis: the thoracic spine rotates "
@@ -1302,7 +1314,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Lumbar extension at address"),
         .shortLabel = QStringLiteral("Low-back arch"),
         .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Spine & tilt"),
         .description = QStringLiteral(
             "How far the low back is arched at address, measured as the lumbar segment's angle from "
             "neutral. This is the S-posture axis. An exaggerated arch pre-tensions the lower back "
@@ -1423,7 +1435,7 @@ void installMetricManifest(MetricCatalogue &cat)
         .label = QStringLiteral("Thorax lateral drift"),
         .shortLabel = QStringLiteral("Chest drift"),
         .unit = QStringLiteral("% stance width"),
-        .group = QStringLiteral("Spine & pelvis"),
+        .group = QStringLiteral("Pelvis & lateral"),
         .description = QStringLiteral(
             "How far the centre of the chest has moved sideways from its address position, as a "
             "percentage of stance width. The upper body moving toward the target ahead of the "

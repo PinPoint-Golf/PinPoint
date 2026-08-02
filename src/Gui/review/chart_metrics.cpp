@@ -22,6 +22,7 @@
 #include "../Analysis/dashboard_reductions.h"   // railCheckpoints / railRange / interpolateAtUs
 
 #include <QHash>
+#include <QSet>
 #include <QtGlobal>
 #include <QtMath>
 #include <algorithm>
@@ -408,4 +409,53 @@ QVariantList ChartMetrics::scoreSegments(const QVariantMap &buckets) const
 QString ChartMetrics::orientationLabel(double value, double greenLo, double greenHi) const
 {
     return pinpoint::analysis::orientationLabel(value, greenLo, greenHi);
+}
+
+// ── Chart metric presets ────────────────────────────────────────────────────────
+
+QVariantList ChartMetrics::seriesGroups(const QVariantList &seriesList) const
+{
+    // The keys this swing can actually DRAW. `> 1` (not `> 0`) matches PpMetricChart's own
+    // _visible test: a single sample is a point, not a trace, and the plot skips it.
+    QSet<QString> plotted;
+    for (const QVariant &v : seriesList) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("t_us")).toList().size() > 1)
+            plotted.insert(m.value(QStringLiteral("key")).toString());
+    }
+    if (plotted.isEmpty())
+        return {};
+
+    // Manifest order, preserved by walking all() once and appending a group the first time it
+    // is seen. A QHash keyed on the group name would lose exactly the ordering the Metric
+    // Library already presents these in, and two surfaces disagreeing about the order of the
+    // same vocabulary is the kind of small wrongness that reads as a bug.
+    std::vector<std::pair<QString, QStringList>> groups;
+    QHash<QString, int> indexOf;
+    for (const pinpoint::analysis::MetricDescriptor *d : m_catalogue.all()) {
+        if (!plotted.remove(d->key))      // remove ⇒ whatever survives is uncatalogued
+            continue;
+        auto it = indexOf.constFind(d->group);
+        if (it == indexOf.constEnd()) {
+            indexOf.insert(d->group, int(groups.size()));
+            groups.push_back({ d->group, QStringList{ d->key } });
+        } else {
+            groups[it.value()].second.append(d->key);
+        }
+    }
+
+    // Whatever the manifest did not claim. Sorted: `plotted` is a QSet, whose iteration order is
+    // unspecified and would otherwise make this group's contents vary between runs.
+    if (!plotted.isEmpty()) {
+        QStringList rest(plotted.cbegin(), plotted.cend());
+        rest.sort();
+        groups.push_back({ QStringLiteral("Other"), std::move(rest) });
+    }
+
+    QVariantList out;
+    out.reserve(int(groups.size()));
+    for (const auto &g : groups)
+        out.append(QVariantMap{ { QStringLiteral("group"), g.first },
+                                { QStringLiteral("keys"),  g.second } });
+    return out;
 }

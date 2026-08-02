@@ -47,6 +47,8 @@
 #include <QTemporaryDir>
 
 #include "app_settings.h"
+#include "chart_metrics.h"
+#include "timeline_labels.h"
 
 class QmlUiTestSetup : public QObject
 {
@@ -64,6 +66,19 @@ public slots:
         m_settings = new AppSettings(this);
         engine->rootContext()->setContextProperty(QStringLiteral("appSettings"), m_settings);
         engine->addImportPath(QStringLiteral(PP_QML_TEST_IMPORTS));
+
+        // The staged module is .qml files and a qmldir; the module's C++ QML_ELEMENT types are
+        // registered by the APP binary, which this target deliberately does not link. So a
+        // component that declares one — PpMetricChart and the whole chart family declare
+        // ChartMetrics and TimelineLabels — was simply "unavailable" here, which is why the chart
+        // had no UI coverage at all rather than failing coverage.
+        //
+        // Registering them by hand under the same URI is the smallest thing that opens those
+        // components up. It is not a stub: these are the real classes, compiled from the real
+        // sources, so a test can only pass here for the reason it would pass in the app. Add to
+        // this list (and to the target's sources) when a component under test needs another type.
+        qmlRegisterType<ChartMetrics>("PinPointStudio", 1, 0, "ChartMetrics");
+        qmlRegisterType<TimelineLabels>("PinPointStudio", 1, 0, "TimelineLabels");
     }
 
 private:

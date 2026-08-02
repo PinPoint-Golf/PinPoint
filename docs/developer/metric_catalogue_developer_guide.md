@@ -302,13 +302,25 @@ V&V: unit = header-only standalone test (`src/Analysis/tests`); validation sourc
 | `xFactorStretch` | planned | Plv+Thx | early-downswing peak − top | anat+mount (both) | new unit · (corpus: speed correlation) |
 | `hipInternalRotation` | planned | Plv+Thg | thigh-vs-pelvis twist | anat+mount (pelvis+thigh) | new unit · (mocap) |
 
-### Spine & pelvis
+### Spine & tilt
+
+Trunk ANGLES. Split from the old "Spine & pelvis" alongside `Pelvis & lateral` below: `.group` is
+what the chart's metric presets are derived from (`ChartMetrics::seriesGroups`), so a group is also
+the set a reader plots together, and ten members made it unreadable.
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
 | `spineForwardBend` | planned | Plv+Thx (or 3D cam) | thorax-rel-pelvis flex | anat+mount / camCal | new unit · (mocap) |
 | `spineSideBend` | planned | FaceCam (or IMU) | lateral flexion | camCal | new unit · (mocap) |
 | `secondaryAxisTilt` | planned | FaceCam | frontal spine vector vs vertical | camCal, ground | new unit · (mocap) |
+
+### Pelvis & lateral
+
+Centre TRANSLATIONS. `hipLineTilt` is named for an angle but belongs here: it is a pelvis reading in
+the same frontal plane as sway and lift, and it is read alongside them.
+
+| Metric | Status | Capture | Detection | Calibration | Verification & validation |
+|---|---|---|---|---|---|
 | `pelvisSway` | planned | FaceCam + ground | lateral pelvis translation | camCal, ground | new unit · (mocap) |
 | `pelvisThrust` | planned | **DTL** (optical axis) | toward-ball translation | stereo | new unit · (mocap; needs depth) |
 | `pelvisLift` | planned | FaceCam + ground | vertical translation | camCal, ground | new unit · (mocap) |
