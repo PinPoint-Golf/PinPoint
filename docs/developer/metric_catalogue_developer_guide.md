@@ -13,21 +13,31 @@ Companion process doc: [`analysis_pipeline_developer_guide.md`](analysis_pipelin
 ## 1. The layer at a glance
 
 ```
-src/Analysis/                         (pure, Qt-only value types — no Qt-GUI)
+src/Metrics/                          (pure, Qt-only value types — no Qt-GUI)
   metric_type.h                   MetricType { Summary, PointInTime, TimeSeries, Sequence }
-  metric_descriptor.h             MetricDescriptor, MetricRequirement, MetricNormative, NormativeCorridor
+  metric_descriptor.h             MetricDescriptor, MetricRequirement  (NO normative values — Step D)
   metric_provider.h               IMetricProvider seam, ShotContext, MetricAvailability
+  metric_reducer.h                the reducer vocabulary a measure names alongside a metricKey
   metric_catalogue.{h,cpp}        MetricCatalogue value object + makeMetricCatalogue() factory
   metric_resolver.{h,cpp}         provider fusion + describeRequirement() reason renderer
   metric_catalogue_manifest.cpp   installMetricManifest() — the ONE list of every descriptor
   metric_providers.{h,cpp}        WristMetricProvider / KinematicSeriesProvider / FootMetricProvider
-                                  / LowerBodyMetricProvider / TempoProvider / HeadMetricProvider
-                                  / ShaftLeanProvider / ScoreProvider / PlannedMetricProvider
-                                  / LaunchMonitorProvider
+                                  / LowerBodyMetricProvider / UpperBodyMetricProvider
+                                  / TrailWristProvider / BodyRotationProvider / ClubDeliveryProvider
+                                  / TempoProvider / HeadMetricProvider / ShaftLeanProvider
+                                  / ScoreProvider / PlannedMetricProvider / LaunchMonitorProvider
+src/Analysis/                         (the PRODUCERS — what emits a MetricSeries)
+  metric_extractor.{h,cpp}        the IMU wrist metrics; the rest are per-region stage files
+  metric_channel.h                MetricChannel, the shared curve type the producers fill
 src/Gui/review/
   metric_catalog.{h,cpp}          MetricCatalog : QObject (QML_ELEMENT) — QVariant façade
+  chart_metrics.{h,cpp}           ChartMetrics::seriesGroups() — presets from MetricDescriptor.group
   MetricLibrary/Detail/Row.qml    the directory + detail screens
 ```
+
+**The catalogue lives in `src/Metrics/`, not `src/Analysis/`** — it moved, and paths through this
+guide follow. `src/Analysis/` keeps the producers, which is the split the layer is built on:
+identity here, production there, and a descriptor that never names a producer.
 
 Design invariants (do not break):
 - **Identity is decoupled from production.** A descriptor never names a producer. A provider declares
@@ -38,12 +48,24 @@ Design invariants (do not break):
   (`analysis_stage.h` anti-goals).
 - **The full design catalogue — live + planned.** The manifest declares every metric in
   `shot_analyzer_design.md §A`, each either **live** (a producer emits it) or a **planned**
-  placeholder (`.planned = true`, no producer yet). Live today: metric_extractor ×4,
-  kinematic_series ×3, shaft-lean, foot_metrics ×5, ball_position ×1, head_track ×3,
-  tempo_metrics ×2, lower_body_metrics ×4, plus the `wristScore` / `wristResemblance` `Summary`
-  scores (sourced from a `ScoreBreakdown`, not a `MetricSeries`).
-  Planned: the whole-body rotation / spine-and-depth / club-delivery / kinematic-sequence /
-  address-and-impact alignment (shoulder / elbow / hip / feet) metrics and `swingScore`.
+  placeholder (`.planned = true`, no producer yet). **70 descriptors; 54 live, 16 planned.**
+  Live today: metric_extractor ×4, kinematic_series ×3 + shaft-lean, foot_metrics ×5 +
+  ball_position ×1, head_track ×3, lower_body_metrics ×6, upper_body_metrics ×9,
+  body_rotation ×4, club_delivery ×3, the trail-wrist series ×1, tempo_metrics ×2, the two
+  wrist `Summary` scores (sourced from a `ScoreBreakdown`, not a `MetricSeries`), and the nine
+  launch-monitor readings (a device, not a producer we write).
+  Planned: the depth-axis metrics, the sagittal spine pair, the keypoints no pose layout carries,
+  the sensors we do not place, `kinematicSequence`, and `swingScore`.
+
+  **This bullet and Appendix A both mirror the manifest's own header comment — keep all three in
+  step.** They drift the moment a producer lands without the roadmap being re-read, and a status
+  table that says "planned" about a metric already on the chart is worse than no table: it sends a
+  reader off to build something that exists. Audited 2026-08-02, against a table that had been
+  carrying **43 rows for a 70-metric catalogue**: 29 metrics were missing (three whole groups —
+  Arms, Ball flight, Strike — among them), 13 rows said "planned" about metrics that had shipped,
+  2 named metrics the manifest has never declared, and four rows described units their producers had
+  already stopped emitting. Appendix A is now checked key-for-key and status-for-status against the
+  manifest; re-run that check rather than trusting a spot read.
 - **ONE UNIT PER KEY, FOR ALL TIME.** A producer may not switch a key's unit per swing depending on
   whether a ruler resolved. Where the unit depends on one, emit the metric only when it resolves and
   leave it ABSENT otherwise — unavailable is a fact the app already renders honestly, a silently
@@ -91,7 +113,7 @@ scalars), `TimeSeries` (a curve), `Sequence` (ordered peak events — no v1 prod
 
 ### Step B — declare the descriptor in the manifest
 Add one `cat.addDescriptor({...})` block to `installMetricManifest()` in
-`src/Analysis/metric_catalogue_manifest.cpp`. Fill every field; source `description`/`howToRead` from
+`src/Metrics/metric_catalogue_manifest.cpp`. Fill every field; source `description`/`howToRead` from
 `docs/` (the wrist/foot/speed prose lives in `docs/design/shot_analyzer_design.md`,
 `docs/reference/wristmetrics.md`, `docs/reference/swing_json_schema.md`) — the manifest is where that
 scattered prose becomes structured. `usedBy` is static, hand-authored (e.g.
@@ -119,7 +141,7 @@ cat.addDescriptor({
 
 ### Step C — declare the provider capability
 A metric is `Unavailable` until a provider claims its key. Either extend an existing provider or add a
-new one in `src/Analysis/metric_providers.{h,cpp}`:
+new one in `src/Metrics/metric_providers.{h,cpp}`:
 - Add the key to that provider's `provides()`.
 - Handle it in `availability(key, ctx)`. Build the sensor/camera/club verdict from a
   `MetricRequirement` via the shared `fromRequirement()` helper so reasons read identically to the
@@ -205,11 +227,16 @@ Manifest/provider edits need no CMake change. New `.cpp` files reach three targe
 sources are already wired.
 
 ### Step F — extend the unit test
-Add cases to `src/Analysis/tests/metric_catalogue_test.cpp`:
+Add cases to `src/Metrics/tests/metric_catalogue_test.cpp` (the source lives beside the catalogue;
+the `pp_add_test` that registers it is in `src/Analysis/tests/CMakeLists.txt`):
 - **completeness**: your key resolves via `descriptor()`; bump the expected count and the per-type
   counts.
+- **a claimant**: some provider lists your key. There is no blanket assertion that every non-planned
+  descriptor is claimed by one, and `stanceWidthMm` has been produced-but-unclaimed — and therefore
+  permanently `Unavailable` — for exactly that reason. Adding the blanket case is worth more than
+  adding your own.
 - **resolve()**: a `ShotContext` where it is `Measured`, and one where it is `Unavailable` with the
-  right reason (session gate / missing sensor).
+  right reason (**missing sensor or camera — never a session type**; see the ⛔ box in Step C).
 - **corridors**: nothing goes in this test — the catalogue no longer resolves them. If your metric
   gains a norm, add a case to `manifest_migration_test` (`src/Diagnostics/tests/`) asserting it
   resolves a corridor at every phase it declares. That is the gate that catches a reducer naming a
@@ -261,19 +288,36 @@ norm.)*
 
 ## Appendix A — per-metric work plan (capture · detection · calibration · V&V)
 
-The work needed to bring each metric to production, across the pipeline stages. For **live** metrics
-the cells describe what is already in place (the producer + its test); for **planned** metrics they
-describe the outstanding work. This is a roadmap, not a contract — effort estimates live in the
-per-feature plans, and every "validate" step is corpus-scale (a single labelled swing is development
-data only). Promote a planned metric only when all four columns are satisfied.
+Every metric in the manifest, one row each, in manifest order. For **live** metrics the cells
+describe what is already in place (the producer + its test); for **planned** metrics they describe
+the outstanding work; **device** rows have no detection work at all. This is a roadmap, not a
+contract — effort estimates live in the per-feature plans, and every "validate" step is corpus-scale
+(a single labelled swing is development data only). Promote a planned metric only when all four
+columns are satisfied.
+
+The table is **exhaustive by construction** — every descriptor appears exactly once, with a status
+matching its flags. If you add a metric, add its row; if you promote one, flip its status here too.
 
 **Legend.** Capture: `F/H/U` = lead forearm/hand/upper-arm IMU · `Plv/Thx/Thg` = pelvis/thorax/thigh
 IMU · `FaceCam` = face-on whole-body camera (pose) · `DTL` = down-the-line camera (depth axis) ·
-`Club` = shaft/club track · `Ball` = ball track · `Phases` = segmentation phase events.
+`Club` = shaft/club track · `Ball` = ball track · `LM` = connected launch monitor · `Phases` =
+segmentation phase events.
 Calibration: `anat+mount` = IMU anatomical zero + mount check ([[calibration-state-signals]]) ·
 `camCal` = camera intrinsic/extrinsic (`cameraFixedInPlace`) · `ground` = ground-plane · `px→mm` =
 ball-scale (`setup.ballDetection`) · `stereo` = DTL/stereo extrinsics · `clubDev` = club-device mount.
 V&V: unit = header-only standalone test (`src/Analysis/tests`); validation source in parentheses.
+
+**Status** is read off the descriptor — `.planned` for the badge the directory shows, and
+`.requirement.launchMonitor` for the third row, which is a requirement rather than a roadmap item:
+
+| Status | Means |
+|---|---|
+| **live** | A producer we write emits it. Resolves Measured on a shot that meets the requirement. |
+| **device** | Real and claimed by `LaunchMonitorProvider`, but the *reading* comes from hardware we integrate rather than a producer we author. Not on the roadmap below — there is no detection work to do, only a connector. |
+| **planned** | `.planned = true`. `PlannedMetricProvider` claims it and always answers `Unavailable — "planned — not yet produced in this build"`, whatever the shot can do. |
+
+Groups below are in manifest order, which is the order the Metric Library and the chart's metric
+presets list them in.
 
 ### Score
 
@@ -291,15 +335,20 @@ V&V: unit = header-only standalone test (`src/Analysis/tests`); validation sourc
 | `leadWristRadUln` | live | F+H | MetricExtractor Cardan-2 ✓ | anat+mount | `wrist_angles_test` · (corpus; weakest IMU axis ~5°) |
 | `forearmPronation` | live | F+H+U | MetricExtractor twist ✓ | anat+mount | `wrist_angles_test` · (corpus) |
 | `leadArmFlexion` | live | F+H+U | MetricExtractor elbow angle ✓ | anat+mount | `wrist_angles_test` · (corpus) |
+| `trailWristFlexExt` | live | FaceCam (WholeBody hand keypoints) | `buildTrailWristSeries` apparent camera-plane angle ✓ | camCal | `pose_wrist_angle_source_test` · (corpus) |
 
 ### Body rotation
 
+Landed camera-first: `BodyRotationProvider` returns **Bridged** off a face-on camera and reserves
+Measured for the pelvis / thorax IMUs, so these read as real-but-estimated rather than absent.
+
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `pelvisRotation` | planned | Plv (slot map lacks a pelvis mount today) | axial `turn(e_ml)` extractor | anat+mount | new unit · (mocap ground truth) |
-| `thoraxRotation` | planned | Thx | axial-turn extractor | anat+mount | new unit · (mocap) |
-| `xFactor` | planned | Plv+Thx | thorax−pelvis separation | anat+mount (both) | new unit · (mocap) |
-| `xFactorStretch` | planned | Plv+Thx | early-downswing peak − top | anat+mount (both) | new unit · (corpus: speed correlation) |
+| `pelvisRotation` | live | FaceCam (Plv IMU upgrades it) | `buildBodyRotationSeries` axial turn ✓ | camCal / anat+mount | `body_rotation_test` · (mocap ground truth owed) |
+| `thoraxRotation` | live | FaceCam (Thx IMU upgrades it) | axial-turn channel ✓ | camCal / anat+mount | `body_rotation_test` · (mocap owed) |
+| `xFactor` | live | FaceCam (Plv+Thx upgrade it) | thorax−pelvis separation ✓ | camCal / anat+mount | `body_rotation_test` · (mocap owed) |
+| `xFactorStretch` | live | as `xFactor`, + a segmented Top | separation minus its value at Top ✓ | camCal / anat+mount | `body_rotation_test` · (corpus: speed correlation owed) |
+| `shoulderPlaneAngle` | live | FaceCam | `buildUpperBodySeries` shoulder-line vs horizontal ✓ | camCal | `upper_body_metrics_test` · (corpus) |
 | `hipInternalRotation` | planned | Plv+Thg | thigh-vs-pelvis twist | anat+mount (pelvis+thigh) | new unit · (mocap) |
 
 ### Spine & tilt
@@ -310,9 +359,11 @@ the set a reader plots together, and ten members made it unreadable.
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `spineForwardBend` | planned | Plv+Thx (or 3D cam) | thorax-rel-pelvis flex | anat+mount / camCal | new unit · (mocap) |
-| `spineSideBend` | planned | FaceCam (or IMU) | lateral flexion | camCal | new unit · (mocap) |
-| `secondaryAxisTilt` | planned | FaceCam | frontal spine vector vs vertical | camCal, ground | new unit · (mocap) |
+| `spineSideBend` | live | FaceCam | `buildUpperBodySeries` lateral flexion ✓ | camCal | `upper_body_metrics_test` · (mocap owed) |
+| `secondaryAxisTilt` | live | FaceCam | frontal spine vector vs vertical ✓ | camCal, ground | `upper_body_metrics_test` · (mocap owed) |
+| `spineForwardBend` | planned | Plv+Thx (or 3D cam) | thorax-rel-pelvis flex — SAGITTAL, so face-on cannot see it | anat+mount / camCal | new unit · (mocap) |
+| `thoracicFlexion` | planned | Plv+Thx (or 3D cam) | thoracic flex at Address — sagittal | anat+mount / camCal | new unit · (mocap) |
+| `lumbarExtension` | planned | Plv+Thx (or 3D cam) | lumbar extension at Address — sagittal | anat+mount / camCal | new unit · (mocap) |
 
 ### Pelvis & lateral
 
@@ -321,9 +372,36 @@ the same frontal plane as sway and lift, and it is read alongside them.
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `pelvisSway` | planned | FaceCam + ground | lateral pelvis translation | camCal, ground | new unit · (mocap) |
+| `pelvisSway` | live | FaceCam + ground | `buildLowerBodySeries` lateral translation ✓ | camCal, ground | `lower_body_metrics_test` · (mocap owed) |
+| `pelvisLift` | live | FaceCam + ground | vertical translation ✓ | camCal, ground | `lower_body_metrics_test` · (mocap owed) |
+| `hipLineTilt` | live | FaceCam | hip-line angle vs horizontal ✓ | camCal | `lower_body_metrics_test` · (corpus) |
+| `thoraxLateralDrift` | live | FaceCam + ground | `buildUpperBodySeries` thorax lateral translation ✓ | camCal, ground | `upper_body_metrics_test` · (corpus) |
 | `pelvisThrust` | planned | **DTL** (optical axis) | toward-ball translation | stereo | new unit · (mocap; needs depth) |
-| `pelvisLift` | planned | FaceCam + ground | vertical translation | camCal, ground | new unit · (mocap) |
+
+### Feet & stance
+
+| Metric | Status | Capture | Detection | Calibration | Verification & validation |
+|---|---|---|---|---|---|
+| `stanceWidth` | live | FaceCam | `buildFootSeries` heel-to-heel ÷ shoulder width ✓ | none — a body-relative ratio. **ABSENT when the shoulders do not resolve**, never re-expressed in another unit | `foot_metrics_test` · distribution owed (no corridor yet) |
+| `stanceWidthMm` | live | FaceCam + Ball | same span through the ball-diameter ruler ✓ | **px→mm** | `foot_metrics_test` · **see the defect note below** |
+| `ballPosition` | live | FaceCam + Ball | ball projected on the heel line ÷ stance width (`ball_position.cpp`) | none — a same-plane ratio, scale-free | `ball_position_test` · per-club distribution owed |
+| `leadFootFlare` | live | FaceCam | foot heel→bigtoe angle ✓ | none | `foot_metrics_test` · (corpus) |
+| `trailFootFlare` | live | FaceCam | foot heel→bigtoe angle ✓ | none | `foot_metrics_test` · (corpus) |
+| `toeLineAngle` | live | FaceCam | bigtoe→bigtoe line angle ✓ | none | `foot_metrics_test` · (corpus) |
+| `leadHeelLift` | live | FaceCam + Ball | heel-vs-toe elevation curve, in **cm** ✓ | **px→mm**; absent without the ruler | `foot_metrics_test` · (corpus) |
+| `leadKneeDrift` | live | FaceCam + ground | `buildLowerBodySeries` lead-knee lateral travel ✓ | camCal, ground | `lower_body_metrics_test` · (corpus) |
+| `comOverLeadFoot` | live | FaceCam + ground | balance point vs lead foot, sampled to Finish ✓ | camCal, ground | `lower_body_metrics_test` · (corpus) |
+| `leadKneeFlexion` | planned | FaceCam (DTL better) | knee angle — sagittal, face-on cannot see it | camCal / stereo | new unit · (mocap) |
+| `trailKneeFlexion` | planned | FaceCam (DTL better) | knee angle — sagittal | camCal / stereo | new unit · (mocap) |
+| `ballBodyDistance` | planned | **DTL** + Ball | ball standoff from the body — depth axis | stereo | new unit · (corpus) |
+
+> **Known defect (2026-08-02).** `stanceWidthMm` is declared in the manifest and emitted by
+> `foot_metrics.cpp`, but **no provider claims it** — it is absent from `FootMetricProvider::provides()`
+> and from `PlannedMetricProvider`. `MetricCatalogue::resolve()` therefore answers `Unavailable` for
+> every shot, so a metric that is genuinely produced never appears as Measured in the directory. The
+> fix is one entry in `FootMetricProvider::provides()` (plus a `ballTrack` capability check, since the
+> mm reading needs the ruler). Nothing catches this today: `metric_catalogue_test` asserts descriptor
+> counts, not that every non-planned descriptor has a claimant — a gap worth closing at the same time.
 
 ### Club & speed
 
@@ -338,11 +416,15 @@ the same frontal plane as sway and lift, and it is read alongside them.
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
+| `shaftAngleVsHorizontal` | live | FaceCam + Club | `buildClubDeliverySeries` shaft vs horizontal ✓ | px→mm | `club_delivery_test` · (corpus) |
+| `attackAngle` | live | FaceCam + Club | vertical velocity angle at Impact (`PointInTime`) ✓ | px→mm | `club_delivery_test` · (launch monitor) |
+| `lowPointAhead` | live | FaceCam + Club + Ball | arc low-point vs ball (`PointInTime`) ✓ | px→mm | `club_delivery_test` · (corpus) |
+| `faceAngle` | device | **LM** | read from the monitor | — | (launch monitor) |
+| `dynamicLoft` | device | **LM** | read from the monitor | — | (launch monitor) |
+| `spinLoft` | device | **LM** | read from the monitor | — | (launch monitor) |
 | `swingPlane` | planned | Club (DTL best) | SVD best-fit plane of head path | camCal | new unit · (DTL cross-check) |
-| `clubPath` | planned | **DTL** + Club | horizontal velocity angle | stereo | new unit · (launch monitor) |
-| `attackAngle` | planned | Club (DTL) | vertical velocity angle | camCal / stereo | new unit · (launch monitor) |
-| `faceAngle` | planned | **clubDev** (or Club proxy) | clubface-normal angle | clubDev | new unit · (launch monitor) |
-| `lowPointAhead` | planned | FaceCam shaft-head + Ball | arc low-point vs ball (needs measured clubhead) | px→mm | `low_point_*` · (corpus) |
+| `clubPath` | planned | **DTL** + Club | horizontal velocity angle — needs depth | stereo | new unit · (launch monitor) |
+| `shaftDirection` | planned | **DTL** + Club | shaft pointing vs target line — needs depth | stereo | new unit · (DTL cross-check) |
 
 ### Tempo & sequence
 
@@ -352,30 +434,55 @@ the same frontal plane as sway and lift, and it is read alongside them.
 | `tempoRatio` | **live** | Phases | backswing ÷ downswing time, + propagated 1σ | none | `tempo_metrics_test` · **`truth.event_top_s` still unmeasured — Top error is doubly leveraged here**; corridor provisional pending the Address→Takeaway gap distribution |
 | `kinematicSequence` | planned | Plv+Thx+F + Club | per-segment peak-ω order/timing stage (Sequence shape) | anat+mount | new unit · (mocap sequence) |
 
-### Feet & stance
-
-| Metric | Status | Capture | Detection | Calibration | Verification & validation |
-|---|---|---|---|---|---|
-| `stanceWidth` | live | FaceCam (+Ball) | `buildFootSeries` heel-to-heel ✓ | **ball-diameter px→mm ruler**; falls back to ×frame when no ball | `foot_metrics_test` · mm distribution owed (no corridor yet) |
-| `ballPosition` | **live** | FaceCam + Ball | ball projected on the heel line ÷ stance width (`ball_position.cpp`) | none — a same-plane ratio, scale-free | `ball_position_test` · per-club distribution owed |
-| `leadFootFlare` | live | FaceCam | foot heel→bigtoe angle ✓ | none | `foot_metrics_test` · (corpus) |
-| `trailFootFlare` | live | FaceCam | foot heel→bigtoe angle ✓ | none | `foot_metrics_test` · (corpus) |
-| `toeLineAngle` | live | FaceCam | bigtoe→bigtoe line angle ✓ | none | `foot_metrics_test` · (corpus) |
-| `leadHeelLift` | live | FaceCam | heel-vs-toe elevation curve ✓ | none (still ×frame — deliberately not converted with stanceWidth) | `foot_metrics_test` · (corpus) |
-
 ### Alignment
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `shoulderAlignment` | planned | FaceCam (DTL for target-line) | shoulder-line angle @Address+Impact | camCal (target-line ref needs DTL) | new unit · (corpus) |
-| `elbowAlignment` | planned | FaceCam | elbow-line angle @Address+Impact | camCal | new unit · (corpus) |
-| `hipAlignment` | planned | FaceCam (DTL for target-line) | hip-line angle @Address+Impact | camCal | new unit · (corpus) |
-| `feetAlignment` | planned | FaceCam | ankle-line angle @Address+Impact | camCal | new unit · (corpus) |
+| `elbowAlignment` | live | FaceCam | `buildUpperBodySeries` elbow-line angle ✓ | camCal | `upper_body_metrics_test` · (corpus) |
+| `feetAlignment` | live | FaceCam | `buildLowerBodySeries` ankle-line angle ✓ | camCal | `lower_body_metrics_test` · (corpus) |
+
+*`shoulderAlignment` and `hipAlignment` were listed here for a long time and have never existed in
+the manifest. The readings they described are covered by `shoulderPlaneAngle` (Body rotation) and
+`hipLineTilt` (Pelvis & lateral); a true target-line alignment needs DTL and is not declared.*
 
 ### Head
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `headSway` | live | FaceCam | `buildHeadSeries` lateral disp ✓ | none (×frame isotropic) | `head_track_test` · (corpus) |
-| `headLift` | live | FaceCam | `buildHeadSeries` vertical disp ✓ | none | `head_track_test` · (corpus) |
-| `headTilt` | live | FaceCam | `buildHeadSeries` eye-line angle ✓ | none | `head_track_test` · (corpus) |
+| `headSway` | live | FaceCam + Ball | `buildHeadSeries` lateral disp, in **cm** ✓ | **px→mm**; absent without the ruler | `head_track_test` · (corpus) |
+| `headLift` | live | FaceCam + Ball | vertical disp, in **cm** ✓ | **px→mm**; absent without the ruler | `head_track_test` · (corpus) |
+| `headTilt` | live | FaceCam | eye-line angle ✓ | none — an angle needs no scale | `head_track_test` · (corpus) |
+
+### Arms
+
+| Metric | Status | Capture | Detection | Calibration | Verification & validation |
+|---|---|---|---|---|---|
+| `leadArmToTorso` | live | FaceCam | `buildUpperBodySeries` lead arm vs torso angle ✓ | camCal | `upper_body_metrics_test` · (corpus) |
+| `trailElbowHeight` | live | FaceCam | trail elbow height ÷ shoulder width ✓ | camCal | `upper_body_metrics_test` · (corpus) |
+| `leadHandWidth` | live | FaceCam | hand distance from the body ÷ arm length ✓ | camCal | `upper_body_metrics_test` · (corpus) |
+| `leadUpperArmToChest` | live | FaceCam | lead-arm connection gap ÷ shoulder width ✓ | camCal | `upper_body_metrics_test` · (corpus) |
+
+### Ball flight
+
+Optical ball flight is not resolvable at our frame rates — see the `launchMonitor` requirement in
+`metric_descriptor.h` for why that is stated as a requirement rather than tracked as a gap. The three
+**planned** rows are the ones we could in principle see off a high-rate ball track and have not built.
+
+| Metric | Status | Capture | Detection | Calibration | Verification & validation |
+|---|---|---|---|---|---|
+| `faceToPath` | device | **LM** | face angle − club path, from the monitor | — | (launch monitor) |
+| `spinAxis` | device | **LM** | from the monitor | — | (launch monitor) |
+| `spinRate` | device | **LM** | from the monitor | — | (launch monitor) |
+| `carryDistance` | device | **LM** | from the monitor | — | (launch monitor) |
+| `launchDirection` | planned | Ball (high rate) | initial ball vector, horizontal | camCal / stereo | new unit · (launch monitor) |
+| `launchAngle` | planned | Ball (high rate) | initial ball vector, vertical | camCal / stereo | new unit · (launch monitor) |
+| `ballSpeed` | planned | Ball (high rate) | post-impact ball speed | px→mm | new unit · (launch monitor) |
+
+### Strike
+
+Both read from the monitor; there is no detection work here, only the connector.
+
+| Metric | Status | Capture | Detection | Calibration | Verification & validation |
+|---|---|---|---|---|---|
+| `smashFactor` | device | **LM** | ball speed ÷ clubhead speed, from the monitor | — | (launch monitor) |
+| `strikeLocation` | device | **LM** | face-impact position, from the monitor | — | (launch monitor) |
