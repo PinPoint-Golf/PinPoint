@@ -25,11 +25,25 @@ import PinPointStudio
 Item {
     id: root
 
-    // Disk info — refreshed when the panel becomes visible and after folder changes
+    // Disk info. queryStorageInfo() is now CHEAP — volume total/free/name and the cached library
+    // size — so calling it from a binding or on completion costs nothing. The recursive
+    // measurement behind `sessionBytes` runs on a worker and arrives later, on sessionBytesChanged.
     property var diskInfo: ({})
 
+    // Volume geometry only. Safe to call at any time, including before the first frame.
     function refreshDiskInfo() {
         diskInfo = appSettings.queryStorageInfo()
+    }
+
+    // …and the expensive half, kicked onto a worker. Returns immediately.
+    function rescanLibrarySize() {
+        appSettings.refreshSessionBytes()
+    }
+
+    // The scan landed (or was started): re-read so the figure and the bar update.
+    Connections {
+        target: appSettings
+        function onSessionBytesChanged() { root.refreshDiskInfo() }
     }
 
     function formatBytes(n) {
@@ -74,7 +88,11 @@ Item {
         ? Math.floor(root.diskInfo.freeBytes / (sessionMb * 1024 * 1024))
         : 0
 
-    Component.onCompleted: refreshDiskInfo()
+    // Both at startup, deliberately. StoragePanel is a direct child of a StackLayout, so it is
+    // built at launch whether or not anybody opens Settings — and that is wanted here: the walk
+    // warms the filesystem's attribute cache, so the first real use of the library is quick. What
+    // is NOT wanted is doing it on this thread. The volume read is instant; the walk is a worker.
+    Component.onCompleted: { refreshDiskInfo(); rescanLibrarySize() }
 
     // ── Folder dialog ─────────────────────────────────────────────────────────
 
@@ -84,6 +102,7 @@ Item {
         onAccepted: {
             appSettings.athleteLibraryPath = appSettings.urlToLocalFile(selectedFolder)
             root.refreshDiskInfo()
+            root.rescanLibrarySize()      // a different library is a different size
         }
     }
 
@@ -362,8 +381,11 @@ Item {
                             color:  Theme.colorBg3
 
                             Rectangle {
+                                // Math.max as well as Math.min: sessionBytes is -1 until the first
+                                // scan lands, and an unclamped ratio would draw a negative width.
                                 width:  root.diskInfo.totalBytes > 0
-                                            ? parent.width * Math.min(1, root.diskInfo.sessionBytes / root.diskInfo.totalBytes)
+                                            ? parent.width * Math.max(0, Math.min(1,
+                                                  root.diskInfo.sessionBytes / root.diskInfo.totalBytes))
                                             : 0
                                 height: parent.height
                                 radius: parent.radius
@@ -373,7 +395,13 @@ Item {
                         }
 
                         Text {
-                            text:                  formatBytes(root.diskInfo.sessionBytes)
+                            // "Measuring…" while the walk is out, rather than the "—" formatBytes
+                            // gives for -1. The two look the same to formatBytes and mean quite
+                            // different things: one is "we are counting", the other is "there is
+                            // nothing here".
+                            text:                  appSettings.sessionBytesScanning
+                                                       ? qsTr("Measuring…")
+                                                       : formatBytes(root.diskInfo.sessionBytes)
                             font.family:           Theme.fontData
                             font.pixelSize:        Theme.fontSzMicro
                             color:                 Theme.colorText2

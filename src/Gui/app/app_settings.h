@@ -23,10 +23,13 @@
 #include <QStringList>
 #include <QVariantMap>
 #include <QCursor>
+#include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QUrl>
 #include <QRegularExpression>
+#include <atomic>
+#include <memory>
 #include "pp_settings.h"
 #include "version.h"
 
@@ -49,6 +52,11 @@ class AppSettings : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString appVersion    READ appVersion    CONSTANT)
+    // Library size, and whether it is currently being measured. Both notify on the same signal
+    // deliberately: they change together at exactly two instants (scan starts, scan ends), and a
+    // view that shows a spinner while the number is stale wants to re-evaluate both at once.
+    Q_PROPERTY(qint64  sessionBytes         READ sessionBytes         NOTIFY sessionBytesChanged)
+    Q_PROPERTY(bool    sessionBytesScanning READ sessionBytesScanning NOTIFY sessionBytesChanged)
     Q_PROPERTY(int     themeIndex   READ themeIndex   WRITE setThemeIndex   NOTIFY themeIndexChanged)
     Q_PROPERTY(int     windowWidth  READ windowWidth  WRITE setWindowWidth  NOTIFY windowWidthChanged)
     Q_PROPERTY(int     windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowHeightChanged)
@@ -226,7 +234,27 @@ class AppSettings : public QObject
     Q_PROPERTY(QVariantMap clubLenPrior READ clubLenPrior WRITE setClubLenPrior NOTIFY clubLenPriorChanged)
 
 public:
+    // Volume geometry ONLY — total, free, name. Cheap: three QStorageInfo reads and no directory
+    // traversal at all. `sessionBytes` comes back from the cache below, which is -1 until a scan
+    // has completed, so a caller can tell "not measured yet" from "measured, and it is zero".
+    //
+    // The traversal that used to live here is now refreshSessionBytes(). It was a fully recursive
+    // stat of every file under the athlete library, on the GUI thread, from StoragePanel's
+    // Component.onCompleted — and StoragePanel is a direct child of a StackLayout, which builds
+    // every page eagerly whatever the current index. So it ran at every launch whether or not
+    // anybody opened Settings, BEFORE the first frame. On a local library that is a barely
+    // noticeable hitch. On a network share it is 5–10 seconds of black window: measured at 12,471
+    // files over an SMB mount, ~100 % of startup samples inside QDirIterator::next().
     Q_INVOKABLE StorageInfo queryStorageInfo() const;
+
+    // Kick the recursive library measurement onto a worker. Returns immediately; when the walk
+    // finishes, `sessionBytes` is cached and sessionBytesChanged() fires so a bound view re-reads.
+    // A second call while one is running is a no-op rather than a queue — the answer would be the
+    // same and the scan is the expensive thing.
+    Q_INVOKABLE void refreshSessionBytes();
+
+    qint64 sessionBytes() const         { return m_sessionBytes; }
+    bool   sessionBytesScanning() const { return m_sessionBytesScanning; }
 
     // Cross-platform conversion of a FolderDialog/FileDialog url to a native local
     // path. QML's JS `url` type has no toLocalFile(), and naively stripping "file://"
@@ -248,6 +276,12 @@ public:
         s.replace(winDrive, QStringLiteral("\\1"));
         return s;
     }
+
+    // Out of line, in app_settings.cpp: it asks a running library scan to stop and waits for it.
+    // Declared rather than defaulted because the wait is a real obligation — a worker holding a
+    // dangling `this` through the watcher would crash on quit, and only on the machines slow
+    // enough for the scan still to be running, which is precisely the network case.
+    ~AppSettings() override;
 
     explicit AppSettings(QObject *parent = nullptr) : QObject(parent)
     {
@@ -1292,6 +1326,7 @@ public:
     }
 
 signals:
+    void sessionBytesChanged();
     void themeIndexChanged();
     void windowWidthChanged();
     void windowHeightChanged();
@@ -1497,4 +1532,16 @@ private:
     bool    m_saveLaunchMonitorData = true;
 
     QVariantMap m_clubLenPrior;
+
+    // ── Library-size scan ────────────────────────────────────────────────────
+    // -1 is "never measured", which is NOT the same statement as 0 and must not collapse into it:
+    // a fresh library really can be empty, and a view that cannot tell them apart shows a confident
+    // "0 bytes" for a share it has not read yet.
+    qint64                 m_sessionBytes         = -1;
+    bool                   m_sessionBytesScanning = false;
+    QFutureWatcher<qint64> m_sessionBytesWatcher;
+    // Shared with the worker so the destructor can ask it to stop. QtConcurrent::run futures are
+    // not cancellable, and waiting on a full network walk would stall every quit by as long as the
+    // stall this change exists to remove — so the walk polls this and returns early instead.
+    std::shared_ptr<std::atomic_bool> m_sessionBytesAbort;
 };
