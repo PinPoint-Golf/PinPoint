@@ -510,9 +510,16 @@ release 3, finish 3.
 
 ### 8.4 Content — what can actually fire
 
-**16 of the 83 signals can fire**, covering 16 conditions. Every one of the other 67 sits on a
-measure that is `planned` (56), `externalDevice` (10) or `noProducer` (2) — **zero** are live with no
-norm, which `core_pack_test` asserts. So the dark ones are waiting on *producers*, not on corridors.
+**37 signals can fire, covering 35 conditions** (2026-08-02, after the lower-body producer — see
+`docs/design/lower_body_face_on_metrics.md`). Everything else sits on a measure that is `planned`,
+`externalDevice` or `noProducer` — **zero** are live with no norm, which `core_pack_test` asserts.
+So the dark ones are waiting on *producers*, not on corridors.
+
+The last jump was 25 → 35 and came from one analysis stage over COCO body keypoints 11–16, which
+turned `pelvisSway`, `pelvisLift` and two new frontal-plane keys live in a single change. The
+governing rule there is worth carrying: **a face-on camera resolves the frontal plane and nothing in
+depth**, so `pelvisThrust` (depth), the knee flexion angles (sagittal) and `pelvisRotation` stay
+planned on purpose rather than by omission.
 
 That is double the eight signals of the previous content package, and the doubling came entirely
 from a gap nobody had noticed: eleven producer keys were live and carried **no measure at all** in
@@ -693,6 +700,7 @@ Each of these is a bug that shipped or nearly shipped. They are here because non
 4. **A corridor keyed on the wrong phase disappears silently.** The reducer must name the phase the producer labels.
 5. **Do not pin shipped numbers in a test.** Two parity gates had to be deleted for exactly this. Gate *shapes* and *relationships*, not values.
 6. **Unit strings can match while conventions do not.** `normUnitMismatch` compares strings and is structurally incapable of catching stance width reading ~2× its corridor in a field both sides spell `% shoulder width`.
+6b. **And it is blind to the PRODUCER, which is the third party to that comparison.** It checks the norm against the MEASURE, and the loader refuses a mismatch there — so both ends of the content agree by construction while the producer emits something else entirely. Three live measures shipped declaring `cm` over producers emitting `×frame` or `mm`: `sig_excessiveHeelLift` could not fire on any swing ever recorded, and `headSway` read Action on all of them. Two silent failures in opposite directions from one root. `measureUnitMismatch` now compares `Measure::unit` against `MetricDescriptor::unit` (`Rate` reducers exempt) and is gated at zero over the shipped library. **A producer must emit ONE unit for a key, for all time** — where that depends on a ruler, the metric is absent when the ruler fails rather than present in the fallback scale, because a metric whose unit changes per swing cannot carry a norm at all.
 7. **Never derive "edited" by comparing values.** A user row holding the shipped numbers is still the user's. Track it at merge time.
 8. **`NotMeasured` is never a pass**, and an omitted condition is not a `NotFired` one. Three distinct states; nothing may collapse them.
 9. **Inside a Repeater delegate, only the component root id resolves** — and a handler on a composite type that declares its own `id: root` cannot see even that. It throws only on click, so no binding, test or screenshot will show it. At file scope, `root.x` inside a composite is fine.

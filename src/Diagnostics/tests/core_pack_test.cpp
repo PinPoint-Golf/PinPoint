@@ -78,14 +78,20 @@ int main()
         }
 
         auto coverage = [&](const char *id) { return coverageOf(p, QString::fromLatin1(id)); };
-        check(coverage("poor_pelvic_disassociation") == 12, "poor pelvic disassociation explains 12");
-        check(coverage("limited_thoracic_rotation") == 11, "limited thoracic rotation explains 11");
+        check(coverage("poor_pelvic_disassociation") == 13, "poor pelvic disassociation explains 13");
+        check(coverage("limited_thoracic_rotation") == 13, "limited thoracic rotation explains 13");
         check(coverage("limited_lead_hip_ir") == 8, "limited lead-hip internal rotation explains 8");
         // 10 -> 11 when the trail hip was given its route to over-the-top: a pelvis that cannot
         // finish turning away leaves the downswing no room to rotate into, and the arms take it
         // over the top. Updated deliberately, per the note below on the pelvis-sway count — these
         // are the numbers somebody chose, and a `>=` here would stop the test noticing a change.
-        check(coverage("limited_trail_hip_ir") == 11, "limited trail-hip internal rotation explains 11");
+        //
+        // 11 -> 13 with the lower-body producer: the trail hip gained the lead knee working in at
+        // the top and the pelvis rising in the backswing. Both are OBSERVATIONS the restriction can
+        // produce and neither is evidence of it on its own — see the design doc on why the face-on
+        // signature is ambiguous — which is why both edges are Moderate and why the explanation
+        // pass, not the detector, is what names the cause.
+        check(coverage("limited_trail_hip_ir") == 13, "limited trail-hip internal rotation explains 13");
         check(coverage("poor_core_stability") == 10, "poor core stability explains 10");
 
         const int topFive = coverage("poor_pelvic_disassociation") + coverage("limited_thoracic_rotation")
@@ -302,6 +308,15 @@ int main()
     // content as a whole, but the grep only ever covered core.json — and a vendor name duly sat
     // unnoticed in a norms.json citation note. A rule enforced over one of three files is a rule
     // that reads as enforced and is not.
+    //
+    // THE ONE SANCTIONED ESCAPE, because otherwise this rule silently costs the library citations:
+    // a peer-reviewed paper whose PUBLISHED TITLE names such a system may still be recorded, with
+    // the name replaced by a bracketed editorial redaction — `ref.gulgin2014` is the worked example.
+    // The identifier is never touched, so the record resolves to the real title in one click, and
+    // the redaction declares itself in `establishes` rather than being silent. That is a standard
+    // scholarly abridgement, not a workaround: the alternative is dropping the only study that
+    // tested physical screens against visible swing faults, which would leave the library's most
+    // load-bearing negative result uncitable. Redact the BRAND, never the finding.
     {
         const char *forbidden[] = { "titleist", "tpi", "trackman", "flightscope", "foresight",
                                     "k-vest", "kvest", "gears", "swingcatalyst", "boditrak",

@@ -478,20 +478,22 @@ void installMetricManifest(MetricCatalogue &cat)
         .type = MetricType::TimeSeries,
         .label = QStringLiteral("Pelvis sway"),
         .shortLabel = QStringLiteral("Sway"),
-        .unit = QStringLiteral("cm"),
+        .unit = QStringLiteral("% stance width"),
         .group = QStringLiteral("Spine & pelvis"),
         .description = QStringLiteral(
             "How far the pelvis slides laterally relative to address — the linear partner to "
-            "pelvis rotation. POSITIVE IS TOWARD THE LEAD SIDE, negative away from it. A little "
-            "pressure shift is powerful; too much slide replaces rotation and hurts consistency."),
+            "pelvis rotation — as a percentage of the golfer's own stance. POSITIVE IS TOWARD THE "
+            "LEAD SIDE, negative away from it. A little pressure shift is powerful; too much slide "
+            "replaces rotation and hurts consistency."),
         .howToRead = QStringLiteral(
             "Read near the top and at Impact. A good pattern goes slightly NEGATIVE in the "
             "backswing, away from the lead side, then positive through the downswing — a pressure "
             "shift — returning near or just past zero by impact. A large negative peak going back "
             "is sway and usually costs turn and centredness of strike; still negative at impact is "
-            "hanging back. Planned: needs a face-on camera and a calibrated ground plane."),
+            "hanging back. The scale is the golfer's own address stance rather than centimetres, "
+            "which needs no ruler and asks the question a coach actually asks — how far across the "
+            "stance, not how many centimetres across the room. Needs a face-on camera."),
         .phases = { P::Top, P::Impact },
-        .planned = true,
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("characteristic:hanging_back"),
                     QStringLiteral("characteristic:slide"),
@@ -531,23 +533,78 @@ void installMetricManifest(MetricCatalogue &cat)
         .type = MetricType::TimeSeries,
         .label = QStringLiteral("Pelvis lift"),
         .shortLabel = QStringLiteral("Lift"),
-        .unit = QStringLiteral("cm"),
+        .unit = QStringLiteral("% stance width"),
         .group = QStringLiteral("Spine & pelvis"),
         .description = QStringLiteral(
-            "How much the pelvis rises or drops vertically relative to address — the up/down "
-            "component of pelvis motion. Some rise through impact is part of a powerful, "
-            "ground-force-driven action; an uncontrolled early rise is another face of early "
-            "extension."),
+            "How much the pelvis rises or drops vertically relative to address, as a percentage of "
+            "the golfer's own stance — the up/down component of pelvis motion. HIGHER MEANS THE "
+            "PELVIS HAS RISEN. Some rise through impact is part of a powerful, ground-force-driven "
+            "action; an uncontrolled early rise is another face of early extension."),
         .howToRead = QStringLiteral(
             "Read at Impact. A small, controlled rise as the player pushes off the ground is normal "
             "and even desirable; what you are watching for is an early or excessive lift that pulls "
-            "the club off its path. Read it alongside pelvis thrust and spine forward bend. "
-            "Planned: needs a face-on camera and a calibrated ground plane."),
-        .phases = { P::Impact },
-        .planned = true,
+            "the club off its path. Read it alongside pelvis thrust and spine forward bend. This is "
+            "the pelvis CENTRE rising or sinking as a whole; one hip riding up above the other is a "
+            "different quantity and has its own metric in hip line tilt. Needs a face-on camera."),
+        .phases = { P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
-        .usedBy = { QStringLiteral("characteristic:trail_hip_hike"),
-                    QStringLiteral("characteristic:pelvis_sink_backswing") },
+        .usedBy = { QStringLiteral("characteristic:pelvis_sink_backswing"),
+                    QStringLiteral("characteristic:pelvis_rise_backswing") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("hipLineTilt"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Hip line tilt"),
+        .shortLabel = QStringLiteral("Hip tilt"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Spine & pelvis"),
+        .description = QStringLiteral(
+            "The tilt of the line between the two hips, seen face-on. POSITIVE MEANS THE TRAIL HIP "
+            "SITS ABOVE THE LEAD HIP. The trail hip riding upward at the top is the signature of a "
+            "pelvis that hiked instead of turning — the golfer found the feeling of a backswing by "
+            "lifting the trail side rather than by rotating over the trail leg."),
+        .howToRead = QStringLiteral(
+            "Read at the top. This is an ABSOLUTE angle rather than a change from address, because "
+            "the figure it is read against is absolute: the trail hip sits somewhat above the lead "
+            "hip at the top for everybody, and the question is how much. It is measured in the "
+            "image plane, so a golfer standing at an angle to the camera will read differently from "
+            "one square to it — read it alongside pelvis lift, which rises when the whole pelvis "
+            "comes up rather than one side of it. Needs a face-on camera."),
+        .phases = { P::Top },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:trail_hip_hike") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("leadKneeDrift"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead knee drift"),
+        .shortLabel = QStringLiteral("Knee drift"),
+        .unit = QStringLiteral("% stance width"),
+        .group = QStringLiteral("Feet & stance"),
+        .description = QStringLiteral(
+            "How far the lead knee has travelled sideways RELATIVE TO ITS OWN HIP, as a percentage "
+            "of the golfer's stance. POSITIVE IS TOWARD THE LEAD SIDE, so a lead knee working "
+            "inward toward the trail leg reads NEGATIVE. Read at the top, it separates a golfer who "
+            "turned into the trail hip from one who found the same feeling by letting the lead knee "
+            "collapse across."),
+        .howToRead = QStringLiteral(
+            "A per-frame curve; the reading that matters is at the top, and a large negative value "
+            "there is the observation. It is a DIFFERENCE — the knee's sideways travel minus its "
+            "own hip's — and that is the whole point of the metric rather than a detail of it. "
+            "Pelvic rotation carries the lead hip toward the trail side as seen from the front, so "
+            "the raw knee position moves the same way whether the golfer turned deeply or did not "
+            "turn at all; subtracting the hip is what tells those two apart. It cannot separate "
+            "them perfectly, since hip and knee sit at different distances from the axis the pelvis "
+            "turns about, so treat a reading here as an observation that points at a cause rather "
+            "than as the cause itself — the down-the-line view and a physical hip screen are what "
+            "settle it. Needs a face-on camera."),
+        .phases = { P::Top },
+        .requirement = { .faceOnCamera = true },
+        .usedBy = { QStringLiteral("chart:review"),
+                    QStringLiteral("characteristic:lead_knee_drifts_in_at_top") },
     });
 
     // ------------------------------------------------------- Club & speed (face-on club track, 2D)
@@ -994,18 +1051,20 @@ void installMetricManifest(MetricCatalogue &cat)
         .type = MetricType::TimeSeries,
         .label = QStringLiteral("Lead heel lift"),
         .shortLabel = QStringLiteral("Heel lift"),
-        .unit = QStringLiteral("×frame"),
+        .unit = QStringLiteral("cm"),
         .group = QStringLiteral("Feet & stance"),
         .description = QStringLiteral(
-            "How far the lead heel rises off the ground through the swing, relative to address, as "
-            "a fraction of frame height (positive when the heel lifts). Some players anchor both "
+            "How far the lead heel rises off the ground through the swing, relative to address, in "
+            "centimetres. HIGHER MEANS THE HEEL IS FURTHER OFF THE GROUND. Some players anchor both "
             "heels; others let the lead heel come up in the backswing to allow a bigger turn — both "
             "can work."),
         .howToRead = QStringLiteral(
             "This is a per-frame curve, usually read for how much the heel comes up around the top. "
             "A little lift is common and can free up the backswing turn; keeping the heel down is a "
             "legitimate stylistic choice for stability. Read the trend rather than any single "
-            "value. Needs a face-on whole-body camera."),
+            "value. The centimetre scale comes from the ball-diameter ruler at the ground plane, so "
+            "the metric is absent rather than rescaled when no ball was detected. Needs a face-on "
+            "whole-body camera."),
         .phases = { P::Top },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review"),
@@ -1119,18 +1178,21 @@ void installMetricManifest(MetricCatalogue &cat)
         .type = MetricType::TimeSeries,
         .label = QStringLiteral("Head sway"),
         .shortLabel = QStringLiteral("Head sway"),
-        .unit = QStringLiteral("×frame"),
+        .unit = QStringLiteral("cm"),
         .group = QStringLiteral("Head"),
         .description = QStringLiteral(
-            "How much the head moves side-to-side relative to address, as a fraction of frame width "
-            "so it is camera-distance independent. The head is a convenient, stable proxy for "
-            "whether the upper body is staying centred: rotating around a steady head is efficient, "
-            "while sliding the head off the ball tends to move the low point."),
+            "How far the head moves side-to-side relative to address, in centimetres. POSITIVE IS "
+            "TOWARD THE LEAD SIDE, the same displacement convention pelvis sway follows. The head is "
+            "a convenient, stable proxy for whether the upper body is staying centred: rotating "
+            "around a steady head is efficient, while sliding the head off the ball tends to move "
+            "the low point."),
         .howToRead = QStringLiteral(
             "This is a per-frame curve; some lateral movement (especially a small shift back and "
             "through) is normal, and only excessive sway is a fault. Read the trend and the peak "
             "rather than any single frame, and pair it with pelvis sway to see whether the whole "
-            "body is sliding. Needs a face-on camera; Wrist Motion session."),
+            "body is sliding. The centimetre scale comes from the inter-ear ruler, so the metric is "
+            "absent rather than rescaled when the head is too small or too occluded to measure. "
+            "Needs a face-on camera; Wrist Motion session."),
         .phases = { P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review"),
@@ -1143,17 +1205,18 @@ void installMetricManifest(MetricCatalogue &cat)
         .type = MetricType::TimeSeries,
         .label = QStringLiteral("Head lift"),
         .shortLabel = QStringLiteral("Head lift"),
-        .unit = QStringLiteral("×frame"),
+        .unit = QStringLiteral("cm"),
         .group = QStringLiteral("Head"),
         .description = QStringLiteral(
-            "How much the head rises or drops relative to address, as a fraction of frame width "
-            "(positive when it rises). Vertical head movement is an early, easy-to-see indicator of "
-            "standing up out of posture or dipping into the ball, both of which change the strike."),
+            "How far the head rises or drops relative to address, in centimetres. HIGHER MEANS THE "
+            "HEAD HAS RISEN. Vertical head movement is an early, easy-to-see indicator of standing "
+            "up out of posture or dipping into the ball, both of which change the strike."),
         .howToRead = QStringLiteral(
             "A per-frame curve read against the address height. A steady head is ideal; an early "
             "rise through the downswing points toward standing up / early extension, while a dip "
             "suggests a drop into the shot. Read it alongside spine forward bend and pelvis lift. "
-            "Needs a face-on camera; Wrist Motion session."),
+            "The centimetre scale comes from the inter-ear ruler, so the metric is absent rather "
+            "than rescaled when it does not resolve. Needs a face-on camera; Wrist Motion session."),
         .phases = { P::Top, P::Impact },
         .requirement = { .faceOnCamera = true },
         .usedBy = { QStringLiteral("chart:review"),

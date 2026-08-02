@@ -184,6 +184,14 @@ pp_add_test(kinematic_series_test SOURCES kinematic_series_test.cpp ${ANALYSIS}/
 # track, no fixture.
 pp_add_test(foot_metrics_test SOURCES foot_metrics_test.cpp ${ANALYSIS}/foot_metrics.cpp)
 
+# Lower-body frontal-plane metrics (lower_body_metrics.{h,cpp}): the hip-referenced
+# lead-knee drift and why it is a difference, the lead-positive sign resolved from
+# the address geometry rather than assumed, the absolute hip-line tilt, and the
+# stance-span denominator floor. Reads COCO body 11–16 only, so it also pins that
+# a legacy 17-kp track produces a full set. Qt-only, no OpenCV; synthetic track.
+pp_add_test(lower_body_metrics_test SOURCES lower_body_metrics_test.cpp
+            ${ANALYSIS}/lower_body_metrics.cpp)
+
 # Ball position at address (ball_position.{h,cpp}): the heel-line projection, the
 # order-independent median lock (leading detector mis-locks must not win), the
 # ball-diameter px→mm ruler, and the refuse-don't-fabricate contract. Qt-only, no

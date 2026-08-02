@@ -215,9 +215,21 @@ std::vector<MetricSeries> buildHeadSeries(const HeadTrackResult &res,
     for (const HeadState &s : res.states)
         grid.push_back(s.t_us);
 
-    const bool    mm      = pxPerMm > 0.0;
-    const double  linGain = mm ? (double(res.frameW) / pxPerMm) : 1.0;  // ×frame → mm, or stay ×frame
-    const QString linUnit = mm ? QStringLiteral("mm") : QStringLiteral("×frame");
+    // CENTIMETRES, and the linear channels are emitted ONLY when the inter-ear ruler resolved.
+    //
+    // These used to switch between "mm" and "×frame" at runtime. A metric whose unit changes per
+    // swing cannot carry a norm — the norm declares one unit and grading compares the numbers
+    // without ever consulting it — and both of these carry one, in cm. So headSway arrived as 40
+    // (mm) against a corridor of 4 ± 3 cm and read Action on every swing ever recorded, while the
+    // ×frame fallback (~0.05) read Ideal on every swing. Same defect in both directions, and
+    // `normUnitMismatch` was structurally unable to see it: it compares the norm against the
+    // MEASURE, and those two agreed with each other.
+    //
+    // Absent rather than rescaled when the ruler fails, for the reason foot_metrics gives for
+    // stanceWidth: unavailable is a fact the app renders honestly, a silently different scale is
+    // not. `headTilt` is unaffected — degrees need no ruler and were never at risk.
+    const bool   cm      = pxPerMm > 0.0;
+    const double linGain = cm ? (double(res.frameW) / pxPerMm / 10.0) : 0.0;  // ×frame → px → mm → cm
 
     // NB: not named `emit` — that is a Qt keyword macro (expands to nothing).
     const auto pushSeries = [&](const HeadChannel &ch, const QString &key, const QString &label,
@@ -240,8 +252,12 @@ std::vector<MetricSeries> buildHeadSeries(const HeadTrackResult &res,
         out.push_back(std::move(m));
     };
 
-    pushSeries(res.sway, QStringLiteral("headSway"), QStringLiteral("Head sway"), linUnit, linGain);
-    pushSeries(res.lift, QStringLiteral("headLift"), QStringLiteral("Head lift"), linUnit, linGain);
+    if (cm) {
+        pushSeries(res.sway, QStringLiteral("headSway"), QStringLiteral("Head sway"),
+                   QStringLiteral("cm"), linGain);
+        pushSeries(res.lift, QStringLiteral("headLift"), QStringLiteral("Head lift"),
+                   QStringLiteral("cm"), linGain);
+    }
     pushSeries(res.tilt, QStringLiteral("headTilt"), QStringLiteral("Head tilt"),
                QStringLiteral("°"), 1.0);
     return out;

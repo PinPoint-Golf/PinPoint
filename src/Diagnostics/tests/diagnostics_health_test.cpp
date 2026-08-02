@@ -666,6 +666,49 @@ int main()
               "a norm keyed on a measure the library does not have is reported");
     }
 
+    // ── The measure against the CATALOGUE, which is a different join ────────
+    //
+    // The negative case is the one that matters here. `normUnitMismatch` above compares the norm
+    // against the measure, and the loader refuses a mismatch there — so both ends of the content
+    // agree by construction, which is exactly why three live measures could sit over producers
+    // emitting a different scale entirely with nothing to report it.
+    std::printf("=== a measure's unit against the metric catalogue's ===\n");
+    {
+        CharacteristicPack pack;
+        auto over = [&](const char *id, const char *metricKey, const char *unit, ReducerKind rk) {
+            Measure m;
+            m.id        = QLatin1String(id);
+            m.kind      = MeasureKind::Provided;
+            m.metricKey = QLatin1String(metricKey);
+            m.label     = QLatin1String(id);
+            m.status    = MeasureStatus::Live;
+            // fromUtf8, not QLatin1String: "°" is two bytes in the source file and latin1 would
+            // read them as two characters, so the unit would never match the catalogue's.
+            m.unit      = QString::fromUtf8(unit);
+            m.reducer   = Reducer{};
+            m.reducer.kind = rk;
+            m.highMeans = QStringLiteral("more of it");
+            pack.measures.push_back(m);
+        };
+        // headTilt is degrees in the catalogue; clubheadSpeed is mph.
+        over("m_agrees",   "headTilt",      "°",     ReducerKind::At);
+        over("m_disagrees","headTilt",      "cm",    ReducerKind::At);
+        over("m_rate",     "clubheadSpeed", "mph/s", ReducerKind::Rate);
+        over("m_unknown",  "notAMetric",    "cm",    ReducerKind::At);
+
+        FakeNorms norms;
+        const auto issues = diagnosticsHealth(pack, norms, cat);
+        check(countCode(issues, "measureUnitMismatch") == 1, "exactly the one, and no others");
+        check(hasSubject(issues, "measureUnitMismatch", QStringLiteral("m_disagrees")),
+              "a measure graded in cm over a metric produced in ° is reported");
+        check(!hasSubject(issues, "measureUnitMismatch", QStringLiteral("m_agrees")),
+              "…and a measure that agrees with its catalogue entry is NOT");
+        check(!hasSubject(issues, "measureUnitMismatch", QStringLiteral("m_rate")),
+              "a Rate reducer divides by time by design — mph/s over mph is not a mistake");
+        check(!hasSubject(issues, "measureUnitMismatch", QStringLiteral("m_unknown")),
+              "a metricKey the catalogue does not have is a different check's row, not this one's");
+    }
+
     // ── The shipped library ─────────────────────────────────────────────────
     //
     // Run for real. This is not a "no issues" assertion — the shipped set has known content debts
@@ -715,6 +758,12 @@ int main()
         // The referential checks must come back CLEAN on shipped content: a unit mismatch or a norm
         // keyed on a measure that does not exist is a content error, not a debt.
         check(countCode(issues, "normUnitMismatch") == 0, "no shipped norm is in the wrong unit");
+        // The gate for the defect this check was written for. Three LIVE measures shipped declaring
+        // cm over producers emitting ×frame or mm — `sig_excessiveHeelLift` could not fire on any
+        // swing ever recorded and `headSway` read Action on all of them. A new row here is not a
+        // backlog item: it is a corridor grading a number in the wrong scale.
+        check(countCode(issues, "measureUnitMismatch") == 0,
+              "every shipped measure is graded in the unit its producer actually emits");
         check(countCode(issues, "unknownNormMeasure") == 0, "every shipped norm keys on a real measure");
         check(countCode(issues, "unknownNormContext") == 0, "every shipped norm keys on a real context");
         check(countCode(issues, "normNotCapturable") == 0,

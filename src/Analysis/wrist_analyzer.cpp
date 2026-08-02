@@ -35,6 +35,7 @@
 #include "foot_metrics.h"
 #include "hand_axis.h"
 #include "head_track.h"
+#include "lower_body_metrics.h"
 #include "pose_wrist_angle_source.h"
 #include "imu_vision_fuser.h"
 #include "orientation_refuse_tuning.h"
@@ -700,6 +701,46 @@ struct FootMetricsStage : AnalysisStage {
     }
 };
 
+// 13b. Lower-body frontal-plane metrics — lead-knee drift, pelvis sway, pelvis
+//      lift, hip-line tilt. DETAIL series only, UNSCORED.
+//
+//      Separate from FootMetricsStage even though both are lower-body and both
+//      are face-on, because they do not read the same thing and do not fail
+//      together: the feet need the WholeBody tail (17–22), this needs only COCO
+//      body 11–16. A legacy 17-kp track produces nothing at all from the feet and
+//      all four of these — folding them into one stage would tie the wider
+//      availability to the narrower one for no reason but tidiness.
+//
+//      Runs after BindDetail (12) for the same reason the tempo and foot stages
+//      do: detail->series is assigned wholesale there, so anything appended
+//      before it is overwritten.
+struct LowerBodyMetricsStage : AnalysisStage {
+    QString name() const override { return QStringLiteral("LowerBodyMetrics"); }
+    bool canRun(const AnalysisContext &ctx) const override
+    {
+        return ctx.caps.hasCamera(CameraPlacement::FaceOn) && !ctx.detail->pose2d.frames.empty();
+    }
+    void run(AnalysisContext &ctx) override
+    {
+        const std::vector<PhaseEvent> &phases = ctx.seg.events;
+        const pinpoint::FormatDescriptor &fd = ctx.window->formatOf(ctx.job.cameraSources.front());
+        const auto *cfmt = std::get_if<pinpoint::CameraFormat>(&fd.format);
+        if (cfmt == nullptr || cfmt->width <= 0 || cfmt->height <= 0)
+            return;
+
+        int64_t addressUs = -1;
+        if (ctx.seg.conf > 0.f)
+            if (const PhaseEvent *a = ctx.seg.eventFor(Phase::Address))
+                addressUs = a->t_us;
+        const bool leadIsLeft = (ctx.job.handedness != 2);
+        const LowerBodyResult lb =
+            trackLowerBody(ctx.detail->pose2d, int(cfmt->width), int(cfmt->height), leadIsLeft,
+                           addressUs, LowerBodyConfig::fromOverrides(ctx.job.tuningOverrides));
+        for (const MetricSeries &m : buildLowerBodySeries(lb, phases))
+            ctx.detail->series.push_back(m);
+    }
+};
+
 // 13a. Tempo — backswing duration (Address→Top) and the tempo ratio
 //      ((Top−Address)/(Impact−Top)). DETAIL series only, UNSCORED.
 //
@@ -896,6 +937,7 @@ SessionProfile wristProfile()
     p.stages.push_back(std::make_unique<BindDetailStage>());
     p.stages.push_back(std::make_unique<HeadTrackStage>());
     p.stages.push_back(std::make_unique<FootMetricsStage>());
+    p.stages.push_back(std::make_unique<LowerBodyMetricsStage>());
     p.stages.push_back(std::make_unique<TempoStage>());
     p.stages.push_back(std::make_unique<KinematicsStage>());
     p.stages.push_back(std::make_unique<BindingsStage>());

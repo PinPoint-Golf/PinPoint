@@ -174,10 +174,50 @@
           "p4"
         ]
       },
-      "status": "planned",
+      "status": "live",
       "label": "Pelvis lift, change P1 to P4",
-      "unit": "cm",
-      "highMeans": "the pelvis higher than at address by the top"
+      "unit": "% stance width",
+      "highMeans": "the pelvis higher than at address by the top",
+      "viewNeeded": "faceOn"
+    },
+    {
+      "id": "m_leadKneeDriftTop",
+      "kind": "provided",
+      "metricKey": "leadKneeDrift",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "live",
+      "label": "Lead knee drift, at the top",
+      "unit": "% stance width",
+      "viewNeeded": "faceOn",
+      "aliases": [
+        "lead knee kicking in",
+        "knee working across"
+      ],
+      "highMeans": "the lead knee further toward the lead side than its own hip — working away from the trail leg",
+      "unwatchedTail": "high",
+      "unwatchedReason": "A lead knee that stays wider than its own hip through the backswing is not a fault anyone has named, and the corridor here is unseated in both directions. Authoring a characteristic for it would put a name on a reading nothing has established."
+    },
+    {
+      "id": "m_hipLineTiltTop",
+      "kind": "provided",
+      "metricKey": "hipLineTilt",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p4"
+      },
+      "status": "live",
+      "label": "Hip line tilt, at the top",
+      "unit": "°",
+      "viewNeeded": "faceOn",
+      "aliases": [
+        "trail hip riding up"
+      ],
+      "highMeans": "the trail hip sitting further above the lead hip at the top",
+      "unwatchedTail": "low",
+      "unwatchedReason": "The other tail is the LEAD hip riding above the trail one at the top, which is a posture almost nobody produces and which no source describes as a fault. It grades because the corridor is two-sided; there is nothing to call it."
     },
     {
       "id": "m_pelvisSwayBack",
@@ -192,10 +232,11 @@
         "sense": "min",
         "anchor": "p1"
       },
-      "status": "planned",
+      "status": "live",
       "label": "Pelvis lateral sway, peak P1 to P4 from P1",
-      "unit": "cm",
-      "highMeans": "the pelvis further toward the lead side during the backswing"
+      "unit": "% stance width",
+      "highMeans": "the pelvis further toward the lead side during the backswing",
+      "viewNeeded": "faceOn"
     },
     {
       "id": "m_pelvisSwayDown",
@@ -210,10 +251,11 @@
         "sense": "max",
         "anchor": "p1"
       },
-      "status": "planned",
+      "status": "live",
       "label": "Pelvis lateral sway, peak P5 to P7 from P1",
-      "unit": "cm",
-      "highMeans": "the pelvis further toward the lead side during the downswing"
+      "unit": "% stance width",
+      "highMeans": "the pelvis further toward the lead side during the downswing",
+      "viewNeeded": "faceOn"
     },
     {
       "id": "m_pelvisSwayImpact",
@@ -227,10 +269,11 @@
           "p7"
         ]
       },
-      "status": "planned",
+      "status": "live",
       "label": "Pelvis lateral sway, change P1 to P7",
-      "unit": "cm",
-      "highMeans": "the pelvis further toward the lead side at impact than at address"
+      "unit": "% stance width",
+      "highMeans": "the pelvis further toward the lead side at impact than at address",
+      "viewNeeded": "faceOn"
     },
     {
       "id": "m_clubPathAtImpact",
@@ -1352,10 +1395,11 @@
         "kind": "at",
         "anchor": "finish"
       },
-      "status": "planned",
+      "status": "live",
       "label": "Pelvis lateral position, at the finish",
-      "unit": "cm",
-      "highMeans": "the pelvis further toward the target at the finish"
+      "unit": "% stance width",
+      "highMeans": "the pelvis further toward the target at the finish",
+      "viewNeeded": "faceOn"
     },
     {
       "id": "m_thoraxRotFinish",
@@ -1454,7 +1498,7 @@
       },
       "status": "planned",
       "label": "Low point, relative to the ball",
-      "unit": "cm",
+      "unit": "in",
       "highMeans": "the arc bottoming out further ahead of the ball, toward the target"
     },
     {
@@ -1775,6 +1819,22 @@
     },
     {
       "id": "sig_trailHipHike",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_hipLineTiltTop"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_leadKneeDriftIn",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadKneeDriftTop"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_pelvisRiseBackswing",
       "test": "outsideCorridor",
       "measures": [
         "m_pelvisLiftTop"
@@ -2912,11 +2972,58 @@
         "sig_trailHipHike"
       ],
       "state": "active",
-      "consequence": "The trail hip rising rather than rotating substitutes a vertical move for a turn and shortens the effective backswing.",
+      "consequence": "The trail hip rising rather than rotating substitutes a vertical move for a turn and shortens the effective backswing. It is measured as the tilt of the hip LINE and not as the pelvis rising as a whole — one hip riding up over the other is the observation, and a pelvis that lifts evenly is a different thing with its own reading.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "head displacement knee flexion heel lift backswing golf kinematics"
+      },
+      "axis": "hip_line_tilt_top"
+    },
+    {
+      "id": "lead_knee_drifts_in_at_top",
+      "label": "Lead knee works in at the top",
+      "aliases": [
+        "lead knee kicks in",
+        "left knee falls in",
+        "knee collapsing across",
+        "no hip depth (face-on)"
+      ],
+      "group": "lateral",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_leadKneeDriftIn"
+      ],
+      "state": "draft",
+      "consequence": "The lead knee travelling in toward the trail leg — further than its own hip has travelled — is the lower body finding the FEELING of a backswing without the turn that should have produced it. What it costs is depth: the pelvis has not wound up over the trail leg, so there is less to unwind into and the downswing tends to get started by the arms and chest instead. Read this as an observation that points somewhere, not as a conclusion. A face-on camera cannot see how far the pelvis actually turned, and the same picture is produced by a golfer who turned deeply and one who barely turned at all — subtracting the hip's own travel is what separates them, and it does not separate them perfectly. A down-the-line view, or a physical hip-rotation screen, is what settles which it was.",
+      "provenance": {
+        "tier": "practice",
+        "citation": "10.1177/0954411919838643",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "lead knee lateral displacement top of backswing hip internal rotation face-on proxy"
+      },
+      "axis": "lead_knee_lateral_top"
+    },
+    {
+      "id": "pelvis_rise_backswing",
+      "label": "Pelvis rises during the backswing",
+      "aliases": [
+        "standing up going back",
+        "lifting out of the shot"
+      ],
+      "group": "posture",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_pelvisRiseBackswing"
+      ],
+      "state": "draft",
+      "consequence": "Gaining pelvis height on the way back lifts the whole swing centre before the downswing has started, and the height has to be given back on the way through for the club to reach the ball. It is the mirror of sinking into the backswing and shares its consequence: a strike whose depth changes from swing to swing rather than one that is consistently heavy or thin.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "pelvis vertical displacement backswing standing up loss of posture golf"
       },
       "axis": "pelvis_height_top"
     },
@@ -8764,6 +8871,128 @@
         "tier": "practice",
         "searchedOn": "2026-08-01",
         "searchTerms": "stuck under plane block hold the face off open at impact golf"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "lead_knee_drifts_in_at_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "lead knee lateral displacement top of backswing hip internal rotation face-on proxy",
+        "citation": "10.1519/JSC.0b013e31829b2ac4"
+      }
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "lead_knee_drifts_in_at_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "thoracic rotation restriction knee buckling compensation golf backswing"
+      }
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "lead_knee_drifts_in_at_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "pelvic disassociation lower body independence golf backswing"
+      }
+    },
+    {
+      "from": "limited_ankle_dorsiflexion",
+      "to": "lead_knee_drifts_in_at_top",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "ankle dorsiflexion restriction knee valgus golf stance"
+      }
+    },
+    {
+      "from": "lead_knee_drifts_in_at_top",
+      "to": "excessive_heel_lift",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "lead heel lift knee action top of backswing hip mobility older golfers"
+      }
+    },
+    {
+      "from": "lead_knee_drifts_in_at_top",
+      "to": "hips_under_rotated_at_top",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "lead knee lateral displacement top of backswing hip internal rotation face-on proxy"
+      }
+    },
+    {
+      "from": "lead_knee_drifts_in_at_top",
+      "to": "trail_hip_hike",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "lead knee lateral displacement top of backswing hip internal rotation face-on proxy"
+      }
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "pelvis_rise_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "thoracic rotation restriction loss of posture backswing golf"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "pelvis_rise_backswing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "trail hip internal rotation vertical pelvis displacement backswing golf"
+      }
+    },
+    {
+      "from": "trail_knee_straighten",
+      "to": "pelvis_rise_backswing",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "trail knee extension backswing pelvis height golf"
+      }
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "weight_back_at_finish",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-02",
+        "searchTerms": "single leg balance lead side loading golf finish"
       }
     }
   ]

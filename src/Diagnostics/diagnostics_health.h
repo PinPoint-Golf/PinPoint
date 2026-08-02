@@ -78,6 +78,22 @@
 //                          resolve for anyone — a corridor sitting in the pack looking authoritative
 //                          and grading nobody, which is the same mistake as a monitor bound on a
 //                          tail that does not grade.
+//   measureUnitMismatch    A Provided measure's unit is not the unit the METRIC CATALOGUE states for
+//                          the key it reads. The producer emits the catalogue's unit; grading uses
+//                          the measure's corridor; nothing in between converts or even compares, so
+//                          the reading is graded against a band in a different scale and the result
+//                          is a confident wrong answer rather than a missing one. This is NOT the
+//                          same check as `normUnitMismatch`, which compares the norm against the
+//                          measure — those two agreed with each other on all three of the live
+//                          measures this was written for. It shipped: `leadHeelLift` emitted
+//                          ×frame-width against a 2 cm ceiling, so `sig_excessiveHeelLift` could not
+//                          fire on any swing ever recorded, and `headSway` emitted millimetres
+//                          against a 4 cm corridor, so it read Action on all of them. Two silent
+//                          failures in opposite directions from one root. Fix the producer or the
+//                          measure — but the measure and its corridor move together, so changing the
+//                          measure means re-seating the corridor.
+//                          A `Rate` reducer is EXEMPT: it legitimately divides by time, so mph/s over
+//                          a mph metric is the reducer doing its job and not a mistake.
 //   clubDependentNoContext The metric's own `howToRead` says the number is club-dependent, and every
 //                          norm for it sits at full swing or above. One corridor is grading a driver
 //                          and a wedge against the same band, which the descriptor already says is

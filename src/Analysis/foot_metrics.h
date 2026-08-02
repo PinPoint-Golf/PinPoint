@@ -62,6 +62,13 @@
 // `leadHeelLift` is a genuine per-frame curve and uses the normal shape,
 // identical to head_track's sway/lift.
 //
+// UNIT INVARIANCE: every metric this module emits carries ONE unit for all
+// time. Where the unit depends on a ruler resolving, the metric is ABSENT when
+// it does not rather than present in the fallback scale — see the stanceWidth
+// and leadHeelLift comments in buildFootSeries(). A metric whose unit changes
+// per swing cannot carry a norm: the norm declares one unit and grading
+// compares the numbers without consulting it, so the mismatch is silent.
+//
 // ISOTROPY: like head_track.h, all geometry (distances, angles) is computed in
 // PIXELS via (frameW, frameH) separately, then any px DISTANCE is re-normalized
 // by the SINGLE reference dimension frameW (matching head_track's sway/lift
@@ -179,10 +186,12 @@ FootMetricsResult trackFeet(const PoseTrack2D &pose, int frameW, int frameH, boo
 // for sway/lift via the inter-ear ruler, and `mmPerPx <= 0` is byte-identical to
 // the pre-ruler behaviour.
 //
-// NB `leadHeelLift` stays "×frame" even when the ruler resolves. It shares the
-// ruler and the depth plane, so converting it would be MORE internally
-// consistent — but it is a separately-shipped live metric and changing its unit
-// is its own gate, not a side effect of this one.
+// `leadHeelLift` is in CENTIMETRES via the same ruler, and is emitted only when
+// that ruler resolves. It used to stay "×frame" on the grounds that changing a
+// separately-shipped live metric's unit was its own gate; this IS that gate,
+// and it was overdue — the measure and the corridor over this key had said "cm"
+// since they were authored, so the ×frame reading was being graded against a
+// centimetre band and the signal on it could never fire.
 std::vector<MetricSeries> buildFootSeries(const FootMetricsResult &res,
                                           const std::vector<PhaseEvent> &phases,
                                           double mmPerPx = -1.0);

@@ -339,6 +339,44 @@
       "year": 1979,
       "generalReading": true,
       "establishes": "The most systematic attempt to describe the swing as geometry rather than as advice — an enumerated catalogue of components and their permissible combinations, written by an engineer and the origin of terms a coach may well use in front of this product's output. Its value here is that it is FALSIFIABLE in a way instruction texts usually are not: it makes geometric claims that measurement can check, and ref.kwon2012's finding that the downswing is only semi-planar is exactly such a check. NOTE THE PUBLISHER: Star System Press is the imprint of the commercial instruction system of the same name as the book. The TEXT is common domain and is recorded; the system's instructor programme is an attribution this repo does not carry, and must not be named anywhere in the content. Original edition 1979; the ISBN identifies a Star System Press printing."
+    },
+    {
+      "id": "ref.khuyagbaatar2019",
+      "doi": "10.1177/0954411919838643",
+      "title": "Kinematic determinants of performance parameters during golf swing",
+      "authors": "Khuyagbaatar, Purevsuren, Kim",
+      "journal": "Proceedings of the Institution of Mechanical Engineers, Part H: Journal of Engineering in Medicine",
+      "year": 2019,
+      "volume": "233",
+      "issue": "5",
+      "pages": "554-561",
+      "establishes": "Ten low-handicap male golfers. The only source found that statistically links FRONTAL-PLANE KNEE motion to trunk-pelvis separation: trail-knee adduction from address to the top, and lead-knee adduction from the top to the finish, both emerged as predictors of X-factor. Read the assignment carefully before leaning on it — the backswing window in that result belongs to the TRAIL knee, where the claim this library makes is about the LEAD knee in the same window. It establishes that knee frontal-plane motion and rotational depth move together at all, which is the mechanism underneath; it does not test the pairing the characteristic names, and n is ten."
+    },
+    {
+      "id": "ref.foxworth2013",
+      "doi": "10.2519/jospt.2013.4417",
+      "title": "Hip joint torques during the golf swing of young and senior healthy males",
+      "authors": "Foxworth, Millar, Long, Way, Vellucci, Vogler",
+      "journal": "Journal of Orthopaedic & Sports Physical Therapy",
+      "year": 2013,
+      "volume": "43",
+      "issue": "9",
+      "pages": "660-665",
+      "establishes": "Twenty healthy male amateurs, ten driver swings each, split young (25.1 ± 3.1 years) against senior (56.9 ± 4.7). Recorded because it is the closest thing found to evidence for the widely-repeated claim that the backswing compensations in this library belong to older players — and it is WEAKER than that claim. Adjusted for club-head velocity the two groups generated COMPARABLE hip torques, with a single exception: trail-limb hip EXTERNAL rotator torque. So one relevant capacity declines measurably with age and the rest did not, and nothing here touches heel lift, knee displacement or any visible swing fault. The age story is therefore a cohort to be seated when there is data, and no characteristic in this library makes it.",
+      "generalReading": true
+    },
+    {
+      "id": "ref.gulgin2014",
+      "doi": "10.1519/JSC.0b013e31829b2ac4",
+      "pmid": "24476744",
+      "title": "Correlation of [commercial screening system] Level 1 movement screens and golf swing faults",
+      "authors": "Gulgin, Schulte, Crawley",
+      "journal": "Journal of Strength and Conditioning Research",
+      "year": 2014,
+      "volume": "28",
+      "issue": "2",
+      "pages": "534-539",
+      "establishes": "TITLE ABRIDGED, and the brackets are the abridgement rather than the authors': the published title names a commercial screening system, which may not enter shipped content. The identifier is untouched and resolves to the full record. Nothing else here is edited.\n\n36 golfers, twelve physical screens tested against fourteen swing faults — the only study found that tests screen results against faults a coach can SEE, in real golfers. The toe-touch, the bridge and the overhead deep squat reached significance for early hip extension, loss of posture and slide. The LOWER-QUARTER ROTATION screen, the one that isolates hip internal rotation, was associated with NO swing fault at all.\n\nCited BECAUSE it is the negative result, and it supports the shape of this library rather than undermining it. The mechanism is measured directly by ref.kim2015 and is not in doubt; what this caps is how strongly a restriction may be said to produce a visible fault. It is the reason every edge from a hip-rotation restriction to a visible characteristic is Moderate and not Strong, and the reason lead_knee_drifts_in_at_top is authored as an OBSERVATION with four competing causes ranked behind it rather than as a detector that concludes a tight hip. A library that had not read this would have written one Strong edge and been wrong with confidence."
     }
   ]
 }

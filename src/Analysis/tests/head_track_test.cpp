@@ -122,24 +122,37 @@ int main()
         CHECK("addr head scale ~ inter-ear px",
               near(res.addrScalePx, 2.0 * 1.8 * eyeL * W, 3.0));
 
-        const std::vector<MetricSeries> series = buildHeadSeries(res, {} /*phases*/);
+        // The linear channels are centimetres and need the ruler. A round pxPerMm keeps the
+        // anisotropy arithmetic below readable: cm = ×frame × W / pxPerMm / 10.
+        const double pxPerMm = 4.0;
+        const double toCm    = double(W) / pxPerMm / 10.0;          // ×frame → cm, = 48
+        const std::vector<MetricSeries> series = buildHeadSeries(res, {} /*phases*/, pxPerMm);
         const MetricSeries *sway = findSeries(series, "headSway");
         const MetricSeries *lift = findSeries(series, "headLift");
         CHECK("headSway emitted", sway != nullptr);
         CHECK("headLift emitted", lift != nullptr);
         if (sway && lift) {
-            CHECK("sway unit == ×frame", sway->unit == QStringLiteral("×frame"));
+            CHECK("sway unit == cm", sway->unit == QStringLiteral("cm"));
             CHECK("grid covers every frame", sway->t_us.size() == frames.size());
             const int s = 5;                       // ramp step 5 ⇒ frame k=10
             const int64_t t = (5 + s) * dt;
-            const double expSway = s * dxs;                          // = 0.02
-            const double expLift = (s * dls) * double(H) / double(W); // = 0.016875 (anisotropy)
-            CHECK("sway recovered (~0.02 ×frame)", near(valueAt(*sway, t), expSway, 0.0015));
-            CHECK("lift recovered (~0.016875 ×frame, H/W scaled)",
-                  near(valueAt(*lift, t), expLift, 0.0015));
+            const double expSway = s * dxs * toCm;                             // 0.02 ×frame
+            const double expLift = (s * dls) * double(H) / double(W) * toCm;   // anisotropy first
+            CHECK("sway recovered (0.02 ×frame → cm)", near(valueAt(*sway, t), expSway, 0.08));
+            CHECK("lift recovered (H/W scaled, then → cm)",
+                  near(valueAt(*lift, t), expLift, 0.08));
             // A naive (no-aspect) lift would read Δcy_norm = 0.03 — the fix must NOT.
-            CHECK("lift is NOT the un-scaled 0.03", !near(valueAt(*lift, t), s * dls, 0.005));
+            CHECK("lift is NOT the un-scaled 0.03",
+                  !near(valueAt(*lift, t), s * dls * toCm, 0.25));
         }
+        // The invariant-unit rule: no ruler ⇒ ABSENT, never a different scale. headSway shipped in
+        // mm against a corridor of 4 ± 3 cm and read Action on every swing ever recorded, while the
+        // ×frame fallback read Ideal on every one — the same defect in both directions.
+        const std::vector<MetricSeries> noRuler = buildHeadSeries(res, {}, -1.0);
+        CHECK("no ruler -> headSway absent", findSeries(noRuler, "headSway") == nullptr);
+        CHECK("no ruler -> headLift absent", findSeries(noRuler, "headLift") == nullptr);
+        CHECK("…but headTilt is degrees and needs no ruler, so it survives",
+              findSeries(noRuler, "headTilt") != nullptr);
     }
 
     // ── 2) Tilt ramp recovery (square 1000×1000 so px angle == eye-line angle) ──
@@ -194,7 +207,7 @@ int main()
         CHECK("gap frames marked invalid", nInvalid == 6);
         CHECK("sway channel skips the gap (24 valid samples)", res.sway.t_us.size() == 24);
 
-        const std::vector<MetricSeries> series = buildHeadSeries(res, {});
+        const std::vector<MetricSeries> series = buildHeadSeries(res, {}, /*pxPerMm*/ 4.0);
         const MetricSeries *sway = findSeries(series, "headSway");
         CHECK("headSway emitted", sway != nullptr);
         if (sway) {
@@ -303,16 +316,21 @@ int main()
         const MetricSeries *sway = findSeries(series, "headSway");
         CHECK("headSway emitted", sway != nullptr);
         if (sway) {
-            CHECK("sway unit == mm", sway->unit == QStringLiteral("mm"));
+            CHECK("sway unit == cm", sway->unit == QStringLiteral("cm"));
             const int64_t t = (5 + 10) * dt;
             const double swayPx = 10 * 0.005 * W;                  // 50 px
-            const double expMm  = swayPx / pxPerMm;                // = 50·145/180 ≈ 40.28 mm
-            CHECK("sway ~ expected mm", near(valueAt(*sway, t), expMm, 0.5));
+            const double expCm  = swayPx / pxPerMm / 10.0;         // = 50·145/180/10 ≈ 4.03 cm
+            CHECK("sway ~ expected cm", near(valueAt(*sway, t), expCm, 0.05));
+            // Worth pinning as a number rather than only as a formula: ~4 cm is the middle of the
+            // shipped corridor for this measure, which is what makes the old mm reading (40) an
+            // Action on every swing rather than a merely-imprecise one.
+            CHECK("…and it lands where the corridor expects, ~4 cm",
+                  valueAt(*sway, t) > 3.5 && valueAt(*sway, t) < 4.5);
         }
-        // No scale ⇒ ×frame fallback preserved.
+        // No scale ⇒ ABSENT. There is no fallback unit any more.
         const std::vector<MetricSeries> raw = buildHeadSeries(res, {}, -1.0);
-        const MetricSeries *rs = findSeries(raw, "headSway");
-        CHECK("no-scale ⇒ ×frame unit", rs && rs->unit == QStringLiteral("×frame"));
+        CHECK("no-scale ⇒ headSway absent, not rescaled",
+              findSeries(raw, "headSway") == nullptr);
     }
 
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);

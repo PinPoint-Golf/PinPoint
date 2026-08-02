@@ -2384,6 +2384,7 @@ target_sources(PinPointStudio PRIVATE
     src/Analysis/head_track.cpp
     src/Analysis/foot_metrics.h
     src/Analysis/foot_metrics.cpp
+    src/Analysis/lower_body_metrics.cpp
     src/Analysis/ball_position.h
     src/Analysis/ball_position.cpp
     src/Analysis/tempo_metrics.h
@@ -2701,6 +2702,7 @@ if(PINPOINT_BUILD_TOOLS)
         src/Analysis/pose_smoother.cpp
         src/Analysis/head_track.cpp
         src/Analysis/foot_metrics.cpp
+        src/Analysis/lower_body_metrics.cpp
         src/Analysis/ball_position.cpp
         src/Analysis/tempo_metrics.cpp
         src/Analysis/pose_wrist_angle_source.cpp

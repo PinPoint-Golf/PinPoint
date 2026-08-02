@@ -296,6 +296,25 @@ inline constexpr int          kAddrMinFrames = 5;       // fallback address ref 
 inline constexpr std::int64_t kAddrWindowUs  = 250000;  // ±window about the Address event for the robust ref
 } // namespace foot
 
+// --- Lower-body frontal-plane metrics (src/Analysis/lower_body_metrics.h) -----
+// leadKneeDrift / hipLineTilt / pelvisSway / pelvisLift, from the COCO BODY hips,
+// knees and ankles (11–16). Consumed by LowerBodyConfig::fromOverrides via
+// "lowerBody.*" dotted keys. Same conf-gate / address-window shape as foot:: and
+// head::, deliberately — a third set of defaults for the same job would be three
+// things to sweep and one thing to reason about.
+//
+// kMinStanceSpanPx guards the DENOMINATOR. Every channel here is a percentage of
+// the address ankle span, so a collapsed or mis-detected stance would divide a
+// few pixels of noise by a few pixels of stance and emit hundreds of percent. A
+// floor is the difference between "we could not measure this" and a confident
+// absurdity; 40 px is well under any usable framing and well over the noise.
+namespace lowerBody {
+inline constexpr double       kConfMin        = 0.30;    // lowerBody.confMin — per-keypoint gate
+inline constexpr int          kAddrMinFrames  = 5;       // lowerBody.addrMinFrames
+inline constexpr std::int64_t kAddrWindowUs   = 250000;  // lowerBody.addrWindowUs
+inline constexpr double       kMinStanceSpanPx = 40.0;   // lowerBody.minStanceSpanPx
+} // namespace lowerBody
+
 // --- Tempo metrics (src/Analysis/tempo_metrics.h) -----------------------------
 // tempoBackswing (Address→Top, s) and tempoRatio ((Top−Address)/(Impact−Top)).
 // Consumed by TempoConfig::fromOverrides via "tempo.*" dotted keys.

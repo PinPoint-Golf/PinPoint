@@ -266,36 +266,46 @@ int main()
     }
 
     // ── The roadmap ranks by SERIES, not by reduced measure ────────────────────
-    // One producer unblocks every reducer over its series. Pelvis lateral sway carries sway, slide
-    // and hanging back at three phases, so it is ONE piece of work worth three characteristics —
-    // and it must rank as such. Listing the three samples separately spreads it across three rows
-    // of "unblocks 1" and buries the item that should lead, which is exactly what happened before
-    // this was fixed.
+    // One producer unblocks every reducer over its series, so a series carrying several reducers is
+    // ONE piece of work worth several characteristics and must rank as such. Listing the samples
+    // separately spreads it across rows of "unblocks 1" and buries the item that should lead, which
+    // is exactly what happened before this was fixed.
+    //
+    // The example was pelvisSway until the lower-body producer landed and took it OFF the roadmap
+    // — which is the roadmap working, and is why this now uses pelvis rotation instead. That is a
+    // deeper quantity than a face-on camera can supply (it is rotation about the vertical axis, and
+    // a frontal projection cannot see it), so it stays planned and stays the best available example
+    // of the shape: five reducers over one series, seven characteristics behind them.
     {
         ModelBrowser       model;
         const QVariantList rows = model.roadmap();
 
         check(!rows.isEmpty(), "the roadmap has rows");
 
-        int  pelvisSwayRows = 0, pelvisSwayBlocks = 0, pelvisSwaySamples = 0;
+        int  pelvisRotRows = 0, pelvisRotBlocks = 0, pelvisRotSamples = 0;
         for (const QVariant &v : rows) {
             const QVariantMap r = v.toMap();
-            if (r.value(QStringLiteral("metricKey")).toString() != QStringLiteral("pelvisSway"))
+            if (r.value(QStringLiteral("metricKey")).toString() != QStringLiteral("pelvisRotation"))
                 continue;
-            ++pelvisSwayRows;
-            pelvisSwayBlocks  = r.value(QStringLiteral("blocks")).toInt();
-            pelvisSwaySamples = r.value(QStringLiteral("samples")).toInt();
+            ++pelvisRotRows;
+            pelvisRotBlocks  = r.value(QStringLiteral("blocks")).toInt();
+            pelvisRotSamples = r.value(QStringLiteral("samples")).toInt();
         }
-        check(pelvisSwayRows == 1, "a series with several reducers is ONE roadmap row");
-        check(pelvisSwaySamples == 4, "that row knows it carries four reducers");
-        // Six, not four, and the gap between the two numbers is the point being made: the four
-        // reducers are unchanged, but the unwatched-tails pass gave two of them their second tail,
-        // so ONE producer now unblocks six faults rather than four. Updated deliberately, never
-        // loosened to a `>=`.
-        check(pelvisSwayBlocks == 6, "and that it unblocks six characteristics");
+        check(pelvisRotRows == 1, "a series with several reducers is ONE roadmap row");
+        check(pelvisRotSamples == 5, "that row knows it carries five reducers");
+        check(pelvisRotBlocks == 7, "and that it unblocks seven characteristics");
+
+        // And the metric that just LEFT the roadmap must really be gone: a producer landing has to
+        // remove its row, or the roadmap keeps advertising work that is finished.
+        int pelvisSwayRows = 0;
+        for (const QVariant &v : rows)
+            if (v.toMap().value(QStringLiteral("metricKey")).toString()
+                == QStringLiteral("pelvisSway"))
+                ++pelvisSwayRows;
+        check(pelvisSwayRows == 0, "a series that gained a producer leaves the roadmap");
 
         check(!rows.isEmpty()
-                  && rows.first().toMap().value(QStringLiteral("blocks")).toInt() >= pelvisSwayBlocks,
+                  && rows.first().toMap().value(QStringLiteral("blocks")).toInt() >= pelvisRotBlocks,
               "rows are ranked by how much they unblock");
 
         // A capture gap must never appear as roadmap work, however many characteristics it blocks.

@@ -53,6 +53,16 @@ public:
     MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
+// lower_body_metrics.cpp — Wrist Motion session only. leadKneeDrift / pelvisSway / pelvisLift /
+// hipLineTilt are frontal-plane readings off the COCO body hips, knees and ankles. Same gate as the
+// feet, and deliberately a separate provider: these keypoints exist in BOTH pose layouts, so this
+// answers on tracks where FootMetricProvider cannot.
+class LowerBodyMetricProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
+};
+
 // head_track.cpp — Wrist Motion session only. headSway / headLift / headTilt need face-on pose.
 class HeadMetricProvider : public IMetricProvider {
 public:

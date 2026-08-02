@@ -64,7 +64,19 @@ static const Expect kExpected[] = {
     { "sig_flatShoulderPlane",Direction::Low,   "shoulderPlaneAngle: 'lower means flatter'" },
     { "sig_flyingElbow",      Direction::High,
       "trailElbowHeight: 'higher means the elbow has risen further above the shoulder line'" },
-    { "sig_trailHipHike",     Direction::High,  "pelvisLift measures a rise; a hike is more of it" },
+    // Moved off pelvisLift, which is the pelvis CENTRE rising, onto the hip LINE. One hip riding up
+    // over the other and the whole pelvis lifting evenly are different observations, and the second
+    // is what pelvisLift measures — so a hike and an even lift were being read off one number.
+    { "sig_trailHipHike",     Direction::High,
+      "hipLineTilt: 'POSITIVE MEANS THE TRAIL HIP SITS ABOVE THE LEAD HIP'; a hike is more of it" },
+    // The lead knee working IN toward the trail leg is movement AWAY from the lead side, so the
+    // fault is the LOW tail — the same trap sway sits in two rows below, and the same reason the
+    // descriptor states its sign in capitals.
+    { "sig_leadKneeDriftIn",  Direction::Low,
+      "leadKneeDrift: 'POSITIVE IS TOWARD THE LEAD SIDE, so a lead knee working inward toward the "
+      "trail leg reads NEGATIVE'" },
+    { "sig_pelvisRiseBackswing", Direction::High,
+      "pelvisLift: 'HIGHER MEANS THE PELVIS HAS RISEN'" },
     { "sig_xfactorDeficit",   Direction::Low,
       "xFactorStretch: 'roughly 5 deg of added stretch is typical'; a deficit is less" },
 

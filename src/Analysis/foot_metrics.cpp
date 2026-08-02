@@ -321,15 +321,30 @@ std::vector<MetricSeries> buildFootSeries(const FootMetricsResult &res,
 
     // leadHeelLift — full per-frame curve, resampled + gap-bridged exactly like
     // head_track's sway/lift (never NaN).
-    if (!res.liftTUs.empty()) {
+    //
+    // CENTIMETRES, and emitted ONLY when the ball-diameter ruler resolved. This is the same
+    // invariant-unit rule stanceWidth states above, and it is not a style choice: a metric whose
+    // unit changes per swing cannot carry a norm, because the norm declares one unit and grading
+    // compares the numbers without ever looking at it. This channel shipped as "×frame" against a
+    // measure and a corridor that both said "cm", so a heel lift of ~0.05 was graded against a
+    // 2 cm ceiling and `sig_excessiveHeelLift` could not fire on any swing ever recorded. Nothing
+    // caught it: `normUnitMismatch` compares the norm against the MEASURE, and those two agreed.
+    //
+    // The ruler is the right one for this quantity — it is taken at the ball's ground-plane depth,
+    // which face-on is essentially the feet's depth, so it is the same plane the heel moves in.
+    // Without it the reading is ABSENT rather than present in some other scale: unavailable is a
+    // fact the app already renders honestly, a silently different scale is a wrong answer wearing
+    // a right answer's clothes.
+    if (!res.liftTUs.empty() && mmPerPx > 0.0) {
+        const double gain = double(res.frameW) * mmPerPx / 10.0;   // ×frame → px → mm → cm
         std::vector<double> vals(grid.size());
         for (size_t i = 0; i < grid.size(); ++i)
-            vals[i] = interpChannel(res.liftTUs, res.liftValue, grid[i]);
+            vals[i] = interpChannel(res.liftTUs, res.liftValue, grid[i]) * gain;
 
         MetricSeries m;
         m.key   = QStringLiteral("leadHeelLift");
         m.label = QStringLiteral("Lead heel lift");
-        m.unit  = QStringLiteral("×frame");
+        m.unit  = QStringLiteral("cm");
         m.t_us  = grid;
         m.value = vals;
         for (const Phase p : { Phase::Address, Phase::Top, Phase::Impact }) {

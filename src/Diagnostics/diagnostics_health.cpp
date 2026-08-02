@@ -270,6 +270,32 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                .arg(n.measureId)));
     }
 
+    // ── The measure's unit against the catalogue's ──────────────────────────
+    //
+    // The one join nothing else makes. `normUnitMismatch` compares the norm against the measure and
+    // the loader refuses a mismatch there, so both ends of the CONTENT agree by construction — and
+    // that is exactly why this was invisible: the producer is the third party, and it was never in
+    // the conversation. Three live measures shipped declaring cm over producers emitting ×frame or
+    // mm, and each failed silently in whichever direction its scale factor pointed.
+    //
+    // Scoped to Provided measures, because a Composed one has no metricKey and nothing to compare
+    // against. NOT scoped to Live: a planned measure with the wrong unit is a corridor that will be
+    // wrong the day its producer lands, and finding it then is finding it late.
+    for (const Measure &m : pack.measures) {
+        if (m.kind != MeasureKind::Provided || m.metricKey.isEmpty()) continue;
+        if (m.reducer.kind == ReducerKind::Rate) continue;   // per-second by design, not a mismatch
+        const MetricDescriptor *d = catalogue.descriptor(m.metricKey);
+        if (d == nullptr || d->unit.isEmpty() || m.unit.isEmpty()) continue;
+        if (d->unit == m.unit) continue;
+        out.push_back(warn(QStringLiteral("measureUnitMismatch"), m.id,
+                           QObject::tr("%1 is graded in '%2', and '%3' produces '%4'. Nothing "
+                                       "converts between them, so the reading is compared against a "
+                                       "corridor in a different scale — which grades confidently and "
+                                       "wrongly rather than reporting nothing.")
+                               .arg(m.label.isEmpty() ? m.id : m.label, m.unit, m.metricKey,
+                                    d->unit)));
+    }
+
     // ── Club-dependent by the metric's own account, with one corridor ───────
     for (const Measure &m : pack.measures) {
         if (m.metricKey.isEmpty()) continue;

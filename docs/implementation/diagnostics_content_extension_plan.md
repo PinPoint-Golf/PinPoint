@@ -162,12 +162,13 @@ only `clubTrack` — so measures over it are the only genuinely session-agnostic
 |---|---|---|
 | `WristMetricProvider` | leadWristFlexExt, leadWristRadUln, forearmPronation, leadArmFlexion | wrist session + lead forearm/hand IMU |
 | `KinematicSeriesProvider` | clubheadSpeed, handSpeed, lagAngle | club track (no session gate) |
-| `FootMetricProvider` | stanceWidth, leadFootFlare, trailFootFlare, toeLineAngle, leadHeelLift, ballPosition | wrist session + face-on |
+| `FootMetricProvider` | stanceWidth, stanceWidthMm, leadFootFlare, trailFootFlare, toeLineAngle, leadHeelLift, ballPosition | wrist session + face-on (WholeBody foot tail 17–22) |
+| `LowerBodyMetricProvider` | leadKneeDrift, pelvisSway, pelvisLift, hipLineTilt | wrist session + face-on (COCO body 11–16 — answers on legacy 17-kp tracks too) |
 | `TempoProvider` | tempoBackswing, tempoRatio | wrist session |
 | `HeadMetricProvider` | headSway, headLift, headTilt | wrist session + face-on |
 | `ShaftLeanProvider` | impactShaftLean | wrist session + face-on + club track |
 | `ScoreProvider` | wristScore, wristResemblance (+ swingScore, always Unavailable) | wrist session |
-| `PlannedMetricProvider` | 21 keys | always Unavailable |
+| `PlannedMetricProvider` | 38 keys | always Unavailable |
 
 The shipped pack's 38 `live` measure statuses were audited against this table: **zero over-claims.**
 

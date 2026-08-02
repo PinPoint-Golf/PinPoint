@@ -168,11 +168,16 @@ int main()
                            res.setup.stanceWidthXFrame * W / res.setup.shoulderWidthPx * 100.0,
                            1e-9));
 
-        // leadHeelLift shares the ruler and the depth plane but is deliberately
-        // NOT converted — it is a separately-shipped metric with its own gate.
+        // leadHeelLift shares the ruler and the depth plane, and now follows the same invariant-unit
+        // rule: centimetres, or absent. It shipped as ×frame against a measure and a corridor that
+        // both said "cm", so a lift of ~0.05 was graded against a 2 cm ceiling and the signal on it
+        // could not fire on any swing ever recorded. `normUnitMismatch` could not see it — it
+        // compares the norm against the MEASURE, and those two agreed with each other.
         const MetricSeries *liftOn = findSeries(on, "leadHeelLift");
-        CHECK("leadHeelLift stays ×frame even with a ruler",
-              liftOn && liftOn->unit == QStringLiteral("×frame"));
+        CHECK("ruler -> leadHeelLift is centimetres",
+              liftOn && liftOn->unit == QStringLiteral("cm"));
+        CHECK("no ruler -> leadHeelLift is ABSENT, not a different scale",
+              findSeries(off, "leadHeelLift") == nullptr);
         // Every other setup scalar is an angle and must be untouched by the ruler.
         const MetricSeries *flareOn = findSeries(on, "leadFootFlare");
         CHECK("angles are unaffected by the ruler",
@@ -238,17 +243,19 @@ int main()
         CHECK("trail foot never confident -> stanceWidth absent", !res.setup.stanceWidthValid);
         CHECK("trail foot never confident -> toe-line absent", !res.setup.toeLineValid);
 
-        const std::vector<MetricSeries> series = buildFootSeries(res, {});
+        const double mmPerPx = 2.0;
+        const std::vector<MetricSeries> series = buildFootSeries(res, {}, mmPerPx);
         const MetricSeries *lift = findSeries(series, "leadHeelLift");
         CHECK("leadHeelLift emitted", lift != nullptr);
         if (lift) {
-            CHECK("unit == ×frame", lift->unit == QStringLiteral("×frame"));
+            CHECK("unit == cm", lift->unit == QStringLiteral("cm"));
             CHECK("grid covers every frame", lift->t_us.size() == frames.size());
             const int s = 5;                       // ramp step 5 ⇒ frame k=10
             const int64_t t = (5 + s) * dt;
-            const double expLift = (0.004 * s) * double(H) / double(W);   // = 0.01125
-            CHECK("lift recovered (~0.01125 ×frame, + = heel up)",
-                  near(valueAt(*lift, t), expLift, 0.0006));
+            // ×frame → px (×W) → mm (×mmPerPx) → cm (/10). 0.01125 ×frame at W = 1600 is 18 px,
+            // 36 mm, 3.6 cm.
+            const double expCm = (0.004 * s) * double(H) / double(W) * double(W) * mmPerPx / 10.0;
+            CHECK("lift recovered (~3.6 cm, + = heel up)", near(valueAt(*lift, t), expCm, 0.2));
         }
         CHECK("no setup scalars from a foot that never resolves", !res.setup.trailFlareValid);
     }
@@ -274,7 +281,7 @@ int main()
         for (const FootState &s : res.states) if (!s.leadValid) ++nInvalid;
         CHECK("gap frames marked invalid", nInvalid == 6);
 
-        const std::vector<MetricSeries> series = buildFootSeries(res, {});
+        const std::vector<MetricSeries> series = buildFootSeries(res, {}, /*mmPerPx*/ 2.0);
         const MetricSeries *lift = findSeries(series, "leadHeelLift");
         CHECK("leadHeelLift emitted", lift != nullptr);
         if (lift) {

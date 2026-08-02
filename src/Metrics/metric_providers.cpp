@@ -114,6 +114,26 @@ MetricAvailability FootMetricProvider::availability(const QString &key, const Sh
     return fromRequirement(req, ctx);
 }
 
+// ------------------------------------------------------------------- LowerBodyMetricProvider
+
+std::vector<QString> LowerBodyMetricProvider::provides() const
+{
+    return { QStringLiteral("leadKneeDrift"), QStringLiteral("pelvisSway"),
+             QStringLiteral("pelvisLift"),    QStringLiteral("hipLineTilt") };
+}
+
+MetricAvailability LowerBodyMetricProvider::availability(const QString &key,
+                                                         const ShotContext &ctx) const
+{
+    Q_UNUSED(key)
+    if (!wristSessionOk(ctx.sessionType))
+        return wristSessionOnly();
+
+    MetricRequirement req;
+    req.faceOnCamera = true;      // frontal-plane pose: hips, knees, ankles
+    return fromRequirement(req, ctx);
+}
+
 // ------------------------------------------------------------------------------------ TempoProvider
 
 std::vector<QString> TempoProvider::provides() const
@@ -209,8 +229,10 @@ std::vector<QString> PlannedMetricProvider::provides() const
         QStringLiteral("hipInternalRotation"),
         QStringLiteral("spineForwardBend"), QStringLiteral("spineSideBend"),
         QStringLiteral("secondaryAxisTilt"),
-        QStringLiteral("pelvisSway"),       QStringLiteral("pelvisThrust"),
-        QStringLiteral("pelvisLift"),
+        // pelvisSway and pelvisLift LEFT this list: LowerBodyMetricProvider produces both. Only
+        // pelvisThrust remains, and it is not an oversight — thrust is toward and away from the
+        // camera, and a face-on view resolves nothing in depth.
+        QStringLiteral("pelvisThrust"),
         QStringLiteral("swingPlane"),       QStringLiteral("clubPath"),
         QStringLiteral("attackAngle"),
         QStringLiteral("lowPointAhead"),
@@ -224,6 +246,19 @@ std::vector<QString> PlannedMetricProvider::provides() const
         QStringLiteral("shaftDirection"),   QStringLiteral("shaftAngleVsHorizontal"),
         QStringLiteral("launchDirection"),  QStringLiteral("launchAngle"),
         QStringLiteral("ballSpeed"),
+        // These ten were `.planned = true` in the manifest and claimed by NOBODY, so they fell to
+        // the resolver's no-provider branch and reported "no producer available" — which is the
+        // reason a key the catalogue has never heard of gets, not the reason a declared roadmap item
+        // deserves. The distinction is the whole point of the planned flag: one says "we have not
+        // written this yet", the other says "this is not a thing". The gap survived because the test
+        // enumerates a hand-written list rather than deriving it, so a descriptor added with the
+        // flag and no provider entry passed every count.
+        QStringLiteral("trailWristFlexExt"),
+        QStringLiteral("thoracicFlexion"),  QStringLiteral("lumbarExtension"),
+        QStringLiteral("shoulderPlaneAngle"),
+        QStringLiteral("leadKneeFlexion"),  QStringLiteral("leadArmToTorso"),
+        QStringLiteral("ballBodyDistance"), QStringLiteral("thoraxLateralDrift"),
+        QStringLiteral("trailElbowHeight"), QStringLiteral("leadHandWidth"),
     };
 }
 

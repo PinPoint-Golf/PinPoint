@@ -60,7 +60,7 @@ int main()
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 70, "descriptor count == 70");
+        checkEqI(static_cast<int>(cat.all().size()), 72, "descriptor count == 72");
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -81,7 +81,7 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  36, "TimeSeries count");
+        checkEqI(countType(cat, MetricType::TimeSeries),  38, "TimeSeries count");
         checkEqI(countType(cat, MetricType::PointInTime), 28, "PointInTime count");
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
@@ -177,22 +177,15 @@ int main()
     }
 
     // 3d. Planned placeholders — declared, flagged, and always resolving 'planned'.
+    //
+    // DERIVED FROM THE CATALOGUE, not from a hand-written list. The list version passed while ten
+    // planned descriptors were claimed by no provider at all: they fell through to the resolver's
+    // no-provider branch and reported "no producer available", which is the reason an UNKNOWN key
+    // gets. The two statements are not interchangeable — one says "we have not written this yet",
+    // the other says "this is not a thing" — and the distinction is the entire purpose of the
+    // planned flag. A hand-written list can only ever check the keys somebody remembered to add to
+    // it, so a new `.planned` descriptor with no provider entry was invisible by construction.
     {
-        const char *planned[] = { "pelvisRotation", "thoraxRotation", "xFactor", "xFactorStretch",
-                                  "hipInternalRotation", "spineForwardBend", "spineSideBend",
-                                  "secondaryAxisTilt", "pelvisSway", "pelvisThrust", "pelvisLift",
-                                  "swingPlane", "clubPath", "attackAngle",
-                                  "lowPointAhead",
-                                  "kinematicSequence", "swingScore",
-                                  "shoulderAlignment", "elbowAlignment", "hipAlignment",
-                                  "feetAlignment",
-                                  // Added with the content extension. `faceAngle` LEFT this list in
-                                  // the same change — it is not a producer we will write, it is a
-                                  // device we will talk to, and it is asserted below instead.
-                                  "trailKneeFlexion", "comOverLeadFoot", "leadUpperArmToChest",
-                                  "shaftDirection", "shaftAngleVsHorizontal",
-                                  "launchDirection", "launchAngle", "ballSpeed" };
-        int flagged = 0, unavailable = 0;
         // Use a fully-capable context to prove these are gated by "no producer", not missing sensors.
         ShotContext capable = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax,
                                           SegmentRole::LeadForearm, SegmentRole::LeadHand,
@@ -200,16 +193,30 @@ int main()
                                         /*faceOn*/ true, /*club*/ true);
         capable.hasBallTrack = true;
         capable.tier = ReconstructionTier::ClubInstrumented;
-        for (const char *k : planned) {
-            const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(k));
-            if (d && d->planned) ++flagged;
-            const MetricAvailability a = cat.resolve(QString::fromLatin1(k), capable);
+
+        int planned = 0, unavailable = 0, saysPlanned = 0;
+        for (const MetricDescriptor *d : cat.all()) {
+            if (!d->planned) continue;
+            ++planned;
+            const MetricAvailability a = cat.resolve(d->key, capable);
             if (a.state == MetricAvailability::Unavailable) ++unavailable;
+            if (a.reason.contains(QStringLiteral("planned"))) ++saysPlanned;
+            else std::printf("    planned but reason does not say so: %s -> \"%s\"\n",
+                             qPrintable(d->key), qPrintable(a.reason));
         }
-        checkEqI(flagged, 29, "all 29 planned metrics carry .planned == true");
-        checkEqI(unavailable, 29, "all 29 planned metrics resolve Unavailable even fully-equipped");
-        check(cat.resolve(QStringLiteral("pelvisRotation"), capable).reason.contains(QStringLiteral("planned")),
-              "planned reason says 'planned'");
+        std::printf("    %d planned descriptors\n", planned);
+        check(planned > 0, "the catalogue has planned descriptors, so the sweep can fail");
+        checkEqI(unavailable, planned,
+                 "every planned metric resolves Unavailable even fully-equipped");
+        // swingScore is the ONE legitimate exception and is asserted by name rather than tolerated
+        // by a fuzzy count: it is claimed by ScoreProvider, which gives the more specific truth
+        // ("no live scorer yet") instead of the generic roadmap reason. Anything else landing here
+        // is a descriptor no provider claims.
+        checkEqI(saysPlanned, planned - 1,
+                 "every planned metric but one reports the ROADMAP reason, not 'no producer'");
+        check(!cat.resolve(QStringLiteral("swingScore"), capable)
+                   .reason.contains(QStringLiteral("planned")),
+              "…and the exception is swingScore, which ScoreProvider answers more specifically");
     }
 
     // 3e. Launch-monitor metrics — a REQUIREMENT, not a planned promise.

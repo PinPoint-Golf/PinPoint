@@ -21,6 +21,9 @@ src/Analysis/                         (pure, Qt-only value types — no Qt-GUI)
   metric_resolver.{h,cpp}         provider fusion + describeRequirement() reason renderer
   metric_catalogue_manifest.cpp   installMetricManifest() — the ONE list of every descriptor
   metric_providers.{h,cpp}        WristMetricProvider / KinematicSeriesProvider / FootMetricProvider
+                                  / LowerBodyMetricProvider / TempoProvider / HeadMetricProvider
+                                  / ShaftLeanProvider / ScoreProvider / PlannedMetricProvider
+                                  / LaunchMonitorProvider
 src/Gui/review/
   metric_catalog.{h,cpp}          MetricCatalog : QObject (QML_ELEMENT) — QVariant façade
   MetricLibrary/Detail/Row.qml    the directory + detail screens
@@ -37,10 +40,19 @@ Design invariants (do not break):
   `shot_analyzer_design.md §A`, each either **live** (a producer emits it) or a **planned**
   placeholder (`.planned = true`, no producer yet). Live today: metric_extractor ×4,
   kinematic_series ×3, shaft-lean, foot_metrics ×5, ball_position ×1, head_track ×3,
-  tempo_metrics ×2, plus the `wristScore` / `wristResemblance` `Summary` scores (sourced from a
-  `ScoreBreakdown`, not a `MetricSeries`).
-  Planned: the whole-body rotation / spine / pelvis / club-delivery / kinematic-sequence /
+  tempo_metrics ×2, lower_body_metrics ×4, plus the `wristScore` / `wristResemblance` `Summary`
+  scores (sourced from a `ScoreBreakdown`, not a `MetricSeries`).
+  Planned: the whole-body rotation / spine-and-depth / club-delivery / kinematic-sequence /
   address-and-impact alignment (shoulder / elbow / hip / feet) metrics and `swingScore`.
+- **ONE UNIT PER KEY, FOR ALL TIME.** A producer may not switch a key's unit per swing depending on
+  whether a ruler resolved. Where the unit depends on one, emit the metric only when it resolves and
+  leave it ABSENT otherwise — unavailable is a fact the app already renders honestly, a silently
+  different scale is a confident wrong answer. This is not a style rule: a corridor declares one unit
+  and grading compares the numbers without ever consulting it, so a per-swing unit is ungradeable in
+  a way nothing reports. `leadHeelLift`, `headSway` and `headLift` each shipped this way and each
+  failed silently — one could never fire, two fired on everything. `measureUnitMismatch` in the
+  diagnostics health list now compares a measure's unit against its descriptor's (`Rate` reducers
+  exempt) and is gated at zero over the shipped library.
 - **Placeholders resolve "planned", not "missing sensors".** The `PlannedMetricProvider` claims every
   planned key and always returns `Unavailable` with reason `"planned — not yet produced in this
   build"`, regardless of the shot's capability — a planned metric's `.requirement` is documentation

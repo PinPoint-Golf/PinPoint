@@ -893,33 +893,57 @@
       "measure": "m_pelvisLiftTop",
       "context": "any",
       "mu": 0.0,
-      "sigmaLo": 2.5,
-      "unit": "cm",
-      "source": "heuristic"
+      "sigmaLo": 6.2,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "Re-expressed from centimetres to a percentage of the golfer's own stance when the producer landed, at roughly 2.5 % of stance per centimetre (a ~40 cm ankle-to-ankle iron stance). The claim is unchanged and still a heuristic: it was never seated on data in either unit, and the conversion factor is itself a round number. Re-seat from the corpus."
+    },
+    {
+      "measure": "m_leadKneeDriftTop",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 8.0,
+      "sigmaHi": 8.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "UNSEATED, and unusually so — no published figure exists for this quantity in any unit, so mu and sigma are not a re-expression of somebody else's number but a placeholder wide enough not to fire on ordinary variation. The centre is zero because a lead knee that tracks its own hip is the null hypothesis this metric was built to state. Seat it from the corpus before anybody reads a grade off it."
+    },
+    {
+      "measure": "m_hipLineTiltTop",
+      "context": "any",
+      "mu": 10.0,
+      "sigmaLo": 7.0,
+      "sigmaHi": 7.0,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "The trail hip normally sits about 10 degrees above the lead hip at the top with a driver, and around 30 degrees is the figure widely taught as the point at which the pelvis has hiked rather than turned. sigmaHi is set so that 3 sigma lands just past 30. Both numbers are coaching doctrine rather than a results table — no peer-reviewed source was found reporting either — and the driver basis means the per-club rows are missing, not that one row covers every club."
     },
     {
       "measure": "m_pelvisSwayBack",
       "context": "any",
-      "mu": -2.0,
-      "sigmaLo": 3.0,
-      "unit": "cm",
-      "source": "heuristic"
+      "mu": -5.0,
+      "sigmaLo": 7.5,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "Re-expressed from centimetres to a percentage of the golfer's own stance when the producer landed, at roughly 2.5 % of stance per centimetre (a ~40 cm ankle-to-ankle iron stance). The claim is unchanged and still a heuristic: it was never seated on data in either unit, and the conversion factor is itself a round number. Re-seat from the corpus."
     },
     {
       "measure": "m_pelvisSwayDown",
       "context": "any",
-      "mu": 8.0,
-      "sigmaLo": 4.0,
-      "unit": "cm",
-      "source": "heuristic"
+      "mu": 20.0,
+      "sigmaLo": 10.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "Re-expressed from centimetres to a percentage of the golfer's own stance when the producer landed, at roughly 2.5 % of stance per centimetre (a ~40 cm ankle-to-ankle iron stance). The claim is unchanged and still a heuristic: it was never seated on data in either unit, and the conversion factor is itself a round number. Re-seat from the corpus."
     },
     {
       "measure": "m_pelvisSwayImpact",
       "context": "any",
-      "mu": 3.0,
-      "sigmaLo": 4.0,
-      "unit": "cm",
-      "source": "heuristic"
+      "mu": 7.5,
+      "sigmaLo": 10.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "Re-expressed from centimetres to a percentage of the golfer's own stance when the producer landed, at roughly 2.5 % of stance per centimetre (a ~40 cm ankle-to-ankle iron stance). The claim is unchanged and still a heuristic: it was never seated on data in either unit, and the conversion factor is itself a round number. Re-seat from the corpus."
     },
     {
       "measure": "m_thoraxDrift",
@@ -1249,10 +1273,11 @@
     {
       "measure": "m_pelvisSwayFinish",
       "context": "any",
-      "mu": 12.0,
-      "sigmaLo": 6.0,
-      "unit": "cm",
-      "source": "heuristic"
+      "mu": 30.0,
+      "sigmaLo": 15.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "Re-expressed from centimetres to a percentage of the golfer's own stance when the producer landed, at roughly 2.5 % of stance per centimetre (a ~40 cm ankle-to-ankle iron stance). The claim is unchanged and still a heuristic: it was never seated on data in either unit, and the conversion factor is itself a round number. Re-seat from the corpus."
     },
     {
       "measure": "m_thoraxRotFinish",
@@ -1329,33 +1354,34 @@
     {
       "measure": "m_lowPointAhead",
       "context": "any",
-      "mu": 5.0,
-      "sigmaLo": 4.0,
-      "unit": "cm",
-      "source": "heuristic"
+      "mu": 2.0,
+      "sigmaLo": 1.6,
+      "unit": "in",
+      "source": "heuristic",
+      "citation": "Re-expressed from centimetres to inches, no change of claim. The descriptor and docs/design/low_point_metric_design.md both state inches — the unit launch monitors quote — and sign-conventions rule 1 gives the outside convention the casting vote."
     },
     {
       "measure": "m_lowPointAhead",
       "context": "driver",
-      "mu": -3.0,
-      "sigmaLo": 4.0,
-      "unit": "cm",
+      "mu": -1.2,
+      "sigmaLo": 1.6,
+      "unit": "in",
       "source": "heuristic"
     },
     {
       "measure": "m_lowPointAhead",
       "context": "iron",
-      "mu": 8.0,
-      "sigmaLo": 4.0,
-      "unit": "cm",
+      "mu": 3.0,
+      "sigmaLo": 1.6,
+      "unit": "in",
       "source": "heuristic"
     },
     {
       "measure": "m_lowPointAhead",
       "context": "wedge",
-      "mu": 8.0,
-      "sigmaLo": 5.0,
-      "unit": "cm",
+      "mu": 3.0,
+      "sigmaLo": 2.0,
+      "unit": "in",
       "source": "heuristic"
     },
     {

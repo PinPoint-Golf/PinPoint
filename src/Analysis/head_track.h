@@ -120,11 +120,13 @@ HeadTrackResult trackHead(const PoseTrack2D &pose, int frameW, int frameH,
 // MetricSeries with Address/Top/Impact phase samples. UNSCORED (no reference
 // bands until a corpus exists — deliberately no bandLo/bandHi).
 //
-// pxPerMm > 0 ⇒ sway/lift emitted in mm (= ×frame-width × frameW / pxPerMm); else
-// ×frame (already normalized). tilt is always degrees. Empty when the address
-// reference is unresolved (no head anywhere) or the channel never had a sample.
+// UNIT INVARIANCE: sway/lift are CENTIMETRES and are emitted ONLY when pxPerMm
+// resolves (> 0). There is no fallback scale — a metric whose unit changes per
+// swing cannot carry a norm, and both of these carry one. tilt is always
+// degrees and is emitted regardless. Empty when the address reference is
+// unresolved (no head anywhere) or the channel never had a sample.
 // The caller owns the px→mm scale-source priority (2D calibration → inter-ear
-// addrScalePx/earWidthMm → athlete height → club length); pass ≤ 0 for ×frame.
+// addrScalePx/earWidthMm → athlete height → club length).
 std::vector<MetricSeries> buildHeadSeries(const HeadTrackResult &res,
                                           const std::vector<PhaseEvent> &phases,
                                           double pxPerMm = -1.0);
