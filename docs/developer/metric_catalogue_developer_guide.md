@@ -469,6 +469,92 @@ norm-set content for every metric, DOF or not — `m_tempoRatio` and `m_stanceWi
 rows beside the 39 migrated wrist cells. If you need a band for a speed, author a measure and a
 norm.)*
 
+## Appendix A0 — which producer to build next
+
+Appendix A is exhaustive and unordered: it says what is outstanding for every metric, and nothing
+about which is worth doing first. This answers that, and it is answerable **only because the
+diagnostics library is authored ahead of the producers**. Every unbuilt metric already has
+characteristics written against it, and every characteristic carries a `prominence` — how often a
+coach expects to see it. Join the two and the roadmap sorts itself: *build the producer that would
+light up the most common faults.*
+
+That is the model earning its keep as a reference rather than as a mirror of the pipeline. Nothing in
+this table is a defect, and none of it belongs in a health list — see the note opening §8.4 of the
+diagnostics guide.
+
+**Read the prominence column as this library's editorial judgement, not measured prevalence** — no
+study counts named swing faults across a population. It is a prior, and it is re-seatable.
+
+| Metric | Status | Faults it would unlock | Top rung | Which |
+|---|---|---:|---|---|
+| `swingPlane` | planned | **6** | ubiquitous | *Over the top*, *Steep through delivery*, *Stuck under the plane*, *Shallowing in transition*, *Steep backswing plane*, *Flat backswing plane* |
+| `spineForwardBend` | planned | **4** | ubiquitous | *Loss of posture*, *Standing too upright*, *Bent over too much at address*, *Diving into the ball* |
+| `clubPath` | planned | **2** | ubiquitous | *Path too far out-to-in*, *Path too far in-to-out* |
+| `faceToPath` | device | **2** | ubiquitous | *Face open to the path*, *Face closed to the path* |
+| `pelvisThrust` | planned | **2** | ubiquitous | *Early extension*, *Backing away from the ball* |
+| `spinAxis` | device | **2** | ubiquitous | *Slice*, *Hook* |
+| `shaftDirection` | planned | **4** | common | *Club taken inside*, *Club taken outside*, *Across the line at the top*, *Laid off at the top* |
+| `launchDirection` | planned | **2** | common | *Pull*, *Push* |
+| `lumbarExtension` | noProducer | **2** | common | *S-posture*, *Flat lower back at address* |
+| `spinRate` | device | **2** | common | *Too much spin*, *Too little spin* |
+| `strikeLocation` | device | **2** | common | *Heel strike*, *Toe strike* |
+| `thoracicFlexion` | noProducer | **2** | common | *C-posture*, *Flat upper back at address* |
+| `ballSpeed` | planned | **1** | common | *Lost ball speed* |
+| `carryDistance` | device | **1** | common | *Short carry* |
+| `smashFactor` | device | **1** | common | *Poor strike efficiency* |
+| `trailKneeFlexion` | planned | **1** | common | *Trail knee straightens* |
+| `leadKneeFlexion` | planned | **3** | occasional | *Sitting too deep*, *Legs too straight*, *Late lead-knee buckle* |
+| `ballBodyDistance` | planned | **2** | occasional | *Ball too close to the body*, *Ball too far from the body* |
+| `launchAngle` | planned | **2** | occasional | *Low ball flight*, *Ballooning* |
+
+**`swingPlane` tops the list by a distance**, and it is worth seeing why the count is six rather than
+the two you might expect. One metric read at three different phases carries the whole plane story —
+the backswing pair off `m_shaftPlaneBackswing`, the delivery pair off `m_shaftPlaneDelivery`, and
+over-the-top with its shallowing counterpart off the P4→P5 delta. That is `metric_reducer.h` doing
+its job: *where* a reading is taken is a property of the measure, not of the metric, so one producer
+serves six characteristics including the single commonest fault in amateur golf.
+
+**The `device` rows are a different kind of work and are ranked here anyway.** They need a connector,
+not a producer written from our own pixels — but a reader deciding what to build next should see all
+of it in one order, and `faceToPath` sitting third says something real about what a launch-monitor
+integration would be worth.
+
+**This table is a JOIN, not a hand-kept list — regenerate it, do not edit it.** The lesson of the
+Capture column below applies with more force here, because this one spans two registries:
+
+```sh
+python3 -c "
+import json, collections
+d = json.load(open('src/Resources/diagnostics/core.json'))
+M = {m['id']: m for m in d['measures']}; S = {s['id']: s for s in d['signals']}
+C = {c['id']: c for c in d['conditions']}
+RANK = {'rare':0,'uncommon':1,'occasional':2,'common':3,'ubiquitous':4}
+by = collections.defaultdict(set); status = {}
+for m in M.values():
+    k = m.get('metricKey')
+    if k: status[k] = 'live' if (status.get(k)=='live' or m['status']=='live') else m['status']
+for c in d['conditions']:
+    for sid in c.get('detectedBy', []):
+        for mid in S.get(sid, {}).get('measures', []):
+            k = M.get(mid, {}).get('metricKey')
+            if k: by[k].add(c['id'])
+rows = [(max(RANK[C[x]['prominence']] for x in v), len(v), k, status[k],
+         sorted(v, key=lambda x: -RANK[C[x]['prominence']]))
+        for k, v in by.items() if status.get(k) != 'live']
+for top, n, k, st, ids in sorted(rows, key=lambda r: (-r[0], -r[1], r[2])):
+    print(k, st, n, [C[i]['label'] for i in ids])"
+```
+
+Two reading notes. Rows tie-break on the metric key, so the order above is exactly what the snippet
+prints. And the Status column uses **this guide's** vocabulary — the pack spells `device` as
+`externalDevice`, which is what the snippet emits.
+
+Metrics with a live producer are excluded — for those the question is already answered. A metric
+serving no characteristic at all (`wristScore`, the chart-only rollups) never appears, which is
+correct: it is not waiting on anything the fault library can rank.
+
+---
+
 ## Appendix A — per-metric work plan (capture · detection · calibration · V&V)
 
 Every metric in the manifest, one row each, in manifest order. For **live** metrics the cells

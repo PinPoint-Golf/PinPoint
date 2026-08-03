@@ -660,6 +660,11 @@ coincidence: the frequent faults are whole-body events needing depth — pelvis 
 change, the transition plane — while the rare ones tend to be single-joint readings a face-on camera
 already resolves. Read as a producer roadmap, not as a defect list.
 
+**That roadmap is written out, ranked, in `metric_catalogue_developer_guide.md` Appendix A0.** Join
+each unbuilt metric to the characteristics authored against it and take their top rung, and the
+question "which producer next" answers itself — `swingPlane` leads with six characteristics
+including over-the-top, because one metric read at three phases carries the whole plane story.
+
 The last jump was 25 → 35 and came from one analysis stage over COCO body keypoints 11–16, which
 turned `pelvisSway`, `pelvisLift` and two new frontal-plane keys live in a single change. The
 governing rule there is worth carrying: **a face-on camera resolves the frontal plane and nothing in
