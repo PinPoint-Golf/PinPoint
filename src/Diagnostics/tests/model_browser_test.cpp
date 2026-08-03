@@ -511,13 +511,21 @@ int main(int argc, char **argv)
             return vals;
         };
 
+        // COMMONEST FIRST, which is the ladder REVERSED — deliberately, and only here. A rail is
+        // scanned from the top and the first question asked of a fault library is "what are the
+        // common ones", so travelling past Rare to reach it puts the answer where the eye arrives
+        // last. Everywhere else (the ring collar, the sort key) the ladder keeps its own order.
+        //
         // Only the rungs the shipped library actually uses appear — a chip with no rows would be a
-        // filter that returns nothing — so this is the ladder FILTERED, in ladder order, not the
-        // whole ladder. Written as a subsequence check so re-seating a prominence cannot fail it.
+        // filter returning nothing — so this is the ladder filtered, not the whole ladder. Written
+        // as a subsequence check so re-ranking a condition cannot fail it.
         QStringList ladder;
         for (Prominence pr : allProminences()) ladder << prominenceLabel(pr);
+        std::reverse(ladder.begin(), ladder.end());
         const QStringList shownP = optionsOf("prominence");
         check(shownP.size() >= 2, "the prominence rail is populated");
+        check(!shownP.isEmpty() && shownP.first() == prominenceLabel(Prominence::Ubiquitous),
+              "the commonest rung heads the prominence rail");
         int at = -1;
         bool ordered = true;
         for (const QString &v : shownP) {
@@ -525,7 +533,7 @@ int main(int argc, char **argv)
             if (i <= at) ordered = false;
             at = i;
         }
-        check(ordered, "the prominence chips run rarest-first, along the ladder");
+        check(ordered, "…and the rest descend from it, commonest to rarest");
 
         QStringList kinds;
         for (ConditionKind k : allConditionKinds()) kinds << conditionKindLabel(k);
@@ -658,7 +666,25 @@ int main(int argc, char **argv)
 
     std::printf("=== quantile facets are cut from the data, and count what they return ===\n");
     {
-        for (const QString &type : { QStringLiteral("causes"), QStringLiteral("characteristics") }) {
+        // CAUSES only. The Characteristics list had one numeric facet — `causedBy`, "Most common
+        // outcomes" — and it was removed when `prominence` shipped: both read as "how common is
+        // this", both had a chip labelled "Common", and they meant entirely different things. The
+        // count of paths into a row is still a column and still a sort key; it just stopped
+        // competing for the word.
+        for (const QVariant &fv : m.facets(QStringLiteral("characteristics")))
+            check(fv.toMap().value(QStringLiteral("kind")).toString() != QStringLiteral("quantile"),
+                  "characteristics offers no numeric facet — prominence answers 'how common'");
+
+        // …and prominence takes the slot the numeric facet used to hold, for the same visibility
+        // reason it held it: the rail scrolls, `group` alone is nine chips, and the question a coach
+        // arrives with must not be below the fold.
+        {
+            const QVariantMap first = m.facets(QStringLiteral("characteristics")).value(0).toMap();
+            check(first.value(QStringLiteral("key")).toString() == QStringLiteral("prominence"),
+                  "characteristics leads its rail with how common a thing is");
+        }
+
+        for (const QString &type : { QStringLiteral("causes") }) {
             QVariantList quantiles;
             for (const QVariant &fv : m.facets(type))
                 if (fv.toMap().value(QStringLiteral("kind")).toString()
@@ -666,13 +692,6 @@ int main(int argc, char **argv)
                     quantiles.append(fv);
             check(!quantiles.isEmpty(),
                   qPrintable(QStringLiteral("%1 offers at least one numeric facet").arg(type)));
-
-            // FIRST in the rail, and this is a visibility rule rather than a taste one: the rail
-            // scrolls, `group` alone is nine values, and a facet emitted after the vocabularies
-            // lands below the fold where an author has no reason to think anything exists.
-            check(m.facets(type).value(0).toMap().value(QStringLiteral("kind")).toString()
-                      == QStringLiteral("quantile"),
-                  qPrintable(QStringLiteral("%1 leads its rail with the ranking facets").arg(type)));
 
             for (const QVariant &fv : quantiles) {
                 const QVariantMap  f    = fv.toMap();

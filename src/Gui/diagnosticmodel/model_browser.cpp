@@ -472,8 +472,16 @@ static QStringList valueFacetOrder(const QString &key)
         for (ConditionGroup g : allConditionGroups()) out << conditionGroupLabel(g);
     else if (key == QLatin1String("kind"))
         for (ConditionKind k : allConditionKinds()) out << conditionKindLabel(k);
-    else if (key == QLatin1String("prominence"))
-        for (Prominence p : allProminences()) out << prominenceLabel(p);
+    else if (key == QLatin1String("prominence")) {
+        // COMMONEST FIRST — the ladder read backwards, and the one place that is right. Everywhere
+        // else the rungs run rarest-first because that is the ladder's own order, and the graph's
+        // collar depends on it. A filter rail is not a ladder: it is a list somebody scans from the
+        // top, and the first question asked of a fault library is "what are the common ones". Making
+        // a reader travel past Rare and Uncommon to reach it puts the answer where the eye arrives
+        // last.
+        const auto &rungs = allProminences();
+        for (auto it = rungs.rbegin(); it != rungs.rend(); ++it) out << prominenceLabel(*it);
+    }
     return out;
 }
 
@@ -1944,11 +1952,16 @@ QVariantList ModelBrowser::facets(const QString &type) const
     // Which column each type facets on. Deliberately few: a rail of every column is a filter nobody
     // reads. These are the questions authors actually arrive with.
     QStringList keys;
-    if (type == kCharacteristics)  keys = { QStringLiteral("group"), QStringLiteral("kind"),
-                                            QStringLiteral("prominence"), QStringLiteral("reach"),
+    // `prominence` leads the Characteristics rail, and that is a visibility rule rather than a
+    // taste one — the same one the quantile facets follow on the lists that still have them. This
+    // list has no numeric facet at all now (see quantileFacets()), so without this "how common is
+    // it" would sit below `group`'s nine chips and `kind`'s seven, which is below the fold. The
+    // question a coach arrives with should not need scrolling to.
+    if (type == kCharacteristics)  keys = { QStringLiteral("prominence"), QStringLiteral("group"),
+                                            QStringLiteral("kind"), QStringLiteral("reach"),
                                             QStringLiteral("evidence") };
-    else if (type == kCauses)      keys = { QStringLiteral("group"), QStringLiteral("kind"),
-                                            QStringLiteral("prominence"), QStringLiteral("reach"),
+    else if (type == kCauses)      keys = { QStringLiteral("prominence"), QStringLiteral("group"),
+                                            QStringLiteral("kind"), QStringLiteral("reach"),
                                             QStringLiteral("evidence") };
     else if (type == kMeasures)    keys = { QStringLiteral("status"), QStringLiteral("unit") };
     // The metrics list faceted on UNIT, and that has gone. A unit is a property of the number, not a
@@ -2080,21 +2093,28 @@ QVariantList ModelBrowser::quantileFacets(const QString &type) const
     struct Def { QString key; QString label; QString high; QString mid; QString low; QString zero; };
     std::vector<Def> defs;
     if (type == kCauses) {
-        defs.push_back({ QStringLiteral("outcomes"), tr("Most common faults"),
-                         tr("Very common"), tr("Common"), tr("Less common"),
+        // Named for what it counts rather than for how often anything happens. It was "Most common
+        // faults", which collided with the prominence facet below it in exactly the way the
+        // Characteristics one did — and this one counts BAD SHOTS REACHED, so the frequency reading
+        // was never the right one anyway.
+        defs.push_back({ QStringLiteral("outcomes"), tr("Bad shots it reaches"),
+                         tr("A lot"), tr("Some"), tr("A few"),
                          tr("No shot outcomes") });
         // Breadth, not frequency — so it counts in its own words.
         defs.push_back({ QStringLiteral("leadsTo"), tr("Knock-on effects"),
                          tr("A lot"), tr("Some"), tr("A few"), tr("None") });
     } else if (type == kCharacteristics) {
-        // `causedBy` only, and NOT `leadsTo` as well. This list already carries three vocabulary
-        // facets; a fourth and fifth push the rail past its scroll height, and "what does this lead
-        // to" is the Causes list's question asked on the wrong list — every row there with anything
-        // downstream is on that list by definition. The sort key is still present, so a column-header
-        // sort answers it without spending rail on it.
-        defs.push_back({ QStringLiteral("causedBy"), tr("Most common outcomes"),
-                         tr("Very common"), tr("Common"), tr("Less common"),
-                         tr("Nothing leads here") });
+        // NOTHING. There used to be a `causedBy` facet here titled "Most common outcomes", and it
+        // was removed once `prominence` shipped, because the two read as the same question and are
+        // not. One counted how many conditions funnel INTO a row — model topology, a count of paths
+        // — and the other is how often a coach expects to see the thing. Both had a chip labelled
+        // "Common", one rail apart, meaning different things, which is a worse failure than either
+        // facet is worth: a reader who cannot tell them apart trusts neither.
+        //
+        // Prominence wins the word because it is the only claim about frequency in the panel that is
+        // about GOLFERS. The `causedBy` column and its sort key both stay, so "what does the most
+        // funnel into" is still one header-click away — it just stops spending rail, and stops
+        // competing for a word it was never really entitled to.
     } else {
         return {};
     }

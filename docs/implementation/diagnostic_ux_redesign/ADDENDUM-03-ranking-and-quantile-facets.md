@@ -128,6 +128,22 @@ Characteristics offers *Most common outcomes* and no breadth facet. Characterist
 facets, and a fourth and fifth push the rail past its scroll height for a question the Causes list
 answers better: every condition with anything downstream is *on* that list by definition.
 
+> **SUPERSEDED, 2026-08-03.** The Characteristics facet on `causedBy` has been **removed**, and the
+> Causes facet on `outcomes` is now titled *Bad shots it reaches* with breadth words rather than
+> frequency ones. `Condition::prominence` shipped in `ae9b57d` — how often a coach expects to see a
+> thing — and it is faceted on both lists. Two facets one rail apart, each with a chip labelled
+> **Common**, meaning "many paths funnel in here" and "about one golfer in three": that is a worse
+> failure than either facet is worth, because a reader who cannot tell them apart trusts neither.
+>
+> Prominence keeps the word, because it is the only claim about frequency in the panel that is about
+> GOLFERS rather than about the graph. Everything this addendum built stays: **the columns, the three
+> sort keys and the reach computation are untouched**, so "what does the most funnel into this" is
+> one header-click away. It stopped spending rail, and stopped competing for a word it was never
+> quite entitled to — this document's own §"the words" section had already noticed the risk, warning
+> that a chip must not "be read as a measured frequency — this counts paths through the model, not
+> swings observed". Prominence is the measured-frequency claim that warning was holding the space
+> for.
+
 **All three sort keys are attached to both row types regardless**, so either list can be sorted or
 faceted on any of them without a column being drawn for it. That is established precedent — `axis` is
 already a sort key with no column (`model_browser.cpp:876`).
@@ -188,10 +204,10 @@ vocabulary is gone from the UI entirely: nobody ranks a swing fault by decile, a
 
 | Surface | Reads |
 |---|---|
-| Causes › facet on `outcomes` | **Most common faults** — Very common (8+) · Common (5–7) · Less common (1–4) |
+| Causes › facet on `outcomes` | ~~Most common faults~~ → **Bad shots it reaches** — A lot (8+) · Some (5–7) · A few (1–4) |
 | Causes › facet on `leadsTo` | **Knock-on effects** — A lot (19+) · Some (12–18) · A few (1–11) |
-| Characteristics › facet on `causedBy` | **Most common outcomes** — Very common (28+) · Common (12–27) · Less common (1–11) · Nothing leads here |
-| Characteristics › column `causedBy` | **Faults** — the count of faults that eventually produce this |
+| ~~Characteristics › facet on `causedBy`~~ | **REMOVED** — see the note above; `prominence` answers "how common" on both lists |
+| Characteristics › column `causedBy` | **Faults** — the count of faults that eventually produce this. Kept, with its sort key |
 
 Two decisions inside that:
 
