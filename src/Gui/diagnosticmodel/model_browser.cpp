@@ -319,16 +319,110 @@ bool matches(const QString &haystack, const QString &needle)
 
 // What a metric needs before it can produce anything, in the words a user would meet elsewhere.
 // Stated positively and in order of how often it is the blocker.
-QStringList metricNeeds(const MetricRequirement &r)
+// The capture devices a metric folds down to, as the words the facet rail and the Needs / Improves
+// columns both use. ONE derivation, because a facet counts what a column shows and the two saying
+// different things is how a chip ends up claiming twelve rows and returning nine.
+QStringList deviceLabels(const std::vector<CaptureDevice> &devices)
 {
-    QStringList needs;
-    if (r.faceOnCamera)  needs << QObject::tr("face-on camera");
-    if (r.clubTrack)     needs << QObject::tr("club tracking");
-    if (r.ballTrack)     needs << QObject::tr("ball tracking");
-    if (r.launchMonitor) needs << QObject::tr("launch monitor");
-    if (!r.imuRoles.empty())
-        needs << QObject::tr("%n IMU(s)", "", int(r.imuRoles.size()));
-    return needs;
+    QStringList out;
+    for (CaptureDevice d : devices) {
+        switch (d) {
+        case CaptureDevice::FaceOnCamera:  out << QObject::tr("Face-on camera");       break;
+        case CaptureDevice::DtlCamera:     out << QObject::tr("Down-the-line camera"); break;
+        case CaptureDevice::WristImus:     out << QObject::tr("Wrist IMUs");           break;
+        case CaptureDevice::BodyImus:      out << QObject::tr("Body IMUs");            break;
+        case CaptureDevice::ClubTrack:     out << QObject::tr("Club tracking");        break;
+        case CaptureDevice::ClubSensor:    out << QObject::tr("Club sensor");          break;
+        case CaptureDevice::BallTrack:     out << QObject::tr("Ball tracking");        break;
+        case CaptureDevice::LaunchMonitor: out << QObject::tr("Launch monitor");       break;
+        }
+    }
+    return out;
+}
+
+// What the metric needs for ANY reading at all — its cheapest route. Not the union over its ladder:
+// a metric a camera produces and an IMU produces better must not read as needing both.
+//
+// Needing nothing is a VALUE, not an absence. Tempo is timed off the phase ladder and needs no
+// device at all, and leaving those rows tagless makes them the only two metrics in the catalogue
+// that no chip can reach — invisible to the filter rather than filed under it.
+QStringList metricNeeds(const MetricDescriptor &d)
+{
+    const QStringList kit = deviceLabels(captureDevicesFor(d.baselineRequirement()));
+    return kit.isEmpty() ? QStringList{ QObject::tr("Nothing extra") } : kit;
+}
+
+// What better kit would add. Counts routes nobody has built yet, because this list answers a
+// catalogue question — where could this metric go — and a route we have not written is precisely
+// what a reader browsing the model is deciding whether to write.
+QStringList metricImproves(const MetricDescriptor &d)
+{
+    return deviceLabels(d.upgradeDevices());
+}
+
+// What a second camera would do, as one chip. Its own facet rather than two more entries under
+// "Improves with", because three of the four answers are about a metric's route ladder and the
+// fourth — Refines — is about projective geometry and applies to thirty-two metrics at once;
+// sitting them side by side under one device name would read as one claim of one strength.
+//
+// Absence from this facet IS an answer: nothing here means a second camera does nothing for the
+// metric, which is true of every IMU reading, every launch-monitor reading, and the six taken at
+// Address while the golfer is still square to the camera.
+QString metricStereoGain(const MetricDescriptor &d)
+{
+    switch (d.stereoGain()) {
+    case MetricDescriptor::StereoGain::Unlocks:  return QObject::tr("Unlock it");
+    case MetricDescriptor::StereoGain::Improves: return QObject::tr("Improve it");
+    case MetricDescriptor::StereoGain::Refines:  return QObject::tr("Refine it");
+    case MetricDescriptor::StereoGain::None:     break;
+    }
+    return QString();
+}
+
+// ── Tag facets ──────────────────────────────────────────────────────────────
+//
+// A THIRD facet kind, beside the cell-text vocabularies and the quantile buckets. Those two both
+// assume a row has exactly one value for a facet; a metric has several capture devices at once, and
+// squeezing that into cell text gives you a chip per COMBINATION ("Face-on camera · Ball tracking"
+// as a value distinct from "Face-on camera"), which is a filter that answers no question anybody
+// has. A tag facet reads a QStringList off the row's sortKeys, counts each entry, and matches by
+// intersection.
+//
+// Which key, and what to call it. Only the metrics list has any today; the mechanism is general.
+struct TagFacetDef { const char *sortKey; const char *label; };
+
+static std::vector<TagFacetDef> tagFacetsFor(const QString &type)
+{
+    if (type == kMetrics)
+        return { { "needsTags",    QT_TR_NOOP("Needs") },
+                 { "improvesTags", QT_TR_NOOP("Improves with") },
+                 { "stereoTags",   QT_TR_NOOP("A 2nd camera would") } };
+    return {};
+}
+
+// The order a tag facet's chips are listed in.
+//
+// The vocabulary facets count in FIRST-SEEN order, which is right for them — `group` is the swing's
+// own sequence, and sorting it alphabetically would scramble a deliberate one. It is wrong here.
+// First-seen over a tag facet means "whichever device the first metric in the manifest happened to
+// need", which is an order with no meaning that reads as no order at all: cameras, IMUs and the
+// launch monitor interleaved differently in each of the three facets.
+//
+// So these declare theirs. Devices follow `allCaptureDevices()` — IMUs, cameras, then the external
+// box — and the stereo verdict runs strongest-first, because "what would a second camera unlock"
+// is the question worth answering before "what would it merely sharpen".
+static QStringList tagFacetOrder(const QString &sortKey)
+{
+    if (sortKey == QLatin1String("needsTags") || sortKey == QLatin1String("improvesTags")) {
+        QStringList out;
+        for (CaptureDevice d : allCaptureDevices())
+            out << deviceLabels({ d }).value(0);
+        out << QObject::tr("Nothing extra");     // the floor of the Needs facet; no device at all
+        return out;
+    }
+    if (sortKey == QLatin1String("stereoTags"))
+        return { QObject::tr("Unlock it"), QObject::tr("Improve it"), QObject::tr("Refine it") };
+    return {};
 }
 
 // The singular noun for one row of a type — the Type column in the cross-type result list. Singular
@@ -766,7 +860,19 @@ QVariantList ModelBrowser::columns(const QString &type) const
         c.append(column(QStringLiteral("key"), tr("Key"), 170, false, QStringLiteral("left"), true));
         c.append(column(QStringLiteral("unit"), tr("Unit"), 80));
         c.append(column(QStringLiteral("group"), tr("Group"), 140));
-        c.append(column(QStringLiteral("needs"), tr("Needs"), 160));
+        c.append(column(QStringLiteral("needs"), tr("Needs"), 170));
+        // What a second camera or a set of IMUs would add. A column, not a footnote: "this is
+        // face-on today and a DTL camera would triangulate it" is the question this list is opened
+        // with as often as "what does it need", and it was previously answerable only by reading
+        // three paragraphs of a metric's own prose.
+        c.append(column(QStringLiteral("improves"), tr("Improves with"), 170));
+        // The second camera gets its OWN column rather than another entry under "Improves with",
+        // because its answer is graded (unlock / improve / refine) where that one is a device list,
+        // and because the weakest grade is derived from projective geometry rather than from a route
+        // somebody authored. It shipped for one build as a facet with no column, which is the worst
+        // of both: the rail said 27 metrics a second camera would refine and the table said "—" next
+        // to every one of them. A facet must count what a column shows.
+        c.append(column(QStringLiteral("stereo"), tr("2nd camera"), 120));
         c.append(column(QStringLiteral("readBy"), tr("Read by"), 68, false, QStringLiteral("right"), true));
     } else if (type == kSignals) {
         c.append(column(QStringLiteral("name"), tr("Id"), 240, true, QStringLiteral("left"), true));
@@ -1159,15 +1265,26 @@ QVariantList ModelBrowser::rawRows(const QString &type) const
             for (const Measure &meas : p.measures)
                 if (meas.metricKey == d->key) readers << measureDisplayLabel(meas);
 
-            const QStringList needs = metricNeeds(d->requirement);
+            const QStringList needs    = metricNeeds(*d);
+            const QStringList improves = metricImproves(*d);
 
             QVariantList cells;
             cells.append(cell(d->label.isEmpty() ? d->key : d->label));
             cells.append(cell(d->key, QStringLiteral("dim"), true));
             cells.append(cell(d->unit));
             cells.append(cell(d->group));
-            cells.append(cell(needs.isEmpty() ? tr("nothing extra") : needs.join(QStringLiteral(" · ")),
-                              needs.isEmpty() ? QStringLiteral("dim") : QString()));
+            // metricNeeds() never returns empty — a metric needing nothing says so — so the cell
+            // and the chip read the same words, which is the rule every facet here follows.
+            const bool noKit = needs.size() == 1 && needs.first() == tr("Nothing extra");
+            cells.append(cell(needs.join(QStringLiteral(" · ")),
+                              noKit ? QStringLiteral("dim") : QString()));
+            // Toned when there is no better route, because a blank here is a real answer — this is
+            // as good as the metric gets — and not a gap in the data.
+            cells.append(cell(improves.isEmpty() ? tr("—") : improves.join(QStringLiteral(" · ")),
+                              improves.isEmpty() ? QStringLiteral("dim") : QString()));
+            const QString stereo = metricStereoGain(*d);
+            cells.append(cell(stereo.isEmpty() ? tr("—") : stereo,
+                              stereo.isEmpty() ? QStringLiteral("dim") : QString()));
             // A metric nothing reads is not a fault — the catalogue is broader than the diagnostics
             // pack — but it IS the interesting case when you are hunting for what a corridor could
             // be built on, so it is toned rather than rendered as an ordinary zero.
@@ -1181,8 +1298,8 @@ QVariantList ModelBrowser::rawRows(const QString &type) const
             r.insert(QStringLiteral("label"), d->label.isEmpty() ? d->key : d->label);
             // Planned means the catalogue describes it and nothing produces it yet — the same
             // distinction the measure roadmap draws, and worth the same dot.
-            r.insert(QStringLiteral("dot"), d->planned ? QStringLiteral("watch")
-                                                       : QStringLiteral("good"));
+            r.insert(QStringLiteral("dot"), d->planned() ? QStringLiteral("watch")
+                                                         : QStringLiteral("good"));
             r.insert(QStringLiteral("cells"), cells);
 
             QVariantMap keys;
@@ -1191,12 +1308,24 @@ QVariantList ModelBrowser::rawRows(const QString &type) const
             keys.insert(QStringLiteral("unit"), d->unit);
             keys.insert(QStringLiteral("group"), d->group);
             keys.insert(QStringLiteral("needs"), needs.join(QLatin1Char(' ')));
+            keys.insert(QStringLiteral("improves"), improves.join(QLatin1Char(' ')));
             keys.insert(QStringLiteral("readBy"), readers.size());
+            // The tag lists the two device facets read. A row carries SEVERAL values for one facet,
+            // which the cell-text facets cannot express — a metric needing a camera and a ball has
+            // one cell reading "Face-on camera · Ball tracking" and belongs under both chips.
+            keys.insert(QStringLiteral("needsTags"), needs);
+            keys.insert(QStringLiteral("improvesTags"), improves);
+            keys.insert(QStringLiteral("stereo"), stereo);
+            keys.insert(QStringLiteral("stereoTags"),
+                        stereo.isEmpty() ? QStringList{} : QStringList{ stereo });
             r.insert(QStringLiteral("sortKeys"), keys);
-            r.insert(QStringLiteral("searchText"),
-                     QStringList{ d->label, d->shortLabel, d->key, d->unit, d->group,
-                                  d->description, d->howToRead }
-                         .join(QLatin1Char(' ')));
+            // Route summaries are searchable. They are where a metric says how it is actually got,
+            // so "inter-ear" and "triangulated" are terms a reader will reach for.
+            QStringList haystack{ d->label, d->shortLabel, d->key, d->unit, d->group,
+                                  d->description, d->howToRead };
+            for (const MetricRoute &rt : d->routes)
+                haystack << rt.summary;
+            r.insert(QStringLiteral("searchText"), haystack.join(QLatin1Char(' ')));
             out.append(r);
         }
     } else if (type == kSignals) {
@@ -1543,6 +1672,21 @@ QVariantList ModelBrowser::rows(const QString &type, const QVariantMap &filters)
                     ok = hit;
                     continue;
                 }
+                // A tag facet: the row carries a LIST for this key, and matches if it holds any
+                // wanted value. Same OR-within-a-facet rule as everything else here, and counted
+                // off the same list the rail counted.
+                bool isTagFacet = false;
+                for (const TagFacetDef &def : tagFacetsFor(type))
+                    if (it.key() == QLatin1String(def.sortKey)) isTagFacet = true;
+                if (isTagFacet) {
+                    const QStringList tags = keys.value(it.key()).toStringList();
+                    bool hit = false;
+                    for (const QString &w : wanted)
+                        if (tags.contains(w)) { hit = true; break; }
+                    ok = hit;
+                    continue;
+                }
+
                 // Facet values are matched against the CELL TEXT of the facet's column, which is
                 // what the rail counted — one source for the count and the filter, so a chip can
                 // never say 12 and return 9.
@@ -1706,7 +1850,12 @@ QVariantList ModelBrowser::facets(const QString &type) const
     else if (type == kCauses)      keys = { QStringLiteral("group"), QStringLiteral("reach"),
                                             QStringLiteral("evidence") };
     else if (type == kMeasures)    keys = { QStringLiteral("status"), QStringLiteral("unit") };
-    else if (type == kMetrics)     keys = { QStringLiteral("group"), QStringLiteral("unit") };
+    // The metrics list faceted on UNIT, and that has gone. A unit is a property of the number, not a
+    // question anybody browses with — "show me the metrics in degrees" groups the wrist, the spine,
+    // the club face and the foot flare together and separates stance width from stance width in
+    // millimetres. What a reader actually arrives with is "what can I get with the kit I own", and
+    // that is the two device facets below. Group stays; it is the only vocabulary here worth a chip.
+    else if (type == kMetrics)     keys = { QStringLiteral("group") };
     else if (type == kSignals)     keys = { QStringLiteral("test"), QStringLiteral("direction") };
     else if (type == kLinks)       keys = { QStringLiteral("relation"), QStringLiteral("strength"),
                                             QStringLiteral("evidence") };
@@ -1765,6 +1914,54 @@ QVariantList ModelBrowser::facets(const QString &type) const
         f.insert(QStringLiteral("key"), key);
         f.insert(QStringLiteral("label"), title);
         f.insert(QStringLiteral("kind"), QStringLiteral("value"));
+        f.insert(QStringLiteral("options"), options);
+        out.append(f);
+    }
+
+    // The tag facets last, under the vocabularies. They are the widest chips (device names are long)
+    // and the most stable, so they anchor the bottom of the rail rather than pushing `group` down.
+    for (const TagFacetDef &def : tagFacetsFor(type)) {
+        const QString key = QString::fromLatin1(def.sortKey);
+
+        QStringList         seen;
+        QHash<QString, int> counts;
+        for (const QVariant &v : all) {
+            const QStringList tags =
+                v.toMap().value(QStringLiteral("sortKeys")).toMap().value(key).toStringList();
+            for (const QString &t : tags) {
+                if (!counts.contains(t)) seen << t;
+                counts[t] += 1;
+            }
+        }
+        if (seen.size() < 2) continue;   // a facet with one value filters nothing
+
+        // Into the declared order. A value the order does not name keeps its first-seen position at
+        // the end rather than being dropped — a chip that vanishes because somebody added a device
+        // and forgot this table would be a filter silently missing rows.
+        const QStringList canonical = tagFacetOrder(key);
+        if (!canonical.isEmpty()) {
+            std::stable_sort(seen.begin(), seen.end(),
+                             [&canonical](const QString &a, const QString &b) {
+                                 const int ia = canonical.indexOf(a);
+                                 const int ib = canonical.indexOf(b);
+                                 return (ia < 0 ? canonical.size() : ia)
+                                      < (ib < 0 ? canonical.size() : ib);
+                             });
+        }
+
+        QVariantList options;
+        for (const QString &value : seen) {
+            QVariantMap o;
+            o.insert(QStringLiteral("value"), value);
+            o.insert(QStringLiteral("label"), value);
+            o.insert(QStringLiteral("count"), counts.value(value));
+            options.append(o);
+        }
+
+        QVariantMap f;
+        f.insert(QStringLiteral("key"), key);
+        f.insert(QStringLiteral("label"), tr(def.label));
+        f.insert(QStringLiteral("kind"), QStringLiteral("tags"));
         f.insert(QStringLiteral("options"), options);
         out.append(f);
     }
@@ -2202,9 +2399,9 @@ QVariantMap ModelBrowser::searchExtras(const QString &type, const QString &id) c
             if (meas.metricKey == id) readers << measureDisplayLabel(meas);
         out.insert(QStringLiteral("connected"), readers.join(QStringLiteral(" · ")));
         out.insert(QStringLiteral("links"), QString::number(readers.size()));
-        out.insert(QStringLiteral("status"), d->planned ? tr("Planned") : tr("Live"));
-        out.insert(QStringLiteral("statusTone"), d->planned ? QStringLiteral("watch")
-                                                            : QStringLiteral("good"));
+        out.insert(QStringLiteral("status"), d->planned() ? tr("Planned") : tr("Live"));
+        out.insert(QStringLiteral("statusTone"), d->planned() ? QStringLiteral("watch")
+                                                              : QStringLiteral("good"));
     } else if (type == kReferences) {
         const Reference *ref = sharedReferenceSet().reference(id);
         if (!ref) return out;
@@ -2634,9 +2831,9 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
 
         QVariantList badges;
         badges.append(hubRow(QString(), QString(), d->group, QString(), QString(), false));
-        if (d->planned)
+        if (d->planned())
             badges.append(hubRow(QString(), QString(), tr("Planned"),
-                                 tr("in the catalogue, no producer yet"), QStringLiteral("warn"),
+                                 tr("in the catalogue, no route built yet"), QStringLiteral("warn"),
                                  false));
         out.insert(QStringLiteral("badges"), badges);
 
@@ -2645,10 +2842,35 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
         // convention was unstated somewhere; this is where it is stated.
         if (!d->howToRead.isEmpty())   sections.append(prose(tr("How to read it"), d->howToRead));
 
-        const QStringList needs = metricNeeds(d->requirement);
+        // The LADDER, best first — every way this metric can be got, what each needs, and how good
+        // it is. A single "Needs" line could only ever describe the cheapest way, so a reader
+        // deciding whether to buy a second camera learned nothing from this page.
+        QVariantList ladder;
+        for (const MetricRoute &rt : d->routes) {
+            const QStringList kit = deviceLabels(captureDevicesFor(rt.requirement));
+            QStringList note;
+            note << (rt.quality == RouteQuality::Estimated ? tr("estimated") : tr("measured"));
+            if (rt.planned) note << tr("not built yet");
+            const QString title = kit.isEmpty() ? tr("Nothing beyond a segmented swing")
+                                                : kit.join(QStringLiteral(" + "));
+            ladder.append(hubRow(QString(), QString(),
+                                 QStringLiteral("%1 — %2").arg(title, note.join(QStringLiteral(", "))),
+                                 rt.summary,
+                                 rt.planned ? QStringLiteral("warn")
+                                            : (rt.quality == RouteQuality::Estimated
+                                                   ? QStringLiteral("watch")
+                                                   : QStringLiteral("good")),
+                                 false));
+        }
+        sections.append(section(tr("How it can be measured"), ladder));
+
+        const QStringList needs    = metricNeeds(*d);
+        const QStringList improves = metricImproves(*d);
         sections.append(prose(tr("Needs"),
                               needs.isEmpty() ? tr("Nothing beyond a swing.")
                                               : needs.join(QStringLiteral(" · "))));
+        if (!improves.isEmpty())
+            sections.append(prose(tr("Improves with"), improves.join(QStringLiteral(" · "))));
 
         // THE JOIN, and the reason this view is here at all: a metric is a curve, and a measure is
         // that curve reduced at a phase. One metric carries several measures — sway, slide and

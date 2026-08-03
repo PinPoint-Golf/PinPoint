@@ -183,12 +183,12 @@ int main()
             const MetricDescriptor *d = cat.descriptor(m.metricKey);
             if (!d) continue;
 
-            if (m.status == MeasureStatus::Live && d->planned) {
+            if (m.status == MeasureStatus::Live && d->planned()) {
                 ++overclaimed;
                 std::printf("        measure '%s' claims live, but metric '%s' is planned\n",
                             qPrintable(m.id), qPrintable(m.metricKey));
             }
-            if (m.status == MeasureStatus::Planned && !d->planned) {
+            if (m.status == MeasureStatus::Planned && !d->planned()) {
                 // Understating is harmless but still a disagreement worth surfacing.
                 std::printf("        note: measure '%s' says planned, metric '%s' has a producer\n",
                             qPrintable(m.id), qPrintable(m.metricKey));
@@ -212,7 +212,7 @@ int main()
             // A capture gap must be catalogued as planned (never as having a producer) and must say
             // in its own text that it cannot be measured, or a reader of the catalogue alone would
             // reasonably expect it to arrive.
-            if (!d->planned) {
+            if (!d->planned()) {
                 ++inconsistent;
                 std::printf("        capture gap '%s' is not marked planned in the catalogue\n",
                             qPrintable(m.metricKey));
@@ -407,7 +407,7 @@ int main()
             for (const Measure &mm : p.measures)
                 if (mm.metricKey == key) { m = &mm; break; }
             if (m && m->status == MeasureStatus::NotCapturable) ++gap;
-            else if (d->planned) ++planned;
+            else if (d->planned()) ++planned;
             else ++live;
         }
         std::printf("        (%d metrics referenced: %d with a producer, %d planned, %d capture gaps)\n",

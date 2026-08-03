@@ -258,6 +258,181 @@ int main(int argc, char **argv)
         check(countsMatch, "every facet chip returns exactly the number it advertises");
     }
 
+    std::printf("=== the metrics list filters on CAPTURE, not on units ===\n");
+    {
+        // A unit is a property of the number, not a question anybody browses with: "metrics in
+        // degrees" puts the wrist, the spine, the club face and the foot flare in one bucket and
+        // splits stance width from stance width in millimetres. It is gone. What replaced it is the
+        // pair of device facets the route ladder makes derivable — what a metric needs at minimum,
+        // and what better kit would add.
+        const QVariantList facets = m.facets(QStringLiteral("metrics"));
+        QStringList keys;
+        for (const QVariant &fv : facets)
+            keys << fv.toMap().value(QStringLiteral("key")).toString();
+        check(!keys.contains(QStringLiteral("unit")), "no unit facet on the metrics list");
+        check(keys.contains(QStringLiteral("needsTags")), "…and a Needs facet in its place");
+        check(keys.contains(QStringLiteral("improvesTags")), "…beside an Improves-with facet");
+        check(keys.contains(QStringLiteral("stereoTags")), "…and a second-camera facet");
+
+        // The same one-source rule as above, now over a facet kind where a row carries SEVERAL
+        // values. Getting this wrong is invisible in the rail and obvious in the list: a metric
+        // needing a camera and a ball must appear under both chips, and be counted by both.
+        bool countsMatch = true, sawTags = false;
+        for (const QVariant &fv : facets) {
+            const QVariantMap f = fv.toMap();
+            if (f.value(QStringLiteral("kind")).toString() != QLatin1String("tags")) continue;
+            sawTags = true;
+            std::printf("        %s:\n", qPrintable(f.value(QStringLiteral("label")).toString()));
+            for (const QVariant &ov : f.value(QStringLiteral("options")).toList()) {
+                const QVariantMap o = ov.toMap();
+                std::printf("          %-24s %d\n",
+                            qPrintable(o.value(QStringLiteral("value")).toString()),
+                            o.value(QStringLiteral("count")).toInt());
+                QVariantMap sel;
+                sel.insert(f.value(QStringLiteral("key")).toString(),
+                           QStringList{ o.value(QStringLiteral("value")).toString() });
+                QVariantMap filters;
+                filters.insert(QStringLiteral("facets"), sel);
+                const int got  = int(m.rows(QStringLiteral("metrics"), filters).size());
+                const int said = o.value(QStringLiteral("count")).toInt();
+                if (got != said) {
+                    countsMatch = false;
+                    std::printf("        %s = %s: chip says %d, list returns %d\n",
+                                qPrintable(f.value(QStringLiteral("key")).toString()),
+                                qPrintable(o.value(QStringLiteral("value")).toString()), said, got);
+                }
+            }
+        }
+        check(sawTags, "the device facets declare themselves as the tag kind");
+        check(countsMatch, "every device chip returns exactly the number it advertises");
+
+        // A metric with two rungs is under its floor's chip and its upgrade's — one row, two
+        // answers, which is the whole reason a tag facet exists. pelvisRotation is the worked case:
+        // a face-on camera estimates it, a pelvis IMU measures it.
+        const auto rowKeys = [&m](const char *key, const char *value) {
+            QVariantMap sel;
+            sel.insert(QString::fromLatin1(key), QStringList{ QString::fromLatin1(value) });
+            QVariantMap filters;
+            filters.insert(QStringLiteral("facets"), sel);
+            QStringList ids;
+            for (const QVariant &rv : m.rows(QStringLiteral("metrics"), filters))
+                ids << rv.toMap().value(QStringLiteral("id")).toString();
+            return ids;
+        };
+        check(rowKeys("needsTags", "Face-on camera").contains(QStringLiteral("pelvisRotation")),
+              "pelvisRotation needs only the camera");
+        check(rowKeys("improvesTags", "Body IMUs").contains(QStringLiteral("pelvisRotation")),
+              "…and body IMUs are what would improve it");
+        check(!rowKeys("needsTags", "Body IMUs").contains(QStringLiteral("pelvisRotation")),
+              "…and it does NOT read as needing them, which the old flat requirement could not say");
+
+        // The depth metrics are filterable as such. They used to state `minTier = Stereo3D`, which
+        // no facet could read and no golfer could act on.
+        check(rowKeys("needsTags", "Down-the-line camera").contains(QStringLiteral("clubPath")),
+              "clubPath is findable by the camera it needs");
+
+        // The second-camera facet grades rather than lumps. A chip covering every projected metric
+        // at one strength would put pelvisThrust — invisible without stereo — beside headTilt, which
+        // a calibrated pair makes a few degrees better at the top.
+        check(rowKeys("stereoTags", "Unlock it").contains(QStringLiteral("clubPath")),
+              "clubPath: a second camera unlocks it");
+        check(rowKeys("stereoTags", "Improve it").contains(QStringLiteral("xFactor")),
+              "xFactor: a second camera improves it (authored rung)");
+        check(rowKeys("stereoTags", "Refine it").contains(QStringLiteral("shoulderPlaneAngle")),
+              "shoulderPlaneAngle: a second camera refines it (derived from the projection)");
+        const QStringList none = rowKeys("stereoTags", "Refine it")
+                               + rowKeys("stereoTags", "Improve it")
+                               + rowKeys("stereoTags", "Unlock it");
+        check(!none.contains(QStringLiteral("toeLineAngle")),
+              "…and an Address-only reading appears under no chip at all, which is the answer");
+
+        // EVERY FACET NEEDS A COLUMN SAYING THE SAME THING.
+        //
+        // The stereo facet shipped for one build without one: the rail offered "Refine it (27)" and
+        // the table showed "—" in every visible column for all 27, so a reader scanning the list
+        // concluded a second camera did nothing for them and a reader using the rail concluded the
+        // opposite. Neither was wrong about what they could see. Filtering and scanning have to
+        // agree, so this asserts each facet's key resolves to a column or a sort key that carries
+        // the same value the chip does.
+        const QVariantList cols = m.columns(QStringLiteral("metrics"));
+        int orphanFacets = 0;
+        for (const QVariant &fv : facets) {
+            const QVariantMap f   = fv.toMap();
+            const QString     key = f.value(QStringLiteral("key")).toString();
+            // A tag facet is keyed "<col>Tags"; a value facet is keyed on the column itself.
+            QString backing = key;
+            if (backing.endsWith(QStringLiteral("Tags")))
+                backing.chop(4);
+            bool found = false;
+            for (const QVariant &cv : cols)
+                if (cv.toMap().value(QStringLiteral("key")).toString() == backing) found = true;
+            if (!found) {
+                ++orphanFacets;
+                std::printf("        facet '%s' has no column to scan\n", qPrintable(key));
+            }
+        }
+        check(orphanFacets == 0, "every metrics facet is backed by a column of the same name");
+
+        // And the column agrees row-for-row with the chip, not merely in name.
+        int mismatched = 0;
+        for (const QVariant &rv : m.rows(QStringLiteral("metrics"), QVariantMap{})) {
+            const QVariantMap r     = rv.toMap();
+            const QVariantList cs   = r.value(QStringLiteral("cells")).toList();
+            const QStringList tags  = r.value(QStringLiteral("sortKeys")).toMap()
+                                       .value(QStringLiteral("stereoTags")).toStringList();
+            int idx = -1;
+            for (int i = 0; i < cols.size(); ++i)
+                if (cols.at(i).toMap().value(QStringLiteral("key")).toString()
+                    == QLatin1String("stereo")) idx = i;
+            if (idx < 0 || idx >= cs.size()) continue;
+            const QString shown = cs.at(idx).toMap().value(QStringLiteral("text")).toString();
+            const QString want  = tags.isEmpty() ? QStringLiteral("—") : tags.first();
+            if (shown != want) {
+                ++mismatched;
+                std::printf("        %s: column says '%s', chip says '%s'\n",
+                            qPrintable(r.value(QStringLiteral("id")).toString()),
+                            qPrintable(shown), qPrintable(want));
+            }
+        }
+        check(mismatched == 0, "the 2nd-camera column says exactly what its chip does");
+
+        // CHIP ORDER IS DECLARED, NOT INCIDENTAL. These counted in first-seen order for one build,
+        // which over a tag facet means "whichever device the first metric in the manifest happened
+        // to need" — so cameras, IMUs and the launch monitor interleaved differently in each of the
+        // three facets and the rail read as unsorted. Sensors, then cameras, then the external box.
+        const auto optionsOf = [&facets](const char *key) {
+            QStringList vals;
+            for (const QVariant &fv : facets) {
+                const QVariantMap f = fv.toMap();
+                if (f.value(QStringLiteral("key")).toString() != QLatin1String(key)) continue;
+                for (const QVariant &ov : f.value(QStringLiteral("options")).toList())
+                    vals << ov.toMap().value(QStringLiteral("value")).toString();
+            }
+            return vals;
+        };
+        const QStringList needsOrder = optionsOf("needsTags");
+        const auto before = [&needsOrder](const char *a, const char *b) {
+            const int ia = needsOrder.indexOf(QString::fromLatin1(a));
+            const int ib = needsOrder.indexOf(QString::fromLatin1(b));
+            return ia >= 0 && ib >= 0 && ia < ib;
+        };
+        check(before("Wrist IMUs", "Face-on camera"), "IMUs lead the Needs rail");
+        check(before("Body IMUs", "Face-on camera"), "…both of them");
+        check(before("Face-on camera", "Down-the-line camera"), "…then the views");
+        check(before("Down-the-line camera", "Club tracking"),
+              "…then what the cameras find in them");
+        check(before("Ball tracking", "Launch monitor"), "…and the external box last");
+        check(needsOrder.last() == QStringLiteral("Nothing extra"),
+              "…with 'needs no device at all' after every device");
+
+        // Strongest first, because "what would a second camera unlock" is worth answering before
+        // "what would it merely sharpen".
+        check(optionsOf("stereoTags")
+                  == QStringList{ QStringLiteral("Unlock it"), QStringLiteral("Improve it"),
+                                  QStringLiteral("Refine it") },
+              "the 2nd-camera chips run strongest-first");
+    }
+
     std::printf("=== a condition ranks by how far it REACHES, not by its out-degree ===\n");
     {
         // Direct out-degree buries a long chain, and a long chain is the shape a root cause has.

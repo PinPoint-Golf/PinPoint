@@ -35,11 +35,17 @@
 
 namespace pinpoint::analysis {
 
-// What a metric needs before any producer can satisfy it (design §3.2). The descriptor states
-// requirements; it never names a provider. When no provider claims a key, the resolver renders the
-// unmet requirement into a human-readable availability reason ("needs face-on camera").
+// What ONE ROUTE needs before it can produce a metric (design §3.2). A requirement never names a
+// provider. When nothing satisfies it, the resolver renders it into a human-readable availability
+// reason ("needs a face-on camera").
 struct MetricRequirement {
     bool                     faceOnCamera = false;                     // pose / shaft / ball products
+    // A second camera down the target line. The face-on view's blind axis is depth, so anything
+    // stated along it — club path, pelvis thrust, ball standoff — needs this view or a stereo
+    // reconstruction built from it. Stated as a DEVICE rather than as `minTier = Stereo3D` because
+    // that is what a golfer buys and what the directory has to be able to filter on; the tier is
+    // what a calibrated pair of them yields.
+    bool                     dtlCamera    = false;
     std::vector<SegmentRole> imuRoles;                                 // required anatomical IMU roles
     bool                     clubTrack   = false;                      // ShaftTrack2D present
     bool                     ballTrack   = false;                      // BallTrack2D present
@@ -50,6 +56,182 @@ struct MetricRequirement {
     // takes, and the day a connector lands the same metric resolves Measured with no content change.
     bool                     launchMonitor = false;
     ReconstructionTier       minTier     = ReconstructionTier::Angles2D;
+};
+
+// ── Capture devices ─────────────────────────────────────────────────────────────────────────────
+//
+// The closed vocabulary a requirement folds down to, and the ONLY axis the metric directory filters
+// on. Deliberately coarser than MetricRequirement: a reader shopping for kit asks "do I need body
+// IMUs" and never "do I need a T12 IMU specifically", and a facet with one option per anatomical
+// role is a filter nobody uses. The requirement stays fine-grained for resolution; this is the
+// reading of it.
+// DECLARATION ORDER IS DISPLAY ORDER, everywhere — every device list, column and filter chip reads
+// in this sequence. Sensors you strap on, then what a camera produces, then the box you plug in;
+// within the cameras, the views before the things found in them. It is grouped by WHAT KIND OF
+// THING it is because that is how a reader scans for their own kit, and an order that varies per
+// row (or per whichever metric happened to be counted first) reads as no order at all.
+enum class CaptureDevice {
+    // ── IMUs ────────────────────────────────────────────────────────────────
+    WristImus,        // LeadForearm / LeadHand / LeadUpperArm — the wrist-motion kit
+    BodyImus,         // Pelvis / Thorax / T12 / thighs — the trunk-and-legs kit
+    // A shaft-mounted IMU. SEPARATE from ClubTrack and it must stay separate: the design's
+    // `ClubInstrumented` tier is an upgrade axis ORTHOGONAL to the second camera — "a one-camera
+    // owner reaches club metrics by adding a sensor, not a camera" — so folding the two into one
+    // chip would answer the buying question with the wrong hardware.
+    ClubSensor,
+    // ── Cameras, and what they produce ──────────────────────────────────────
+    FaceOnCamera,
+    DtlCamera,
+    ClubTrack,        // the club found in the image — a camera product, not a device you buy
+    BallTrack,        // likewise the ball
+    // ── External hardware ───────────────────────────────────────────────────
+    LaunchMonitor,
+};
+
+// Every device, in that order. One list, so a caller wanting the canonical sequence cannot invent a
+// second one that drifts from the enum.
+inline const std::vector<CaptureDevice> &allCaptureDevices()
+{
+    static const std::vector<CaptureDevice> kAll = {
+        CaptureDevice::WristImus,    CaptureDevice::BodyImus,   CaptureDevice::ClubSensor,
+        CaptureDevice::FaceOnCamera, CaptureDevice::DtlCamera,  CaptureDevice::ClubTrack,
+        CaptureDevice::BallTrack,    CaptureDevice::LaunchMonitor,
+    };
+    return kAll;
+}
+
+// Stable slug (persisted in filter state, never shown) and display label (shown, translated at the
+// GUI edge — this header is Qt-only and has no QObject to tr() through).
+inline QString captureDeviceId(CaptureDevice d)
+{
+    switch (d) {
+    case CaptureDevice::FaceOnCamera:  return QStringLiteral("faceOn");
+    case CaptureDevice::DtlCamera:     return QStringLiteral("dtl");
+    case CaptureDevice::WristImus:     return QStringLiteral("wristImus");
+    case CaptureDevice::BodyImus:      return QStringLiteral("bodyImus");
+    case CaptureDevice::ClubTrack:     return QStringLiteral("clubTrack");
+    case CaptureDevice::ClubSensor:    return QStringLiteral("clubSensor");
+    case CaptureDevice::BallTrack:     return QStringLiteral("ballTrack");
+    case CaptureDevice::LaunchMonitor: return QStringLiteral("launchMonitor");
+    }
+    return QString();
+}
+
+inline QString captureDeviceLabel(CaptureDevice d)
+{
+    switch (d) {
+    case CaptureDevice::FaceOnCamera:  return QStringLiteral("Face-on camera");
+    case CaptureDevice::DtlCamera:     return QStringLiteral("Down-the-line camera");
+    case CaptureDevice::WristImus:     return QStringLiteral("Wrist IMUs");
+    case CaptureDevice::BodyImus:      return QStringLiteral("Body IMUs");
+    case CaptureDevice::ClubTrack:     return QStringLiteral("Club tracking");
+    case CaptureDevice::ClubSensor:    return QStringLiteral("Club sensor");
+    case CaptureDevice::BallTrack:     return QStringLiteral("Ball tracking");
+    case CaptureDevice::LaunchMonitor: return QStringLiteral("Launch monitor");
+    }
+    return QString();
+}
+
+// The devices one requirement folds down to, in vocabulary order and without duplicates.
+//
+// Built by WALKING THE VOCABULARY and asking the requirement, not by walking the requirement's
+// fields. The difference shows on `imuRoles`, which is an unordered set the manifest authors in
+// whatever sequence reads best: asking "does anything here mean wrist IMUs" gives the same answer
+// whatever order the roles were written in, where switching on each role in turn would let
+// `{Pelvis, LeadHand}` and `{LeadHand, Pelvis}` produce two different lists for the same kit.
+inline std::vector<CaptureDevice> captureDevicesFor(const MetricRequirement &r)
+{
+    const auto hasImu = [&r](std::initializer_list<SegmentRole> family) {
+        for (SegmentRole want : family)
+            for (SegmentRole have : r.imuRoles)
+                if (have == want) return true;
+        return false;
+    };
+
+    std::vector<CaptureDevice> out;
+    for (CaptureDevice d : allCaptureDevices()) {
+        bool needed = false;
+        switch (d) {
+        case CaptureDevice::WristImus:
+            needed = hasImu({ SegmentRole::LeadUpperArm, SegmentRole::LeadForearm,
+                              SegmentRole::LeadHand });
+            break;
+        case CaptureDevice::BodyImus:
+            needed = hasImu({ SegmentRole::Pelvis, SegmentRole::Thorax, SegmentRole::T12,
+                              SegmentRole::TrailThigh, SegmentRole::LeadThigh });
+            break;
+        case CaptureDevice::ClubSensor:    needed = hasImu({ SegmentRole::Club }); break;
+        case CaptureDevice::FaceOnCamera:  needed = r.faceOnCamera;                break;
+        case CaptureDevice::DtlCamera:     needed = r.dtlCamera;                   break;
+        case CaptureDevice::ClubTrack:     needed = r.clubTrack;                   break;
+        case CaptureDevice::BallTrack:     needed = r.ballTrack;                   break;
+        case CaptureDevice::LaunchMonitor: needed = r.launchMonitor;               break;
+        }
+        if (needed) out.push_back(d);
+    }
+    return out;
+}
+
+// ── Acquisition routes ──────────────────────────────────────────────────────────────────────────
+//
+// A metric is rarely obtainable exactly one way. Axial pelvis turn can be estimated from the
+// collapse of the hip span in a face-on image, triangulated from a calibrated camera pair, or
+// measured outright by a pelvis IMU — the same number, three methods, three fidelities. Until this
+// existed the descriptor could hold only the FLOOR of that ladder, and the rest lived in three
+// places that could not be queried and drifted apart: an if/else inside BodyRotationProvider, a
+// sentence in the metric's own `description`, and the Capture column of the developer guide.
+//
+// Now the ladder is data. What follows from that, and is the reason it is worth the manifest churn:
+//   * Availability RESOLVES through it — the best satisfied route decides Measured vs Bridged, and
+//     the route's own words explain which method produced the number.
+//   * The upgrade is derivable — "you are reading this off the face-on camera; a pelvis IMU would
+//     measure it directly" needs no second piece of hand-written prose.
+//   * "Planned" becomes a fact about a ROUTE, not about a metric. `clubPath` is not work we have
+//     failed to do — it needs a camera pointing down the target line. Both statements are now
+//     expressible at once, which the single `.planned` flag could not do, and nine metrics were
+//     mis-stated as roadmap items because of it.
+enum class RouteMethod {
+    Projected,      // read in one camera's image plane
+    Triangulated,   // reconstructed from two calibrated views
+    Inertial,       // integrated from an IMU on the segment itself
+    Fused,          // inertial + vision together
+    Device,         // read from external hardware we integrate rather than compute
+    Derived,        // computed from phase events / other metrics — needs no capture of its own
+};
+
+// Stable slug for the method — a glyph key and a persisted filter value, not display text.
+inline QString routeMethodName(RouteMethod m)
+{
+    switch (m) {
+    case RouteMethod::Projected:    return QStringLiteral("projected");
+    case RouteMethod::Triangulated: return QStringLiteral("triangulated");
+    case RouteMethod::Inertial:     return QStringLiteral("inertial");
+    case RouteMethod::Fused:        return QStringLiteral("fused");
+    case RouteMethod::Device:       return QStringLiteral("device");
+    case RouteMethod::Derived:      return QStringLiteral("derived");
+    }
+    return QString();
+}
+
+// What a route yields when it is the one that fires. Two values, because this is what the shot-level
+// answer already has room for: Direct → Measured, Estimated → Bridged. A three-rung fidelity enum
+// would have to arbitrate whether stereo beats an IMU, and the honest answer is "it depends on the
+// metric" — which is exactly what the ORDER of the routes vector says, per metric, instead.
+enum class RouteQuality { Estimated, Direct };
+
+struct MetricRoute {
+    QString           id;                                   // "faceOn", "faceOn+dtl", "pelvisImu"
+    RouteMethod       method  = RouteMethod::Projected;
+    RouteQuality      quality = RouteQuality::Direct;
+    MetricRequirement requirement;
+    // How this route gets the number, in the reader's language. Shown verbatim as the availability
+    // reason when the route yields Estimated ("estimated from the collapse of the hip span in the
+    // image"), and on the detail page for every route. Name the METHOD, not the missing device: a
+    // Bridged metric IS produced, and "needs a pelvis IMU" reads as a refusal.
+    QString           summary;
+    // No producer implements THIS route yet. A metric is planned exactly when every one of its
+    // routes is — which is derived below rather than stored, so the two can never disagree.
+    bool              planned = false;
 };
 
 // A metric descriptor carries NO normative values.
@@ -78,16 +260,132 @@ struct MetricDescriptor {
 
     std::vector<Phase> phases;             // phases sampled (PointInTime) / where peak matters (TimeSeries)
     bool               scored = false;     // has a band and contributes to a score
-    // Roadmap placeholder: in the design catalogue but no producer yet (always resolves Unavailable).
-    // Surfaced so the directory can badge it "Planned" — the requirement then reads as "will need …".
-    bool               planned = false;
 
-    // NB: named `requirement`, NOT `requires` — `requires` is a C++20 keyword and cannot be an identifier.
-    MetricRequirement  requirement;
+    // Every way this metric can be acquired, ORDERED BEST FIRST — and the last rung is the
+    // least-demanding way to get it at all. Both halves of that ordering are load-bearing: the first
+    // decides which route wins on a capable shot, the last is what the directory reports as "needs".
+    // At least one route, always; a metric with none can be produced no way and should not exist.
+    std::vector<MetricRoute> routes;
 
     // Reverse index of consumers — static, hand-authored in the manifest (design §13.2 decision).
     // Powers the detail page's "Where it's used". e.g. {"dashboard:motion","score:wrist","fault:cuppedAtTop"}.
     QStringList        usedBy;
+
+    // ── Readings of the ladder ──────────────────────────────────────────────────────────────────
+    // Derived, never stored. `planned` used to be a field beside `requirement`, and the pair could
+    // contradict each other — a metric flagged planned while its requirement described hardware, so
+    // the directory promised work we were not doing about a gap that was really the golfer's kit.
+
+    // Nothing produces this metric by ANY route yet.
+    bool planned() const
+    {
+        for (const MetricRoute &r : routes)
+            if (!r.planned) return false;
+        return true;
+    }
+
+    // The best route we have actually built, or null when every route is planned.
+    const MetricRoute *bestLiveRoute() const
+    {
+        for (const MetricRoute &r : routes)
+            if (!r.planned) return &r;
+        return nullptr;
+    }
+
+    // The FLOOR: the least-demanding route — the cheapest kit that gets a number at all. Live where
+    // one exists, otherwise the cheapest planned one, because a planned metric still has to be able
+    // to say what it will need. Null only for the degenerate empty-routes case.
+    const MetricRoute *baselineRoute() const
+    {
+        const MetricRoute *live = nullptr;
+        for (const MetricRoute &r : routes)
+            if (!r.planned) live = &r;                 // best-first, so the last live one is cheapest
+        if (live) return live;
+        return routes.empty() ? nullptr : &routes.back();
+    }
+
+    // What you must have for any reading at all. This is the "Needs" facet, and the descriptor-level
+    // requirement every pre-routes caller was really asking for.
+    MetricRequirement baselineRequirement() const
+    {
+        const MetricRoute *r = baselineRoute();
+        return r ? r->requirement : MetricRequirement{};
+    }
+
+    // ── What a second camera would do ───────────────────────────────────────────────────────────
+    //
+    // Three of these are read off authored routes. The fourth, `Refines`, is DERIVED, and it has to
+    // be: it is a property of projective geometry, not a fact about any one metric, and authoring it
+    // thirty-two times would be thirty-two copies of one sentence that a thirty-third metric would
+    // then silently miss.
+    //
+    // The geometry: a face-on camera measures `atan2(Δz, Δx_projected)` where the truth is
+    // `atan2(Δz, √(Δx² + Δy²))`. Those agree only while the measured segment lies in the frontal
+    // plane. A golf swing rotates the body about the vertical axis, so a `Projected` reading taken
+    // anywhere past Address is measuring a foreshortened quantity — and the same applies to
+    // translations, where turning the pelvis moves the APPARENT hip centre sideways with no sway at
+    // all. Only two families escape: readings taken while the golfer is still square, and ratios
+    // between two spans at the same depth.
+    //
+    // KNOWN LIMIT, and it is why `Refines` is graded weakest rather than promoted: the error is
+    // PHASE-dependent and a route is per-metric. `shoulderPlaneAngle` declares Address, Top and
+    // Impact — exact at the first, badly projected at the second, one rung for both. Modelling that
+    // would mean per-phase routes, which is a great deal of machinery for a caveat that belongs in
+    // prose.
+    enum class StereoGain { None, Refines, Improves, Unlocks };
+
+    StereoGain stereoGain() const
+    {
+        const MetricRoute *floor = baselineRoute();
+        if (!floor) return StereoGain::None;
+
+        // Cannot be had at all without the second camera.
+        if (floor->requirement.dtlCamera) return StereoGain::Unlocks;
+
+        // Somebody authored a better rung that needs it — a real, stated improvement.
+        for (CaptureDevice d : upgradeDevices())
+            if (d == CaptureDevice::DtlCamera) return StereoGain::Improves;
+
+        // Otherwise: is this a projection taken while the body is off-square?
+        if (floor->method != RouteMethod::Projected) return StereoGain::None;
+        for (Phase p : phases)
+            if (p != Phase::Address) return StereoGain::Refines;
+        return StereoGain::None;
+    }
+
+    // Devices that only appear on routes ABOVE the floor — what more kit would buy. Counts PLANNED
+    // routes too, unlike the per-shot upgrade hint in metric_provider.h, and the difference is
+    // deliberate: this answers a catalogue question ("what is this metric's ceiling"), while a hint
+    // shown against a real swing may only advertise something a golfer could actually go and use.
+    std::vector<CaptureDevice> upgradeDevices() const
+    {
+        const MetricRoute *floor = baselineRoute();
+        std::vector<CaptureDevice> have = floor ? captureDevicesFor(floor->requirement)
+                                                : std::vector<CaptureDevice>{};
+        std::vector<CaptureDevice> out;
+        for (const MetricRoute &r : routes) {
+            if (&r == floor) break;                    // ordered best-first: the floor ends the walk
+            for (CaptureDevice d : captureDevicesFor(r.requirement)) {
+                bool known = false;
+                for (CaptureDevice x : have) if (x == d) known = true;
+                for (CaptureDevice x : out)  if (x == d) known = true;
+                if (!known) out.push_back(d);
+            }
+        }
+        return out;
+    }
 };
+
+// Stable slug for the stereo verdict — a persisted filter value, never display text.
+inline QString stereoGainId(MetricDescriptor::StereoGain g)
+{
+    switch (g) {
+    case MetricDescriptor::StereoGain::None:     return QStringLiteral("none");
+    case MetricDescriptor::StereoGain::Refines:  return QStringLiteral("refines");
+    case MetricDescriptor::StereoGain::Improves: return QStringLiteral("improves");
+    case MetricDescriptor::StereoGain::Unlocks:  return QStringLiteral("unlocks");
+    }
+    return QString();
+}
 
 } // namespace pinpoint::analysis

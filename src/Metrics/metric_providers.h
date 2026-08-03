@@ -20,9 +20,20 @@
 
 #include "metric_provider.h"
 
-// Capability declarations for the live MetricSeries producers (design §6). Each maps its producer's
-// keys to per-shot availability. None of these compute anything — production stays in the analysis
-// stages.
+// Capability declarations for the live MetricSeries producers (design §6). None of these compute
+// anything — production stays in the analysis stages.
+//
+// EACH OF THESE IS NOW A CLAIM LIST AND NOTHING ELSE. A provider says "I produce these keys"; HOW
+// well, on a given shot, is read off each metric's route ladder in the manifest by the seam's
+// default `availability()` (metric_provider.h). Before the ladder existed, every class here also
+// rebuilt its metrics' requirements in C++ — a second copy of what the descriptor already said,
+// which drifted: `stanceWidthMm` was produced on every ruler-resolved swing and claimed by nobody,
+// and `leadHeelLift` was claimed while understating what it needed, so each lied in the opposite
+// direction. The requirement now has exactly one home.
+//
+// Adding an `availability()` override below is therefore a design decision, not a routine step:
+// it means the ladder cannot express something, and the first question is whether a route is
+// missing from the manifest.
 //
 // NO PROVIDER LOOKS AT `ShotContext::sessionType`, and none may. Availability answers one question —
 // can this shot's data and devices support this metric — and a session type is neither: it is what
@@ -41,7 +52,6 @@ namespace pinpoint::analysis {
 class WristMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // kinematic_series.cpp — runs in both the wrist and camera-kinematics profiles (any session).
@@ -49,7 +59,6 @@ public:
 class KinematicSeriesProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // foot_metrics.cpp + ball_position.cpp. All need face-on whole-body pose (foot keypoints);
@@ -57,7 +66,6 @@ public:
 class FootMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // lower_body_metrics.cpp — leadKneeDrift / pelvisSway / pelvisLift / hipLineTilt / feetAlignment /
@@ -67,7 +75,6 @@ public:
 class LowerBodyMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // upper_body_metrics.cpp — the chest, shoulder and arm frontal-plane channels. Same input as the
@@ -76,7 +83,6 @@ public:
 class UpperBodyMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // pose_wrist_angle_source.cpp buildTrailWristSeries — trailWristFlexExt from the face-on pose.
@@ -88,19 +94,19 @@ public:
 class TrailWristProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// body_rotation.cpp — the one provider that answers Bridged, and the reason the state exists.
+// body_rotation.cpp — the producer that made Bridged necessary, and the worked example of a ladder.
 //
-// A bound Pelvis / Thorax IMU measures axial turn directly: Measured. With only a face-on camera the
-// same producer estimates it from the collapse of the hip or shoulder span in the image, which is a
-// real reading at reduced fidelity: Bridged, with a reason that says which. xFactor and its stretch
-// need BOTH segments, so they resolve at the weaker of the two.
+// A bound Pelvis / Thorax IMU measures axial turn directly; with only a face-on camera the SAME
+// producer estimates it from the collapse of the hip or shoulder span in the image — a real reading
+// by a weaker method. That used to be an if/else here. It is now two routes on each of the four
+// descriptors, which is what lets the directory show the ladder instead of only its outcome, and
+// what makes xFactor's "resolves at the weaker of the two segments" fall out of its routes needing
+// both IMUs rather than out of a hand-written per-key condition.
 class BodyRotationProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // club_delivery.cpp — shaftAngleVsHorizontal / attackAngle from the measured clubhead;
@@ -109,53 +115,48 @@ public:
 class ClubDeliveryProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // head_track.cpp — headSway / headLift / headTilt need face-on pose.
 class HeadMetricProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // wrist_analyzer.cpp ShaftLeanStage — impactShaftLean needs the club track.
 class ShaftLeanProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // tempo_metrics.cpp — needs NO devices beyond whatever produced a confident phase ladder: an
-// IMU-only swing and a camera-only swing both qualify, which is a
-// disjunction MetricRequirement cannot express — hence the empty requirement plus the note that
-// availability here means "the pipeline can produce it", not "this shot's ladder was good enough"
-// (the producer refuses an unreliable ladder at analysis time; see tempo_metrics.h).
+// IMU-only swing and a camera-only swing both qualify, which no single requirement can express. Both
+// metrics therefore carry one `Derived` route with an empty requirement, and the claim it makes is
+// "the pipeline can produce this", not "this shot's ladder was good enough" — the producer refuses
+// an unreliable ladder at analysis time (see tempo_metrics.h).
 class TempoProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 // Summary scores (produced as ScoreBreakdown, not MetricSeries — hence keyed synthetically):
-//   wristScore / wristResemblance — LIVE for the Wrist session (WristResemblanceScorer +
-//     WristAssessmentEngine, wrist_analyzer.cpp); need the lead forearm + hand IMUs.
-//   swingScore — the Swing/GRF/Coach adherence score, ASPIRATIONAL: SwingScorer is dead code and
-//     CameraKinematicsAnalyzer returns a stub, so this always resolves Unavailable ("no live scorer").
+//   wristScore / wristResemblance — LIVE (WristResemblanceScorer + WristAssessmentEngine,
+//     wrist_analyzer.cpp); need the lead forearm + hand IMUs.
+//   swingScore — the Swing/GRF/Coach adherence score. SwingScorer is dead code and
+//     CameraKinematicsAnalyzer returns a stub, so its only route is planned and it always resolves
+//     Unavailable. That used to be an `if (key == "swingScore")` here, saying so in a sentence the
+//     directory could not see; it is now the route's own summary.
 class ScoreProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
-// Roadmap placeholders — every design-catalogue metric with no producer in this build (whole-body
-// rotation, spine/pelvis, club delivery, tempo, kinematic sequence). Claims the keys so the resolver
-// reports a "planned" verdict rather than a misleading "your setup lacks X"; always Unavailable.
-class PlannedMetricProvider : public IMetricProvider {
-public:
-    std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
-};
+// There is no PlannedMetricProvider any more, and reinstating one would be a step backwards. It
+// claimed every `.planned` descriptor and answered one fixed sentence, which made it a second list
+// of what is unbuilt that had to be kept in step with the first — and drifted, silently, because a
+// new placeholder that nobody added to it fell through to "no producer available" (the reason an
+// UNKNOWN key gets) rather than to "planned". A metric whose every route is planned now says so
+// from its own ladder, in that route's words about why.
 
 // The launch-monitor metrics: face angle and everything downstream of it, spin, strike location and
 // carry. Deliberately NOT a planned placeholder — a planned metric has no producer and is a promise;
@@ -166,7 +167,6 @@ public:
 class LaunchMonitorProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;
-    MetricAvailability   availability(const QString &key, const ShotContext &ctx) const override;
 };
 
 } // namespace pinpoint::analysis

@@ -55,7 +55,7 @@ int main()
     std::printf("=== metric catalogue ===\n");
     const MetricCatalogue cat = makeMetricCatalogue();
 
-    // 1. Manifest completeness — the full design catalogue (54 produced + 16 planned), each resolvable.
+    // 1. Manifest completeness — the full design catalogue (45 produced + 25 planned), each resolvable.
     // The nine additions are the measures the shipped diagnostics pack depends on: every
     // characteristic must resolve to a catalogue metric, so the pack cannot become a second
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
@@ -199,7 +199,7 @@ int main()
         const ShotContext club = wristShot({}, /*faceOn*/ true, /*club*/ true);
         check(cat.resolve(QStringLiteral("impactShaftLean"), club).state == MetricAvailability::Measured,
               "impactShaftLean Measured with face-on + club track");
-        check(cat.descriptor(QStringLiteral("headSway"))->planned == false, "headSway not planned");
+        check(cat.descriptor(QStringLiteral("headSway"))->planned() == false, "headSway not planned");
     }
 
     // 3c-bis. The face-on producer batch, and the BRIDGED state.
@@ -269,34 +269,40 @@ int main()
 
         // attackAngle no longer demands a stereo tier. It never should have: the angle lives in the
         // vertical plane containing the target line, which is the face-on image plane.
-        check(cat.descriptor(QStringLiteral("attackAngle"))->requirement.minTier
+        check(cat.descriptor(QStringLiteral("attackAngle"))->baselineRequirement().minTier
                   == ReconstructionTier::Angles2D,
               "attackAngle does not require a stereo reconstruction");
-        check(cat.descriptor(QStringLiteral("attackAngle"))->requirement.faceOnCamera,
+        check(!cat.descriptor(QStringLiteral("attackAngle"))->baselineRequirement().dtlCamera,
+              "…nor a down-the-line camera, which is the device that tier stood in for");
+        check(cat.descriptor(QStringLiteral("attackAngle"))->baselineRequirement().faceOnCamera,
               "…and does require the face-on camera it is actually read from");
     }
 
-    // 3d. Planned placeholders — declared, flagged, and always resolving 'planned'.
+    // 3d. Planned metrics — every rung planned, and always resolving 'planned'.
     //
-    // DERIVED FROM THE CATALOGUE, not from a hand-written list. The list version passed while ten
-    // planned descriptors were claimed by no provider at all: they fell through to the resolver's
+    // DERIVED FROM THE CATALOGUE, not from a hand-written list. There used to be two such lists —
+    // the `.planned` flags and PlannedMetricProvider::provides() — and they drifted: ten planned
+    // descriptors were in the first and not the second, so they fell through to the resolver's
     // no-provider branch and reported "no producer available", which is the reason an UNKNOWN key
     // gets. The two statements are not interchangeable — one says "we have not written this yet",
-    // the other says "this is not a thing" — and the distinction is the entire purpose of the
-    // planned flag. A hand-written list can only ever check the keys somebody remembered to add to
-    // it, so a new `.planned` descriptor with no provider entry was invisible by construction.
+    // the other says "this is not a thing". Both lists are gone; planned is now derived from the
+    // route ladder, so there is nothing left to keep in step.
     {
-        // Use a fully-capable context to prove these are gated by "no producer", not missing sensors.
+        // Fully capable INCLUDING a down-the-line camera — the point is that these are gated by "no
+        // producer for this route", not by missing kit. Without hasDtl the depth metrics would pass
+        // this sweep for the wrong reason, which is exactly the conflation the ladder separates.
         ShotContext capable = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax,
                                           SegmentRole::LeadForearm, SegmentRole::LeadHand,
                                           SegmentRole::LeadThigh, SegmentRole::TrailThigh },
                                         /*faceOn*/ true, /*club*/ true);
-        capable.hasBallTrack = true;
+        capable.hasBallTrack     = true;
+        capable.hasDtl           = true;
+        capable.hasLaunchMonitor = true;
         capable.tier = ReconstructionTier::ClubInstrumented;
 
         int planned = 0, unavailable = 0, saysPlanned = 0;
         for (const MetricDescriptor *d : cat.all()) {
-            if (!d->planned) continue;
+            if (!d->planned()) continue;
             ++planned;
             const MetricAvailability a = cat.resolve(d->key, capable);
             if (a.state == MetricAvailability::Unavailable) ++unavailable;
@@ -305,37 +311,41 @@ int main()
                              qPrintable(d->key), qPrintable(a.reason));
         }
         std::printf("    %d planned descriptors\n", planned);
-        check(planned > 0, "the catalogue has planned descriptors, so the sweep can fail");
+        checkEqI(planned, 25, "25 planned metrics — nothing produces them by any route");
         checkEqI(unavailable, planned,
-                 "every planned metric resolves Unavailable even fully-equipped");
-        // swingScore is the ONE legitimate exception and is asserted by name rather than tolerated
-        // by a fuzzy count: it is claimed by ScoreProvider, which gives the more specific truth
-        // ("no live scorer yet") instead of the generic roadmap reason. Anything else landing here
-        // is a descriptor no provider claims.
-        checkEqI(saysPlanned, planned - 1,
-                 "every planned metric but one reports the ROADMAP reason, not 'no producer'");
-        check(!cat.resolve(QStringLiteral("swingScore"), capable)
-                   .reason.contains(QStringLiteral("planned")),
-              "…and the exception is swingScore, which ScoreProvider answers more specifically");
+                 "every planned metric resolves Unavailable even with every device present");
+        checkEqI(saysPlanned, planned,
+                 "…and every one says PLANNED, so none reads as a missing-sensor refusal");
+        // swingScore has no exception any more, and that is the improvement: it used to be answered
+        // by a hand-written branch in ScoreProvider whose sentence the directory could not see, so
+        // it alone reported something other than the roadmap reason. Its route now carries the same
+        // specific truth AND the planned word.
+        const QString sw = cat.resolve(QStringLiteral("swingScore"), capable).reason;
+        check(sw.contains(QStringLiteral("planned")) && sw.contains(QStringLiteral("scorer")),
+              "swingScore says both that it is planned and precisely what is missing");
     }
 
-    // 3d-bis. EVERY descriptor is claimed by SOME provider.
+    // 3d-bis. EVERY descriptor WITH A LIVE ROUTE is claimed by some provider.
     //
     // The sweeps above check that planned metrics answer the roadmap reason and that live ones
     // resolve where they should — but both walk descriptors the test names, and neither can see a
     // descriptor that simply fell out of every provider's provides(). That is a real and silent
-    // failure mode: MetricCatalogue::resolve() falls back to rendering the descriptor's own
-    // requirement as the reason, so an unclaimed metric reads as a plausible "needs a face-on
-    // camera" on a shot that HAS one, and stays Unavailable however capable the shot is. Nothing
-    // about it looks like a bug from the directory.
+    // failure mode: MetricCatalogue::resolve() falls back to the descriptor's own ladder, so an
+    // unclaimed metric reads as a plausible "needs a face-on camera" on a shot that HAS one, and
+    // stays Unavailable however capable the shot is. Nothing about it looks like a bug from the
+    // directory.
     //
     // stanceWidthMm shipped exactly that way: declared, produced by foot_metrics.cpp on every
     // ruler-resolved swing, and absent from FootMetricProvider::provides(), so it was reported
     // unavailable on all of them. A per-metric case would not have caught it — this one does,
     // for every key at once and for every key added later.
+    //
+    // A metric whose every route is planned is EXEMPT, and deliberately: nothing produces it, so
+    // there is no producer to claim it. That exemption is what let the placeholder provider go.
     {
         int unclaimed = 0;
         for (const MetricDescriptor *d : cat.all()) {
+            if (d->planned()) continue;
             bool claimed = false;
             for (const IMetricProvider *p : cat.providers()) {
                 const auto keys = p->provides();
@@ -346,17 +356,167 @@ int main()
                 std::printf("    NO PROVIDER CLAIMS: %s\n", qPrintable(d->key));
             }
         }
-        checkEqI(unclaimed, 0, "every descriptor is claimed by at least one provider");
+        checkEqI(unclaimed, 0, "every metric with a live route is claimed by a provider");
     }
 
-    // 3e. Launch-monitor metrics — a REQUIREMENT, not a planned promise.
+    // 3d-ter. The route ladder itself — shape, and the two readings taken off its ends.
+    {
+        int noRoutes = 0, badOrder = 0;
+        for (const MetricDescriptor *d : cat.all()) {
+            if (d->routes.empty()) {
+                ++noRoutes;
+                std::printf("    NO ROUTES: %s\n", qPrintable(d->key));
+                continue;
+            }
+            // Best-first is not decoration: resolveRoutes() takes the FIRST satisfied live rung, so
+            // an Estimated rung sitting above a Direct one would hand back a Bridged answer on a
+            // shot that could have been Measured.
+            bool seenEstimated = false;
+            for (const MetricRoute &r : d->routes) {
+                if (r.quality == RouteQuality::Estimated) seenEstimated = true;
+                else if (seenEstimated) {
+                    ++badOrder;
+                    std::printf("    ROUTES OUT OF ORDER (Direct below Estimated): %s\n",
+                                qPrintable(d->key));
+                    break;
+                }
+            }
+        }
+        checkEqI(noRoutes, 0, "every descriptor declares at least one acquisition route");
+        checkEqI(badOrder, 0, "every ladder is ordered best-first");
+
+        // The floor is what the directory reports as "needs", and it is the LAST live rung.
+        const MetricDescriptor *pr = cat.descriptor(QStringLiteral("pelvisRotation"));
+        check(pr->baselineRequirement().faceOnCamera,
+              "pelvisRotation's floor is the camera, not the IMU that measures it best");
+        check(pr->baselineRequirement().imuRoles.empty(), "…and the floor asks for no IMU at all");
+        // Its ceiling is BOTH rungs above the floor. Stereo triangulates the hip bearing instead of
+        // inferring it from foreshortening, which is a real improvement over `acos(w/w0)` — the
+        // design's "the second camera adds nothing" is measured against the IMU ideal, not against
+        // what a camera-only shot actually gets, and stating only the IMU here understated the
+        // catalogue's own ceiling.
+        const auto up = pr->upgradeDevices();
+        check(up.size() == 2, "…while its ceiling names both rungs above the camera");
+        bool hasImus = false, hasDtl = false;
+        for (CaptureDevice dv : up) {
+            if (dv == CaptureDevice::BodyImus)  hasImus = true;
+            if (dv == CaptureDevice::DtlCamera) hasDtl  = true;
+        }
+        check(hasImus && hasDtl, "…body IMUs and a down-the-line camera");
+
+        // The knees are the user-facing case for the whole change: readable face-on in principle,
+        // properly resolvable only from down the line. Both rungs planned, so the metric is planned
+        // — and it STILL reports the camera as its floor and DTL as its upgrade rather than
+        // collapsing to one undifferentiated "not yet".
+        const MetricDescriptor *lk = cat.descriptor(QStringLiteral("leadKneeFlexion"));
+        check(lk->planned(), "leadKneeFlexion is planned — no rung is built");
+        check(lk->baselineRequirement().faceOnCamera && !lk->baselineRequirement().dtlCamera,
+              "…its floor is the face-on camera");
+        const auto lkUp = lk->upgradeDevices();
+        check(lkUp.size() == 1 && lkUp.front() == CaptureDevice::DtlCamera,
+              "…and a down-the-line camera is what would improve it");
+
+        // Depth metrics state a DEVICE. Three of them used minTier = Stereo3D as a stand-in, which
+        // rendered as "a higher reconstruction tier" — true, unactionable, and unfilterable.
+        for (const char *k : { "pelvisThrust", "clubPath", "swingPlane", "shaftDirection",
+                               "ballBodyDistance", "launchDirection" }) {
+            const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(k));
+            check(d && d->baselineRequirement().dtlCamera,
+                  k);
+        }
+
+        // And the reason a golfer sees for one names the camera, not the tier.
+        ShotContext everything = wristShot({}, /*faceOn*/ true, /*club*/ true);
+        everything.hasBallTrack = true;
+        const QString why = cat.resolve(QStringLiteral("clubPath"), everything).reason;
+        check(!why.contains(QStringLiteral("tier")), "clubPath's reason does not talk about tiers");
+    }
+
+    // 3d-quinquies. What a second camera would do — three answers authored, one derived.
     //
-    // The distinction is the whole point of the split: a planned metric has no producer and always
-    // resolves Unavailable, whereas these have a producer the golfer may not own. So they must read
-    // "needs a launch monitor" without one and Measured with one, through the same requirement path
-    // that renders every other absent input. Getting this wrong in either direction is a lie: as
-    // `planned` they would promise work we are not doing, and as unconditionally Measured they
-    // would report numbers nobody supplied.
+    // The derived one is the point. A face-on camera measures a PROJECTION, exact only while the
+    // measured segment lies in the frontal plane, and a swing rotates the body out of it — so any
+    // `Projected` rung read past Address is reading a foreshortened quantity. That is geometry, not
+    // a fact about any one metric, and authoring it 27 times would be 27 copies of one sentence that
+    // a 28th metric would then silently miss.
+    {
+        using SG = MetricDescriptor::StereoGain;
+        const auto gain = [&cat](const char *k) {
+            const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(k));
+            return d ? d->stereoGain() : SG::None;
+        };
+
+        check(gain("clubPath")  == SG::Unlocks,  "clubPath cannot be had without the second camera");
+        check(gain("xFactor")   == SG::Improves, "xFactor has an authored stereo rung above the span");
+        check(gain("shoulderPlaneAngle") == SG::Refines,
+              "shoulderPlaneAngle is a projected line read at the Top — foreshortened, so refined");
+
+        // The two families that genuinely escape, and they are the whole reason this is derived from
+        // the phases rather than from the method alone.
+        check(gain("toeLineAngle") == SG::None,
+              "toeLineAngle is read at Address only — the golfer is square, the projection is exact");
+        check(gain("ballPosition") == SG::None, "…as is ball position");
+        check(gain("leadWristFlexExt") == SG::None, "an IMU reading owes a camera nothing");
+        check(gain("spinRate") == SG::None, "…nor does a launch-monitor reading");
+
+        // attackAngle is Refines, and that is NOT in conflict with the design's correction that a
+        // DTL camera is the one view which cannot measure it. Both hold: DTL ALONE puts the
+        // target-line direction on its own optical axis, while a CALIBRATED PAIR recovers the 3D
+        // velocity vector and removes the unknown depth component the projected reading carries.
+        // Replacing the view and triangulating from both are different things.
+        check(gain("attackAngle") == SG::Refines,
+              "attackAngle is refined by triangulation, though not by a DTL view alone");
+
+        int refines = 0;
+        for (const MetricDescriptor *d : cat.all())
+            if (d->stereoGain() == SG::Refines) ++refines;
+        std::printf("    %d metrics carry projection error a calibrated pair would refine\n", refines);
+        checkEqI(refines, 27, "27 projected readings taken past Address");
+    }
+
+    // 3d-quater. The upgrade hint — what more kit would buy, on a real shot.
+    {
+        const ShotContext cam = wristShot({}, /*faceOn*/ true);
+        const MetricAvailability est = cat.resolve(QStringLiteral("pelvisRotation"), cam);
+        check(est.routeId == QStringLiteral("faceOn"), "the camera rung is the one that fired");
+
+        // THE BEST RUNG, NOT THE NEAREST — and pelvisRotation is the case that distinguishes them.
+        // Two rungs sit above the camera: a stereo pair (planned, and skipped for that reason) and
+        // a pelvis IMU. Even once the stereo producer lands, the hint must keep naming the IMU: it
+        // is cheaper, measures the turn outright rather than triangulating two points, and works on
+        // the one camera the owner already has. A nearest-rung walk would recommend a second camera
+        // to every face-on owner, which is the purchase the design argues hardest against.
+        check(est.upgrade.contains(QStringLiteral("Pelvis"))
+                  && est.upgrade.contains(QStringLiteral("measure it directly")),
+              "…and the shot is told a pelvis IMU would measure it directly");
+        check(!est.upgrade.contains(QStringLiteral("down-the-line")),
+              "…and NOT to go and buy a second camera, which is the weaker fix");
+
+        ShotContext pelvisImu = wristShot({ SegmentRole::Pelvis }, /*faceOn*/ true);
+        const MetricAvailability best = cat.resolve(QStringLiteral("pelvisRotation"), pelvisImu);
+        check(best.routeId == QStringLiteral("pelvisImu"), "the IMU rung fires when it can");
+        check(best.upgrade.isEmpty(), "…and nothing better is dangled, because there is nothing");
+
+        // A HINT MAY NEVER ADVERTISE A ROUTE NOBODY BUILT. leadKneeFlexion's better rung is a DTL
+        // camera and no producer reads it, so a golfer must not be told to go and buy one; the
+        // catalogue-level upgradeDevices() DOES say so, because that answers a different question.
+        const MetricAvailability knee = cat.resolve(QStringLiteral("leadKneeFlexion"), cam);
+        check(knee.upgrade.isEmpty(), "no upgrade is offered towards an unbuilt route");
+    }
+
+    // 3e. Launch-monitor metrics — a REQUIREMENT *and* a planned rung, which is the pair a route
+    // can state and the old metric-level flag could not.
+    //
+    // This block used to assert the opposite: that these nine were NOT planned, and that they went
+    // Measured the moment a connector set `hasLaunchMonitor`. The requirement half was and is right
+    // — the hardware is the golfer's to own, and a metric that needs one must say so rather than
+    // promising work. The rest was aspirational: **nothing in this build sets `hasLaunchMonitor`**,
+    // no code outside a test even mentions it, so "needs a launch monitor" was telling a golfer to
+    // buy a device that would change nothing. Both facts are now stated, on the same rung.
+    //
+    // When a connector lands, dropping `PLANNED` from those nine rungs is the whole change — and
+    // this test flips back with it, which is the point of asserting the connector's absence rather
+    // than assuming it.
     {
         const char *lm[] = { "faceAngle", "faceToPath", "spinRate", "spinAxis", "smashFactor",
                              "strikeLocation", "carryDistance", "dynamicLoft", "spinLoft" };
@@ -367,25 +527,37 @@ int main()
         capable.hasBallTrack = true;
         capable.tier = ReconstructionTier::ClubInstrumented;
 
-        int notPlanned = 0, unavailableWithout = 0, saysWhy = 0, measuredWith = 0;
+        int requiresDevice = 0, planned = 0, unavailableWithout = 0, saysPlanned = 0,
+            stillUnavailableWith = 0, needsFacet = 0;
         for (const char *k : lm) {
             const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(k));
-            if (d && !d->planned && d->requirement.launchMonitor) ++notPlanned;
+            if (!d) continue;
+            // THE HARDWARE FACT SURVIVES. This is what marking them planned used to destroy, and
+            // what keeps them under the "Launch monitor" chip in the directory.
+            if (d->baselineRequirement().launchMonitor) ++requiresDevice;
+            for (CaptureDevice dev : captureDevicesFor(d->baselineRequirement()))
+                if (dev == CaptureDevice::LaunchMonitor) ++needsFacet;
+            if (d->planned()) ++planned;
 
             const MetricAvailability without = cat.resolve(QString::fromLatin1(k), capable);
             if (without.state == MetricAvailability::Unavailable) ++unavailableWithout;
-            if (without.reason.contains(QStringLiteral("launch monitor"))) ++saysWhy;
+            if (without.reason.contains(QStringLiteral("planned"))) ++saysPlanned;
 
+            // And WITH a monitor reported, still unavailable — because we cannot read it. Anything
+            // else here would be the catalogue claiming a number nobody supplied.
             ShotContext withLm = capable;
             withLm.hasLaunchMonitor = true;
-            if (cat.resolve(QString::fromLatin1(k), withLm).state == MetricAvailability::Measured)
-                ++measuredWith;
+            if (cat.resolve(QString::fromLatin1(k), withLm).state
+                    == MetricAvailability::Unavailable)
+                ++stillUnavailableWith;
         }
-        checkEqI(notPlanned, 9, "all 9 launch-monitor metrics require the device, not a producer");
-        checkEqI(unavailableWithout, 9, "…and are Unavailable on a fully-equipped shot without one");
-        checkEqI(saysWhy, 9, "…each saying WHY, so the absence is graceful rather than blank");
-        checkEqI(measuredWith, 9, "…and Measured the moment a connector reports one, with no "
-                                  "catalogue change");
+        checkEqI(requiresDevice, 9, "all 9 launch-monitor metrics still REQUIRE the device");
+        checkEqI(needsFacet, 9, "…so all 9 still file under the Launch monitor chip");
+        checkEqI(planned, 9, "…and all 9 are planned, because no connector reads one");
+        checkEqI(unavailableWithout, 9, "…Unavailable on a fully-equipped shot without one");
+        checkEqI(saysPlanned, 9, "…saying PLANNED, not 'go and buy a launch monitor'");
+        checkEqI(stillUnavailableWith, 9,
+                 "…and STILL Unavailable with one reported, which is the honest answer today");
     }
 
     // 4. resolve() — club-track / face-on gating (kinematics + foot).
@@ -445,7 +617,7 @@ int main()
               "tempoRatio Measured on an IMU-only shot (no camera, no club)");
         check(cat.resolve(QStringLiteral("tempoBackswing"), noCam).state == MetricAvailability::Measured,
               "tempoBackswing Measured with no devices bound at all");
-        check(cat.descriptor(QStringLiteral("tempoRatio"))->planned == false,
+        check(cat.descriptor(QStringLiteral("tempoRatio"))->planned() == false,
               "tempoRatio no longer planned");
     }
 

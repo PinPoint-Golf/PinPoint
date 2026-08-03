@@ -15,17 +15,20 @@ Companion process doc: [`analysis_pipeline_developer_guide.md`](analysis_pipelin
 ```
 src/Metrics/                          (pure, Qt-only value types — no Qt-GUI)
   metric_type.h                   MetricType { Summary, PointInTime, TimeSeries, Sequence }
-  metric_descriptor.h             MetricDescriptor, MetricRequirement  (NO normative values — Step D)
-  metric_provider.h               IMetricProvider seam, ShotContext, MetricAvailability
+  metric_descriptor.h             MetricDescriptor, MetricRoute, MetricRequirement, CaptureDevice
+                                  (NO normative values — Step D)
+  metric_provider.h               IMetricProvider seam, ShotContext, MetricAvailability,
+                                  describeRequirement() + resolveRoutes() — the route walk
   metric_reducer.h                the reducer vocabulary a measure names alongside a metricKey
   metric_catalogue.{h,cpp}        MetricCatalogue value object + makeMetricCatalogue() factory
-  metric_resolver.{h,cpp}         provider fusion + describeRequirement() reason renderer
+  metric_resolver.{h,cpp}         provider fusion (resolveAvailability) — nothing else
   metric_catalogue_manifest.cpp   installMetricManifest() — the ONE list of every descriptor
-  metric_providers.{h,cpp}        WristMetricProvider / KinematicSeriesProvider / FootMetricProvider
-                                  / LowerBodyMetricProvider / UpperBodyMetricProvider
-                                  / TrailWristProvider / BodyRotationProvider / ClubDeliveryProvider
-                                  / TempoProvider / HeadMetricProvider / ShaftLeanProvider
-                                  / ScoreProvider / PlannedMetricProvider / LaunchMonitorProvider
+  metric_providers.{h,cpp}        CLAIM LISTS ONLY: WristMetricProvider / KinematicSeriesProvider
+                                  / FootMetricProvider / LowerBodyMetricProvider
+                                  / UpperBodyMetricProvider / TrailWristProvider
+                                  / BodyRotationProvider / ClubDeliveryProvider / TempoProvider
+                                  / HeadMetricProvider / ShaftLeanProvider / ScoreProvider
+                                  / LaunchMonitorProvider
 src/Analysis/                         (the PRODUCERS — what emits a MetricSeries)
   metric_extractor.{h,cpp}        the IMU wrist metrics; the rest are per-region stage files
   metric_channel.h                MetricChannel, the shared curve type the producers fill
@@ -41,21 +44,98 @@ identity here, production there, and a descriptor that never names a producer.
 
 Design invariants (do not break):
 - **Identity is decoupled from production.** A descriptor never names a producer. A provider declares
-  which descriptor keys it can satisfy and, per shot, at what quality.
+  which descriptor keys it can satisfy.
+- **A metric declares a ROUTE LADDER, and it is the only statement of what the metric needs.**
+  `MetricDescriptor::routes` is `std::vector<MetricRoute>`, **ordered best first**, and its **last
+  rung is the cheapest** — both ends are read, so both orderings are load-bearing. Each rung carries
+  its own `requirement`, a `RouteMethod` (Projected / Triangulated / Inertial / Fused / Device /
+  Derived), a `RouteQuality` (`Direct` → Measured, `Estimated` → Bridged), a `summary` naming the
+  method, and its own `planned` flag.
+
+  There is **no `.requirement` field and no `.planned` field**. A flat requirement could state only
+  the floor, so everything above it lived in provider C++ (`BodyRotationProvider`'s IMU-vs-camera
+  if/else), in a metric's own `description`, and in Appendix A's Capture column — three copies, no
+  gate, and they drifted. Everything now derives from the one ladder:
+
+  | Reading | Method | Used by |
+  |---|---|---|
+  | is it built at all | `planned()` — every rung planned | the Planned badge, roadmap counts |
+  | what it needs | `baselineRequirement()` — the last live rung | "Needs", the row's source glyphs |
+  | what better kit adds | `upgradeDevices()` — devices above the floor, **planned rungs included** | the "Improves with" filter |
+  | this shot's answer | `resolveRoutes()` — first satisfied live rung | Measured/Bridged, the reason, `upgrade` |
+
+  The two device readings differ deliberately: `upgradeDevices()` answers a *catalogue* question
+  ("where could this metric go") and counts routes nobody has built, while
+  `MetricAvailability::upgrade` is shown against a *real swing* and may only ever name kit that
+  would actually work today. Telling a golfer to buy a DTL camera for a pipeline we have not
+  written is a lie with a price on it.
+- **The upgrade hint names the BEST rung, not the nearest.** `resolveRoutes()` walks best-first and
+  stops at the first unsatisfied live rung, so a metric with two rungs above the one that fired
+  points at the top one. `pelvisRotation` on a camera-only shot has both a stereo rung and a pelvis
+  IMU above it, and the IMU is what the hint must say: cheaper, measures the turn outright rather
+  than triangulating two points, and works on the camera the owner already has. A nearest-rung walk
+  would recommend a second camera to every owner of the weakest setup — the purchase
+  `shot_analyzer_design.md` argues hardest against ("the UI prompts the *right* upgrade").
+- **`stereoGain()` grades the second camera in four steps, and the weakest one is DERIVED.**
+  `Unlocks` (the floor needs DTL) · `Improves` (an authored DTL rung above the floor) · `Refines`
+  (**derived**) · `None`. The first three are read off routes. `Refines` is computed: a `Projected`
+  floor rung whose metric is read at any phase past Address.
+
+  That is projective geometry, not a fact about a metric. A face-on camera measures
+  `atan2(Δz, Δx_projected)` where the truth is `atan2(Δz, √(Δx² + Δy²))`, and those agree only while
+  the segment lies in the frontal plane; a swing rotates the body out of it. Translations have the
+  same problem wearing a different hat — turning the pelvis moves the *apparent* hip centre sideways
+  with no sway at all. Two families escape, and both fall out of the rule: readings taken while the
+  golfer is still square (the six Address-only setup and foot metrics), and anything not `Projected`
+  at all. **27 metrics** are `Refines` today, and authoring that 27 times would be 27 copies of one
+  sentence that a 28th metric would then silently miss.
+
+  It surfaces as its **own column and facet** ("2nd camera"), not as another entry under "Improves
+  with" — that one is a device list where this is a graded verdict, and the weakest grade is not a
+  route anybody authored. It shipped for one build as a facet with no column, which is the worst of
+  both: the rail offered "Refine it (27)" while the table showed "—" beside every one of them, so
+  scanning the list and filtering it gave opposite answers. **A facet must count what a column
+  shows**; `model_browser_test` now asserts that for every metrics facet, by name and row-for-row.
+
+  **Known limit:** the error is *phase*-dependent and a route is per-metric. `shoulderPlaneAngle`
+  declares Address, Top and Impact — exact at the first, badly foreshortened at the second, one rung
+  for both. Modelling it properly means per-phase routes, which is a lot of machinery for a caveat
+  that belongs in prose. `Refines` is graded weakest partly for this reason.
+
+  **`attackAngle` is `Refines`, and that does not contradict the design's correction** that DTL is
+  the one view which cannot measure it. Both hold: a DTL camera *alone* puts the target-line
+  direction on its own optical axis, while a *calibrated pair* recovers the 3D velocity vector and
+  removes the depth-component bias the projected reading carries. Replacing the view and
+  triangulating from both views are different operations. Do not "fix" this.
+- **A club sensor is not club tracking.** `CaptureDevice::ClubSensor` (a shaft IMU) and
+  `CaptureDevice::ClubTrack` (the club found in the image) are separate tags because
+  `ClubInstrumented` is an upgrade axis *orthogonal* to the second camera — "a one-camera owner
+  reaches club metrics by adding a sensor, not a camera". `clubheadSpeed` has both above its
+  projected rung, sensor first, which is what makes its hint recommend the right hardware.
+- **`planned` is a fact about a ROUTE.** `clubPath` is not work we owe — it needs a camera pointing
+  down the target line, and the DTL producer on top of that. Both are now stated at once; the single
+  flag could say only one, and **nine metrics were mis-filed as roadmap items** when what they
+  actually needed was hardware. Hardware is a requirement, never a `planned` flag (see the launch
+  monitor note in Step C) — but a route needing hardware we cannot *read* yet is honestly both.
+- **Depth is a DEVICE (`MetricRequirement::dtlCamera`), not `minTier = Stereo3D`.** Three metrics
+  used the tier as a proxy, which rendered as "needs a higher reconstruction tier" — true,
+  unactionable, and invisible to any filter. `ShotContext::hasDtl` is false on every shot this build
+  can record, exactly as `hasLaunchMonitor` is: the day a capture path lands, those metrics resolve
+  with no catalogue change.
 - **No startup singleton / self-registration.** The catalogue is assembled on demand by
   `makeMetricCatalogue()` (mirrors `makeReferenceBandProvider(Kind)`), which installs the manifest
   and a fixed provider set. This matches the Analysis module's ban on stage/provider registration
   (`analysis_stage.h` anti-goals).
 - **The full design catalogue — live + planned.** The manifest declares every metric in
-  `shot_analyzer_design.md §A`, each either **live** (a producer emits it) or a **planned**
-  placeholder (`.planned = true`, no producer yet). **70 descriptors; 54 live, 16 planned.**
+  `shot_analyzer_design.md §A`, each either **live** (some rung has a producer) or **planned**
+  (every rung planned). **70 descriptors; 45 live, 25 planned.**
   Live today: metric_extractor ×4, kinematic_series ×3 + shaft-lean, foot_metrics ×5 +
   ball_position ×1, head_track ×3, lower_body_metrics ×6, upper_body_metrics ×9,
-  body_rotation ×4, club_delivery ×3, the trail-wrist series ×1, tempo_metrics ×2, the two
-  wrist `Summary` scores (sourced from a `ScoreBreakdown`, not a `MetricSeries`), and the nine
-  launch-monitor readings (a device, not a producer we write).
+  body_rotation ×4, club_delivery ×3, the trail-wrist series ×1, tempo_metrics ×2, and the two
+  wrist `Summary` scores (sourced from a `ScoreBreakdown`, not a `MetricSeries`).
   Planned: the depth-axis metrics, the sagittal spine pair, the keypoints no pose layout carries,
-  the sensors we do not place, `kinematicSequence`, and `swingScore`.
+  the sensors we do not place, `kinematicSequence`, `swingScore`, and the nine launch-monitor
+  readings — which **also** require the device, and are the worked case for a rung being both.
 
   **This bullet and Appendix A both mirror the manifest's own header comment — keep all three in
   step.** They drift the moment a producer lands without the roadmap being re-read, and a status
@@ -75,24 +155,34 @@ Design invariants (do not break):
   failed silently — one could never fire, two fired on everything. `measureUnitMismatch` in the
   diagnostics health list now compares a measure's unit against its descriptor's (`Rate` reducers
   exempt) and is gated at zero over the shipped library.
-- **Placeholders resolve "planned", not "missing sensors".** The `PlannedMetricProvider` claims every
-  planned key and always returns `Unavailable` with reason `"planned — not yet produced in this
-  build"`, regardless of the shot's capability — a planned metric's `.requirement` is documentation
-  of *what it will need*, surfaced as "will need …" on the detail page and a **Planned** badge in the
-  directory. **Promoting a placeholder to live:** add the producer, drop `.planned`, move the key out
-  of `PlannedMetricProvider::provides()` into a real provider that returns `Measured` when capable,
-  flip the matching `core.json` measures from `planned` to `live`, and update the
-  metric_catalogue_test counts. Then **re-run `core_pack_test`**: a condition that could not fire
-  before may now fire with nothing behind it, which is a defect in what ships rather than a backlog
-  item, and that test is the thing that catches it.
-- **`PlannedMetricProvider::provides()` is grouped by WHY, and keep it that way.** Depth, sagittal,
-  no-keypoint-in-any-layout, sensors-we-do-not-place, and work-we-have-not-done are five different
-  statements, and a flat list of keys loses all of them. A reader deciding what to build next needs
-  to know which group a key is in before anything else.
+- **Planned metrics resolve "planned", not "missing sensors" — from the ladder, with no placeholder
+  provider.** A descriptor whose every rung is planned answers `Unavailable` with
+  `"planned — <that rung's summary>"`, whatever the shot can do; its `baselineRequirement()` is
+  documentation of *what it will need*, surfaced as "will need …" on the detail page and a
+  **Planned** badge in the directory.
+
+  **`PlannedMetricProvider` is gone and must not come back.** It claimed every `.planned` key and
+  repeated one fixed sentence, which made it a second list of what is unbuilt that had to be kept in
+  step with the first — and it drifted: ten planned descriptors were missing from it and fell
+  through to `"no producer available"`, the reason an **unknown** key gets. Those two statements are
+  not interchangeable. `resolveAvailability()` now falls back to the descriptor's own ladder when
+  nothing claims a key, so the planned answer comes from the same place the requirement does.
+
+  **Promoting a route to live:** add the producer, drop `PLANNED` from that rung, add the key to a
+  real provider's `provides()` if nothing claims it yet, flip the matching `core.json` measures from
+  `planned` to `live`, and update the metric_catalogue_test counts. Then **re-run `core_pack_test`**:
+  a condition that could not fire before may now fire with nothing behind it, which is a defect in
+  what ships rather than a backlog item, and that test is the thing that catches it.
+- **Each planned rung says WHY in its own `summary`, and that is where the grouping now lives.**
+  Depth, sagittal, no-keypoint-in-any-layout, sensors-we-do-not-place and work-we-have-not-done are
+  five different statements; they used to be comment headings over a flat key list in
+  `PlannedMetricProvider`, a file away from the requirements they explained. The reason now sits on
+  the route beside its own requirement. The manifest header still groups them for a reader deciding
+  what to build next — keep that list and the routes in step.
 
 Two easy traps:
-- The descriptor member is `requirement`, **not** `requires` — `requires` is a C++20 keyword and
-  cannot be an identifier.
+- The route member is `requirement`, **not** `requires` — `requires` is a C++20 keyword and cannot be
+  an identifier. (The QML façade calls it `requires`, which is fine: JavaScript has no such keyword.)
 - The producer `Phase` enum (Address…Finish, `swing_analysis.h`) is **distinct** from
   `PpSwingPosition` (P1…P8, `wrist_assessment_types.h`). Where you need to cross between them, the
   one canonical table is `wristCheckpoints()` (`wrist_analysis_adapter.h`) — reuse it, never
@@ -117,8 +207,9 @@ Add one `cat.addDescriptor({...})` block to `installMetricManifest()` in
 `docs/` (the wrist/foot/speed prose lives in `docs/design/shot_analyzer_design.md`,
 `docs/reference/wristmetrics.md`, `docs/reference/swing_json_schema.md`) — the manifest is where that
 scattered prose becomes structured. `usedBy` is static, hand-authored (e.g.
-`{"chart:review","score:wrist"}`). Keep `requirement.minTier` at `Angles2D` unless the metric
-genuinely needs a higher *camera reconstruction* tier — IMU metrics do not.
+`{"chart:review","score:wrist"}`). Keep `minTier` at `Angles2D` on every rung; a rung that needs the
+second camera says `.dtlCamera = true`, which is the device, where the tier is what a calibrated pair
+of them yields.
 
 ```cpp
 cat.addDescriptor({
@@ -134,18 +225,65 @@ cat.addDescriptor({
     .phases = { Phase::Top, Phase::Impact },
     .scored = false,
     // No normative block — a descriptor describes a metric, it does not judge it. See Step D.
-    .requirement = { .imuRoles = { SegmentRole::LeadForearm, SegmentRole::LeadHand } },
+    .routes = {
+        via("wristImus", RM::Inertial, Direct,
+            { .imuRoles = { SegmentRole::LeadForearm, SegmentRole::LeadHand } },
+            QStringLiteral("the Cardan axis between the two IMU orientations")) },
     .usedBy = { QStringLiteral("chart:review") },
 });
 ```
 
-### Step C — declare the provider capability
-A metric is `Unavailable` until a provider claims its key. Either extend an existing provider or add a
-new one in `src/Metrics/metric_providers.{h,cpp}`:
-- Add the key to that provider's `provides()`.
-- Handle it in `availability(key, ctx)`. Build the sensor/camera/club verdict from a
-  `MetricRequirement` via the shared `fromRequirement()` helper so reasons read identically to the
-  resolver's `describeRequirement()`.
+`via(...)` is a local helper at the top of `installMetricManifest()`, with `RM` /
+`Direct` / `Estimated` / `PLANNED` aliases beside it — six designated initialisers per rung buried
+the thing the ladder exists to show.
+
+**Declare a second rung when a metric genuinely has one**, and only then. Reference the docs, not
+your intuition: an upgrade route is a claim that some kit produces a better number, and one invented
+here becomes a filter chip that sends a reader shopping.
+
+The source is the **"2nd camera (DTL) adds"** column in `shot_analyzer_design.md` §"Single-camera
+(face-on) viability", read together with the corrections block above it. Two traps in reading it:
+
+- **Its verdicts assume an IMU.** The column header is `single-cam(face-on) + IMU`, so "nothing" for
+  `xFactor` means *given a bound pelvis+thorax pair, a second camera adds nothing* — which is true.
+  It is **not** a statement about the camera-only shot, which is what most swings are and what
+  `body_rotation.cpp` actually serves with `acos(w/w₀)` and `σ ∝ 1/sin θ` (unbounded near square).
+  Stereo genuinely beats that. Both facts are now rungs, in order.
+- **Three of its rows are wrong on the merits** and the corrections block says so — most sharply
+  `attackAngle`, where "DTL makes it fully in-plane" is backwards: the angle lives in the vertical
+  plane containing the target line, which IS the face-on image plane. Do not add a DTL rung there.
+
+Ordered best first, cheapest last:
+
+```cpp
+    .routes = {
+        via("pelvisImu", RM::Inertial, Direct, { .imuRoles = { SegmentRole::Pelvis } },
+            QStringLiteral("measured directly from the pelvis IMU")),
+        via("faceOn", RM::Projected, Estimated, { .faceOnCamera = true },
+            QStringLiteral("estimated from the collapse of the hip span in the face-on image")) },
+```
+
+A rung's `summary` must name the **method**, not the missing device. It is shown verbatim as the
+availability reason for an `Estimated` rung, against a number that IS on screen — "needs a pelvis
+IMU" there reads as a refusal. The missing-kit sentence is generated separately, from the
+requirement.
+
+### Step C — claim the key
+**One line.** Add the key to a provider's `provides()` in `src/Metrics/metric_providers.{h,cpp}`, or
+add a new provider class if none fits. That is the whole step: every provider we ship is a claim list
+and nothing more, because the seam's default `availability()` walks the metric's ladder
+(`resolveRoutes()` in `metric_provider.h`).
+
+Each class used to rebuild its metrics' requirements in C++ as well — a second copy of what the
+descriptor already said, and it drifted in both directions at once: `stanceWidthMm` was produced on
+every ruler-resolved swing and claimed by nobody, while `leadHeelLift` was claimed but understated
+what it needed, so a ball-less shot was told it was `Measured` while the producer had declined to
+emit it.
+
+> **Overriding `availability()` is a design decision, not a routine step.** It means the ladder
+> cannot express something, and the first question is whether a rung is missing from the manifest.
+> Nothing we ship overrides it today; two classes used to, and both were saying things the directory
+> could not see (body rotation's IMU-vs-camera split, the scores' missing scorer).
 
 > ### ⛔ NEVER READ `ShotContext::sessionType`
 >
@@ -161,31 +299,47 @@ new one in `src/Metrics/metric_providers.{h,cpp}`:
 > `appendBodyMetricStages()` in `wrist_analyzer.cpp` lists the body-metric stages ONCE and every
 > profile runs them, with each stage gating in its own `canRun()` on the data it actually needs.
 
-**Returning `Bridged`.** Three states, and the middle one is not decoration. Use it when the metric
-IS produced but by a weaker route than the ideal sensor — `BodyRotationProvider` is the worked
-example: a bound `SegmentRole::Pelvis` stream measures axial turn directly (`Measured`), and with
-only a face-on camera the same producer estimates it from the collapse of the hip span in the image
-(`Bridged`). Two rules follow. The reason must name the **method**, not the missing device
-("estimated from the face-on camera — a pelvis / thorax IMU would measure it directly"), because
-"needs a pelvis IMU" reads as a refusal when a value is in fact produced. And the producer must
-carry the cost: `body_rotation.cpp` propagates its span noise into `MetricSeries::sigma` so a reader
-can see how much to trust a small turn.
+**Getting `Bridged`.** Three states, and the middle one is not decoration. It is what an
+`Estimated` rung yields: the metric IS produced, by a weaker method than the best rung. Body rotation
+is the worked example — a bound `SegmentRole::Pelvis` stream measures axial turn directly, and with
+only a face-on camera the same producer estimates it from the collapse of the hip span in the image.
+You get this by **declaring the two rungs in Step B**, not by writing a condition here. The producer
+still has to carry the cost: `body_rotation.cpp` propagates its span noise into `MetricSeries::sigma`
+so a reader can see how much to trust a small turn.
 - If you add a **new** provider class, register a process-lifetime instance of it in
   `makeMetricCatalogue()` (`metric_catalogue.cpp`) with `cat.addProvider(&yourProvider)`.
 
-**Hardware the user may not own is a REQUIREMENT, not a `planned` flag.** `MetricRequirement` gained
-`launchMonitor` alongside `faceOnCamera` / `clubTrack` / `ballTrack`, matched by
-`ShotContext::hasLaunchMonitor`. The distinction matters in both directions and both mistakes are
-lies: marking a launch-monitor metric `planned` promises work we are not doing, while claiming it
-`Measured` unconditionally reports numbers nobody supplied. Declaring the requirement instead makes
-the absence graceful through the path every other missing input already uses — "needs a launch
-monitor" today, `Measured` the moment a connector sets the flag, with no catalogue change at that
-point. `LaunchMonitorProvider` is that connector's insertion point rather than a stub to delete, and
-the diagnostics pack's matching statement is `MeasureStatus::ExternalDevice`.
+**Hardware the user may not own is a REQUIREMENT. Whether we can READ it is a separate field, and a
+rung is often both.** `MetricRequirement` carries `launchMonitor` and `dtlCamera` alongside
+`faceOnCamera` / `clubTrack` / `ballTrack`, matched by `ShotContext::hasLaunchMonitor` / `hasDtl`.
+Declaring the requirement is what keeps the metric under the right chip and makes the absence
+graceful through the path every other missing input uses.
 
-Resolution rule (in `metric_resolver.cpp`): over all providers that list the key, the best state wins
-(`Measured` > `Bridged` > `Unavailable`), ties broken by `priority()`. If no provider claims the key,
-it is `Unavailable` with the descriptor requirement rendered as the reason.
+But a requirement is not a promise that the device would work. **Nothing in this build sets
+`hasLaunchMonitor`** — no code outside a test even mentions it — so all nine launch-monitor rungs are
+`PLANNED` as well as requiring the device. "Needs a launch monitor" on its own would send a golfer to
+buy hardware that changes nothing.
+
+> This is not a reversal of the old rule, it is what the route made possible. The rule was written
+> when `planned` was a **metric-level** flag with nowhere to put the hardware, so marking these
+> planned really did erase the requirement and promise work instead. On a route the two are separate
+> fields and both are visible: the **Needs** facet still says *Launch monitor*, the badge says
+> **Planned**, and the reason says why. `clubPath` is the same shape — a camera we have no capture
+> path for AND a producer we have not written.
+
+`LaunchMonitorProvider` remains that connector's insertion point rather than a stub to delete, and
+the diagnostics pack's matching statement is `MeasureStatus::ExternalDevice`. When a connector lands,
+**dropping `PLANNED` from those nine rungs is the whole change** — and `metric_catalogue_test` §3e
+flips back with it, because it asserts the connector's absence rather than assuming it.
+
+**Resolution, in two layers.** `resolveRoutes()` (`metric_provider.h`) walks ONE metric's ladder:
+first live rung the shot satisfies wins, `Direct` → `Measured` and `Estimated` → `Bridged`; the
+nearest better live rung becomes `MetricAvailability::upgrade`; no live rung satisfied gives
+`"needs X, or Y"` over every live rung; no live rung at all gives `"planned — …"`.
+`resolveAvailability()` (`metric_resolver.cpp`) then fuses PROVIDERS: over all that list the key, the
+best state wins (`Measured` > `Bridged` > `Unavailable`), ties broken by `priority()`. If none claims
+the key it falls back to the ladder — which is the right answer for a planned metric and a defect for
+anything else, gated by `metric_catalogue_test` §3d-bis.
 
 ### Step D — the corridor (a norm, not a descriptor field)
 
@@ -231,12 +385,17 @@ Add cases to `src/Metrics/tests/metric_catalogue_test.cpp` (the source lives bes
 the `pp_add_test` that registers it is in `src/Analysis/tests/CMakeLists.txt`):
 - **completeness**: your key resolves via `descriptor()`; bump the expected count and the per-type
   counts.
-- **a claimant**: nothing to add — section 3d-bis already sweeps every descriptor for one, so
-  forgetting to list your key in a provider's `provides()` fails the suite by name. Do not weaken
-  that sweep to make a new metric pass; an unclaimed key is `Unavailable` on every shot forever,
-  which is what it was written to catch.
+- **a claimant**: nothing to add — section 3d-bis already sweeps every descriptor **with a live
+  route** for one, so forgetting to list your key in a provider's `provides()` fails the suite by
+  name. Do not weaken that sweep to make a new metric pass; an unclaimed key is `Unavailable` on
+  every shot forever, which is what it was written to catch. Metrics whose every rung is planned are
+  exempt: nothing produces them, so there is no producer to claim them.
+- **the ladder**: nothing to add — 3d-ter checks every descriptor has at least one route and that
+  none puts a `Direct` rung below an `Estimated` one, which would hand back `Bridged` on a shot that
+  could have been `Measured`.
 - **resolve()**: a `ShotContext` where it is `Measured`, and one where it is `Unavailable` with the
-  right reason (**missing sensor or camera — never a session type**; see the ⛔ box in Step C).
+  right reason (**missing sensor or camera — never a session type**; see the ⛔ box in Step C). If
+  you declared a second rung, add the `Bridged` case and the `upgrade` sentence too.
 - **corridors**: nothing goes in this test — the catalogue no longer resolves them. If your metric
   gains a norm, add a case to `manifest_migration_test` (`src/Diagnostics/tests/`) asserting it
   resolves a corridor at every phase it declares. That is the gate that catches a reducer naming a
@@ -251,16 +410,40 @@ ctest --test-dir build/analyzer-tests -R metric_catalogue --output-on-failure
 ### Step G — verify in the app
 Build the app once, open **Settings → Metrics**, confirm the metric appears in its group with the
 right unit/short-label and source glyph, and that its detail page renders the meaning, how-to-read,
-normative bar (for any metric with a norm), requirement, and usedBy. Run the full 7-suite gate
-before any release.
+normative bar (for any metric with a norm), the **How it's measured** ladder, and usedBy. Then open
+**Settings → Diagnostics → Metrics** and check it lands under the right **Needs**, **Improves with**
+and **A 2nd camera would** chips — the last is derived, so a projected metric you read past Address
+should appear under *Refine it* without you having authored anything. Run the full 7-suite gate before any release.
 
 ## 3. QML façade shapes (for UI work)
 
 `MetricCatalog` (`src/Gui/review/metric_catalog.h`, `QML_ELEMENT`) marshals registry types to
 QVariant. Row shape from `query(filters, shotCtx={})`:
-`{ key, label, shortLabel, unit, type, group, scored, sources:[…], availability:{state,reason,tier} }`.
+`{ key, label, shortLabel, unit, type, group, scored, planned, sources:[…], needsDevices:[…],
+improvesDevices:[…], availability:{state,reason,tier,routeId,upgrade} }`.
 Detail from `descriptor(key, shotCtx={})` adds `description, howToRead, flexPositive, phases:[int…],
-normative:{…}, requires:{…}, usedBy:[…]`. **Phases are Phase ints** — render with `TimelineLabels`.
+normative:{…}, routes:[…], requires:{…}, usedBy:[…]`. **Phases are Phase ints** — render with
+`TimelineLabels`.
+
+`routes` is the ladder, best first — one entry per rung:
+`{ id, method, estimated, summary, planned, requires:{faceOnCamera,dtlCamera,imuRoles:[…],clubTrack,
+ballTrack,launchMonitor,minTier}, devices:[deviceId…] }`. `requires` at the top level is the FLOOR
+(the cheapest rung), kept under that name because every surface asking "what does this need" wants
+exactly that. `needsDevices` / `improvesDevices` are stable slugs (`faceOn`, `dtl`, `wristImus`,
+`bodyImus`, `clubTrack`, `clubSensor`, `ballTrack`, `launchMonitor`), not display text.
+`stereoGain` is one of `unlocks` / `improves` / `refines` / `none` — what a second camera would do,
+with `refines` derived rather than authored (see the invariant above).
+
+**`CaptureDevice`'s declaration order is display order**, everywhere a device list is rendered:
+IMUs (wrist · body · club sensor), then cameras and what they find in them (face-on · DTL · club
+track · ball track), then the launch monitor. `allCaptureDevices()` is that sequence, and
+`captureDevicesFor()` builds by walking it rather than by walking the requirement's fields — so
+`imuRoles`, which is an unordered set the manifest authors in whatever sequence reads best, cannot
+make `{Pelvis, LeadHand}` and `{LeadHand, Pelvis}` produce two different lists for the same kit.
+
+`availability.upgrade` is a ready-made sentence ("Pelvis IMU would measure it directly") and is empty
+when the best rung already fired. **Bind it; never synthesise one from `routes`** — that list
+includes rungs no producer implements, and a shot-level hint may only name kit that would work today.
 
 The `normative` map is resolved out of the NORM SET, not the descriptor:
 `{ corridors:[{phase,greenLo,greenHi,amberLo,amberHi,deltaFromAddress,measureId,contextId,inherited,overridden}],
@@ -269,8 +452,8 @@ weakReason }`. A metric with no measure or no norm gets an empty `corridors` lis
 "no norm yet" state, never a zeroed band. The Watch edge (`amberLo/amberHi`) is policy-dependent for
 any norm that states no monitor band, which is why the host must bind
 `gradePolicy: appSettings.diagnosticsGradePolicy` on the `MetricCatalog` it declares. `shotCtx` (all optional): `{ tier, sessionType, imuRoles:[roleName…],
-hasFaceOn, hasClubTrack, hasBallTrack, archetype, club, shape }`; empty `{}` = the context-free
-directory view.
+hasFaceOn, hasDtl, hasClubTrack, hasBallTrack, hasLaunchMonitor, archetype, club, shape }`; empty
+`{}` = the context-free directory view.
 
 ## 4. Deferred (not in v1)
 
@@ -307,14 +490,23 @@ Calibration: `anat+mount` = IMU anatomical zero + mount check ([[calibration-sta
 ball-scale (`setup.ballDetection`) · `stereo` = DTL/stereo extrinsics · `clubDev` = club-device mount.
 V&V: unit = header-only standalone test (`src/Analysis/tests`); validation source in parentheses.
 
-**Status** is read off the descriptor — `.planned` for the badge the directory shows, and
-`.requirement.launchMonitor` for the third row, which is a requirement rather than a roadmap item:
+**Status** is read off the route ladder — `planned()` for the badge the directory shows, and
+`baselineRequirement().launchMonitor` for the third row, which is a requirement rather than a roadmap
+item:
 
 | Status | Means |
 |---|---|
-| **live** | A producer we write emits it. Resolves Measured on a shot that meets the requirement. |
-| **device** | Real and claimed by `LaunchMonitorProvider`, but the *reading* comes from hardware we integrate rather than a producer we author. Not on the roadmap below — there is no detection work to do, only a connector. |
-| **planned** | `.planned = true`. `PlannedMetricProvider` claims it and always answers `Unavailable — "planned — not yet produced in this build"`, whatever the shot can do. |
+| **live** | Some rung has a producer. Resolves Measured (or Bridged) on a shot that satisfies it. |
+| **device** | The *reading* comes from hardware we integrate rather than a producer we author. Still requires the device, and **also planned** until a connector exists — nothing sets `hasLaunchMonitor` today. There is no detection work below, only the connector. |
+| **planned** | Every rung `PLANNED`. Answers `Unavailable — "planned — <that rung's summary>"`, whatever the shot can do. |
+
+**The Capture column is now derivable, so check it rather than remember it.** It duplicates
+`.routes[].requirement`, and duplication is what put 43 rows against a 70-metric catalogue the last
+time this table was audited. A row's Capture cell should read as its ladder does; where a metric has
+two rungs the cell says so in parentheses (`FaceCam (Plv IMU upgrades it)`), which is exactly what
+`baselineRequirement()` + `upgradeDevices()` return. The **Needs** and **Improves with** chips in
+Settings → Diagnostics → Metrics are the same two readings, generated — read them off the running app
+and correct this table, not the other way round.
 
 Groups below are in manifest order, which is the order the Metric Library and the chart's metric
 presets list them in.
@@ -325,7 +517,7 @@ presets list them in.
 |---|---|---|---|---|---|
 | `wristScore` | live | F+H (+U) | WristAssessmentEngine rollup ✓ | anat+mount | `composite_score_v2_test` · (corpus: score stability) |
 | `wristResemblance` | live | F+H | WristResemblanceScorer ✓ | anat+mount | `wrist_resemblance_test` · (corpus: per-archetype) |
-| `swingScore` | planned | Plv+Thx + FaceCam | wire a live adherence scorer (SwingScorer is dark) | anat+mount, camCal | `swing_scorer_test` (exists) · (corpus: adherence vs coach) |
+| `swingScore` | planned | FaceCam | wire a live adherence scorer (SwingScorer is dark) | anat+mount, camCal | `swing_scorer_test` (exists) · (corpus: adherence vs coach) |
 
 ### Wrist & forearm
 
@@ -344,10 +536,10 @@ Measured for the pelvis / thorax IMUs, so these read as real-but-estimated rathe
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `pelvisRotation` | live | FaceCam (Plv IMU upgrades it) | `buildBodyRotationSeries` axial turn ✓ | camCal / anat+mount | `body_rotation_test` · (mocap ground truth owed) |
-| `thoraxRotation` | live | FaceCam (Thx IMU upgrades it) | axial-turn channel ✓ | camCal / anat+mount | `body_rotation_test` · (mocap owed) |
-| `xFactor` | live | FaceCam (Plv+Thx upgrade it) | thorax−pelvis separation ✓ | camCal / anat+mount | `body_rotation_test` · (mocap owed) |
-| `xFactorStretch` | live | as `xFactor`, + a segmented Top | separation minus its value at Top ✓ | camCal / anat+mount | `body_rotation_test` · (corpus: speed correlation owed) |
+| `pelvisRotation` | live | FaceCam (Plv IMU upgrades it; DTL triangulates it) | `buildBodyRotationSeries` axial turn ✓ | camCal / anat+mount | `body_rotation_test` · (mocap ground truth owed) |
+| `thoraxRotation` | live | FaceCam (Thx IMU upgrades it; DTL a weaker cross-check) | axial-turn channel ✓ | camCal / anat+mount | `body_rotation_test` · (mocap owed) |
+| `xFactor` | live | FaceCam (Plv+Thx upgrade it; DTL triangulates both bearings) | thorax−pelvis separation ✓ | camCal / anat+mount | `body_rotation_test` · (mocap owed) |
+| `xFactorStretch` | live | as `xFactor` (incl. the DTL rung), + a segmented Top | separation minus its value at Top ✓ | camCal / anat+mount | `body_rotation_test` · (corpus: speed correlation owed) |
 | `shoulderPlaneAngle` | live | FaceCam | `buildUpperBodySeries` shoulder-line vs horizontal ✓ | camCal | `upper_body_metrics_test` · (corpus) |
 | `hipInternalRotation` | planned | Plv+Thg | thigh-vs-pelvis twist | anat+mount (pelvis+thigh) | new unit · (mocap) |
 
@@ -362,8 +554,8 @@ the set a reader plots together, and ten members made it unreadable.
 | `spineSideBend` | live | FaceCam | `buildUpperBodySeries` lateral flexion ✓ | camCal | `upper_body_metrics_test` · (mocap owed) |
 | `secondaryAxisTilt` | live | FaceCam | frontal spine vector vs vertical ✓ | camCal, ground | `upper_body_metrics_test` · (mocap owed) |
 | `spineForwardBend` | planned | Plv+Thx (or 3D cam) | thorax-rel-pelvis flex — SAGITTAL, so face-on cannot see it | anat+mount / camCal | new unit · (mocap) |
-| `thoracicFlexion` | planned | Plv+Thx (or 3D cam) | thoracic flex at Address — sagittal | anat+mount / camCal | new unit · (mocap) |
-| `lumbarExtension` | planned | Plv+Thx (or 3D cam) | lumbar extension at Address — sagittal | anat+mount / camCal | new unit · (mocap) |
+| `thoracicFlexion` | planned | **DTL** | upper-back CONTOUR at Address — no keypoint exists between shoulders and hips in either layout | stereo | new unit · (mocap) |
+| `lumbarExtension` | planned | **DTL** | low-back CONTOUR at Address — no keypoint exists between shoulders and hips in either layout | stereo | new unit · (mocap) |
 
 ### Pelvis & lateral
 
@@ -376,7 +568,7 @@ the same frontal plane as sway and lift, and it is read alongside them.
 | `pelvisLift` | live | FaceCam + ground | vertical translation ✓ | camCal, ground | `lower_body_metrics_test` · (mocap owed) |
 | `hipLineTilt` | live | FaceCam | hip-line angle vs horizontal ✓ | camCal | `lower_body_metrics_test` · (corpus) |
 | `thoraxLateralDrift` | live | FaceCam + ground | `buildUpperBodySeries` thorax lateral translation ✓ | camCal, ground | `upper_body_metrics_test` · (corpus) |
-| `pelvisThrust` | planned | **DTL** (optical axis) | toward-ball translation | stereo | new unit · (mocap; needs depth) |
+| `pelvisThrust` | planned | FaceCam + **DTL** (optical axis) | toward-ball translation | stereo | new unit · (mocap; needs depth) |
 
 ### Feet & stance
 
@@ -412,8 +604,8 @@ the same frontal plane as sway and lift, and it is read alongside them.
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `clubheadSpeed` | live | Club | `buildKinematicSeries` head-path speed ✓ | px→mm / ground | `kinematic_series_test` · (launch monitor) |
-| `handSpeed` | live | Club (grip) | grip-path speed ✓ | px→mm | `kinematic_series_test` · (launch monitor) |
+| `clubheadSpeed` | live | FaceCam + Club (shaft sensor best, then DTL — the projected speed loses the depth component) | `buildKinematicSeries` head-path speed ✓ | px→mm / ground | `kinematic_series_test` · (launch monitor) |
+| `handSpeed` | live | FaceCam + Club (grip); DTL restores the depth component | grip-path speed ✓ | px→mm | `kinematic_series_test` · (launch monitor) |
 | `lagAngle` | live | Club + FaceCam pose | forearm-vs-shaft angle ✓ | px→mm, pose | `kinematic_series_test` · (strobe/montage review) |
 | `impactShaftLean` | live | Club | shaft-lean stage ✓ | px→mm | `shaft_*` tests · (corpus) |
 
@@ -427,7 +619,7 @@ the same frontal plane as sway and lift, and it is read alongside them.
 | `faceAngle` | device | **LM** | read from the monitor | — | (launch monitor) |
 | `dynamicLoft` | device | **LM** | read from the monitor | — | (launch monitor) |
 | `spinLoft` | device | **LM** | read from the monitor | — | (launch monitor) |
-| `swingPlane` | planned | Club (DTL best) | SVD best-fit plane of head path | camCal | new unit · (DTL cross-check) |
+| `swingPlane` | planned | **DTL** + Club | SVD best-fit plane of head path — needs the path in 3D | stereo | new unit · (DTL cross-check) |
 | `clubPath` | planned | **DTL** + Club | horizontal velocity angle — needs depth | stereo | new unit · (launch monitor) |
 | `shaftDirection` | planned | **DTL** + Club | shaft pointing vs target line — needs depth | stereo | new unit · (DTL cross-check) |
 
@@ -454,8 +646,8 @@ the manifest. The readings they described are covered by `shoulderPlaneAngle` (B
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `headSway` | live | FaceCam + Ball | `buildHeadSeries` lateral disp, in **cm** ✓ | **px→mm**; absent without the ruler | `head_track_test` · (corpus) |
-| `headLift` | live | FaceCam + Ball | vertical disp, in **cm** ✓ | **px→mm**; absent without the ruler | `head_track_test` · (corpus) |
+| `headSway` | live | FaceCam | `buildHeadSeries` lateral disp, in **cm** ✓ | **inter-ear px→mm** (NOT the ball — `wrist_analyzer.cpp` builds it from `head.addrScalePx / earWidthMm`); absent without it | `head_track_test` · (corpus) |
+| `headLift` | live | FaceCam | vertical disp, in **cm** ✓ | **inter-ear px→mm**, as `headSway`; absent without it | `head_track_test` · (corpus) |
 | `headTilt` | live | FaceCam | eye-line angle ✓ | none — an angle needs no scale | `head_track_test` · (corpus) |
 
 ### Arms
@@ -479,9 +671,9 @@ Optical ball flight is not resolvable at our frame rates — see the `launchMoni
 | `spinAxis` | device | **LM** | from the monitor | — | (launch monitor) |
 | `spinRate` | device | **LM** | from the monitor | — | (launch monitor) |
 | `carryDistance` | device | **LM** | from the monitor | — | (launch monitor) |
-| `launchDirection` | planned | Ball (high rate) | initial ball vector, horizontal | camCal / stereo | new unit · (launch monitor) |
-| `launchAngle` | planned | Ball (high rate) | initial ball vector, vertical | camCal / stereo | new unit · (launch monitor) |
-| `ballSpeed` | planned | Ball (high rate) | post-impact ball speed | px→mm | new unit · (launch monitor) |
+| `launchDirection` | planned | **DTL** + Ball (high rate) | initial ball vector, horizontal | camCal / stereo | new unit · (launch monitor) |
+| `launchAngle` | planned | FaceCam + Ball (high rate) | initial ball vector, vertical | camCal / stereo | new unit · (launch monitor) |
+| `ballSpeed` | planned | FaceCam + Ball (high rate) | post-impact ball speed | px→mm | new unit · (launch monitor) |
 
 ### Strike
 

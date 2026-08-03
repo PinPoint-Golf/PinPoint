@@ -22,34 +22,6 @@
 
 namespace pinpoint::analysis {
 
-QString describeRequirement(const MetricRequirement &req, const ShotContext &ctx)
-{
-    QStringList missing;
-
-    if (req.faceOnCamera && !ctx.hasFaceOn)
-        missing << QStringLiteral("a face-on camera");
-    if (req.clubTrack && !ctx.hasClubTrack)
-        missing << QStringLiteral("club tracking");
-    if (req.ballTrack && !ctx.hasBallTrack)
-        missing << QStringLiteral("ball tracking");
-    if (req.launchMonitor && !ctx.hasLaunchMonitor)
-        missing << QStringLiteral("a launch monitor");
-
-    QStringList roles;
-    for (SegmentRole r : req.imuRoles)
-        if (!ctx.hasRole(r))
-            roles << segmentRoleName(r);
-    if (!roles.isEmpty())
-        missing << (roles.join(QStringLiteral(" + ")) + QStringLiteral(" IMU"));
-
-    if (static_cast<int>(ctx.tier) < static_cast<int>(req.minTier))
-        missing << QStringLiteral("a higher reconstruction tier");
-
-    if (missing.isEmpty())
-        return QString();
-    return QStringLiteral("needs ") + missing.join(QStringLiteral(", "));
-}
-
 MetricAvailability resolveAvailability(const std::vector<const IMetricProvider *> &providers,
                                        const MetricDescriptor *desc, const QString &key,
                                        const ShotContext &ctx)
@@ -58,6 +30,13 @@ MetricAvailability resolveAvailability(const std::vector<const IMetricProvider *
     best.tier = ctx.tier;
     bool claimed = false;
     int  bestPriority = 0;
+
+    // An unknown key has no ladder to walk and no provider worth asking.
+    if (!desc) {
+        best.state  = MetricAvailability::Unavailable;
+        best.reason = QStringLiteral("unknown metric");
+        return best;
+    }
 
     for (const IMetricProvider *p : providers) {
         if (!p)
@@ -68,7 +47,7 @@ MetricAvailability resolveAvailability(const std::vector<const IMetricProvider *
         if (!provides)
             continue;
 
-        const MetricAvailability a = p->availability(key, ctx);
+        const MetricAvailability a = p->availability(*desc, ctx);
         const bool better = !claimed
                           || metricStateRank(a.state) > metricStateRank(best.state)
                           || (metricStateRank(a.state) == metricStateRank(best.state)
@@ -80,16 +59,13 @@ MetricAvailability resolveAvailability(const std::vector<const IMetricProvider *
         }
     }
 
-    if (!claimed) {
-        best.state = MetricAvailability::Unavailable;
-        if (!desc)
-            best.reason = QStringLiteral("unknown metric");
-        else {
-            best.reason = describeRequirement(desc->requirement, ctx);
-            if (best.reason.isEmpty())
-                best.reason = QStringLiteral("no producer available");
-        }
-    }
+    // No provider claims it. A metric whose every route is planned is SUPPOSED to land here — the
+    // ladder says "planned" for itself, and a placeholder provider that only ever repeated that
+    // sentence was a second list to keep in step. A metric with a live route landing here is the
+    // stanceWidthMm bug (declared, produced, claimed by nobody, reported Unavailable on every shot
+    // ever taken), which the catalogue test sweeps for by name.
+    if (!claimed)
+        best = resolveRoutes(*desc, ctx);
     return best;
 }
 

@@ -27,15 +27,15 @@
 
 // The resolution rule (design §5): over all providers that list `key`, take the one returning the
 // highest-quality state (Measured > Bridged > Unavailable), ties broken by declared priority. If no
-// provider claims the key, the metric is Unavailable with the descriptor's requirement rendered as
-// the reason. Kept separate from the registry so the fusion policy has one testable home.
+// provider claims the key, the metric falls back to its own route ladder. Kept separate from the
+// registry so the fusion policy has one testable home.
+//
+// The rung-picking itself is NOT here — `resolveRoutes()` in metric_provider.h is the route walk,
+// because that is where the value types it reads live and it has to be callable from the provider
+// seam's default implementation. This file fuses PROVIDERS; that one reads one metric's ladder.
+// `describeRequirement()` moved there with it and is still visible through this header.
 
 namespace pinpoint::analysis {
-
-// Human-readable "why this can't be produced" for an unmet requirement, given the shot's capability.
-// Lists the missing pieces only (camera / IMU roles / club / ball / tier); empty when nothing is
-// missing (the caller should not reach here in that case).
-QString describeRequirement(const MetricRequirement &req, const ShotContext &ctx);
 
 // Fuse the providers that claim `key`. `desc` may be null (unknown key) — then the result is
 // Unavailable with an "unknown metric" reason. When providers claim the key but all return

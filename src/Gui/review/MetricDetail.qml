@@ -97,20 +97,56 @@ Item {
         return u
     }
 
-    // The requirement, rendered as plain-language capability lines.
-    function _measures() {
+    // The kit ONE route needs, as plain-language capability lines.
+    function _kitFor(r) {
         var out = []
-        var r = (d && d.requires) ? d.requires : ({})
-        var roles = r.imuRoles || []
+        var roles = (r && r.imuRoles) ? r.imuRoles : []
         if (roles.length > 0) {
             var names = roles.map(_humanRole)
             out.push(names.join(" + ") + (roles.length > 1 ? qsTr(" IMUs") : qsTr(" IMU")))
         }
-        if (r.faceOnCamera) out.push(qsTr("Face-on camera"))
-        if (r.clubTrack)    out.push(qsTr("Club tracking"))
-        if (r.ballTrack)    out.push(qsTr("Ball tracking"))
+        if (r.faceOnCamera)  out.push(qsTr("Face-on camera"))
+        if (r.dtlCamera)     out.push(qsTr("Down-the-line camera"))
+        if (r.clubTrack)     out.push(qsTr("Club tracking"))
+        if (r.ballTrack)     out.push(qsTr("Ball tracking"))
+        if (r.launchMonitor) out.push(qsTr("Launch monitor"))
         if (r.minTier && r.minTier !== "angles2D")
             out.push(qsTr("Requires %1 reconstruction").arg(r.minTier))
+        return out
+    }
+
+    // What a second camera would do, when the answer is not already a rung on the ladder. Only the
+    // derived grade is worded here — "unlocks" and "improves" are visible as routes above, and
+    // repeating them would say the same thing twice in one section.
+    readonly property string _stereoNote: {
+        if (!d || d.stereoGain !== "refines") return ""
+        return qsTr("Read in the face-on image plane past address, so it carries the "
+                  + "foreshortening of a body that has turned. A calibrated second camera would "
+                  + "measure it in three dimensions instead.")
+    }
+
+    // THE ROUTE LADDER, best first. This used to render one requirement, which described the
+    // cheapest way to get the metric and silently implied it was the only way — so a metric a
+    // pelvis IMU measures outright read here as a camera metric, and a reader had no way to learn
+    // otherwise from the page whose job is to say how it is measured.
+    function _measures() {
+        var out = []
+        var routes = (d && d.routes) ? d.routes : []
+        for (var i = 0; i < routes.length; ++i) {
+            var rt   = routes[i]
+            var kit  = _kitFor(rt.requires || ({}))
+            var note = []
+            if (rt.estimated) note.push(qsTr("estimated"))
+            if (rt.planned)   note.push(qsTr("not built yet"))
+            out.push({
+                title:  kit.length > 0 ? kit.join(" + ") : qsTr("Nothing beyond a segmented swing"),
+                note:   note.join(", "),
+                detail: rt.summary || "",
+                // The first rung is the best one; anything below it is a fallback, and a planned
+                // rung is neither — it is a description of something that does not run.
+                dim:    rt.planned === true
+            })
+        }
         return out
     }
 
@@ -441,22 +477,54 @@ Item {
                         Layout.fillWidth: true
                         spacing: Theme.sp(8)
                         Rectangle {
-                            Layout.alignment: Qt.AlignVCenter
+                            Layout.alignment: Qt.AlignTop
+                            Layout.topMargin: Theme.sp(6)
                             implicitWidth:  Theme.sp(5)
                             implicitHeight: Theme.sp(5)
                             radius: width / 2
-                            color: Theme.colorText3
+                            color: modelData.dim ? Theme.colorText3 : Theme.colorText2
                         }
-                        Text {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: modelData
-                            font.family:    Theme.fontBody
-                            font.pixelSize: Theme.fontSzBody2
-                            color: Theme.colorText2
-                            wrapMode: Text.WordWrap
+                            spacing: Theme.sp(1)
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.note.length > 0
+                                          ? modelData.title + " — " + modelData.note
+                                          : modelData.title
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzBody2
+                                color: modelData.dim ? Theme.colorText3 : Theme.colorText2
+                                wrapMode: Text.WordWrap
+                            }
+                            // How this rung actually gets the number. Named as a method, never as a
+                            // missing device — an estimated reading IS produced, and "needs a
+                            // pelvis IMU" against a number on screen reads as a refusal.
+                            Text {
+                                Layout.fillWidth: true
+                                visible: modelData.detail.length > 0
+                                text: modelData.detail
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzMicro
+                                color: Theme.colorText3
+                                wrapMode: Text.WordWrap
+                            }
                         }
                     }
                 }
+            }
+
+            Text {
+                Layout.fillWidth:  true
+                Layout.leftMargin: Theme.sp(26)
+                Layout.topMargin:  Theme.sp(4)
+                visible: root._stereoNote.length > 0
+                text: root._stereoNote
+                font.family:    Theme.fontBody
+                font.pixelSize: Theme.fontSzMicro
+                font.italic:    true
+                color: Theme.colorText3
+                wrapMode: Text.WordWrap
             }
 
             // ── Where it's used ────────────────────────────────────────────────

@@ -397,6 +397,27 @@ This section specifies the biomechanical metric catalog produced by `MetricExtra
 > The rows that remain correct and unbudged are the depth ones — `pelvisThrust`, `clubPath`,
 > `swingPlane`, `shaftDirection` — and the sagittal ones the frontal projection foreshortens
 > (`spineForwardBend`, the knee flexions). Those are the down-the-line case, and it is unchanged.
+>
+> **One refinement, 2026-08-03: "the 2nd camera adds nothing" is scoped to the column header.** That
+> header is `single-cam(face-on) **+ IMU**`, and given a bound pelvis+thorax pair it is exactly
+> right — X-factor is a relative segment orientation, the IMU quaternion delivers it at full
+> fidelity, and stereo would only agree with it more slowly. The row is *not* a claim about the
+> camera-only shot, which is what most swings are: there `body_rotation.cpp` computes
+> `θ = acos(w/w₀)` from the span collapse and propagates `σ = σ_w / (w₀ · sin θ)`, which **diverges
+> as θ → 0** — worst exactly where a coach reads a small turn. Triangulated hip and shoulder
+> endpoints give the bearing off geometry instead, with an error flat in θ. So both statements hold
+> and neither implies the other:
+>
+> * against the IMU ideal, a second camera adds nothing — keep prompting the IMU as the upgrade;
+> * against the shipped face-on estimate, it is a real improvement, and the catalogue now says so.
+>
+> `metric_catalogue_manifest.cpp` carries this as a three-rung ladder on `pelvisRotation`,
+> `thoraxRotation`, `xFactor` and `xFactorStretch` (IMU · stereo · span-collapse, best first), with
+> the stereo rung `PLANNED`. The per-shot upgrade hint deliberately names the **best** rung rather
+> than the next one up, so a face-on owner is still told to buy an IMU. `clubheadSpeed` / `handSpeed`
+> gained the same treatment for the same reason — a projected speed is missing the depth component
+> of the head's velocity — with `clubheadSpeed`'s shaft-sensor rung above its stereo rung, per §"a
+> one-camera owner reaches club metrics by adding a sensor, not a camera".
 
 Notation: `R_seg` = a segment's right-handed anatomical frame (built per the architecture's `SkeletonFrame.segQuat`); `q_seg` its quaternion; lab frame X = target line, Y = down-the-line/away-from-ball, Z = up (Cheetham convention). `twist(q, axis)` = swing-twist axial component of `q` about `axis`. `turn(e_ml)` = `atan2(dot(e_ml_h, Y), dot(e_ml_h, X))` of the segment medio-lateral axis projected to horizontal, **relative to its Address value**. "Input" states the data source. Per-metric **single-camera viability and the minimum capability** that yields each metric at full fidelity are in the companion *"Single-camera (face-on) viability"* table immediately below — not a column here, because viability is driven by camera *count* × IMU *placement*, not a single linear tier.
 

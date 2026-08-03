@@ -66,8 +66,10 @@ ShotContext contextFromMap(const QVariantMap &m)
         c.tier = static_cast<ReconstructionTier>(m.value(QStringLiteral("tier")).toInt());
     c.sessionType  = m.value(QStringLiteral("sessionType"), -1).toInt();
     c.hasFaceOn    = m.value(QStringLiteral("hasFaceOn")).toBool();
+    c.hasDtl       = m.value(QStringLiteral("hasDtl")).toBool();
     c.hasClubTrack = m.value(QStringLiteral("hasClubTrack")).toBool();
     c.hasBallTrack = m.value(QStringLiteral("hasBallTrack")).toBool();
+    c.hasLaunchMonitor = m.value(QStringLiteral("hasLaunchMonitor")).toBool();
     for (const QVariant &v : m.value(QStringLiteral("imuRoles")).toList()) {
         const SegmentRole r = roleFromName(v.toString());
         if (r != SegmentRole::Unknown)
@@ -82,21 +84,40 @@ ShotContext contextFromMap(const QVariantMap &m)
 QVariantMap availabilityMap(const MetricAvailability &a)
 {
     QVariantMap m;
-    m.insert(QStringLiteral("state"),  stateName(a.state));
-    m.insert(QStringLiteral("reason"), a.reason);
-    m.insert(QStringLiteral("tier"),   tierName(a.tier));
+    m.insert(QStringLiteral("state"),   stateName(a.state));
+    m.insert(QStringLiteral("reason"),  a.reason);
+    m.insert(QStringLiteral("tier"),    tierName(a.tier));
+    m.insert(QStringLiteral("routeId"), a.routeId);
+    // What better kit would buy on THIS shot, already a sentence ("Pelvis IMU would measure it
+    // directly"). Empty when the best route already fired — bind it, do not compute it, and never
+    // synthesise one from `requires` below: that map is the catalogue's ceiling and includes routes
+    // no producer implements.
+    m.insert(QStringLiteral("upgrade"), a.upgrade);
     return m;
 }
 
-// Compact "what produces this" hints for a directory row glyph, from the requirement.
+// Compact "what produces this" hints for a directory row glyph. From the FLOOR route — the row is
+// answering "what do I need", and the ladder's better rungs would put a club glyph on a metric a
+// camera produces.
 QVariantList sourceHints(const MetricRequirement &r)
 {
     QVariantList s;
     if (!r.imuRoles.empty()) s.append(QStringLiteral("imu"));
     if (r.faceOnCamera)      s.append(QStringLiteral("camera"));
+    if (r.dtlCamera)         s.append(QStringLiteral("dtl"));
     if (r.clubTrack)         s.append(QStringLiteral("club"));
     if (r.ballTrack)         s.append(QStringLiteral("ball"));
     return s;
+}
+
+// The device tags a metric needs and the ones that would improve it, as stable slugs. Both are
+// catalogue facts, unchanged by the shot, and both are what the metric directory filters on.
+QVariantList deviceTags(const std::vector<CaptureDevice> &devices)
+{
+    QVariantList out;
+    for (CaptureDevice d : devices)
+        out.append(captureDeviceId(d));
+    return out;
 }
 
 // The compact directory row (design §7 query shape) + its resolved availability.
@@ -110,8 +131,13 @@ QVariantMap rowMap(const MetricDescriptor &d, const MetricAvailability &a)
     m.insert(QStringLiteral("type"),         metricTypeName(d.type));
     m.insert(QStringLiteral("group"),        d.group);
     m.insert(QStringLiteral("scored"),       d.scored);
-    m.insert(QStringLiteral("planned"),      d.planned);
-    m.insert(QStringLiteral("sources"),      sourceHints(d.requirement));
+    m.insert(QStringLiteral("planned"),      d.planned());
+    m.insert(QStringLiteral("sources"),      sourceHints(d.baselineRequirement()));
+    m.insert(QStringLiteral("needsDevices"),    deviceTags(captureDevicesFor(d.baselineRequirement())));
+    m.insert(QStringLiteral("improvesDevices"), deviceTags(d.upgradeDevices()));
+    // "none" | "refines" | "improves" | "unlocks" — what a second camera would do. The weakest of
+    // the four is derived from projective geometry rather than authored; see MetricDescriptor.
+    m.insert(QStringLiteral("stereoGain"),      stereoGainId(d.stereoGain()));
     m.insert(QStringLiteral("availability"), availabilityMap(a));
     return m;
 }
@@ -336,17 +362,52 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
     normative.insert(QStringLiteral("oneSided"),   shapeIsOneSided(railShape));
     m.insert(QStringLiteral("normative"), normative);
 
-    // Requirement (rendered for the "How it's measured" section).
+    // The ROUTE LADDER, best first — the "How it's measured" section, which used to be able to show
+    // only the floor and so described a one-way metric whatever the truth was.
+    QVariantList routes;
+    for (const MetricRoute &r : d->routes) {
+        QVariantList roles;
+        for (SegmentRole role : r.requirement.imuRoles)
+            roles.append(segmentRoleName(role));
+
+        QVariantMap rreq;
+        rreq.insert(QStringLiteral("faceOnCamera"),  r.requirement.faceOnCamera);
+        rreq.insert(QStringLiteral("dtlCamera"),     r.requirement.dtlCamera);
+        rreq.insert(QStringLiteral("imuRoles"),      roles);
+        rreq.insert(QStringLiteral("clubTrack"),     r.requirement.clubTrack);
+        rreq.insert(QStringLiteral("ballTrack"),     r.requirement.ballTrack);
+        rreq.insert(QStringLiteral("launchMonitor"), r.requirement.launchMonitor);
+        rreq.insert(QStringLiteral("minTier"),       tierName(r.requirement.minTier));
+
+        QVariantMap rm;
+        rm.insert(QStringLiteral("id"),        r.id);
+        rm.insert(QStringLiteral("method"),    routeMethodName(r.method));
+        rm.insert(QStringLiteral("estimated"), r.quality == RouteQuality::Estimated);
+        rm.insert(QStringLiteral("summary"),   r.summary);
+        rm.insert(QStringLiteral("planned"),   r.planned);
+        rm.insert(QStringLiteral("requires"),  rreq);
+        rm.insert(QStringLiteral("devices"),   deviceTags(captureDevicesFor(r.requirement)));
+        routes.append(rm);
+    }
+    m.insert(QStringLiteral("routes"), routes);
+
+    // The floor, kept under the name every existing binding already uses. A surface asking "what
+    // does this need" wants the cheapest route, which is what this has always meant.
+    const MetricRequirement base = d->baselineRequirement();
     QVariantList roles;
-    for (SegmentRole r : d->requirement.imuRoles)
+    for (SegmentRole r : base.imuRoles)
         roles.append(segmentRoleName(r));
     QVariantMap req;
-    req.insert(QStringLiteral("faceOnCamera"), d->requirement.faceOnCamera);
+    req.insert(QStringLiteral("faceOnCamera"), base.faceOnCamera);
+    req.insert(QStringLiteral("dtlCamera"),    base.dtlCamera);
     req.insert(QStringLiteral("imuRoles"),     roles);
-    req.insert(QStringLiteral("clubTrack"),    d->requirement.clubTrack);
-    req.insert(QStringLiteral("ballTrack"),    d->requirement.ballTrack);
-    req.insert(QStringLiteral("minTier"),      tierName(d->requirement.minTier));
+    req.insert(QStringLiteral("clubTrack"),    base.clubTrack);
+    req.insert(QStringLiteral("ballTrack"),    base.ballTrack);
+    req.insert(QStringLiteral("launchMonitor"), base.launchMonitor);
+    req.insert(QStringLiteral("minTier"),      tierName(base.minTier));
     m.insert(QStringLiteral("requires"), req);
+    m.insert(QStringLiteral("needsDevices"),    deviceTags(captureDevicesFor(base)));
+    m.insert(QStringLiteral("improvesDevices"), deviceTags(d->upgradeDevices()));
 
     QVariantList usedBy;
     for (const QString &u : d->usedBy)
