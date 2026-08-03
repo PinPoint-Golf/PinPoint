@@ -3,7 +3,7 @@
 **Audience**: Developers adding or running unit tests in PinPoint Studio
 **Location**: `tests/` (umbrella + shared CMake module + presets), `src/<Sub>/tests/` (the suites)
 **Language**: CMake + C++17/20 (GoogleTest or a hand-rolled `main()`)
-**Status**: 8 suites, 57 tests, runnable as one umbrella build or individually
+**Status**: 8 suites, 117 test targets, runnable as one umbrella build or individually
 
 ---
 
@@ -128,7 +128,7 @@ One configure produces one CTest registry spanning all suites:
 ```bash
 cmake -S tests -B build/tests
 cmake --build build/tests -j6
-ctest --test-dir build/tests --output-on-failure   # all 57 tests
+ctest --test-dir build/tests --output-on-failure   # all 117 targets
 ```
 
 ---
@@ -172,6 +172,17 @@ cmake -S tests -B build/tests-tsan -DPP_SANITIZE=thread
 
 Use a **separate build dir per sanitizer config** (the flags bake into objects).
 `pp_add_test` applies them to every target automatically.
+
+Two gotchas that have each cost an afternoon:
+
+- **The Buffer suite does not use this knob.** It predates `pp_add_test` and keeps
+  its own `-DPINPOINT_ENABLE_ASAN` / `_UBSAN` / `_TSAN` options (see
+  `src/Buffer/CMakeLists.txt`). `-DPP_SANITIZE` configures the umbrella without
+  touching Buffer's targets — which reads as "TSan found nothing" when TSan never
+  ran.
+- **Never set `detect_leaks=1` on arm64 macOS.** LeakSanitizer is unsupported
+  there, and every test aborts at exit — a whole suite reporting as failing, with
+  nothing wrong. ASan itself is fine; it is only the leak detector.
 
 ---
 
@@ -314,6 +325,15 @@ short and the co-located stubs/fixtures obvious. (Don't create a single global
 `tests/` dump of all test sources — only the *orchestration* is centralised, not
 the test files.)
 
+**A `tests/` folder does not have to mean a new suite.** `src/Diagnostics/tests/`,
+`src/Export/tests/` and `src/Metrics/tests/` hold sources with no `CMakeLists.txt`
+of their own — the Analysis suite compiles them by absolute path
+(`SOURCES ${SRC}/Export/tests/swing_doc_test.cpp …`), because each links
+`swing_analysis.h` or the pack value types and a separate project would duplicate
+that whole dependency set for a handful of targets. Prefer this when the new tests
+would pull in the same dependencies as an existing suite; add a real suite only
+when the dependency set genuinely differs.
+
 1. Create `src/<NewSub>/tests/CMakeLists.txt` starting with the bootstrap block
    from §7 (substitute the project name).
 2. Add your `pp_add_test` calls.
@@ -396,13 +416,14 @@ Qt6::Qml), `find_package` it in the suite — that is additive and cached.
 | `tests/cmake/PinPointTests.cmake` | Shared infra: Qt prefix, `pp_find_eigen`, sanitizers, lazy gtest, `pp_add_test` |
 | `tests/CMakePresets.json` | `tests` / `tests-asan` / `tests-tsan` presets (run from `tests/`) |
 | `tests/MIGRATION.md` | Historical record of the consolidation + remaining cleanup |
-| `src/Analysis/tests/` | Wrist-assessment engine, segmentation/metrics, orientation filters, IMU driver parse, ShaftTracker, Export round-trip (28) |
-| `src/Buffer/tests/` | Lock-free ring, timeline merge, watchdog, thread-policy, fuzz (8, GoogleTest, links `pinpoint_buffer`) |
-| `src/Core/tests/` | Resource profiler + GPU metrics + profiler controller (7, GoogleTest) |
-| `src/Gui/tests/` | TimelineLabels, SwingSeriesModel, ShotListModel, ReanalysisController (4) |
+| `src/Analysis/tests/` | **84** — by far the largest. Wrist-assessment engine, the stage mechanism and one test per stage, segmentation/metrics, shaft + clubhead + ball tracking, pose helpers, scoring and norms, the diagnostics/characteristic packs, orientation filters, IMU driver parse, the shot arbiter, and the Export round-trip. Reach for `ctest -R <pattern>` here, not the whole suite. |
+| `src/Buffer/tests/` | Lock-free ring, timeline merge, watchdog, thread-policy, fuzz (8, GoogleTest, links `pinpoint_buffer`). **Not migrated to `pp_add_test`** — own gtest fetch, own `PINPOINT_ENABLE_*` sanitizer options. |
+| `src/Core/tests/` | Resource profiler (core, concurrency/TSan, compile-out), OS + GPU metrics, stats log, profiler controller (7, GoogleTest) |
+| `src/Gui/tests/` | TimelineLabels, chart metrics, SwingSeriesModel, ShotListModel, ReanalysisController, QML reactivity (6) |
 | `src/IMU/tests/` | Impact detector, ImuIoWorker, ESKF gyro-unit pin (3) |
-| `src/Pose/tests/` | Calibrated ball-model, calibration protocol, BallDetector throttle (3) |
+| `src/Pose/tests/` | v2 temporal ball tracker + its live/offline parity, BallDetector throttle contract, heatmap decode, pose-model selection (5) |
 | `src/Audio/tests/` | Acoustic onset detector (1) |
+| `src/Diagnostics/tests/`, `src/Export/tests/`, `src/Metrics/tests/` | **Sources only — no suite of their own.** Compiled by the Analysis suite (counted in its 84) because they link `swing_analysis.h` / the pack types. See below. |
 | `src/Update/tests/` | Linux updater pure logic (version compare, arch-aware AppImage asset selection, GPG VALIDSIG parse, placeholder-key refusal), `PlatformTarget` arch tokens, and `UpdateController` state-machine + relaunch session-safety policy via a `FakeUpdateBackend` (3, GoogleTest; policy test needs Qt6 Qml + Test) |
 
 See also: the per-subsystem developer guides in this folder (e.g.

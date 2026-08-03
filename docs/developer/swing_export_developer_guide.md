@@ -1,23 +1,30 @@
 # Pinpoint Swing Export — Developer Guide
 
 **Audience**: Developers working on or integrating with the Pinpoint application
-**Location**: `src/Export/` (plus integration in `src/Gui/shot_processor.{h,cpp}`)
+**Location**: `src/Export/` (plus integration in `src/Gui/shot/shot_processor.{h,cpp}`)
 **Language**: C++20, Qt 6
-**Status**: v1 — video + IMU streams implemented (codec h264/h265, container mp4/mov/mkv, export-time downscale, optional raw-payload sidecar, IMU json/csv/binary, pattern-based session-folder naming). Pose streams are serialised **if present on the job** but no producer exists yet; metrics/launch-monitor streams are schema-ready but not produced
+**Status**: Production — video + IMU + ball streams (codec h264/h265, container mp4/mov/mkv, export-time downscale, optional raw-payload sidecar, IMU json/csv/binary, pattern-based session-folder naming), impact thumbnail, extensive capture provenance, and a bulk zip export. Pose streams are serialised **if present on the job** but still have no producer; metrics/launch-monitor streams are schema-ready but not produced
 
-> **⚠ Ownership moved (2026-06):** the swing machinery described below as living in
-> `CameraManager` (window capture, replay, `startSwingSave()`, `buildSwingExportJob()`,
-> `maybeFinishSwing()`, the resume gating) has **migrated to `ShotProcessor`**
-> (`src/Gui/shot_processor.{h,cpp}`), which drives it from
+> **⚠ Ownership moved (2026-06), and this guide predates several later changes.**
+> The swing machinery described below as living in `CameraManager` (window
+> capture, replay, `startSwingSave()`, `buildSwingExportJob()`,
+> `maybeFinishSwing()`, the resume gating) **migrated to `ShotProcessor`**
+> (`src/Gui/shot/shot_processor.{h,cpp}`), which drives it from
 > `ShotController::shotDetected` and runs a per-session-type `ShotAnalyzer`
 > **before** the export (the two heavy workers are sequenced, not overlapped —
 > see the shot-analyzer guide §11). The join is now `maybeJoin()`/`finishShot()`;
 > the teardown stop-barrier is `ShotProcessor::finishNowBlocking()`; resume
-> gating keys off `EventBuffer::swingWindowLive()`. The exporter also writes an
-> impact thumbnail (`thumb.jpg`, via `QImage::save` — see CLAUDE.md for the
-> libjpeg-clash rationale) and handles NV12/YUV420P. The invariants and
-> pipeline mechanics below are otherwise unchanged — read `CameraManager` as
-> `ShotProcessor` where the text touches window lifetime.
+> gating keys off `EventBuffer::swingWindowLive()`. Read `CameraManager` as
+> `ShotProcessor` wherever the text below touches window lifetime, and
+> "5 s window" as **4 s**.
+>
+> Since then the exporter has also gained: the impact thumbnail (`thumb.jpg`, via
+> `QImage::save` — see CLAUDE.md for the libjpeg-clash rationale), NV12/YUV420P
+> handling, a **shared decode path** (`frame_decode.h`, §3), the **ball stream**
+> and its persisted empty-mat baseline, the **capture provenance block**, and
+> **`SwingZipExporter`** for bulk export. Those are covered in §3 and §6 below.
+> The core invariants — values-in jobs, borrowed window, zero-copy reads,
+> one-writer-per-file — are unchanged.
 
 ---
 
@@ -38,6 +45,10 @@
 13. [Common Mistakes](#13-common-mistakes)
 14. [File Map](#14-file-map)
 15. [Testing](#15-testing)
+
+Two sections carry most of what changed since this guide was first written:
+**§3** (the job's provenance fields and the shared `frame_decode` path) and
+**§6** (the ball stream, the baseline sidecar, and `swing_summary.json`).
 
 ---
 
@@ -119,21 +130,79 @@ The worker must never touch `QSettings`, `AppSettings`, or any controller — th
 are UI-thread objects. Everything is resolved up-front into a `SwingExportJob`:
 
 ```cpp
-struct SwingExportCamera { SourceId sourceId; QString alias, fileName; };
 struct SwingExportJob {
     QString swingDir;                          // absolute, already created
     QString swingId;       int swingIndex;
+
     std::vector<SwingExportCamera> cameras;    // aliases sanitised + deduped
-    QHash<QString, QString> imuAliasBySerial;
+    QHash<QString, QString>            imuAliasBySerial;
+    QHash<QString, SwingImuDeviceInfo> imuDeviceBySerial;   // rate, fusion, A/M
+    std::vector<SwingPoseStream> poseStreams;  // no producer yet
+    std::vector<SwingBallStream> ballStreams;  // face-on ball track + launch step
+
+    // Capture provenance — session context, detector constants, host/build
+    int sessionType, shotSource;
+    QString swingDetectionSensitivity, motionCaptureQuality;
+    qint64 imuBleLatencyUs;  int audioDeviceLatencyUs;
+    SwingHostInfo host;                        // appVersion, gitSha, hostname,
+                                               // platform, poseBackend
+
+    // Encode + serialisation settings
     QString codec;  int crf;  bool saveImu;
+    QString resolutionMode;                    // native | half | 1080p | 4k
+    bool    saveRaw;                           // "<alias>.raw" sidecars
+    QString imuFormat;                         // json | csv | binary
+    bool    savePose;
+
     QString athleteName, athleteUuid, handedness, sessionId;
+
+    // Club geometry + the club-length prior, so re-analysis reproduces the fuse
+    double clubLengthM, hoselFromButtMm;  QString shaftType, clubName;
+    std::vector<double> bandCentersMm;
+    double priorClubLenPx, priorClubLenVarPx;  int priorClubLenN;
+
     QDateTime wallclockAnchorUtc;              // see §6, clock block
+    SourceId  thumbnailSourceId;  int64_t thumbnailTimestampUs;
+    int64_t   impactUs;                        // WINDOW-RELATIVE µs
 };
 ```
 
 `SwingExporter::run(const SwingWindow&, const SwingExportJob&)` is a **stateless
 static function** — all scratch is local, the result comes back as a
-`SwingExportResult{ok, swingDir, error}` value through the `QFuture`.
+`SwingExportResult{ok, swingDir, error, thumbnailPath, manifest}` value through
+the `QFuture`.
+
+Note the last field: the exporter **returns** the raw `pinpoint.swing` manifest
+tree rather than writing it. The unified `swing.json` (manifest + the analyzer's
+`"analysis"` block) is written once, at the join, on the GUI thread — see the
+shot-analyzer guide §9. `SwingExporter::captureBlock(job)` is exposed separately
+so the degraded analysis-only path can synthesise a header with *identical*
+metadata.
+
+### Two provenance rules the job encodes
+
+**`impactUs` is window-relative, and it is the re-analysis anchor.** A corpus
+swing captured with analysis skipped has no `analysis.phases[Impact]`, so
+`capture.impactUs` is the only record of when the ball was struck. Everything
+under `analysis` is likewise normalised to window-relative µs on write — absolute
+`nowMicros()` values are meaningless in a file that outlives the process.
+
+**Everything re-analysis needs must be *in the file*.** The club geometry, the
+club-length prior as it stood *before* this shot's update, the motion-capture
+quality tier, the IMU A/M calibration snapshot, the hitting-area ROI, and the
+learned empty-mat baseline are all persisted for one reason: offline re-analysis
+must reproduce what the live shot did without reading `AppSettings`, which may
+have changed since. If you add an input that affects analysis, persist it here.
+
+### `SwingExportCamera` — per-stream setup, not just a filename
+
+Each camera carries its capture-time setup into the stream's `"setup"` object:
+perspective (None/DownTheLine/FaceOn/Other), mirroring, fixed-in-place, exposure
+and its provenance, plus the ball-detection block — calibration state, the
+calibrated ball position and radius (full-frame normalised, co-registered with
+the shaft-track head samples), the hitting-area ROI, and the learned baseline
+blob. The baseline is written as a sidecar; an empty blob omits both the sidecar
+and its JSON key entirely, and re-analysis then self-seeds as before.
 
 ### IVideoEncoder — abstract base + factory
 
@@ -163,7 +232,7 @@ the window is destroyed only in `maybeFinishSwing()`, on the UI thread, strictly
 after the worker has returned (guaranteed by `QFutureWatcher::finished` ordering —
 see §10).
 
-### Zero-copy reads
+### Zero-copy reads, through one shared decode path
 
 Per frame, the worker calls `window.payloadOf(entry)` and wraps the returned bytes
 in a `cv::Mat` header **without copying**:
@@ -176,6 +245,30 @@ cv::cvtColor(raw, bgr, plan.cvtCode);    // demosaic into the ONE reused scratch
 
 While the buffer is `Paused` the producers are stopped, so the bytes are stable —
 this is the same guarantee the replay path relies on.
+
+The demosaic table used to live inside `SwingExporter`. It is now
+**`src/Export/frame_decode.h`** — pure functions, no Qt, no logging — because the
+shot analyzer decodes the same frozen payloads and the two must not be able to
+diverge. It exposes:
+
+| Function | Purpose |
+|---|---|
+| `demosaicPlanFor(PixelFormat)` | `{supported, matType, cvtCode, tag, rowsNum/rowsDen}`. The `tag` is what lands in `swing.json` `processing.demosaic`. |
+| `frameGeometry(CameraFormat&, stride, minBytes)` | Plane-0 stride and the minimum bytes of one frame. False for unsupported formats or degenerate dimensions. |
+| `decodeFrame(...)` | One payload → BGR `CV_8UC3`. False on null/short payloads and unsupported formats. |
+
+Two details in there that bite:
+
+- The mapping deliberately **mirrors the live-view path**
+  (`camera_instance.cpp` → `raw_video_frame.cpp`) so an exported frame's colour
+  matches what was on screen. The edge-aware `_EA` variants share the pattern
+  naming — better quality, and the cost is irrelevant off the hot path.
+- Planar 4:2:0 payloads (NV12/I420) are **1.5× image-height rows tall**, which is
+  what `rowsNum`/`rowsDen` encode. Treating them as `height` rows silently
+  truncates the chroma planes.
+
+Only 8-bit formats are handled; MJPEG, H264_NAL and 12/16-bit Bayer are
+unsupported and skip the source with a warning.
 
 ---
 
@@ -410,7 +503,66 @@ stop hardcoding assumptions; all additive (absent on legacy swings):
   `calibrated` (composite gate: `anatCalibrated` AND mount deviation ≤ 15° AND
   gravity error ≤ 25° — `ImuInstance::fullyCalibrated()`), the two gate angles,
   `calibratedAt` (ISO8601 UTC) and `calibAgeSec` at shot time (−1 / empty = never
-  calibrated).
+  calibrated). **The A/M snapshot is *also* duplicated into each IMU stream's
+  `device` block**, and that duplication is load-bearing: a swing captured with
+  analysis skipped (corpus capture) has no `analysis.bindings` at all, so the
+  disk loader rebuilds the IMU→segment bindings from `device` instead.
+- **`capture.impactUs`** (window-relative µs) — the re-analysis impact anchor for
+  an analysis-skipped swing, which has no `analysis.phases[Impact]` to read.
+- **`capture.club`** — club length, shaft type, retro-band centres and hosel
+  offset, plus the club-length prior as it stood *before* this shot's update, so
+  re-analysis reproduces the exact length fuse the live shot ran.
+- **`capture.motionCaptureQuality`** — the offline pose-model tier, so
+  re-analysis picks the same model rather than the current setting.
+
+### The ball stream and the baseline sidecar
+
+The face-on camera contributes a `kind: "ball"` stream — deliberately
+low-entropy: per-frame `found/x/y/r/conf` plus a single launch step
+(`launchTUs`, `launchX`, `launchY`, window-relative). Empty means nothing is
+written: ball detection may be off, or this may not be the camera running it.
+
+Separately, each camera may carry its learned **empty-mat baseline** `B` — the
+v2 temporal detector's self-calibrated reference (see the shot-detector guide
+§7) — as a raw `float32` sidecar plus a JSON key holding its dimensions, ROI,
+radius estimate, noise level and (provenance-only) fps. This exists so offline
+re-analysis reconstructs the tracker from the baseline the live session actually
+learned, instead of self-seeding over a window in which the ball is *already
+placed* — which would subtract the ball into the baseline and then never detect
+it. An absent blob omits both the sidecar and the key, and re-analysis
+self-seeds as before.
+
+### Timestamps in the `analysis` block are window-relative too
+
+Everything under `analysis` — metric series `t_us`, phase events — is normalised
+to window-relative µs on write, matching the stream timestamps. Absolute
+`nowMicros()` values are meaningless in a file that outlives the process; the
+reader re-bases them when reconstructing `analysisDetail`.
+
+### `swing_summary.json` — a regenerable index sidecar
+
+A Wrist swing's `swing.json` runs to tens of MB (`analysis.pose2d` alone is
+~13 MB, retained for replay overlays), and the session picker needs about eight
+scalars from each. Parsing every document to draw a list was a visible stall.
+
+`swing_summary.json` (schema `pinpoint.swingsummary/1`, a few hundred bytes)
+caches exactly those scalars, guarded by the source document's **size + mtime**
+so any out-of-band rewrite — re-analysis, corpus tooling — is detected and the
+sidecar regenerated. It is **pure cache**: always safe to delete, always
+regenerable.
+
+Two API details matter:
+
+- `SwingDocReader::readSwingSummary(dir, writeSidecar)` prefers the sidecar and
+  falls back to a full parse on a miss or stale guard. Pass `writeSidecar=false`
+  on any GUI-thread path that must never fat-parse — the caller then gets
+  `ok=false` for an un-indexed swing and renders it without detail, rather than
+  stalling.
+- Both the cheap and the full path extract through **one** function
+  (`summaryFromRoot`), so they cannot disagree about a score shape, a club
+  fallback or a thumbnail name. `SwingSummary::fromSidecar` is provenance the
+  parity test uses to prove the cheap path was actually exercised — a bug that
+  always fell back would otherwise pass silently while the stall crept back.
 
 ### Field sources
 
@@ -580,7 +732,9 @@ The exporter reuses existing keys — **do not invent parallel settings**.
 | `storage/saveImuStreams` | Gates the IMU streams in `swing.json` |
 | `storage/imuDataFormat` | `json` (inline) / `csv` / `binary` — csv/binary write an `imu_<alias>.<ext>` sidecar |
 | `storage/saveRawFrames` | Dumps undecoded sensor payloads to an `<alias>.raw` sidecar (+ a `raw` block per video stream) |
+| `storage/skipAnalysisForRawCapture` | With `saveRawFrames` on: skip analysis and the replay entirely, export frames only. Corpus-capture mode — each shot lands instantly and is re-analysed in bulk later (shot-analyzer guide §4/§9a) |
 | `storage/savePoseKeypoints` | Gates serialising `kind:"pose"` streams — the exporter only *writes* pose carried on the job; no producer yet (empty today) |
+| `general/motionCaptureQuality` | Recorded into `capture` so re-analysis picks the same offline pose model |
 | `camera/alias` (`cameraAlias()` map) | MP4 filenames, keyed by `cameraKey()` |
 | `imu/alias` (`imuAlias()` map) | IMU stream aliases, matched by serial/device-id |
 
@@ -665,6 +819,30 @@ Append another object to `streams[]` with a new `kind` (e.g. `"pose"`,
 a units/schema block, and parallel `t_us` + data arrays. Do **not** bump the
 schema version for additive changes — readers ignore unknown kinds by contract.
 
+### Bulk export — `SwingZipExporter`
+
+The carousel's "export selected shots" action is a separate worker
+(`swing_zip_exporter.{h,cpp}`, QML context property `swingExporter`), built on the
+same discipline as `SwingExporter`: a self-contained value job, a stateless static
+worker on `QtConcurrent`, the result delivered back on the UI thread via
+`QFutureWatcher`.
+
+- `camerasForShots(dirs)` reads each shot's `swing.json` and unions its
+  `kind=="video"` streams, de-duped by file in first-seen order — that list is the
+  model for the options sheet's camera checkboxes. An unreadable `swing.json` is
+  skipped rather than fatal.
+- `exportShots(dirs, selectedVideoFiles, includeJson)` builds `~/<session>.zip`.
+  Extracting it reproduces the session: a top-level `<session>/` with one
+  `swing_NNNN/` per shot. Each shot contributes `thumb.jpg` (always), the selected
+  videos, and — only with the JSON toggle on — `swing.json` plus the IMU sidecars.
+
+Two things it deliberately does *not* do. **Raw frame sidecars are never
+included** — they are the largest artifact by far and useless outside this
+machine. And **the archive is never held in memory**: it streams straight to the
+on-disk file via `QZipWriter`'s filename constructor, so peak RAM is one member
+at a time (bounded by one swing's MP4, since `*.raw` is excluded). A session can
+be multiple GB; building the zip in a `QByteArray` would not survive it.
+
 ### Adding a new encoder backend (`h265`, ProRes, hardware)
 
 1. Implement `IVideoEncoder` in a new `src/Export/<name>_encoder.{h,cpp}`.
@@ -740,9 +918,23 @@ count); only `-count_frames` or an actual decode reveals it.
 ### Re-deriving the Bayer mapping
 
 The OpenCV `COLOR_Bayer*` constants do not match the sensor pattern names
-one-to-one. The exporter's table mirrors the live-view mapping deliberately — if
-exported colours ever diverge from the on-screen image, compare against
-`camera_instance.cpp`'s PixelFormat→pattern switch before touching the exporter.
+one-to-one. The table in `frame_decode.h` mirrors the live-view mapping
+deliberately — if exported colours ever diverge from the on-screen image, compare
+against `camera_instance.cpp`'s PixelFormat→pattern switch before touching it.
+And note the table is now **shared with the shot analyzer**: a change here
+changes what analysis sees, not just what is written to disk. That is the point
+of the extraction — the two can never diverge — but it means the blast radius is
+wider than the file's name suggests.
+
+### Adding an analysis input without persisting it
+
+Offline re-analysis reads `swing.json` and never `AppSettings`, so anything that
+affects analysis and lives only in settings makes a re-analysed swing disagree
+with the live one — silently, with the same score field showing a different
+number. Club geometry, the length prior, the quality tier, the IMU A/M snapshot,
+the ball ROI and the empty-mat baseline are all in the file for exactly this
+reason. Add yours to `SwingExportJob` and the manifest at the same time you add
+it to `ShotAnalysisJob`.
 
 ### Blocking the UI thread on the watcher outside teardown
 
@@ -760,22 +952,35 @@ src/Export/
 │                               makeVideoEncoder() declaration. No libav includes.
 ├── video_encoder.cpp           Factory — the only file with HAVE_FFMPEG ifdefs
 │
-├── ffmpeg_video_encoder.h       Concrete encoder; libav types forward-declared
-├── ffmpeg_video_encoder.cpp     libav call sequence, BT.709 sws, RAII cleanup,
+├── ffmpeg_video_encoder.h      Concrete encoder; libav types forward-declared
+├── ffmpeg_video_encoder.cpp    libav call sequence, BT.709 sws, RAII cleanup,
 │                               the pkt->duration fix (§8)
+│
+├── frame_decode.h              DemosaicPlan / frameGeometry / decodeFrame — the
+├── frame_decode.cpp              ONE decode path, shared with the analyzer (§3)
 │
 ├── swing_paths.h               SwingPaths — session/swing dir allocation + cache
 ├── swing_paths.cpp             sanitise(), per-app-run session policy
 │
-├── swing_exporter.h            SwingExportJob/Camera/Result, SwingExporter::run
-└── swing_exporter.cpp          Per-camera encode loop, DemosaicPlan table,
-                                restorer hook, IMU streams, swing.json builder
+├── swing_exporter.h            SwingExportJob/Camera/Result, the stream structs,
+├── swing_exporter.cpp            SwingExporter::run + captureBlock(); per-camera
+│                                 encode loop, thumbnail, IMU/ball streams,
+│                                 baseline sidecar, manifest builder
+│
+├── swing_doc.h                 SwingDocWriter/Reader — the unified swing.json,
+├── swing_doc.cpp                 the review write-through, and the regenerable
+│                                 swing_summary.json index sidecar (§6)
+│
+├── swing_zip_exporter.h        Bulk "export selected shots to a zip" (§12)
+├── swing_zip_exporter.cpp
+│
+└── tests/
+    └── swing_doc_test.cpp      Document round-trip; BUILT BY THE ANALYSIS SUITE
 
-src/Gui/
-├── camera_manager.h            Export members, signals, join declarations
-└── camera_manager.cpp          startSwingSave(), buildSwingExportJob(),
-                                onSwingSaveFinished(), maybeFinishSwing(),
-                                guards on resume/teardown paths (§5)
+src/Gui/shot/
+└── shot_processor.{h,cpp}      startSwingSave(), buildSwingExportJob(),
+                                onSwingSaveFinished(), maybeJoin(), finishShot(),
+                                finishNowBlocking() — the teardown stop-barrier
 
 src/Buffer/
 └── event_buffer.cpp            registerSource() normalises identifier →
@@ -832,18 +1037,26 @@ real captured frames — and are validated by hand (see
 - **Raw-only** — `writeSwingJson(…, nullptr)` omits the `analysis` block while still
   emitting `pinpoint.swing/2` (export-succeeded-but-analysis-failed degrades cleanly).
 
-It is self-contained (own `main()` + `check()`, no GoogleTest) and is built by the
-**Analysis CTest suite** (`src/Analysis/tests/CMakeLists.txt`) because it links
-`swing_analysis.h`, rather than a separate Export test project:
+- **Summary sidecar** — `swing_summary.json` is written on a full read, reused on
+  the next one, and **invalidated by the source document's size/mtime**. The test
+  also asserts the cheap path was genuinely taken (`SwingSummary::fromSidecar`)
+  and that an orphaned sidecar copied into a directory with no `swing.json` is
+  rejected rather than trusted.
+
+There is **no Export test project**. `swing_doc_test.cpp` lives in
+`src/Export/tests/` but is compiled by the **Analysis suite**
+(`src/Analysis/tests/CMakeLists.txt`) because it links `swing_analysis.h`:
 
 ```bash
-cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=/path/to/Qt/6.11.x/gcc_64
-cmake --build build/analyzer-tests -j
-ctest --test-dir build/analyzer-tests -R swing_doc_test --output-on-failure
+cmake -S src/Analysis/tests -B build/analysis-tests
+cmake --build build/analysis-tests -j6
+ctest --test-dir build/analysis-tests -R swing_doc_test --output-on-failure
 ```
 
-See [BUILDING.md → Testing](../../BUILDING.md#testing) for the full suite (and the
-EventBuffer suite that backs the borrowed-window contract this module relies on).
+It is self-contained (own `main()` + `check()`, no GoogleTest). See
+`docs/developer/testing_developer_guide.md` for the umbrella build and the
+per-suite conventions, and the EventBuffer suite for the borrowed-window contract
+this module relies on.
 
 ---
 

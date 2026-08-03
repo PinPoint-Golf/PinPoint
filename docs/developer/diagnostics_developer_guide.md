@@ -1,7 +1,7 @@
 # Pinpoint Diagnostics — Developer Guide
 
 **Audience**: developers working on the diagnostics model — characteristics, measures, norms, contexts, the causal graph, or the screens over them
-**Location**: `src/Diagnostics/` (the model), `src/Gui/characteristics/` (the façades and views), `src/Resources/diagnostics/` (the content)
+**Location**: `src/Diagnostics/` (the model), `src/Gui/diagnosticmodel/` (the `ModelBrowser` façade + the panel views), `src/Resources/diagnostics/` (the content)
 **Language**: C++17 value types and rules, Qt-only, no Qt-GUI below the façade layer
 **Status**: the CONTENT layer is production and shipped. The EXECUTION layer — running a diagnosis against a real shot — is written, tested, and **not wired**. Section 8 is the precise breakdown; read it before assuming any of this runs.
 
@@ -18,7 +18,7 @@
 7. [Providers, layering and persistence](#7-providers-layering-and-persistence)
 8. [**Live, dormant, planned — the full breakdown**](#8-live-dormant-planned--the-full-breakdown)
 9. [Validation and health](#9-validation-and-health)
-10. [The GUI façades](#10-the-gui-façades)
+10. [The GUI façade — `ModelBrowser`](#10-the-gui-façade--modelbrowser)
 11. [Adding things](#11-adding-things)
 12. [Testing](#12-testing)
 13. [Traps that have already cost time](#13-traps-that-have-already-cost-time)
@@ -80,11 +80,11 @@ The second rule: **a metric describes itself and does not judge itself.** `Metri
         │                   corridors for MetricDetail, PpBandRail, 3 dashboard zones  (live)
         │
         ▼
- FAÇADES (QML_ELEMENT, marshalling only — no rules)
-   CharacteristicLibraryModel · CharacteristicEditorModel · NormModel · NormEditorModel
+ FAÇADE  (QML_ELEMENT, marshalling only — no rules)
+   ModelBrowser        one connected content graph, read AND edited (§10)
         │
         ▼
- VIEWS   Settings → Diagnostics (6 views) · Settings → Metrics · the wrist grid
+ VIEWS   Settings → Diagnostic Model (navIdx 9) · Settings → Metrics · the wrist grid
 ```
 
 **All logic stays in C++.** QML renders shapes and holds no rules: it does not walk the context tree, does not decide what "inherited" means, does not compute a band edge from a policy, and does not lay out the causal graph. Every one of those is a statement about correctness, and a statement about correctness written in a delegate is a statement nothing can test.
@@ -454,11 +454,11 @@ The section to read before assuming anything here runs. "Dormant" means written 
 | `metric_corridor.h` | `metric_catalog.cpp` → MetricDetail, PpBandRail, dashboard Motion/Verdict/Setup zones |
 | `NormBandProvider` (`Analysis/reference_bands.cpp`) | the wrist grid, live (`wrist_diagnostics_model`) and offline (`wrist_analyzer`) |
 | `measure_sample.{h,cpp}` | the corridor editor's histogram, the corpus-share health scan |
-| `dag_layout.{h,cpp}` | `DagView.qml` via `CharacteristicLibraryModel::dag()` |
-| `diagnostics_health.{h,cpp}` | `CharacteristicLibraryModel::health()` |
+| `dag_layout.{h,cpp}` | `ModelGraph.qml` via `ModelBrowser::dag()` |
+| `diagnostics_health.{h,cpp}` | `ModelBrowser` (the validation strip) |
 | `measure_facets.{h,cpp}`, `anatomy_vocabulary.{h,cpp}` | Composed-measure vocabulary, the measure picker |
 | all six providers + the two mergers | pack and norm assembly |
-| 4 façades in `Gui/characteristics/` | the Diagnostics settings panel |
+| `ModelBrowser` in `Gui/diagnosticmodel/` | the Diagnostics settings panel |
 
 ### 8.2 Code — DORMANT (written, tested, no caller)
 
@@ -597,7 +597,7 @@ Four validators, plus one set of checks that spans them.
 | `validateNormPack(norms)` | one norm set, standalone | every load; the corridor editor before a save |
 | `validateContextTree(tree)` | one context tree | every load — duplicate ids, unknown parents, cycles |
 | `validateNormsAgainst(norms, pack, tree)` | the ASSEMBLED library | `diagnosticsHealth()` — and nothing else, ever, until stage 10 |
-| `diagnosticsHealth(pack, norms, catalogue)` | all three registries at once | `CharacteristicLibraryModel::health()` |
+| `diagnosticsHealth(pack, norms, catalogue)` | all three registries at once | `ModelBrowser` (the validation strip) |
 
 `validateNormsAgainst()` had owned `normUnitMismatch`, `unknownNormMeasure`, `unknownNormContext` and `normNotCapturable` since stage 1 with exactly one caller: its own test. **A check that never runs is indistinguishable from a check that passes.** If you add a referential check, add the call site in the same change.
 
@@ -622,20 +622,42 @@ Two scoping rules there are load-bearing:
 
 ---
 
-## 10. The GUI façades
+## 10. The GUI façade — `ModelBrowser`
 
-Four `QML_ELEMENT` marshallers, all instantiated by `CharacteristicLibrary.qml` (the Diagnostics settings panel, `ScreenSettings.qml` panel 10). Six views hang off it: Characteristics, Measures & norms, Glossary, Screens & drills, Causes & health, and Roadmap (developer builds only).
+> **This replaced four façades, and the old ones are gone.** `CharacteristicLibraryModel`, `CharacteristicEditorModel`, `NormModel`, `NormEditorModel` and the fourteen QML views under `src/Gui/characteristics/` were **deleted on 2026-07-31**. The Diagnostic Model panel had already answered every deep link into them and depended on none of it, so it was a removal rather than an untangling. If you find a reference to any of those names, it predates that.
 
-| Façade | Owns | Notes |
-|---|---|---|
-| `CharacteristicLibraryModel` | read-only queries over the pack: directory, detail, DAG, roadmap, capture gaps, cause coverage, **health**, the corpus scan, and the two reference registries + the glossary | holds the pack, the norm set AND the metric catalogue, because health spans all three |
-| `CharacteristicEditorModel` | the draft: one condition being authored, its signals, bindings, the measure picker, `linkCause`/`unlinkCause` + undo | a draft, deliberately separate from the read model |
-| `NormModel` | measures & norms directory, `measureDetail`, `normAt`, the metric→measure join marshalled | read-only |
-| `NormEditorModel` | one corridor being edited: the draft, the library scan, the histogram, save/discard/reset | writes; call `refresh()` on the readers after |
+One `QML_ELEMENT` marshaller — `ModelBrowser` (`src/Gui/diagnosticmodel/model_browser.{h,cpp}`) — is the whole panel's model: **one connected content graph, read and edited through one object**. The panel is `DiagnosticModel.qml` (Settings navIdx 9), with the `Model*.qml` views and `RingMenu.qml` hanging off it.
 
-**The marshaller is a place a feature can be complete on both sides and still absent.** Stage 8 finished the DAG's headings, edge labels and arrowheads in C++ and they reached nothing, because `dag()` did not copy them into the QVariantMap. Nothing warns: QML reads `undefined` and renders nothing. **When you add a field to a value type, grep the marshaller.**
+### Reuse; do not reimplement
 
-Grade policy and library paths are **bound from `AppSettings` by the hosting QML**, never read from settings inside a façade — the objects stay testable standalone. Three façades plus `MetricCatalog` each expose a `gradePolicy` property for that reason.
+Every **rule** in `ModelBrowser` is a call into the layer that owns it — `causesOf` / `effectsOf` / `coverageOf` / `hasCausalPath` and `tailsOfAxis` (`characteristic_pack.h`), `validatePack`, `diagnosticsHealth`, `layoutDag`, `measureDisplayLabel`, the shared screen/drill/reference registries, the enum label tables. What is reimplemented here is **marshalling, and only marshalling**.
+
+### The layering — why there are four packs, not one
+
+The earlier façade read the pack **as saved**. That is correct for a read-only panel and fatal for an editing one: every surface must show the library *as it would be if you saved now* — the table, the inspector, the graph, and above all the validation strip, which is worthless if it grades the file rather than the draft.
+
+| Layer | What it is |
+|---|---|
+| `m_core` | the shipped pack, read-only — the **only** way to answer "does this ship?" |
+| `m_savedUser` | the user pack as it is on disk — the baseline every dirty mark is measured from |
+| `m_working` | the user pack as edited. Unsaved. |
+| `m_assembled` | `core + memory(m_working)`, rebuilt after every mutation. **Everything reads this.** |
+
+The norm set is layered identically (`m_savedNorms` / `m_workingNorms` / `m_norms`) because corridors are edited here too, and **one undo history spans both registries**. A command therefore snapshots both packs, and one Save writes both files. Two histories was the alternative and was rejected: an author who edits a characteristic, then its corridor, then hits ⌘Z twice has one mental model of what should happen, not two.
+
+**Copy-on-write falls out of the layering rather than being coded.** Editing a field of a *shipped* object copies that object into `m_working`; undoing that first edit removes the copy — which is exactly the reset, with no separate "take theirs" path to keep in step.
+
+### QML holds no rules
+
+Sorting, filtering, faceting, search, the legality of a proposed link, which cell may be edited and with what control, and which of two values is "yours" — all decided in C++. QML is handed `columns(type)` and `rows(type, filters)` and renders them; it does not know what a Measure is. **A rule written in a delegate is a rule nothing can test.**
+
+### The marshaller is where a feature can be complete on both sides and still absent
+
+Stage 8 finished the DAG's headings, edge labels and arrowheads in C++ and they reached nothing, because `dag()` did not copy them into the `QVariantMap`. Nothing warns — QML reads `undefined` and renders nothing. **When you add a field to a value type, grep the marshaller.**
+
+A second instance of the same class of bug, found while porting the tests off the old façades: the row comparator tested `typeId() == Int` and nothing else, so every count taken from a container's `size()` — a `qsizetype`, not an `int` — fell through to the string branch and sorted lexicographically. The bibliography read `7 6 6 4 3 2 2 12 1`, with the paper holding up twelve claims buried between the twos and the ones. Corridor `mu` is a `double` and sorted the same wrong way.
+
+Grade policy and library paths are **bound from `AppSettings` by the hosting QML**, never read from settings inside the façade — the object stays testable standalone. `ModelBrowser` and `MetricCatalog` each expose a `gradePolicy` property for that reason.
 
 ---
 
@@ -705,9 +727,12 @@ All in the analyzer suite: `cmake -S src/Analysis/tests -B build/analyzer-tests`
 | `reference_bands_test` | the Norm→Band projection, the archetype mechanism, and `ragOf(grade(v)) == classifyDelta(v)` over the whole shipped set |
 | `wrist_norm_render_test` | the engine renders a real grid from the shipped norms — and an empty norm source greys everything, so the guard can fail |
 | `reference_sets_test` | the screen and drill registries: every reference resolves both ways, each validator fires AND stays silent, and no branded screening system reached the content |
-| `norm_model_test`, `norm_editor_model_test`, `characteristic_editor_test`, `diagnostics_catalogue_integrity_test` | the façades: every rule they hide is asserted here or nowhere — including that screens, drills and the glossary reach QML, which is the "complete on both sides and reaching nothing" trap |
+| `model_browser_test`, `inspector_refresh_test`, `corridor_plot_test`, `diagnostics_catalogue_integrity_test` | the façade: every rule it hides is asserted here or nowhere — the layering and undo across both registries, the row comparator's type handling, the roadmap ranking, free-text search, and that screens, drills and the glossary reach QML, which is the "complete on both sides and reaching nothing" trap |
+| `axis_direction_test` | every signal watches the tail its `highMeans` sentence says it does — see trap 1 |
 
-Standalone tests reach shipped content through `pp_norm_env(<target>)` and `-DPP_CORE_PACK_PATH`.
+The `norm_model_test` / `norm_editor_model_test` / `characteristic_editor_test` targets no longer exist; their assertions were ported onto `ModelBrowser` when the old façades were deleted (§10). One was *not* ported and is called out rather than quietly dropped: the old model returned the roadmap markdown as a string and the test checked its headings. The new panel exports to a file, and a test that wrote into the developer's Documents folder to read it back would be a test with a side effect on the product.
+
+Note where these live: the sources are in **`src/Diagnostics/tests/`** but they are compiled by the **Analysis suite** (`src/Analysis/tests/CMakeLists.txt`) — the same arrangement as `swing_doc_test`. There is no Diagnostics test project. Standalone targets reach shipped content through `pp_norm_env(<target>)` and `-DPP_CORE_PACK_PATH`.
 
 ---
 
@@ -729,7 +754,7 @@ Each of these is a bug that shipped or nearly shipped. They are here because non
 9. **Inside a Repeater delegate, only the component root id resolves** — and a handler on a composite type that declares its own `id: root` cannot see even that. It throws only on click, so no binding, test or screenshot will show it. At file scope, `root.x` inside a composite is fine.
 10. **A `const Condition *` dies when `save()` reloads the provider.** Copy what you need out first.
 11. **Text links are `Theme.colorAccent` at rest**, body font, trailing arrow, cursor change only (`ScreenHome.qml`'s `switchLink`). Muted-until-hover is for secondary chrome, not for a way out of the page.
-12. **A default setting can hide a whole-band defect, and the tests will agree with it.** The Ideal band was drawn at `mu ± sigma` and graded at `mu ± idealMaxZ × sigma` for nine stages. Under `standard` those are the same number, so nothing failed — and three separate tests had written the defect down as a requirement ("a policy change does not move the IDEAL band"). **When a value is a default, sweep the non-defaults**: `norm_test` and `norm_editor_model_test` now assert under every shipped preset, not only the shipped one.
+12. **A default setting can hide a whole-band defect, and the tests will agree with it.** The Ideal band was drawn at `mu ± sigma` and graded at `mu ± idealMaxZ × sigma` for nine stages. Under `standard` those are the same number, so nothing failed — and three separate tests had written the defect down as a requirement ("a policy change does not move the IDEAL band"). **When a value is a default, sweep the non-defaults**: `norm_test` and the façade's corridor assertions now run under every shipped preset, not only the shipped one.
 
 ---
 
@@ -757,7 +782,7 @@ src/Diagnostics/
   {resource,file,merged}_{pack,norm}_provider.cpp   layering
   pack_provider.h               ICharacteristicPackProvider, PackOrigin
 
-src/Gui/characteristics/        4 façades + 13 QML views
+src/Gui/diagnosticmodel/       ModelBrowser + DiagnosticModel.qml + the Model*.qml views
 src/Resources/diagnostics/      core.json · norms.json · contexts.json · screens.json · drills.json
 src/Analysis/reference_bands.{h,cpp}   NormBandProvider — Norm -> Band for the wrist grid
 src/Gui/review/metric_catalog.cpp      corridors for the metric + dashboard surfaces

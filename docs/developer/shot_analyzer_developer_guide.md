@@ -1,9 +1,14 @@
 # Pinpoint Shot Analyzer — Developer Guide
 
 **Audience**: Developers working on or integrating with the Pinpoint application  
-**Location**: `src/Analysis/` (analyzers + math), `src/Gui/shot_processor.{h,cpp}` (orchestration), `src/Export/swing_doc.{h,cpp}` (persistence)  
+**Location**: `src/Analysis/` (analyzers + math), `src/Gui/shot/shot_processor.{h,cpp}` (orchestration), `src/Export/swing_doc.{h,cpp}` (persistence)  
 **Language**: C++17 (analysis value types and math) / C++20 (app integration)  
-**Status**: Pipeline production; the M1 **Wrist** analyzer is real (IMU-only chain); Swing / GRF / Coach analyzers are deterministic stubs awaiting their pipelines.
+**Status**: Production. Two analyzers: `WristAnalyzer` (session type 1 — the full IMU + camera stage profile) and `CameraKinematicsAnalyzer` (types 0/2/3 and the unknown fallback). Offline re-analysis of an exported swing runs the same analyzers over a disk-backed window.
+
+> **Scope.** This is the *outside* view: how `analyze()` is launched, how jobs are
+> built, how results join with the export, and how everything persists. The
+> *inside* of `analyze()` — the capability-gated stage pipeline and every current
+> stage — is `docs/developer/analysis_pipeline_developer_guide.md`.
 
 ---
 
@@ -14,10 +19,11 @@
 3. [Core Concepts](#3-core-concepts)
 4. [The ShotProcessor Pipeline, Stage by Stage](#4-the-shotprocessor-pipeline-stage-by-stage)
 5. [Getting Started — Writing a New Analyzer](#5-getting-started--writing-a-new-analyzer)
-6. [The M1 Wrist Chain](#6-the-m1-wrist-chain)
+6. [Wrist-Chain Facts Worth Knowing Here](#6-wrist-chain-facts-worth-knowing-here)
 7. [The Scoring Model](#7-the-scoring-model)
 8. [Output Shapes — From Worker to QML](#8-output-shapes--from-worker-to-qml)
 9. [Persistence — the Unified swing.json](#9-persistence--the-unified-swingjson)
+9a. [Offline Re-analysis](#9a-offline-re-analysis)
 10. [Threading and Lifetime Rules](#10-threading-and-lifetime-rules)
 11. [Internals — Design Decisions Explained](#11-internals--design-decisions-explained)
 12. [Testing](#12-testing)
@@ -28,7 +34,7 @@
 
 ## 1. What the Shot Analyzer Is
 
-The shot analyzer turns a **frozen 5-second `SwingWindow`** — raw IMU packets,
+The shot analyzer turns a **frozen 4-second `SwingWindow`** — IMU samples,
 camera frames, and the shot marker — into everything the user sees about a
 shot: a 0–100 **score**, per-metric **values at impact** (the carousel chips),
 a **trace** sparkline, and the rich **`SwingAnalysis` detail** (full metric
@@ -39,6 +45,16 @@ It is a **per-session-type** abstraction: a Wrist session and a GRF session
 analyse the same kind of window with entirely different pipelines. The
 `ShotAnalyzer` interface plus a factory keyed on
 `SessionController::Type` keep that polymorphism out of the orchestration code.
+
+Two implementations exist today:
+
+| Session type | Analyzer | What it does |
+|---|---|---|
+| 1 — Wrist | `WristAnalyzer` | The full stage profile: IMU fusion, segmentation, the offline pose pass, ball/shaft tracking, metrics, scoring |
+| 0 / 2 / 3 and unknown | `CameraKinematicsAnalyzer` | Shared camera-kinematics analyzer — a placeholder score plus the real clubhead/hand-speed and lag series from the face-on camera once kinematics is enabled |
+
+The same `analyze()` also runs **offline**, over a swing reconstructed from an
+exported folder rather than from the live ring — see §9a.
 
 Each assessment type — **Wrist, Swing, GRF** — produces its **own**
 session-appropriate score (its own bands and weights, so the number reflects
@@ -64,14 +80,15 @@ is published.
 │  ShotController ──shotDetected(source, impactUs, sessionType)──┐             │
 │                                                                ▼             │
 │                                                        [ShotProcessor]       │
-│                                                        POSTROLL (500 ms)     │
+│                                            POSTROLL (1250 ms auto / 500 man) │
 │                                                                │             │
-│                                       pauseBuffer → captureSwingWindow(5 s)  │
+│                                       pauseBuffer → captureSwingWindow(4 s)  │
 │                                                                │             │
 │                              PROCESSING (sequenced)                          │
+│                       ▼ (QtConcurrent) segmentation pre-stage                │
 │                       ▼ (QtConcurrent)                                       │
 │              [ShotAnalyzer]  makeShotAnalyzer(type)                          │
-│              fuse → phases → metrics → score → detail                        │
+│              runStages(profile, ctx)  → see the pipeline guide               │
 │                       │ analysis done                                        │
 │                       ▼ (QtConcurrent)                                       │
 │              [SwingExporter]  MP4s + thumb.jpg + raw manifest                │
@@ -105,10 +122,31 @@ Consumers of the result:
 ### `ShotAnalysisJob` — the value-type job
 
 Everything the worker needs, **resolved on the UI thread before launch** (the
-same rule as `SwingExportJob`): session type, shot source, impact timestamp,
-the window's camera/IMU/marker source IDs, athlete handedness, the swing
-directory, and — critically — the **IMU→segment bindings**. The worker must
-never touch `AppSettings`, controllers, or live `ImuInstance` objects.
+same rule as `SwingExportJob`). The worker must never touch `AppSettings`,
+controllers, or live `ImuInstance` objects. The job has grown well past its
+original handful of fields; the groups are:
+
+| Group | Fields | Notes |
+|---|---|---|
+| **Identity** | `sessionType`, `shotSource`, `impactUs`, `swingDir` | `impactUs` is the marker anchor — the single source of truth (§11) |
+| **Sources** | `cameraSources` (face-on first), `faceOnCameraCount`, `imuSources`, `markerSourceId` | Discovered from the window's own `formatOf()` descriptors |
+| **Athlete / club** | `handedness`, `clubLengthM`, `clubName`, `bandCentersMm`, `shaftType`, `hoselFromButtMm` | Band geometry is empty for an untaped club — the shaft tracker then runs ray evidence only, no band tier |
+| **Club-length prior** | `priorClubLenPx`, `priorClubLenVarPx`, `priorClubLenN` | A persisted `LengthPriorState` so the length fuse can join an E-prior. `N=0` ⇒ no prior joins |
+| **Calibration** | `imuBindings` | `{SourceId, SegmentRole, alignA, mountM}` snapshots — see below |
+| **Model selection** | `motionCaptureQuality` | `"High"` runs ViTPose++-L when downloaded; anything else runs ViTPose-B |
+| **Ball** | `ballTrack`, `ballSearchRoi`, `ballBaseline` | The live face-on ball track, the hitting-area ROI, and the live empty-mat baseline. All optional; each has a defined fallback |
+| **Progress** | `progress` | `std::function<void(float)>`, 0..1, **called from the worker thread**. May be null — check before calling |
+| **SwingLab injection** | `poseTrackPath`, `ballTrackPath`, tuning overrides | Load a recorded pose/ball track instead of running the detector. Empty in production |
+
+Two rules about the job that are easy to get wrong:
+
+- **Every field has exactly two fillers**, and they must stay in step:
+  `ShotProcessor::buildAnalysisJob()` on the **live** path (reading
+  `AppSettings`), and `SwingDiskLoader` on the **re-analysis** path (reading the
+  recorded `swing.json`, *never* `AppSettings` — that is what makes re-analysis
+  deterministic). Adding a field means filling it in both.
+- **`progress` is a worker-thread callback.** The `ShotProcessor` lambda posts a
+  queued invoke; anything else you install must marshal to its own thread itself.
 
 ### `ImuSegmentBinding` — calibration snapshot
 
@@ -174,18 +212,38 @@ the duration.
 ### POSTROLL — `onShotDetected`
 
 Captures the trigger tuple (source, impact µs, session type, wallclock label)
-and starts a single-shot timer (`postRollMsFor(source)`, 500 ms for every
-source today). The buffer **keeps capturing** so the follow-through lands in
+and starts a single-shot timer (`postRollMsFor(source)` — **1250 ms** for every
+auto source, 500 ms for the manual button, which is pressed after the swing is
+already over). The buffer **keeps capturing** so the follow-through lands in
 the ring before it freezes.
 
 ### Freeze — `captureWindowAndLaunch`
 
-`pauseBuffer()` → `captureSwingWindow(5 s)`. If the user pressed Stop during
+`pauseBuffer()` → `captureSwingWindow(4 s)`. If the user pressed Stop during
 the post-roll the rings froze early — still a valid (truncated) shot; only
 buffer teardown aborts. One `ReplayTrack` is built per live camera with frames
-in the window. After the segmentation pre-stage resolves
-(`onSegmentationFinished`), the two heavy workers run **sequenced, not
-overlapped** — analysis first, the x264 export only once analysis finishes:
+in the window.
+
+#### The skip-analysis corpus-capture escape hatch
+
+Before anything heavy starts, the processor checks
+`saveRawFrames() && skipAnalysisForRawCapture()`. When both are set it marks
+analysis `Skipped`, exports the frames only, and suppresses the replay — so each
+shot captures **instantly** and the swings are re-analysed in bulk later. The
+raw-only `swing.json` still carries `capture.impactUs`, so offline re-analysis
+(§9a) has its impact reference. This is how the blessed corpus is built.
+
+#### The segmentation pre-stage
+
+Otherwise a **milliseconds-cheap** fuse + inertial ladder runs first, on its own
+`QtConcurrent` worker, gating both heavy workers. Its swing bounds trim the
+export encode span and the replay to the swing rather than the whole window.
+Failure, or no IMU, yields a confidence-0 result and everything below degrades to
+full-window behaviour — it is an optimisation, never a gate on correctness.
+
+After it resolves (`onSegmentationFinished`), the two heavy workers run
+**sequenced, not overlapped** — analysis first, the x264 export only once
+analysis finishes:
 
 ```cpp
 // onSegmentationFinished(): launch analysis alone.
@@ -204,11 +262,18 @@ the export's encode threads inflated per-frame inference ~5× (§11).
 
 ### Job building — `startAnalysis`
 
-All UI-thread reads happen here: camera sources ordered **face-on first** (so
-analyzers can prefer it without re-sorting), IMU + marker sources discovered
-from the window's own `formatOf()` descriptors, athlete handedness, and the
-`ImuSegmentBinding` snapshots (§3). The job then moves into the lambda by
-value.
+`buildAnalysisJob()` is where every UI-thread read happens: camera sources
+ordered **face-on first** (so analyzers can prefer it without re-sorting), IMU +
+marker sources discovered from the window's own `formatOf()` descriptors, athlete
+handedness and club record, the motion-capture quality tier, the live ball track
+and ROI, the persisted club-length prior, and the `ImuSegmentBinding` snapshots
+(§3). The job then moves into the lambda by value.
+
+The progress callback is installed here too: the analyzer calls it from the
+worker thread, and the lambda posts a queued invoke that drives
+`analysisProgress` (throttled to ~1 % steps) for the toolbar's ANALYSING bar.
+
+The re-analysis path builds the same job from `swing.json` instead — see §9a.
 
 ### Join — `maybeJoin`
 
@@ -232,6 +297,7 @@ the synchronous export-skip path):
 | OK | failed/skipped | synth manifest + analysis | no video, real score | no |
 | failed | OK | manifest only (raw) | video, score 0 | no |
 | failed | failed | none (in-memory shot only) | degraded | no |
+| **skipped** (corpus capture) | OK | manifest only (raw, with `capture.impactUs`) | video, score 0 | **suppressed** |
 
 ### Finish
 
@@ -244,105 +310,75 @@ the trigger.
 
 ## 5. Getting Started — Writing a New Analyzer
 
-The three stub analyzers (Swing, GRF, Coach) are placeholders for exactly this
-exercise. To make one real:
+**Do not write a new monolithic `analyze()`.** Analysis is now a
+capability-gated **stage pipeline** over a shared typed context: every block —
+IMU fusion, segmentation, the pose pass, ball/shaft tracking, metrics, scoring —
+is one `AnalysisStage` with a `canRun` gate, and device presence is *data, not
+control flow*. A new session type is a new **stage profile**, not a new
+hand-rolled chain.
+
+That mechanism, the current stage list, the ordering invariants, and the recipe
+for adding a stage all live in
+**`docs/developer/analysis_pipeline_developer_guide.md`** — read it before
+writing anything. The skeleton is:
 
 ```cpp
-// ── 1. src/Analysis/grf_analyzer.h ────────────────────────────────────────
-#pragma once
-#include "shot_analyzer.h"
-
-class GrfAnalyzer : public ShotAnalyzer
-{
-public:
-    ShotAnalysisResult analyze(const pinpoint::SwingWindow &window,
-                               const ShotAnalysisJob &job) override;
-};
-
-// ── 2. src/Analysis/grf_analyzer.cpp ──────────────────────────────────────
+// ── 1. The analyzer is thin: build a context, run a profile, project a result.
 ShotAnalysisResult GrfAnalyzer::analyze(const pinpoint::SwingWindow &window,
                                         const ShotAnalysisJob &job)
 {
-    ShotAnalysisResult r;
-
-    // (a) Read raw data from the frozen window — zero-copy, const only.
-    //     job.imuSources / job.cameraSources / job.markerSourceId name the
-    //     sources; window.entriesFor(id) / window.payloadOf(e) /
-    //     window.interpolateImu(...) access them. Prefer the shared fuser
-    //     when you need anatomical orientation streams:
-    const auto streams = pinpoint::analysis::ImuVisionFuser::fuse(window, job.imuBindings);
-    if (streams.timeGrid.empty()) {
-        r.ok = false;                       // degrade, never crash:
-        r.error = QStringLiteral("no usable IMU data in window");
-        return r;                           // carousel row with score 0
-    }
-
-    // (b) Phases — Impact is job.impactUs, the marker anchor. Reuse the
-    //     segmenter if lead-hand motion is meaningful for your type.
-    const auto phases = pinpoint::analysis::PhaseSegmenter::segment(streams, job.impactUs);
-
-    // (c) Build MetricSeries on the TimeGrid (absolute µs!), degrees,
-    //     Address-referenced. Then score: add a band table for your session
-    //     type in swing_scorer.cpp (bandsFor) and call SwingScorer::score.
-
-    // (d) Fill both result tiers (flat mirrors ShotListModel roles):
-    auto detail = std::make_shared<pinpoint::analysis::SwingAnalysis>();
-    // detail->series / phases / tier / score ...
-    r.detail = detail;
-    r.score  = detail->score.overall;
-    // r.metrics: key → { "label": ..., "value": "display string at Impact" }
-    // r.tracePoints: ~24 QPointF normalised 0..1 for the PpTrace sparkline
-    r.ok = true;
-    return r;
+    AnalysisContext ctx{ CaptureCapabilities::fromJob(job), job, &window };
+    ctx.detail = std::make_shared<SwingAnalysis>();
+    ctx.wall.start();
+    runStages(grfProfile(), ctx);     // authored order, canRun gates, halt short-circuit
+    return projectResult(ctx);        // flatten context → ShotAnalysisResult
 }
 
-// ── 3. Register in the factory (shot_analyzer.cpp) ───────────────────────
-case 2:  return std::make_unique<GrfAnalyzer>();     // replaces GrfStubAnalyzer
+// ── 2. Register in the factory (shot_analyzer.cpp).
+if (sessionType == 2) return std::make_unique<GrfAnalyzer>();
 
-// ── 4. Root CMakeLists.txt: add grf_analyzer.{h,cpp} to target_sources.
+// ── 3. Root CMakeLists.txt: add the sources to target_sources.
 //      If your session type binds IMUs, extend segmentRoleForSlot()
 //      (shot_processor.cpp) so placement slots map to SegmentRoles.
 
-// ── 5. Add a pipeline test over a synthetic window/streams to
-//      src/Analysis/tests (the pipeline_test.cpp pattern), plus scorer
-//      goldens for your band table.
+// ── 4. Fill your new job fields in BOTH builders — ShotProcessor::buildAnalysisJob()
+//      (live) and SwingDiskLoader (re-analysis). A field filled in only one of
+//      them makes re-analysis silently disagree with live capture.
+
+// ── 5. Tests: a stage test per stage, plus scorer goldens for any new band
+//      table. See the pipeline guide §8.
 ```
 
-The contract in one sentence: **read only `window` (const) and `job` (values),
-return in bounded time, and degrade to `ok=false` instead of throwing** — the
-join, persistence, carousel, and replay all behave correctly around any
-outcome you return.
+The contract in one sentence, unchanged and still load-bearing: **read only
+`window` (const) and `job` (values), return in bounded time, and degrade to
+`ok=false` instead of throwing** — the join, persistence, carousel, and replay
+all behave correctly around any outcome you return.
 
 ---
 
-## 6. The M1 Wrist Chain
+## 6. Wrist-Chain Facts Worth Knowing Here
 
-`WristAnalyzer` (session type 1) is the reference implementation — four pure
-stages, each independently testable:
+The Wrist profile's 18 stages are documented in the pipeline guide. What follows
+is the handful of facts an *orchestration* reader keeps tripping over.
+
+The shape of the chain, in one glance:
 
 ```
-ImuVisionFuser::fuse(window, bindings)
-   │   200 Hz TimeGrid over common coverage; q_anat = A·q_raw·M per segment;
-   │   hold-last for momentary gaps; empty grid when nothing is fusable
-   ▼
-PhaseSegmenter::segment(streams, job.impactUs)
-   │   Impact = the marker anchor (clamped to grid). Address = settle just
-   │   before sustained lead-hand motion onset (smoothed quat-derived angular
-   │   speed crossing max(15% of peak, 0.3 rad/s)). Top = lead-hand orientation
-   │   FURTHEST from Address in (addr, impact] — far more robust than
-   │   angular-velocity valley hunting. Finish = grid end.
-   ▼
-MetricExtractor::extract(streams, phases, job.handedness)
-   │   Lead-arm joint angles from RELATIVE quaternions between adjacent
-   │   segments (forearm→hand, etc.), Address-referenced, via the swing-twist
-   │   decomposition in wrist_angles.h:
-   │     leadWristFlexExt  (bow/cup)  — needs forearm + hand
-   │     leadWristRadUln   (hinge)    — needs forearm + hand
-   │     forearmPronation  (roll)     — needs + LeadUpperArm binding
-   │     leadArmFlexion    (IMU elbow)— needs + LeadUpperArm binding
-   ▼
-SwingScorer::score(series, sessionType)
-       per-metric sub-scores against reference bands → weighted geometric mean
+IMU fusion        200 Hz TimeGrid over common coverage; q_anat = A·q_raw·M per
+                  segment; hold-last for momentary gaps; empty grid ⇒ degrade
+      ▼
+Segmentation      Impact = the marker anchor (clamped to grid). Address = settle
+                  just before sustained lead-hand motion onset. Top = lead-hand
+                  orientation FURTHEST from Address in (addr, impact].
+      ▼
+Pose / ball /     The offline ViTPose pass and the camera-derived tracking
+shaft tracking    stages — the wall-clock bulk of an analysis (§11).
+      ▼
+Metrics           Lead-arm joint angles from RELATIVE quaternions between
+                  adjacent segments, Address-referenced, via the swing-twist
+                  decomposition in wrist_angles.h.
+      ▼
+Scoring           per-metric sub-scores vs reference bands → weighted geometric mean
 ```
 
 Two hardware-locked facts to respect (full story in `wrist_angles.h` and
@@ -454,6 +490,68 @@ in-memory-only by design.
 
 ---
 
+## 9a. Offline Re-analysis
+
+The same analyzers run over a swing **reconstructed from disk**, with no live
+buffer anywhere in the picture. This is what makes corpus capture (§4) useful:
+capture fast and analyse later, and re-analyse the whole corpus whenever the
+pipeline changes.
+
+### `SwingDiskLoader` — swing.json → SwingWindow
+
+`SwingDiskLoader::load(swingDir)` returns a `LoadedSwing`: a **disk-backed**
+`SwingWindow` plus a `ShotAnalysisJob` resolved entirely from `swing.json`
+(session type, face-on-first camera sources, IMU sources, serial-matched A/M
+bindings, impact, handedness, club record, quality tier, ball baseline).
+
+It **streams**. A live window is multi-GB at high frame rates, so rebuilding a
+whole `EventBuffer` in RAM is not an option: frames are read one at a time into a
+single reusable buffer per camera (raw sidecar offset reads where available, else
+`cv::VideoCapture`), while IMU samples and the frame index — both tiny — live in
+RAM. That is exactly the contract `SwingPayloadSource` defines (see the event
+buffer guide §9): the bytes for a source need only stay valid until the next read
+of that same source, and analysis stages read frames strictly one at a time.
+Performance is traded for bounded memory, deliberately — re-analysis is a rare
+offline operation.
+
+The `ReanalyzeOptions` knobs: `tuningOverrides` and `poseTrackPath` (SwingLab),
+`sessionTypeOverride`, and `fullWindow` — which disables the swing-span bound on
+the heavy stages so the whole captured window is scanned. The in-app path sets
+`fullWindow` on every explicit re-analyse; SwingLab leaves it false so sweeps stay
+comparable to production's live bound.
+
+### `ReanalysisController` — the in-app funnel
+
+`reanalysisController` (QML context property) serves both carousel paths: the
+focused shot's action bar, and "re-analyse all shown". It is **model-agnostic** —
+callers pass already-resolved swing *dirs* (the carousel resolves them from
+whichever model is active: the live shot model, or a loaded session's review
+model), and it emits `reanalysed(swingDir)` per success so the caller refreshes
+the right row. Resolving ids against the wrong model when a past session is under
+review is the trap that shape avoids.
+
+Two concurrency rules, both about ViTPose:
+
+- **One swing at a time.** Each re-analysis runs the pose pass at physical-core
+  thread count; running two would double CPU and risk OOM. The queue drains
+  sequentially.
+- **It yields to live capture.** `setLiveBusy(true)` (wired from
+  `ShotProcessor::busyChanged`) holds the queue *between* swings, so a re-analysis
+  never starts a second ViTPose alongside a live one. An in-flight swing finishes
+  — only the next is deferred.
+
+Beyond that it is independent of `ShotProcessor`: its window is disk-backed and it
+never touches the live ring, so it may run alongside live capture. Fresh analysis
+is written back into `swing.json`, preserving the `capture` / `streams` / `review`
+blocks.
+
+`reanalyzeSwingDir(dir, opts)` is the convenience wrapper — load, run
+`makeShotAnalyzer(...)->analyze()`, and wrap the call so a thrown analyzer
+degrades to `{ok=false, error}` rather than propagating. The `swinglab_run` tool
+uses the same loader, so both paths exercise one tested reconstruction.
+
+---
+
 ## 10. Threading and Lifetime Rules
 
 The pipeline's safety reduces to four rules:
@@ -557,9 +655,14 @@ and removes any copy/ownership question.
 The standalone suite (own `main()`, CHECK macros, not in the root build):
 
 ```bash
-cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
-cmake --build build/analyzer-tests -j
-ctest --test-dir build/analyzer-tests --output-on-failure
+# Standalone (Qt prefix auto-resolved — see testing_developer_guide.md)
+cmake -S src/Analysis/tests -B build/analysis-tests
+cmake --build build/analysis-tests -j6
+ctest --test-dir build/analysis-tests --output-on-failure
+
+# Or under the umbrella, with every other suite
+cmake -S tests -B build/tests && cmake --build build/tests -j6
+ctest --test-dir build/tests --output-on-failure
 ```
 
 | Test | Covers |
@@ -572,7 +675,14 @@ ctest --test-dir build/analyzer-tests --output-on-failure
 | `imu_sample_test` | the stored IMU sample frame (`makeImuSample`) the fuser reads back |
 | `swing_doc_test` | unified swing.json writer/reader round-trip |
 | `orientation_filter_test`, `imu_driver_frame_test` | upstream provisioning: fusion filters and the real driver parse path |
+| `analysis_stage_test` | the stage mechanism itself: `canRun` gating, authored order, halt short-circuit |
+| `swing_window_parity_test` | a ring-backed and a disk-backed `SwingWindow` present the same data — the guarantee re-analysis (§9a) rests on |
+| `tuned_constants_parity_test`, `tuning_overrides_test` | the SwingLab override plumbing agrees with the compiled-in constants |
 | `session_summary_test`, `viz_frame_test`, `arbiter_test` | neighbours sharing the suite (review drawer, viz math, shot-detection arbiter) |
+
+The suite is large — 80+ targets and growing, because every stage carries its
+own test. `ctest -R <pattern>` is the way to work in it. The per-stage tests are
+catalogued in the pipeline guide.
 
 What is deliberately *not* unit-tested here: `ShotProcessor` orchestration
 (threading, joins, lifecycle). That is exercised headlessly —
@@ -591,6 +701,24 @@ The compiler will not stop you capturing `m_appSettings` or an `ImuInstance*`
 in the analyze lambda — the data race at runtime will. Everything crosses the
 boundary inside `ShotAnalysisJob` (values) or the const window. If the job
 lacks something you need, extend the job.
+
+### Adding a job field and filling it in only one place
+
+`ShotAnalysisJob` has **two** fillers: `ShotProcessor::buildAnalysisJob()` reads
+`AppSettings` on the live path, and `SwingDiskLoader` reads `swing.json` on the
+re-analysis path. Fill only the first and re-analysis silently disagrees with
+live capture on that field — the same swing scores differently depending on how
+it was analysed, with nothing failing to point at the cause. (Note the
+direction of the rule: re-analysis must *never* read `AppSettings`. That is what
+makes it deterministic; a setting changed since capture must not alter a past
+swing's numbers.)
+
+### Calling `job.progress` without checking it
+
+It is a `std::function` that may be null, and it is called **from the worker
+thread**. Check before calling, and never touch anything UI-owned from inside
+it — the `ShotProcessor` installer posts a queued invoke for exactly that
+reason.
 
 ### Writing files from an analyzer
 
@@ -643,25 +771,35 @@ end-of-replay path taken early; do not attach completion semantics to it.
 
 ## 14. File Map
 
+Only the orchestration-facing files are listed. The stage headers (there are
+~60 in `src/Analysis/` now) are catalogued in the pipeline guide's file map.
+
 ```
 src/Analysis/
-├── shot_analyzer.h             ShotAnalyzer interface, ShotAnalysisJob/Result,
-├── shot_analyzer.cpp             makeShotAnalyzer factory + the three stubs
+├── shot_analyzer.h             ShotAnalyzer interface, ShotAnalysisJob/Result
+├── shot_analyzer.cpp           makeShotAnalyzer factory: WristAnalyzer (type 1),
+│                                 CameraKinematicsAnalyzer (everything else)
 ├── swing_analysis.h            All value shapes: SegmentRole, ImuSegmentBinding,
 │                                 Phase(+Event/Sample), MetricSeries, ScoredMetric,
 │                                 Fault, ScoreBreakdown, SwingAnalysis
-├── imu_vision_fuser.{h,cpp}    TimeGrid + q_anat resampling → FusedStreams
-├── phase_segmenter.{h,cpp}     Address/Top/Impact/Finish heuristics (M1)
-├── metric_extractor.{h,cpp}    Wrist MetricSeries from relative quaternions
-├── wrist_angles.h              Swing-twist decomposition (header-only, hardware-locked)
+├── analysis_stage.h            The stage mechanism — AnalysisStage, AnalysisContext,
+│                                 CaptureCapabilities, runStages (pipeline guide)
+├── wrist_analyzer.{h,cpp}      The Wrist profile: the stage list + projectResult
+├── swing_reanalyzer.{h,cpp}    SwingDiskLoader / SwingDiskSource / reanalyzeSwingDir —
+│                                 the offline disk-backed path (§9a)
 ├── swing_scorer.{h,cpp}        Band tables + weighted-geometric-mean scoring
-├── wrist_analyzer.{h,cpp}      The real M1 Wrist analyzer (chains the above)
-└── tests/                      Standalone CTest suite (build/analyzer-tests)
+├── score_uncertainty.h         Uncertainty-interval propagation (§7)
+├── wrist_angles.h              Swing-twist decomposition (header-only, hardware-locked)
+├── analysis_tuning.h           SwingLab override plumbing onto the config structs
+└── tests/                      80+ targets; per-stage tests + the goldens
 
-src/Gui/
-├── shot_processor.{h,cpp}      Pipeline orchestration: post-roll, window, jobs,
-│                                 join, unified write, replay, stop-barriers
-└── shot_list_model.*           Carousel rows: addShot (live) / addPersistedShot (reload)
+src/Gui/shot/
+├── shot_processor.{h,cpp}      Pipeline orchestration: post-roll, segmentation
+│                                 pre-stage, window, jobs, join, unified write,
+│                                 replay, stop-barriers
+├── reanalysis_controller.{h,cpp}  The in-app re-analyse funnel (§9a)
+├── shot_list_model.*           Carousel rows: addShot (live) / addPersistedShot (reload)
+└── shot_replay_controller.*    The ¼× replay tail
 
 src/Export/
 ├── swing_exporter.{h,cpp}      The media-export worker, run after analysis (separate guide)
@@ -671,10 +809,13 @@ src/Export/
 
 ---
 
-*Design rationale and the metric/scoring evidence base: 
+*Inside `analyze()`: `docs/developer/analysis_pipeline_developer_guide.md`.
+Design rationale and the metric/scoring evidence base:
 `docs/design/shot_analyzer_design.md` (architecture + scoring model),
-`docs/implementation/shot_analyzer_m1_wrist.md` (the M1 wrist chain),
-`docs/design/shot_analyzer_viz.md` (replay graph), `docs/reference/wristmetrics.md` (bands),
+`docs/design/analysis_pipeline_fusion_architecture_proposal.md` (the stage
+architecture), `docs/implementation/shot_analyzer_m1_wrist.md` (the M1 wrist
+chain), `docs/design/shot_analyzer_viz.md` (replay graph),
+`docs/reference/wristmetrics.md` (bands),
 `docs/design/imu_frame_contract.md` (frames and joint-DOF axes). Upstream:
 `docs/developer/shot_detector_developer_guide.md`; sideways:
 `docs/developer/swing_export_developer_guide.md`; underneath:

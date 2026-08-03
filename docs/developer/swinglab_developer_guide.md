@@ -3,7 +3,7 @@
 **Audience**: Developers working on the analysis pipeline or the offline evaluation tooling
 **Location**: `tools/swinglab/` (runner + Python lab), built via `-DPINPOINT_BUILD_TOOLS=ON`
 **Language**: C++20 (`swinglab_run`) / Python 3 (numpy, opencv, matplotlib)
-**Status**: L1–L5 implemented and validated end-to-end on the synthetic corpus (100/100 baseline). Real-data missions await clean corpus v1 — pre-corpus-v1 studio recordings are unreliable (2026-06-11 decision).
+**Status**: L1–L5 implemented and validated end-to-end on the synthetic corpus (100/100 baseline). The runner's disk→window reconstruction is now shared with the in-app re-analyse path (`SwingDiskLoader`), and `parity_diff.py` gates analyzer refactors byte-identically. Real-data missions await clean corpus v1 — pre-corpus-v1 studio recordings are unreliable (2026-06-11 decision).
 
 ---
 
@@ -39,11 +39,12 @@ the evidence as plots a model can read.
 Three design principles drive everything:
 
 1. **Replay the production code, never a reimplementation.** The core is a
-   C++ runner (`swinglab_run`) that rebuilds an `EventBuffer` +
-   `SwingWindow` from a recorded swing dir and executes the exact
-   `ImuVisionFuser → PhaseSegmenter → PoseRunner → ShaftTracker → metrics`
-   chain the app runs (`makeShotAnalyzer`, unmodified). A Python rewrite of
-   the tracker would drift from the app within a week.
+   C++ runner (`swinglab_run`) that reconstructs a `SwingWindow` from a recorded
+   swing dir and executes the unmodified production stage pipeline
+   (`makeShotAnalyzer`). A Python rewrite of the tracker would drift from the app
+   within a week. **The reconstruction is now shared code**, not the runner's own:
+   `SwingDiskLoader` (`src/Analysis/swing_reanalyzer.h`) backs both this runner and
+   the in-app re-analyse path, so both exercise one tested loader.
 2. **Make failure legible.** Every run produces a per-swing
    **scorecard.json** (named checks with values vs thresholds), a
    **contact_sheet.png** (the track overlaid on key frames — how a model
@@ -80,11 +81,11 @@ and inert in production.
         THE APP (record time)                      SWINGLAB (any time later)
 ┌─────────────────────────────────┐    ┌──────────────────────────────────────────┐
 │ ShotProcessor                   │    │  swinglab_run <swing_dir> --out <run>    │
-│   SwingExporter ──► swing dir   │    │    parse swing.json streams[]            │
-│     <alias>.mp4 / .raw          │───►│    rebuild EventBuffer (original t_us)   │
-│     imu_<alias>.csv|.bin|inline │    │    pause → captureSwingWindow            │
-│     swing.json  (streams +      │    │    resolve ShotAnalysisJob (impact,      │
-│       capture/setup/device +    │    │      bindings, handedness, overrides)    │
+│   SwingExporter ──► swing dir   │    │    SwingDiskLoader::load(swingDir)       │
+│     <alias>.mp4 / .raw          │───►│      → disk-backed SwingWindow (streams  │
+│     imu_<alias>.csv|.bin|inline │    │        one frame at a time) +            │
+│     swing.json  (streams +      │    │        ShotAnalysisJob from swing.json   │
+│       capture/setup/device +    │    │    apply --params / --pose / --ball      │
 │       analysis.bindings)        │    │    makeShotAnalyzer → analyze()  ◄═ THE  │
 │     thumb.jpg                   │    │      PRODUCTION PIPELINE, UNMODIFIED     │
 └─────────────────────────────────┘    │    write result.json + runmeta.json      │
@@ -100,6 +101,9 @@ and inert in production.
                                        │    sweep  → mechanical param search       │
                                        │    label  → truth.json (click-UI)         │
                                        │    synth  → ground-truthed fixture        │
+                                       ├──────────────────────────────────────────┤
+                                       │  parity_diff.py  byte-identical soak gate │
+                                       │  montage_positions.py  P1–P8 montages     │
                                        └──────────────────────────────────────────┘
 ```
 
@@ -186,55 +190,64 @@ configures).
 
 ```
 swinglab_run <swing_dir> --out <run_dir> [--params p.json] [--trace]
-             [--session-type N] [--face-on Str] [--impact-us N] [--pose f.json]
+             [--session-type N] [--face-on Str] [--impact-us N]
+             [--pose f.json] [--ball f.json]
+             [--refuse-orientation] [--refuse-beta X]
 ```
 
-### Stage 1 — load and parse
+### Stage 1–2 — reconstruct, via `SwingDiskLoader`
 
-`swing.json` is loaded; `streams[]` is split into video and IMU stream
-records. Per video stream it reads encoded dims, frame `t_us[]`, the optional
-`raw` sidecar block, the per-stream `capture.fps_num/den`, and the `setup`
-object (perspective). Per IMU stream: serial, samples (inline JSON), and the
-`device.outputRateHz`. **Face-on selection**: `setup.perspective == 2` when
-the stream carries `setup` and `--face-on` was not explicitly passed;
-otherwise the legacy alias-substring match (default needle `"Face"`). An
-explicit `--face-on` always wins — the escape hatch for mislabelled
-recordings.
+**This used to be the runner's own code and is now shared.** One call —
+`SwingDiskLoader::load(swingDir, opts)` (`src/Analysis/swing_reanalyzer.h`) —
+returns a `LoadedSwing`: a disk-backed `SwingWindow` plus a `ShotAnalysisJob`
+resolved from `swing.json`. The in-app re-analyse path
+(`ReanalysisController`) calls the same loader, so a reconstruction bug cannot
+exist in one and not the other.
 
-### Stage 2 — rebuild the EventBuffer
+The important behavioural change: it **streams**. The old runner rebuilt a full
+`EventBuffer` and wrote every payload into it at its original timestamp, which
+holds the whole window in RAM — multi-GB at high frame rates. The loader instead
+reads one frame at a time into a single reusable buffer per camera (raw sidecar
+offset reads where present, else `cv::VideoCapture`), keeping only the IMU
+samples and the frame index resident. That is the `SwingPayloadSource` contract
+(event buffer guide §9), and it is why re-analysing a corpus no longer needs a
+workstation's worth of memory. Frames still come from the **raw sidecars when
+present** (bit-faithful — the exact bytes the live analyzer saw), MP4 otherwise;
+`LoadedSwing::usedRaw` reports which, and the scorecard's `frames: raw|mp4` flag
+follows from it.
 
-One `registerSource()` per stream, with the format resolved from the
-manifest: raw replays register the recorded pixel format/dims/stride; MP4
-replays register BGR24 at encoded dims. fps and `expected_interarrival_us`
-derive from the recorded rates (legacy fallbacks 150 fps / 200 Hz — §7).
-Payloads are then written **at their original timestamps**: IMU samples
-re-packed through `makeImuSample`, camera frames read from the raw sidecar
-(exact bytes) or decoded by `cv::VideoCapture`. Finally `pause()` →
-`captureSwingWindow(tMin, tMax)` freezes the window, exactly like the app.
+**Face-on selection**: `setup.perspective == 2` when the stream carries `setup`
+and `--face-on` was not explicitly passed; otherwise the legacy alias-substring
+match (default needle `"Face"`). An explicit `--face-on` always wins — the escape
+hatch for mislabelled recordings.
 
-Because the buffer is paused before capture and there are no live producers,
-none of the app's producer-stop barriers are needed here — but the same
-window/ring semantics apply (see the EventBuffer guide).
+### Stage 3 — the job, and what the runner adds to it
 
-### Stage 3 — resolve the job
-
-A `ShotAnalysisJob` is filled from the manifest, mirroring what
-`ShotProcessor::buildAnalysisJob()` does from live state:
+The loader fills the `ShotAnalysisJob` from the manifest, mirroring what
+`ShotProcessor::buildAnalysisJob()` does from live state — but reading
+**`swing.json`, never `AppSettings`**. That is the whole determinism argument: a
+setting changed since capture must not alter a past swing's numbers.
 
 | Field | Source | Override |
 |---|---|---|
 | `sessionType` | `capture.sessionType` when present | `--session-type` (also the legacy default, 1 = Wrist) |
-| `impactUs` | the recorded Impact phase (`analysis.phases[].phase == 5`) | `--impact-us` |
+| `impactUs` | the recorded Impact phase, else `capture.impactUs` (which is what an analysis-skipped corpus swing has) | `--impact-us` |
 | `handedness` | `athlete.handedness` | — |
 | `cameraSources` | face-on first (`faceOnCameraCount` set) | `--face-on` |
-| `imuBindings` | `analysis.bindings[]`, serial-matched to IMU streams — the exact A/M the app used, plus calibration status (§7) | — |
+| `imuBindings` | `analysis.bindings[]` serial-matched to IMU streams — the exact A/M the app used, plus calibration status (§7). Falls back to each stream's `device` calibration block when `analysis.bindings` is absent (the corpus-capture case). | — |
+| club geometry, length prior, quality tier, ball ROI/baseline | the recorded `capture.*` / `setup.*` blocks | — |
 | `tuningOverrides` | `--params` JSON, flattened to dotted keys (`shaft.ridgeKernelPx`) | — |
 | `poseTrackPath` | `--pose` (skip ViTPose, load a `PoseTrack2D` JSON) | — |
+| `ballTrackPath` | `--ball` (skip the offline ball replay, load a ground-truth `BallTrack2D`) | — |
 
-Bindings are **never fabricated**: if a recorded swing has no
-`analysis.bindings`, the runner does not synthesize identity A/M — re-fusing
-without the session calibration would be fiction. No impact instant at all is
-a hard error (`--impact-us` is the manual rescue).
+Bindings are **never fabricated**: if a swing has neither `analysis.bindings` nor
+a stream-level calibration block, the runner does not synthesize identity A/M —
+re-fusing without the session calibration would be fiction. No impact instant at
+all is a hard error (`--impact-us` is the manual rescue).
+
+`--refuse-orientation` re-fuses the recorded raw IMU through the orientation
+filter before analysis (with `--refuse-beta` setting the gain), which is how the
+`filter.*` namespace is exercised.
 
 ### Stage 4 — run the production pipeline
 
@@ -285,8 +298,30 @@ file-based. Run with the SwingLab venv: `~/.swinglab-venv/bin/python lab.py …`
 | `plot <run> <swing>` | (Re)render `contact_sheet.png`. |
 | `report <run_root>` | Regenerate `REPORT.md` from `summary.json`. |
 | `diff <run_a> <run_b>` | Per-swing regression diff (≥ 5 points down = regression). Writes `DIFF.md` into run_b; **exit 1 when any regression** — the soak-loop gate. |
-| `sweep <corpus> <runs> <space.json> [--trials N]` | Tier-0 random search. `space.json` = `{"shaft.ridgeKernelPx": [5, 15, "int"], "assembly.coverageMin": [0.4, 0.8]}`; objective = mean scorecard score; keeps best params + full history in `sweep-result.json`. No model involved. |
+| `sweep <corpus> <runs> <space.json> [--trials N] [--method random\|coordinate] [--baseline R] [--partition p.json] [--freeze] [--allow-frozen]` | Mechanical param search. `space.json` = `{"shaft.ridgeKernelPx": [5, 15, "int"], "assembly.coverageMin": [0.4, 0.8]}`; objective = mean scorecard score; keeps best params + full history in `sweep-result.json`. No model involved. See the flag notes below. |
 | `label <swing> [--every N]` | OpenCV click-UI (needs a display): step frames, click grip→head, mark P-positions with keys 1–6; writes `truth.json`. **In-app alternative:** the PinPoint **Markup** panel (`src/Gui/session/PpMarkupPanel.qml`; enable via the session toolbar's View menu → "Markup") loads/edits/saves the same `truth.json` from inside the app on the focused swing (frame-accurate cv::VideoCapture view; P1–P10 + club; byte-compatible with the scorecard). |
+
+### `sweep` flags worth understanding before you use them
+
+- `--method coordinate` — coordinate descent, the default strategy for separable
+  knobs. `random` remains for spaces where the knobs interact.
+- `--baseline <run_dir>` — applies the **diff gate per trial**: any trial that
+  regresses any swing by ≥5 points against that run is rejected outright. Without
+  it a sweep will happily "improve" the mean while destroying two swings.
+- `--partition partitions.json` (`{tune:[], validation:[], heldout:[]}`) — sweep
+  on Tune, *select* on Validation. This is the guard against fitting the search
+  to the corpus.
+- `--freeze` — the one-time held-out evaluation. It is opt-in precisely because
+  running it more than once turns a held-out set into another validation set.
+- `--allow-frozen` — permits sweeping `score.*` / `rules.*` / `bands.*`, which
+  are frozen until labels exist. A post-label pass only.
+
+### Two standalone tools alongside `lab.py`
+
+| Tool | Purpose |
+|---|---|
+| `parity_diff.py RUN_A RUN_B` | **Byte-identical soak gate for refactors.** Pairs every `result.json` under two run roots by relative path and diffs each pair. The *only* excluded field is `analysis.timings` — per-stage wall-clock ms, which legitimately differ between two runs of the same deterministic pipeline. Everything else, the whole document, must match exactly. Exit 0 iff every pair compared equal **and nothing was unpaired**. This is what gated the staged-vs-monolith analyzer migration. |
+| `montage_positions.py` | P1–P8 coaching-position montages per swing: a `_pstrip.png` row of 8 cropped tiles with the shaft drawn (green = MilestoneFit, orange = TrackSample, thin white = a `truth.json` label within 40 ms, grey = missing), and a `_strobe.png` single-frame overlay of every P plus a low-alpha interpolated layer — measured vs synthesized at a glance. |
 
 The contact sheet (`plots.py`) is a 16:9 PNG: five overlay frames at the
 ladder's key instants (Address/Top/Impact/Release/Finish) with the recovered
@@ -550,6 +585,16 @@ line-oriented (`RunResult.trace_lines()`).
 - **Trusting MP4 replays for pixel-level conclusions.** Re-encoded pixels
   are approximate; scorecards carry `frames: mp4` for a reason. Record with
   `saveRawFrames` ON for tuning corpora.
+- **Changing reconstruction in the runner instead of the loader.**
+  `SwingDiskLoader` is shared with the in-app re-analyse path. A "quick fix"
+  inside `swinglab_run.cpp` that bypasses it means SwingLab and the app disagree
+  about the same swing — which is precisely the class of bug the shared loader
+  exists to make impossible.
+- **Sweeping without `--baseline`.** A sweep optimises the *mean*; nothing stops
+  it trading two swings' collapse for a broad small gain. The per-trial diff gate
+  is the flag, not an afterthought.
+- **Running `--freeze` more than once.** The second run makes the held-out set a
+  validation set, and you no longer have an unbiased estimate of anything.
 - **Synthesizing identity bindings for swings that lack them.** The runner
   deliberately refuses — re-fusing without the session calibration
   fabricates data.
@@ -564,6 +609,8 @@ line-oriented (`RunResult.trace_lines()`).
 ```
 tools/swinglab/
   lab.py                        # CLI entry point (subcommands → swinglab/*)
+  parity_diff.py                # byte-identical refactor soak gate (§5)
+  montage_positions.py          # P1–P8 position strips + strobe tiles (§5)
   requirements.txt              # numpy, opencv-python, matplotlib
   configs/                      # params presets + sweep spaces
   src/swinglab_run.cpp          # C++ offline runner (PINPOINT_BUILD_TOOLS=ON)
@@ -575,7 +622,13 @@ tools/swinglab/
     label.py                    # truth.json click-UI (needs display)
     synth.py                    # ground-truthed synthetic swing generator
 
-src/Analysis/shot_analyzer.h    # ShotAnalysisJob (tuningOverrides, poseTrackPath)
+src/Analysis/swing_reanalyzer.h # SwingDiskLoader — the SHARED disk → SwingWindow
+                                #   reconstruction (§4), also used by the in-app
+                                #   re-analyse path
+src/Analysis/shot_analyzer.h    # ShotAnalysisJob (tuningOverrides, poseTrackPath,
+                                #   ballTrackPath)
+src/Analysis/analysis_tuning.h  # tuning::apply — dotted key → config struct field
+src/Core/pp_tuned_constants.h   # pinpoint::tuned::* — the frozen defaults
 src/Analysis/swing_analysis.h   # ImuSegmentBinding / BindingRecord (calibration status)
 src/Export/swing_doc.{h,cpp}    # result.json writer (shared with the app)
 

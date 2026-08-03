@@ -3,7 +3,7 @@
 **Audience**: Developers adding or modifying analysis stages (metrics, tracking passes, fusion proposals)  
 **Location**: `src/Analysis/analysis_stage.h` (mechanism), `src/Analysis/wrist_analyzer.cpp` (the Wrist profile + all current stages)  
 **Language**: C++17 (analysis value types and math) / C++20 (app integration)  
-**Status**: Production. The Wrist profile (18 stages) is the only real profile; the original 17 passed the byte-identical staged-vs-monolith gate over the 61-swing blessed corpus before the monolith was deleted, and EventRefine (stage 11) landed afterwards through its own dark-then-freeze gate (2026-07-18). Swing / GRF profiles land as stage lists when their placement UX arrives.
+**Status**: Production. The Wrist profile (24 stages) is the only real profile; the original 17 passed the byte-identical staged-vs-monolith gate over the 61-swing blessed corpus before the monolith was deleted, and EventRefine (stage 11) landed afterwards through its own dark-then-freeze gate (2026-07-18). Swing / GRF profiles land as stage lists when their placement UX arrives.
 
 ---
 
@@ -71,7 +71,7 @@ ShotProcessor::startAnalysis (live shot)            swinglab_run / in-app re-ana
                         │
         AnalysisContext ctx { caps, job, &window }
                         │
-        runStages(wristProfile(), ctx)         ← 18 stages, authored order
+        runStages(wristProfile(), ctx)         ← 24 stages, authored order
                         │     each: canRun? → run(ctx) → trace entry (name, ns, skip reason)
                         ▼
         projectResult(ctx)                     ← metrics map, trace, score, detail
@@ -220,6 +220,7 @@ Two telemetry layers — do not conflate them:
 | 14c | BodyRotation | pose frames **OR** a bound Pelvis/Thorax stream | pelvis/thorax turn, X-factor + stretch (unscored) |
 | 14d | ClubDelivery | `shaft.valid` && samples | shaft-vs-horizontal, attack angle, low point (unscored) |
 | 14e | Tempo | confident Address/Top/Impact ladder | tempo backswing + ratio (unscored) |
+| 14f | Kinematics | `kinematics.enabled` (dark by default) | clubhead/hand speed + lag series from the shaft track and pose (unscored). Shared with `CameraKinematicsAnalyzer`, which is the whole of that profile. |
 | 15 | Bindings | always | `detail->bindings` (calibration snapshot per device) |
 | 16 | Resemblance | always | `detail->score` + §B.7 interval + tier |
 | 17 | Assessment | `runAssessment` && IMU streams && local series | findings; **overrides** headline score, clears interval |

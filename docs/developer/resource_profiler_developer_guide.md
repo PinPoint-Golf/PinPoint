@@ -3,7 +3,7 @@
 **Audience**: Developers and Claude Code investigating performance, capacity, or behavioural issues in PinPointStudio  
 **Location**: `src/Core/` (profiler core), `src/Gui/monitor/` (controller + UI)  
 **Language**: C++17 / QML  
-**Status**: Phase 1 core implemented and validated on Linux (`-Wall -Wextra`, ASan/TSan). Controller, monitor panel, and seed instrumentation per the Claude Code build prompt.
+**Status**: Production. Core, controller, monitor panel and the seed instrumentation all ship; GPU-memory sampling has a backend per platform; analysis stages are auto-instrumented and each run is recorded for drill-down. 7 test targets in `src/Core/tests/`.
 
 ---
 
@@ -14,7 +14,7 @@
 3. [Core Concepts](#3-core-concepts)
 4. [Instrumenting Code — The Profiler API](#4-instrumenting-code--the-profiler-api)
 5. [Reading the Profiler in the Resource Monitor](#5-reading-the-profiler-in-the-resource-monitor)
-6. [The Application Log — Capturing Diagnostics](#6-the-application-log--capturing-diagnostics)
+6. [Capturing Diagnostics — Stats Ring vs Application Log](#6-capturing-diagnostics--stats-ring-vs-application-log)
 7. [Investigating a Performance or Capacity Issue](#7-investigating-a-performance-or-capacity-issue)
 8. [Build Configuration](#8-build-configuration)
 9. [Internals — How It Works](#9-internals--how-it-works)
@@ -32,6 +32,8 @@ by a **named scope or category** (the "by X" axis):
 
 - **Memory** consumed by a category (current + peak bytes).
 - **CPU** — whole-process and per-named-thread utilisation.
+- **GPU memory** — this process's VRAM plus the device-wide picture, via one backend
+  per platform (§10).
 - **Call and timing accumulation** by scope (call count, total / min / max / average wall
   time, and — in the deep tier — per-scope CPU time).
 
@@ -159,6 +161,21 @@ void CaptureThread::run() {
 }
 ```
 
+One thread cannot register itself directly: the EventBuffer merger. `src/Buffer/`
+is a standalone library with no `src/Core/` dependency — its own tests build
+without any of this. So `EventBuffer` exposes a hook instead, and `main.cpp`
+supplies the call:
+
+```cpp
+eventBuffer.setThreadRegisterHook([](const char *name) {
+    pinpoint::osmetrics::registerThread(name);      // name == "Buffer.Merger"
+});
+eventBuffer.start();     // the hook fires once, at merger loop entry
+```
+
+That is the pattern to copy for any other subsystem that must stay
+Core-independent: an injected `std::function`, set before the thread starts.
+
 **Naming convention.** Dot-namespaced, `Subsystem.Detail` (`Pose.ViTPose.infer`,
 `Video.preprocess`, `Export.Staging`). Keep names static string literals — they are interned
 once per call site by pointer, so the steady-state cost is a deref plus a few relaxed atomics.
@@ -203,9 +220,13 @@ shows:
   `AnalysisProfileLog`: one row per `analyze()` call (time · session · ok/halted ·
   frames/total/score), tap to expand its full per-stage breakdown (each stage's ms, or the
   skip reason for a stage that did not run — so a camera-only or IMU-only run is legible from
-  the breakdown alone). Its own **Clear** and **Export** (`PinPointStudio_analysis_*.txt`, one
-  block per run with the stage list) — the artifact to attach when a user reports a slow
-  analysis. Runtime only — never persisted to swing.json.
+  the breakdown alone). Each ran stage also draws a **horizontal time bar**, normalised
+  against the slowest stage in *that* run, so the dominant stage fills its track and the
+  rest scale against it; skipped stages get no bar. (Low-alpha accent behind the row text,
+  which stays on top and legible — pure QML in `RmAnalysisRunRow.qml`, reading the per-stage
+  ms the controller already exposes.) Its own **Clear** and **Export**
+  (`PinPointStudio_analysis_*.txt`, one block per run with the stage list) — the artifact to
+  attach when a user reports a slow analysis. Runtime only — never persisted to swing.json.
 - **Controls** — a **deep** toggle (greyed when `PINPOINT_PROFILE` is not compiled in),
   **Reset** (start a fresh measurement window), and **Dump to log** (append a summary to the
   stats ring now).
@@ -405,10 +426,40 @@ Why each:
   shows meaningful labels uniformly across platforms. Enumerate-all-threads is a deferred
   fallback.
 
-> Validation status: the Linux/POSIX path is built and exercised (scopes, memory, reset, deep
-> CPU, steady-state per-thread CPU). The macOS (mach) and Windows (`GetThreadTimes` /
-> `K32GetProcessMemoryInfo`) branches are written to the documented APIs and want an on-platform
-> smoke when first built there. The gauge is the only per-OS surface.
+### GPU memory — `pp_gpu_metrics`
+
+The GPU sibling of `pp_os_metrics`, and the second per-OS surface. One small API
+(`init` / `sample` / `processGpuBytes` / `reset`), exactly **one backend per
+platform**, each picked to match where ONNX Runtime actually uses the GPU:
+
+| Platform | Backend | Covers | How |
+|---|---|---|---|
+| Linux | NVML | CUDA — ONNX's only GPU EP there, so NVIDIA is the only relevant vendor | `dlopen("libnvidia-ml.so.1")` |
+| Windows | DXGI | DirectML *and* CUDA in one vendor-neutral query | `IDXGIAdapter3::QueryVideoMemoryInfo` |
+| macOS | Metal | CoreML | `MTLDevice currentAllocatedSize` / `recommendedMaxWorkingSetSize` (`pp_gpu_metrics_mac.mm`) |
+
+`GpuSample` reports `processUsedBytes` (the headline number — this process's
+VRAM), `peakProcessBytes`, the device-wide total/used where the backend can see
+them, the resolved `backend` and `deviceName`, and a `unified` flag. That flag
+matters when reading the numbers: on Apple Silicon GPU memory is unified, so it
+**overlaps RSS** rather than adding to it — do not sum the two.
+
+Three properties worth knowing:
+
+- **No hard GPU dependency.** NVML is `dlopen`'d, never linked. On a host with no
+  usable source (a non-NVIDIA Linux box) `init()` returns `false`, every field
+  reads 0/empty, and the library still loads.
+- **`init()` is idempotent and thread-safe**; `sample()` and `processGpuBytes()`
+  call it internally. The controller calls it once at startup only to log which
+  backend resolved.
+- **`processGpuBytes()` is the cheap query**, used to *bracket* an
+  `Ort::Session` creation for per-subsystem attribution — so it is called from
+  model-load worker threads (pose, TTS) as well as the 1 s sampler. Everything is
+  mutex-guarded for that reason. It is still a driver query: low-cadence only,
+  never a hot path.
+
+> The gauge and the GPU sampler are the only per-OS surfaces in the profiler.
+> Everything above `pp_os_metrics.cpp` / `pp_gpu_metrics.cpp` is portable.
 
 ## 11. Common Mistakes
 
@@ -439,17 +490,40 @@ Why each:
 |---|---|
 | `src/Core/pp_profiler.h` / `.cpp` | Tiered macros, lock-free records, singleton registry, `snapshot`, `reset`, `dumpToLog` (→ `PpStatsLog`), `ScopeTimer` / `MemScope`. |
 | `src/Core/pp_os_metrics.h` / `.cpp` | Cross-platform process + per-thread RSS / CPU sampling and thread registration. |
+| `src/Core/pp_gpu_metrics.h` / `.cpp` | GPU-memory sampling: NVML (Linux) / DXGI (Windows) dispatch, `GpuSample`, `processGpuBytes`. |
+| `src/Core/pp_gpu_metrics_mac.mm` | The Metal backend (Objective-C++), Apple only. |
+| `src/Core/cpu_topology.h` | Physical-core count — sizes the ORT intra-op pool (shot-analyzer guide §11). |
+| `src/Core/AnalysisProfileLog.h` / `.cpp` | Per-`analyze()`-run record + its per-stage breakdown; backs the ANALYSIS RUNS tab and its Export. Runtime only. |
 | `src/Core/PpStatsLog.h` / `.cpp` | Dedicated stats ring the profiler dumps into — separate from the application log. |
 | `src/Core/PpMessageLog.h` / `.cpp` | Application-log ring (warnings/errors + Qt/OpenCV/FFmpeg capture); the profiler does **not** write here. |
 | `src/Core/pp_debug.h` / `.cpp` | `ppInfo/ppWarn/ppError/ppDebug` and the Qt/OpenCV/FFmpeg capture. |
+| `src/Analysis/analysis_profiling.h` / `.cpp` | `recordAnalysisRun` — turns a stage trace into `Analysis.Stage.*` scopes + an `AnalysisProfileLog` entry (§4). |
 | `src/Gui/monitor/profiler_controller.h` / `.cpp` | QObject bridge: 1 s gauge sampler, cached gauge, formatted scope/memory/thread models, 60 s dump cadence, stats-ring filter + export. |
-| `src/Gui/monitor/ScreenResourceMonitor.qml` | Hosts the PROFILER panel + STATS HISTORY section. |
+| `src/Gui/monitor/resource_monitor_controller.h` / `.cpp` | The screen's other half — the EventBuffer diagnostics snapshot (incl. session-lifetime totals) and device cards. |
+| `src/Gui/monitor/ScreenResourceMonitor.qml` | Hosts the PROFILER panel, STATS HISTORY, and the bottom tabs. |
 | `src/Gui/monitor/RmProfilerRow.qml` | Scope table row component. |
 | `src/Gui/monitor/RmStatRow.qml` | STATS HISTORY row component (time / category / message). |
-| `src/Core/tests/` | GoogleTest suite (core, gauge, concurrency/TSan, compile-out). |
+| `src/Gui/monitor/RmAnalysisRunRow.qml` | ANALYSIS RUNS row + the expandable per-stage breakdown with time bars (§5). |
+| `src/Gui/monitor/RmDeviceCard.qml`, `RmSourceRow.qml`, `RmTimelineChart.qml`, `RmWarningNotice.qml` | The buffer/device half of the screen. |
+| `src/Core/tests/` | 7 GoogleTest targets: `pp_profiler_test`, `pp_profiler_concurrency_test` (TSan), `pp_profiler_compileout_test`, `pp_os_metrics_test`, `pp_gpu_metrics_test`, `pp_stats_log_test`, `profiler_controller_test`. |
+
+### Running the tests
+
+```bash
+cmake -S src/Core/tests -B build/core-tests
+cmake --build build/core-tests -j6
+ctest --test-dir build/core-tests --output-on-failure
+```
+
+> `profiler_controller_test` needs `AnalysisProfileLog.cpp` in its target — it
+> reads `pullAnalysisRuns()`. It once silently reported as **"Not Run"** rather
+> than failing, because a link error at that stage is not a test failure to
+> CTest. If a target you added disappears from the results rather than going red,
+> check the link line first.
 
 ---
 
-*For the implementation plan, phasing, and test specification, see the Claude Code build prompt
-(`CLAUDE_CODE_PROMPT_resource_profiler.md`). For the broader data-flow diagnostics it complements,
-see the Event Buffer developer guide.*
+*For the broader data-flow diagnostics this complements, see
+`docs/developer/event_buffer_developer_guide.md` (§10, the diagnostics snapshot and
+its session-lifetime counters). For what the analysis stages actually are, see
+`docs/developer/analysis_pipeline_developer_guide.md` §7 (Managing Performance).*

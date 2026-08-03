@@ -1,9 +1,9 @@
 # Pinpoint Shot Detector — Developer Guide
 
 **Audience**: Developers working on or integrating with the Pinpoint application  
-**Location**: `src/IMU/impact_detector.h`, `src/Audio/onset_detector.h` + `acoustic_shot_detector.{h,cpp}`, `src/Gui/shot_arbiter.h` + `shot_controller.{h,cpp}`; vision groundwork in `src/Pose/ball_detector.*` + `ball_model.h` and `src/Gui/ball_calibration_controller.{h,cpp}`  
+**Location**: `src/IMU/impact_detector.h`, `src/Audio/onset_detector.h` + `acoustic_shot_detector.{h,cpp}`, `src/Gui/shot/shot_arbiter.h` + `shot_controller.{h,cpp}`, vision in `src/Pose/ball_detector.{h,cpp}` + `ball_temporal.h`  
 **Language**: C++17 (detector math headers) / C++20 (app integration)  
-**Status**: P1–P3 implemented and unit-tested; P4 mic settings + latency calibration landed. The calibrated ball detector (B0–B5) is live but its `ballLaunched` candidate producer is still pending; on-hardware field tuning pending.
+**Status**: All **three** modalities are live candidate producers — IMU (P1), acoustic (P2) and vision (P3-G5, the v2 temporal ball tracker). P4 mic settings + latency calibration landed. On-hardware field tuning of the thresholds is ongoing.
 
 ---
 
@@ -15,14 +15,15 @@
 4. [The Timestamp Model — Latency-Aware Back-Dating](#4-the-timestamp-model--latency-aware-back-dating)
 5. [The IMU Impact Detector](#5-the-imu-impact-detector)
 6. [The Acoustic Onset Detector](#6-the-acoustic-onset-detector)
-7. [The Arbiter — Candidate → Hold → Fuse → Commit](#7-the-arbiter--candidate--hold--fuse--commit)
-8. [ShotController Integration](#8-shotcontroller-integration)
-9. [Getting Started — Adding a New Detector Modality](#9-getting-started--adding-a-new-detector-modality)
-10. [Configuration and Settings](#10-configuration-and-settings)
-11. [Internals — Design Decisions Explained](#11-internals--design-decisions-explained)
-12. [Testing](#12-testing)
-13. [Common Mistakes](#13-common-mistakes)
-14. [File Map](#14-file-map)
+7. [The Vision Launch Detector](#7-the-vision-launch-detector)
+8. [The Arbiter — Candidate → Hold → Fuse → Commit](#8-the-arbiter--candidate--hold--fuse--commit)
+9. [ShotController Integration](#9-shotcontroller-integration)
+10. [Getting Started — Adding a New Detector Modality](#10-getting-started--adding-a-new-detector-modality)
+11. [Configuration and Settings](#11-configuration-and-settings)
+12. [Internals — Design Decisions Explained](#12-internals--design-decisions-explained)
+13. [Testing](#13-testing)
+14. [Common Mistakes](#14-common-mistakes)
+15. [File Map](#15-file-map)
 
 ---
 
@@ -41,7 +42,7 @@ detectors behind one funnel:
 |---|---|---|---|
 | **Acoustic** | `OnsetDetector` (impact "click") | Sample-accurate pinpoint; small, stable capture latency | Fires on any sharp sound near the mic |
 | **IMU** | `ImpactDetector` (shaft shock + swing energy) | Strong evidence a *swing* happened | ±5 ms sampling at 200 Hz; variable BLE latency; ±16 g clipping |
-| **Vision** | calibrated ball presence (live); launch signal future — see §9 note | Confirms a ball is teed (and, later, that it left) | Requires per-camera calibration; frame-rate coarse; launch hook pending |
+| **Vision** | `BallDetector` launch cliff (`ball_temporal.h`) | Direct evidence the ball *left the tee* — needs no user calibration | Frame-rate coarse; age-from-collapse estimate; fixed confidence 0.6, so it corroborates and never commits alone |
 
 Each detector emits a *candidate* — an estimated true-impact instant plus a
 confidence. The **arbiter** collects candidates in a short hold window and
@@ -73,6 +74,9 @@ scoring) belongs to the shot analyzer — see
 │                                    ▼                      ▼                │
 │                         [TranscriptionController] ─► [ShotController]      │
 │                                                       reportCandidate()    │
+│  [BallDetector] ──ballLaunched──► [CameraInstance] ──►     ▲               │
+│   (detector thread)                stamps absolute t       │               │
+│                                    [CameraManager] ────────┘               │
 │                                                       ┌──────────────┐     │
 │  [SHOT button] ────triggerShot()──────────────────────►  ShotArbiter │     │
 │   (manual — bypasses the hold)                        │  hold/fuse   │     │
@@ -93,7 +97,8 @@ scoring) belongs to the shot analyzer — see
    and `ShotController::armed` is true.
 2. **Swing happens**: the IMU on the club shaft sees a gyro-energy ramp through
    the downswing, then an accelerometer shock at impact; the microphone hears
-   the impact click a few milliseconds of latency later.
+   the impact click a few milliseconds of latency later; the ball's matched-filter
+   response in the hitting-area ROI collapses off a cliff as it departs.
 3. **Candidates**: each detector independently back-dates its arrival stamp by
    its own latency and calls `ShotController::reportCandidate(source, est_t, conf)`.
 4. **Hold**: the first candidate opens a 200 ms arbiter window. Other modalities'
@@ -101,7 +106,7 @@ scoring) belongs to the shot analyzer — see
 5. **Commit**: at the deadline the arbiter fuses: two agreeing modalities (or one
    strong one) → `commitShot()` writes the `shot_marker_v1` entry with the
    **authoritative** timestamp (acoustic when present) and emits `shotDetected`.
-6. **Pipeline**: `ShotProcessor` runs post-roll → pause → `captureSwingWindow()`
+6. **Pipeline**: `ShotProcessor` runs post-roll → pause → `captureSwingWindow(4 s)`
    → analysis ∥ export → replay. Its `busy` state disarms the trigger for the
    whole pipeline, and the arbiter's own refractory absorbs echoes around the
    edges.
@@ -182,8 +187,9 @@ est_t_us = arrival_stamp_us − per_source_latency_us
 
 | Source | Arrival stamp | Latency constant | Where it lives |
 |---|---|---|---|
-| IMU | `nowMicros()` at the top of the GUI-thread packet handler | `ImuInstance::kImuBleLatencyUs` (30 ms) | `imu_instance.h` |
-| Acoustic | `nowMicros()` at buffer **receipt** on the audio thread, minus `samplesAfterOnset/rate` back to the onset sample | `AppSettings::audioDeviceLatencyUs` (20 ms default, persisted) | `app_settings.h` |
+| IMU | `nowMicros()` at the top of the GUI-thread packet handler | `ImuInstance::kImuBleLatencyUs` (30 ms) | `src/Gui/imu/imu_instance.h` |
+| Acoustic | `nowMicros()` at buffer **receipt** on the audio thread, minus `samplesAfterOnset/rate` back to the onset sample | `AppSettings::audioDeviceLatencyUs` (20 ms default, persisted) | `src/Gui/app/app_settings.h` |
+| Vision | the **triggering frame's own capture time** on the buffer clock (`BallDetection::tUs`, the same value its ring entry got), minus the collapse age | `kBallLaunchLatencyUs` (24 ms ball-departure latency), plus `framesSinceCollapse × frameInterval` | `src/Pose/ball_detector.cpp` |
 
 The acoustic path is the precision channel: the onset sample index is exact
 (the truth-table test demonstrates 0-sample error), so its only error is the
@@ -191,11 +197,17 @@ device-latency constant. The IMU's BLE connection-interval jitter makes its
 constant softer — which is exactly why the arbiter's match tolerance is ±40 ms
 and the acoustic timestamp wins when both agree.
 
-**Until P4**, both constants are fixed estimates. P4 replaces them with
-cross-correlation auto-calibration (peak-function alignment of simultaneous
-IMU/audio observations of the same strikes). The constants are deliberately
-*passed into* the detector configs, never hard-coded in the math, so P4 is a
-plumbing change only.
+The vision path back-dates in two steps, and the reason is worth internalising.
+The tracker only *knows* a launch happened some frames after the collapse cliff,
+so the detector reports an **age** (`launchAgeUs`) rather than an instant, paired
+with the frame time it noticed (`launchFrameTUs`). `CameraInstance` forms
+`estImpactUs = launchFrameTUs − launchAgeUs`. Using the frame's own capture stamp
+rather than "now" matters: the detector runs on its own thread behind a throttle,
+so "now" at emit time carries queueing delay that has nothing to do with the ball.
+
+The latency constants are deliberately *passed into* the detector configs, never
+hard-coded in the math, so replacing the fixed estimates with cross-correlation
+auto-calibration is a plumbing change only.
 
 **Rules:**
 - Stamp arrival time **first**, before any processing, on the thread the data
@@ -277,16 +289,39 @@ mono float ─► one-pole high-pass (1 kHz)   impact energy is high-frequency;
    adaptive threshold                       8 × noise-floor EMA (τ 500 ms,
    crossed FROM BELOW (attack-only)         frozen while tracking a candidate)
         ▼
-   exponential-decay gate                   at +30 ms the envelope must have
+   absolute amplitude gate                  hard floor on the candidate
+   (minLevelAbs, from mic sensitivity)      threshold — see below
+        ▼
+   exponential-decay gate                   at +45 ms the envelope must have
    (decayRatioMax 0.5)                      dropped below half its peak —
         ▼                                   speech and tones fail this
    refractory 35 ms                         min inter-onset spacing
 ```
 
-Confirmation is delayed by `decayWindowMs` (30 ms), but the reported onset is
+### The absolute amplitude gate (`minLevelAbs`)
+
+The relative threshold alone has a failure mode that reads as a *missed impact*
+rather than a false positive. In a quiet room the noise-floor EMA collapses toward
+zero, so `8 × floor` does too, and any faint tick — a keyboard press, a chair —
+opens a candidate. That spurious candidate's tracking and refractory windows then
+**swallow the real impact** that lands inside them. So the detector keeps a hard
+floor on candidate-opening that is independent of the noise floor: below
+`minLevelAbs` nothing opens at all, and the impact gets its own clean candidate.
+
+`0` disables it (pure relative behaviour). Live, it is driven from the mic
+sensitivity setting on a log scale — `s=0 → 0.30` (loud events only), `s=1 → 0.01`
+(very sensitive), `s=0.5 → ~0.055`. The calibration meter draws this level so the
+user can sit it between their ambient noise and their club impacts.
+
+Confirmation is delayed by `decayWindowMs` (**45 ms**), but the reported onset is
 the **first threshold-crossing sample** — that is what makes audio the
 sample-accurate pinpoint modality. A second hit inside the decay window folds
 into the same candidate (peak update) rather than double-firing.
+
+The window was widened from 30 ms to 45 ms because a reverberant indoor bay rings
+longer than an anechoic click and was failing its own decay gate. 45 ms is the
+longest horizon that still rejects the truth-table speech bursts — do not raise it
+further without re-running `acoustic_shot_detector_test`.
 
 The **attack-only crossing** rule (`m_wasBelow`) is load-bearing: without it,
 the abrupt *end* of a sustained tone re-candidates while the envelope is still
@@ -320,11 +355,107 @@ context provides the queued hop onto the GUI thread. The latency constant is a
 `std::atomic` so the GUI thread can update it from `AppSettings` while the
 audio thread reads it.
 
+### When the microphone actually runs
+
+The acoustic detector is only useful while the mic is open, and the mic used to
+open only on the Audio page and in the calibration view — so acoustic detection
+silently never applied during real sessions. `main.cpp` now drives
+`TranscriptionController::setShotDetectionActive()` from
+
+```
+cameraManager.captureIntent()
+  && appSettings.acousticShotDetectionEnabled()
+  && appSettings.autoDetectSwing()
+```
+
+`captureIntent` is *session*-stable — it does not toggle per shot — so the mic
+stays open across a whole capturing session and closes whenever acoustic cannot
+contribute a candidate anyway.
+
+Note the split at the arbiter boundary: the raw detector fires **always**, so the
+mic-calibration meter keeps seeing onsets; only the `reportCandidate()` call is
+gated on `autoDetectSwing && acousticShotDetectionEnabled`. Voice/STT is
+independent and unaffected by the acoustic toggle.
+
 ---
 
-## 7. The Arbiter — Candidate → Hold → Fuse → Commit
+## 7. The Vision Launch Detector
 
-**Math**: `src/Gui/shot_arbiter.h` — `pinpoint::ShotArbiter`, header-only, no
+**Math**: `src/Pose/ball_temporal.h` — `TemporalBallTracker`, header-only, OpenCV
+only, no Qt. **Live hook**: `BallDetector` (`src/Pose/ball_detector.{h,cpp}`), on
+its own detector thread behind a `FrameThrottle`. Design:
+`docs/design/ball_detection_v2.md`.
+
+This is the **v2 self-calibrating** detector. It replaced an earlier approach that
+required a per-camera user calibration profile (`BallCalProfile`, a calibration
+wizard, on-disk profiles per cameraKey); none of that exists any more. If you find
+references to `ball_model.h`, `ball_calibration_store.h` or
+`BallCalibrationController`, they are stale — the detector learns what it needs
+from the scene.
+
+### How a launch is detected
+
+1. **Seed the empty-mat baseline.** With the mat empty, ~1 s of frames are
+   accumulated into a mean DoG response `B` over the ROI. `baselineReady` fires
+   with a deep-copied `BallBaselineSnapshot` (`B`, noise level, radius estimate,
+   fps, ROI).
+2. **Lock the ball.** A placed ball is a novel matched-filter response against
+   `B`. On acquisition, `ballLocked(x, y, radiusNorm)` fires once.
+3. **Watch the spot.** Per frame, presence is the at-spot response over its
+   locked baseline `L0`; present when `≥ kPresenceFrac` (0.40) of it.
+4. **The cliff.** A struck ball's at-spot response collapses off a cliff. The
+   tracker records the collapse frame index; `ballLaunched(launchFrameTUs,
+   launchAgeUs, x, y)` fires with the age computed back to it (§4), and the
+   tracker re-arms for the next ball.
+
+Two self-healing behaviours matter when reading the code:
+
+- **Re-arm on absence** (`kReacquireSeconds`, 0.30 s): a ball removed or occluded
+  for that long releases the lock, so re-adding it re-locks. A brief occlusion
+  recovers before the timer.
+- **Auto re-seed** (`kReseedEmptySeconds`, 1.5 s of a quiet ROI): the one-shot
+  seed bakes in whatever sits under the box at seed time. A ball already on the
+  mat — a saved ROI restored on connect, the box nudged with the ball down — gets
+  subtracted into `B` and is then *never novel*, i.e. never detected. Relearning
+  whenever the ROI has been ball-free for a while heals that.
+
+### Stamping and the relaunch guard
+
+`CameraInstance` owns the conversion to an absolute impact time and the guard
+against double-firing:
+
+```cpp
+const qint64 baseTUs     = launchFrameTUs >= 0 ? launchFrameTUs : nowMicros();
+const qint64 estImpactUs = baseTUs - launchAgeUs;
+```
+
+A struck ball can **bounce back through the ROI**, re-lock, and fire a second
+launch inside the post-roll — observed 0.53 s after impact, which overwrote the
+real launch before the window-freeze snapshot. Two genuine shots are never less
+than 2 s apart (1.5 s arbiter refractory plus the processing pipeline), so a
+launch within 2 s of the previous one is treated as the same strike and the
+**first one wins**.
+
+The emitted confidence is a fixed **0.6** — deliberately below the arbiter's 0.8
+lone-candidate floor. Vision can corroborate IMU or acoustic; it can never commit
+a shot by itself. `CameraInstance` also stashes the launch *position* the detector
+already computed (`ballLaunchInfo()`), which feeds the offline ball-anchor pass;
+the `ballLaunched` signal itself carries only the timestamp and confidence.
+
+The signal path is `BallDetector` → `CameraInstance` (queued; the detector runs on
+its own thread) → `CameraManager::ballLaunched` → the `main.cpp` lambda →
+`reportCandidate(Source::Ball, …)`, gated on `autoDetectSwing`.
+
+> `baselineReady`, `ballLocked`, `ballLaunched` and `exposureWarning` are
+> **outside** the `FrameThrottle` contract, which counts only
+> `ballDetected` / `detectionSkipped` — exactly one of those two per `detect()`
+> call, always. Adding a temporal signal never releases the throttle.
+
+---
+
+## 8. The Arbiter — Candidate → Hold → Fuse → Commit
+
+**Math**: `src/Gui/shot/shot_arbiter.h` — `pinpoint::ShotArbiter`, header-only, no
 Qt, time injected (`nowUs` parameters) so it is fully unit-testable.
 `ShotController` owns one and supplies the `QTimer`.
 
@@ -369,7 +500,7 @@ Everything runs on the GUI thread — no locks anywhere in the chain.
 
 ---
 
-## 8. ShotController Integration
+## 9. ShotController Integration
 
 `ShotController` (QML context property `shotController`) is the single funnel.
 Its public surface, after P3:
@@ -389,8 +520,8 @@ signals: void shotDetected(Source source, qint64 timestampUs, int sessionType);
 at the moment of commit (`SessionController::activeSessionType()`), carried in
 both the signal and the marker payload, and consumed by the analyzer factory.
 
-The main.cpp wiring (one lambda per modality, both gated on the
-`autoDetectSwing` setting):
+The main.cpp wiring is one lambda per modality — three of them now — each gated on
+`autoDetectSwing`:
 
 ```cpp
 QObject::connect(&imuManager, &ImuManager::impactDetected, &shotController,
@@ -400,52 +531,67 @@ QObject::connect(&imuManager, &ImuManager::impactDetected, &shotController,
 });
 ```
 
+The acoustic lambda adds `&& appSettings.acousticShotDetectionEnabled()`; the ball
+lambda (`CameraManager::ballLaunched`) is gated on `autoDetectSwing` alone.
+
 `ShotProcessor` applies a per-source **post-roll** before freezing the buffer
-(`postRollMsFor(Source)`, all 500 ms today) so the follow-through lands in the
-ring — a new source must be added to that switch.
+(`postRollMsFor(Source)`) so the follow-through lands in the ring. It is no longer
+uniform — a new source must be added to that switch:
+
+| Source | Post-roll |
+|---|---|
+| `Manual` | 500 ms |
+| `Imu` / `Pose` / `Ball` / `Acoustic` | 1250 ms |
+
+The manual button is pressed *after* the swing is over, so it needs only enough
+room to catch the tail; an auto-detected shot commits at impact and must wait out
+the whole follow-through.
+
+The window itself is `captureSwingWindow(4 s)` (trimmed from 5 s, 2026-07-19). The
+window is anchored at the pause instant, so post-impact room (~1.5 s: hold +
+back-date + post-roll) is unaffected and the trim only reduces pre-impact reach.
+The floor is set by the analyzer's onset clamp — it never reads further back than
+impact − 1.75 s — so 4 s leaves ~0.7 s of margin while cutting a fifth off the
+frozen window (~190 MB of raw frame copy per camera at export, and 20 % of the
+x264 encode).
 
 ---
 
-## 9. Getting Started — Adding a New Detector Modality
+## 10. Getting Started — Adding a New Detector Modality
 
-The intended fourth modality is vision: a `ballLaunched(qint64 timestampUs)`
-signal from a Kalman-tracked ball detector (`docs/design/ball_detector_design.md` §8).
-**The launch signal does not exist yet**, but the groundwork now does: the
-environment-calibrated stationary detector
-(`docs/design/ball_detection_calibration.md`, implemented as B0–B5) gates
-detection on a per-camera calibration profile (`BallDetector::setProfile()`,
-created via `BallCalibrationController`, persisted per cameraKey) with an
-illumination-drift monitor — the legacy Hough/HSV path is retired. Today's
-`CameraInstance::ballPresentChanged` is still smoothed over a 50-frame window,
-seconds too coarse for a ±40 ms match tolerance. Do not wire it as a candidate
-source. When the tracked launch detector lands, the full integration is:
+All three designed modalities are now wired, so this section is the recipe for a
+*fourth*. The vision path (§7) is the most recent worked example — read it
+alongside this.
 
 ```cpp
-// 1. Detector math: a pure header under the owning subsystem
-//    (src/Pose/launch_detector.h), tested standalone. Emit an estimated
-//    true-impact instant: arrival nowMicros() − frame/detector latency,
-//    and a confidence that is NOT saturated (the arbiter's lone-strong
-//    threshold is 0.8 — reserve >0.8 for genuinely decisive evidence).
+// 1. Detector math: a pure header under the owning subsystem, tested
+//    standalone with a truth table (see §13). Emit an estimated true-impact
+//    instant, and a confidence that is NOT saturated — the arbiter's
+//    lone-strong threshold is 0.8, so reserve >0.8 for genuinely decisive
+//    evidence. Vision deliberately reports a flat 0.6 so it can only
+//    corroborate.
 
 // 2. Surface a signal from the owning controller (the ImuInstance /
-//    TranscriptionController precedent): compute est_t on the thread the
-//    data arrives on, BEFORE any queued hop.
+//    AcousticShotDetector / BallDetector precedent): compute est_t on the
+//    thread the data arrives on, BEFORE any queued hop. If your detector can
+//    only report "N frames/samples ago", emit the age alongside the stamp of
+//    the observation and let the owner subtract — do not substitute "now".
 
-// 3. Wire it in main.cpp behind the same setting gate:
-QObject::connect(&cameraManager, &CameraManager::ballLaunched, &shotController,
+// 3. Wire it in main.cpp behind the autoDetectSwing gate (plus any
+//    modality-specific enable, as acoustic does):
+QObject::connect(&fooManager, &FooManager::somethingDetected, &shotController,
                  [&](qint64 estImpactUs, float conf) {
     if (appSettings.autoDetectSwing())
-        shotController.reportCandidate(ShotController::Source::Ball, estImpactUs, conf);
+        shotController.reportCandidate(ShotController::Source::Foo, estImpactUs, conf);
 });
 
-// 4. The arbiter already understands it: Source::Ball maps to ArbSource::Ball
-//    (lowest timestamp authority — vision corroborates, never pinpoints).
-//    A genuinely NEW modality instead needs: an ArbSource enum entry (enum
-//    order = authority order), a Source enum entry + toArbSource/fromArbSource
-//    cases (shot_controller.cpp), a postRollMsFor case (shot_processor.cpp),
-//    and arbiter_test cases for its authority position.
+// 4. Teach the plumbing about it:
+//      - an ArbSource enum entry — ENUM ORDER IS AUTHORITY ORDER (shot_arbiter.h)
+//      - a Source enum entry + toArbSource/fromArbSource cases (shot_controller.cpp)
+//      - a postRollMsFor case (shot_processor.cpp)
+//      - arbiter_test cases pinning its authority position
 
-// 5. Add truth-table tests for the detector math (see §12) and field-verify
+// 5. Add truth-table tests for the detector math (see §13) and field-verify
 //    before shipping it with any weight.
 ```
 
@@ -455,42 +601,47 @@ A detector's entire job is `(est_t, conf)` candidates within its own gates.
 
 ---
 
-## 10. Configuration and Settings
+## 11. Configuration and Settings
 
 ### User-facing (`AppSettings`, Settings → General)
 
 | Setting | Key | Default | Effect |
 |---|---|---|---|
-| Auto-detect swing | `General/autoDetectSwing` | **ON** (since P3) | Master gate on both auto wirings in main.cpp. OFF = manual SHOT only. |
-| Swing detection sensitivity | `General/swingDetectionSensitivity` | "Medium" | Low/Medium/High → IMU `thresholdScale` 1.5/1.0/0.7 (`ImuManager::impactScaleFor`, live-updated). >1 = less sensitive. |
+| Auto-detect swing | `General/autoDetectSwing` | **ON** (since P3) | Master gate on all three auto wirings in main.cpp. OFF = manual SHOT only, and the mic stays closed. |
+| Swing detection sensitivity | `General/swingDetectionSensitivity` | `"Medium"` | Low/Medium/High → IMU `thresholdScale` 1.5/1.0/0.7 (`ImuManager::impactScaleFor`, live-updated). >1 = less sensitive. |
 | Audio device latency | `General/audioDeviceLatencyUs` | 20000 | Acoustic back-dating constant; forwarded to the detector atomically, live-updated. |
-| Hitting-area ROI | `camera/ballRoi` | unset | Per-cameraKey `{x, y, w, h}` map (`AppSettings::cameraBallRoi`); set via `CameraManager::setBallRoi()`. Changing it hard-invalidates the camera's ball-calibration profile. Vision groundwork (B0), not a detector tunable. |
+| Acoustic shot detection | `General/acousticShotDetectionEnabled` | **ON** | Per-modality enable for acoustic. Gates the arbiter feed *and* whether the mic opens during a session. Independent of voice/STT. |
+| Acoustic sensitivity | `General/acousticSensitivity` | 0.5 | [0,1] → `OnsetDetectorConfig::minLevelAbs` on a log scale (`0.01 × 30^(1−s)`): 0 → 0.30 (loud only), 1 → 0.01, 0.5 → ~0.055. The calibration meter draws this level. |
+| Microphone | `General/audioInputDevice` | "" (system default) | Pushed at startup before the first capture, and kept live. |
+| Hitting-area ROI | `camera/ballRoi` | unset | Per-cameraKey `{x, y, w, h}` map (`AppSettings::cameraBallRoi`); set via `CameraManager::setBallRoi()`. Defines where the vision detector looks. Changing it re-seeds the empty-mat baseline. |
 
-The default flipped OFF→ON at P3: a single modality auto-trigger was judged too
-false-positive-prone to default on, but with cross-modal confirmation (or a
-decisively-gated lone detector) it is acceptable. If field tuning proves
-otherwise, flip `app_settings.h` line ~142 back.
+The `autoDetectSwing` default flipped OFF→ON at P3: a single-modality auto-trigger
+was judged too false-positive-prone to default on, but with cross-modal
+confirmation (or a decisively-gated lone detector) it is acceptable.
 
 ### Detector constants (code)
 
 `ImpactDetectorConfig`, `OnsetDetectorConfig` and `ArbiterConfig` are plain
-structs with inline defaults — see §5/§6/§7 tables. They are constructed with
-defaults in their owners; there is deliberately no settings plumbing for the
-inner thresholds yet (they need field data before they deserve UI). The two
-latency constants and the sensitivity scale are the only externally-fed values.
+structs with inline defaults — see the §5/§6/§8 tables; the vision constants
+(`kPresenceFrac`, `kReacquireSeconds`, `kReseedEmptySeconds`,
+`kBallLaunchLatencyUs`) are file-scope `constexpr` in `ball_detector.cpp`. They are
+constructed with defaults in their owners; there is deliberately no settings
+plumbing for the inner thresholds (they need field data before they deserve UI).
+The externally-fed values are exactly: the two latency constants, the IMU
+sensitivity scale, and the acoustic absolute-level gate.
 
 ---
 
-## 11. Internals — Design Decisions Explained
+## 12. Internals — Design Decisions Explained
 
 ### Why the detectors are header-only pure math
 
 Every gate decision is testable without BLE hardware, an audio device, Qt
-signals, or the app build. The standalone suites (§12) run the full truth
-tables in milliseconds. The live hooks (`ImuInstance`, `AcousticShotDetector`)
-contain *no* detection logic — only sampling, frame conversion, and timestamp
-plumbing. Keep it that way: a tuning change must be provable in a test before
-it touches a device.
+signals, or the app build. The standalone suites (§13) run the full truth
+tables in milliseconds. The live hooks (`ImuInstance`, `AcousticShotDetector`,
+`BallDetector`) contain *no* detection logic — only sampling, frame conversion,
+and timestamp plumbing. Keep it that way: a tuning change must be provable in a
+test before it touches a device.
 
 ### Why the IMU decision is delayed by exactly one sample
 
@@ -530,43 +681,47 @@ single-modality false positives through the back door.
 |---|---|---|
 | `ImpactDetector::push` | GUI | BLE chain originates there (`QLowEnergyController` parented, no `moveToThread`) |
 | `OnsetDetector::push` | Audio | data arrives there; receipt stamp must be taken there |
+| `TemporalBallTracker::push` / `BallDetector::detect` | Detector thread | frame processing is expensive; runs behind a `FrameThrottle`, queued from the preprocessor |
 | `ShotArbiter`, `ShotController`, hold timer | GUI | single-threaded by construction — no locks |
-| `est_t` computation | producer thread | before any queued hop (jitter must not contaminate the estimate) |
+| `est_t` computation | producer thread | before any queued hop (jitter must not contaminate the estimate). Vision is the exception that proves the rule: it cannot compute `est_t` on the detector thread because the *frame* stamp is the anchor, not the arrival — so it emits `(frameTUs, ageUs)` and `CameraInstance` subtracts. Either way, "now" at the far end of a queue is never used. |
 
 ---
 
-## 12. Testing
+## 13. Testing
 
-Three standalone CTest suites — the `src/Analysis/tests` convention (own
-`main()`, printf CHECK macros, not in the root build):
+The detector tests live in four different suites, all standalone-configurable and
+all reachable from the umbrella. The Qt prefix is auto-resolved by
+`tests/cmake/PinPointTests.cmake` — pass `-DCMAKE_PREFIX_PATH` only if Qt is
+somewhere non-standard. See `testing_developer_guide.md`.
 
 ```bash
-# IMU impact detector truth table
-cmake -S src/IMU/tests -B build/imu-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
-cmake --build build/imu-tests -j && ctest --test-dir build/imu-tests --output-on-failure
+# All suites in one configure
+cmake -S tests -B build/tests && cmake --build build/tests -j6
+ctest --test-dir build/tests --output-on-failure -R 'impact|acoustic|arbiter|ball'
 
-# Acoustic onset detector truth table
-cmake -S src/Audio/tests -B build/audio-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
-cmake --build build/audio-tests -j && ctest --test-dir build/audio-tests --output-on-failure
-
-# Arbiter decision table (lives in the analyzer suite — Gui-header precedent)
-cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
-cmake --build build/analyzer-tests -j && ctest --test-dir build/analyzer-tests --output-on-failure
-
-# Vision groundwork — calibrated ball detection (model scoring, throttle
-# contract, calibration session protocol + profile persistence)
-cmake -S src/Pose/tests -B build/pose-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
-cmake --build build/pose-tests -j && ctest --test-dir build/pose-tests --output-on-failure
+# Or a single suite, for fast iteration:
+cmake -S src/IMU/tests   -B build/imu-tests    # impact_detector_test
+cmake -S src/Audio/tests -B build/audio-tests  # acoustic_shot_detector_test
+cmake -S src/Analysis/tests -B build/analysis-tests  # arbiter_test
+cmake -S src/Pose/tests  -B build/pose-tests   # ball_temporal_*, contract
+cmake --build build/imu-tests -j6 && ctest --test-dir build/imu-tests --output-on-failure
 ```
 
 The truth tables **are** the subsystem's value — every gate exists to kill a
 specific false-positive class, and each class has a named test:
 
-| Suite | Cases |
+| Test (suite) | Cases |
 |---|---|
-| `impact_detector_test` | strike fires exactly once with back-dated `est_t`; mat tap (spike, flat gyro) rejected; waggle rejected; slow swell rejected (jerk gate); refractory collapses double-hits; orientation gate on/off; 100 Hz ≡ 200 Hz; startup guard; sensitivity scale accepts/rejects a weak swing |
-| `acoustic_shot_detector_test` | click fires once, sample-accurate (0-sample error); sustained tone rejected at start (decay gate) AND at cutoff (attack-only rule); speech-like bursts rejected; ambient noise rejected; 20 ms double-click → one onset, 100 ms → two; `estimateImpactUs` math |
-| `arbiter_test` | 2-modal agree → one commit, acoustic timestamp; lone-weak reject; lone-strong commit; Imu > Ball authority; disagreement beyond ±40 ms; refractory drops echoes; manual `noteCommit` arms refractory; `cancel()` voids a window |
+| `impact_detector_test` (IMU) | strike fires exactly once with back-dated `est_t`; mat tap (spike, flat gyro) rejected; waggle rejected; slow swell rejected (jerk gate); refractory collapses double-hits; orientation gate on/off; 100 Hz ≡ 200 Hz; startup guard; sensitivity scale accepts/rejects a weak swing |
+| `acoustic_shot_detector_test` (Audio) | click fires once, sample-accurate (0-sample error); sustained tone rejected at start (decay gate) AND at cutoff (attack-only rule); speech-like bursts rejected; ambient noise rejected; 20 ms double-click → one onset, 100 ms → two; `estimateImpactUs` math |
+| `arbiter_test` (Analysis) | 2-modal agree → one commit, acoustic timestamp; lone-weak reject; lone-strong commit; Imu > Ball authority; disagreement beyond ±40 ms; refractory drops echoes; manual `noteCommit` arms refractory; `cancel()` voids a window |
+| `ball_temporal_test` (Pose) | the v2 tracker's seed → lock → presence → collapse-cliff path |
+| `ball_temporal_parity_test` (Pose) | the live tracker and the offline reconstruction agree — the same guarantee `swing_window_parity_test` gives the window |
+| `ball_detector_contract_test` (Pose) | the `FrameThrottle` contract: exactly one `ballDetected`/`detectionSkipped` per `detect()`, and the temporal signals never substitute for it |
+
+`arbiter_test` lives in the Analysis suite rather than a Gui one because
+`shot_arbiter.h` is pure header math with no Qt — the Analysis suite is where
+header-only math without an obvious home goes.
 
 ### Hardware verification (pending — the field checklist)
 
@@ -584,7 +739,7 @@ A headless middle tier also exists: replay a recorded BLE trace
 
 ---
 
-## 13. Common Mistakes
+## 14. Common Mistakes
 
 ### Wiring a detector to `triggerShot()` instead of `reportCandidate()`
 
@@ -626,12 +781,30 @@ behaviour change on a rate switch. Every window in this subsystem is
 milliseconds against sample timestamps; keep new ones that way (the
 rate-independence test will catch you).
 
-### Trusting `ballPresentChanged` as a launch signal
+### Trusting a presence signal as a launch signal
 
-It is smoothed over a 50-frame window for UI stability — present→absent lags
-the strike by seconds. Inside a ±40 ms match tolerance that is worse than no
-candidate at all (it can only miss the window or, worse, match a *different*
-strike).
+Ball *presence* is smoothed for UI stability; present→absent lags the strike
+badly. Inside a ±40 ms match tolerance that is worse than no candidate at all —
+it can only miss the window or, worse, match a *different* strike. The launch
+candidate comes from the tracker's per-frame collapse **cliff**
+(`BallDetector::ballLaunched`), never from the presence property.
+
+### Forgetting that a struck ball can come back
+
+It bounces off the net and rolls back through the ROI, re-locks, and fires a
+second launch — observed 0.53 s after impact, and it overwrote the real launch
+before the window-freeze snapshot. `CameraInstance` keeps the **first** launch of
+any 2 s cluster for exactly this reason. Any new vision signal needs the same
+thought: the physical event you are watching for does not stop happening after
+the shot.
+
+### Stamping a frame-derived event with "now"
+
+The ball detector runs on its own thread behind a throttle, so the moment its
+signal is *handled* is unrelated to the moment the frame was *captured*. Every
+frame carries `BallDetection::tUs` — the same value its EventBuffer ring entry
+got. Use it. `nowMicros()` appears in that path only as a defensive fallback for
+an unknown (`-1`) frame time.
 
 ### Re-using the acoustic detector at STT's 16 kHz
 
@@ -642,61 +815,78 @@ for a reason.
 
 ---
 
-## 14. File Map
+## 15. File Map
+
+> `src/Gui/` was reorganised from a flat folder into feature subfolders
+> (`app/`, `cameras/`, `imu/`, `shot/`, …). Paths below are current; older
+> references to `src/Gui/shot_controller.cpp` and friends predate that move.
 
 ```
 src/IMU/
 ├── impact_detector.h           ImpactDetector — pure gate math (P1)
 └── tests/
-    ├── CMakeLists.txt          Standalone CTest (build/imu-tests)
+    ├── CMakeLists.txt
     └── impact_detector_test.cpp
 
 src/Audio/
-├── onset_detector.h            OnsetDetector + estimateImpactUs — pure math (P2)
+├── onset_detector.h            OnsetDetector + estimateImpactUs — pure math (P2);
+│                                 minLevelAbs absolute gate, 45 ms decay window
 ├── acoustic_shot_detector.h    Thin QObject wrapper (audio thread)
 ├── acoustic_shot_detector.cpp  Receipt stamping, format conversion, emit
 └── tests/
-    ├── CMakeLists.txt          Standalone CTest (build/audio-tests)
+    ├── CMakeLists.txt
     └── acoustic_shot_detector_test.cpp
 
-src/Gui/
+src/Gui/shot/
 ├── shot_arbiter.h              ShotArbiter — hold/fuse/commit math (P3)
 ├── shot_controller.h           ShotController — armed gate, triggerShot,
 ├── shot_controller.cpp           reportCandidate, commitShot, shot marker
+└── shot_processor.{h,cpp}      Post-roll → freeze → analyse ∥ export → replay;
+                                  postRollMsFor, owns the SwingWindow
+
+src/Gui/imu/
 ├── imu_instance.{h,cpp}        IMU live hook + impactDetected + kImuBleLatencyUs
-├── imu_manager.{h,cpp}         Signal forward + sensitivity mapping + 200 Hz default
-├── transcription_controller.*  Owns AcousticShotDetector on the audio thread
-├── app_settings.h              autoDetectSwing, swingDetectionSensitivity,
-│                                 audioDeviceLatencyUs
-└── main.cpp                    The two gated reportCandidate wirings
+└── imu_manager.{h,cpp}         Signal forward + sensitivity mapping + 200 Hz default
+
+src/Gui/cameras/
+└── camera_instance.{h,cpp}     Vision hook: stamps ballLaunched to an absolute
+    camera_manager.{h,cpp}        impact time, relaunch guard, ballLaunchInfo();
+                                  setBallRoi
+
+src/Gui/app/
+└── app_settings.h              autoDetectSwing, swingDetectionSensitivity,
+                                  audioDeviceLatencyUs, audioInputDevice,
+                                  acousticShotDetectionEnabled, acousticSensitivity,
+                                  cameraBallRoi
+
+src/Gui/media/
+└── transcription_controller.*  Owns AcousticShotDetector on the audio thread;
+                                  setShotDetectionActive gates the mic
+
+src/Gui/
+└── main.cpp                    The three gated reportCandidate wirings
 
 src/Analysis/tests/
-└── arbiter_test.cpp            Arbiter decision table (in the analyzer suite)
+└── arbiter_test.cpp            Arbiter decision table (header-only math suite)
 
-src/Pose/                       Vision groundwork (B0–B5) — no candidate producer yet (§9)
-├── ball_detector.{h,cpp}       BallDetector — calibration-gated detection, drift monitor,
-│                                 calib-capture mode (setProfile/clearProfile, beginCalibCapture;
-│                                 target ≤ 0 = open-ended stream for the stillness gate)
-├── ball_model.h                pinpoint::ballcal — BallCalProfile, candidate scoring,
-│                                 frameStillness (noise-adaptive capture gate)
-├── ball_calibration_logic.h    Calibration session protocol (pure header)
-├── ball_calibration_store.h    Profile persistence (profile.yml.gz per cameraKey)
+src/Pose/                       Vision — a live candidate producer (§7)
+├── ball_temporal.h             TemporalBallTracker — matched-filter core, lock,
+│                                 presence, collapse cliff. Self-calibrating.
+├── ball_detector.{h,cpp}       BallDetector — baseline seed/re-seed, ROI, throttle
+│                                 contract, ballLaunched/ballLocked/baselineReady/
+│                                 exposureWarning, BallBaselineSnapshot
 └── tests/
-    ├── CMakeLists.txt          Standalone CTest (build/pose-tests)
-    ├── ball_model_test.cpp     Model construction + scoring goldens
-    ├── ball_detector_contract_test.cpp  FrameThrottle contract (one signal per detect())
-    └── ball_calibration_test.cpp        Session protocol + profile persistence
-
-src/Gui/ (vision groundwork)
-├── ball_calibration_controller.{h,cpp}  User-in-the-loop calibration state machine
-└── camera_manager / camera_instance     setBallRoi/ballCalibrationFor; applyBallCalProfile,
-                                           ballCalibrated/ballDrifting properties
+    ├── CMakeLists.txt
+    ├── ball_temporal_test.cpp           Tracker seed → lock → cliff
+    ├── ball_temporal_parity_test.cpp    Live vs offline reconstruction agree
+    └── ball_detector_contract_test.cpp  FrameThrottle contract
 ```
 
 ---
 
 *For the research survey behind the multi-modal approach see
-`docs/design/shotdetection.md`; for the design this implements (including the P4
-roadmap: latency auto-calibration, optional audio-in-ring, ML for jerk-less
-sensor placements) see `docs/implementation/shot_detection_impl.md`. Downstream of
-`shotDetected`, see `docs/developer/shot_analyzer_developer_guide.md`.*
+`docs/design/shotdetection.md`; for the implementation phases see
+`docs/implementation/shot_detection_impl.md`; for the vision detector's design see
+`docs/design/ball_detection_v2.md` (+ `docs/implementation/ball_detection_v2_impl_plan.md`).
+Downstream of `shotDetected`, see
+`docs/developer/shot_analyzer_developer_guide.md`.*

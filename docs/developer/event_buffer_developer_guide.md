@@ -3,7 +3,8 @@
 **Audience**: Developers working on or integrating with the Pinpoint application  
 **Location**: `src/Buffer/`  
 **Language**: C++20  
-**Status**: Production — fully implemented and tested on Linux and macOS
+**Status**: Production — shipping on Linux, macOS and Windows; 8 test targets +
+a manual latency benchmark
 
 ---
 
@@ -58,9 +59,9 @@ ring that overwrites from the oldest end.
 │              ┌─────────────────────────────┤                        │
 │              │                             │                        │
 │         [Subscription]             [SwingWindow]                    │
-│       (live consumers:          (post-pause analysis:               │
-│        UI preview,               swing analyser,                    │
-│        recorder)                 scorer, replay)                    │
+│       (live consumers:          (owned by ShotProcessor;            │
+│        UI preview,               read concurrently by               │
+│        recorder)                 ShotAnalyzer + SwingExporter)      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,32 +76,47 @@ ring that overwrites from the oldest end.
 3. **Capture**: With sources registered, the buffer fills continuously. Camera frames
    and IMU packets are published into their respective rings. Old data is silently
    overwritten as rings wrap.
-4. **Swing detection**: Ball detection and IMU analysis fire a swing-complete event
-   (future feature). The application calls `EventBuffer::pause()` — producers stop
-   writing, the merger quiesces, rings freeze. The last 5 seconds are intact.
-5. **Analysis**: `EventBuffer::captureSwingWindow(4000ms)` returns a `SwingWindow` —
-   a frozen, zero-copy view. Frames and IMU packets are accessed directly from ring
-   memory — no copies.
-6. **Dismiss**: User dismisses results. The `SwingWindow` is destroyed (ring memory
-   stays allocated — only ring positions are reset), then `EventBuffer::resume()`
-   clears the positions and restarts capture for the next swing.
+4. **Shot detection**: `ShotController` fires `shotDetected` (ball-launch / acoustic /
+   IMU evidence — see `shot_detector_developer_guide.md`). `ShotProcessor` waits out
+   a per-source post-roll so the follow-through lands in the ring, then calls
+   `EventBuffer::pause()` — producers stop writing, the merger quiesces, rings
+   freeze. The last 5 seconds are intact.
+5. **Analysis**: `ShotProcessor` calls `EventBuffer::captureSwingWindow(4000ms)`,
+   which returns a `SwingWindow` — a frozen, zero-copy view. `ShotAnalyzer` and
+   `SwingExporter` then read that one window **concurrently** from two
+   `QtConcurrent` workers (both `const`, both zero-copy) — frames and IMU samples
+   come straight from ring memory.
+6. **Dismiss**: After the workers join and the optional ¼× replay finishes, the
+   `SwingWindow` is destroyed (ring memory stays allocated — only ring positions
+   are reset), then `EventBuffer::resume()` clears the positions and restarts
+   capture for the next swing.
 7. **Device deselection**: When the user deselects a device, `CameraManager::setSelected()`
    pauses the buffer, calls `deregisterSource()` (freeing ring memory immediately),
    then resumes.
 8. **App exit**: `aboutToQuit` fires `EventBuffer::stop()`, joining the merger thread.
    `~EventBuffer()` frees any remaining source rings.
 
-The buffer is invisible to QML. The managers (`CameraManager`, `ImuManager`) own
-the buffer *state machine* (pause/resume sequencing, swing-window capture and
-replay orchestration), while the per-device instances (`CameraInstance`,
-`ImuInstance`) own the *data path*: each registers its own source on selection,
-publishes raw bytes from its capture/BLE thread, and deregisters on deselection.
+The buffer is invisible to QML. Ownership splits three ways:
+
+- The **managers** (`CameraManager`, `ImuManager`) own the buffer *state machine* —
+  pause/resume sequencing and the register/deregister dance on device selection.
+- The **per-device instances** (`CameraInstance`, `ImuInstance`) own the *data path*:
+  each registers its own source on selection, publishes raw bytes from its
+  capture/BLE thread, and deregisters on deselection.
+- **`ShotProcessor`** (`src/Gui/shot/`) owns the *`SwingWindow`* for its entire
+  lifetime. This migrated out of `CameraManager`: every resume path now funnels
+  through `CameraManager::resumeBuffer()`, which refuses while
+  `EventBuffer::swingWindowLive()` is true, so the window cannot outlive the
+  freeze that makes it valid.
+
 Note that the EventBuffer is a third, independent consumer of camera frames —
 separate from both the pose/ball pipeline and the view fan-out (`CameraInstance`
 publishes display frames to subscribed `QVideoSink`s; that path never touches the
-ring). The `BufferController` exposes diagnostic properties to QML. Analysis
-consumers (swing analyser, scorer) are not yet implemented and will interact
-with `SwingWindow` directly from C++.
+ring). The `BufferController` exposes diagnostic properties to QML.
+
+A `SwingWindow` is also produced **without** a live buffer: `SwingDiskLoader`
+(`src/Analysis/swing_reanalyzer.cpp`) builds one from an exported swing folder so
+offline re-analysis runs the identical analysis code. See §9.
 
 ---
 
@@ -111,7 +127,13 @@ with `SwingWindow` directly from C++.
 Every device that writes into the buffer registers as a **source** and receives a
 `SourceId` — a small integer used for all subsequent operations. A source has a
 `SourceDescriptor` that describes the device type, format, and expected data rate.
-Sources are registered once at application startup; no hot-plug in v1.
+Sources come and go with device selection (register on select, deregister on
+deselect); the buffer is briefly paused around each change.
+
+A descriptor also carries an **`identifier`** — the device serial or an opaque
+stable device id. It is what keys session-lifetime statistics (§10) and what lets
+a window reader attribute a payload to a physical device, so it survives
+deregistration where `SourceId` does not.
 
 ### SourceRing
 
@@ -139,8 +161,18 @@ cross-source clock jitter, and appends ordered `IndexEntry` records to the
 
 After `pause()`, `captureSwingWindow()` returns a **`SwingWindow`** — a frozen view
 of a time range. It holds a snapshot of `IndexEntry` records (tiny — 40 bytes each)
-and provides zero-copy access to payloads directly from the frozen source rings.
-Valid only while the buffer is paused.
+and serves payloads through a **`SwingPayloadSource`** that it owns.
+
+The payload source is the pluggable bit. Two backings exist, and the *same*
+concrete `SwingWindow` type is fed by either:
+
+| Backing | Where | Payload access |
+|---|---|---|
+| `RingPayloadSource` | `event_buffer.cpp`, built by `captureSwingWindow()` | Zero-copy from the frozen rings; seqlock-validated. Valid only while Paused. |
+| `SwingDiskSource` | `src/Analysis/swing_reanalyzer.cpp`, built by `SwingDiskLoader` | Streams an exported swing folder; one decoded frame per camera resident at a time, IMU held in RAM. Always valid. |
+
+That indirection is why offline re-analysis of an exported swing runs the *same*
+analysis stages as live capture rather than a parallel code path.
 
 ---
 
@@ -161,6 +193,7 @@ pinpoint::EventBuffer buffer;
 // Camera source
 pinpoint::SourceDescriptor camDesc;
 camDesc.name = "left_camera";
+camDesc.identifier = "SN-4412093";   // device serial — keys lifetime stats
 camDesc.window_duration = std::chrono::milliseconds(5000);
 camDesc.expected_interarrival_us = std::chrono::microseconds(33333); // 30fps
 
@@ -172,7 +205,9 @@ camFmt.fps_numerator       = 30;
 camFmt.fps_denominator     = 1;
 camFmt.max_payload_bytes   = 1920 * 1080;   // Mono8
 camFmt.typical_payload_bytes = 1920 * 1080;
+camFmt.plane_strides[0]    = 1920;          // bytes per row — NOT assumed from width
 camDesc.format.device = pinpoint::DeviceKind::Camera_UVC;
+camDesc.format.device_serial = camDesc.identifier;
 camDesc.format.format = camFmt;
 
 pinpoint::SourceId camId = buffer.registerSource(camDesc);
@@ -180,14 +215,17 @@ pinpoint::SourceId camId = buffer.registerSource(camDesc);
 // IMU source
 pinpoint::SourceDescriptor imuDesc;
 imuDesc.name = "wt9011dcl_ble";
+imuDesc.identifier = "C4:AC:59:11:22:33";
 imuDesc.window_duration = std::chrono::milliseconds(5000);
 imuDesc.expected_interarrival_us = std::chrono::microseconds(10000); // 100Hz
 
+// IMU sources store DECODED samples, not raw device packets — the driver parses
+// on the BLE thread and publishes a fixed-layout ImuSample (see §9).
 pinpoint::ImuFormat imuFmt{};
 imuFmt.device         = pinpoint::DeviceKind::IMU_WitMotion;
 imuFmt.sample_rate_hz = 100;
-imuFmt.packet_bytes   = 20;
-imuFmt.packet_schema  = "wt9011dcl_combined_v1";
+imuFmt.packet_bytes   = sizeof(pinpoint::ImuSample);   // 40
+imuFmt.packet_schema  = "imu_sample_v2";
 imuDesc.format.device = pinpoint::DeviceKind::IMU_WitMotion;
 imuDesc.format.format = imuFmt;
 
@@ -278,22 +316,31 @@ size_t n = buffer.activeSourceCount();   // count of non-deregistered sources
 | Field | Type | Purpose |
 |---|---|---|
 | `name` | `std::string` | Human-readable name for diagnostics |
+| `identifier` | `std::string` | Device serial or opaque stable device id. Keys session-lifetime stats (§10) — survives deregistration. |
 | `window_duration` | `chrono::milliseconds` | How much history to retain (default 5000ms) |
 | `expected_interarrival_us` | `chrono::microseconds` | Used by liveness watchdog to detect stalls |
-| `format.device` | `DeviceKind` | Camera or IMU type — see `types.h` |
+| `format.device` | `DeviceKind` | Camera, IMU, or `Marker_App` — see `types.h` |
+| `format.device_serial` | `std::string` | Physical-device attribution for window readers. `registerSource()` falls back to `identifier` if this is empty. |
 | `format.format` | `CameraFormat` or `ImuFormat` | Format-specific fields — see below |
 | `sync_source` | `SyncSource` | Timestamping mode (always `SoftwareTimestamp` in v1) |
 | `sync_group` | `optional<string>` | Hardware sync group (placeholder, unused in v1) |
+
+`DeviceKind::Marker_App` is not a device: it registers a source the *application*
+publishes into, so app-generated events (e.g. a shot-impact marker) land in the
+same timeline as device data and are ordered against it by the merger.
 
 ### Camera format fields
 
 | Field | Purpose |
 |---|---|
-| `pixel_format` | `PixelFormat` enum — e.g. `Mono8`, `BayerRG8`, `YUV422` |
+| `pixel_format` | `PixelFormat` enum — e.g. `Mono8`, `BayerRG8`, `YUV422`. `pixel_format_names.h` maps it to/from the canonical `swing.json` string. |
 | `width`, `height` | Frame dimensions in pixels |
 | `fps_numerator`, `fps_denominator` | Frame rate as a fraction |
 | `max_payload_bytes` | **Critical**: slots are sized to this. Must be ≥ largest frame you will ever publish. If a frame exceeds this, it is clamped and logged. |
 | `typical_payload_bytes` | Used for diagnostics only |
+| `plane_strides` | `array<uint32_t,4>` — bytes per row per plane. **Do not derive stride from `width`**: drivers pad rows, and a decoder that assumes `width` bytes shears the image. Set it from what the driver reports. |
+| `exposure_us` | Per-stream exposure in microseconds; `0` = unknown. Motion-blur-aware stages read it. |
+| `exposure_source` | `ExposureSource` provenance — `Measured` (read from the frame, manual exposure), `MeasuredAuto` (read from the frame, auto-exposure active so it varies), `Derived` (computed as `1/(2·fps)` — webcams that report nothing), `Unknown`. Round-trips through `swing.json` via `exposureSourceName()` / `exposureSourceFromName()`. |
 
 ### IMU format fields
 
@@ -301,8 +348,8 @@ size_t n = buffer.activeSourceCount();   // count of non-deregistered sources
 |---|---|
 | `device` | `DeviceKind` enum |
 | `sample_rate_hz` | Nominal sample rate — informs watchdog threshold |
-| `packet_bytes` | Fixed packet size. If your IMU sends variable-size packets, use the maximum. |
-| `packet_schema` | Opaque string identifying the packet layout for parsers |
+| `packet_bytes` | Fixed payload size per event. IMU sources publish **decoded** `ImuSample` records, so this is `sizeof(ImuSample)` (40), not the on-the-wire BLE packet size. |
+| `packet_schema` | Opaque string identifying the payload layout. Currently `"imu_sample_v2"` — see `imu_sample.h`. |
 
 ### Slot count and memory
 
@@ -420,13 +467,49 @@ automatically by swing/ball detection. Device selection calls
     start()  (next swing session)
 ```
 
-### `start()` — Idle → Capturing
+### `start()` — Idle → Capturing *or* Paused
 
-Launches the merger thread, sets the `capturing_` flag so producers begin writing.
-Valid with **zero registered sources** — the merger runs quietly, sleeping efficiently
-until sources are registered. Called once in `main.cpp` before any controllers
-are constructed. The merger applies `ThreadPolicy::apply(ThreadRole::Merger)` at
-entry to elevate its scheduling priority (see Section 13).
+Launches the merger thread. Called once in `main.cpp` before any controllers are
+constructed. The merger applies `ThreadPolicy::apply(ThreadRole::Merger)` at entry
+to elevate its scheduling priority (see Section 13), then invokes the optional
+thread-register hook (see below).
+
+`start()` is valid with **zero registered sources**, and that is the normal case at
+app launch. With no sources it enters **Paused**, not Capturing, and sets an
+internal `no_source_paused_` flag — the merger parks rather than spinning over an
+empty source set:
+
+```cpp
+buffer.isWaitingForSources();  // true: Paused only because nothing is registered
+```
+
+Use this to distinguish "waiting for the first device" from a deliberate
+swing-analysis pause — they are the same `BufferState::Paused` otherwise. The flag
+is set by `start()` with no sources, by `deregisterSource()` when the last source
+goes, and by `resume()` when it declines (see below). It clears on a successful
+`resume()`.
+
+The GUI closes the loop rather than the buffer auto-resuming itself:
+`CameraManager::applyCaptureIntent()` is called after every register/deregister and
+funnels through `resumeBuffer()`, which is a no-op unless the buffer is Paused and
+becomes effective once a source exists.
+
+### Registering the merger thread with the profiler
+
+`EventBuffer` deliberately does not know about the app's resource profiler — the
+standalone Buffer tests build without it. Instead the app injects a hook, called
+once from the merger thread at loop entry:
+
+```cpp
+// src/Gui/main.cpp
+eventBuffer.setThreadRegisterHook([](const char *name) {
+    pinpoint::osmetrics::registerThread(name);   // name == "Buffer.Merger"
+});
+eventBuffer.start();   // set the hook BEFORE start()
+```
+
+Set it before `start()`; it fires exactly once. See
+`resource_profiler_developer_guide.md` for what registration buys you.
 
 ### `pause()` — Capturing → Paused
 
@@ -446,8 +529,13 @@ entry to elevate its scheduling priority (see Section 13).
 
 ### `resume()` — Paused → Capturing
 
-1. If `resume_clear_rings` is true (default): resets each ring's write position
-   to zero and clears the `TimelineIndex`. The next swing gets a clean slate.
+0. **Refuses if no sources are registered.** It stays Paused, sets
+   `no_source_paused_`, and returns — there is nothing to capture, and spinning the
+   merger over an empty source set is pure waste.
+1. If `resume_clear_rings` is true (default): **folds each ring's counters into the
+   session-lifetime totals** (§10) *before* resetting the ring's write position to
+   zero, then clears the `TimelineIndex`. The next swing gets a clean slate without
+   the resource monitor losing every count on each pause→resume cycle.
 2. Sets `capturing_ = true` — producers begin writing immediately on the next callback.
 3. Wakes the merger out of its paused park: bumps `control_wait_` and notifies —
    done **last**, after the state transition is fully committed, so the woken
@@ -471,11 +559,16 @@ The buffer returns to Idle. Called once on app exit via
 ### State query
 
 ```cpp
-buffer.state();        // returns BufferState enum
-buffer.isCapturing();  // convenience — true only in Capturing state
+buffer.state();               // returns BufferState enum
+buffer.isCapturing();         // convenience — true only in Capturing state
+buffer.isWaitingForSources(); // Paused only because nothing is registered
+buffer.swingWindowLive();     // a SwingWindow captured from this buffer is alive
 ```
 
-Both are safe to call from any thread.
+All are safe to call from any thread. `swingWindowLive()` is the app-wide resume
+gate: `CameraManager::resumeBuffer()` returns early while it is true, so no path —
+including QML — can unfreeze the rings out from under a window the shot workers
+are still reading.
 
 ---
 
@@ -545,8 +638,8 @@ Consumer-visible latency has two components:
 
 ## 9. The SwingWindow — Frozen Analysis View
 
-`SwingWindow` is the primary interface for post-swing analysis. It can only be
-constructed while the buffer is `Paused`.
+`SwingWindow` is the primary interface for post-swing analysis. A window captured
+*from a buffer* can only be constructed while that buffer is `Paused`.
 
 ```cpp
 buffer.pause();
@@ -575,6 +668,11 @@ size_t nSamples = window.imuSampleCount(imuId);
 pinpoint::SourceRing::ReadHandle h = window.payloadOf(entry);
 // h.data points into frozen ring memory — no copy
 // h.bytes is the actual payload size
+
+// Format metadata for a source — pixel format, dimensions, plane strides,
+// exposure and its provenance. Read this rather than assuming anything about
+// the payload layout; in particular NEVER assume stride == width.
+const pinpoint::FormatDescriptor& fmt = window.formatOf(camId);
 ```
 
 ### IMU interpolation
@@ -582,22 +680,62 @@ pinpoint::SourceRing::ReadHandle h = window.payloadOf(entry);
 ```cpp
 // Get interpolated IMU state at an arbitrary timestamp
 // (e.g. the exact moment a camera frame was captured)
-std::byte buffer[20];
+pinpoint::ImuSample s{};
 bool ok = window.interpolateImu(imuId, frame_timestamp_us,
-                                buffer, sizeof(buffer));
-// buffer now contains linearly interpolated IMU packet bytes
+                                reinterpret_cast<std::byte*>(&s), sizeof(s));
 ```
+
+`out_bytes` must equal `sizeof(ImuSample)` (40) — the window interpolates decoded
+samples, not raw device packets. Accel and gyro are lerped componentwise; the
+orientation quaternion is **slerped along the shortest arc**, never interpolated
+as Euler angles. All values are in the raw sensor body frame (schema
+`imu_sample_v2`) — see `imu_sample.h` and `docs/design/imu_frame_contract.md`.
+
+### Backing the window with something other than a live buffer
+
+`SwingWindow`'s public constructor takes a `std::unique_ptr<const
+SwingPayloadSource>`, so anything that can serve `(source_id, sequence) → bytes`
+plus a `FormatDescriptor` can back one:
+
+```cpp
+class MySource final : public pinpoint::SwingPayloadSource {
+    pinpoint::SourceRing::ReadHandle payloadOf(SourceId, uint64_t) const noexcept override;
+    const pinpoint::FormatDescriptor& formatOf(SourceId) const noexcept override;
+    bool validate(SourceId, const pinpoint::SourceRing::ReadHandle&) const noexcept override;
+};
+
+pinpoint::SwingWindow w(std::make_unique<MySource>(), std::move(entries), t0, t1);
+```
+
+The contract on `payloadOf()` is deliberately weak so a streaming backing is
+possible: the bytes returned for a source need only stay valid **until the next
+`payloadOf()` call on that same source id**. Analysis stages read camera frames
+strictly one at a time, so a single reusable buffer per source satisfies it —
+which is exactly how `SwingDiskSource` keeps one decoded frame per camera resident
+instead of the whole swing.
+
+`validate()` is the ring-only concern: `RingPayloadSource` re-checks the seqlock
+generation against the live ring, while a disk/RAM backing returns `true`
+unconditionally because its bytes cannot be recycled underneath the reader.
 
 ### Lifetime rules
 
-- `window.entries()` and `window.payloadOf()` are valid while the buffer is
-  `Paused` and the `SwingWindow` object is alive.
-- Calling `buffer.resume()` while a `SwingWindow` exists is allowed but payload
-  access afterwards is undefined — the rings may be overwritten. Best practice:
-  destroy the `SwingWindow` before calling `resume()`.
-- `SwingWindow` is non-copyable but movable. Moving it transfers ownership safely.
+- For a ring-backed window: `window.entries()` and `window.payloadOf()` are valid
+  while the buffer is `Paused` and the `SwingWindow` object is alive. A disk-backed
+  window has no such coupling.
+- The resume/deregister guard (`swingWindowLive()`) is owned by
+  `RingPayloadSource`, set in its constructor and cleared in its destructor — i.e.
+  held for the window's whole lifetime, moves included. `CameraManager::resumeBuffer()`
+  refuses while it is set, so in practice you cannot resume out from under a live
+  window; the app destroys it in `ShotProcessor::finishShot()` and only then
+  re-applies the capture intent.
+- `SwingWindow` is non-copyable but movable. The move is defaulted — ownership of
+  the payload source (and therefore of the guard) transfers with it, with no
+  special-casing.
 - Destroying a `SwingWindow` does not resume the buffer. `resume()` must be
   called explicitly when the application is ready for the next swing.
+- Two workers may read one window concurrently. Every accessor is `const` and
+  zero-copy; `ShotAnalyzer` and `SwingExporter` do exactly this.
 
 ### Memory cost
 
@@ -628,9 +766,18 @@ stats.monotonicity_violations.load();// non-monotonic timestamps, clamped by mer
 
 ### Liveness watchdog
 
-The merger thread checks each source every 10ms. If a source produces no events
-for `expected_interarrival_us × 5`, it is declared stalled and a special marker
-is emitted into the `TimelineIndex`:
+The merger thread checks each source every 10ms. A source is declared stalled once
+it has been silent for
+
+```
+max(expected_interarrival_us × stall_threshold_mult, stall_threshold_min_us)
+```
+
+i.e. `5 ×` its expected interval, but **never less than 1 second**. That floor
+matters: at 240fps the rate-derived threshold is ~21ms, and ordinary BLE/USB
+delivery hiccups well under a second are normal and self-heal — without the floor
+the timeline would fill with stall markers that mean nothing. When a source does
+trip the threshold, a marker is emitted into the `TimelineIndex`:
 
 ```cpp
 // In a consumer loop:
@@ -646,23 +793,58 @@ The stall clears automatically when the source resumes writing.
 
 ### Diagnostics snapshot
 
-`BufferController` (in `src/Gui/`) calls this every 5 seconds and logs it:
+Two consumers poll this. `BufferController` (`src/Gui/cameras/`) calls it on a 5s
+timer, logs a line per source (at warn level when stalled), and republishes it to
+QML as `state` / `sources` / `totalEvents`. `ResourceMonitorController`
+(`src/Gui/monitor/`) takes the same snapshot for the resource-monitor screen — that
+is where the lifetime totals are actually surfaced.
 
 ```cpp
-pinpoint::DiagnosticsSnapshot snap = buffer.diagnostics();
+pinpoint::EventBuffer::DiagnosticsSnapshot snap = buffer.diagnostics();
 
 snap.state;                 // current BufferState
 snap.timeline_entries;      // total events in TimelineIndex
 snap.snapshot_timestamp_us; // when this snapshot was taken
 
-for (const auto& src : snap.sources) {
+for (const auto& src : snap.sources) {          // currently-registered sources
+    src.id;
     src.name;               // source name string
-    src.events_written;
+    src.identifier;         // stable device id — keys the lifetime totals
+    src.slot_count;
+    src.events_written;     // since the last ring reset (i.e. last resume)
     src.events_overwritten;
+    src.bytes_written_total;
     src.stalled;
-    // ...
+    // Session-lifetime totals: folded history + the current ring's counters.
+    // These SURVIVE the ring resets that pause→resume performs.
+    src.lifetime_events_written;
+    src.lifetime_events_overwritten;
+    src.lifetime_bytes_written;
+}
+
+for (const auto& lt : snap.lifetime) {          // every source seen this session,
+    lt.identifier;                              // INCLUDING deregistered ones
+    lt.events_written;
+    lt.events_overwritten;
+    lt.bytes_written;
 }
 ```
+
+### Per-swing counters vs session-lifetime counters
+
+This is the distinction to get right when reading diagnostics. The `SourceStats`
+counters (and the matching `SourceInfo` fields) are **per capture session**: a
+default `resume()` clears the rings, so they restart from zero on every
+pause→resume — which, with swing replay, is once per shot. Before clearing,
+`resume()` folds them into `lifetime_`, keyed by `SourceDescriptor::identifier`.
+`deregisterSource()` folds too, so a device that has since been deselected still
+appears in `snap.lifetime`.
+
+So: use `events_written` to ask "how is this device doing right now"; use
+`lifetime_events_written` or `snap.lifetime` to ask "how much has this device
+delivered this session". The `lifetime_` map is mutated only on the control plane
+(`resume()` / `deregisterSource()`, both serialised with the buffer Paused) and
+never touched on the producer hot path.
 
 ### What to watch for
 
@@ -686,6 +868,7 @@ pinpoint::EventBufferConfig config;
 config.reorder_window_us       = 5000;  // 5ms cross-source ordering window
 config.watchdog_interval_ms    = 10;    // how often stall detection runs
 config.stall_threshold_mult    = 5;     // stall if silent for 5 × interarrival
+config.stall_threshold_min_us  = 1000000; // ...but never sooner than 1s (see §10)
 config.timeline_index_capacity = 8192; // power of 2; covers ~10s at 500 events/s
 config.merger_spin_iterations  = 64;   // ~10µs hot-path spinning before sleeping
 config.merger_cold_timeout_us  = 500;  // yield budget per merger iteration (macOS)
@@ -698,6 +881,9 @@ pinpoint::EventBuffer buffer(config);
 ```
 
 Tuning advice:
+- `stall_threshold_min_us`: the floor exists because the rate-derived threshold is
+  absurdly tight at high frame rates (~21ms at 240fps). Lower it only if you
+  genuinely need sub-second stall reporting and can tolerate the false positives.
 - `reorder_window_us`: increase if sources have high clock jitter (>5ms) and
   events arrive out of order. Increases end-to-end latency by the same amount.
 - `resume_clear_rings`: set `false` if you want `SwingWindow` data to persist
@@ -729,7 +915,7 @@ The protocol is:
 1. Load the generation counter with `memory_order_acquire`. If odd, the slot is
    being written — skip or retry.
 2. Read the payload.
-3. Load generation again with `memory_order_acquire`.
+3. Re-read the generation.
 4. If the generation changed between steps 1 and 3, the slot was overwritten during
    the read — the data is potentially torn. Discard and skip forward.
 
@@ -737,11 +923,55 @@ This is correct even on ARM (which has a weaker memory model than x86) because t
 `acquire`/`release` pairing creates the necessary happens-before relationships. The
 compiler and CPU cannot reorder reads before the acquire or writes after the release.
 
+#### The two fences that make it actually work on arm64
+
+The loads and stores above are necessary but not sufficient, because **`acquire`
+and `release` on a load/store are one-way barriers**, and in both directions the
+seqlock needs the *other* way. Both fences compile to nothing on x86-TSO and are
+the difference between working and silently-not on arm64.
+
+**Writer — release fence after publishing the odd generation** (`acquireWriteSlot()`
+and `getSlotByIndex()`, `source_ring.cpp`):
+
+```cpp
+write_seq_.store(seq + 1, std::memory_order_release);
+std::atomic_thread_fence(std::memory_order_release);   // ← this
+return WriteSlot{...};
+```
+
+The store-release orders everything *before* it and stops nothing *after* it from
+moving up. But the caller's payload stores happen after `acquireWriteSlot()`
+returns — the marker is published first and the bytes it is supposed to cover come
+later. Without the second fence those payload stores may become visible **before**
+the gen=odd marker, and a consumer recycling the slot then copies half-written
+bytes while the generation still looks stable: a torn read that `validate()` calls
+clean.
+
+**Reader — acquire fence before re-reading the generation** (`ReadHandle::validate()`):
+
+```cpp
+std::atomic_thread_fence(std::memory_order_acquire);   // ← this
+uint64_t gen_after = hdr.generation.load(std::memory_order_relaxed);
+return gen_after == generation_snapshot;
+```
+
+An acquire *load* cannot supply this. Acquire stops later accesses from floating
+up; what has to be pinned here is the payload copy that already happened —
+`copyBytesRacy()`'s loads must not sink *below* the check meant to vet them. An
+acquire *fence* is the barrier with that direction (no prior load may cross it), so
+the generation is re-read strictly after the bytes were taken. Without it the CPU
+may satisfy the copy late, from a slot the producer has since recycled, and
+`validate()` certifies those bytes against a generation read before they were
+fetched. Note the load itself is then `relaxed` — the fence is doing the ordering,
+so an acquire load would be redundant.
+
+If you touch the seqlock, these two fences are the part to leave alone.
+
 There is a deliberate data race in the seqlock: the reader reads payload bytes at
 the same time a writer might be writing to them (if the ring wraps). ThreadSanitizer
 (TSAN) flags this race. This is benign — the generation check is the safety mechanism,
 not the absence of concurrent access. Narrow TSAN suppressions in
-`tests/tsan_suppressions.txt` cover exactly and only this pattern.
+`src/Buffer/tests/tsan_suppressions.txt` cover exactly and only this pattern.
 
 ### 12.2 Cache line alignment and false sharing
 
@@ -794,6 +1024,25 @@ sources must have produced at least one event with a timestamp beyond the event'
 timestamp plus the window before the event can be released. The cost is latency
 (~13ms end-to-end for the default 5ms window with a 60fps camera).
 
+#### Overrun recovery — resume at the oldest resident slot, not the write head
+
+When the merger finds `write_seq - next > slot_count`, the producer has lapped it
+and the sequence it wanted is gone. The obvious recovery — skip to the current
+write head — is wrong, and used to be what this did. The backlog
+`[write_seq - slot_count, write_seq)` is *published, still-valid data*; jumping to
+the head throws away a whole extra ring lap (seconds of frames) on top of what the
+producer already overwrote. So the merger resumes at the oldest sequence still
+resident:
+
+```cpp
+next = ws_now - slot.ring->slotCount();
+```
+
+Salvaging into a region the producer is still advancing through is safe because
+`peekTimestamp()`'s seqlock and lap checks reject any sequence the producer reaches
+while the merger drains — a salvaged slot that goes stale mid-recovery is simply
+dropped again.
+
 ### 12.4 Producer signals — how the merger wakes
 
 Without a signal mechanism, the merger would need to poll constantly or sleep on a
@@ -820,8 +1069,8 @@ slow consumers.
 
 ### 12.6 `SwingWindow` safety without pinning
 
-A `SwingWindow` accesses ring slot memory directly with no reference counting. This
-is safe because:
+A ring-backed `SwingWindow` accesses slot memory directly with no reference
+counting. This is safe because:
 
 1. `captureSwingWindow()` is only callable when `state() == Paused`.
 2. In Paused state, `capturing_ = false`, so `acquireWriteSlot()` returns
@@ -831,6 +1080,16 @@ is safe because:
 5. `SwingWindow::payloadOf()` returns a `ReadHandle` with a generation snapshot.
    Even though overwrite cannot happen while Paused, `validate()` is still called
    after use — correct code should not rely on state invariants for correctness.
+
+What keeps the buffer *in* Paused for the window's lifetime is the
+`swing_window_live_` flag, and note **where it now lives**: `RingPayloadSource`
+sets it in its constructor and clears it in its destructor. That placement is the
+whole trick. The flag used to be set/cleared by `SwingWindow` itself, which meant
+every move constructor and move assignment had to hand the guard over by hand and
+null out the source. Now the window's moves are `= default`: the guard rides along
+with the `unique_ptr<SwingPayloadSource>`, is held until the *final* owner is
+destroyed, and a disk-backed window simply never acquires one — because
+`SwingDiskSource` has no buffer to freeze.
 
 ---
 
@@ -1023,11 +1282,12 @@ store to the same address). Defined in `platform.h`:
 
 ## 14. Common Mistakes
 
-### Calling `start()` before registering all sources
+### Assuming a camera frame's row stride equals its width
 
-Sources must be registered before `start()`. The merger thread begins polling
-rings immediately on `start()` — a source registered after this point will not
-be included in the k-way merge and its events will never appear in the timeline.
+`plane_strides` exists because drivers pad rows. Computing `row * width` instead of
+`row * plane_strides[0]` produces a progressively sheared image — which looks like
+a camera or decode bug and is neither. Read the stride from
+`SwingWindow::formatOf()` / `EventBuffer::formatOf()`; never derive it.
 
 ### Reading `slot.data` when `slot.valid == false`
 
@@ -1065,6 +1325,17 @@ will see partial data with no error. Monitor `bounds_violations` in diagnostics.
 Camera registrations should use the actual frame size reported by the driver after
 the camera starts.
 
+### Overwriting a source's format descriptor with a partially-filled one
+
+`updateSourceFormat()` replaces the whole `FormatDescriptor`. Re-stamps built from
+frame data typically carry no `device_serial`, so a naive replace would erase the
+attribution `registerSource()` normalised in. The buffer defends against exactly
+that one field — an empty `device_serial` in the update preserves the registered
+one — but nothing else is merged. Fill the descriptor from the current one rather
+than from scratch. `CameraInstance` additionally refuses to re-stamp while
+`swingWindowLive()`, preserving the invariant that a descriptor is immutable for
+as long as a worker is reading through it.
+
 ### Calling `deregisterSource()` while a `SwingWindow` is live
 
 `deregisterSource()` asserts that `swing_window_live_` is false. If you call it while
@@ -1096,33 +1367,44 @@ Qt's time classes are not guaranteed to be monotonic across all platforms and so
 
 ```
 src/Buffer/
+├── CMakeLists.txt              pinpoint_buffer library; PINPOINT_ENABLE_{ASAN,
+│                               UBSAN,TSAN} options; tests added only when
+│                               PROJECT_IS_TOP_LEVEL
 ├── platform.h                  Platform detection macros; PINPOINT_CPU_PAUSE()
-├── types.h                     SourceId, DeviceKind, PixelFormat, IndexEntry,
-│                               IndexEntryFlags, BufferState
-├── format_descriptor.h         FormatDescriptor, CameraFormat, ImuFormat
-├── source_descriptor.h         SourceDescriptor, SyncSource
+├── types.h                     SourceId, DeviceKind (incl. Marker_App),
+│                               PixelFormat, IndexEntry, IndexEntryFlags
+├── format_descriptor.h         FormatDescriptor, CameraFormat (strides,
+│                               exposure), ImuFormat, ExposureSource + names
+├── pixel_format_names.h        PixelFormat ↔ swing.json string, both directions
+│                               derived from one table. Qt-free.
+├── imu_sample.h                ImuSample (40B, "imu_sample_v2") + makeImuSample
+│                               — the single source of truth for the stored frame
+├── source_descriptor.h         SourceDescriptor, SyncSource, slot-count/size math
 ├── source_stats.h              SourceStats (cache-line aligned, all atomic)
 ├── event_buffer_config.h       EventBufferConfig — all tunable parameters
 │
 ├── source_ring.h               SourceRing — seqlock SPSC ring, core primitive
-├── source_ring.cpp
+├── source_ring.cpp             …including the two seqlock fences (§12.1)
 │
 ├── timeline_index.h            TimelineIndex — SPMC seqlock ring of IndexEntry
 ├── timeline_index.cpp
 │
-├── wait_flag.h                 WaitFlag — platform-abstracted wait with timeout
+├── wait_flag.h                 WaitFlag — platform-abstracted timed + untimed wait
 ├── wait_flag.cpp               Three platform implementations in one file
 │
 ├── thread_policy.h             ThreadPolicy — unprivileged priority elevation
 ├── thread_policy.cpp           Per-platform implementations
 │
 ├── event_buffer.h              EventBuffer, Subscription, DiagnosticsSnapshot
-├── event_buffer.cpp            Merger loop, lifecycle, watchdog, registration
+├── event_buffer.cpp            Merger loop, lifecycle, watchdog, registration,
+│                               lifetime counters, RingPayloadSource
 │
+├── swing_payload_source.h      SwingPayloadSource — the pluggable window backing
 ├── swing_window.h              SwingWindow — frozen analysis view
 ├── swing_window.cpp
 │
 └── tests/
+    ├── CMakeLists.txt              8 gtest targets + the benchmark
     ├── source_ring_test.cpp        SPSC stress, overrun, seqlock correctness
     ├── adversarial_fuzz_test.cpp   Producer/consumer race timing
     ├── timeline_index_test.cpp     Append, read, snapshot, reset
@@ -1138,39 +1420,72 @@ src/Buffer/
     └── tsan_suppressions.txt       Narrow seqlock race suppressions
 ```
 
+One Buffer-related test lives **outside** this tree:
+`src/Analysis/tests/swing_window_parity_test.cpp` builds a real `EventBuffer`,
+captures a window from it, and asserts a ring-backed window and a disk-backed one
+present the same data — i.e. that the `SwingPayloadSource` split did not fork
+behaviour. It sits in the Analysis suite because it needs the reanalyzer.
+
 ### Running the tests
 
+The Buffer suite has **not** migrated to the shared `pp_add_test` helper — it
+predates it, keeps its own GoogleTest `FetchContent`, and uses its own
+`PINPOINT_ENABLE_*` sanitizer options rather than the repo-wide `PP_SANITIZE`.
+Both entry points below are current; see `testing_developer_guide.md` for the
+wider picture.
+
 ```bash
-cd src/Buffer
+# Standalone — Buffer as its own top-level project (this is what enables its tests)
+cmake -S src/Buffer -B build/buffer
+cmake --build build/buffer -j6
+ctest --test-dir build/buffer --output-on-failure
 
-# ASAN + UBSAN (correctness)
-cmake -B tests/build -DPINPOINT_ENABLE_ASAN=ON -DPINPOINT_ENABLE_UBSAN=ON
-cmake --build tests/build
-ctest --test-dir tests/build --output-on-failure
-
-# TSAN (threading)
-cmake -B tests/build_tsan -DPINPOINT_ENABLE_TSAN=ON
-cmake --build tests/build_tsan
-TSAN_OPTIONS="suppressions=tests/tsan_suppressions.txt" \
-    ctest --test-dir tests/build_tsan --output-on-failure
+# Under the umbrella, alongside every other suite
+cmake -S tests -B build/tests
+cmake --build build/tests -j6
+ctest --test-dir build/tests --output-on-failure
 ```
+
+Sanitizers use a separate build dir (the flags bake into objects), and for these
+targets the knob is `PINPOINT_ENABLE_*`, **not** `PP_SANITIZE`:
+
+```bash
+# ASAN + UBSAN (correctness)
+cmake -S src/Buffer -B build/buffer-asan \
+      -DPINPOINT_ENABLE_ASAN=ON -DPINPOINT_ENABLE_UBSAN=ON
+cmake --build build/buffer-asan -j6
+ctest --test-dir build/buffer-asan --output-on-failure
+
+# TSAN (threading) — the seqlock's deliberate benign race needs the suppressions
+cmake -S src/Buffer -B build/buffer-tsan -DPINPOINT_ENABLE_TSAN=ON
+cmake --build build/buffer-tsan -j6
+TSAN_OPTIONS="suppressions=$PWD/src/Buffer/tests/tsan_suppressions.txt" \
+    ctest --test-dir build/buffer-tsan --output-on-failure
+```
+
+> On arm64 macOS, do not add `detect_leaks=1` — LSan is unsupported there and the
+> whole suite reports as failing. See `testing_developer_guide.md`.
 
 ### Latency benchmark (two modes)
 
+`latency_benchmark` is deliberately **not** registered with CTest — it is a
+manual-run timing harness, and its targets are wall-clock assertions that would be
+flaky in CI.
+
 ```bash
-cmake -B tests/build_bench && cmake --build tests/build_bench
+cmake -S src/Buffer -B build/buffer && cmake --build build/buffer -j6
 
 # Mode A: merger response latency (single source, direct ring read)
 # Target: p50 < 100µs, p99 < 500µs
-./tests/build_bench/latency_benchmark --merger
+./build/buffer/tests/latency_benchmark --merger
 
 # Mode B: end-to-end latency (multi-source via Subscription)
 # Target: p50 ≈ reorder_window + 0.5 × slowest_source_interval
 # For 5ms reorder + 60Hz camera: p50 ≈ 13ms — this is by design, not a bug
-./tests/build_bench/latency_benchmark --e2e
+./build/buffer/tests/latency_benchmark --e2e
 
 # Both modes
-./tests/build_bench/latency_benchmark
+./build/buffer/tests/latency_benchmark
 ```
 
 ---
