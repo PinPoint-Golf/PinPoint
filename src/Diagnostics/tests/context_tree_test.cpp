@@ -279,7 +279,49 @@ int main()
             check(res.tree.contains(QStringLiteral("archetype_bowed"))
                       && res.tree.contains(QStringLiteral("archetype_cupped")),
                   "the archetype contexts exist for the migrated face corridors");
+
+            // ── The club a swing was hit with, as a node in THIS tree ──────────
+            //
+            // Asserted against the shipped file rather than in isolation, because the promise
+            // contextIdForClub() makes is that its answer always EXISTS here — a caller resolves a
+            // norm against it without checking, and a returned id the tree lacks would silently
+            // resolve nothing and grade every reading as "no corridor".
+            const QStringList clubs = { QStringLiteral("DRIVER"),  QStringLiteral("3 WOOD"),
+                                        QStringLiteral("4 HYBRID"), QStringLiteral("7 IRON"),
+                                        QStringLiteral("SAND WEDGE"), QStringLiteral("PUTTER"),
+                                        QStringLiteral(""), QStringLiteral("HOVERCRAFT") };
+            bool allPresent = true;
+            for (const QString &c : clubs)
+                if (!res.tree.contains(contextIdForClub(c))) allPresent = false;
+            check(allPresent, "every club resolves to a context the shipped tree actually contains");
         }
+    }
+
+    std::printf("=== context tree: club -> context ===\n");
+    {
+        check(contextIdForClub(QStringLiteral("DRIVER")) == QStringLiteral("driver"),
+              "DRIVER resolves to the driver context");
+        check(contextIdForClub(QStringLiteral("7 IRON")) == QStringLiteral("iron"),
+              "a numbered iron resolves on the word, not on a per-club table");
+        check(contextIdForClub(QStringLiteral("SAND WEDGE")) == QStringLiteral("wedge"),
+              "a named wedge resolves to wedge");
+        check(contextIdForClub(QStringLiteral("3 WOOD")) == QStringLiteral("fairway_wood"),
+              "a fairway wood resolves to fairway_wood");
+        check(contextIdForClub(QStringLiteral("4 HYBRID")) == QStringLiteral("fairway_wood"),
+              "a hybrid is a long-club delivery, so it grades as a fairway wood");
+        // PITCHING WEDGE contains both words. WEDGE has to win, or every wedge in the bag would
+        // grade against the iron corridor — which for ball position is 17% of stance width away.
+        check(contextIdForClub(QStringLiteral("PITCHING WEDGE")) == QStringLiteral("wedge"),
+              "PITCHING WEDGE is a wedge, not an iron — the order of the tests is load-bearing");
+        check(contextIdForClub(QStringLiteral("pitching wedge")) == QStringLiteral("wedge"),
+              "case is normalised, so a hand-edited swing.json still resolves");
+
+        check(contextIdForClub(QStringLiteral("PUTTER")) == kDefaultContextId(),
+              "a putter has no node yet, so it lands on the default rather than inventing one");
+        check(contextIdForClub(QString()) == kDefaultContextId(),
+              "an unrecorded club is the same case as a shot declaring no context");
+        check(contextIdForClub(QStringLiteral("HOVERCRAFT")) == kDefaultContextId(),
+              "an unrecognised club does not resolve to nothing — nothing would grade nothing");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

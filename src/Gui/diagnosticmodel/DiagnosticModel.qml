@@ -47,6 +47,15 @@ Item {
         // a corridor the app does not grade against.
         libraryRoot: appSettings.athleteLibraryPath
         gradePolicy: appSettings.diagnosticsGradePolicy
+        // The swing a session screen has loaded, if any. Bound through the same context-property
+        // seam the two above use, so the façade never learns what a session screen is — it is
+        // handed a path and reads a phase grid off it.
+        //
+        // The session lock leaves Settings reachable while a session runs (NavigationController
+        // permits 8, 9 and the active type), which is what makes this worth binding: an author can
+        // have a swing on the Wrist stage and this panel open at the same time, and that is exactly
+        // when a corridor is worth arguing with.
+        currentSwingDir: currentSwing.swingDir
     }
 
     // The façade is read through Q_INVOKABLEs, which are not properties and so cannot be bound to.
@@ -712,6 +721,27 @@ Item {
             Text {
                 text:           browser.packLabel
                 visible:        globalBar.roomy
+                font.family:    Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorText3
+                Layout.fillWidth: false
+            }
+
+            // Which swing the measures table's readings belong to, and WHICH CORRIDOR answered for
+            // them. The second half is the load-bearing one: a value coloured against the full-swing
+            // corridor when the shot was a wedge is a confident, wrong colour, and a reader has to
+            // be able to see which of the five ball-position corridors is doing the judging.
+            //
+            // Kept when the title and the pack label drop out at narrow widths — those two say what
+            // the reader already knows, this says something only the app knows. Muted to the same
+            // level as the pack label: it qualifies the table, it is not a finding.
+            Text {
+                visible: browser.currentSwingDir !== ""
+                text:    browser.currentSwingLoading  ? qsTr("reading swing…")
+                       : browser.currentSwingHasValues
+                             ? qsTr("%1 · graded at %2").arg(browser.currentSwingLabel)
+                                                        .arg(browser.currentSwingContext)
+                             : qsTr("swing loaded · no readings")
                 font.family:    Theme.fontData
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3

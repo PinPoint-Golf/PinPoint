@@ -529,9 +529,12 @@ ModelBrowser::ModelBrowser(QObject *parent)
     , m_cat(makeMetricCatalogue())
     , m_policyName(QStringLiteral("standard"))
     , m_corridorWatcher(new QFutureWatcher<QVariantList>(this))
+    , m_swingWatcher(new QFutureWatcher<SwingPhaseGrid>(this))
 {
     connect(m_corridorWatcher, &QFutureWatcher<QVariantList>::finished,
             this, &ModelBrowser::onCorridorScanFinished);
+    connect(m_swingWatcher, &QFutureWatcher<SwingPhaseGrid>::finished,
+            this, &ModelBrowser::onSwingGridLoaded);
 
     // The user's override file, read separately from the merged view — saving must write back the
     // user's own entries and never a flattened copy of the shipped pack.
@@ -589,6 +592,7 @@ ModelBrowser::~ModelBrowser()
     // The worker reads only copies, but it writes into a future this object owns — so it has to be
     // joined before that future dies with us.
     if (m_corridorWatcher->isRunning()) m_corridorWatcher->waitForFinished();
+    if (m_swingWatcher->isRunning())    m_swingWatcher->waitForFinished();
 }
 
 // ⚠ THIS INVALIDATES EVERY POINTER INTO THE ASSEMBLY. m_assembled, m_norms, m_screens and m_drills
@@ -938,6 +942,16 @@ QVariantList ModelBrowser::columns(const QString &type) const
         c.append(column(QStringLiteral("anchor"), tr("Anchor"), 86, false, QStringLiteral("left"), true));
         c.append(column(QStringLiteral("status"), tr("Status"), 96));
         c.append(column(QStringLiteral("readBy"), tr("Read by"), 68, false, QStringLiteral("right"), true));
+        // What the swing on screen actually read. ONLY when there is one — a permanent column of
+        // dashes would be a standing accusation against the library, when the ordinary state of
+        // this panel is that nobody has a session open.
+        //
+        // Last, and deliberately: every column before it is a property of the LIBRARY and this one
+        // is a property of one swing. Putting it beside `unit` would read as though the measure
+        // carried the number.
+        if (showSwingColumn())
+            c.append(column(QStringLiteral("swingValue"), tr("This swing"), 96, false,
+                            QStringLiteral("right"), true));
     } else if (type == kMetrics) {
         c.append(column(QStringLiteral("name"), tr("Name"), 240, /*flex*/ true));
         c.append(column(QStringLiteral("key"), tr("Key"), 170, false, QStringLiteral("left"), true));
@@ -1200,6 +1214,14 @@ QVariantMap ModelBrowser::measureRow(const Measure &m) const
     cells.append(cell(QString::number(users), users == 0 ? QStringLiteral("warn") : QString(), true,
                       QStringLiteral("right")));
 
+    // The loaded swing's reading, graded against the corridor that would answer for it. Gated on
+    // the SAME predicate columns() uses — see showSwingColumn().
+    std::optional<double> swingValue;
+    if (showSwingColumn()) {
+        swingValue = swingValueFor(m);
+        cells.append(swingCell(m, swingValue));
+    }
+
     QVariantMap r;
     r.insert(QStringLiteral("id"), m.id);
     r.insert(QStringLiteral("type"), kMeasures);
@@ -1213,6 +1235,12 @@ QVariantMap ModelBrowser::measureRow(const Measure &m) const
     keys.insert(QStringLiteral("anchor"), anchor);
     keys.insert(QStringLiteral("status"), int(m.status));
     keys.insert(QStringLiteral("readBy"), users);
+    // Sorting on the swing column ranks by HOW FAR OUT, not by the raw reading — the question an
+    // author sorts this column to ask is "what did this swing do worst", and the readings are in
+    // different units, so ordering them against each other means nothing. Unreadable measures sort
+    // to the bottom under a descending sort (-1), below every graded one, rather than to the top
+    // where a dash would outrank a genuine fault.
+    keys.insert(QStringLiteral("swingValue"), swingDeviation(m, swingValue));
     r.insert(QStringLiteral("sortKeys"), keys);
     r.insert(QStringLiteral("searchText"),
              QStringList{ label, m.id, m.unit, m.metricKey, m.highMeans,
@@ -6674,6 +6702,146 @@ void ModelBrowser::scanCorridor(const QString &measureId)
         }
         return out;
     }));
+}
+
+// ── The swing on screen ─────────────────────────────────────────────────────
+
+void ModelBrowser::setCurrentSwingDir(const QString &dir)
+{
+    if (dir == m_swingDir) return;
+    m_swingDir = dir;
+
+    // The old swing's readings go NOW, not when the new grid lands. Between the two there is no
+    // swing on screen, and a column still showing the previous one's numbers under the new one's
+    // name is the worst of the three states this can be in.
+    m_swingGrid = SwingPhaseGrid{};
+    m_swingContextId.clear();
+    m_swingLoading = false;
+
+    if (m_swingDir.isEmpty()) {
+        emit currentSwingChanged();
+        emit modelChanged();          // the column goes away; see onSwingGridLoaded for both signals
+        return;
+    }
+
+    // OFF THE UI THREAD, with `writeSidecar` TRUE — the two halves of one decision.
+    //
+    // measure_sample.h offers a GUI-thread-safe call (`writeSidecar = false`) that returns an empty
+    // grid rather than fat-parsing, and it is the wrong one here. A swing whose sidecar is missing
+    // or whose guard is stale — which is EVERY swing that has just been re-analysed, the exact ones
+    // an author is looking at — would answer "no readings" indistinguishably from a swing that
+    // genuinely carries none. So the parse is allowed to happen, and it happens on a worker where a
+    // one-second stall costs a spinner instead of a frozen panel. The sidecar it writes then makes
+    // every later look at the same swing free.
+    const QString dirCopy = m_swingDir;
+    m_swingLoading = true;
+    emit currentSwingChanged();
+    // modelChanged HERE TOO, not only when the grid lands. The readings were dropped four lines up,
+    // so the column has to go with them on the same tick — otherwise the table keeps rendering the
+    // PREVIOUS swing's numbers for however long the parse takes, while the header above it has
+    // already changed to name the new one. Stale-and-labelled-as-current is the one state this is
+    // not allowed to be in, and it is the state a reader has no way to detect.
+    emit modelChanged();
+
+    m_swingWatcher->setFuture(QtConcurrent::run([dirCopy]() -> SwingPhaseGrid {
+        return readPhaseGrid(dirCopy, /*writeSidecar*/ true);
+    }));
+}
+
+void ModelBrowser::onSwingGridLoaded()
+{
+    SwingPhaseGrid grid = m_swingWatcher->future().result();
+
+    // The swing may have changed while the worker ran. Its result belongs to the dir that was
+    // current when it started, and there is no way to ask the future which that was — so it is
+    // matched on the grid's own record of where it came from. A grid that cannot say (an empty one,
+    // from a dir with no readable analysis) is accepted only when nothing has moved on since.
+    if (!grid.swingDir.isEmpty() && grid.swingDir != m_swingDir) return;
+
+    m_swingGrid      = std::move(grid);
+    m_swingContextId = m_swingGrid.isEmpty() ? QString()
+                                             : contextIdForClub(m_swingGrid.club);
+    m_swingLoading   = false;
+
+    emit currentSwingChanged();
+    // AND modelChanged, which is not belt-and-braces: the measures table gains or loses a COLUMN
+    // here, and the panel re-reads columns() and rows() off its `_revision` counter, which only
+    // modelChanged bumps. Emitting one without the other leaves the table's column list and its
+    // cell arrays built from different answers to showSwingColumn() — positional arrays that
+    // disagree, which is the failure the developer guide calls invisible to any check that counts.
+    emit modelChanged();
+}
+
+QString ModelBrowser::currentSwingLabel() const
+{
+    if (m_swingGrid.isEmpty()) return {};
+    const QString n = tr("swing %1").arg(m_swingGrid.ordinal);
+    return m_swingGrid.club.isEmpty() ? n : tr("%1 · %2").arg(n, m_swingGrid.club);
+}
+
+std::optional<double> ModelBrowser::swingValueFor(const Measure &m) const
+{
+    if (m_swingGrid.isEmpty()) return std::nullopt;
+    const std::optional<double> v = reduceOverGrid(m_swingGrid, m);
+
+    // A non-finite reading is NOT a reading. Without this it would render as a dash — normNumber
+    // spells an infinity that way — while still being graded, and every band comparison against a
+    // NaN is false, so it would come back Action: a dash wearing a warning colour, which is the one
+    // combination this column has no way to explain.
+    if (v && !std::isfinite(*v)) return std::nullopt;
+    return v;
+}
+
+QVariantMap ModelBrowser::swingCell(const Measure &m, const std::optional<double> &value) const
+{
+    // "Not assessed" — and it says so with an em dash rather than a blank, because a blank cell in
+    // a table of numbers reads as a rendering fault.
+    if (!value)
+        return cell(tr("—"), QStringLiteral("dim"), true, QStringLiteral("right"));
+
+    // normNumber, not QString::number: one to four decimals, as many as the number needs. A ratio
+    // whose corridor is 0.05 wide renders its edges as three different figures at one decimal.
+    const QString text = normNumber(*value);
+
+    // The corridor that would actually answer for this shot — resolved at the swing's own context,
+    // walking up from `driver` to `full_swing` to `any` exactly as grading does everywhere else.
+    // Nothing on the chain carrying a row is not a fault and not a finding: it is a measure with no
+    // corridor, and the reading is shown plainly with no colour claimed for it.
+    const NormResolution res = m_norms->resolve(m.id, m_swingContextId);
+    if (!res.found())
+        return cell(text, QString(), true, QStringLiteral("right"));
+
+    // The measure's SHAPE decides which tails grade — one-sidedness is a property of the quantity,
+    // invariant across contexts, which is why it lives on the measure and not on the norm.
+    const Grade g = grade(*value, *res.norm, gradePolicyByName(m_policyName), m.shape);
+
+    // NotMeasured here can only mean implausible (a norm resolved, and there is a value). The
+    // reading is SHOWN — hiding it is what makes a mis-tracked ball look like an absence — but it
+    // is not graded in either direction.
+    if (g == Grade::NotMeasured)
+        return cell(text, QStringLiteral("dim"), true, QStringLiteral("right"));
+
+    return cell(text, isDeviation(g) ? QStringLiteral("warn") : QString(), true,
+                QStringLiteral("right"));
+}
+
+double ModelBrowser::swingDeviation(const Measure &m, const std::optional<double> &value) const
+{
+    if (!value) return -1.0;
+    const NormResolution res = m_norms->resolve(m.id, m_swingContextId);
+    if (!res.found()) return -1.0;
+    if (res.norm->isImplausible(*value)) return -1.0;   // not ranked; it is not a swing finding
+
+    // Magnitude, not the signed distance: a stance 3 tolerances narrow and one 3 tolerances wide
+    // are equally far outside the corridor, and a sort that put one at each end of the list would
+    // bury half of what it was opened to find.
+    const double z = std::abs(normZ(*value, *res.norm, m.shape));
+
+    // A zero-tolerance norm admits only its own centre, so z is legitimately infinite there. This
+    // key crosses into QML inside the row map, and norm.h's rule is that infinity and NaN do not:
+    // `.toDouble()` on the far side has no way to render one. Clamped to a figure that still sorts
+    // above every real deviation.
+    return std::isfinite(z) ? z : 1.0e9;
 }
 
 void ModelBrowser::onCorridorScanFinished()

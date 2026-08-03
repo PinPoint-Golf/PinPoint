@@ -213,6 +213,7 @@ qt_add_executable(PinPointStudio
     src/Gui/shot/shot_list_model.h          src/Gui/shot/shot_list_model.cpp
     src/Gui/shot/shot_processor.h           src/Gui/shot/shot_processor.cpp
     src/Gui/shot/shot_replay_controller.h   src/Gui/shot/shot_replay_controller.cpp
+    src/Gui/shot/current_swing.h
     src/Gui/shot/reanalysis_controller.h    src/Gui/shot/reanalysis_controller.cpp
     src/Gui/markup/markup_truth.h           src/Gui/markup/markup_truth.cpp
     src/Gui/markup/markup_controller.h      src/Gui/markup/markup_controller.cpp

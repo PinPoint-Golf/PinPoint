@@ -58,6 +58,7 @@
 #include "../Export/swing_doc.h"
 #include "../Export/swing_zip_exporter.h"
 #include "shot_processor.h"
+#include "current_swing.h"
 #include "shot_replay_controller.h"
 #include "reanalysis_controller.h"
 #include "live_wrist_angles.h"
@@ -319,6 +320,11 @@ int main(int argc, char *argv[])
     // Disk-backed replay of saved shots (MP4 + swing.json) — independent of the
     // live SwingWindow that ShotProcessor owns for the just-captured shot.
     ShotReplayController      shotReplay(&appSettings);
+    // Which swing is on screen, app-wide. Written by the session screen that has one
+    // loaded (replay if active, else the carousel's selection); read by anything that
+    // is not that screen — today the Diagnostic Model panel, which grades its measures
+    // table against it. Deliberately not a second dir on shotReplay; see current_swing.h.
+    CurrentSwing              currentSwing;
     // Any review-state transition tears down an on-screen disk replay, so the
     // previous shot's replay stage + metric graph don't linger over the newly
     // selected (or resumed-live) session. reviewActiveChanged fires on every
@@ -505,6 +511,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("shotController"),    &shotController);
     engine.rootContext()->setContextProperty(QStringLiteral("shotProcessor"),     &shotProcessor);
     engine.rootContext()->setContextProperty(QStringLiteral("shotReplay"),        &shotReplay);
+    engine.rootContext()->setContextProperty(QStringLiteral("currentSwing"),      &currentSwing);
     engine.rootContext()->setContextProperty(QStringLiteral("shotModel"),         &shotModel);
     engine.rootContext()->setContextProperty(QStringLiteral("reanalysisController"), &reanalysisController);
     engine.rootContext()->setContextProperty(QStringLiteral("swingExporter"),     &swingZipExporter);

@@ -19,6 +19,7 @@
 #pragma once
 
 #include "../../Diagnostics/drill_pack.h"
+#include "../../Diagnostics/measure_sample.h"
 #include "../../Diagnostics/norm_provider.h"
 #include "../../Diagnostics/pack_provider.h"
 #include "../../Diagnostics/screen_pack.h"
@@ -143,6 +144,33 @@ class ModelBrowser : public QObject
     // happened once. Bound to AppSettings by the panel, so this object keeps no settings dependency.
     Q_PROPERTY(QString gradePolicy READ gradePolicy WRITE setGradePolicy NOTIFY modelChanged)
 
+    // ── The swing on screen ─────────────────────────────────────────────────
+    //
+    // The library is authored ABOUT swings, and until now it could not show one. An author editing
+    // a corridor could see the whole library's distribution (the corridor scan) and the numbers
+    // they were typing, but not the reading in front of them on the session screen — so "is this
+    // corridor right?" was answerable only in aggregate, one measure at a time.
+    //
+    // Bound by the panel from the `currentSwing` context property, the same seam `libraryRoot` and
+    // `gradePolicy` use, so this object keeps no dependency on what a session screen is.
+    Q_PROPERTY(QString currentSwingDir READ currentSwingDir WRITE setCurrentSwingDir
+               NOTIFY currentSwingChanged)
+    // "swing 3 · DRIVER" — what the measures column's header says it is showing. Empty until a grid
+    // has actually been read, so it can never name a swing whose values are not on screen.
+    Q_PROPERTY(QString currentSwingLabel READ currentSwingLabel NOTIFY currentSwingChanged)
+    // The context the readings are GRADED at, derived from the swing's club — "driver", "wedge".
+    // Reported rather than assumed: a value coloured against the full-swing corridor when the shot
+    // was a wedge is a confident, wrong colour, and the reader has to be able to see which corridor
+    // answered. Empty when no swing is loaded.
+    Q_PROPERTY(QString currentSwingContext READ currentSwingContext NOTIFY currentSwingChanged)
+    // A phase grid is being read. The read is off the UI thread (a swing with no sidecar, or a
+    // stale one, costs a full swing.json parse), so the column arrives a beat after the swing does.
+    Q_PROPERTY(bool currentSwingLoading READ currentSwingLoading NOTIFY currentSwingChanged)
+    // Does this swing produce a value for anything the library measures? False for a swing whose
+    // analysis carries none of the metrics any measure reads — which is a capture gap and says so,
+    // rather than a column of dashes with no explanation.
+    Q_PROPERTY(bool currentSwingHasValues READ currentSwingHasValues NOTIFY currentSwingChanged)
+
 public:
     explicit ModelBrowser(QObject *parent = nullptr);
     ~ModelBrowser() override;
@@ -171,6 +199,13 @@ public:
     void    setLibraryRoot(const QString &root);
     QString gradePolicy() const { return m_policyName; }
     void    setGradePolicy(const QString &name);
+
+    QString currentSwingDir() const { return m_swingDir; }
+    void    setCurrentSwingDir(const QString &dir);
+    QString currentSwingLabel() const;
+    QString currentSwingContext() const { return m_swingContextId; }
+    bool    currentSwingLoading() const { return m_swingLoading; }
+    bool    currentSwingHasValues() const { return !m_swingGrid.isEmpty(); }
 
     // ── Reading ─────────────────────────────────────────────────────────────
 
@@ -518,6 +553,7 @@ public:
 signals:
     void modelChanged();
     void corridorSamplesChanged();
+    void currentSwingChanged();
     // A save landed. The rest of the app caches its providers, so whoever is listening has to
     // re-take theirs or the edit is on disk and invisible until relaunch.
     void libraryChanged();
@@ -712,4 +748,52 @@ private:
     bool                             m_corridorScanning = false;
     QFutureWatcher<QVariantList>    *m_corridorWatcher  = nullptr;
     void onCorridorScanFinished();
+
+    // ── The loaded swing's readings ─────────────────────────────────────────
+    //
+    // The GRID, not the measure values — the same choice measure_sample.h argues for and for the
+    // identical reason, one level in: the pack here is not merely editable, it is being edited, so
+    // a cache of "measureId -> value" would be stale on every keystroke that changes a reducer. The
+    // grid is a property of the SWING and survives every edit; reducing it is cheap enough to do
+    // per row.
+    QString                          m_swingDir;
+    QString                          m_swingContextId;   // derived from the swing's club
+    pinpoint::analysis::SwingPhaseGrid m_swingGrid;
+    bool                             m_swingLoading = false;
+    QFutureWatcher<pinpoint::analysis::SwingPhaseGrid> *m_swingWatcher = nullptr;
+    void onSwingGridLoaded();
+
+    // This swing's reading for one measure, already reduced. nullopt means the swing cannot produce
+    // it — no such metric, or a phase the reducer needs was never segmented — which the column
+    // renders as a dash and NEVER as a zero (measure_sample.h's rule, and the whole module's).
+    std::optional<double> swingValueFor(const pinpoint::analysis::Measure &m) const;
+
+    // The reading as a CELL: the number, and the one thing the colour says — inside the corridor or
+    // outside it.
+    //
+    // Two tones and no more, which is a deliberate narrowing of a four-band grade. This column is
+    // read by SCANNING it, next to a library the author is editing; Ideal-vs-Good is a distinction
+    // about the corridor's shape, not about the swing, and rendering it here would make every
+    // ordinary reading carry a colour and the column stop meaning anything. `warn` is therefore
+    // exactly `isDeviation()` — Watch or Action — which is the app's own answer to "did something
+    // deviate", shared rather than redefined.
+    //
+    // Three states are NOT deviations and must not be coloured as though they were: no value at
+    // all, no corridor authored to judge it against, and a reading the norm refuses to believe
+    // (norm.h's plausibility rule — grading a mis-tracked ball in EITHER direction launders a
+    // capture fault into a diagnosis). Each of them renders muted, not warned.
+    QVariantMap swingCell(const pinpoint::analysis::Measure &m,
+                          const std::optional<double>      &value) const;
+
+    // How far outside the corridor the reading is, in tolerances — the swing column's sort key.
+    // Negative when there is nothing to rank (no value, or no corridor), so those sort below every
+    // graded row rather than above them.
+    double swingDeviation(const pinpoint::analysis::Measure &m,
+                          const std::optional<double>      &value) const;
+
+    // Does the measures table carry the swing column right now? ONE answer, because columns() and
+    // rows() build POSITIONAL arrays against each other — a column list and a cell list that
+    // disagree about this is the transposition bug the developer guide calls invisible to any check
+    // that counts.
+    bool showSwingColumn() const { return !m_swingGrid.isEmpty(); }
 };

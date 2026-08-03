@@ -268,6 +268,28 @@ ContextTreeLoadResult loadContextTree(const QByteArray &json, const QString &sou
     return loadFrom(doc.object(), sourceLabel);
 }
 
+QString contextIdForClub(const QString &club)
+{
+    // Matched on WORDS rather than on the exact vocabulary strings, so "7 IRON", "3 IRON" and a
+    // future "2 IRON" all land without a table that has to be kept in step with club_vocabulary.h.
+    // Upper-cased first because the token is stored upper-case but a hand-edited swing.json or an
+    // imported one need not be.
+    const QString c = club.trimmed().toUpper();
+    if (c.isEmpty()) return kDefaultContextId();
+
+    if (c.contains(QLatin1String("DRIVER")))  return QStringLiteral("driver");
+    if (c.contains(QLatin1String("WEDGE")))   return QStringLiteral("wedge");
+    // Before IRON, because a hybrid is named for the iron it replaces ("3 HYBRID" carries no "IRON",
+    // but a future "4 IRON HYBRID" would) — and after WEDGE for the same reason in reverse.
+    if (c.contains(QLatin1String("HYBRID")))  return QStringLiteral("fairway_wood");
+    if (c.contains(QLatin1String("WOOD")))    return QStringLiteral("fairway_wood");
+    if (c.contains(QLatin1String("IRON")))    return QStringLiteral("iron");
+
+    // PUTTER lands here with everything unrecognised. See the header for why that is deliberate
+    // rather than a gap waiting for a node.
+    return kDefaultContextId();
+}
+
 QJsonObject saveContextTree(const ContextTree &tree)
 {
     QJsonArray arr;

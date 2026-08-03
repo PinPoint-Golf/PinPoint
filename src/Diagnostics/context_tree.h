@@ -124,6 +124,27 @@ BindingResolution resolveContextBinding(const Condition &c, const ContextTree &t
 // deliberately separate from resolution — they differ exactly where inheritance does.
 const ContextBinding *ownContextBinding(const Condition &c, const QString &contextId);
 
+// ── What context a SHOT is in ───────────────────────────────────────────────
+//
+// The club a swing was hit with, as a node in this tree. A swing.json records the club (the token
+// vocabulary in Core/club_vocabulary.h) and no context id at all, so something has to bridge the
+// two — and it is here, once, rather than at each surface that grades a swing. Ball position is the
+// case that makes it matter: the shipped pack authors five corridors for it (any, driver,
+// fairway_wood, iron, wedge), and reading a driver against the full-swing row throws all five away.
+//
+// Judgement calls, stated rather than buried:
+//   · a HYBRID resolves to `fairway_wood`. It is a long-club delivery — ball forward, shallower
+//     attack — which is what the woods node distinguishes, and ball position is the measure the
+//     distinction was authored for.
+//   · a PUTTER resolves to the DEFAULT. The tree has no putting node, and inventing one here would
+//     be pack content authored in C++. A putt graded against full-swing corridors is wrong, but it
+//     is wrong visibly, at a context the reader can see, rather than silently.
+//
+// An unrecognised or empty club also yields the default — the same answer a shot that declares no
+// context gets, which is what kDefaultContextId() is for. This never returns a node the shipped
+// tree lacks, so a caller may resolve against it without checking.
+QString contextIdForClub(const QString &club);
+
 // ── Validation ──────────────────────────────────────────────────────────────
 //
 // ERRORS:

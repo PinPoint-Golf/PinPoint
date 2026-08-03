@@ -34,7 +34,13 @@
 #include "../screen_pack.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTemporaryDir>
 
 #include <algorithm>
 #include <cmath>
@@ -3020,6 +3026,161 @@ int main(int argc, char **argv)
               "as a condition, which is what graph() knows how to lay out");
 
         while (m.canUndo()) m.undo();
+    }
+
+    // ── The swing on screen: readings in the measures table ─────────────────────────────────────
+    //
+    // The one column in this panel whose value comes from OUTSIDE the library. Three things are
+    // asserted because each has already been got wrong somewhere in this file's history or is one
+    // line away from being: that the column and the cells agree about whether it exists (positional
+    // arrays), that the corridor which answers is the one the SWING'S CLUB selects rather than the
+    // default, and that the two tones mean inside and outside and nothing else.
+    std::printf("\n=== the loaded swing's readings ===\n");
+    {
+        auto columnIndex = [](const QVariantList &cols, const QString &key) {
+            for (int i = 0; i < cols.size(); ++i)
+                if (cols.at(i).toMap().value(QStringLiteral("key")).toString() == key) return i;
+            return -1;
+        };
+
+        // A swing carrying ONE reading: ball position, 25% of stance width, at address. The number
+        // is chosen because the shipped pack grades it differently per club and the difference is
+        // the whole point of the context walk — driver mu 5 sigma 8 (z = 2.5, a deviation), iron
+        // mu 33 sigma 10 (z = -0.8, inside). One swing, two clubs, two colours.
+        auto writeSwing = [](const QString &dir, const QString &club, double value) {
+            QDir().mkpath(dir);
+            QJsonArray t, v;
+            for (qint64 x = 0; x <= 100000; x += 1000) { t.append(x); v.append(value); }
+            QJsonObject metric;
+            metric.insert(QStringLiteral("key"),   QStringLiteral("ballPosition"));
+            metric.insert(QStringLiteral("unit"),  QStringLiteral("% stance width"));
+            metric.insert(QStringLiteral("t_us"),  t);
+            metric.insert(QStringLiteral("value"), v);
+
+            QJsonObject phase;
+            phase.insert(QStringLiteral("phase"), int(Phase::Address));
+            phase.insert(QStringLiteral("t_us"),  50000);
+            phase.insert(QStringLiteral("conf"),  0.9);
+
+            QJsonObject analysis;
+            analysis.insert(QStringLiteral("metrics"), QJsonArray{ metric });
+            analysis.insert(QStringLiteral("phases"),  QJsonArray{ phase });
+
+            QJsonObject review;  review.insert(QStringLiteral("club"), club);
+            QJsonObject swing;   swing.insert(QStringLiteral("index"), 3);
+
+            QJsonObject root;
+            root.insert(QStringLiteral("analysis"), analysis);
+            root.insert(QStringLiteral("review"),   review);
+            root.insert(QStringLiteral("swing"),    swing);
+
+            QFile f(QDir(dir).filePath(QStringLiteral("swing.json")));
+            if (f.open(QIODevice::WriteOnly))
+                f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+        };
+
+        // The grid is read on a worker (a swing with no sidecar costs a full parse, which must not
+        // land on the UI thread), so every assertion here waits for it rather than assuming.
+        auto settle = [&m]() {
+            QElapsedTimer clock; clock.start();
+            while (m.currentSwingLoading() && clock.elapsed() < 15000)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        };
+
+        // No swing: the column is not there. The ordinary state of this panel is that nobody has a
+        // session open, and a permanent column of dashes would be a standing accusation against the
+        // library rather than information.
+        check(columnIndex(m.columns(QStringLiteral("measures")), QStringLiteral("swingValue")) < 0,
+              "with no swing loaded the measures table has no swing column");
+        check(!m.currentSwingHasValues(), "and reports no readings to show");
+
+        QTemporaryDir tmp;
+        const QString driverDir = QDir(tmp.path()).filePath(QStringLiteral("swing_0003"));
+        const QString ironDir   = QDir(tmp.path()).filePath(QStringLiteral("swing_0004"));
+        writeSwing(driverDir, QStringLiteral("DRIVER"),  25.0);
+        writeSwing(ironDir,   QStringLiteral("7 IRON"),  25.0);
+
+        m.setCurrentSwingDir(driverDir);
+        settle();
+
+        const QVariantList cols = m.columns(QStringLiteral("measures"));
+        const int          idx  = columnIndex(cols, QStringLiteral("swingValue"));
+        check(idx >= 0, "a loaded swing puts the swing column on the measures table");
+        check(idx == cols.size() - 1,
+              "and puts it LAST — every other column is a property of the library, not of a swing");
+        check(m.currentSwingContext() == QStringLiteral("driver"),
+              "the readings are graded at the context the swing's club selects");
+        check(m.currentSwingLabel().contains(QStringLiteral("DRIVER")),
+              "and the panel can say which swing they belong to");
+
+        const QVariantList rows = m.rows(QStringLiteral("measures"));
+        // Cell/column parity, over EVERY row rather than the one under test. columns() and rows()
+        // build positional arrays against each other and a disagreement is invisible to any check
+        // that looks at one row — the delegate reads columns[index] per cell, so a short column
+        // list is a binding evaluated against undefined.
+        bool parity = !rows.isEmpty();
+        for (const QVariant &rv : rows)
+            if (rv.toMap().value(QStringLiteral("cells")).toList().size() != cols.size())
+                parity = false;
+        check(parity, "every measure row has exactly one cell per column, swing column included");
+
+        const QVariantMap bp = rowFor(rows, QStringLiteral("m_ballPosition"));
+        check(!bp.isEmpty(), "the swing's one measurable reading is on a row that exists");
+        const QVariantMap bpCell = bp.value(QStringLiteral("cells")).toList().at(idx).toMap();
+        // "25.0", not "25" — normNumber gives a figure one to four decimals wide, the same
+        // spelling every other norm number in this panel uses. A column that rendered its readings
+        // to a different precision than the corridor beside it would invite exactly one question.
+        check(bpCell.value(QStringLiteral("text")).toString() == QStringLiteral("25.0"),
+              "the cell shows what the swing actually read");
+        check(bpCell.value(QStringLiteral("tone")).toString() == QStringLiteral("warn"),
+              "25% of stance width is outside the DRIVER corridor, so it warns");
+
+        // A measure the swing cannot produce. Not a zero and not a blank — "not assessed" and
+        // "assessed and fine" are different statements and this module exists to keep them apart.
+        const QVariantMap absent =
+            rowFor(rows, QStringLiteral("m_leadWristFlexExt_p1"));
+        if (!absent.isEmpty()) {
+            const QVariantMap c = absent.value(QStringLiteral("cells")).toList().at(idx).toMap();
+            check(c.value(QStringLiteral("text")).toString() == QStringLiteral("—"),
+                  "a measure this swing cannot produce reads as a dash, never as a zero");
+            check(c.value(QStringLiteral("tone")).toString() == QStringLiteral("dim"),
+                  "and is muted rather than warned — a capture gap is not a swing finding");
+        }
+
+        // THE SAME READING, A DIFFERENT CLUB. This is the assertion that makes the context walk
+        // load-bearing rather than decorative: 25% is a deviation off a driver and unremarkable off
+        // a 7 iron, and a column that coloured both the same would be confidently wrong for one of
+        // them every time.
+        m.setCurrentSwingDir(ironDir);
+        // BEFORE the grid lands. The previous swing's readings must be gone the instant the swing
+        // changes, not when the replacement arrives — a parse takes a second on an unindexed swing,
+        // and for that second the table would otherwise show the driver's numbers under the iron's
+        // name, which is a wrong answer a reader has no way to detect. (Deterministic: the worker's
+        // completion is delivered through the event loop, which has not run yet.)
+        check(m.currentSwingLoading(), "switching swings starts a read");
+        check(columnIndex(m.columns(QStringLiteral("measures")),
+                          QStringLiteral("swingValue")) < 0,
+              "and drops the old swing's column immediately, rather than when the new one lands");
+        settle();
+        check(m.currentSwingContext() == QStringLiteral("iron"),
+              "loading another swing re-resolves the context from its own club");
+        const QVariantList ironCols = m.columns(QStringLiteral("measures"));
+        const int          ironIdx  = columnIndex(ironCols, QStringLiteral("swingValue"));
+        const QVariantMap  ironBp   = rowFor(m.rows(QStringLiteral("measures")),
+                                             QStringLiteral("m_ballPosition"));
+        const QVariantMap  ironCell =
+            ironBp.value(QStringLiteral("cells")).toList().at(ironIdx).toMap();
+        check(ironCell.value(QStringLiteral("text")).toString() == QStringLiteral("25.0"),
+              "the same reading");
+        check(ironCell.value(QStringLiteral("tone")).toString().isEmpty(),
+              "inside the IRON corridor, so it takes the ordinary text colour");
+
+        // Unloading takes the column with it, rather than leaving the last swing's numbers on
+        // screen under nobody's name.
+        m.setCurrentSwingDir(QString());
+        check(columnIndex(m.columns(QStringLiteral("measures")), QStringLiteral("swingValue")) < 0,
+              "clearing the swing removes the column again");
+        check(!m.currentSwingHasValues(), "and the readings go with it, immediately");
     }
 
     // Leave no user pack behind: a test with a side effect on the product is not a test.

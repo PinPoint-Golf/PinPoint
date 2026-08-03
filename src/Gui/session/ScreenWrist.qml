@@ -47,6 +47,33 @@ Item {
     // otherwise an off-screen timeline re-lays-out on every swing reload.
     readonly property bool _screenActive: navController.currentIndex === SessionController.Wrist + 1
 
+    // THE focused swing — the active replay, else the carousel's selection. One definition, because
+    // three panels here bind it (data viewer, markup, and the app-wide `currentSwing` below) and it
+    // was previously written out twice; a third copy is how they start disagreeing about which
+    // swing a screen is showing.
+    readonly property string _focusedSwingDir:
+        shotReplay.swingDir !== "" ? shotReplay.swingDir
+                                   : (wristCarousel.selectedCard ? wristCarousel.selectedCard.swingDir : "")
+
+    // Publish it app-wide.
+    //
+    // NOT gated on _screenActive, and that is the whole point rather than an oversight. Every
+    // reader of this is BY DEFINITION on another screen — the Diagnostic Model panel lives in
+    // Settings, which the session lock deliberately leaves reachable — so clearing it when this
+    // screen stops being the visible one clears it exactly when somebody goes to look. It shipped
+    // that way for one build and the column was never once on screen.
+    //
+    // What it means is therefore "the swing THIS SCREEN has loaded", not "the swing on the screen
+    // you are looking at". It empties on its own when the screen genuinely has none — no replay and
+    // nothing selected in the carousel — which is the honest condition. (The setter guards against
+    // re-announcing the same path, so re-evaluating on every carousel change costs nothing.)
+    Binding {
+        target: currentSwing
+        property: "swingDir"
+        value: root._focusedSwingDir
+        restoreMode: Binding.RestoreNone
+    }
+
     // Today-scoped carousel: on entry (before capture) show today's most-recent
     // session folder, or an empty carousel when none exists for today. Guarded so
     // it never clobbers a live session's freshly-captured in-memory shots or an
@@ -132,8 +159,7 @@ Item {
                 tableDelegate: Component {
                     PpDataViewer {
                         sessionType: SessionController.Wrist
-                        swingDir: shotReplay.swingDir !== "" ? shotReplay.swingDir
-                                : (wristCarousel.selectedCard ? wristCarousel.selectedCard.swingDir : "")
+                        swingDir: root._focusedSwingDir
                     }
                 }
                 // Markup panel — ground-truth labelling of the focused swing. Only the
@@ -142,8 +168,7 @@ Item {
                     PpMarkupPanel {
                         sessionType: SessionController.Wrist
                         panelActive: root._screenActive
-                        targetSwingDir: shotReplay.swingDir !== "" ? shotReplay.swingDir
-                                : (wristCarousel.selectedCard ? wristCarousel.selectedCard.swingDir : "")
+                        targetSwingDir: root._focusedSwingDir
                     }
                 }
             }
