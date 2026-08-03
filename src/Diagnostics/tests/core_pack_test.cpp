@@ -12,6 +12,9 @@
 #include "../reference_pack.h"
 
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 
 #include <algorithm>
@@ -66,6 +69,93 @@ int main()
                     observable, screened, asserted, int(p.edges.size()), int(p.measures.size()));
     }
 
+    // ── The kind census ─────────────────────────────────────────────────────────
+    //
+    // Thresholds, not exact counts: which kind a borderline condition lands in is an editorial call
+    // that is meant to move, and pinning 69 would make every reclassification a test edit. What must
+    // hold is the SHAPE — that the library is mostly about swing faults, and that the five kinds
+    // whose absence would mean the axis had not really been authored are all populated.
+    {
+        std::map<ConditionKind, int> byKind;
+        for (const Condition &c : p.conditions) ++byKind[c.kind];
+
+        check(byKind[ConditionKind::Fault] >= 50, "the library is mostly swing faults, as it should be");
+        check(byKind[ConditionKind::Delivery] >= 8, "the delivery layer is populated");
+        check(byKind[ConditionKind::Outcome] >= 15, "the outcome layer is populated");
+        check(byKind[ConditionKind::Capacity] >= 10, "the physical-capacity layer is populated");
+        check(byKind[ConditionKind::Intent] >= 5, "the intent layer is populated");
+        check(byKind[ConditionKind::Setup] >= 15, "the setup layer is populated");
+
+        // The four kinds that the group axis CANNOT recover, which is the whole argument for the
+        // field existing. All four used to sit in `setup` because there was nowhere else to put them.
+        int miscastAsSetupGroup = 0;
+        for (const Condition &c : p.conditions)
+            if (c.group == ConditionGroup::Setup
+                && (c.kind == ConditionKind::Capacity || c.kind == ConditionKind::Intent
+                    || c.kind == ConditionKind::Equipment))
+                ++miscastAsSetupGroup;
+        check(miscastAsSetupGroup >= 20,
+              "the `setup` group still holds capacities, intents and equipment — which is why the "
+              "kind axis is not recoverable from it");
+
+        for (const auto &kv : byKind)
+            std::printf("        %-10s %d\n", qPrintable(conditionKindName(kv.first)), kv.second);
+    }
+
+    // ── Outcome and BallFlight are coextensive, in BOTH directions ──────────────
+    //
+    // `outcomeReachOf()` asks the KIND. It used to ask the group, and the move was landed only
+    // because the two sets are provably the same set over shipped content — so this assertion is
+    // what makes that a no-op rather than a hope. The second half is the one that matters: a new
+    // ball-flight condition authored without a kind would default to Fault and quietly stop being
+    // counted as an outcome by every "how many bad shots does this explain" number in the panel.
+    //
+    // The decision this pins, so it is not rediscovered as an accident: `strike_toe`/`strike_heel`
+    // are Outcome, not Delivery, though strike location IS one of the ball-flight determinants. A
+    // golfer sees the mark on the face; that makes it something the ball did. Move them to Delivery
+    // and this assertion goes red for a correct reason — then the one-way form is what to keep, and
+    // `swingEdges` below needs its own sentence.
+    {
+        QStringList outcomeNotBallFlight, ballFlightNotOutcome;
+        for (const Condition &c : p.conditions) {
+            if (c.kind == ConditionKind::Outcome && c.group != ConditionGroup::BallFlight)
+                outcomeNotBallFlight << c.id;
+            if (c.group == ConditionGroup::BallFlight && c.kind != ConditionKind::Outcome)
+                ballFlightNotOutcome << c.id;
+        }
+        for (const QString &id : outcomeNotBallFlight)
+            std::printf("        Outcome outside ballFlight: %s\n", qPrintable(id));
+        for (const QString &id : ballFlightNotOutcome)
+            std::printf("        ballFlight not an Outcome:  %s\n", qPrintable(id));
+        check(outcomeNotBallFlight.isEmpty(), "every Outcome sits in the ball-flight group");
+        check(ballFlightNotOutcome.isEmpty(), "and every ball-flight condition is an Outcome");
+    }
+
+    // ── Every shipped condition AUTHORS both new fields ─────────────────────────
+    //
+    // Read off the RAW JSON, and it has to be: Prominence has five legitimate values and no
+    // sentinel, so by the time the loader is done a row nobody authored is byte-identical to a row
+    // somebody authored at the default rung — and 58 conditions sit at that rung on purpose. The
+    // validator therefore cannot ask this question at all (see the note in characteristic_pack.h).
+    // This is the only layer where it is answerable, and the failure it catches is the real one: a
+    // 146-row hand edit that stopped at 142.
+    {
+        const QJsonArray conds = QJsonDocument::fromJson(raw).object()
+                                     .value(QStringLiteral("conditions")).toArray();
+        QStringList noKind, noProminence;
+        for (const QJsonValue &v : conds) {
+            const QJsonObject o = v.toObject();
+            const QString     id = o.value(QStringLiteral("id")).toString();
+            if (!o.contains(QStringLiteral("kind")))       noKind << id;
+            if (!o.contains(QStringLiteral("prominence"))) noProminence << id;
+        }
+        for (const QString &id : noKind)       std::printf("        no kind: %s\n", qPrintable(id));
+        for (const QString &id : noProminence) std::printf("        no prominence: %s\n", qPrintable(id));
+        check(int(conds.size()) == int(p.conditions.size()), "every condition in the file loaded");
+        check(noKind.isEmpty(), "every shipped condition declares its kind");
+        check(noProminence.isEmpty(), "and every one declares a prominence");
+    }
+
     // ── Cause concentration ─────────────────────────────────────────────────────
     // The whole point of the model: a handful of latent causes explain most of the pack, and none of
     // them needs any capture hardware. If every characteristic had its own private cause, this would
@@ -113,10 +203,13 @@ int main()
         // delivery that causes the slice. Counting those in the denominator would make the same
         // library look less concentrated purely for having become able to explain the shot the
         // golfer actually saw.
+        // Asks the KIND, like outcomeReachOf() does, and for the same reason: "is this an outcome"
+        // is a question about what sort of thing a condition is. The number is unchanged, because
+        // the two sets are asserted coextensive above.
         int swingEdges = 0;
         for (const Edge &e : p.edges) {
             const Condition *to = p.condition(e.to);
-            if (e.type == EdgeType::Causes && to && to->group != ConditionGroup::BallFlight)
+            if (e.type == EdgeType::Causes && to && to->kind != ConditionKind::Outcome)
                 ++swingEdges;
         }
 

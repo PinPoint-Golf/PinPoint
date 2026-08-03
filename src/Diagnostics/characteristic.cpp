@@ -106,6 +106,31 @@ const Row<ConditionGroup> kGroups[] = {
     { ConditionGroup::BallFlight,  "ballFlight",  "Ball flight" },
 };
 
+// The token `setup` is ALSO a ConditionGroup token, and a shipped row carries both — `"group":
+// "setup", "kind": "setup"` is correct and means two different things. The tables are separate and
+// the parsers never cross, but an error message that says only "unknown setup" would send an author
+// to the wrong field, so both loaders name the field they are talking about.
+const Row<ConditionKind> kKinds[] = {
+    { ConditionKind::Fault,     "fault",     "Fault" },
+    { ConditionKind::Setup,     "setup",     "Setup" },
+    { ConditionKind::Delivery,  "delivery",  "Delivery" },
+    { ConditionKind::Outcome,   "outcome",   "Outcome" },
+    { ConditionKind::Capacity,  "capacity",  "Capacity" },
+    { ConditionKind::Intent,    "intent",    "Intent" },
+    { ConditionKind::Equipment, "equipment", "Equipment" },
+};
+
+// Names and labels agree here, unlike kStrengths, and that is deliberate: a strength is authored as
+// a magnitude and read as a frequency, whereas a prominence is authored and read as the same claim.
+// Only the top rung diverges, because "Ubiquitous" is a word for a document and not for a chip.
+const Row<Prominence> kProminences[] = {
+    { Prominence::Rare,       "rare",       "Rare" },
+    { Prominence::Uncommon,   "uncommon",   "Uncommon" },
+    { Prominence::Occasional, "occasional", "Occasional" },
+    { Prominence::Common,     "common",     "Common" },
+    { Prominence::Ubiquitous, "ubiquitous", "Almost everyone" },
+};
+
 const Row<Observability> kObservabilities[] = {
     { Observability::Observable, "observable", "Observable" },
     { Observability::Latent,     "latent",     "Latent" },
@@ -208,6 +233,53 @@ const std::vector<ConditionGroup> &allConditionGroups()
         return r;
     }();
     return v;
+}
+
+QString conditionKindName(ConditionKind k)  { return nameOf(kKinds, k); }
+QString conditionKindLabel(ConditionKind k) { return labelOf(kKinds, k); }
+bool    conditionKindFromName(const QString &s, ConditionKind &out) { return fromName(kKinds, s, out); }
+
+const std::vector<ConditionKind> &allConditionKinds()
+{
+    static const std::vector<ConditionKind> v = [] {
+        std::vector<ConditionKind> r;
+        for (const auto &row : kKinds) r.push_back(row.value);
+        return r;
+    }();
+    return v;
+}
+
+QString prominenceName(Prominence p)  { return nameOf(kProminences, p); }
+QString prominenceLabel(Prominence p) { return labelOf(kProminences, p); }
+bool    prominenceFromName(const QString &s, Prominence &out) { return fromName(kProminences, s, out); }
+
+const std::vector<Prominence> &allProminences()
+{
+    static const std::vector<Prominence> v = [] {
+        std::vector<Prominence> r;
+        for (const auto &row : kProminences) r.push_back(row.value);
+        return r;
+    }();
+    return v;
+}
+
+double prominenceWeight(Prominence p)
+{
+    // P(condition) — how much of the population carries this at all. See the header for the two
+    // reasons neither bound is available (they are NOT strengthWeight()'s reasons) and for why the
+    // 12x spread against that ladder's 9.5x is the part of this table that was chosen.
+    //
+    // Read them as frequencies an author can check a row against: one in twenty, one in ten, one in
+    // five, one in three, three in five. That is the resolution an editorial judgement supports, and
+    // no finer.
+    switch (p) {
+    case Prominence::Ubiquitous: return 0.60;
+    case Prominence::Common:     return 0.35;
+    case Prominence::Occasional: return 0.20;
+    case Prominence::Uncommon:   return 0.10;
+    case Prominence::Rare:       return 0.05;
+    }
+    return 0.20;                      // unreachable-but-safe, mirrors the default rung
 }
 
 QString observabilityName(Observability o) { return nameOf(kObservabilities, o); }

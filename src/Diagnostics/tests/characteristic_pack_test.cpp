@@ -73,6 +73,11 @@ static CharacteristicPack goodPack()
         c.label              = id;
         c.axis               = axis;
         c.group              = ConditionGroup::Setup;
+        // The fixture AUTHORS a kind, so `kindsAuthored` is true throughout and every kind rule is
+        // live over it. A fixture that left them all at the default would silently switch those four
+        // rules off for the whole file, and each of their positive cases would then be testing the
+        // gate rather than the rule. The gate itself is tested once, on its own, below.
+        c.kind               = ConditionKind::Setup;
         c.observability      = Observability::Observable;
         c.confirmedBy        = ConfirmedBy::Measured;
         c.state              = ConditionState::Active;
@@ -92,6 +97,7 @@ static CharacteristicPack goodPack()
     screened.id                  = QStringLiteral("limitedHipIr");
     screened.label               = QStringLiteral("limited hip internal rotation");
     screened.group               = ConditionGroup::Setup;
+    screened.kind                = ConditionKind::Capacity;
     screened.observability       = Observability::Latent;
     screened.confirmedBy         = ConfirmedBy::Screened;
     screened.screenRef           = QStringLiteral("screen.hipInternalRotation");
@@ -576,6 +582,94 @@ int main()
         check(allConditionGroups().size() == 9, "all nine groups are enumerated in one place");
     }
 
+    // ── ConditionKind and Prominence: round-trip, and the two unknown-token errors ──
+    //
+    // Same failure mode the group block above exists for, with a worse consequence: a kind that does
+    // not round-trip lands the condition back in Fault, where the kind rules would then accuse it of
+    // an omission it does not have. That is why both parse as ERRORS on an unknown token rather than
+    // falling back the way `group` does.
+    {
+        CharacteristicPack p = goodPack();
+        p.conditions.front().kind       = ConditionKind::Delivery;
+        p.conditions.front().prominence = Prominence::Ubiquitous;
+        const PackLoadResult res = loadPack(savePack(p), QStringLiteral("kinds"));
+        const Condition     *c   = res.pack.condition(p.conditions.front().id);
+        check(c && c->kind == ConditionKind::Delivery, "a kind round-trips as itself");
+        check(c && c->prominence == Prominence::Ubiquitous, "a prominence round-trips as itself");
+
+        // The default is the MIDDLE rung, not the first value. If somebody "fixes" that for
+        // consistency with every other enum here, this is what says so.
+        check(Condition{}.prominence == Prominence::Occasional,
+              "an unauthored condition sits at the neutral rung, not the rarest");
+        check(Condition{}.kind == ConditionKind::Fault, "and defaults to Fault");
+
+        ConditionKind k{};
+        check(conditionKindFromName(QStringLiteral("capacity"), k) && k == ConditionKind::Capacity,
+              "capacity parses");
+        check(conditionKindFromName(QStringLiteral("intent"), k) && k == ConditionKind::Intent,
+              "intent parses");
+        check(allConditionKinds().size() == 7, "all seven kinds are enumerated in one place");
+
+        Prominence pr{};
+        check(prominenceFromName(QStringLiteral("rare"), pr) && pr == Prominence::Rare, "rare parses");
+        check(prominenceFromName(QStringLiteral("ubiquitous"), pr) && pr == Prominence::Ubiquitous,
+              "ubiquitous parses");
+        check(allProminences().size() == 5, "all five rungs are enumerated in one place");
+
+        // `setup` is a legal token of BOTH enums and means two different things. A shipped row
+        // carries `"group": "setup", "kind": "setup"`, so neither table may resolve the other's.
+        ConditionGroup g{};
+        check(conditionKindFromName(QStringLiteral("setup"), k) && k == ConditionKind::Setup
+                  && conditionGroupFromName(QStringLiteral("setup"), g) && g == ConditionGroup::Setup,
+              "the shared token `setup` resolves in each enum to its own value");
+    }
+
+    // The ladder is a SHAPE, not a table of values. Nothing here pins 0.35, because these are
+    // editorial figures awaiting a corpus re-seat and trap 5 says a test must not freeze them.
+    {
+        double prev = -1.0;
+        bool   monotonic = true, inBounds = true;
+        for (Prominence p : allProminences()) {
+            const double w = prominenceWeight(p);
+            if (w <= prev)          monotonic = false;
+            if (w <= 0.0 || w >= 1.0) inBounds = false;
+            prev = w;
+        }
+        check(monotonic, "prominence weights rise strictly with the rung");
+        check(inBounds, "and every rung is strictly inside 0..1 — neither bound is available");
+        check(prominenceWeight(Prominence::Occasional) == prominenceWeight(Condition{}.prominence),
+              "the default rung's weight is the one an unauthored condition gets");
+    }
+
+    // The unknown-token errors, both directions. A pack that never mentions the field is silent.
+    {
+        CharacteristicPack p = goodPack();
+        QJsonObject root = savePack(p);
+        QJsonArray  conds = root.value(QStringLiteral("conditions")).toArray();
+        QJsonObject first = conds.at(0).toObject();
+
+        first.insert(QStringLiteral("kind"), QStringLiteral("capcity"));
+        conds.replace(0, first);
+        root.insert(QStringLiteral("conditions"), conds);
+        check(hasError(loadPack(root, QStringLiteral("k")).report, "unknownConditionKind"),
+              "a misspelt kind is refused, not silently landed in Fault");
+
+        first.insert(QStringLiteral("kind"), QStringLiteral("capacity"));
+        first.insert(QStringLiteral("prominence"), QStringLiteral("ubiquitious"));
+        conds.replace(0, first);
+        root.insert(QStringLiteral("conditions"), conds);
+        check(hasError(loadPack(root, QStringLiteral("k")).report, "unknownProminence"),
+              "and a misspelt rung is too");
+
+        first.remove(QStringLiteral("kind"));
+        first.remove(QStringLiteral("prominence"));
+        conds.replace(0, first);
+        root.insert(QStringLiteral("conditions"), conds);
+        const ValidationReport clean = loadPack(root, QStringLiteral("k")).report;
+        check(!hasError(clean, "unknownConditionKind") && !hasError(clean, "unknownProminence"),
+              "a condition that says nothing about either is accused of nothing");
+    }
+
     // ── Edge provenance ─────────────────────────────────────────────────────────
     //
     // An edge is a CLAIM, and for a long while it was the only claim in the pack that could not say
@@ -685,6 +779,80 @@ int main()
     // list carrying rows nobody can act on is one people stop reading. Four of these had no test at
     // all in either direction, which is how `observableNoSignal` came to accuse seven deliberately
     // signal-less conditions without anything noticing.
+    {
+        // faultNotObservable — the check the whole kind axis was worth adding for. `over_the_top`
+        // shipped Latent for a year because nobody had written it a measure, and with no kind field
+        // there was no claim for anything to contradict.
+        CharacteristicPack p = goodPack();
+        check(!hasWarning(validatePack(p), "faultNotObservable"),
+              "a Setup condition that is Observable does not warn");
+
+        p.conditions.front().kind          = ConditionKind::Fault;
+        p.conditions.front().observability = Observability::Latent;
+        check(hasWarning(validatePack(p), "faultNotObservable"),
+              "a Fault that cannot be seen in the swing warns — it is a capacity or an intent");
+
+        p.conditions.front().observability = Observability::Both;
+        check(!hasWarning(validatePack(p), "faultNotObservable"),
+              "`Both` passes: seen sometimes is seen");
+
+        // And the whole rule set switches off for a pack that predates the field, where every
+        // condition loads at the default Fault. The Latent screened cause in the fixture is what
+        // would otherwise be accused.
+        p.conditions.front().observability = Observability::Latent;
+        for (Condition &c : p.conditions) c.kind = ConditionKind::Fault;
+        check(!hasWarning(validatePack(p), "faultNotObservable"),
+              "a pack with no opinion about kind is accused of nothing");
+    }
+    {
+        // kindReachMismatch — one code, both halves, because an author fixes either the same way.
+        CharacteristicPack p = goodPack();
+        check(!hasWarning(validatePack(p), "kindReachMismatch"),
+              "a Capacity reached by a screen does not warn");
+
+        p.conditions.back().confirmedBy = ConfirmedBy::Asserted;
+        check(hasWarning(validatePack(p), "kindReachMismatch"),
+              "a Capacity you can only ask about warns — the body's range is screened, not reported");
+
+        CharacteristicPack q = goodPack();
+        q.conditions.front().kind        = ConditionKind::Intent;
+        q.conditions.front().confirmedBy = ConfirmedBy::Asserted;
+        q.conditions.front().detectedBy.clear();
+        check(!hasWarning(validatePack(q), "kindReachMismatch"), "an Asserted Intent does not warn");
+
+        q.conditions.front().confirmedBy = ConfirmedBy::Measured;
+        check(hasWarning(validatePack(q), "kindReachMismatch"),
+              "an Intent claimed to be measured warns — a belief is not readable off a swing");
+    }
+    {
+        // outcomeNotBallFlight — the ONE rule coupling kind to group, kept only while the two sets
+        // are coextensive over shipped content. outcomeHasEffect is the orientation half.
+        CharacteristicPack p = goodPack();
+        p.conditions.front().kind  = ConditionKind::Outcome;
+        p.conditions.front().group = ConditionGroup::BallFlight;
+        check(!hasWarning(validatePack(p), "outcomeNotBallFlight"),
+              "an Outcome in the ball-flight group does not warn");
+
+        p.conditions.front().group = ConditionGroup::Impact;
+        check(hasWarning(validatePack(p), "outcomeNotBallFlight"), "an Outcome filed elsewhere warns");
+    }
+    {
+        // outcomeHasEffect — the far end of the chain screenedHasCause guards at the near end. An
+        // outcome is where an explanation stops; an edge out of one is written back to front.
+        CharacteristicPack p = goodPack();
+        p.conditions.front().kind = ConditionKind::Outcome;
+        p.conditions.front().group = ConditionGroup::BallFlight;
+        check(!hasWarning(validatePack(p), "outcomeHasEffect"),
+              "an Outcome that causes nothing does not warn");
+
+        Edge back;
+        back.from = p.conditions.front().id;                  // the outcome…
+        back.to   = p.conditions.at(1).id;                    // …claiming to cause a swing fault
+        back.type = EdgeType::Causes;
+        p.edges.push_back(back);
+        check(hasWarning(validatePack(p), "outcomeHasEffect"),
+              "an Outcome that causes something warns — the ball does not cause the swing");
+    }
     {
         CharacteristicPack p = goodPack();
         p.conditions.front().detectedBy.clear();

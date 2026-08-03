@@ -1352,6 +1352,14 @@
       "source": "heuristic"
     },
     {
+      "measure": "m_transitionPlaneShift",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
       "measure": "m_lowPointAhead",
       "context": "any",
       "mu": 2.0,

@@ -153,6 +153,65 @@ int main(int argc, char **argv)
             check(ok, qPrintable(QStringLiteral("%1: every row has one cell per column").arg(type)));
         }
 
+        // ── and each enum cell sits under ITS OWN column ────────────────────────
+        //
+        // Count parity above is not enough, and the gap is not theoretical. `conditionRow()` builds
+        // its cells POSITIONALLY in two branches — one for characteristics, one for causes — against
+        // one `columns()` with two arms. Transpose two cells in ONE branch and the count is
+        // unchanged, nothing throws, and `facets()` reads the wrong column's text at that index.
+        // The rail would then fill a "How common" chip list with kind labels, and the FILTER would
+        // agree with it, because rows() resolves the value the same wrong way. Both halves wrong in
+        // the same direction is the one failure a count can never see.
+        //
+        // So: find each column by key, and assert every row's cell there is a member of that enum's
+        // own label set. Comparing cells[i]["field"] against columns()[i]["key"] would be the
+        // tempting shortcut and does NOT work — the name cell carries field `label` against column
+        // key `name`, and the tier cell carries `tier` against `evidence`.
+        {
+            QStringList kindLabels, prominenceLabels, groupLabels, reachLabels;
+            for (ConditionKind k : allConditionKinds())  kindLabels       << conditionKindLabel(k);
+            for (Prominence pr : allProminences())       prominenceLabels << prominenceLabel(pr);
+            for (ConditionGroup g : allConditionGroups()) groupLabels     << conditionGroupLabel(g);
+            for (ConfirmedBy cb : { ConfirmedBy::Measured, ConfirmedBy::Screened,
+                                    ConfirmedBy::Asserted })
+                reachLabels << reachLabel(cb);
+
+            const struct { const char *key; const QStringList *labels; } vocab[] = {
+                { "group", &groupLabels }, { "kind", &kindLabels },
+                { "prominence", &prominenceLabels }, { "reach", &reachLabels },
+            };
+
+            for (const QString &type : { QStringLiteral("characteristics"), QStringLiteral("causes") }) {
+                const QVariantList cols = m.columns(type);
+                const QVariantList rows = m.rows(type);
+                for (const auto &v : vocab) {
+                    int colIndex = -1;
+                    for (int i = 0; i < cols.size(); ++i)
+                        if (cols.at(i).toMap().value(QStringLiteral("key")).toString()
+                            == QLatin1String(v.key))
+                            colIndex = i;
+                    check(colIndex >= 0,
+                          qPrintable(QStringLiteral("%1: a `%2` column exists — a facet without one "
+                                                    "is dropped silently")
+                                         .arg(type, QLatin1String(v.key))));
+                    if (colIndex < 0) continue;
+
+                    QString stray;
+                    for (const QVariant &rv : rows) {
+                        const QString text = rv.toMap().value(QStringLiteral("cells")).toList()
+                                                 .at(colIndex).toMap()
+                                                 .value(QStringLiteral("text")).toString();
+                        if (!v.labels->contains(text)) { stray = text; break; }
+                    }
+                    check(stray.isEmpty(),
+                          qPrintable(QStringLiteral("%1: the `%2` column holds only %2 labels%3")
+                                         .arg(type, QLatin1String(v.key),
+                                              stray.isEmpty() ? QString()
+                                                              : QStringLiteral(" (saw '%1')").arg(stray))));
+                }
+            }
+        }
+
         // Exactly one column takes the slack. Two would fight; none starves the name column, which
         // is the one that has to stay readable as panes are added.
         for (const QString &type : { QStringLiteral("characteristics"), QStringLiteral("measures"),
@@ -431,6 +490,78 @@ int main(int argc, char **argv)
                   == QStringList{ QStringLiteral("Unlock it"), QStringLiteral("Improve it"),
                                   QStringLiteral("Refine it") },
               "the 2nd-camera chips run strongest-first");
+    }
+
+    std::printf("=== the kind and prominence rails read in their own order, and their counts hold ===\n");
+    {
+        // A VALUE facet used to count in first-seen order, which is pack FILE order. `group` read
+        // correctly only because core.json happens to be authored roughly in swing order — luck, not
+        // design, and a user pack authored any other way scrambled it with nothing reporting so.
+        // A prominence ladder in file order is not a ladder at all, which is what forced
+        // valueFacetOrder() to exist.
+        const QVariantList facets = m.facets(QStringLiteral("characteristics"));
+        const auto optionsOf = [&facets](const char *key) {
+            QStringList vals;
+            for (const QVariant &fv : facets) {
+                const QVariantMap f = fv.toMap();
+                if (f.value(QStringLiteral("key")).toString() != QLatin1String(key)) continue;
+                for (const QVariant &ov : f.value(QStringLiteral("options")).toList())
+                    vals << ov.toMap().value(QStringLiteral("value")).toString();
+            }
+            return vals;
+        };
+
+        // Only the rungs the shipped library actually uses appear — a chip with no rows would be a
+        // filter that returns nothing — so this is the ladder FILTERED, in ladder order, not the
+        // whole ladder. Written as a subsequence check so re-seating a prominence cannot fail it.
+        QStringList ladder;
+        for (Prominence pr : allProminences()) ladder << prominenceLabel(pr);
+        const QStringList shownP = optionsOf("prominence");
+        check(shownP.size() >= 2, "the prominence rail is populated");
+        int at = -1;
+        bool ordered = true;
+        for (const QString &v : shownP) {
+            const int i = ladder.indexOf(v);
+            if (i <= at) ordered = false;
+            at = i;
+        }
+        check(ordered, "the prominence chips run rarest-first, along the ladder");
+
+        QStringList kinds;
+        for (ConditionKind k : allConditionKinds()) kinds << conditionKindLabel(k);
+        at = -1; ordered = true;
+        for (const QString &v : optionsOf("kind")) {
+            const int i = kinds.indexOf(v);
+            if (i <= at) ordered = false;
+            at = i;
+        }
+        check(ordered, "and the kind chips run in the order a diagnosis reads");
+
+        // The half that actually matters: a chip that says 12 must return 12. Reordering `seen`
+        // cannot break this — the counts come from a hash and the filter re-derives from cell text —
+        // but that is an argument, and this is the measurement.
+        int disagreed = 0;
+        for (const QVariant &fv : facets) {
+            const QVariantMap f = fv.toMap();
+            const QString     key = f.value(QStringLiteral("key")).toString();
+            if (key != QStringLiteral("kind") && key != QStringLiteral("prominence")) continue;
+            for (const QVariant &ov : f.value(QStringLiteral("options")).toList()) {
+                const QVariantMap o = ov.toMap();
+                QVariantMap selection;
+                selection.insert(key, QVariantList{ o.value(QStringLiteral("value")) });
+                QVariantMap filters;
+                filters.insert(QStringLiteral("facets"), selection);   // rows() nests them here
+                const int got = m.rows(QStringLiteral("characteristics"), filters).size();
+                const int said = o.value(QStringLiteral("count")).toInt();
+                if (got != said) {
+                    ++disagreed;
+                    std::printf("        %s/%s: chip says %d, filter returns %d\n",
+                                qPrintable(key),
+                                qPrintable(o.value(QStringLiteral("value")).toString()), said, got);
+                }
+            }
+        }
+        check(disagreed == 0, "every kind and prominence chip returns exactly what it counted");
     }
 
     std::printf("=== a condition ranks by how far it REACHES, not by its out-degree ===\n");
@@ -922,6 +1053,26 @@ int main(int argc, char **argv)
         for (const QVariant &v : groups)
             if (v.toMap().value(QStringLiteral("current")).toBool()) groupCurrent = true;
         check(groupCurrent, "and the shortlist never drops the value being changed");
+
+        // Kind takes the group's route — seven into five, ranked by what this library uses most.
+        const QVariantList kinds =
+            m.ringValues(QStringLiteral("characteristics"), condId, QStringLiteral("kind"));
+        check(kinds.size() == 5, "seven kinds shortlist to the five the collar draws");
+        bool kindCurrent = false;
+        for (const QVariant &v : kinds)
+            if (v.toMap().value(QStringLiteral("current")).toBool()) kindCurrent = true;
+        check(kindCurrent, "…and still shows the one being changed");
+
+        // Prominence takes the STRENGTH route instead: five rungs into five cells, in ladder order,
+        // unsorted. Ranking a ladder by how often the library uses each rung would be a ladder about
+        // the ladder. This is the assertion that stops somebody "fixing" it to match `group`.
+        QStringList wantLadder;
+        for (Prominence pr : allProminences()) wantLadder << prominenceName(pr);
+        QStringList gotLadder;
+        for (const QVariant &v : m.ringValues(QStringLiteral("characteristics"), condId,
+                                              QStringLiteral("prominence")))
+            gotLadder << v.toMap().value(QStringLiteral("value")).toString();
+        check(gotLadder == wantLadder, "the whole prominence ladder, in ladder order, unsorted");
 
         while (m.canUndo()) m.undo();
         check(m.unsavedCount() == 0, "back to the file");
@@ -2226,7 +2377,8 @@ int main(int argc, char **argv)
                     offered << fv.toMap().value(QStringLiteral("field")).toString();
         for (const QString &want : { QStringLiteral("consequence"), QStringLiteral("injuryNote"),
                                      QStringLiteral("aliases"), QStringLiteral("citation"),
-                                     QStringLiteral("state") })
+                                     QStringLiteral("state"), QStringLiteral("kind"),
+                                     QStringLiteral("prominence") })
             check(offered.contains(want),
                   qPrintable(QStringLiteral("a characteristic's %1 is reachable").arg(want)));
 

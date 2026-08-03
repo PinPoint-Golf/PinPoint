@@ -1694,6 +1694,24 @@
       "label": "Pelvis rotation, at the top",
       "unit": "°",
       "highMeans": "a deeper hip turn at the top, and more room to unwind into"
+    },
+    {
+      "id": "m_transitionPlaneShift",
+      "kind": "provided",
+      "metricKey": "swingPlane",
+      "reducer": {
+        "kind": "delta",
+        "anchor": "p4",
+        "window": [
+          "p4",
+          "p5"
+        ]
+      },
+      "status": "planned",
+      "label": "Plane shift, top to early downswing",
+      "unit": "°",
+      "highMeans": "the shaft moved OUTSIDE the plane it was on at the top — the club is working out toward the ball line rather than down",
+      "viewNeeded": "downTheLine"
     }
   ],
   "signals": [
@@ -2632,6 +2650,22 @@
         "m_leadForearmRot_p7"
       ],
       "direction": "high"
+    },
+    {
+      "id": "sig_overTheTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_transitionPlaneShift"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_shallowing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_transitionPlaneShift"
+      ],
+      "direction": "low"
     }
   ],
   "conditions": [
@@ -2642,6 +2676,8 @@
         "too much arch at address"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2665,6 +2701,8 @@
         "rounded back at address"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2689,6 +2727,8 @@
         "standing too tall at address"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2707,6 +2747,8 @@
       "id": "alignment_open",
       "label": "Shoulders open at address",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2726,6 +2768,8 @@
       "id": "alignment_closed",
       "label": "Shoulders closed at address",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2745,6 +2789,8 @@
       "id": "ball_forward",
       "label": "Ball too far forward",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2764,6 +2810,8 @@
       "id": "ball_back",
       "label": "Ball too far back",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2783,6 +2831,8 @@
       "id": "stance_wide",
       "label": "Stance too wide",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2801,6 +2851,8 @@
       "id": "stance_narrow",
       "label": "Stance too narrow",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2822,6 +2874,8 @@
         "crowding it"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2846,6 +2900,8 @@
         "reaching for it"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2868,6 +2924,8 @@
         "standing up through it"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2894,6 +2952,8 @@
         "hip thrust toward the ball"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2922,6 +2982,8 @@
         "leaning left at the top"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2945,6 +3007,8 @@
         "flat shoulder turn"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2966,6 +3030,8 @@
         "hip riding up"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -2990,6 +3056,8 @@
         "no hip depth (face-on)"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3013,6 +3081,8 @@
         "lifting out of the shot"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3035,6 +3105,8 @@
         "lateral slide back"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3063,6 +3135,8 @@
         "excessive lateral drive"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3087,6 +3161,8 @@
         "reverse weight shift"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3114,6 +3190,8 @@
         "lunging at it"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3135,6 +3213,8 @@
         "knee buckling through impact"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3156,6 +3236,8 @@
         "disconnected trail arm"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3178,6 +3260,8 @@
         "wing"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3199,8 +3283,10 @@
         "OTT"
       ],
       "group": "armsAndClub",
-      "observability": "latent",
-      "confirmedBy": "asserted",
+      "kind": "fault",
+      "prominence": "ubiquitous",
+      "observability": "observable",
+      "confirmedBy": "measured",
       "state": "active",
       "consequence": "The club moving outside the plane at the start of the downswing has to come back across the ball to reach it, which is where the leftward path comes from. It is the move behind the number rather than the number itself.",
       "provenance": {
@@ -3211,6 +3297,10 @@
       "drills": [
         "drill.gateForPath",
         "drill.pumpToDelivery"
+      ],
+      "axis": "transition_plane",
+      "detectedBy": [
+        "sig_overTheTop"
       ]
     },
     {
@@ -3221,6 +3311,8 @@
         "collapsing arms"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3247,6 +3339,8 @@
         "losing lag"
       ],
       "group": "release",
+      "kind": "fault",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3278,6 +3372,8 @@
         "hands behind the ball"
       ],
       "group": "release",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3303,6 +3399,8 @@
         "dead hands"
       ],
       "group": "release",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3322,6 +3420,8 @@
       "id": "sequence_order",
       "label": "Out-of-order sequence",
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3345,6 +3445,8 @@
         "low coil"
       ],
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3369,6 +3471,8 @@
         "snatching it"
       ],
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3390,6 +3494,8 @@
       "id": "limited_trail_hip_ir",
       "label": "Limited trail-hip internal rotation",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.trailHipInternalRotation",
@@ -3408,6 +3514,8 @@
       "id": "limited_lead_hip_ir",
       "label": "Limited lead-hip internal rotation",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.leadHipInternalRotation",
@@ -3425,6 +3533,8 @@
       "id": "poor_pelvic_disassociation",
       "label": "Poor pelvic disassociation",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.pelvicDisassociation",
@@ -3444,6 +3554,8 @@
       "id": "limited_thoracic_rotation",
       "label": "Limited thoracic rotation",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.thoracicRotation",
@@ -3460,6 +3572,8 @@
       "id": "limited_thoracic_extension",
       "label": "Limited thoracic extension",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.thoracicExtension",
@@ -3475,6 +3589,8 @@
       "id": "thoracic_kyphosis",
       "label": "Fixed thoracic kyphosis",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.thoracicKyphosis",
@@ -3490,6 +3606,8 @@
       "id": "limited_shoulder_flexion",
       "label": "Limited shoulder flexion",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.shoulderFlexion",
@@ -3505,6 +3623,8 @@
       "id": "limited_shoulder_external_rotation",
       "label": "Limited trail-shoulder external rotation",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.trailShoulderExternalRotation",
@@ -3520,6 +3640,8 @@
       "id": "limited_ankle_dorsiflexion",
       "label": "Limited ankle dorsiflexion",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.ankleDorsiflexion",
@@ -3535,6 +3657,8 @@
       "id": "limited_hip_extension",
       "label": "Limited hip extension",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.hipExtension",
@@ -3551,6 +3675,8 @@
       "id": "limited_wrist_mobility",
       "label": "Limited wrist mobility",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "uncommon",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.wristMobility",
@@ -3566,6 +3692,8 @@
       "id": "poor_core_stability",
       "label": "Poor core stability",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.coreStability",
@@ -3581,6 +3709,8 @@
       "id": "poor_single_leg_balance",
       "label": "Poor single-leg balance",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.singleLegBalance",
@@ -3596,6 +3726,8 @@
       "id": "club_too_short",
       "label": "Club too short for the golfer",
       "group": "setup",
+      "kind": "equipment",
+      "prominence": "uncommon",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "active",
@@ -3610,6 +3742,8 @@
       "id": "trying_to_lift_the_ball",
       "label": "Trying to lift the ball",
       "group": "setup",
+      "kind": "intent",
+      "prominence": "ubiquitous",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "active",
@@ -3624,6 +3758,8 @@
       "id": "aim_bias_open",
       "label": "Aims left of the target",
       "group": "setup",
+      "kind": "intent",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "active",
@@ -3638,6 +3774,8 @@
       "id": "aim_bias_closed",
       "label": "Aims right of the target",
       "group": "setup",
+      "kind": "intent",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "active",
@@ -3652,6 +3790,8 @@
       "id": "tempo_habit",
       "label": "Settled tempo habit",
       "group": "setup",
+      "kind": "intent",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "active",
@@ -3666,6 +3806,8 @@
       "id": "stance_habit",
       "label": "Settled setup preference",
       "group": "setup",
+      "kind": "intent",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "active",
@@ -3685,6 +3827,8 @@
       ],
       "axis": "feet_alignment",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3707,6 +3851,8 @@
       ],
       "axis": "feet_alignment",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3728,6 +3874,8 @@
       ],
       "axis": "hip_alignment",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3749,6 +3897,8 @@
       ],
       "axis": "hip_alignment",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3770,6 +3920,8 @@
       ],
       "axis": "knee_flex_address",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3792,6 +3944,8 @@
       ],
       "axis": "knee_flex_address",
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3814,6 +3968,8 @@
       ],
       "axis": "grip_rotation",
       "group": "setup",
+      "kind": "intent",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -3833,6 +3989,8 @@
       ],
       "axis": "grip_rotation",
       "group": "setup",
+      "kind": "intent",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -3850,6 +4008,8 @@
         "sitting back at address"
       ],
       "group": "setup",
+      "kind": "intent",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -3870,6 +4030,8 @@
       ],
       "axis": "takeaway_direction",
       "group": "setup",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3892,6 +4054,8 @@
       ],
       "axis": "takeaway_direction",
       "group": "setup",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3913,6 +4077,8 @@
         "rolling the face"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3935,6 +4101,8 @@
       ],
       "axis": "backswing_plane",
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3957,6 +4125,8 @@
       ],
       "axis": "backswing_plane",
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3979,6 +4149,8 @@
       ],
       "axis": "top_direction",
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4000,6 +4172,8 @@
       ],
       "axis": "top_direction",
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4021,6 +4195,8 @@
         "past parallel"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4043,6 +4219,8 @@
         "chicken-winged going back"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4064,6 +4242,8 @@
         "standing up on it going back"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4089,6 +4269,8 @@
       ],
       "axis": "head_height_backswing",
       "group": "posture",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4110,6 +4292,8 @@
       ],
       "axis": "head_height_backswing",
       "group": "posture",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4131,6 +4315,8 @@
         "off the ball"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4152,6 +4338,8 @@
         "heel off the ground"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4173,6 +4361,8 @@
         "short of the top"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4196,6 +4386,8 @@
         "run-off"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4223,6 +4415,8 @@
       ],
       "axis": "delivery_plane",
       "group": "armsAndClub",
+      "kind": "delivery",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4249,6 +4443,8 @@
       ],
       "axis": "delivery_plane",
       "group": "armsAndClub",
+      "kind": "delivery",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4273,6 +4469,8 @@
         "no shift"
       ],
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4295,6 +4493,8 @@
         "stopping the turn"
       ],
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4317,6 +4517,8 @@
         "slowing down"
       ],
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4338,6 +4540,8 @@
         "no forward lean"
       ],
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4364,6 +4568,8 @@
         "hitting behind it"
       ],
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4389,6 +4595,8 @@
       ],
       "axis": "attack_angle",
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4412,6 +4620,8 @@
       ],
       "axis": "attack_angle",
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4434,6 +4644,8 @@
       ],
       "axis": "face_to_path",
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4457,6 +4669,8 @@
       ],
       "axis": "face_to_path",
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4479,6 +4693,8 @@
         "blocked"
       ],
       "group": "impact",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4502,6 +4718,8 @@
       ],
       "axis": "axis_tilt_impact",
       "group": "impact",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4523,6 +4741,8 @@
       ],
       "axis": "axis_tilt_impact",
       "group": "impact",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4544,6 +4764,8 @@
         "stepping through"
       ],
       "group": "finish",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4568,6 +4790,8 @@
         "stuck on the back foot"
       ],
       "group": "finish",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4591,6 +4815,8 @@
         "no follow-through"
       ],
       "group": "finish",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4613,6 +4839,8 @@
       ],
       "axis": "start_line",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4637,6 +4865,8 @@
       ],
       "axis": "start_line",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4659,6 +4889,8 @@
       ],
       "axis": "launch_angle",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4682,6 +4914,8 @@
       ],
       "axis": "launch_angle",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4703,6 +4937,8 @@
         "lost yards"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4726,6 +4962,8 @@
       ],
       "axis": "curvature",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4749,6 +4987,8 @@
       ],
       "axis": "curvature",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4770,6 +5010,8 @@
         "double cross"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -4787,6 +5029,8 @@
         "big block-slice"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -4807,6 +5051,8 @@
         "chunked it"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -4830,6 +5076,8 @@
         "thinned it"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -4851,6 +5099,8 @@
         "dribbler"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -4870,6 +5120,8 @@
         "sky ball"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -4889,6 +5141,8 @@
         "socket"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "asserted",
       "state": "draft",
@@ -4910,6 +5164,8 @@
       ],
       "axis": "strike_location",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4931,6 +5187,8 @@
       ],
       "axis": "strike_location",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4951,6 +5209,8 @@
         "not compressing it"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4973,6 +5233,8 @@
       ],
       "axis": "spin_rate",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -4995,6 +5257,8 @@
       ],
       "axis": "spin_rate",
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5015,6 +5279,8 @@
         "coming up short"
       ],
       "group": "ballFlight",
+      "kind": "outcome",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5032,6 +5298,8 @@
       "id": "limited_hamstring_length",
       "label": "Limited hamstring length",
       "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
       "screenRef": "screen.hamstringLength",
@@ -5051,6 +5319,8 @@
         "chopping down"
       ],
       "group": "setup",
+      "kind": "intent",
+      "prominence": "occasional",
       "observability": "latent",
       "confirmedBy": "asserted",
       "state": "active",
@@ -5069,6 +5339,8 @@
         "reaching down at it"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5091,6 +5363,8 @@
         "tucked pelvis"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5113,6 +5387,8 @@
         "too straight through the chest"
       ],
       "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5136,6 +5412,8 @@
         "getting closer through the ball"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5158,6 +5436,8 @@
         "tilting rather than turning"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5180,6 +5460,8 @@
         "hanging the upper body back"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5202,6 +5484,8 @@
         "standing off the ball"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5224,6 +5508,8 @@
         "sliding toward the target going back"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5246,6 +5532,8 @@
         "settling into the backswing"
       ],
       "group": "posture",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5268,6 +5556,8 @@
         "too much from the inside"
       ],
       "group": "armsAndClub",
+      "kind": "delivery",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5290,6 +5580,8 @@
         "trail arm too deep"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5312,6 +5604,8 @@
         "turning further than it can be held"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5334,6 +5628,8 @@
         "backswing stops early"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5356,6 +5652,8 @@
         "face turned down going back"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5378,6 +5676,8 @@
         "no width in the arms"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5400,6 +5700,8 @@
         "elbow locked out going back"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5423,6 +5725,8 @@
         "too much lag"
       ],
       "group": "release",
+      "kind": "fault",
+      "prominence": "rare",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5445,6 +5749,8 @@
         "over-cocked"
       ],
       "group": "release",
+      "kind": "fault",
+      "prominence": "rare",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5467,6 +5773,8 @@
         "too much forward bow"
       ],
       "group": "impact",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5489,6 +5797,8 @@
         "delofting it too much"
       ],
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5512,6 +5822,8 @@
         "digging past it"
       ],
       "group": "impact",
+      "kind": "delivery",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5534,6 +5846,8 @@
         "over-cleared"
       ],
       "group": "impact",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5556,6 +5870,8 @@
         "hips never get going"
       ],
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5578,6 +5894,8 @@
         "too much separation"
       ],
       "group": "sequence",
+      "kind": "fault",
+      "prominence": "rare",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5601,6 +5919,8 @@
         "head toward the target in the backswing"
       ],
       "group": "lateral",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5624,6 +5944,8 @@
         "cutting across it"
       ],
       "group": "armsAndClub",
+      "kind": "delivery",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "state": "active",
@@ -5647,6 +5969,8 @@
         "stopped turning going back"
       ],
       "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5671,6 +5995,8 @@
         "turning it over"
       ],
       "group": "release",
+      "kind": "fault",
+      "prominence": "uncommon",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5696,6 +6022,8 @@
         "blocking it"
       ],
       "group": "release",
+      "kind": "fault",
+      "prominence": "occasional",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -5709,6 +6037,31 @@
         "searchTerms": "holding the face off through impact lead forearm rotation open clubface block golf"
       },
       "axis": "lead_forearm_impact"
+    },
+    {
+      "id": "shallowing",
+      "label": "Shallowing in transition",
+      "aliases": [
+        "dropping it into the slot",
+        "laying the shaft down",
+        "shallowing out"
+      ],
+      "axis": "transition_plane",
+      "group": "armsAndClub",
+      "kind": "delivery",
+      "prominence": "uncommon",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_shallowing"
+      ],
+      "state": "draft",
+      "consequence": "The shaft drops under the plane it was on at the top as the downswing starts. This is the other end of the same axis over-the-top sits on, and it is not a fault: it is a move many good players make deliberately to get the club approaching from inside. It is reported because it is a fact about the swing, and how much of it is right for a golfer is the coach's call. Taken far enough it becomes stuck under the plane, which is.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "shaft plane transition early downswing shallow steep golf"
+      }
     }
   ],
   "edges": [
@@ -9059,6 +9412,28 @@
         "tier": "practice",
         "searchedOn": "2026-08-02",
         "searchTerms": "thoracic rotation restriction short follow through golf finish"
+      }
+    },
+    {
+      "from": "trail_elbow_deep",
+      "to": "shallowing",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "shaft plane transition early downswing shallow steep golf"
+      }
+    },
+    {
+      "from": "shallowing",
+      "to": "under_plane_stuck",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "shaft plane transition early downswing shallow steep golf"
       }
     }
   ]

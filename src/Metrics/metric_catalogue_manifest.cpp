@@ -927,7 +927,13 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("characteristic:flat_backswing_plane"),
                     QStringLiteral("characteristic:steep_backswing_plane"),
                     QStringLiteral("characteristic:steep_downswing_shaft"),
-                    QStringLiteral("characteristic:under_plane_stuck") },
+                    QStringLiteral("characteristic:under_plane_stuck"),
+                    // The P4→P5 pair. Over the top is the plane SHIFT out of the top, which is a
+                    // different reading of this series from the P6 absolute two rows up: a golfer
+                    // can be steep at delivery off a steep backswing without ever re-routing the
+                    // club outward in transition.
+                    QStringLiteral("characteristic:over_the_top"),
+                    QStringLiteral("characteristic:shallowing") },
     });
 
     cat.addDescriptor({

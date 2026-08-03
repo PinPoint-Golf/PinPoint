@@ -143,6 +143,36 @@ QVariantList groupOptions()
         l.append(option(conditionGroupName(g), conditionGroupLabel(g)));
     return l;
 }
+QVariantList kindOptions()
+{
+    QVariantList l;
+    for (ConditionKind k : allConditionKinds())
+        l.append(option(conditionKindName(k), conditionKindLabel(k)));
+    return l;
+}
+QVariantList prominenceOptions()
+{
+    QVariantList l;
+    for (Prominence p : allProminences())
+        l.append(option(prominenceName(p), prominenceLabel(p)));
+    return l;
+}
+// One line under the picker, because the kinds are not self-explanatory from their words alone and
+// the difference between a Fault and a Delivery is the distinction an author is most likely to get
+// wrong — both are things that happen during the swing.
+QString kindHint(ConditionKind k)
+{
+    switch (k) {
+    case ConditionKind::Fault:     return QObject::tr("a movement error — what a lesson is about");
+    case ConditionKind::Setup:     return QObject::tr("a static state before the swing starts");
+    case ConditionKind::Delivery:  return QObject::tr("impact geometry — the scoreboard, not the fault");
+    case ConditionKind::Outcome:   return QObject::tr("what the ball did");
+    case ConditionKind::Capacity:  return QObject::tr("what the body can do — screened, not measured");
+    case ConditionKind::Intent:    return QObject::tr("what the golfer believes — ask, never conclude");
+    case ConditionKind::Equipment: return QObject::tr("the clubs");
+    }
+    return QString();
+}
 QVariantList reachOptions()
 {
     QVariantList l;
@@ -423,6 +453,44 @@ static QStringList tagFacetOrder(const QString &sortKey)
     if (sortKey == QLatin1String("stereoTags"))
         return { QObject::tr("Unlock it"), QObject::tr("Improve it"), QObject::tr("Refine it") };
     return {};
+}
+
+// The same question for a VALUE facet, whose chips are the cell text of an ordered vocabulary.
+//
+// The paragraph above says first-seen order "is right for them — `group` is the swing's own
+// sequence". That was true only by luck: first-seen means PACK FILE ORDER, and `core.json` happens
+// to be authored roughly in swing order. A user pack authored any other way scrambles the group rail
+// and nothing reports it. `prominence` would have made the luck run out immediately — a ladder read
+// in whatever order the first few conditions happened to be tagged is not a ladder.
+//
+// So these declare theirs, walked off the shared vocabularies rather than hand-listed, because a
+// hand-listed copy is exactly what allConditionGroups() exists to prevent.
+static QStringList valueFacetOrder(const QString &key)
+{
+    QStringList out;
+    if (key == QLatin1String("group"))
+        for (ConditionGroup g : allConditionGroups()) out << conditionGroupLabel(g);
+    else if (key == QLatin1String("kind"))
+        for (ConditionKind k : allConditionKinds()) out << conditionKindLabel(k);
+    else if (key == QLatin1String("prominence"))
+        for (Prominence p : allProminences()) out << prominenceLabel(p);
+    return out;
+}
+
+// Into the declared order. A value the order does not name keeps its first-seen position at the END
+// rather than being dropped — a chip that vanishes because somebody added a rung and forgot the
+// table would be a filter silently missing rows, which is worse than a chip in the wrong place.
+//
+// Shared by both facet loops. It was written once for tags and was about to be pasted a second time
+// for values, which is how two copies of an ordering rule start disagreeing.
+static void applyCanonicalOrder(QStringList &seen, const QStringList &canonical)
+{
+    if (canonical.isEmpty()) return;
+    std::stable_sort(seen.begin(), seen.end(), [&canonical](const QString &a, const QString &b) {
+        const int ia = canonical.indexOf(a);
+        const int ib = canonical.indexOf(b);
+        return (ia < 0 ? canonical.size() : ia) < (ib < 0 ? canonical.size() : ib);
+    });
 }
 
 // The singular noun for one row of a type — the Type column in the cross-type result list. Singular
@@ -823,6 +891,11 @@ QVariantList ModelBrowser::columns(const QString &type) const
     if (type == kCharacteristics) {
         c.append(column(QStringLiteral("name"), tr("Name"), 240, /*flex*/ true));
         c.append(column(QStringLiteral("group"), tr("Group"), 120));
+        // Beside the group, because the pair is the point: the group says WHERE in the swing, the
+        // kind says WHAT SORT OF THING. Reading them together is what makes it obvious that a
+        // library filed under `setup` is holding fourteen physical screens.
+        c.append(column(QStringLiteral("kind"), tr("Kind"), 104));
+        c.append(column(QStringLiteral("prominence"), tr("How common"), 118));
         c.append(column(QStringLiteral("measures"), tr("Meas"), 52, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("causes"), tr("Caus"), 52, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("explains"), tr("Expl"), 52, false, QStringLiteral("right"), true));
@@ -840,6 +913,8 @@ QVariantList ModelBrowser::columns(const QString &type) const
     } else if (type == kCauses) {
         c.append(column(QStringLiteral("name"), tr("Name"), 240, true));
         c.append(column(QStringLiteral("group"), tr("Group"), 120));
+        c.append(column(QStringLiteral("kind"), tr("Kind"), 104));
+        c.append(column(QStringLiteral("prominence"), tr("How common"), 118));
         c.append(column(QStringLiteral("explains"), tr("Explains"), 68, false, QStringLiteral("right"), true));
         // The two that make this list a ranking rather than a register. `Explains` beside them is
         // kept deliberately: it is what the author DREW, and the gap between it and `Leads to` is
@@ -965,6 +1040,14 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
     editable(groupCell, QStringLiteral("group"), QStringLiteral("enum"),
              conditionGroupName(c.group), groupOptions());
 
+    QVariantMap kindCell = cell(conditionKindLabel(c.kind));
+    editable(kindCell, QStringLiteral("kind"), QStringLiteral("enum"),
+             conditionKindName(c.kind), kindOptions());
+
+    QVariantMap prominenceCell = cell(prominenceLabel(c.prominence));
+    editable(prominenceCell, QStringLiteral("prominence"), QStringLiteral("enum"),
+             prominenceName(c.prominence), prominenceOptions());
+
     QVariantMap reachCell = cell(reachLabel(c.confirmedBy));
     editable(reachCell, QStringLiteral("reach"), QStringLiteral("enum"),
              confirmedByName(c.confirmedBy), reachOptions());
@@ -978,9 +1061,15 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
     // How far this condition reaches, both ways. Memoised — see reachOf().
     const Reach reach = reachOf(c.id);
 
+    // POSITIONAL, against columns() above, and the two branches must agree with each other as well
+    // as with it. Count parity is not enough: transposing two cells in ONE branch keeps the count
+    // identical, nothing throws, and the facet reads the wrong column's text — with the filter
+    // agreeing, because both read the same wrong index. model_browser_test checks the label sets.
     QVariantList cells;
     cells.append(nameCell);
     cells.append(groupCell);
+    cells.append(kindCell);
+    cells.append(prominenceCell);
     if (asCause) {
         cells.append(cell(QString::number(coverageOf(p, c.id)), QString(), true, QStringLiteral("right")));
         cells.append(cell(QString::number(reach.leadsTo), QString(), true, QStringLiteral("right")));
@@ -1018,6 +1107,11 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
     // the enum order is, and sorting the labels alphabetically would put Ball flight first.
     QVariantMap keys;
     keys.insert(QStringLiteral("group"), int(c.group));
+    // The ORDINAL, not the label, for both — a prominence must sort along its ladder, and sorting
+    // "Almost everyone / Common / Occasional / Rare / Uncommon" alphabetically would read as noise
+    // that happens to look sorted.
+    keys.insert(QStringLiteral("kind"), int(c.kind));
+    keys.insert(QStringLiteral("prominence"), int(c.prominence));
     keys.insert(QStringLiteral("measures"), measureN);
     keys.insert(QStringLiteral("causes"), int(causesOf(p, c.id).size()));
     keys.insert(QStringLiteral("explains"), coverageOf(p, c.id));
@@ -1034,8 +1128,13 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
     // scattered through the group.
     keys.insert(QStringLiteral("axis"), c.axis);
     r.insert(QStringLiteral("sortKeys"), keys);
+    // The KIND label joins the haystack; the prominence label deliberately does NOT. "Common" and
+    // "Rare" appear in consequence prose all over the pack, so adding them would make searching for
+    // either term useless — it would match half the library on the wrong field. The prominence rail
+    // is how that question gets asked.
     r.insert(QStringLiteral("searchText"),
              QStringList{ c.label, c.id, c.axis, conditionGroupLabel(c.group),
+                          conditionKindLabel(c.kind),
                           c.aliases.join(QLatin1Char(' ')), c.consequence.text() }
                  .join(QLatin1Char(' ')));
     return r;
@@ -1845,9 +1944,11 @@ QVariantList ModelBrowser::facets(const QString &type) const
     // Which column each type facets on. Deliberately few: a rail of every column is a filter nobody
     // reads. These are the questions authors actually arrive with.
     QStringList keys;
-    if (type == kCharacteristics)  keys = { QStringLiteral("group"), QStringLiteral("reach"),
+    if (type == kCharacteristics)  keys = { QStringLiteral("group"), QStringLiteral("kind"),
+                                            QStringLiteral("prominence"), QStringLiteral("reach"),
                                             QStringLiteral("evidence") };
-    else if (type == kCauses)      keys = { QStringLiteral("group"), QStringLiteral("reach"),
+    else if (type == kCauses)      keys = { QStringLiteral("group"), QStringLiteral("kind"),
+                                            QStringLiteral("prominence"), QStringLiteral("reach"),
                                             QStringLiteral("evidence") };
     else if (type == kMeasures)    keys = { QStringLiteral("status"), QStringLiteral("unit") };
     // The metrics list faceted on UNIT, and that has gone. A unit is a property of the number, not a
@@ -1887,8 +1988,9 @@ QVariantList ModelBrowser::facets(const QString &type) const
             }
         if (colIndex < 0) continue;
 
-        // Counted in first-seen order rather than sorted, so a facet over an ORDERED vocabulary
-        // (groups are the swing's own order) reads in that order rather than alphabetically.
+        // Counted in first-seen order, then put into the vocabulary's own order — see
+        // valueFacetOrder(). Never sorted alphabetically: these are ladders and sequences, and
+        // "Almost everyone" before "Common" before "Occasional" would read as noise.
         QStringList         seen;
         QHash<QString, int> counts;
         for (const QVariant &v : all) {
@@ -1900,6 +2002,7 @@ QVariantList ModelBrowser::facets(const QString &type) const
             counts[value] += 1;
         }
         if (seen.size() < 2) continue;   // a facet with one value filters nothing
+        applyCanonicalOrder(seen, valueFacetOrder(key));
 
         QVariantList options;
         for (const QString &value : seen) {
@@ -1935,19 +2038,7 @@ QVariantList ModelBrowser::facets(const QString &type) const
         }
         if (seen.size() < 2) continue;   // a facet with one value filters nothing
 
-        // Into the declared order. A value the order does not name keeps its first-seen position at
-        // the end rather than being dropped — a chip that vanishes because somebody added a device
-        // and forgot this table would be a filter silently missing rows.
-        const QStringList canonical = tagFacetOrder(key);
-        if (!canonical.isEmpty()) {
-            std::stable_sort(seen.begin(), seen.end(),
-                             [&canonical](const QString &a, const QString &b) {
-                                 const int ia = canonical.indexOf(a);
-                                 const int ib = canonical.indexOf(b);
-                                 return (ia < 0 ? canonical.size() : ia)
-                                      < (ib < 0 ? canonical.size() : ib);
-                             });
-        }
+        applyCanonicalOrder(seen, tagFacetOrder(key));
 
         QVariantList options;
         for (const QString &value : seen) {
@@ -2452,6 +2543,11 @@ QVariantList ModelBrowser::fieldsOf(const QString &type, const QString &id) cons
         f.append(fieldRow(QStringLiteral("label"), tr("Name"), QStringLiteral("text"), c->label));
         f.append(fieldRow(QStringLiteral("group"), tr("Group"), QStringLiteral("enum"),
                           conditionGroupName(c->group), groupOptions()));
+        f.append(fieldRow(QStringLiteral("kind"), tr("What kind of thing"), QStringLiteral("enum"),
+                          conditionKindName(c->kind), kindOptions(), kindHint(c->kind)));
+        f.append(fieldRow(QStringLiteral("prominence"), tr("How common"), QStringLiteral("enum"),
+                          prominenceName(c->prominence), prominenceOptions(),
+                          tr("This library's editorial judgement — no prevalence study exists.")));
         f.append(fieldRow(QStringLiteral("reach"), tr("How it is reached"), QStringLiteral("enum"),
                           confirmedByName(c->confirmedBy), reachOptions(),
                           reachHint(c->confirmedBy)));
@@ -4003,6 +4099,16 @@ QVariantMap ModelBrowser::setField(const QString &type, const QString &id, const
             if (!conditionGroupFromName(text, g)) return reject(tr("%1 is not a group.").arg(text));
             c->group = g;
             what     = tr("Group → %1").arg(conditionGroupLabel(g));
+        } else if (field == QStringLiteral("kind")) {
+            ConditionKind k{};
+            if (!conditionKindFromName(text, k)) return reject(tr("%1 is not a kind.").arg(text));
+            c->kind = k;
+            what    = tr("Kind → %1").arg(conditionKindLabel(k));
+        } else if (field == QStringLiteral("prominence")) {
+            Prominence pr{};
+            if (!prominenceFromName(text, pr)) return reject(tr("%1 is not a prominence.").arg(text));
+            c->prominence = pr;
+            what          = tr("How common → %1").arg(prominenceLabel(pr));
         } else if (field == QStringLiteral("reach")) {
             ConfirmedBy r{};
             if (!confirmedByFromName(text, r)) return reject(tr("%1 is not a reach.").arg(text));
@@ -4473,6 +4579,31 @@ QVariantList ModelBrowser::ringValues(const QString &type, const QString &id,
                              return uses.value(a.toMap().value(QStringLiteral("value")).toString())
                                   > uses.value(b.toMap().value(QStringLiteral("value")).toString());
                          });
+    } else if ((type == kCharacteristics || type == kCauses) && field == QStringLiteral("kind")) {
+        const Condition *c = p.condition(id);
+        if (!c) return {};
+        current = conditionKindName(c->kind);
+
+        // Seven kinds, five cells — shortlists like `group`, and by the same measure. Which kind an
+        // author reaches for most is a fact about the library they are editing.
+        QHash<QString, int> uses;
+        for (const Condition &o : p.conditions) uses[conditionKindName(o.kind)]++;
+        options = kindOptions();
+        std::stable_sort(options.begin(), options.end(),
+                         [&uses](const QVariant &a, const QVariant &b) {
+                             return uses.value(a.toMap().value(QStringLiteral("value")).toString())
+                                  > uses.value(b.toMap().value(QStringLiteral("value")).toString());
+                         });
+    } else if ((type == kCharacteristics || type == kCauses)
+               && field == QStringLiteral("prominence")) {
+        const Condition *c = p.condition(id);
+        if (!c) return {};
+        current = prominenceName(c->prominence);
+
+        // The strength precedent, NOT the group one: five rungs into five cells, in ladder order,
+        // unsorted. Ranking these by how often the library uses them would put the ladder in
+        // frequency order — which is a ladder about the ladder, and unreadable.
+        options = prominenceOptions();
     } else {
         return {};
     }

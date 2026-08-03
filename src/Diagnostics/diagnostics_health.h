@@ -131,7 +131,14 @@
 //   oneBandCorpus          A corridor grading an implausible share of the drawn library into a
 //                          single band. NOT produced here: it needs a library scan and arrives
 //                          asynchronously. The code is declared here so the health list has one
-//                          vocabulary and the view's label table has one home.
+//                          vocabulary.
+//
+// THERE IS NO LONGER A VIEW LABEL TABLE, and this comment used to say the codes were declared here
+// so that one had a home. `HealthView.qml` and its `_codeLabel` map went with the old diagnostics
+// panel; the health list is now marshalled raw by `ModelBrowser::rawRows(kHealth)`, which renders
+// the `code` string itself and chips on it. So a new code needs no QML change and appears in the
+// panel the moment something emits it — and the code string IS what a reader sees, which is a
+// reason to name one carefully rather than a reason to stop caring.
 //
 // Deliberately NOT a check: the unread edge of a single-tail axis. `s_posture` reads one end of
 // `lumbar_curve` and nothing reads the other, but the norm is a single two-sided row — the "missing"

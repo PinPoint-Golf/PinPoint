@@ -159,6 +159,14 @@ static const Expect kExpected[] = {
       "m_shaftPlaneDelivery highMeans: 'a steeper delivery plane, the shaft higher above the "
       "address plane'" },
     { "sig_underPlaneStuck",      Direction::Low,  "…and stuck under the plane is the other end" },
+    { "sig_overTheTop",           Direction::High,
+      "m_transitionPlaneShift highMeans: 'the shaft moved OUTSIDE the plane it was on at the top'. "
+      "Over the top IS that outward move — a DIFFERENT event from sig_steepDownswingShaft above, "
+      "which reads the plane at P6: a golfer can be steep at delivery from a steep BACKSWING "
+      "without ever re-routing the club outward in transition" },
+    { "sig_shallowing",           Direction::Low,
+      "…and the shaft dropping under that plane is the other end. Not a fault — it is the move good "
+      "players make on purpose, which is why the condition on this tail is kind Delivery" },
     { "sig_hipSpinOut",           Direction::High,
       "pelvisRotation at P5: spinning out is the pelvis ALREADY further open in early downswing" },
     { "sig_hipStall",             Direction::Low,

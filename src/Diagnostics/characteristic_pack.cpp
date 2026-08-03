@@ -370,10 +370,15 @@ QSet<QString> causalClosure(const CharacteristicPack &pack, const QString &id, b
 
 int outcomeReachOf(const CharacteristicPack &pack, const QString &conditionId)
 {
+    // Asks the KIND, not the group. "Is this an outcome" is a question about what sort of thing a
+    // condition is, and the group answers where in the swing it sits — this line was the only place
+    // in the model that had to press the group into the other job, because there was nowhere else to
+    // ask. The two sets are exactly coextensive over shipped content and `core_pack_test` asserts it
+    // in both directions, so the change is a no-op by construction rather than by hope.
     int n = 0;
     for (const QString &id : causalClosure(pack, conditionId, /*downstream*/ true))
         if (const Condition *c = pack.condition(id))
-            if (c->group == ConditionGroup::BallFlight) ++n;
+            if (c->kind == ConditionKind::Outcome) ++n;
     return n;
 }
 
@@ -605,6 +610,21 @@ ValidationReport validatePack(const CharacteristicPack &pack)
     }
 
     // --- conditions ----------------------------------------------------------
+    //
+    // The kind rules below are gated on whether ANYTHING in this pack has an opinion about kind. A
+    // pack authored before the field existed loads with every condition at the default — Fault — and
+    // an ungated `faultNotObservable` would then accuse every Latent condition in it of an omission
+    // that is really the field's own age. Same reasoning as scoping `personalNormNoSample` to the
+    // personal layer so the migrated shipped rows never appear: a check that fires on the design is
+    // worse than no check.
+    //
+    // The stated cost, so nobody rediscovers it as a bug: a pack whose conditions genuinely are ALL
+    // Faults escapes these four rules. That is acceptable and arguably correct — a pack where
+    // everything is a fault has nothing for a kind rule to compare.
+    const bool kindsAuthored =
+        std::any_of(pack.conditions.begin(), pack.conditions.end(),
+                    [](const Condition &c) { return c.kind != ConditionKind::Fault; });
+
     for (const Condition &c : pack.conditions) {
         for (const QString &sid : c.detectedBy)
             if (!signalSet.contains(sid))
@@ -628,6 +648,48 @@ ValidationReport validatePack(const CharacteristicPack &pack)
             warn(r, QStringLiteral("inconsistentReach"), c.id,
                  QStringLiteral("'%1' is %2 but also claims a detecting signal.")
                      .arg(c.id, confirmedByName(c.confirmedBy)));
+
+        // A Fault is a movement error IN THE SWING, so one that cannot be seen there is misfiled —
+        // it is a Capacity, an Intent, or an event this pack has no measure for and should not be
+        // calling a fault. `Both` passes: it can be seen SOMETIMES, which is enough.
+        //
+        // This is the check the whole kind axis was worth adding for. `over_the_top` shipped Latent
+        // and Asserted for a year — the commonest fault in amateur golf, tagged as though it were a
+        // belief — and nothing could say so, because with no kind field there was no claim to
+        // contradict.
+        if (kindsAuthored && c.kind == ConditionKind::Fault
+            && c.observability == Observability::Latent)
+            warn(r, QStringLiteral("faultNotObservable"), c.id,
+                 QStringLiteral("'%1' is a Fault that cannot be seen in the swing. A movement nobody "
+                                "can see is a capacity or an intent, not a swing fault.").arg(c.id));
+
+        // Two halves of one authoring mistake, under one code: an author fixes either by moving the
+        // kind or moving the reach, and two codes for one fix is what this file keeps complaining
+        // about. The message names which pair disagreed so the row is still actionable.
+        if (kindsAuthored && c.kind == ConditionKind::Capacity
+            && c.confirmedBy != ConfirmedBy::Screened)
+            warn(r, QStringLiteral("kindReachMismatch"), c.id,
+                 QStringLiteral("'%1' is a Capacity but is reached by %2. What the body can do is "
+                                "established by a physical screen, not from the swing.")
+                     .arg(c.id, confirmedByName(c.confirmedBy)));
+
+        if (kindsAuthored && c.kind == ConditionKind::Intent
+            && c.confirmedBy != ConfirmedBy::Asserted)
+            warn(r, QStringLiteral("kindReachMismatch"), c.id,
+                 QStringLiteral("'%1' is an Intent but is reached by %2. What a golfer is trying to "
+                                "do is knowable only by asking.")
+                     .arg(c.id, confirmedByName(c.confirmedBy)));
+
+        // THE ONE RULE THAT COUPLES THE TWO AXES, and it is here on sufferance. Kind and group are
+        // meant to be orthogonal; this says they are not, for one value. It is worth having only
+        // while the two sets are exactly coextensive over shipped content, which `core_pack_test`
+        // asserts in both directions. If a legitimate Outcome ever needs to sit outside BallFlight,
+        // DELETE THIS RULE rather than bending the content to it.
+        if (kindsAuthored && c.kind == ConditionKind::Outcome
+            && c.group != ConditionGroup::BallFlight)
+            warn(r, QStringLiteral("outcomeNotBallFlight"), c.id,
+                 QStringLiteral("'%1' is an Outcome but sits in the %2 group rather than ball "
+                                "flight.").arg(c.id, conditionGroupName(c.group)));
 
         if (c.provenance.tier == ProvenanceTier::Proposed)
             warn(r, QStringLiteral("proposedTier"), c.id,
@@ -840,6 +902,27 @@ ValidationReport validatePack(const CharacteristicPack &pack)
                      .arg(c.id, incoming.first()));
     }
 
+    // The other end of the same chain, and the same class of mistake. An Outcome is where an
+    // explanation ENDS: what the ball did cannot cause the swing that produced it. An outgoing
+    // Causes edge from one is an edge written back to front.
+    //
+    // Kept SEPARATE from screenedHasCause rather than folded into a "kind orientation" rule, and
+    // screenedHasCause is deliberately left keyed on ConfirmedBy rather than on Capacity: it is the
+    // inverted-graph detector and its value is that it is UNSCOPED, catching an incoming edge from a
+    // fault, a delivery or an outcome alike. It also keys on the field `relation_resolver` actually
+    // reads. A kind-keyed replacement would guard a field nothing downstream consumes yet.
+    if (kindsAuthored) {
+        for (const Condition &c : pack.conditions) {
+            if (c.kind != ConditionKind::Outcome) continue;
+            const QStringList outgoing = effectsOf(pack, c.id);
+            if (!outgoing.isEmpty())
+                warn(r, QStringLiteral("outcomeHasEffect"), c.id,
+                     QStringLiteral("'%1' is an Outcome but claims to cause '%2'. What the ball did "
+                                    "cannot cause the swing that produced it — check the direction.")
+                         .arg(c.id, outgoing.first()));
+        }
+    }
+
     return r;
 }
 
@@ -997,6 +1080,27 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         observabilityFromName(o.value(QStringLiteral("observability")).toString(), c.observability);
         confirmedByFromName(o.value(QStringLiteral("confirmedBy")).toString(), c.confirmedBy);
         conditionStateFromName(o.value(QStringLiteral("state")).toString(), c.state);
+
+        // These two follow `shape` below rather than the four lines above them: absent means the
+        // documented default, a MISSPELT token is an error. The four above swallow an unknown token
+        // silently, which is how a condition typed "postrue" lands in Setup with nobody told — and a
+        // misread kind is worse than a misread group, because the kind rules would then accuse the
+        // row of the wrong defect entirely. Both messages name the FIELD, because `setup` is a legal
+        // token of two different enums here and `kind` is the third meaning of that JSON key in this
+        // file (Measure::kind, Reducer::kind).
+        if (o.contains(QStringLiteral("kind"))
+            && !conditionKindFromName(o.value(QStringLiteral("kind")).toString(), c.kind))
+            err(r, QStringLiteral("unknownConditionKind"), c.id,
+                QStringLiteral("Condition '%1' declares kind '%2'; the kinds are fault, setup, "
+                               "delivery, outcome, capacity, intent and equipment.")
+                    .arg(c.id, o.value(QStringLiteral("kind")).toString()));
+
+        if (o.contains(QStringLiteral("prominence"))
+            && !prominenceFromName(o.value(QStringLiteral("prominence")).toString(), c.prominence))
+            err(r, QStringLiteral("unknownProminence"), c.id,
+                QStringLiteral("Condition '%1' declares prominence '%2'; the rungs are rare, "
+                               "uncommon, occasional, common and ubiquitous.")
+                    .arg(c.id, o.value(QStringLiteral("prominence")).toString()));
 
         c.provenance = parseProvenance(o.value(QStringLiteral("provenance")).toObject());
         // A tier is only as good as its citation. An author cannot claim Supported without one.
@@ -1170,6 +1274,13 @@ QJsonObject savePack(const CharacteristicPack &pack)
         o.insert(QStringLiteral("label"), c.label);
         if (!c.axis.isEmpty()) o.insert(QStringLiteral("axis"), c.axis);
         o.insert(QStringLiteral("group"), conditionGroupName(c.group));
+        // Written unconditionally, beside the three fields they belong with — NOT omitted when they
+        // hold the default, the way `shape` is. That omission exists to keep 105 of 106 measures
+        // byte-identical across a save, and the argument evaporates here: every shipped condition
+        // authors both, so omitting the default would mean the 69 hand-written `"kind": "fault"`
+        // rows are silently dropped by the writer and the file disagrees with its own round-trip.
+        o.insert(QStringLiteral("kind"), conditionKindName(c.kind));
+        o.insert(QStringLiteral("prominence"), prominenceName(c.prominence));
         o.insert(QStringLiteral("observability"), observabilityName(c.observability));
         o.insert(QStringLiteral("confirmedBy"), confirmedByName(c.confirmedBy));
         if (!c.detectedBy.isEmpty()) o.insert(QStringLiteral("detectedBy"), writeStringList(c.detectedBy));

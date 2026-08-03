@@ -87,6 +87,10 @@ struct ValidationReport {
 //   unwatchedTailShaped  a one-sided measure claiming a tail is "deliberately unwatched". The shape
 //                        already says which tail does not grade; the two cannot both be true
 //   unwatchedTailWatched a measure claiming a tail is unwatched that a corridor signal watches
+//   unknownConditionKind a condition declares a kind that is not one of the seven. An error for
+//                        unknownShape's reason: a misread kind lands the row in Fault, where the
+//                        kind rules then accuse it of the wrong defect entirely
+//   unknownProminence    a condition declares a rung that is not one of the five — same reasoning
 //
 // WARNINGS — the pack works, but the health list should show it:
 //   observableNoSignal   an Observable and Measured condition nothing can detect. Scoped to
@@ -110,6 +114,26 @@ struct ValidationReport {
 //   unwatchedTailNoReason  a measure declaring a tail deliberately unwatched without saying why.
 //                        The declaration silences `ungradedTail`; without the reason it is
 //                        indistinguishable from a tail nobody has got to
+//   faultNotObservable   a Fault that cannot be seen in the swing. Then it is not a swing fault; it
+//                        is a Capacity or an Intent. THIS IS THE CHECK THAT WOULD HAVE CAUGHT
+//                        `over_the_top`, which shipped Latent because nobody had written it a measure
+//   kindReachMismatch    a Capacity not reached by a screen, or an Intent not reached by asking. One
+//                        code for both, because an author fixes either the same way
+//   outcomeNotBallFlight an Outcome outside the BallFlight group. The ONE rule coupling the two
+//                        otherwise-orthogonal axes; if it ever fires legitimately, delete the rule
+//   outcomeHasEffect     an Outcome that causes something. What the ball did cannot cause the swing
+//                        that produced it, so this is an edge written back to front
+//
+// DELIBERATELY NOT A CHECK: "this condition has no prominence". It cannot be written here at all.
+// Prominence has five legitimate values and no sentinel, so a row nobody authored and a row somebody
+// authored at the default rung are THE SAME BYTES by the time the validator sees them — and 58 of
+// the shipped conditions sit at that rung on purpose. Any predicate over the loaded pack either
+// accuses those 58 or reports nothing. Giving the enum an eighth "unset" value would fix the
+// predicate and break the thing the enum is for, which is that every condition has an answer.
+// The failure it was meant to catch — a 146-row hand edit that stopped at 142 — is caught instead by
+// `core_pack_test`, which reads the SHIPPED JSON as raw text and asserts the key is present on every
+// condition. That is the only layer where the question is answerable, and it is also the only layer
+// where it matters.
 //
 // The checks that span the pack, the norm set, the context tree and the metric catalogue at once —
 // "can this signal ever fire?" — live in `diagnostics_health.h`, because no single pack can answer

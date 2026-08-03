@@ -256,6 +256,52 @@ enum class ProvenanceTier {
 // draft -> candidate without a schema change.
 enum class ConditionState { Draft, Candidate, Active, NeedsRevalidation, Superseded, Retired };
 
+// WHAT KIND OF THING this is. Orthogonal to ConditionGroup, which says WHERE in the body and WHEN in
+// the swing. Both facets are needed and only one existed, which is how `setup` became the group that
+// holds fourteen physical screens, nine beliefs and a set of clubs.
+//
+// The distinction the library could not previously make is between a movement error a lesson is
+// about, an impact geometry that is merely the scoreboard, and a physical capacity that constrains
+// what is coachable at all. All three were `Condition` with a group and two epistemic flags — and
+// with nothing recording the kind, those flags absorbed the job. `over_the_top` shipped `Latent` and
+// `Asserted`, which the headers below define as "cannot be seen in the swing" and "intent, habit,
+// perception". It is neither. It was tagged that way because nobody had written it a measure, so the
+// fields had quietly become a record of PRODUCER COVERAGE rather than a statement about the thing.
+//
+// The repair is the division of labour these three now keep:
+//
+//   ConditionKind   what sort of thing it is.      INTRINSIC — never moves when a producer lands.
+//   Observability   can it be seen in the swing.   INTRINSIC to the movement.
+//   ConfirmedBy     how it is established TODAY.   MOVES, when a producer or a connector lands.
+//
+// Only the third is allowed to change under us, and it is the one that means "today".
+enum class ConditionKind {
+    Fault,      // a movement error in the swing. What a lesson is about.
+    Setup,      // a static state before the swing starts. Told and rehearsed, not trained.
+    Delivery,   // impact geometry — path, face to path, attack angle, low point, shaft lean. These
+                // are the ball-flight laws and they are very nearly a CLOSED determinant set: given
+                // them, the outcome follows. A fault is explained by which of them it broke. They
+                // are not faults themselves, and a coach does not give a lesson on a number.
+    Outcome,    // what the ball did. Where an explanation ENDS.
+    Capacity,   // what the body can do. Screened, never measured from our pixels, and a CONSTRAINT
+                // on the search rather than an answer to it.
+    Intent,     // what the golfer is trying to do or believes. Asked, never concluded.
+    Equipment,  // the clubs.
+};
+
+// How often this condition is present in the population a coach actually sees — the base rate
+// `strengthWeight()` below says the pack cannot supply. Read as a frequency, stored as a rung,
+// weighted as one number in 0…1 by prominenceWeight().
+//
+// NOTHING IN THE LIBRARY IS SEATED ON A PREVALENCE STUDY, because there is not one: no peer-reviewed
+// source counts named swing faults across a population. Every value ships at `practice` tier and is
+// this library's editorial judgement, and a UI that renders a rank owes the reader that sentence. It
+// is a PRIOR. The moment the swing library has volume the posterior is measurable — count how often
+// each condition fires across the corpus — and the seat will be biased in a way that must be
+// reported, because it can only count what can FIRE. Over-the-top, early extension and every
+// launch-monitor outcome would come back under-rated for reasons that have nothing to do with golf.
+enum class Prominence { Rare, Uncommon, Occasional, Common, Ubiquitous };
+
 struct Provenance {
     QString        author;
     QString        citation;   // DOI, PMID or ISBN. NEVER a commercial organisation, product or
@@ -307,6 +353,13 @@ struct Condition {
     QStringList                 aliases;
     QString                     axis;                  // joins the two tails of one measure; may be empty
     ConditionGroup              group        = ConditionGroup::Setup;
+    ConditionKind               kind         = ConditionKind::Fault;   // what sort of thing; see above
+    // The MIDDLE rung, deliberately, and not the first value the way every other enum here defaults.
+    // Neither `group` nor `confirmedBy` multiplies into a rank; this one will. `Rare` would silently
+    // bury every condition in an unauthored pack the day the scoring lands, and `Ubiquitous` would
+    // swamp the shipped content with it. The neutral rung is the only default that is harmless when
+    // it is wrong. Do not "fix" this back to Rare for consistency with its neighbours.
+    Prominence                  prominence   = Prominence::Occasional;
     Observability               observability = Observability::Observable;
     QStringList                 detectedBy;            // signal ids; empty => Latent
     ConfirmedBy                 confirmedBy  = ConfirmedBy::Measured;
@@ -416,6 +469,53 @@ bool    conditionGroupFromName(const QString &s, ConditionGroup &out);
 // copies of it (the library's filter row and the editor's picker) had already drifted apart by the
 // time a third group was added.
 const std::vector<ConditionGroup> &allConditionGroups();
+QString conditionKindName(ConditionKind k);
+QString conditionKindLabel(ConditionKind k);
+bool    conditionKindFromName(const QString &s, ConditionKind &out);
+
+// The kinds, in the order a diagnosis reads: what the golfer does, what the club then delivers, what
+// the ball does about it, and then the three things that are true of the golfer rather than of the
+// swing. One definition, for the same reason allConditionGroups() exists.
+const std::vector<ConditionKind> &allConditionKinds();
+QString prominenceName(Prominence p);
+QString prominenceLabel(Prominence p);   // words. Never a percentage, and never a rank number.
+bool    prominenceFromName(const QString &s, Prominence &out);
+
+// The rungs, rarest first — the order IS the ladder, as with allStrengths().
+const std::vector<Prominence> &allProminences();
+
+// P(condition) — the base rate strengthWeight() below says the pack cannot supply, in 0…1 exclusive
+// of both bounds. Five rungs, because nobody can author 0.17 of a prevalence nobody has counted.
+//
+// THE SPREAD IS THE DESIGN, NOT THE VALUES. This ladder runs 12x from floor to ceiling against
+// strengthWeight()'s 9.5x, and that ratio is the only thing here anybody chose on purpose: the two
+// terms have to stay commensurable, so that a Ubiquitous cause covering one weak finding does not
+// outrank a Rare cause covering two very strong ones. Widen this ladder and prevalence decides
+// nearly every ordering — which is the same failure as ranking by graph topology, with the sign
+// flipped. A finer floor was rejected for a different reason: 0.02 against 0.06 claims to
+// discriminate one-in-fifty from one-in-seventeen on an editorial judgement with no study behind it,
+// and a rung nobody can author against a real row is a rung that gets picked by feel and then
+// defended by its number.
+//
+// NOTHING CONSUMES THIS YET, deliberately. Wiring it into RankedCause::score is a separate change
+// that owes the measurement strengthWeight() demands below, and the consumption form —
+// multiplicative, log-additive, or a tie-break — is not fixed by these values.
+//
+// NEITHER BOUND IS AVAILABLE, and the reasons are NOT strengthWeight()'s reasons. This is a base
+// rate on a node, not a conditional on an edge, so both have to be re-derived. Both survive:
+//
+//   0 is worse here than there. A strength of 0 was refused because 0 is taken — edgeWeight()
+//   returns it for "there is no such edge". This one MULTIPLIES, so a zero rung annihilates the
+//   whole product and yields a score of exactly 0, which in RankedCause::score already means
+//   "explains none of these findings". That collapses "we see this, rarely" into "this is not a
+//   candidate", and those are precisely the two states this field exists to hold apart. A Rare fault
+//   covering four findings must still be able to outrank a Common one covering none.
+//
+//   1 is absorbing under Bayes, as it is for strength — but the sharper objection is that P = 1 says
+//   every golfer has this, which makes the term NON-DIAGNOSTIC: it multiplies every candidate
+//   identically and contributes nothing to any ordering. And a ceiling at 1 is unrevisable upward,
+//   which no editorial judgement awaiting a corpus re-seat has earned.
+double prominenceWeight(Prominence p);
 QString observabilityName(Observability o);
 bool    observabilityFromName(const QString &s, Observability &out);
 QString confirmedByName(ConfirmedBy c);
