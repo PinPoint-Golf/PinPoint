@@ -3047,32 +3047,47 @@ int main(int argc, char **argv)
         // is chosen because the shipped pack grades it differently per club and the difference is
         // the whole point of the context walk — driver mu 5 sigma 8 (z = 2.5, a deviation), iron
         // mu 33 sigma 10 (z = -0.8, inside). One swing, two clubs, two colours.
-        auto writeSwing = [](const QString &dir, const QString &club, double value) {
+        auto writeSwingOf = [](const QString &dir, const QString &club, const QString &key,
+                       const QString &unit, double value) {
             QDir().mkpath(dir);
             QJsonArray t, v;
             for (qint64 x = 0; x <= 100000; x += 1000) { t.append(x); v.append(value); }
             QJsonObject metric;
-            metric.insert(QStringLiteral("key"),   QStringLiteral("ballPosition"));
-            metric.insert(QStringLiteral("unit"),  QStringLiteral("% stance width"));
+            metric.insert(QStringLiteral("key"),   key);
+            metric.insert(QStringLiteral("unit"),  unit);
             metric.insert(QStringLiteral("t_us"),  t);
             metric.insert(QStringLiteral("value"), v);
 
-            QJsonObject phase;
-            phase.insert(QStringLiteral("phase"), int(Phase::Address));
-            phase.insert(QStringLiteral("t_us"),  50000);
-            phase.insert(QStringLiteral("conf"),  0.9);
+            // Both phases, because the two measures under test anchor at different ones —
+            // ball position at Address, clubhead speed at Impact.
+            auto phaseAt = [](Phase p, qint64 tUs) {
+                QJsonObject o;
+                o.insert(QStringLiteral("phase"), int(p));
+                o.insert(QStringLiteral("t_us"),  tUs);
+                o.insert(QStringLiteral("conf"),  0.9);
+                return o;
+            };
 
             QJsonObject analysis;
             analysis.insert(QStringLiteral("metrics"), QJsonArray{ metric });
-            analysis.insert(QStringLiteral("phases"),  QJsonArray{ phase });
+            analysis.insert(QStringLiteral("phases"),
+                            QJsonArray{ phaseAt(Phase::Address, 20000),
+                                        phaseAt(Phase::Impact,  80000) });
 
             QJsonObject review;  review.insert(QStringLiteral("club"), club);
             QJsonObject swing;   swing.insert(QStringLiteral("index"), 3);
+            // WHEN the swing happened, which is what the age band is taken on. Without it the grid
+            // carries no wallclock, ageBandFor answers "unknown", and the cohort below would come
+            // back qualified on sex alone — the correct answer to a question this fixture did not
+            // mean to ask, and one that would have made the age assertion silently vacuous.
+            QJsonObject clock;
+            clock.insert(QStringLiteral("wallclock"), QStringLiteral("2026-01-15T10:00:00.000"));
 
             QJsonObject root;
             root.insert(QStringLiteral("analysis"), analysis);
             root.insert(QStringLiteral("review"),   review);
             root.insert(QStringLiteral("swing"),    swing);
+            root.insert(QStringLiteral("clock"),    clock);
 
             QFile f(QDir(dir).filePath(QStringLiteral("swing.json")));
             if (f.open(QIODevice::WriteOnly))
@@ -3097,6 +3112,13 @@ int main(int argc, char **argv)
         QTemporaryDir tmp;
         const QString driverDir = QDir(tmp.path()).filePath(QStringLiteral("swing_0003"));
         const QString ironDir   = QDir(tmp.path()).filePath(QStringLiteral("swing_0004"));
+        auto writeSwing = [&](const QString &dir, const QString &club, double v) {
+            writeSwingOf(dir, club, QStringLiteral("ballPosition"),
+                         QStringLiteral("% stance width"), v);
+        };
+        auto writeSpeedSwing = [&](const QString &dir, const QString &club, double v) {
+            writeSwingOf(dir, club, QStringLiteral("clubheadSpeed"), QStringLiteral("mph"), v);
+        };
         writeSwing(driverDir, QStringLiteral("DRIVER"),  25.0);
         writeSwing(ironDir,   QStringLiteral("7 IRON"),  25.0);
 
@@ -3162,8 +3184,8 @@ int main(int argc, char **argv)
                           QStringLiteral("swingValue")) < 0,
               "and drops the old swing's column immediately, rather than when the new one lands");
         settle();
-        check(m.currentSwingContext() == QStringLiteral("iron"),
-              "loading another swing re-resolves the context from its own club");
+        check(m.currentSwingContext() == QStringLiteral("iron_7"),
+              "loading another swing re-resolves the context from its own club, per club");
         const QVariantList ironCols = m.columns(QStringLiteral("measures"));
         const int          ironIdx  = columnIndex(ironCols, QStringLiteral("swingValue"));
         const QVariantMap  ironBp   = rowFor(m.rows(QStringLiteral("measures")),
@@ -3174,6 +3196,125 @@ int main(int argc, char **argv)
               "the same reading");
         check(ironCell.value(QStringLiteral("tone")).toString().isEmpty(),
               "inside the IRON corridor, so it takes the ordinary text colour");
+        // …and it got there by INHERITANCE. m_ballPosition carries no row at iron_7; the walk goes
+        // iron_7 -> iron and finds one. That is the second storey earning its keep: a per-club node
+        // costs nothing for the measures that do not vary by club.
+        check(m.currentSwingContext() == QStringLiteral("iron_7"),
+              "…resolved from a club node that carries no ball-position row of its own");
+
+        // ── Who the swing belongs to ────────────────────────────────────────────
+        //
+        // The same swing, the same club, three different golfers. Clubhead speed is the one measure
+        // whose shipped corridors segment, so it is the one that can prove the cohort reaches the
+        // resolver at all — a wiring failure here looks exactly like content that does not exist.
+        const QString driverSwing = QDir(tmp.path()).filePath(QStringLiteral("swing_0005"));
+        writeSpeedSwing(driverSwing, QStringLiteral("DRIVER"), 78.0);
+        m.setCurrentSwingDir(driverSwing);
+        settle();
+
+        auto speedTone = [&]() {
+            const QVariantList cs = m.columns(QStringLiteral("measures"));
+            const int          i  = columnIndex(cs, QStringLiteral("swingValue"));
+            const QVariantMap  r  = rowFor(m.rows(QStringLiteral("measures")),
+                                           QStringLiteral("m_clubheadSpeedImpact"));
+            return r.value(QStringLiteral("cells")).toList().at(i).toMap()
+                    .value(QStringLiteral("tone")).toString();
+        };
+
+        check(m.currentSwingCohort().isEmpty(),
+              "a golfer who has told us nothing has no cohort, and that is a real answer");
+        // 78 mph off a driver, graded against the corridor for a golfer we know nothing about —
+        // which is the male amateur figure, because that is what an unqualified population norm
+        // centres on. A fault. This is the assertion that shows the cohort EARNING something
+        // rather than merely resolving: the same number is fine four lines below.
+        check(speedTone() == QStringLiteral("warn"),
+              "…so 78 mph is a fault against the universal driver corridor");
+
+        // A 30-year-old man. 78 mph is a full tolerance and a half below his own corridor's mu.
+        m.setAthleteSex(QStringLiteral("male"));
+        m.setAthleteDob(QStringLiteral("1996-01-01"));
+        check(m.currentSwingCohort() == QStringLiteral("men 18–54"),
+              "sex and a date of birth resolve a cohort, ON THE SWING'S OWN DATE");
+        const QString asMan = speedTone();
+
+        // The date rule, made to bite: a man born in 1966 was 59 when this swing was hit, so he
+        // must grade in the senior band whatever today happens to be. A band taken from the clock
+        // instead of from the swing would drift into 65+ in 2031 and nothing would notice.
+        m.setAthleteDob(QStringLiteral("1966-06-01"));
+        check(m.currentSwingCohort() == QStringLiteral("men 55–64"),
+              "…so the same man grades in the band he was in on the day, not the one he is in now");
+        m.setAthleteDob(QStringLiteral("1996-01-01"));
+
+        // The same reading, a woman of the same age. Her corridor sits lower, so the reading that
+        // was marginal for him is ordinary for her — which is the entire argument for cohort rows,
+        // and it is asserted rather than asserted-about.
+        m.setAthleteSex(QStringLiteral("female"));
+        // "women 18–54", not "women". This reports the cohort the ATHLETE resolved to, which is a
+        // panel-wide fact; WHICH ROW answered is per measure — the shipped women's corridor is
+        // qualified on sex alone and is reached from here by the probe order dropping the age axis.
+        // The two are different questions and only the first has one answer for a whole table.
+        check(m.currentSwingCohort() == QStringLiteral("women 18–54"),
+              "the label says who the golfer is, not which of their corridors answered");
+        check(speedTone().isEmpty(),
+              "78 mph is ordinary for a woman — the SAME reading, a different answer");
+        check(asMan == QStringLiteral("warn"),
+              "…while it stayed a fault for a man of the same age, which is the point of the row");
+
+        // Declining to say is NOT the same as saying nothing went wrong: it means the universal
+        // corridor, exactly as an empty record does.
+        m.setAthleteSex(QStringLiteral("declined"));
+        check(m.currentSwingCohort() == QStringLiteral("18–54"),
+              "a declined sex leaves THAT axis unset and keeps the one that is known");
+        m.setAthleteDob(QString());
+        check(m.currentSwingCohort().isEmpty(),
+              "…and with neither known, the universal corridor, which is a real answer");
+        m.setAthleteSex(QString());
+
+        // ── The same reading, in the detail pane ────────────────────────────────
+        //
+        // The pane and the table are two renderings of ONE grade. The pill exists so an author
+        // editing a corridor can see what the swing on screen did against it without leaving the
+        // pane — so the thing worth asserting is not that it appears but that it appears on the
+        // RIGHT ROW and carries the SAME colour the table gave it.
+        m.setAthleteDob(QString());
+        m.setAthleteSex(QString());
+        const QVariantMap ins = m.inspect(QStringLiteral("measures"),
+                                          QStringLiteral("m_clubheadSpeedImpact"));
+        QVariantList corridorRows;
+        for (const QVariant &sv : ins.value(QStringLiteral("sections")).toList())
+            if (sv.toMap().value(QStringLiteral("title")).toString().contains(
+                    QStringLiteral("Corridor")))
+                corridorRows = sv.toMap().value(QStringLiteral("rows")).toList();
+        check(!corridorRows.isEmpty(), "the measure's pane lists the corridors that resolve for it");
+
+        int pills = 0;
+        QVariantMap pilled;
+        for (const QVariant &rv : corridorRows) {
+            const QVariantMap r = rv.toMap();
+            if (r.value(QStringLiteral("pill")).toString().isEmpty()) continue;
+            ++pills;
+            pilled = r;
+        }
+        check(pills == 1, "exactly ONE corridor row is pilled — the swing was graded at one context");
+        check(pilled.value(QStringLiteral("id")).toString().endsWith(QStringLiteral("@driver")),
+              "…the one the swing's own club selects");
+        check(pilled.value(QStringLiteral("pill")).toString() == QStringLiteral("78.0"),
+              "the pill carries the reading, spelled as every other norm number is");
+        check(pilled.value(QStringLiteral("pillTone")).toString() == speedTone(),
+              "…and the SAME tone the measures table gave it — one grade, two renderings");
+
+        // No swing, no pill. The pane is the library's, not a swing's, whenever there is no swing.
+        const QString heldDir = m.currentSwingDir();
+        m.setCurrentSwingDir(QString());
+        const QVariantMap bare = m.inspect(QStringLiteral("measures"),
+                                           QStringLiteral("m_clubheadSpeedImpact"));
+        bool anyPill = false;
+        for (const QVariant &sv : bare.value(QStringLiteral("sections")).toList())
+            for (const QVariant &rv : sv.toMap().value(QStringLiteral("rows")).toList())
+                if (!rv.toMap().value(QStringLiteral("pill")).toString().isEmpty()) anyPill = true;
+        check(!anyPill, "with no swing loaded no row is pilled");
+        m.setCurrentSwingDir(heldDir);
+        settle();
 
         // Unloading takes the column with it, rather than leaving the last swing's numbers on
         // screen under nobody's name.

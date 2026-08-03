@@ -326,9 +326,25 @@ int main()
     // ── Nothing is invented where there is nothing ──────────────────────────
     std::printf("=== no measure or no norm ⇒ no corridor ===\n");
     {
-        check(!corridorForMetricAtPhase(pack, *norms, QStringLiteral("clubheadSpeed"),
+        // ballSpeed, and it used to be clubheadSpeed. The swap is worth explaining, because the old
+        // case was not merely an example — Stage 6 refused a clubhead-speed corridor on the ground
+        // that "a speed band is athlete-relative and a population figure would grade a junior
+        // against a tour player", and that objection was correct about the corridor it was
+        // imagining.
+        //
+        // What answers it is the pair of changes that landed with the corridor and not the corridor
+        // alone: the measure is now a FLOOR, so the fast half of the population cannot be graded at
+        // all, and the rows are deliberately wide enough that no adult in the source's own range —
+        // female beginner to tour player — reaches a fault. What survives of the objection is the
+        // low tail for a junior, and the mechanism for that is a cohort row, which nothing resolves
+        // yet (every resolve() call site passes an unqualified cohort). The norms.json rows say so
+        // in their own citations and say they should tighten when it does.
+        //
+        // ballSpeed carries the case now: a device metric whose measure is `planned`, so it is a
+        // metric with a measure and no norm, which is the shape this check is actually about.
+        check(!corridorForMetricAtPhase(pack, *norms, QStringLiteral("ballSpeed"),
                                         Phase::Impact, kFull).has_value(),
-              "clubheadSpeed has no defensible band yet and gets no corridor");
+              "a metric whose measure carries no norm gets no corridor");
         check(!corridorForMetricAtPhase(pack, *norms, QStringLiteral("kinematicSequence"),
                                         Phase::Impact, kFull).has_value(),
               "a Sequence metric has no corridor");

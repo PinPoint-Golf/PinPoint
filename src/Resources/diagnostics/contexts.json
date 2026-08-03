@@ -25,8 +25,24 @@
     { "id": "full_swing",   "label": "Full swing",        "parent": "any" },
     { "id": "driver",       "label": "Driver",            "parent": "full_swing" },
     { "id": "fairway_wood", "label": "Fairway wood",      "parent": "full_swing" },
+    { "id": "wood_3",       "label": "3 wood",            "parent": "fairway_wood" },
+    { "id": "wood_5",       "label": "5 wood",            "parent": "fairway_wood" },
+    { "id": "hybrid",       "label": "Hybrid",            "parent": "fairway_wood" },
+
     { "id": "iron",         "label": "Iron",              "parent": "full_swing" },
+    { "id": "iron_3",       "label": "3 iron",            "parent": "iron" },
+    { "id": "iron_4",       "label": "4 iron",            "parent": "iron" },
+    { "id": "iron_5",       "label": "5 iron",            "parent": "iron" },
+    { "id": "iron_6",       "label": "6 iron",            "parent": "iron" },
+    { "id": "iron_7",       "label": "7 iron",            "parent": "iron" },
+    { "id": "iron_8",       "label": "8 iron",            "parent": "iron" },
+    { "id": "iron_9",       "label": "9 iron",            "parent": "iron" },
+
     { "id": "wedge",        "label": "Wedge",             "parent": "full_swing" },
+    { "id": "wedge_pitching", "label": "Pitching wedge",  "parent": "wedge" },
+    { "id": "wedge_gap",    "label": "Gap wedge",         "parent": "wedge" },
+    { "id": "wedge_sand",   "label": "Sand wedge",        "parent": "wedge" },
+    { "id": "wedge_lob",    "label": "Lob wedge",         "parent": "wedge" },
 
     { "id": "archetype_bowed",  "label": "Bowed style",   "parent": "full_swing" },
     { "id": "archetype_cupped", "label": "Cupped style",  "parent": "full_swing" },
@@ -34,6 +50,8 @@
     { "id": "partial",      "label": "Partial swing",     "parent": "any" },
     { "id": "pitch",        "label": "Pitch",             "parent": "partial" },
     { "id": "chip",         "label": "Chip",              "parent": "partial" },
+
+    { "id": "putt",         "label": "Putt",              "parent": "any" },
 
     { "id": "bunker",       "label": "Bunker",            "parent": "any" },
     { "id": "specialty",    "label": "Specialty shot",    "parent": "any" }

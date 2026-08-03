@@ -2923,10 +2923,29 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
             if (!from.isEmpty()) detail = tr("%1 · from %2").arg(detail, from);
             else if (own)        detail = tr("%1 · yours").arg(detail);
 
-            corridors.append(hubRow(kCorridors,
-                                    corridorId(id, ctx.value(QStringLiteral("id")).toString()),
-                                    ctx.value(QStringLiteral("label")).toString(), detail,
-                                    own ? QStringLiteral("accent") : QString()));
+            const QString ctxId = ctx.value(QStringLiteral("id")).toString();
+            QVariantMap   row   = hubRow(kCorridors, corridorId(id, ctxId),
+                                         ctx.value(QStringLiteral("label")).toString(), detail,
+                                         own ? QStringLiteral("accent") : QString());
+
+            // THIS SWING, against this corridor — on the ONE row the loaded swing is graded at.
+            //
+            // Keyed on the swing's own context rather than on where the answering norm lives, and
+            // the difference is the useful part: a 7 iron pills the `iron_7` row, whose detail
+            // already reads "from iron", so the pane says what the swing read AND which corridor
+            // reached down to grade it. Pilling the norm's home row instead would show the number
+            // beside a context the shot was never in.
+            //
+            // Tone from swingTone(), the same call the table cell makes — the pane and the table
+            // are two renderings of one grade and must never disagree about the colour.
+            if (showSwingColumn() && !m_swingContextId.isEmpty() && ctxId == m_swingContextId) {
+                if (const std::optional<double> v = swingValueFor(*m)) {
+                    row.insert(QStringLiteral("pill"), normNumber(*v));
+                    row.insert(QStringLiteral("pillTone"), swingTone(*m, v));
+                    row.insert(QStringLiteral("pillHint"), tr("this swing"));
+                }
+            }
+            corridors.append(row);
         }
         sections.append(section(tr("Corridors"), corridors,
                                 corridors.isEmpty()
@@ -6772,6 +6791,41 @@ void ModelBrowser::onSwingGridLoaded()
     emit modelChanged();
 }
 
+void ModelBrowser::setAthleteDob(const QString &iso)
+{
+    if (iso == m_athleteDob) return;
+    m_athleteDob = iso;
+    // Every reading is re-graded, because the corridor that answers may have changed under all of
+    // them at once. No re-read: the grid is a property of the swing and demographics are not in it.
+    emit currentSwingChanged();
+    emit modelChanged();
+}
+
+void ModelBrowser::setAthleteSex(const QString &token)
+{
+    if (token == m_athleteSex) return;
+    m_athleteSex = token;
+    emit currentSwingChanged();
+    emit modelChanged();
+}
+
+Cohort ModelBrowser::swingCohort() const
+{
+    // The swing's OWN day, not today. norm.h is emphatic and the reason is concrete: a golfer who
+    // was 54 when they hit this ball must be graded in the band they were in then, however many
+    // birthdays have passed since. An empty wallclock yields an invalid date, which ageBandFor
+    // answers "unknown" for — the honest answer, and one that still grades.
+    const QDate on = m_swingGrid.wallclockMs > 0
+                         ? QDateTime::fromMSecsSinceEpoch(m_swingGrid.wallclockMs).date()
+                         : QDate();
+    return cohortFor(QDate::fromString(m_athleteDob, Qt::ISODate), m_athleteSex, on);
+}
+
+QString ModelBrowser::currentSwingCohort() const
+{
+    return cohortLabel(swingCohort());
+}
+
 QString ModelBrowser::currentSwingLabel() const
 {
     if (m_swingGrid.isEmpty()) return {};
@@ -6792,24 +6846,27 @@ std::optional<double> ModelBrowser::swingValueFor(const Measure &m) const
     return v;
 }
 
-QVariantMap ModelBrowser::swingCell(const Measure &m, const std::optional<double> &value) const
+QString ModelBrowser::swingTone(const Measure &m, const std::optional<double> &value) const
 {
-    // "Not assessed" — and it says so with an em dash rather than a blank, because a blank cell in
-    // a table of numbers reads as a rendering fault.
-    if (!value)
-        return cell(tr("—"), QStringLiteral("dim"), true, QStringLiteral("right"));
+    // THE grading rule for a reading, in one place. Two surfaces render it — the measures table's
+    // cell and the inspector's corridor pill — and a second copy is how one ends up amber while the
+    // other is plain for the same number, which is the exact defect the corridor doctrine keeps
+    // warning about one level up.
+    //
+    // "dim" is NOT a grade. It means the question was not asked: no value at all, or a value the
+    // norm refuses to believe.
+    if (!value) return QStringLiteral("dim");
 
-    // normNumber, not QString::number: one to four decimals, as many as the number needs. A ratio
-    // whose corridor is 0.05 wide renders its edges as three different figures at one decimal.
-    const QString text = normNumber(*value);
+    // The corridor that would actually answer for this shot, resolved at the swing's own context
+    // and WITH THE COHORT. The walk is context-major — at each node from `iron_7` up to `any` the
+    // whole cohort probe order is tried, most specific first — so a women's row at `driver` beats a
+    // universal row at `driver`, and a universal `driver` row still beats a women's row at
+    // `full_swing`. See cohortProbeOrder() for why that order is fixed rather than scored.
+    const NormResolution res = m_norms->resolve(m.id, m_swingContextId, swingCohort());
 
-    // The corridor that would actually answer for this shot — resolved at the swing's own context,
-    // walking up from `driver` to `full_swing` to `any` exactly as grading does everywhere else.
     // Nothing on the chain carrying a row is not a fault and not a finding: it is a measure with no
     // corridor, and the reading is shown plainly with no colour claimed for it.
-    const NormResolution res = m_norms->resolve(m.id, m_swingContextId);
-    if (!res.found())
-        return cell(text, QString(), true, QStringLiteral("right"));
+    if (!res.found()) return {};
 
     // The measure's SHAPE decides which tails grade — one-sidedness is a property of the quantity,
     // invariant across contexts, which is why it lives on the measure and not on the norm.
@@ -6818,17 +6875,28 @@ QVariantMap ModelBrowser::swingCell(const Measure &m, const std::optional<double
     // NotMeasured here can only mean implausible (a norm resolved, and there is a value). The
     // reading is SHOWN — hiding it is what makes a mis-tracked ball look like an absence — but it
     // is not graded in either direction.
-    if (g == Grade::NotMeasured)
-        return cell(text, QStringLiteral("dim"), true, QStringLiteral("right"));
+    if (g == Grade::NotMeasured) return QStringLiteral("dim");
 
-    return cell(text, isDeviation(g) ? QStringLiteral("warn") : QString(), true,
-                QStringLiteral("right"));
+    return isDeviation(g) ? QStringLiteral("warn") : QString();
+}
+
+QVariantMap ModelBrowser::swingCell(const Measure &m, const std::optional<double> &value) const
+{
+    // "Not assessed" — and it says so with an em dash rather than a blank, because a blank cell in
+    // a table of numbers reads as a rendering fault.
+    //
+    // normNumber, not QString::number: one to four decimals, as many as the number needs. A ratio
+    // whose corridor is 0.05 wide renders its edges as three different figures at one decimal.
+    const QString text = value ? normNumber(*value) : tr("—");
+    return cell(text, swingTone(m, value), true, QStringLiteral("right"));
 }
 
 double ModelBrowser::swingDeviation(const Measure &m, const std::optional<double> &value) const
 {
     if (!value) return -1.0;
-    const NormResolution res = m_norms->resolve(m.id, m_swingContextId);
+    // The same resolution the cell used, cohort included — a sort ranking rows against a corridor
+    // other than the one that coloured them would order the column by an answer nobody can see.
+    const NormResolution res = m_norms->resolve(m.id, m_swingContextId, swingCohort());
     if (!res.found()) return -1.0;
     if (res.norm->isImplausible(*value)) return -1.0;   // not ranked; it is not a swing finding
 

@@ -15,6 +15,7 @@
 //   ctest --test-dir build/analyzer-tests -R context_tree_test --output-on-failure
 
 #include "../context_tree.h"
+#include "../../Core/club_vocabulary.h"
 
 #include <QFile>
 
@@ -286,14 +287,32 @@ int main()
             // contextIdForClub() makes is that its answer always EXISTS here — a caller resolves a
             // norm against it without checking, and a returned id the tree lacks would silently
             // resolve nothing and grade every reading as "no corridor".
-            const QStringList clubs = { QStringLiteral("DRIVER"),  QStringLiteral("3 WOOD"),
-                                        QStringLiteral("4 HYBRID"), QStringLiteral("7 IRON"),
-                                        QStringLiteral("SAND WEDGE"), QStringLiteral("PUTTER"),
-                                        QStringLiteral(""), QStringLiteral("HOVERCRAFT") };
-            bool allPresent = true;
-            for (const QString &c : clubs)
-                if (!res.tree.contains(contextIdForClub(c))) allPresent = false;
-            check(allPresent, "every club resolves to a context the shipped tree actually contains");
+            // THE WHOLE BAG, from the real vocabulary rather than a hand-written list — a list here
+            // would go stale the day a club is added, which is the day this check matters most.
+            QStringList probe = pinpoint::clubVocabulary();
+            probe << QString() << QStringLiteral("HOVERCRAFT");   // the two non-club answers
+            QStringList missing;
+            for (const QString &c : probe)
+                if (!res.tree.contains(contextIdForClub(c)))
+                    missing << (c.isEmpty() ? QStringLiteral("<empty>") : c);
+            check(missing.isEmpty(),
+                  qPrintable(QStringLiteral("every club resolves to a context the shipped tree "
+                                            "contains (missing: %1)").arg(missing.join(", "))));
+
+            // And the second storey is REACHED. contextIdForClub returning the family for
+            // everything would satisfy the check above completely while making per-club corridors
+            // unauthorable, because nothing would ever ask for one.
+            check(contextIdForClub(QStringLiteral("7 IRON")) == QStringLiteral("iron_7")
+                      && res.tree.isDescendantOf(QStringLiteral("iron_7"), QStringLiteral("iron")),
+                  "a 7 iron resolves to its own node, which inherits from the iron family");
+            check(res.tree.chain(QStringLiteral("iron_7"))
+                      .contains(kDefaultContextId()),
+                  "…and on up to full_swing, so a family or general row still reaches it");
+            // A putt must NOT inherit anything authored for a swing. This is the one club whose
+            // chain is a correctness claim rather than a convenience.
+            check(!res.tree.chain(contextIdForClub(QStringLiteral("PUTTER")))
+                       .contains(kDefaultContextId()),
+                  "a putt does not inherit full-swing corridors");
         }
     }
 
@@ -301,23 +320,25 @@ int main()
     {
         check(contextIdForClub(QStringLiteral("DRIVER")) == QStringLiteral("driver"),
               "DRIVER resolves to the driver context");
-        check(contextIdForClub(QStringLiteral("7 IRON")) == QStringLiteral("iron"),
-              "a numbered iron resolves on the word, not on a per-club table");
-        check(contextIdForClub(QStringLiteral("SAND WEDGE")) == QStringLiteral("wedge"),
-              "a named wedge resolves to wedge");
-        check(contextIdForClub(QStringLiteral("3 WOOD")) == QStringLiteral("fairway_wood"),
-              "a fairway wood resolves to fairway_wood");
-        check(contextIdForClub(QStringLiteral("4 HYBRID")) == QStringLiteral("fairway_wood"),
-              "a hybrid is a long-club delivery, so it grades as a fairway wood");
+        check(contextIdForClub(QStringLiteral("7 IRON")) == QStringLiteral("iron_7"),
+              "a numbered iron resolves to its own node, read off the number");
+        check(contextIdForClub(QStringLiteral("2 IRON")) == QStringLiteral("iron"),
+              "an iron outside the shipped 3-9 lands on the family — inherited, not unhandled");
+        check(contextIdForClub(QStringLiteral("SAND WEDGE")) == QStringLiteral("wedge_sand"),
+              "a named wedge resolves to that wedge");
+        check(contextIdForClub(QStringLiteral("3 WOOD")) == QStringLiteral("wood_3"),
+              "a numbered wood resolves to that wood");
+        check(contextIdForClub(QStringLiteral("4 HYBRID")) == QStringLiteral("hybrid"),
+              "both hybrids share one node — the source has one hybrid figure, not two");
         // PITCHING WEDGE contains both words. WEDGE has to win, or every wedge in the bag would
         // grade against the iron corridor — which for ball position is 17% of stance width away.
-        check(contextIdForClub(QStringLiteral("PITCHING WEDGE")) == QStringLiteral("wedge"),
+        check(contextIdForClub(QStringLiteral("PITCHING WEDGE")) == QStringLiteral("wedge_pitching"),
               "PITCHING WEDGE is a wedge, not an iron — the order of the tests is load-bearing");
-        check(contextIdForClub(QStringLiteral("pitching wedge")) == QStringLiteral("wedge"),
+        check(contextIdForClub(QStringLiteral("pitching wedge")) == QStringLiteral("wedge_pitching"),
               "case is normalised, so a hand-edited swing.json still resolves");
 
-        check(contextIdForClub(QStringLiteral("PUTTER")) == kDefaultContextId(),
-              "a putter has no node yet, so it lands on the default rather than inventing one");
+        check(contextIdForClub(QStringLiteral("PUTTER")) == QStringLiteral("putt"),
+              "a putter resolves to putt, which hangs off `any` and not off full_swing");
         check(contextIdForClub(QString()) == kDefaultContextId(),
               "an unrecorded club is the same case as a shot declaring no context");
         check(contextIdForClub(QStringLiteral("HOVERCRAFT")) == kDefaultContextId(),

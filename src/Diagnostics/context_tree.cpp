@@ -270,23 +270,56 @@ ContextTreeLoadResult loadContextTree(const QByteArray &json, const QString &sou
 
 QString contextIdForClub(const QString &club)
 {
-    // Matched on WORDS rather than on the exact vocabulary strings, so "7 IRON", "3 IRON" and a
-    // future "2 IRON" all land without a table that has to be kept in step with club_vocabulary.h.
-    // Upper-cased first because the token is stored upper-case but a hand-edited swing.json or an
-    // imported one need not be.
+    // Matched on WORDS and a leading number rather than on the exact vocabulary strings, so a
+    // future "2 IRON" lands on `iron_2` if the tree grows one and on `iron` if it does not, without
+    // a table here that has to be kept in step with club_vocabulary.h. Upper-cased first because
+    // the token is stored upper-case but a hand-edited or imported swing.json need not be.
     const QString c = club.trimmed().toUpper();
     if (c.isEmpty()) return kDefaultContextId();
 
-    if (c.contains(QLatin1String("DRIVER")))  return QStringLiteral("driver");
-    if (c.contains(QLatin1String("WEDGE")))   return QStringLiteral("wedge");
-    // Before IRON, because a hybrid is named for the iron it replaces ("3 HYBRID" carries no "IRON",
-    // but a future "4 IRON HYBRID" would) — and after WEDGE for the same reason in reverse.
-    if (c.contains(QLatin1String("HYBRID")))  return QStringLiteral("fairway_wood");
-    if (c.contains(QLatin1String("WOOD")))    return QStringLiteral("fairway_wood");
-    if (c.contains(QLatin1String("IRON")))    return QStringLiteral("iron");
+    // The leading number, where there is one: "7 IRON" -> 7, "PITCHING WEDGE" -> -1.
+    int  digits = 0;
+    while (digits < c.size() && c.at(digits).isDigit()) ++digits;
+    const int number = digits > 0 ? c.left(digits).toInt() : -1;
 
-    // PUTTER lands here with everything unrecognised. See the header for why that is deliberate
-    // rather than a gap waiting for a node.
+    if (c.contains(QLatin1String("DRIVER"))) return QStringLiteral("driver");
+
+    // A putt is NOT a full swing, and this is the line that says so. It resolves under `any`, which
+    // inherits nothing authored for a swing — before the node existed a putter fell through to the
+    // full-swing default and was graded against corridors written for one.
+    if (c.contains(QLatin1String("PUTTER"))) return QStringLiteral("putt");
+
+    // WEDGE before IRON, and it is load-bearing: "PITCHING WEDGE" is a wedge, and an iron corridor
+    // is 17% of stance width away from a wedge one for ball position.
+    if (c.contains(QLatin1String("WEDGE"))) {
+        if (c.contains(QLatin1String("PITCH"))) return QStringLiteral("wedge_pitching");
+        if (c.contains(QLatin1String("GAP")))   return QStringLiteral("wedge_gap");
+        if (c.contains(QLatin1String("SAND")))  return QStringLiteral("wedge_sand");
+        if (c.contains(QLatin1String("LOB")))   return QStringLiteral("wedge_lob");
+        return QStringLiteral("wedge");
+    }
+
+    // Before IRON, because a hybrid is named for the iron it replaces — "3 HYBRID" carries no
+    // "IRON", but a future "4 IRON HYBRID" would. ONE node for the family rather than one per
+    // number: the figures that would distinguish a 3 from a 4 hybrid do not exist, and a node whose
+    // corridor can only ever be its parent's is a row an author has to read and dismiss.
+    if (c.contains(QLatin1String("HYBRID"))) return QStringLiteral("hybrid");
+
+    if (c.contains(QLatin1String("WOOD"))) {
+        if (number == 3) return QStringLiteral("wood_3");
+        if (number == 5) return QStringLiteral("wood_5");
+        return QStringLiteral("fairway_wood");
+    }
+
+    // 3 through 9 are the nodes the tree ships. Anything outside that — a 2 iron, a 1 iron — lands
+    // on the family, which is the correct answer rather than a fallback: it inherits every row the
+    // family carries and is graded, just not distinguished.
+    if (c.contains(QLatin1String("IRON"))) {
+        if (number >= 3 && number <= 9) return QStringLiteral("iron_%1").arg(number);
+        return QStringLiteral("iron");
+    }
+
+    // Everything unrecognised. See the header for why that is the default rather than nothing.
     return kDefaultContextId();
 }
 

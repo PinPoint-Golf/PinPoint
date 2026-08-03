@@ -158,6 +158,29 @@ class ModelBrowser : public QObject
     // "swing 3 · DRIVER" — what the measures column's header says it is showing. Empty until a grid
     // has actually been read, so it can never name a swing whose values are not on screen.
     Q_PROPERTY(QString currentSwingLabel READ currentSwingLabel NOTIFY currentSwingChanged)
+    // ── Who the swing belongs to ────────────────────────────────────────────
+    //
+    // The two demographic fields of the athlete, RAW: an ISO date of birth and a sex token, exactly
+    // as AthleteController holds them. Not a resolved cohort, because the age band has to be taken
+    // ON THE DAY OF THE SWING — an athlete ages across their own history, and a band computed
+    // anywhere else would grade a swing from four years ago against the band they are in now. This
+    // object knows the swing's date; the panel knows the athlete; so the panel hands over the facts
+    // and the derivation happens here, once, through the same cohortFor() everything else uses.
+    //
+    // Both are optional and unset is a first-class answer: a golfer who has told us nothing is
+    // graded by the corridor that describes everyone, never NotMeasured.
+    Q_PROPERTY(QString athleteDob READ athleteDob WRITE setAthleteDob NOTIFY currentSwingChanged)
+    Q_PROPERTY(QString athleteSex READ athleteSex WRITE setAthleteSex NOTIFY currentSwingChanged)
+    // WHO THE GOLFER IS, in words — "men 55–64", or empty when neither axis is known. Reported for
+    // the reason the context is: a golfer whose grades improve after entering their date of birth
+    // has to read that as the corridor becoming right for them, not as the app going soft.
+    //
+    // The athlete's cohort, NOT the answering row's. They differ — the shipped women's speed row is
+    // qualified on sex alone and is reached by the probe order dropping the age axis — and only the
+    // first has a single answer for a whole table, because which row answers is per measure. If a
+    // surface ever needs the second, that is NormResolution::cohort(), one per cell.
+    Q_PROPERTY(QString currentSwingCohort READ currentSwingCohort NOTIFY currentSwingChanged)
+
     // The context the readings are GRADED at, derived from the swing's club — "driver", "wedge".
     // Reported rather than assumed: a value coloured against the full-swing corridor when the shot
     // was a wedge is a confident, wrong colour, and the reader has to be able to see which corridor
@@ -204,6 +227,11 @@ public:
     void    setCurrentSwingDir(const QString &dir);
     QString currentSwingLabel() const;
     QString currentSwingContext() const { return m_swingContextId; }
+    QString athleteDob() const { return m_athleteDob; }
+    void    setAthleteDob(const QString &iso);
+    QString athleteSex() const { return m_athleteSex; }
+    void    setAthleteSex(const QString &token);
+    QString currentSwingCohort() const;
     bool    currentSwingLoading() const { return m_swingLoading; }
     bool    currentSwingHasValues() const { return !m_swingGrid.isEmpty(); }
 
@@ -758,6 +786,14 @@ private:
     // per row.
     QString                          m_swingDir;
     QString                          m_swingContextId;   // derived from the swing's club
+    QString                          m_athleteDob;       // ISO, empty when unknown
+    QString                          m_athleteSex;       // "male" | "female" | "declined" | ""
+
+    // The athlete's cohort ON THE DAY OF THIS SWING. Derived, never stored on the swing: the grid
+    // carries the wallclock, the record carries the date of birth, and the band is a reading of the
+    // two taken together. Unqualified whenever either is unknown — which yields exactly one probe,
+    // so a golfer we know nothing about costs precisely what everybody cost before cohorts existed.
+    pinpoint::analysis::Cohort swingCohort() const;
     pinpoint::analysis::SwingPhaseGrid m_swingGrid;
     bool                             m_swingLoading = false;
     QFutureWatcher<pinpoint::analysis::SwingPhaseGrid> *m_swingWatcher = nullptr;
@@ -784,6 +820,12 @@ private:
     // capture fault into a diagnosis). Each of them renders muted, not warned.
     QVariantMap swingCell(const pinpoint::analysis::Measure &m,
                           const std::optional<double>      &value) const;
+
+    // The tone alone, so the table cell and the inspector's corridor pill reach ONE grading rule.
+    // "" ordinary · "warn" outside · "dim" not graded (no value, no corridor, or a reading the norm
+    // refuses to believe).
+    QString swingTone(const pinpoint::analysis::Measure &m,
+                      const std::optional<double>      &value) const;
 
     // How far outside the corridor the reading is, in tolerances — the swing column's sort key.
     // Negative when there is nothing to rank (no value, or no corridor), so those sort below every

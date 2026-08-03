@@ -31,6 +31,19 @@ class AthleteController : public QObject
     Q_PROPERTY(QString      currentInitials   READ currentInitials   NOTIFY currentAthleteChanged)
     Q_PROPERTY(QString      currentHandedness READ currentHandedness NOTIFY currentAthleteChanged)
     Q_PROPERTY(QString      currentUuid       READ currentUuid       NOTIFY currentAthleteChanged)
+    // The two demographic fields, RAW — an ISO date and a token, not a resolved cohort.
+    //
+    // Raw because the age band depends on the DAY, and the day belongs to whatever is being graded,
+    // not to this object. A `currentCohort` property would have to pick a date, and the only one it
+    // could pick is today — which is the single mistake norm.h's ageBandFor() exists to prevent, and
+    // it would be baked into a property nobody could override. A consumer holding a swing hands
+    // these two to cohortFor() with that swing's own date.
+    //
+    // Empty is a first-class answer: unset means the corridor that describes everyone, never
+    // NotMeasured. NOTIFY athletesChanged as well, because editing the current athlete's date of
+    // birth changes these without changing WHICH athlete is current.
+    Q_PROPERTY(QString      currentDob        READ currentDob        NOTIFY athletesChanged)
+    Q_PROPERTY(QString      currentSex        READ currentSex        NOTIFY athletesChanged)
     Q_PROPERTY(QVariantList athletes          READ athletes          NOTIFY athletesChanged)
     Q_PROPERTY(QVariantList recentSessions   READ recentSessions    NOTIFY athletesChanged)
 
@@ -42,6 +55,8 @@ public:
     QString      currentInitials()   const { return m_currentInitials; }
     QString      currentHandedness() const { return m_currentHandedness; }
     QString      currentUuid()       const { return m_currentUuid; }
+    QString      currentDob()        const { return currentField(QStringLiteral("dob")); }
+    QString      currentSex()        const { return currentField(QStringLiteral("sex")); }
     QVariantList athletes()          const { return m_athletes; }
     QVariantList recentSessions()    const { return {}; }
 
@@ -138,6 +153,21 @@ signals:
 private:
     void reload();
     static QString computeInitials(const QString &name);
+
+    // One field off the CURRENT athlete's record, empty when there is none. Read out of m_athletes
+    // rather than mirrored into a member beside m_currentName: those four are set when the current
+    // athlete CHANGES, and a demographic edited in the form changes the record without changing
+    // which record is current — a mirror would go stale exactly there.
+    QString currentField(const QString &key) const
+    {
+        if (m_currentUuid.isEmpty()) return {};
+        for (const QVariant &v : m_athletes) {
+            const QVariantMap a = v.toMap();
+            if (a.value(QStringLiteral("uuid")).toString() == m_currentUuid)
+                return a.value(key).toString();
+        }
+        return {};
+    }
 
     QVariantList m_athletes;
     QString      m_currentUuid;

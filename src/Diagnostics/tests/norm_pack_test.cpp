@@ -1197,14 +1197,31 @@ int main()
               "the shipped tree carries the default context");
         check(prov->norms().readOnly, "the shipped norm set is marked read-only");
 
-        // THE REGRESSION GATE for cohort keying, stated over real content rather than a fixture:
-        // every shipped row is unqualified, so every resolution must answer identically for a golfer
-        // we know everything about and one we know nothing about. If this ever fails, a cohort has
-        // reached shipped content — which is a decision, not an accident, and it should fail here.
-        bool     allSame     = true;
-        bool     allUnqual   = true;
+        // THE REGRESSION GATE for cohort keying, stated over real content rather than a fixture.
+        //
+        // It used to read "every shipped row is unqualified" and said of itself: "if this ever
+        // fails, a cohort has reached shipped content — which is a decision, not an accident, and
+        // it should fail here." It failed, the decision was taken, and the gate is rewritten rather
+        // than removed — because what it was really protecting is not the absence of cohorts but
+        // the rule that a corridor may only vary by athlete WHERE SOMEBODY SAID SO.
+        //
+        // So: name the measures allowed to segment, assert nothing else does, and assert that the
+        // ones that do actually answer differently. The last part matters as much as the first —
+        // cohort rows that resolved for nobody would pass a check that only looked for their
+        // absence, and would be content nobody reads.
+        const QStringList kSegmented = { QStringLiteral("m_clubheadSpeedImpact") };
+
+        bool        allSame = true;
+        QStringList unexpected;
         for (const Norm &n : prov->norms().norms) {
-            if (!n.cohort.isUnqualified()) { allUnqual = false; continue; }
+            if (!n.cohort.isUnqualified()) {
+                if (!kSegmented.contains(n.measureId)) unexpected << n.measureId;
+                continue;
+            }
+            // An unqualified row on a SEGMENTED measure is the universal fallback and is expected
+            // to be beaten by its own cohort rows — so it is not part of the invariance claim.
+            if (kSegmented.contains(n.measureId)) continue;
+
             const NormResolution plain = prov->resolve(n.measureId, n.contextId);
             for (const Cohort &who : { coh(Sex::Female, AgeBand::Adult65Plus),
                                        coh(Sex::Male, AgeBand::Junior),
@@ -1214,8 +1231,34 @@ int main()
                 if (seg.norm != plain.norm || seg.contextId != plain.contextId) allSame = false;
             }
         }
-        check(allUnqual, "every shipped row is unqualified — this stage adds no content");
-        check(allSame, "…so every shipped resolution answers identically for any athlete");
+        unexpected.removeDuplicates();
+        check(unexpected.isEmpty(),
+              qPrintable(QStringLiteral("only the measures that declared a cohort carry one "
+                                        "(unexpected: %1)").arg(unexpected.join(", "))));
+        check(allSame, "…and every other shipped resolution answers identically for any athlete");
+
+        // And the segmented one segments. A woman and a man of the same age must reach DIFFERENT
+        // rows off the tee, or the content is decoration.
+        const NormResolution man   = prov->resolve(QStringLiteral("m_clubheadSpeedImpact"),
+                                                   QStringLiteral("driver"),
+                                                   coh(Sex::Male, AgeBand::Adult18_54));
+        const NormResolution woman = prov->resolve(QStringLiteral("m_clubheadSpeedImpact"),
+                                                   QStringLiteral("driver"),
+                                                   coh(Sex::Female, AgeBand::Adult18_54));
+        const NormResolution anon  = prov->resolve(QStringLiteral("m_clubheadSpeedImpact"),
+                                                   QStringLiteral("driver"));
+        check(man.found() && woman.found() && anon.found(),
+              "the driver speed corridor resolves for a man, a woman and an unknown golfer");
+        check(man.norm != woman.norm && man.norm->mu > woman.norm->mu,
+              "…to different rows, the women's corridor sitting lower");
+        check(anon.norm->cohort.isUnqualified(),
+              "…and a golfer who has told us nothing still gets the universal corridor");
+        // The senior row is reached by AGE alone moving, which is the axis the age bands exist for.
+        const NormResolution senior = prov->resolve(QStringLiteral("m_clubheadSpeedImpact"),
+                                                    QStringLiteral("driver"),
+                                                    coh(Sex::Male, AgeBand::Adult55_64));
+        check(senior.found() && senior.norm->mu < man.norm->mu,
+              "a man of 55 resolves a lower corridor than the same man at 40");
     }
 
     std::printf("%s\n", g_fail == 0 ? "ALL PASS" : "FAILURES");

@@ -56,6 +56,12 @@ Item {
         // have a swing on the Wrist stage and this panel open at the same time, and that is exactly
         // when a corridor is worth arguing with.
         currentSwingDir: currentSwing.swingDir
+        // The athlete's two demographic fields, raw. The BAND is derived inside the façade from the
+        // swing's own date — passing a resolved cohort from here would have to pick a date, and the
+        // only one QML could pick is today, which is the mistake deriving-at-the-swing-date exists
+        // to prevent.
+        athleteDob: athleteController.currentDob
+        athleteSex: athleteController.currentSex
     }
 
     // The façade is read through Q_INVOKABLEs, which are not properties and so cannot be bound to.
@@ -737,11 +743,17 @@ Item {
             // level as the pack label: it qualifies the table, it is not a finding.
             Text {
                 visible: browser.currentSwingDir !== ""
+                // The cohort is appended only when one resolved. Empty means the universal corridor,
+                // which is a real answer and the ordinary one — writing "everyone" there would turn
+                // the common case into a claim.
                 text:    browser.currentSwingLoading  ? qsTr("reading swing…")
-                       : browser.currentSwingHasValues
-                             ? qsTr("%1 · graded at %2").arg(browser.currentSwingLabel)
+                       : !browser.currentSwingHasValues ? qsTr("swing loaded · no readings")
+                       : browser.currentSwingCohort !== ""
+                             ? qsTr("%1 · graded at %2, %3").arg(browser.currentSwingLabel)
+                                                            .arg(browser.currentSwingContext)
+                                                            .arg(browser.currentSwingCohort)
+                             : qsTr("%1 · graded at %2").arg(browser.currentSwingLabel)
                                                         .arg(browser.currentSwingContext)
-                             : qsTr("swing loaded · no readings")
                 font.family:    Theme.fontData
                 font.pixelSize: Theme.fontSzMicro
                 color:          Theme.colorText3

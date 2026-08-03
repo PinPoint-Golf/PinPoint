@@ -738,6 +738,52 @@ Item {
                                         elide: Text.ElideRight
                                     }
 
+                                    // THIS SWING, on the one corridor row it was graded at. Sits
+                                    // between the name and the corridor's own numbers because that
+                                    // is the reading order the row is for: which corridor, what
+                                    // this swing did against it, what it claims.
+                                    //
+                                    // The model decides WHERE it appears and what colour it is —
+                                    // the same swingTone() the measures table asks — so the pane
+                                    // and the table cannot disagree about one number's grade.
+                                    Rectangle {
+                                        id: swingPill
+                                        readonly property string tone: hubRow.modelData.pillTone || ""
+                                        Layout.alignment: Qt.AlignVCenter
+                                        visible: (hubRow.modelData.pill || "") !== ""
+                                        implicitWidth:  pillRow.implicitWidth + Theme.sp(14)
+                                        implicitHeight: Theme.sp(19)
+                                        radius:       height / 2
+                                        color:        "transparent"
+                                        border.width: 1
+                                        // Muted when the reading is not graded, accent when it is
+                                        // ordinary, warn when it is outside — the pill carries the
+                                        // finding, so it must not read as decoration.
+                                        border.color: swingPill.tone !== "" ? root._toneColor(swingPill.tone)
+                                                                            : Theme.colorAccent
+
+                                        RowLayout {
+                                            id: pillRow
+                                            anchors.centerIn: parent
+                                            spacing: Theme.sp(5)
+
+                                            Text {
+                                                text: hubRow.modelData.pillHint || ""
+                                                visible: text.length > 0
+                                                font.family:    Theme.fontBody
+                                                font.pixelSize: Theme.fontSzMicro
+                                                color:          Theme.colorText3
+                                            }
+                                            Text {
+                                                text: hubRow.modelData.pill || ""
+                                                font.family:    Theme.fontData
+                                                font.pixelSize: Theme.fontSzMicro
+                                                color: swingPill.tone !== "" ? root._toneColor(swingPill.tone)
+                                                                             : Theme.colorText
+                                            }
+                                        }
+                                    }
+
                                     Text {
                                         Layout.maximumWidth: sectionItem.width * 0.42
                                         text:    hubRow.modelData.detail

@@ -132,17 +132,26 @@ const ContextBinding *ownContextBinding(const Condition &c, const QString &conte
 // case that makes it matter: the shipped pack authors five corridors for it (any, driver,
 // fairway_wood, iron, wedge), and reading a driver against the full-swing row throws all five away.
 //
-// Judgement calls, stated rather than buried:
-//   · a HYBRID resolves to `fairway_wood`. It is a long-club delivery — ball forward, shallower
-//     attack — which is what the woods node distinguishes, and ball position is the measure the
-//     distinction was authored for.
-//   · a PUTTER resolves to the DEFAULT. The tree has no putting node, and inventing one here would
-//     be pack content authored in C++. A putt graded against full-swing corridors is wrong, but it
-//     is wrong visibly, at a context the reader can see, rather than silently.
+// It resolves to the MOST SPECIFIC node the tree carries — `iron_7`, not `iron` — and the walk does
+// the rest. That is the point of the second storey: a measure that genuinely varies club by club
+// says so with a club row, one that does not writes a family row, and both are reached by the same
+// lookup. Returning the family here instead would make per-club corridors unauthorable, since
+// nothing would ever ask for one.
 //
-// An unrecognised or empty club also yields the default — the same answer a shot that declares no
+// Judgement calls, stated rather than buried:
+//   · a HYBRID resolves to one `hybrid` node rather than to a node per number. The figures that
+//     would distinguish a 3 from a 4 hybrid do not exist, and a node whose corridor can only ever
+//     be its parent's is a row an author has to read and dismiss.
+//   · a PUTTER resolves to `putt`, which hangs off `any` and NOT off full_swing. This used to
+//     return the default, so a putt was graded against corridors authored for a full swing — the
+//     clubhead-speed rows would have called every putt a fault.
+//   · an iron outside 3–9 resolves to the family. Not a fallback: it inherits every row the family
+//     carries and grades normally, it is simply not distinguished.
+//
+// An unrecognised or empty club yields the default — the same answer a shot that declares no
 // context gets, which is what kDefaultContextId() is for. This never returns a node the shipped
-// tree lacks, so a caller may resolve against it without checking.
+// tree lacks, so a caller may resolve against it without checking; `context_tree_test` sweeps the
+// whole club vocabulary against the shipped tree to keep that true.
 QString contextIdForClub(const QString &club);
 
 // ── Validation ──────────────────────────────────────────────────────────────

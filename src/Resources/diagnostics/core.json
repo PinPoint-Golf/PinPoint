@@ -1225,6 +1225,7 @@
         "anchor": "p7"
       },
       "status": "live",
+      "shape": "floor",
       "label": "Clubhead speed, at impact",
       "unit": "mph",
       "highMeans": "a faster clubhead at the ball"
