@@ -1452,6 +1452,33 @@ int main(int argc, char **argv)
         }
         check(sawNorm, "a measure node carries its corridor");
 
+        // The ubiquity mark, on the nodes and nowhere else. It is the TOP rung only — a mark that
+        // also meant `Common` would land on half the library — and it has to be right on every node
+        // of a picture, not just the one it is centred on, because that is the comparison a reader
+        // makes with it.
+        {
+            const auto  core = makeResourcePackProvider();
+            const auto &cp   = core->pack();
+            QString     everywhere;
+            for (const Condition &c : cp.conditions)
+                if (c.prominence == Prominence::Ubiquitous) { everywhere = c.id; break; }
+            check(!everywhere.isEmpty(), "the shipped library has something ubiquitous in it");
+
+            const QVariantMap ug = m.graph(QStringLiteral("characteristics"), everywhere, opts);
+            int flagged = 0, wrong = 0, seen = 0;
+            for (const QVariant &v : ug.value(QStringLiteral("nodes")).toList()) {
+                const QVariantMap n  = v.toMap();
+                const Condition  *c  = cp.condition(n.value(QStringLiteral("id")).toString());
+                if (!c) continue;
+                ++seen;
+                const bool marked = n.value(QStringLiteral("ubiquitous")).toBool();
+                if (marked) ++flagged;
+                if (marked != (c->prominence == Prominence::Ubiquitous)) ++wrong;
+            }
+            check(seen > 0 && flagged > 0, "a ubiquitous condition's node says so");
+            check(wrong == 0, "and no node claims a prominence its condition does not have");
+        }
+
         // A health row is a finding, not an object — it has no neighbourhood, and inventing one
         // would draw a relationship that does not exist.
         check(m.graph(QStringLiteral("health"), QStringLiteral("health:0"), opts)

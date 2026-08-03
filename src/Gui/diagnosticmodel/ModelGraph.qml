@@ -716,6 +716,23 @@ Item {
                             elide: Text.ElideRight
                         }
                     }
+
+                    // Nearly everybody has this one. `∀` is the universal quantifier and says only
+                    // "all" — a star, a flame or a warning would each have told the reader whether
+                    // to be pleased about a base rate, and prominence is not a verdict (see
+                    // characteristic.h: it is a PRIOR, and an editorial one). Anchored to the TOP of
+                    // the condition row so it stays in the box's corner however many measure rows
+                    // grew underneath, and last in the row so the label elides into it rather than
+                    // under it. The word itself is in the hub's meta line when the node is held.
+                    Text {
+                        Layout.alignment: Qt.AlignTop
+                        Layout.topMargin: Theme.sp(3)
+                        visible:        nodeItem.modelData.ubiquitous === true
+                        text:           "∀"
+                        font.family:    Theme.fontSymbol
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                    }
                 }
 
                 // ── The measures, inside the box ──────────────────────────────
@@ -1515,7 +1532,11 @@ Item {
                 return qsTr("%1 selected").arg(root.selectedNodeIds.length)
             var n = root._nodeById(input.pressedNode.id)
             if (!n) return ""
+            // The ∀ in the node's corner, in words, for the one node the reader is holding — the
+            // graph has no hover channel of its own (input is taken at the pane), so this is where
+            // a glyph gets explained at all.
             return (n.latent ? qsTr("cause") : qsTr("condition")) + " · " + root._sourceWord(n.source)
+                 + (n.ubiquitous === true ? " · " + qsTr("ubiquitous") : "")
         }
         if (input.pressedEdge) {
             if (root.selectedEdgeIds.length > 1)

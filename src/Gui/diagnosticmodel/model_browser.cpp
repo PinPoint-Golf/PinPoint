@@ -6710,6 +6710,17 @@ void ModelBrowser::decorateNode(QVariantMap &node, const QString &type, const QS
     // than the ring asking a second question at the moment it opens.
     node.insert(QStringLiteral("source"), sourceOf(id));
 
+    // The top rung of `prominence`, and ONLY the top rung, carried onto the picture. A reader
+    // scanning a causal band is asking "which of these tells me something about THIS golfer", and
+    // the ones nearly everybody has answer it least — that is a base rate, not a verdict, so the
+    // node marks it with a neutral glyph and nothing about the box changes. `Common` deliberately
+    // does not qualify: half the shipped library is Common, and a mark on half the boxes marks
+    // nothing. Conditions only — a measure or a paper has no prevalence to state.
+    if (type == kCharacteristics || type == kCauses) {
+        if (const Condition *c = pack().condition(id))
+            node.insert(QStringLiteral("ubiquitous"), c->prominence == Prominence::Ubiquitous);
+    }
+
     // One line the node can say about itself. For a measure that is its corridor: the number a
     // reader is actually asking about when they look at a measure in a graph, and until now it was
     // two navigations away.
