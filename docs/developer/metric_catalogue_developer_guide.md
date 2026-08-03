@@ -482,6 +482,9 @@ That is the model earning its keep as a reference rather than as a mirror of the
 this table is a defect, and none of it belongs in a health list — see the note opening §8.4 of the
 diagnostics guide.
 
+Metrics that were *examined and declined* are not here — they are in Appendix B, with the objection
+recorded. Read that before proposing a shortcut to anything in this table.
+
 **Read the prominence column as this library's editorial judgement, not measured prevalence** — no
 study counts named swing faults across a population. It is a prior, and it is re-seatable.
 
@@ -769,3 +772,241 @@ Both read from the monitor; there is no detection work here, only the connector.
 |---|---|---|---|---|---|
 | `smashFactor` | device | **LM** | ball speed ÷ clubhead speed, from the monitor | — | (launch monitor) |
 | `strikeLocation` | device | **LM** | face-impact position, from the monitor | — | (launch monitor) |
+
+---
+
+## Appendix B — considered and not pursued
+
+Appendix A0 ranks the metrics we **intend** to build. This one records the metrics we **do not**, and
+it exists because the arguments against them are not obvious and keep being rediscovered. Every entry
+below was reached the same way — by reading the diagnostic model for conditions that name a cause the
+pipeline can never see, and asking what new metric would close the gap — and every one of them was
+set aside on the merits, not on effort.
+
+**Nothing here is a defect and nothing here is a roadmap item.** The model is authored ahead of the
+producers on purpose (see the note opening §8.4 of the diagnostics guide); a condition with no live
+signal is the library doing its job. What this appendix adds is the *reason* a particular closing
+move was declined, so that the next reader who spots the same gap starts from the objection rather
+than from the idea.
+
+**Standing of the review.** Taken against `core` pack `1.0.0` (146 conditions, 110 measures, 306
+edges) on 2026-08-03. At that reading **74 of 146 conditions had no live signal** — 31 with no signal
+authored at all, 29 blocked on a `planned` metric, 10 on a launch monitor, 4 on the two `noProducer`
+spine curves — and **49 of the 100 nodes that are the `from` end of a `causes` edge** could not be
+detected. Those counts move as the pack does; regenerate them rather than quoting these.
+
+```sh
+# Causes the model can name but the pipeline cannot see, ranked by explanatory reach.
+python3 -c "
+import json, collections
+d = json.load(open('src/Resources/diagnostics/core.json'))
+M = {m['id']: m for m in d['measures']}; S = {s['id']: s for s in d['signals']}
+C = {c['id']: c for c in d['conditions']}
+def live(c):
+    return any(all(M[m]['status'] == 'live' for m in S[s]['measures'])
+               for s in c.get('detectedBy', []))
+reach = collections.Counter(e['from'] for e in d['edges'] if e['type'] == 'causes')
+for cid, n in reach.most_common():
+    c = C.get(cid)
+    if c and not live(c):
+        print(n, cid, c['kind'], c['prominence'], c['confirmedBy'])"
+```
+
+### B.1 Video-measured physical screens
+
+*Would close:* the 14 `capacity` conditions with no signal, which between them sit at the head of the
+causal graph — `limited_thoracic_rotation` (15 effects), `poor_pelvic_disassociation` (13),
+`limited_trail_hip_ir` (13), `poor_core_stability` (10), `limited_lead_hip_ir` (9),
+`poor_single_leg_balance` (7): **67 causal edges**, more than any producer in Appendix A0.
+`screens.json` already carries the protocols, and each is a 2D angle or distance from a fixed
+camera — the thing pose estimation is best at.
+
+*Why not.* The protocol is not the geometry. Every screen in that registry qualifies its measurement
+with a constraint the camera cannot police — *keep the pelvis still*, *stop at the first resistance
+rather than at end range* — and the registry says so in as many words: "letting it lift is what makes
+this test read high". A camera would return a confident number for a quantity defined differently
+from the one the pass criterion was drawn against, and it would return it *unsupervised*, which is
+exactly the condition under which those constraints fail. A screen also asserts a **capacity**, and a
+capacity is a property of the body rather than of a swing; adopting it would mean a second kind of
+capture, a second estimand and a second calibration story before the first number appeared.
+
+*What would change our mind.* A guided protocol in which the pose stack gates the reading on
+compliance (pelvis-stable, limb-plane-in-view) and refuses rather than estimates when it cannot, plus
+a cohort validated against goniometry. Absent the refusal path this stays out — the failure mode is
+silent, and silent is the one we cannot ship.
+
+### B.2 Optical ball flight for `launchAngle` / `ballSpeed`
+
+*Would close:* `launch_low`, `launch_high`, `ball_speed_deficit`. The argument for trying is real and
+worth restating so nobody has to reconstruct it: launch angle lives in the vertical plane containing
+the target line, which **is** the face-on image plane, so it is a face-on reading by the same
+reasoning `attackAngle` is (and by which DTL is the one view that cannot take it).
+
+*Why not.* Frame rate, not projection — see the `launchMonitor` comment in `metric_descriptor.h:52`.
+The ball leaves at tens of metres per second and the initial vector is defined over the first few
+centimetres of flight; at our capture rates it is a blurred streak that has left the detector's
+ROI within a frame or two. The Appendix A rows already say `Ball (high rate)`, which is the honest
+statement: this is a **capture** gap wearing a producer's clothes, and building a producer against
+the frames we have would give a number whose error is larger than the corridor it is read against.
+
+*What would change our mind.* A high-rate capture path with a dedicated post-impact ROI and a known
+exposure — at which point the existing `planned` rungs resolve with no catalogue change.
+
+### B.3 `smashFactor` from `ballSpeed` ÷ face-on `clubheadSpeed`
+
+*Would close:* `smash_deficit`, and it is tempting because it would move a `device` row to `live`
+without a connector — `clubheadSpeed` already has a live `faceOnClub` rung.
+
+*Why not.* Beyond depending on B.2, the arithmetic destroys the metric. The face-on clubhead rung is
+`Projected`: it differentiates the head path in the image plane and is missing the axial term, which
+is precisely why the ladder puts `clubSensorFused` *above* the second camera rather than below it. A
+few per cent of error in the denominator moves smash factor by more than the whole band that
+separates a centred strike from a poor one. A ratio cannot be more trustworthy than its worse input,
+and here the worse input's error sits in the same direction as the effect being diagnosed.
+
+*What would change our mind.* The `clubSensorFused` rung landing. With a shaft sensor supplying the
+axial term the denominator becomes Direct, and then only B.2 stands between us and a monitor-free
+smash factor.
+
+### B.4 Acoustic strike signature
+
+*Would close:* `strike_toe`, `strike_heel` (both `common`, both launch-monitor-only today), with
+corroboration for `chunk` / `thin` / `top` / `sky` / `shank` — seven `outcome` conditions currently
+`asserted`, i.e. the golfer has to tell us. The appeal: we already capture the audio and already
+detect the onset, so the transient's spectral content is data on disk that nothing reads.
+
+*Why not.* The timbre is dominated by variables we neither control nor calibrate — face material and
+head construction, ball model, shaft, room, microphone and its distance. Toe/heel discrimination is
+robust for one fixed combination of those and does not survive a corpus that varies all of them.
+Worse, the discrimination is not signed: toe and heel misses both go duller, so the feature separates
+*centred from not* far better than it separates the two conditions the model actually distinguishes.
+`AcousticShotDetector` is deliberately a level-and-onset device for that reason — it uses audio for
+the one thing audio is unambiguously best at, which is *when*.
+
+*What would change our mind.* A per-club acoustic baseline captured in-session (so the reading is
+relative to that club's own centred strike, not to an absolute), plus a corpus carrying
+launch-monitor strike labels to validate against. Note this would only ever yield a *quality* scalar;
+toe-versus-heel needs a different modality.
+
+### B.5 Grip geometry from whole-body hand keypoints
+
+*Would close:* `grip_strong` (3 effects) and `grip_weak` (`common`, 2 effects), both `intent` /
+`asserted` today. The hands (COCO-WholeBody 91–132) are already decoded; their only consumer is
+`hand_axis.h`, as a smoothed anchor for the shaft tracker.
+
+*Why not.* Two reasons that compound. The hands at address are the most occluded landmarks in the
+frame — they overlap each other on the grip and the trail hand is largely behind the lead — which is
+why `pose.gripFromSmoothedHands` is still defaults-off and awaiting its own corpus evaluation rather
+than promoted. And grip strength is conventionally defined by knuckle count or the direction of the
+V's, both of which are the hand's **rotation about the shaft**: a depth reading, on the axis the
+face-on camera does not have. A projected substitute would be a different quantity sharing a name
+with the coaching term, which is the specific mistake the descriptor voice exists to prevent.
+
+*What would change our mind.* Hand-keypoint confidence characterised at address on the corpus, and a
+definition of grip strength that survives projection — most plausibly against the live
+`forearmPronation` DOF at P1 rather than off the hand landmarks at all.
+
+### B.6 `kinematicSequence` off the face-on rotation series
+
+*Would close:* the sequence ordering, and it looks nearly free — the descriptor says what is missing
+is "angular-SPEED series for the pelvis and thorax to order", and `pelvisRotation` / `thoraxRotation`
+both carry **live** face-on rungs already. Differentiate what we have.
+
+*Why not.* Those rungs are `Estimated`, and their summaries say how: *from the collapse of the hip /
+shoulder span in the face-on image*. That is a cosine, and a cosine is flattest exactly where the
+sequence needs the most resolution — near the top and through transition, where the spans are most
+foreshortened. Differentiating a foreshortening estimate amplifies the error where it is already
+worst, and sequence is a claim about the *timing of peaks* to within tens of milliseconds. The
+metric would resolve, chart, and be wrong in a way no reader could see.
+
+*What would change our mind.* Nothing about the maths; this one is waiting on the pelvis and thorax
+IMUs its route already declares. The route ladder is right and the shortcut is not.
+
+### B.7 A face-on rung for `leadKneeFlexion` / `trailKneeFlexion`
+
+*Would close:* `late_buckle`, `excessive_knee_flex`, `insufficient_knee_flex`, `trail_knee_straighten`
+— four conditions, and the rung already exists in the manifest.
+
+*Why not.* It exists and is marked `PLANNED` with the reason attached: "a sagittal angle foreshortened
+by the frontal projection — visible, but close enough to noise that no producer reads it there
+today". Across the range that matters (roughly 20°–35° at address) the projected shin-against-thigh
+difference is a handful of pixels, and the knee is one of the noisier keypoints. Building it would
+put four conditions into `Bridged` on a reading that cannot separate the bands they are authored
+against.
+
+*What would change our mind.* Measure it before deciding — a corpus pass quantifying the projected
+angle's spread against the DTL truth would settle this either way, and it is the cheapest experiment
+in this appendix. Absent that, the `dtl` rung is the answer.
+
+### B.8 A `Range` reducer, and cross-shot dispersion
+
+*Would close:* `limited_wrist_mobility` off the live IMU DOF series; `tempo_habit` and `stance_habit`
+off `tempoRatio`, `stanceWidth` and `ballPosition`, all live. `ReducerKind` is
+`At | Delta | Rate | Extremum` and a peak-to-peak range is a small addition to it.
+
+*Why not.* Two distinct objections, and only the second is about cost.
+
+*Range* is cheap and would be measuring the wrong thing. Range **used** in a swing is not range
+**available** in the joint: a golfer with full mobility who does not use it reads identically to one
+who cannot, and `limited_wrist_mobility` is a `capacity` — the model classes capacities as `latent`
+precisely so this substitution cannot be made quietly. Adding the reducer to serve that condition
+would license the category error at the schema level.
+
+*Dispersion* is not a reducer at all. Every measure in the model reduces one series from one shot;
+consistency is a property of a shot **set**, which has no estimand here — no window, no cohort, no
+statement of what varies legitimately between clubs or over a session. That is a model-shape question
+(see `docs/implementation/score_estimand_alignment_plan.md`), not a catalogue one, and answering it
+in the catalogue would be answering it in the wrong place.
+
+*What would change our mind.* A `Range` reducer is defensible on its own merits for series where
+range-used *is* the quantity of interest — author it for one of those and the wrist-mobility use stays
+out. Dispersion waits on a session-level estimand.
+
+### B.9 Face-on proxies for `early_extension` and `loss_of_posture`
+
+*Would close:* two `ubiquitous` faults, currently blocked on `pelvisThrust` and `spineForwardBend`,
+both DTL. Two proxies suggest themselves: the pelvis coming toward the camera changes its **apparent
+hip span**, which is a depth cue a single view does have; and loss of posture might be composed from
+the live `headLift` and `pelvisLift`.
+
+*Why not.* The hip-span proxy is already spoken for. `pelvisRotation`'s Estimated rung reads the same
+collapse of the same span, and turning is what the pelvis does through the downswing — one signal
+cannot be depth and rotation at once, and the model draws `causes` edges between the two. We would be
+measuring one quantity twice, then observing a relationship we had manufactured. The `headLift` +
+`pelvisLift` composition fails differently: both rise in a perfectly good pivot, so the composite has
+no discriminating power without the spine angle, which is the sagittal reading we do not have and the
+reason `spineForwardBend` is planned in the first place.
+
+*What would change our mind.* For early extension, a depth cue that is independent of turn — which in
+practice means DTL or a trunk IMU. For loss of posture, the `trunkImus` rung `spineForwardBend`
+already declares.
+
+### B.10 Out of scope for this appendix — live metrics no condition reads
+
+The review also surfaced the mirror-image gap: **12 metrics with a live rung that no characteristic
+reads** — `wristScore`, `wristResemblance`, `trailWristFlexExt`, `xFactor`, `spineSideBend`,
+`clubheadSpeed`, `tempoBackswing`, `stanceWidthMm`, `leadFootFlare`, `trailFootFlare`, `toeLineAngle`,
+`elbowAlignment`. Some are chart-only rollups and correctly unreferenced; others (`xFactor` is the
+sharpest example, since its `xFactorStretch` sibling *is* wired) look like model content that was
+never authored.
+
+That is not a metric gap and no work in this catalogue would close it. It belongs to the diagnostics
+pack — a measure, a signal and a condition, no producer involved — and is recorded here only so the
+finding is not lost between the two guides. Regenerate the list before acting on it:
+
+```sh
+# Live metrics that no condition's signal reaches.
+python3 -c "
+import json, re, collections
+d = json.load(open('src/Resources/diagnostics/core.json'))
+M = {m['id']: m for m in d['measures']}; S = {s['id']: s for s in d['signals']}
+reached = {M[mid]['metricKey'] for c in d['conditions'] for s in c.get('detectedBy', [])
+           for mid in S[s]['measures'] if mid in M}
+src = open('src/Metrics/metric_catalogue_manifest.cpp').read()
+for b in re.split(r'cat\.addDescriptor\(\{', src)[1:]:
+    key = re.search(r'\.key = QStringLiteral\(\"([^\"]+)\"\)', b).group(1)
+    r = b[b.find('.routes'):]
+    if r.count('via(') > r.count('PLANNED') and key not in reached:
+        print(key, '(measure authored)' if any(m.get('metricKey') == key for m in d['measures'])
+                   else '(no measure)')"
+```
