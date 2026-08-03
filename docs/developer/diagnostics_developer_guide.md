@@ -154,6 +154,9 @@ struct Condition {
     QString                     id, label, axis;
     QStringList                 aliases;       // coach phrasing that resolves here — the glossary
     ConditionGroup              group;         // Setup … Sequence | Impact | Finish | BallFlight
+    ConditionKind               kind;          // Fault | Setup | Delivery | Outcome | Capacity |
+                                               //   Intent | Equipment — WHAT SORT OF THING
+    Prominence                  prominence;    // Rare … Ubiquitous — how common, in this population
     Observability               observability; // Observable | Latent | Both
     ConfirmedBy                 confirmedBy;   // Measured | Screened | Asserted
     ConditionState              state;
@@ -166,11 +169,36 @@ struct Condition {
 };
 ```
 
-Three distinctions the UI must never blur:
+Four distinctions the UI must never blur:
 
-- **`Observability`** — can it be *seen* in the swing? A `Latent` condition has no signals by definition; it is resolved by the explanation pass from what it explains, never detected.
-- **`ConfirmedBy`** — how it can be *established*. `Measured` (a signal fired, the app knows), `Screened` (a physical test would settle it), `Asserted` (intent, habit, perception — knowable only by asking).
+- **`ConditionKind`** — what sort of thing it *is*. **Intrinsic, and it never moves when a producer lands.**
+- **`Observability`** — can it be *seen* in the swing? A `Latent` condition has no signals by definition; it is resolved by the explanation pass from what it explains, never detected. Also intrinsic — it is a property of the movement, not of our cameras.
+- **`ConfirmedBy`** — how it is established **today**. `Measured` (a signal fired, the app knows), `Screened` (a physical test would settle it), `Asserted` (knowable only by asking). **This is the one that is allowed to move**, and it moves when a producer or a launch-monitor connector lands — exactly as `MeasureStatus` does.
 - **`ProvenanceTier`** — is it cited, or proposed? A `Proposed` condition must be badged as such.
+
+**That division of labour is the whole of why `kind` exists, and it was learned the hard way.** For a
+year the pack had only the last three, and with no field for *what sort of thing this is* the first
+two silently took the job on. `over_the_top` shipped `Latent` + `Asserted` — the headers define those
+as "cannot be seen in the swing" and "intent, habit, perception", and it is neither; it is the most
+visible fault in amateur golf. It was tagged that way because nobody had written it a measure. So the
+two epistemic fields had become a record of **producer coverage**, and nothing could report it,
+because every row still held a legal value. The same pressure filled `ConditionGroup::Setup` with
+fourteen physical screens, nine beliefs and a set of clubs. See trap 15.
+
+**`Delivery` is the kind most easily confused with `Fault`**, and the line is worth stating: path,
+face-to-path, attack angle, low point and shaft lean at impact are very nearly a *closed determinant
+set* — given them, the ball flight follows. They are the scoreboard of the downswing, not the
+movement error, and a coach does not give a lesson on a number. Body and hand positions at impact
+(axis tilt, pelvis rotation, a bowed lead wrist) *cause* delivery and are Faults.
+
+**`Prominence` is the base rate, and it is a prior.** No peer-reviewed source counts named swing
+faults across a population, so every value is this library's editorial judgement at `practice` tier —
+never a citation. It is re-seatable: once the swing library has volume, prevalence is measurable, and
+the seat will be biased in a way that must be reported because it can only count what can fire.
+`prominenceWeight()` reads 0.05 / 0.10 / 0.20 / 0.35 / 0.60, and **the spread is the design, not the
+values** — 12× against `strengthWeight`'s 9.5×, so that prevalence and evidence stay commensurable.
+The default is the **middle** rung, deliberately breaking this file's first-value convention: it is
+the only default that is harmless when wrong, since this one will multiply into a rank.
 
 **`Asserted` causes are offered, never concluded.** They are surfaced, visually distinct, phrased as a question, and they never count as resolving a finding. Dropping them instead would leave characteristics whose only cause is habit with an empty explanation panel, when the truthful answer is "this may simply be how they set up".
 
@@ -193,10 +221,24 @@ struct Edge { QString from, to; EdgeType type; Strength strength; Provenance pro
 
 Two things it is not, both of which it resembles:
 
-- **Not P(cause | effect)**, which is what ranking causes from an observed effect actually wants. Bayes needs a base rate for how common each cause is, and no `Condition` carries one. Treat this as a posterior and you rank by out-degree — most outgoing edges wins — while looking rigorous.
+- **Not P(cause | effect)**, which is what ranking causes from an observed effect actually wants. Bayes needs a base rate for how common each cause is. **`Condition::prominence` is now that base rate**, and it changes what this paragraph used to say: for a year no `Condition` carried one, so a caller treating this as a posterior was ranking by out-degree — most outgoing edges wins — while looking rigorous. The half that was missing exists; **it is not yet consumed** (see below).
 - **`RankedCause::score` is not a probability either.** It sums one weight per covered finding, so a cause explaining four of them scores past 1 and is meant to. The sum is ordinal and only ever reaches a comparison; normalising it would break the greedy set cover it feeds.
 
 The values were re-cut once, from an ordinal ladder running to 1.5, after measuring that the rescale preserved 98% of cause pairings on the shipped pack and that every pair it reordered was a near-tie. Anything that moves them owes the same measurement.
+
+**`prominenceWeight()` deliberately reaches nothing.** It is authored, marshalled, sortable and
+facetable, and `relation_resolver` does not read it. Wiring it into `rankWeight()` is a change that
+owes the measurement above — and note that the 98% figure was produced by a script that was never
+committed, so that measurement has to be *built*, not re-run. Two things it will have to get right:
+the factor belongs at `rankWeight()`, which is the single chokepoint both accumulation sites go
+through, and `better()` compares `a.score != b.score` exactly, so a multiplicative score needs an
+epsilon for float noise. The epsilon must not be sized to restore the coverage and corroboration
+tie-breaks — prominence separating two previously-tied causes is the feature.
+
+The measurement needs no API flag. Run `explain()` twice over the *same new code*: once on the
+shipped pack, once on a copy with every prominence forced to one rung. Uniform prominence makes
+`score(c) = k · Σ w(c,e)`, a positive scalar multiple of the old score, so that run reproduces the
+pre-change ordering exactly and **is** the control.
 
 ### Norm — what normal looks like
 
@@ -468,7 +510,9 @@ The section to read before assuming anything here runs. "Dormant" means written 
 | **`relation_resolver`** (`resolveRelations`, ranked causes, screen recommendations) | compiled into the app; **its only `#include` is its own header** | findings from `detect()` |
 | **`NormMeasureSource`** | referenced only by its own header | an `IMeasureValueSource` implementation (below) |
 | **`IMeasureValueSource`** | declared; implemented **only by a test fake** | ⚠ **the real gap.** `measure_sample` provides `readPhaseGrid()` + `reduceOverGrid()` but no adapter to this interface. The corridor editor and the corpus scan both call `reduceOverGrid()` directly. Wiring the engine means writing that adapter |
-| **`ContextBinding::applicable` / `material`** | resolved by `resolveContextBinding()`, honoured by `detect()`, editable in the UI | a caller of `detect()`. Also: **no shipped condition carries a binding row** (0 of 50), so both are inert in content as well |
+| **`ContextBinding::applicable` / `material`** | resolved by `resolveContextBinding()`, honoured by `detect()`, editable in the UI | a caller of `detect()`. Also: **no shipped condition carries a binding row** (0 of 146), so both are inert in content as well |
+| **`Condition::kind`** | authored on all 146, validated, marshalled, faceted, sorted, editable | a consumer with an opinion. Nothing in `detect()` or `explain()` branches on it; `outcomeReachOf()` is the one rule that reads it |
+| **`Condition::prominence` / `prominenceWeight()`** | authored on all 146, and reaches every panel surface | the ranking. See §3 for what that change owes before it lands |
 | **`GradePolicy` reaching grading** | reaches three façades and the corpus scan | the engine (it takes a policy in its constructor already) |
 | **`SignalTest::Threshold`** | implemented in `evaluate()` | content — no shipped signal uses it |
 | **`SignalTest::Ratio`** | implemented in `evaluate()` | content — no shipped signal uses it |
@@ -479,22 +523,60 @@ The section to read before assuming anything here runs. "Dormant" means written 
 
 ### 8.3 Content — the shipped numbers
 
-**Pack** (`core.json`) — 106 measures, 83 signals, 112 conditions, 178 edges:
+> **Counted, not remembered — recount before you trust this.** Every figure below is a `git grep`
+> away from being wrong, and this table has been wrong before: it sat at "112 conditions, 178 edges"
+> while the pack held 146 and 306, which is a census understating the causal graph by more than half.
+> Nothing warns, because a stale number in prose is not a compile error. Regenerate with:
+>
+> ```sh
+> python3 -c "
+> import json,collections
+> d=json.load(open('src/Resources/diagnostics/core.json'))
+> n=json.load(open('src/Resources/diagnostics/norms.json'))['norms']
+> for k in ('measures','signals','conditions','edges'): print(k, len(d[k]))
+> for f in ('kind','prominence','group','observability','confirmedBy'):
+>     print(f, dict(collections.Counter(c[f] for c in d['conditions'])))
+> print('edges', dict(collections.Counter(e.get('type','causes') for e in d['edges'])))
+> print('norms', len(n))"
+> ```
+
+**Pack** (`core.json`) — 110 measures, 119 signals, 146 conditions, 306 edges:
 
 | Measures | | Signals | | Conditions | |
 |---|---|---|---|---|---|
-| Live | **44** | `outsideCorridor` | 82 | Observable | 90 |
-| Planned | 51 | `order` | 1 | Latent | 22 |
-| NoProducer | 2 | with a direction | 82 | `Measured` | 83 |
-| ExternalDevice | 9 | | | `Screened` | 13 |
-| Provided | 97 | | | `Asserted` | 16 |
-| Composed | 9 | | | with an axis | 45 |
-| with `highMeans` | 70 | | | with aliases | 86 |
-| with a norm | 95 | | | with drills | 23 |
+| Live | **83** | `outsideCorridor` | 118 | Observable | 122 |
+| Planned | 16 | `order` | 1 | Latent | 24 |
+| ExternalDevice | 9 | with a direction | 118 | `Measured` | 115 |
+| NoProducer | 2 | | | `Asserted` | 17 |
+| Provided | 101 | | | `Screened` | 14 |
+| Composed | 9 | | | with an axis | 99 |
+| with `highMeans` | 75 | | | with aliases | 119 |
+| with a norm | 99 | | | with drills | 23 |
 | | | | | with binding rows | **0** |
 
-Reducers: 52 `at`, 42 `delta`, 10 `extremum`, 2 `rate`.
-Edges: 164 `Causes`, 9 `Corroborates`, 5 `Excludes` — 69 strong, 94 moderate, 15 weak.
+Reducers: 55 `at`, 43 `delta`, 10 `extremum`, 2 `rate`.
+Edges: 283 `Causes`, 18 `Corroborates`, 5 `Excludes` — 103 strong, 184 moderate, 19 weak.
+(`veryWeak` and `veryStrong` are authored nowhere yet; both rungs exist for authors, not for the
+shipped set.)
+
+**Kinds** — the axis added 2026-08-03:
+
+| kind | | | kind | |
+|---|---|---|---|---|
+| `fault` | **69** | | `capacity` | 14 |
+| `setup` | 20 | | `delivery` | 13 |
+| `outcome` | 20 | | `intent` | 9 |
+| | | | `equipment` | 1 |
+
+**Prominence** — 58 `occasional`, 52 `common`, 25 `uncommon`, 8 `ubiquitous`, 3 `rare`. All editorial
+judgement; no prevalence study exists (see §3). The eight at `ubiquitous` are `over_the_top`,
+`early_extension`, `casting`, `loss_of_posture`, `out_to_in_path`, `open_face_to_path`, `slice` and
+`trying_to_lift_the_ball`.
+
+**The two axes are not redundant, and 26 conditions prove it**: `group: setup` splits four ways — 20
+genuine Setup, 14 Capacity, 9 Intent, 1 Equipment and 2 misfiled motion faults (the two takeaways) —
+and `armsAndClub` splits Fault/Delivery. Those 26 include every physical screen and every intent node
+in the library.
 
 Provenance, after the pass of 2026-07-27 — **no `proposed` remains anywhere, and every condition
 records the date its search was made**:
@@ -502,17 +584,17 @@ records the date its search was made**:
 | tier | conditions | edges | |
 |---|---|---|---|
 | `supported` | 5 | 6 | the defining variable (conditions) or the named pair (edges) is directly measured |
-| `indirect` | 23 | 25 | a source measures the mechanism underneath; the named claim is our reading |
-| `practice` | 84 | 147 | searched, coaching consensus found, no peer-reviewed test of the named claim |
+| `indirect` | 23 | 26 | a source measures the mechanism underneath; the named claim is our reading |
+| `practice` | 118 | 274 | searched, coaching consensus found, no peer-reviewed test of the named claim |
 | `proposed` | **0** | **0** | nobody has looked — the tier a completed search pass empties |
 
 `core_pack_test` no longer asserts `proposed > 0`; that was a mid-search proxy. It asserts
 `practice > cited` plus an all-searched check instead. **Do not restore the old assertion** — adding
 a proposed row back to satisfy it is the laundering it was written to prevent.
-Groups: setup 41, ballFlight 20, armsAndClub 15, impact 9, lateral 8, posture 7, sequence 6,
-release 3, finish 3.
+Groups: setup 46, armsAndClub 25, ballFlight 20, posture 13, impact 13, lateral 11, sequence 8,
+release 7, finish 3.
 
-**Norms** (`norms.json`) — 149 rows: 95 at `any`, 8 + 8 at the two archetypes, and 12 / 2 / 12 / 12 at driver / fairway wood / iron / wedge. **Every row is `source: heuristic` with `n = 0`**; 56 carry explicit monitor bounds (the migrated wrist grid + tempo), 30 carry a citation. Those citations are **notes, not identifiers** — `citation` is documented as "DOI/PMID, or the note explaining a provisional figure", and 23 of them name the paper the figure should be re-seated FROM. Nothing moved to `source: literature` in the 2026-07-27 pass, deliberately: that tier asserts the mu and sigma came off a results table, and nobody read one. See `docs/implementation/provenance_log.md` §6.
+**Norms** (`norms.json`) — 156 rows: 99 at `any`, 8 + 8 at the two archetypes, and 13 / 2 / 13 / 13 at driver / fairway wood / iron / wedge. **Every row is `source: heuristic` with `n = 0`**; 56 carry explicit monitor bounds (the migrated wrist grid + tempo), 50 carry a citation. Those citations are **notes, not identifiers** — `citation` is documented as "DOI/PMID, or the note explaining a provisional figure", and many of them name the paper the figure should be re-seated FROM. Nothing moved to `source: literature` in the 2026-07-27 pass, deliberately: that tier asserts the mu and sigma came off a results table, and nobody read one. See `docs/implementation/provenance_log.md` §6.
 
 **Contexts** (`contexts.json`) — 13 nodes, one root. 7 have norms at or beneath them; the other 5 (`partial`, `pitch`, `chip`, `bunker`, `specialty`) carry none of their own and inherit from `any`, which the health list reports as harmless.
 
@@ -522,10 +604,35 @@ release 3, finish 3.
 
 ### 8.4 Content — what can actually fire
 
-**37 signals can fire, covering 35 conditions** (2026-08-02, after the lower-body producer — see
-`docs/design/lower_body_face_on_metrics.md`). Everything else sits on a measure that is `planned`,
+> **A gap here is the design working, not a backlog.** The model is authored **ahead of the
+> producers on purpose**: a complete library is a reference a coach can review and validate, and it
+> is what then *sets* the priority order for building producers. A model that only described what
+> the pipeline could already measure would be a mirror of the pipeline and useless for deciding what
+> the pipeline should do next. **So do not add a check, a warning or a test that reports a modelled
+> item as deficient for lacking a producer** — that restates the purpose of the exercise, and it is
+> `observableNoSignal`'s mistake in a new costume (trap 3c). The roadmap surface already enumerates
+> producer gaps; nothing else should. For the same reason, an analysis over the pack should sweep
+> **every** condition, not the subset that can currently fire.
+
+**75 signals can fire, covering 71 conditions.** Everything else sits on a measure that is `planned`,
 `externalDevice` or `noProducer` — **zero** are live with no norm, which `core_pack_test` asserts.
 So the dark ones are waiting on *producers*, not on corridors.
+
+**Prominence and detectability run inversely at the top**, which is the sharpest priority statement
+the library can now make and was invisible before there was a base rate to sort on:
+
+| rung | fires | dark | |
+|---|---:|---:|---|
+| Ubiquitous | 1 | 3 | **25%** |
+| Common | 19 | 3 | 86% |
+| Occasional | 18 | 6 | 75% |
+| Uncommon | 14 | 2 | 87% |
+| Rare | 3 | 0 | 100% |
+
+Every rare fault in the library is detectable and three of the four commonest are not. It is not a
+coincidence: the frequent faults are whole-body events needing depth — pelvis thrust, spine-angle
+change, the transition plane — while the rare ones tend to be single-joint readings a face-on camera
+already resolves. Read as a producer roadmap, not as a defect list.
 
 The last jump was 25 → 35 and came from one analysis stage over COCO body keypoints 11–16, which
 turned `pelvisSway`, `pelvisLift` and two new frontal-plane keys live in a single change. The
@@ -542,7 +649,7 @@ cost no pipeline work whatsoever.
 The single `order` signal (`sig_sequenceOrder`) still cannot fire: both of its measures
 (`m_pelvisRotPeak`, `m_thoraxRotPeak`) are `planned`.
 
-**Every one of those 16 can also be EXPLAINED**, and that was not true when they were first
+**Every condition that can fire can also be EXPLAINED**, and that was not true when they were first
 counted. Ten of them had no cause at all and four had neither cause nor effect — so the least
 explicable part of the library was precisely the part a golfer would meet first. The gap formed at
 the intersection of two healthy-looking states: the causal work went in per GROUP, while the firing
@@ -560,18 +667,17 @@ nothing behind it is a defect in what ships.
 > the operator meant to capture, and only the sensors are evidence about what was captured. Ledger
 > `X1` in the content-extension plan is closed by this.
 
-> **The measure counts below are from before the face-on producer batch (2026-08-02).** After it:
-> **83 measures live** (was 51), 15 planned, 9 external-device, 2 noProducer, and **0 of the 72
-> conditions that can fire lack a cause** — six did, briefly, the moment their producers landed, and
-> `core_pack_test` caught it. Six `causes` edges were authored to close that.
+**0 of the conditions that can fire lack a cause** — six did, briefly, the moment their producers
+landed, and `core_pack_test` caught it. Six `causes` edges were authored to close that; see trap 3b.
 
 The 9 `Composed` measures (facet-built rather than metric-backed) are no longer all planned: five of
 them — `m_shoulderPlane`, `m_thoraxDrift`, `m_trailElbowRise`, `m_leadArmToTorso`, `m_leadHandWidth`
 — went live with `upper_body_metrics.cpp`, which was built to the geometry their `series` facets
 already named. The Composed path is production-live for the first time.
 
-Condition fields in use: `consequence` 112/112, `provenance` 112/112, `aliases` 86, `drills` 23,
-`screenRef` 13, `injuryNote` 7, `bindings` **0**.
+Condition fields in use: `consequence` 146/146, `provenance` 146/146, `kind` 146/146,
+`prominence` 146/146, `aliases` 119, `axis` 99, `drills` 23, `screenRef` 14, `injuryNote` 11,
+`bindings` **0**.
 
 **References** (`references.json`) — 21, joined to the pack by `Provenance::citation` against
 `doi` **or** `pmid` (exact string match, either field). One record carries a PMID and no DOI because
@@ -583,7 +689,8 @@ one is background, and one is an arXiv preprint held for attribution only.
 
 - **Everything that stores, resolves, projects, renders and edits the content is live**, and two real surfaces depend on it today: the wrist grid and the metric/dashboard corridors.
 - **Everything that turns a shot into findings is dormant** — one adapter and one design decision away.
-- **The numbers are all starting figures.** Nothing is seated on data; `n = 0` everywhere. Treat a shipped corridor as a hypothesis, and do not build a gate that pins one.
+- **The numbers are all starting figures.** Nothing is seated on data; `n = 0` on every norm, and every prominence is editorial judgement. Treat a shipped corridor and a shipped rung alike as a hypothesis, and do not build a gate that pins one.
+- **The content leads the code, deliberately.** More is modelled than can be captured, and that is the product: a complete library is what a coach can review and what then decides which producer gets built next. The gap is the roadmap, not a defect — see the note opening §8.4.
 
 ---
 
@@ -610,6 +717,23 @@ always was. `bothTailsOneCondition`, `inconsistentReach`, `needsRevalidation` an
 had no test in either direction, which is how that survived; all four are now gated both ways.
 
 `health()` merges three sources — the pack validator's warnings, the norm set's own (which `norm_provider.h` had promised were "part of the health list" while they were not), and `diagnosticsHealth()`. Codes, with what each means an author should DO, are documented at the top of `diagnostics_health.h`.
+
+**The kind rules are all gated on whether the pack has an opinion.** `faultNotObservable`,
+`kindReachMismatch`, `outcomeNotBallFlight` and `outcomeHasEffect` (all warnings, all opening at zero
+over shipped content) run only when some condition holds a non-default kind. A pack authored before
+the field existed loads with every condition at `Fault`, and an ungated `faultNotObservable` would
+accuse every `Latent` row in it of an omission that is really the field's own age. The stated cost: a
+pack whose conditions genuinely are all Faults escapes the four — acceptable, and arguably correct,
+since there is then nothing for a kind rule to compare.
+
+Note what is NOT there. **"This condition has no prominence" cannot be written at all**, and the
+reason is worth understanding before somebody tries: `Prominence` has five legitimate values and no
+sentinel, so by the time the validator sees a row, one nobody authored is byte-identical to one
+somebody authored at the default rung — and 58 shipped conditions sit at that rung on purpose. Any
+predicate over the loaded pack either accuses those 58 or reports nothing. An eighth "unset" value
+would fix the predicate and break what the enum is for. `core_pack_test` asks the question at the
+only layer where it is answerable, by reading the shipped JSON as raw text and checking the key is
+present on every condition.
 
 Two scoping rules there are load-bearing:
 
@@ -675,7 +799,25 @@ The reducer must name the phase the **producer** actually labels. `m_tempoRatio`
 
 ### A characteristic
 
-Needs a `consequence` (why it matters), a `ConfirmedBy`, an `Observability`, and either `detectedBy` signals or a reason it is latent. Causal edges are `Causes` from cause to effect; the validator refuses cycles, self-edges, and `Corroborates` over an existing causal path.
+Needs a `consequence` (why it matters), a `ConditionKind`, a `Prominence`, a `ConfirmedBy`, an `Observability`, and either `detectedBy` signals or a reason it is latent. Causal edges are `Causes` from cause to effect; the validator refuses cycles, self-edges, and `Corroborates` over an existing causal path.
+
+**Pick the kind before anything else** — it is the one field that constrains the others, and the
+validator will tell you when they disagree. Ask what sort of thing it is, not where in the swing it
+happens: a movement error is a `Fault`, an impact number is `Delivery`, a range of motion is a
+`Capacity`. The trap is `Fault` versus `Delivery`; see §3.
+
+**Prominence is a judgement, and it ships as one.** Set the rung against how often you would expect to
+see it in the golfers this library is for. It stays at `practice` tier — **never attach a citation to
+a rung**, because no prevalence study exists to attach. If you find yourself wanting to write a note
+explaining where the intuition came from, the answer is "this library's editorial judgement" and
+nothing more; `core_pack_test` greps the raw content bytes for vendor names, and a provenance note is
+where one would get in.
+
+An axis-partner tail is where the kind field earns its keep. Authoring the opposite end of a corridor
+does not make that end a fault — `shallowing` is the low tail of `over_the_top`'s axis and is a move
+good players make deliberately, so it is `Delivery` with a wide corridor and no injury note. Before
+the kind field there was nowhere to say that, and the pattern would have minted a fault out of a
+technique.
 
 ### A screen or a drill
 
@@ -711,7 +853,7 @@ All in the analyzer suite: `cmake -S src/Analysis/tests -B build/analyzer-tests`
 | Suite | Gates |
 |---|---|
 | `characteristic_pack_test` | load, save, validation, every error and warning code |
-| `core_pack_test` | the SHIPPED pack: ids, referential integrity, that every live corridor signal can fire, and that **everything which can fire can also be explained** — a condition detectable today with no cause is a defect, not a backlog item |
+| `core_pack_test` | the SHIPPED pack: ids, referential integrity, that every live corridor signal can fire, and that **everything which can fire can also be explained** — a condition detectable today with no cause is a defect, not a backlog item. Also the kind census, that `Outcome` and the `BallFlight` group are coextensive **in both directions** (which is what makes `outcomeReachOf()`'s move a no-op rather than a hope), and — read off the raw JSON, because the loader cannot answer it — that every condition declares a kind and a prominence |
 | `axis_direction_test` | every corridor signal points the way its own condition claims. The fixture carries the catalogue quote that decides each row, so a new signal with no fixture row **fails** |
 | `norm_test` | the grade rule: per-side z, monitor bounds dominating in both directions, the drawn Ideal edge agreeing with the graded one **under every preset**, and the preset ordering invariant |
 | `norm_pack_test` | persistence, validation, layering — that context specificity beats layer precedence, the cohort probe order exhaustively, and the band a date of birth derives at a given date |
@@ -755,6 +897,9 @@ Each of these is a bug that shipped or nearly shipped. They are here because non
 10. **A `const Condition *` dies when `save()` reloads the provider.** Copy what you need out first.
 11. **Text links are `Theme.colorAccent` at rest**, body font, trailing arrow, cursor change only (`ScreenHome.qml`'s `switchLink`). Muted-until-hover is for secondary chrome, not for a way out of the page.
 12. **A default setting can hide a whole-band defect, and the tests will agree with it.** The Ideal band was drawn at `mu ± sigma` and graded at `mu ± idealMaxZ × sigma` for nine stages. Under `standard` those are the same number, so nothing failed — and three separate tests had written the defect down as a requirement ("a policy change does not move the IDEAL band"). **When a value is a default, sweep the non-defaults**: `norm_test` and the façade's corridor assertions now run under every shipped preset, not only the shipped one.
+13. **An epistemic field will absorb an ontological job if there is nowhere else to put it.** `Observability` and `ConfirmedBy` mean "can it be seen" and "how is it established". With no field recording *what sort of thing this is*, they quietly became a record of producer coverage instead — `over_the_top` shipped `Latent` + `Asserted` for a year, meaning "invisible" and "a belief", because nobody had written it a measure. The same pressure turned `ConditionGroup::Setup` into the bucket holding fourteen physical screens, nine beliefs and a set of clubs. **Nothing reported either, because every row still held a legal value in every field** — which is what makes this class of drift different from a bug. When a field's values start correlating with what the pipeline can do rather than with what the thing is, the taxonomy is missing an axis.
+14. **A census in prose rots silently.** §8.3 read "112 conditions, 178 edges" while the pack held 146 and 306 — understating the causal graph by more than half, in the document people consult to find out how big the model is. A wrong number in a comment is not a compile error and no test looks at it. Recount before quoting, with the one-liner at the head of §8.3.
+15. **Positional cell arrays fail in a way count parity cannot see.** `conditionRow()` builds cells in two branches against one `columns()`; transpose two in one branch and the count is unchanged, nothing throws, and the facet rail silently reads the wrong column — with the *filter* agreeing, because it resolves the value the same wrong way. Both halves wrong in the same direction is invisible to any check that counts. `model_browser_test` asserts each enum column holds only that enum's labels.
 
 ---
 
@@ -788,4 +933,4 @@ src/Analysis/reference_bands.{h,cpp}   NormBandProvider — Norm -> Band for the
 src/Gui/review/metric_catalog.cpp      corridors for the metric + dashboard surfaces
 ```
 
-**Read next:** `docs/design/diagnostics_norms.md` (the brief), `docs/implementation/diagnostics_norms_impl_plan.md` (how it was built, its ledger, and the handoff to *Diagnosis execution, V&V*), `docs/user/pinpoint-diagnostics-guide.md` (the same model in non-technical language — useful for naming things the way users will), `docs/design/pinpoint_sign_conventions.md` (before touching any direction), and `docs/developer/metric_catalogue_developer_guide.md` (the other registry).
+**Read next:** `docs/design/swing_fault_ontology.md` (why `kind` and `prominence` exist, and the coaching review that produced them), `docs/design/diagnostics_norms.md` (the brief), `docs/implementation/diagnostics_norms_impl_plan.md` (how it was built, its ledger, and the handoff to *Diagnosis execution, V&V*), `docs/user/pinpoint-diagnostics-guide.md` (the same model in non-technical language — useful for naming things the way users will), `docs/design/pinpoint_sign_conventions.md` (before touching any direction), and `docs/developer/metric_catalogue_developer_guide.md` (the other registry).

@@ -138,6 +138,33 @@ example, for *Scooping*:
 > Adding loft through impact with the lead wrist means the club is rising at the ball, costing
 > compression and distance control.
 
+### Not everything in the library is a swing fault
+
+The library holds several different sorts of thing, and it treats them differently, because a coach
+does:
+
+- a **swing fault** — a movement error, and what a lesson is usually about: *over the top*,
+  *early extension*, *casting*
+- a **setup position** — a static thing, before the swing starts: *ball too far back*, *stance too
+  wide*. Often fixed inside one session, by being told
+- a **delivery number** — what the club was doing at the ball: path, face angle, angle of attack,
+  where the low point was. These are the scoreboard of the downswing rather than a fault in
+  themselves, and they are what actually decide the shot
+- an **outcome** — what the ball did: *slice*, *thin*, *short carry*. Where an explanation ends
+- a **physical capacity** — what your body can and cannot do, like hip or shoulder range of motion.
+  Settled by a physical test, never by a camera, and it constrains what is worth working on
+- an **intent** — what you are trying to do or believe, like *trying to lift the ball*. Only you can
+  confirm it, so it is always offered as a question and never concluded
+
+That distinction is why the app can say *"you are coming over the top, and limited lead-hip rotation
+may be why — here is a test that would settle it"* rather than handing you a mobility screen and
+calling it your swing fault.
+
+**Some of them are marked as more common than others.** That ranking is this library's own
+judgement, made to help sort what is worth looking at first — it is not measured prevalence, because
+nobody has counted swing faults across a population. Treat it as a coach's ordering, and expect it to
+change as the library learns.
+
 ### Causes — how characteristics connect
 
 Characteristics are linked to each other, because swings are not lists of independent faults. One

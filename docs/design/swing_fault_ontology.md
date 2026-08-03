@@ -1,7 +1,9 @@
 # The swing-fault ontology — a review, and a proposed repair
 
-**Status**: REVIEW AND PROPOSAL. Nothing here is implemented. Every number below was read out of
-`src/Resources/diagnostics/core.json` and `norms.json` at `69b37b6`.
+**Status**: SHIPPED in `ae9b57d`, with four corrections — **read §11 before acting on §5–§9.** The
+body of this document is left as the review it was, because the argument is what makes the fields
+defensible and a rewritten proposal reads as though it were always obvious. Every number in §1–§10
+was read at `69b37b6` and is therefore pre-change; §11 carries the shipped figures.
 **Occasioned by**: "over the top and early extension are both incredibly common swing faults, yet
 one is a characteristic and one is a cause."
 **Reviewed from**: the coaching side. What a coach names, what a coach measures, and what a coach
@@ -425,3 +427,87 @@ technique coaches teach.
    beginner's. `Norm` already solved this shape with `(context, cohort)` and the machinery exists —
    but a prominence keyed three ways is 145 × 13 × 6 authoring slots, which is how a field becomes
    one nobody fills in.
+
+---
+
+## 11. What actually shipped — `ae9b57d`, 2026-08-03
+
+All seven kinds, the five-rung ladder, the over-the-top repair, four new warnings and two new load
+errors. Every one of the 146 conditions carries a kind and a prominence.
+
+| kind | n | | kind | n |
+|---|---:|---|---|---:|
+| Fault | 69 | | Capacity | 14 |
+| Setup | 20 | | Delivery | 13 |
+| Outcome | 20 | | Intent | 9 |
+| | | | Equipment | 1 |
+
+The four open questions of §10 were answered: Delivery ships as a kind (Q1); Setup does too, and
+S- and C-posture went with it as address postures rather than swing faults (Q2); the ladder has five
+rungs (Q3); and prominence is **not** keyed by cohort or context (Q4) — a single global rung, on the
+argument this document already made, that 146 × 13 × 6 slots is how a field becomes one nobody fills.
+
+### The four corrections implementation made to this proposal
+
+**1 · The weight ladder is 0.05 / 0.10 / 0.20 / 0.35 / 0.60, not §6's 0.02–0.50.** Two reasons. A
+0.02 floor claims to discriminate one-in-fifty from one-in-seventeen on a judgement with no study
+behind it, and a rung nobody can author against a real row gets picked by feel and then defended by
+its number. And the spread matters more than the values: 25× against `strengthWeight`'s 9.5× would
+let a Ubiquitous cause covering one weak finding outrank a Rare cause covering two very strong ones —
+which is this document's own complaint about ranking by topology, with the sign flipped. At 12× the
+two terms stay commensurable.
+
+**2 · Delivery is 13 conditions, not §4's 17.** Axis tilt at impact, pelvis rotation at impact and
+the bowed lead wrist are body and hand positions that *cause* delivery; they are Faults. The narrower
+set is the club's geometry only. This is not a tidiness point: with the wider set, three shipped
+edges trip a Delivery→Fault rule and with the narrow one exactly one does.
+
+**3 · `deliveryCausesFault` was not shipped, because the invariant is unsound.** §5 proposed "a
+Delivery may not cause a Fault — the scoreboard does not cause the movement". Its one counterexample
+on the shipped graph, `under_plane_stuck → face_held_open_impact`, is a *true* coaching claim: being
+stuck under the plane makes you hold the face open to save it. **Compensation chains are real**, and
+a delivery error routinely produces a rescue movement. What shipped instead is `outcomeHasEffect` —
+an Outcome with an outgoing causal edge — which is sound, because what the ball did genuinely cannot
+cause the swing that produced it. `screenedHasCause` was left keyed on `ConfirmedBy` rather than
+moved to `Capacity`: its value is that it is unscoped, and it guards the field `relation_resolver`
+actually reads.
+
+**4 · `faultNoProminence` is unimplementable and was replaced.** Prominence has five legitimate
+values and no sentinel, so a row nobody authored and a row somebody authored at the default rung are
+the same bytes once loaded — and 58 shipped conditions sit at that rung on purpose. Any validator
+predicate either accuses those 58 or reports nothing. `core_pack_test` asks the question where it is
+answerable, by reading the shipped JSON as raw text.
+
+### What the prevalence field made visible on day one
+
+The strongest evidence the field was worth adding, and it was invisible before there was a base rate
+to sort on: **prominence and detectability run inversely at the top.**
+
+| rung | fires | dark | |
+|---|---:|---:|---|
+| Ubiquitous | 1 | 3 | **25%** |
+| Common | 19 | 3 | 86% |
+| Occasional | 18 | 6 | 75% |
+| Uncommon | 14 | 2 | 87% |
+| Rare | 3 | 0 | 100% |
+
+Every rare fault in the library is detectable and three of the four commonest are not — `over_the_top`,
+`early_extension` and `loss_of_posture` are all on planned measures, while `casting` alone fires. The
+mechanism is not mysterious: the frequent faults are whole-body events needing depth, and the rare
+ones tend to be single-joint readings a face-on camera already resolves.
+
+**This is a priority ordering, not a defect list**, and it is what the model is for. The library is
+authored ahead of its producers deliberately, so that it can be reviewed with coaches and then used
+to decide which producer earns building next. A health check reporting these six rows was considered
+and rejected for exactly that reason — a warning that a modelled item is not yet implemented restates
+the purpose of the exercise.
+
+### Still outstanding
+
+`prominenceWeight()` reaches nothing. Wiring it into `RankedCause::score` owes the measurement
+`characteristic.h` demands of `strengthWeight` — and the 98% figure that comment cites came from a
+script that was never committed, so the harness has to be built rather than re-run. The method needs
+no API flag: run `explain()` twice over the same new code, once on the shipped pack and once on a
+copy with every prominence forced to one rung. Uniform prominence makes `score(c) = k · Σ w(c,e)`, a
+positive scalar multiple of the old score, so that run reproduces the pre-change ordering exactly and
+is the control.
