@@ -465,6 +465,71 @@ int main()
               "…but it carries no weight in the ranking score");
     }
 
+    // ── Prominence: the base rate, in the ranking ───────────────────────────────
+    //
+    // SHAPES ONLY. Nothing here pins 0.35 or any condition's rung — those are editorial figures
+    // awaiting a corpus re-seat, and trap 5 says a test must not freeze them. What is asserted is
+    // that the term is present, that it is a tie-break of last resort rather than a coverage
+    // override, and that a uniform pack reproduces the pre-change ordering — which is the property
+    // `rank_shift_report` measures against and would be worthless without.
+    std::printf("=== prominence weights the ranking ===\n");
+    {
+        CharacteristicPack pack = fixture();
+        FakeSource         src;
+        src.add(QStringLiteral("mSway"), 50.0, 0.0, 10.0);   // sway and slide both fire, so each
+        src.add(QStringLiteral("mSlide"), 50.0, 0.0, 10.0);  // cause below covers two findings
+        const DetectionResult d = detect(pack, src);
+
+        // Two causes, identical in every way the ranking reads except the rung. Give poorBalance
+        // the same two effects at the same strength so coverage and edge weights cannot separate
+        // them, and the ONLY difference left is how common each is.
+        for (const char *to : { "sway", "slide" }) {
+            Edge e;
+            e.from     = QStringLiteral("poorBalance");
+            e.to       = QString::fromLatin1(to);
+            e.type     = EdgeType::Causes;
+            e.strength = Strength::Strong;               // matches limitedHipIr's
+            pack.edges.push_back(e);
+        }
+        for (Condition &c : pack.conditions) {
+            if (c.id == QLatin1String("limitedHipIr")) c.prominence = Prominence::Ubiquitous;
+            if (c.id == QLatin1String("poorBalance"))  c.prominence = Prominence::Rare;
+        }
+
+        const Explanation ex = explain(pack, d);
+        check(!ex.roots.empty(), "the tied pair ranks");
+        check(ex.roots.front().conditionId == QLatin1String("limitedHipIr"),
+              "of two causes alike in coverage and strength, the commoner one is put first");
+        check(ex.roots.front().prominence == Prominence::Ubiquitous,
+              "and the rung it was weighted by is carried out, so a UI can say why");
+
+        // Reversing the rungs must reverse the answer. Without this the check above passes on an
+        // alphabetical tie-break, which is what it would have done before the change.
+        for (Condition &c : pack.conditions) {
+            if (c.id == QLatin1String("limitedHipIr")) c.prominence = Prominence::Rare;
+            if (c.id == QLatin1String("poorBalance"))  c.prominence = Prominence::Ubiquitous;
+        }
+        const Explanation flipped = explain(pack, d);
+        check(!flipped.roots.empty()
+                  && flipped.roots.front().conditionId == QLatin1String("poorBalance"),
+              "…and swapping the rungs swaps the order, so it is the rung deciding and not the id");
+
+        // Coverage is a COUNT of findings explained and prominence must never touch it. A base rate
+        // that changed what a cause accounts for would be prevalence rewriting the evidence.
+        check(flipped.roots.front().coverage == ex.roots.front().coverage,
+              "prominence reorders causes; it never changes what one explains");
+
+        // A uniform pack is a positive scalar multiple of the pre-change score, so it must produce
+        // the pre-change ORDER exactly — here, the alphabetical tie-break the two rungs were
+        // overriding. This is the control `rank_shift_report` measures against.
+        CharacteristicPack flat = pack;
+        for (Condition &c : flat.conditions) c.prominence = Prominence::Occasional;
+        const Explanation control = explain(flat, d);
+        check(!control.roots.empty()
+                  && control.roots.front().conditionId == QLatin1String("limitedHipIr"),
+              "a pack at one rung ranks by the id again — the control reproduces the old ordering");
+    }
+
     // ── Excludes: two findings that cannot both describe one swing ──────────────
     //
     // The pair is resolved BEFORE ranking, because leaving both in would put a contradiction in

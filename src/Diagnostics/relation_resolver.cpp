@@ -21,6 +21,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <cmath>
 
 namespace pinpoint::analysis {
 
@@ -143,8 +144,29 @@ Explanation explain(const CharacteristicPack &pack, const DetectionResult &detec
     for (const Finding &f : detection.findings)
         if (f.state == FindingState::Fired && !f.material) immaterial.insert(f.conditionId);
 
+    // THE ONE CHOKEPOINT, and the reason the prominence factor goes here rather than at either of
+    // the two places `score` is accumulated. Both of them (the candidate pass below, and the greedy
+    // re-score that recomputes over the still-uncovered subset) call through this lambda, so one
+    // edit covers both. Applying it at the call sites would be two edits that must agree forever,
+    // and they would not.
+    //
+    // score(cause) = P(cause) x SUM over covered findings of P(effect | cause)
+    //
+    // The second term was always here. The first is the base rate that `strengthWeight()`'s own
+    // header spent a year saying the pack could not supply — "Bayes needs a base rate for how common
+    // each cause is, and no Condition carries one". One does now. Without it the ranking is out-
+    // degree wearing a posterior's clothes: a cause is put first for having many arrows, not for
+    // being a likely explanation of THIS swing, so a settled tempo habit outranks early extension.
+    //
+    // Still not a probability, and `RankedCause::score` never was — it SUMS over covered findings,
+    // so a cause explaining four of them scores past any single term and is meant to. The quantity
+    // is ordinal and only ever reaches a comparison.
     const auto rankWeight = [&pack, &immaterial](const QString &from, const QString &to) {
-        return immaterial.contains(to) ? 0.0 : edgeWeight(pack, from, to);
+        if (immaterial.contains(to)) return 0.0;
+        const Condition *cause = pack.condition(from);
+        const double     base  = cause ? prominenceWeight(cause->prominence)
+                                       : prominenceWeight(Prominence::Occasional);
+        return base * edgeWeight(pack, from, to);
     };
 
     // Every condition that explains at least one fired finding is a candidate — including other
@@ -175,6 +197,7 @@ Explanation explain(const CharacteristicPack &pack, const DetectionResult &detec
         rc.conditionId = c.id;
         rc.explains    = covers;
         rc.coverage    = int(covers.size());
+        rc.prominence  = c.prominence;
         rc.confirmedBy = c.confirmedBy;
         rc.offeredOnly = (c.confirmedBy == ConfirmedBy::Asserted);
         rc.unknown     = (c.confirmedBy == ConfirmedBy::Screened
@@ -207,8 +230,22 @@ Explanation explain(const CharacteristicPack &pack, const DetectionResult &detec
         for (const QString &e : rc.explains) total += corroborationCount.value(e, 0);
         return total;
     };
+    // The epsilon guards FLOAT NOISE AND NOTHING ELSE, and its size is the whole of its meaning.
+    //
+    // Before prominence, `score` was a sum of five discrete edge weights, so two causes with the
+    // same structure produced bit-identical doubles and `!=` was exact and correct. It is now a sum
+    // of PRODUCTS, and two structurally different causes can land on the same value by arithmetic
+    // that differs in the last bit — 0.35 x 0.60 against 0.20 x 1.05 — which would hand the ordering
+    // to the id and look like a bug nobody could reproduce.
+    //
+    // What it must NOT do is restore the tie-breaks below to how often they used to fire. Two causes
+    // that used to tie exactly and now differ because one is Common and the other Occasional are
+    // being separated BY PROMINENCE, which is the entire point of the change; widening this until
+    // they tie again would silently undo it. Sized for representation error, never for policy.
+    constexpr double kScoreEpsilon = 1e-9;
+
     const auto better = [&corroborationOf](const RankedCause &a, const RankedCause &b) {
-        if (a.score != b.score)       return a.score > b.score;
+        if (std::abs(a.score - b.score) > kScoreEpsilon) return a.score > b.score;
         if (a.coverage != b.coverage) return a.coverage > b.coverage;
         const int ca = corroborationOf(a), cb = corroborationOf(b);
         if (ca != cb)                 return ca > cb;

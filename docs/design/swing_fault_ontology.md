@@ -502,12 +502,20 @@ to decide which producer earns building next. A health check reporting these six
 and rejected for exactly that reason — a warning that a modelled item is not yet implemented restates
 the purpose of the exercise.
 
-### Still outstanding
+### The ranking now uses it
 
-`prominenceWeight()` reaches nothing. Wiring it into `RankedCause::score` owes the measurement
-`characteristic.h` demands of `strengthWeight` — and the 98% figure that comment cites came from a
-script that was never committed, so the harness has to be built rather than re-run. The method needs
-no API flag: run `explain()` twice over the same new code, once on the shipped pack and once on a
-copy with every prominence forced to one rung. Uniform prominence makes `score(c) = k · Σ w(c,e)`, a
-positive scalar multiple of the old score, so that run reproduces the pre-change ordering exactly and
-is the control.
+`score(cause) = P(cause) × Σ P(effect | cause)`, entering at `rankWeight()`. Measured with
+`rank_shift_report`, which runs `explain()` twice over the same code — once on the shipped pack, once
+on a copy at a single rung, since uniform prominence is a scalar multiple and therefore *is* the
+pre-change ordering. Over 409 ranked synthetic finding sets and 1328 cause pairings: **78.9%
+preserved, and only 7.1% reordered by score** — the remaining reorderings follow from the greedy
+cover picking a different cause first and are consequences of that pick rather than independent
+judgements.
+
+Do not compare that to the strength re-cut's 98%. That was a rescale of an existing term; this is a
+new one, and a new term that reordered nothing would not have been worth adding. The question is
+whether the reorderings are defensible, and the widest evidence margin prominence overturns is 2.7×
+against a 3× prevalence ratio — the two ladders behaving commensurably, which is what §6's spread
+argument was for. The top of the list is `early_extension` over `late_pelvis_rotation`,
+`out_to_in_path` over `late_pelvis_rotation`, and `over_the_top` over `poor_core_stability` — which
+is, precisely, this document's §3.2 complaint being answered.

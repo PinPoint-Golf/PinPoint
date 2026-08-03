@@ -42,7 +42,14 @@ struct RankedCause {
     QString     conditionId;
     QStringList explains;              // fired conditions this cause accounts for
     int         coverage   = 0;        // explains.size(), hoisted for sorting/display
-    double      score      = 0.0;      // coverage weighted by edge strength
+    // P(cause) x SUM of P(effect | cause) over the findings it covers. NOT a probability: it sums,
+    // so a cause explaining four findings scores past any single term and is meant to. Ordinal, and
+    // it only ever reaches a comparison — normalising it would break the greedy set cover.
+    double      score      = 0.0;
+    // The base rate the score was weighted by. Carried so a UI can answer "why is this first?" with
+    // the whole reason rather than half of it: coverage and strength are visible in `explains`, and
+    // without this the prevalence term is an invisible thumb on the scale.
+    Prominence  prominence = Prominence::Occasional;
     ConfirmedBy confirmedBy = ConfirmedBy::Measured;
     bool        offeredOnly = false;   // Asserted: shown, never counted as resolving
     bool        unknown     = false;   // Screened and not yet entered — driving a recommendation

@@ -539,6 +539,24 @@ pp_add_test(characteristic_engine_test
             ${DIAG}/context_tree.cpp ${DIAG_PACK}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 
+# rank_shift_report — the measurement `characteristic.h` demands of anything that moves the ranking
+# weights, run over the shipped pack. Hand-rolled rather than pp_add_test because that helper always
+# calls add_test(), and this must NOT be a gate: an assertion on the preserved-pairing percentage
+# would pin the shipped prominence values, so the first coach-led re-rank would fail a gate nobody
+# wanted — the frozen-parity mistake already deleted twice here (see the norm parity note below).
+# Its printed output is the deliverable and belongs in the commit message. Same link line as the
+# test above plus the pack path; it needs no norms, no context tree and no Qml.
+# Precedent for a deliberately unregistered target: src/Buffer/tests/latency_benchmark.
+add_executable(rank_shift_report
+    ${DIAG}/tests/rank_shift_report.cpp
+    ${DIAG}/relation_resolver.cpp ${DIAG}/characteristic_engine.cpp
+    ${DIAG}/context_tree.cpp ${DIAG_PACK})
+target_include_directories(rank_shift_report PRIVATE ${PP_BUFFER} ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+target_link_libraries(rank_shift_report PRIVATE Qt6::Core Qt6::Gui)
+target_compile_options(rank_shift_report PRIVATE -DPP_CORE_PACK_PATH="${DIAGRES}/core.json")
+pp_apply_sanitizers(rank_shift_report)
+# Note: intentionally NOT added to add_test() — manual run only.
+
 # Qml for the QML_ELEMENT façades under test (ModelBrowser is a QObject with Q_PROPERTY/Q_INVOKABLE,
 # so those targets also need AUTOMOC).
 find_package(Qt6 REQUIRED COMPONENTS Qml)

@@ -226,19 +226,45 @@ Two things it is not, both of which it resembles:
 
 The values were re-cut once, from an ordinal ladder running to 1.5, after measuring that the rescale preserved 98% of cause pairings on the shipped pack and that every pair it reordered was a near-tie. Anything that moves them owes the same measurement.
 
-**`prominenceWeight()` deliberately reaches nothing.** It is authored, marshalled, sortable and
-facetable, and `relation_resolver` does not read it. Wiring it into `rankWeight()` is a change that
-owes the measurement above — and note that the 98% figure was produced by a script that was never
-committed, so that measurement has to be *built*, not re-run. Two things it will have to get right:
-the factor belongs at `rankWeight()`, which is the single chokepoint both accumulation sites go
-through, and `better()` compares `a.score != b.score` exactly, so a multiplicative score needs an
-epsilon for float noise. The epsilon must not be sized to restore the coverage and corroboration
-tie-breaks — prominence separating two previously-tied causes is the feature.
+**`prominenceWeight()` is now consumed**, and the score it feeds is:
 
-The measurement needs no API flag. Run `explain()` twice over the *same new code*: once on the
-shipped pack, once on a copy with every prominence forced to one rung. Uniform prominence makes
-`score(c) = k · Σ w(c,e)`, a positive scalar multiple of the old score, so that run reproduces the
-pre-change ordering exactly and **is** the control.
+```
+score(cause) = P(cause) × Σ over covered findings of P(effect | cause)
+```
+
+The factor enters at `rankWeight()` (`relation_resolver.cpp`) and nowhere else. That lambda is the
+single chokepoint both accumulation sites go through — the candidate pass and the greedy re-score —
+so one edit covers both; applying it at the call sites would be two edits that must agree forever.
+`better()` gained a `1e-9` epsilon, because a sum of *products* can land on one value by arithmetic
+differing in the last bit where a sum of five discrete weights could not. **That epsilon is sized for
+representation error and must never be widened to restore the tie-breaks** — prominence separating
+two previously-tied causes is the change working.
+
+**The measurement needed no API flag, and that is the part worth reusing.** Run `explain()` twice
+over the *same* code: once on the shipped pack, once on a copy with every prominence forced to one
+rung. Uniform prominence makes `score(c) = k · Σ w(c,e)`, a positive scalar multiple of the old
+score, so that run reproduces the pre-change ordering exactly and **is** the control. Nothing
+reimplements the greedy pass, so what is measured is what ships. `rank_shift_report`
+(`src/Diagnostics/tests/`) is that harness — **deliberately not a ctest gate**, because an assertion
+on the preserved-pairing percentage would pin the shipped prominence values and the first coach-led
+re-rank would fail it. Its result on the shipped pack:
+
+| | |
+|---|---|
+| cause pairings compared | 1328, over 409 ranked synthetic finding sets |
+| preserved | 1048 (**78.9%**) |
+| reordered **by score** | 94 (**7.1%** of all pairings) |
+| reordered by the cover picking differently | 186 |
+
+**Read the split before reading the headline.** Only the score-driven number says prominence decided
+a pairing; the rest are downstream of the greedy cover choosing a different first cause, and counting
+them as "prominence reordered this" overstates the change. And note the two figures are not
+comparable to the strength re-cut's 98% — that was a *rescale of an existing term*, this is a *new
+term*, and a new term that reordered nothing would not have been worth adding. What matters is
+whether the reorderings are defensible: the widest evidence margin prominence overturns is 2.7×,
+against a 3× prevalence ratio, so the ladders are behaving commensurably and no large evidence
+advantage is being overwhelmed by a small prevalence edge. The report names every reordered pair with
+both scores, so that is checkable rather than assertable.
 
 ### Norm — what normal looks like
 
@@ -512,7 +538,7 @@ The section to read before assuming anything here runs. "Dormant" means written 
 | **`IMeasureValueSource`** | declared; implemented **only by a test fake** | ⚠ **the real gap.** `measure_sample` provides `readPhaseGrid()` + `reduceOverGrid()` but no adapter to this interface. The corridor editor and the corpus scan both call `reduceOverGrid()` directly. Wiring the engine means writing that adapter |
 | **`ContextBinding::applicable` / `material`** | resolved by `resolveContextBinding()`, honoured by `detect()`, editable in the UI | a caller of `detect()`. Also: **no shipped condition carries a binding row** (0 of 146), so both are inert in content as well |
 | **`Condition::kind`** | authored on all 146, validated, marshalled, faceted, sorted, editable | a consumer with an opinion. Nothing in `detect()` or `explain()` branches on it; `outcomeReachOf()` is the one rule that reads it |
-| **`Condition::prominence` / `prominenceWeight()`** | authored on all 146, and reaches every panel surface | the ranking. See §3 for what that change owes before it lands |
+| ~~**`Condition::prominence` / `prominenceWeight()`**~~ | **no longer dormant** — it weights `RankedCause::score` via `rankWeight()`, measured by `rank_shift_report` (§3) | a caller of `explain()` |
 | **`GradePolicy` reaching grading** | reaches three façades and the corpus scan | the engine (it takes a policy in its constructor already) |
 | **`SignalTest::Threshold`** | implemented in `evaluate()` | content — no shipped signal uses it |
 | **`SignalTest::Ratio`** | implemented in `evaluate()` | content — no shipped signal uses it |
@@ -862,7 +888,8 @@ All in the analyzer suite: `cmake -S src/Analysis/tests -B build/analyzer-tests`
 | `measure_facets_test`, `anatomy_vocabulary_test` | the Composed vocabulary and its validity table |
 | `measure_sample_test` | reading a measure off a stored swing; an unsegmented phase yields NOTHING, never a nearest-sample guess |
 | `norm_measure_source_test` | values + norms → a graded reading, and the three silent failures (firing on ordinary variation, grading an unknown context against the default, an absent norm reading as a pass) |
-| `characteristic_engine_test` | `detect()` and the explanation pass |
+| `characteristic_engine_test` | `detect()` and the explanation pass — including that prominence orders two causes alike in coverage and strength, that swapping the rungs swaps the order (so it is the rung deciding and not the id), that it never changes what a cause explains, and that a one-rung pack reproduces the pre-change ordering. Shapes only; no rung or weight is pinned |
+| `rank_shift_report` | **not a test.** The measurement `characteristic.h` demands of anything moving the ranking weights. Run it by hand and put its output in the commit message; never gate on it |
 | `dag_layout_test` | no overlaps, determinism, depth bound, waypoint routing — samples every curve and fails on any box it crosses |
 | `diagnostics_health_test` | every check, in both directions, plus the shipped library |
 | `manifest_migration_test` | the (metric, phase) → measure → norm join for every metric that ever had a corridor |
