@@ -37,6 +37,14 @@ pp_add_test(gcquad_csv_parser_test
     INCLUDE ${LM}
     GTEST)
 
+# --- Whether a reading nothing else saw becomes a shot of its own ----------------
+# Pure decision logic, split out of the controller precisely so it can be tested without
+# standing up a CameraManager. Exhaustive over all 2^7 states.
+pp_add_test(standalone_gate_test
+    SOURCES standalone_gate_test.cpp ${LM}/standalone_gate.cpp
+    INCLUDE ${LM}
+    GTEST)
+
 # --- Attribution: which swing a reading belongs to -------------------------------
 # ShotPairing is header-only and pure. GcQuadMonitor is a QObject and does real file
 # I/O against a QTemporaryDir (the repo convention — tests write their own fixtures),

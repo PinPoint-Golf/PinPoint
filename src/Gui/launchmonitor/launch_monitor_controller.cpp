@@ -23,6 +23,7 @@
 #include "launch_monitor_factory.h"
 #include "pp_debug.h"
 #include "session_controller.h"
+#include "standalone_gate.h"
 #include "shot_list_model.h"
 #include "../../Export/swing_doc.h"
 
@@ -269,43 +270,29 @@ bool LaunchMonitorController::writeDeviceOnly(const QString &swingDir,
 
 bool LaunchMonitorController::createStandaloneShot(const LaunchMonitorReading &reading)
 {
-    // ── Preconditions, every one a quiet no ─────────────────────────────────
-    // None of these is an error worth a warning: they are the ordinary states in which
-    // a reading is simply not ours to keep.
-    if (!m_settings || !m_settings->launchMonitorStandalone())
-        return false;                       // off by default — see the setting's comment
-    if (!m_settings->saveLaunchMonitorData())
-        return false;                       // storing device data is switched off
-    if (!m_athletes || !m_athletes->hasCurrentAthlete()) {
-        ppInfo() << "LaunchMonitor: standalone shot skipped — no athlete selected";
-        return false;                       // allocateSwingDir needs a name and a uuid
-    }
-    if (!m_session || !m_session->running()) {
-        ppInfo() << "LaunchMonitor: standalone shot skipped — no session running";
-        return false;
-    }
-    // CAPTURE MUST BE ACTIVE, and this is the bound that actually matters.
-    //
-    // Nothing about the BUFFER can answer it here: with no cameras and no IMUs there are
-    // no sources, so the buffer stays paused however loudly the user has said they are
-    // hitting balls. captureIntent() is the toolbar Capture/Stop state — the user's own
-    // statement — and that is the right thing to ask, because recording a shot is a
-    // question about intent rather than about plumbing.
-    //
-    // Without it a session left open records every ball anyone hits on the simulator,
-    // which is precisely what a user who has pressed Stop has said they do not want.
-    if (!m_cameras || !m_cameras->captureIntent()) {
-        ppInfo() << "LaunchMonitor: standalone shot skipped — capture is not active";
+    // The decision is decideStandalone()'s, not this function's. Everything here is
+    // fact-GATHERING — see standalone_gate.h for why the two are separated.
+    StandaloneFacts facts;
+    facts.connectorConfigured = configured();
+    facts.standaloneEnabled   = m_settings && m_settings->launchMonitorStandalone();
+    facts.storeDeviceData     = m_settings && m_settings->saveLaunchMonitorData();
+    facts.libraryConfigured   = m_settings && !m_settings->athleteLibraryPath().isEmpty();
+    facts.athleteSelected     = m_athletes && m_athletes->hasCurrentAthlete();
+    facts.sessionRunning      = m_session  && m_session->running();
+    // Capture-active is the user's own statement, and no buffer state can stand in for
+    // it: with no cameras and no IMUs there are no sources, so the buffer stays paused
+    // however loudly they have said they are hitting balls.
+    facts.captureActive       = m_cameras  && m_cameras->captureIntent();
+
+    const StandaloneVerdict verdict = decideStandalone(facts);
+    if (verdict != StandaloneVerdict::Record) {
+        ppInfo() << "LaunchMonitor: reading" << reading.deviceShotId
+                 << "not recorded as a shot of its own —"
+                 << standaloneVerdictReason(verdict);
         return false;
     }
 
-    const QString libraryRoot = m_settings->athleteLibraryPath();
-    if (libraryRoot.isEmpty()) {
-        ppWarn() << "LaunchMonitor: standalone shot skipped — no athlete library configured";
-        return false;
-    }
-
-    const auto alloc = m_paths.allocateSwingDir(libraryRoot,
+    const auto alloc = m_paths.allocateSwingDir(m_settings->athleteLibraryPath(),
                                                 m_athletes->currentName(),
                                                 m_athletes->currentUuid(),
                                                 m_settings->sessionNamingPattern(),

@@ -239,6 +239,7 @@ qt_add_executable(PinPointStudio
     src/LaunchMonitor/launch_monitor_base.h      src/LaunchMonitor/launch_monitor_base.cpp
     src/LaunchMonitor/launch_monitor_factory.h   src/LaunchMonitor/launch_monitor_factory.cpp
     src/LaunchMonitor/shot_pairing.h
+    src/LaunchMonitor/standalone_gate.h           src/LaunchMonitor/standalone_gate.cpp
     src/LaunchMonitor/gcquad_csv_parser.h        src/LaunchMonitor/gcquad_csv_parser.cpp
     src/LaunchMonitor/gcquad_monitor.h           src/LaunchMonitor/gcquad_monitor.cpp
     src/Gui/launchmonitor/launch_monitor_controller.h src/Gui/launchmonitor/launch_monitor_controller.cpp
