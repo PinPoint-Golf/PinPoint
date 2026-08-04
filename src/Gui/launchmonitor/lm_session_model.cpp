@@ -491,9 +491,11 @@ void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats,
     g.insert(QStringLiteral("flight"), flight);
 
     // ── the two inferred reads ──────────────────────────────────────────────
-    const LmFlightShape shape = lmFlightShape(startDir,
+    // The spin axis leads and carry comes along, because severity is decided from how
+    // far the ball actually bent off its own start line — see lm_inferred_reads.h.
+    const LmFlightShape shape = lmFlightShape(startDir, spinAxis,
                                               valueOf(stats, "lm.faceToPath"),
-                                              spinAxis, offline, m_leftHanded);
+                                              carry, offline, m_leftHanded);
     g.insert(QStringLiteral("shape"), QVariantMap{
         { QStringLiteral("has"),       shape.has },
         { QStringLiteral("name"),      shape.name },

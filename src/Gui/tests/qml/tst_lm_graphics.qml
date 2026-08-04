@@ -106,7 +106,7 @@ Item {
         strikeEllipse: { has: true, n: 18, meanX: 1.2, meanY: -2.4,
                          majorSd: 5.1, minorSd: 2.2, tiltDeg: 28.0 },
         shape:  { has: true, name: "Pull–fade", windowIdx: 0, curveIdx: 2,
-                  evidence: "start 1.3° left · face +1.6° to path · finishes 5.1 yd right" },
+                  evidence: "start 1.3° left · axis 4.7° right · curved 8.9 yd right" },
         strike: { has: true, name: "Low", evidence: "smash +0.01 vs μ" },
     })
 
