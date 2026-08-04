@@ -2741,6 +2741,11 @@ if(PINPOINT_BUILD_TOOLS)
         src/Export/frame_decode.cpp
         src/Export/swing_doc.cpp
         src/Export/swing_paths.cpp
+        # swing_doc.cpp writes the launchMonitor block by walking lm::fieldDefs(),
+        # so the offline tools need the table itself, not just its header. The
+        # PARSER and the monitor stay out: an offline tool replays a recorded
+        # swing.json, it never reads a LastShot.CSV or talks to a device.
+        src/LaunchMonitor/launch_monitor_reading.cpp
         src/Pose/pose_estimator_base.cpp
         src/Pose/pose_estimator_vitpose.cpp
         src/Core/pp_debug.cpp
@@ -2755,6 +2760,10 @@ if(PINPOINT_BUILD_TOOLS)
     function(pinpoint_configure_offline_target tgt)
         target_include_directories(${tgt} PRIVATE
             src/Buffer src/Analysis src/Metrics src/Export src/Pose src/Core src/IMU
+            # src/Export/swing_doc.h includes launch_monitor_reading.h, so every
+            # consumer of it needs this — the app target got it when the reading
+            # was added, these offline targets did not.
+            src/LaunchMonitor
             "${_ort_root}/include"
             ${OpenCV_INCLUDE_DIRS}
             ${whisper_SOURCE_DIR}/include
