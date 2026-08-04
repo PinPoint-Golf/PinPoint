@@ -3,7 +3,7 @@
 **Audience**: Developers adding or running unit tests in PinPoint Studio
 **Location**: `tests/` (umbrella + shared CMake module + presets), `src/<Sub>/tests/` (the suites)
 **Language**: CMake + C++17/20 (GoogleTest or a hand-rolled `main()`)
-**Status**: 8 suites, 117 test targets, runnable as one umbrella build or individually
+**Status**: 9 suites, 120 test targets, runnable as one umbrella build or individually
 
 ---
 
@@ -96,7 +96,7 @@ enable_testing()
 add_subdirectory("${PP_SRC}/Buffer"       "${CMAKE_BINARY_DIR}/Buffer-lib")
 add_subdirectory("${PP_SRC}/Buffer/tests" "${CMAKE_BINARY_DIR}/Buffer")
 
-foreach(suite Analysis Audio Core Gui IMU Pose Update)
+foreach(suite Analysis Audio Core Gui IMU LaunchMonitor Pose Update)
     add_subdirectory("${PP_SRC}/${suite}/tests" "${CMAKE_BINARY_DIR}/${suite}")
 endforeach()
 ```
@@ -128,7 +128,7 @@ One configure produces one CTest registry spanning all suites:
 ```bash
 cmake -S tests -B build/tests
 cmake --build build/tests -j6
-ctest --test-dir build/tests --output-on-failure   # all 117 targets
+ctest --test-dir build/tests --output-on-failure   # all 120 targets
 ```
 
 ---
@@ -351,9 +351,10 @@ Qt6::Qml), `find_package` it in the suite — that is additive and cached.
 
 ## 9. Conventions and gotchas
 
-- **Test framework is per-suite, not enforced.** Buffer, Core and Update use
-  GoogleTest; Analysis, Audio, Gui, IMU and Pose use a hand-rolled `main()` +
-  `CHECK`/`CHECK_NEAR` macros. Both are fine — match the suite you're editing.
+- **Test framework is per-suite, not enforced.** Buffer, Core, Update and
+  LaunchMonitor use GoogleTest; Analysis, Audio, Gui, IMU and Pose use a hand-rolled
+  `main()` + `CHECK`/`CHECK_NEAR` macros. Both are fine — match the suite you're
+  editing.
 - **`AUTOMOC` is per-target now.** The old suites set a global `CMAKE_AUTOMOC ON`;
   with `pp_add_test` you pass `AUTOMOC` on the targets that have `Q_OBJECT` /
   `QML_ELEMENT`. Forgetting it shows up as undefined-symbol link errors for the
@@ -375,9 +376,11 @@ Qt6::Qml), `find_package` it in the suite — that is additive and cached.
   `QStandardPaths::setTestModeEnabled(true)` **before** `QCoreApplication` so it
   never reads or writes the developer's real settings file.
 - **Never link `pp_debug.cpp`.** It pulls in whisper/ggml. Use a `PpLogStream`
-  stub instead. Three exist today (`Core/tests/pp_log_stub.cpp`,
-  `Analysis/tests/imu_test_stubs.cpp`, `Pose/tests/pose_test_stubs.cpp`); reuse
-  the nearest one.
+  stub instead. Three exist (`Core/tests/pp_log_stub.cpp`,
+  `Analysis/tests/imu_test_stubs.cpp`, `Pose/tests/pose_test_stubs.cpp`); reuse the
+  nearest one — the LaunchMonitor suite reaches across to Core's rather than adding a
+  fourth. (`Gui/tests/reanalysis_stubs.cpp` is a different thing: it stubs the
+  re-analysis worker body, not logging.)
 - **C++20 unless you say otherwise.** Anything pulling in `event_buffer.h` →
   `swing_window.h` (`std::span`) needs C++20 — that's the default, so it just
   works; only set `STD 17` to deliberately pin an older standard.
@@ -400,6 +403,32 @@ Qt6::Qml), `find_package` it in the suite — that is additive and cached.
   puts the TOP inside that window and contaminates the very reference the metric is measured
   against — which reads as a producer bug and is not one. `body_rotation_test` builds ~1.6 s at 240
   fps for exactly this reason.
+- **A decision that reads live app state cannot be tested — extract the decision.**
+  Not the same as "add a fake": if a policy reads five things off four controllers, the
+  testable part is the JUDGEMENT, and the untestable part is the GATHERING, which is also
+  the part that is hard to get wrong. `decideStandalone()` (`src/LaunchMonitor`) takes
+  seven booleans and returns a verdict; the controller only fills the struct. The same
+  split is why `linux_update_logic.cpp` exists. The tell that you need it: the policy has
+  already behaved differently on a real machine than it did on paper — the launch
+  monitor's did that twice, once because a precondition was missing entirely and once
+  because the whole path sat behind a setting that was off, and neither was a coding
+  error that any amount of care in the controller would have caught.
+- **Enumerate the state space when it is small enough to enumerate.** Seven booleans is
+  128 states; `standalone_gate_test` walks all of them and asserts exactly one records.
+  Sampling the interesting-looking ones would not have caught a precondition added later
+  without a thought about ordering. Where the combination count is small, exhaustive is
+  cheaper to write than choosing representatives and arguing about the choice.
+- **Return a verdict, not a bool, when several things can be false at once.** Which reason
+  gets reported is a decision somebody should be able to read and revisit, and it belongs
+  in a test rather than in the order the `if`s happened to be written. `standalone_gate`
+  orders configuration before current state so a user still setting up hears about the
+  setting rather than about capture — and there is a test asserting exactly that
+  precedence, plus one asserting every refusal carries a reason.
+- **Pin the REAL captured bytes, not a tidied version of them.** `gcquad_csv_parser_test`
+  embeds the actual FSX2020 row verbatim — trailing comma, CRLF and all — because the
+  format's quirks are the thing most likely to break, and a fixture retyped into what the
+  format "obviously" is tests the author's belief rather than the device. The same reason
+  `fake_shot.py` copies the exemplar's header byte for byte instead of composing one.
 - **Assert SIGNS on synthetic tracks, accuracy on a corpus.** A sign is the one thing a synthetic
   fixture can pin exactly, and it is also the thing that silently grades every swing backwards when
   it is wrong. `upper_body_metrics_test` runs its whole sign suite twice — once normally, once
@@ -421,6 +450,7 @@ Qt6::Qml), `find_package` it in the suite — that is additive and cached.
 | `src/Core/tests/` | Resource profiler (core, concurrency/TSan, compile-out), OS + GPU metrics, stats log, profiler controller (7, GoogleTest) |
 | `src/Gui/tests/` | TimelineLabels, chart metrics, SwingSeriesModel, ShotListModel, ReanalysisController, QML reactivity (6) |
 | `src/IMU/tests/` | Impact detector, ImuIoWorker, ESKF gyro-unit pin (3) |
+| `src/LaunchMonitor/tests/` | `LastShot.CSV` parsing (columns by name not position, metric **and** imperial units as FSX2020 declares them, closure rate in dps **or** rpm, the derived values, malformed/torn/short input), shot attribution, and the standalone gate exhaustive over all 2^7 precondition states (3, GoogleTest; the pairing test writes its own fixtures into a `QTemporaryDir` and needs Qt6 Test) |
 | `src/Pose/tests/` | v2 temporal ball tracker + its live/offline parity, BallDetector throttle contract, heatmap decode, pose-model selection (5) |
 | `src/Audio/tests/` | Acoustic onset detector (1) |
 | `src/Diagnostics/tests/`, `src/Export/tests/`, `src/Metrics/tests/` | **Sources only — no suite of their own.** Compiled by the Analysis suite (counted in its 84) because they link `swing_analysis.h` / the pack types. See below. |
