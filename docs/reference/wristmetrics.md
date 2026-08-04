@@ -23,8 +23,23 @@ says so plainly.
 
 ## (a) Measurement & sign convention
 
-The canonical standard is **ISB / Wu et al. 2005** (*J Biomech* 38(5):981–992), built on
-the **Grood & Suntay (1983)** joint-coordinate system. Signs (ISB, high confidence):
+The canonical standard is **ISB / Wu et al. 2005** — `ref.wu2005` in the model reference
+pack — built on the **Grood & Suntay (1983)** joint-coordinate system. Signs (ISB, high
+confidence):
+
+> Wu G, van der Helm FCT, Veeger HEJ, Makhsous M, Van Roy P, Anglin C, Nagels J, Karduna AR,
+> McQuade K, Wang X, Werner FW, Buchholz B. *ISB recommendation on definitions of joint
+> coordinate systems of various joints for the reporting of human joint motion — Part II:
+> shoulder, elbow, wrist and hand.* J Biomech 2005;38(5):981–992.
+> doi:[10.1016/j.jbiomech.2004.05.042](https://doi.org/10.1016/j.jbiomech.2004.05.042) ·
+> PMID 15844264
+
+**This is a society standard, not one laboratory's preference**, and that distinction is the
+reason it wins here. It is the recommendation of the **Standardization and Terminology
+Committee of the International Society of Biomechanics**, twelve authors across institutions
+in five countries, [published by the society itself](https://media.isbweb.org/images/documents/standards/Wu%20et%20al%20J%20Biomech%2038%20(2005)%20981%E2%80%93992.pdf)
+under its standards collection, and the companion to the Part I recommendation covering
+ankle, hip and spine (Wu et al. 2002, PMID 11934426).
 
 - **Flexion +**, extension − (about proximal Z).
 - **Ulnar +**, radial − (floating e2 axis).
@@ -49,6 +64,15 @@ the goal → positive). **Caveats that bit us and bite the literature:**
 - Most golf studies (≈10 of 92 reviewed) do **not** follow ISB; some local-frame studies
   define **radial deviation as positive** — i.e. signs invert between sources. Don't compare
   raw signs across papers without checking the frame.
+- **Commercial wrist sensors invert bow/cup against us, and this is the one to expect.** At
+  least one widely used device reports **extension (cupping) as positive and flexion (bowing)
+  as negative** — the exact inverse of ISB and of us. A golfer or coach moving between the two
+  and comparing raw signs reads every wrist as its own opposite. The rule is that **the
+  published standard wins over the popular product**: we stay ISB-compliant and record the
+  disagreement rather than adopting a vendor convention, because a vendor can change theirs and
+  a standard is the thing that lets two datasets be compared at all. What both agree on is the
+  *principle* — the sign means the same thing whichever way the golfer plays — and ISB delivers
+  it outright, flexion being positive for **both** the left and the right arm.
 - ISB itself is hard to implement in vivo (cadaveric/imaging landmarks), which is why
   IMU/coaching systems use functional calibration instead.
 - The decomposition math (`wrist_angles.h`) is sign-*consistent*; the *physical* sign of

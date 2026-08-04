@@ -39,6 +39,7 @@ All `t_us` values are **microseconds, window-relative** (0-based; `window.start_
   "streams": [ … ],        // video + IMU streams
   "thumbnail": { … },      // impact still
   "review":  { … },        // OPTIONAL — user rating/note/club
+  "launchMonitor": { … },  // OPTIONAL — a connected launch monitor's readings
   "analysis":{ … }         // OPTIONAL — the analyzed swing (pinpoint.analysis/3)
 }
 ```
@@ -55,6 +56,7 @@ All `t_us` values are **microseconds, window-relative** (0-based; `window.start_
 | `streams` | ✓ | One entry per camera / IMU. |
 | `thumbnail` | ✓ | Impact-frame JPEG reference. |
 | `review` | — | User rating/note/club (added by `updateReview`). |
+| `launchMonitor` | — | A launch monitor's readings for this shot (added by `updateLaunchMonitor`). |
 | `analysis` | — | The analyzed swing. Absent for analysis-skipped captures. |
 
 ---
@@ -213,6 +215,45 @@ The quaternion is the **host-fused** world orientation PinPoint owns (Madgwick/E
 | `review.rating` | int 0–5 | 0 = unrated. |
 | `review.note` | str | Free text. |
 | `review.club` | str | User-chosen club label (distinct from `capture.club`). Whole block is **optional** — written only by `updateReview`. |
+
+---
+
+## `launchMonitor`
+
+Written by `SwingDocWriter::updateLaunchMonitor` when a connected launch monitor reports the shot.
+**Optional and written late** — the device writes its file after the shot, and `swing.json` is not
+written until the analyzer and exporter both finish (12–37 s), so this block normally arrives by a
+second, atomic rewrite rather than with the original document.
+
+```json
+"launchMonitor": {
+  "kind": "gcquad",
+  "deviceShotId": "283",
+  "deviceClub": "Irn",
+  "sourcePath": "/Volumes/FSX/LastShot.CSV",
+  "readAtMs": 1785000000000,
+  "clubheadSpeed": 87.19, "ballSpeed": 111.68, "smashFactor": 1.281,
+  "carryDistance": 150.4, "spinRate": 7614, "faceAngle": 6.94, …
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `kind` | str | Which connector produced it (`"gcquad"`). Recorded, not assumed. |
+| `deviceShotId` | str | The DEVICE's own shot counter — **not** a PinPoint shot id, and never treated as one. It is how the connector tells a fresh row from the same row restated. |
+| `deviceClub` | str | The club the monitor believed was in use. Provenance only: PinPoint's own club selection resolves normative corridors, because these codes are coarser than our per-club contexts. |
+| `sourcePath` / `readAtMs` | str / int ms | Where it came from and when we read it. |
+| _readings_ | number | One key per value the device reported, **already converted into the metric catalogue's units** (mph, yd, ft, °, rpm, mm). A value the device did not report is absent, never zero. Includes columns that map to no metric, so the block is a full record of what was said. |
+
+Every reading also appears in `analysis.metrics[]` under an `lm.`-prefixed key (`lm.clubheadSpeed`,
+`lm.faceAngle`, …) as an empty curve carrying one `phaseSamples` entry at Impact — the same shape
+every point-in-time metric uses. **The `lm.` prefix is the point, not a decoration**: six of these
+quantities are ones PinPoint also estimates optically, and those keep their bare keys untouched
+alongside. A launch monitor is a reference instrument to check our estimates against, so the
+measurement must sit beside the estimate rather than replace it.
+
+The metric entries are written only when the document already has an `analysis` block; the raw block
+above is written regardless, so a shot whose analysis failed still keeps what the device said.
 
 ---
 

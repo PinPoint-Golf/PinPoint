@@ -63,6 +63,8 @@ int main(int argc, char **argv)
     // much clubhead speed, so a Target would have graded a tour-speed swing Action against an
     // amateur corridor the day the corridor landed. Converted BEFORE the corridor rather than
     // after, which is why it changed no grade — nothing resolved against the measure until then.
+    // The THIRTEENTH is m_carryDistance, converted on the same terms when the launch monitor
+    // connector gave it a corridor for the first time; its reason is in the norms.json header too.
     // Not a number pinned for its own sake — the reason for each is recorded in the norms.json
     // header, and a THIRTEENTH shape appearing without that conversation is the thing this catches.
     // The count is updated deliberately when a measure is added or converted, never loosened to a
@@ -70,7 +72,7 @@ int main(int argc, char **argv)
     int oneSided = 0;
     for (const Measure &mm : pack.measures)
         if (shapeIsOneSided(mm.shape)) ++oneSided;
-    check(oneSided == 12, "…and one of exactly twelve one-sided measures in the shipped pack");
+    check(oneSided == 13, "…and one of exactly thirteen one-sided measures in the shipped pack");
 
     // ── The rows ────────────────────────────────────────────────────────────
     //

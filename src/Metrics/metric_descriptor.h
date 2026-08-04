@@ -258,6 +258,48 @@ struct MetricDescriptor {
     QString    howToRead;                  // sign convention, when to read, what good looks like
     bool       flexPositive = true;        // sign polarity, mirrors MetricSeries.flexPositive
 
+    // ── What the sign means (design: sign conventions) ──────────────────────────────────────────
+    //
+    // THE RULE: A SIGN'S MEANING NEVER CHANGES WITH HANDEDNESS. Whatever transform is needed to
+    // hold that fixed is the producer's job, not the reader's. Two frames express it:
+    //
+    //   WORLD FRAME — referenced to the TARGET LINE, the GROUND and the HORIZON. Positive is to
+    //     the RIGHT of the target line, or UPWARD. Nothing is mirrored, because the reference is
+    //     the world and the world does not care which way the golfer stands. `clubPath`,
+    //     `launchDirection`, `faceAngle`, `attackAngle`, every `lm.*` reading.
+    //
+    //   ANATOMICAL FRAME — referenced to the golfer's own LEAD side. Positive is extension
+    //     (cupping), or rotation toward the target. Producers DO mirror a left-handed golfer, and
+    //     that mirror is what keeps the meaning fixed: a bowed lead wrist must read negative for
+    //     both golfers, which is the HackMotion convention and the reason
+    //     pose_wrist_angle_source.cpp applies an image flip. Removing it would invert every
+    //     left-handed swing's archetype.
+    //
+    // WHAT DOES FLIP IS THE GLOSS, NEVER THE SIGN. "In-to-out", "open", "draw" are right-handed
+    // readings of a world-frame number: positive `clubPath` is right of the target line for
+    // everyone, which is in-to-out for a right-hander and out-to-in for a left-hander. State the
+    // frame-referenced meaning first and the gloss second, or a left-handed reader is misled by
+    // prose that looks authoritative.
+    //
+    // THE CANONICAL STATEMENT IS docs/design/pinpoint_sign_conventions.md — rules 0/1/2 and the
+    // per-metric tables. Rule 0 (a published standard outranks a popular product) is why the four
+    // ISB joint angles keep ISB polarity even though a market-leading wrist sensor reports the
+    // inverse. These fields are that document made checkable at the point of authoring.
+    //
+    // Both strings are lower-case fragments completing "positive means …" / "negative means …", so
+    // they read inside a sentence and inside a table cell.
+    //
+    // `signPositive` is REQUIRED for anything in a signable unit — every such metric has a
+    // direction, even an unsigned one, whose direction is what the magnitude counts.
+    // `signNegative` MAY be empty, and empty means "cannot go negative": a carry, a spin rate, a
+    // duration. Writing prose there anyway would invent a meaning the metric does not have.
+    // metric_catalogue_test enforces both halves, and additionally refuses a world-frame metric
+    // stated ONLY as a right-handed gloss — "in-to-out" flips for a left-handed golfer where
+    // "right of the target line" does not, and naming only the gloss misleads half the readership
+    // while looking authoritative.
+    QString    signPositive;               // "right of the target line — in-to-out for a right-hander"
+    QString    signNegative;               // "left of the target line — out-to-in for a right-hander"
+
     std::vector<Phase> phases;             // phases sampled (PointInTime) / where peak matters (TimeSeries)
     bool               scored = false;     // has a band and contributes to a score
 

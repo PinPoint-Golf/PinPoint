@@ -377,6 +377,20 @@
       "issue": "2",
       "pages": "534-539",
       "establishes": "TITLE ABRIDGED, and the brackets are the abridgement rather than the authors': the published title names a commercial screening system, which may not enter shipped content. The identifier is untouched and resolves to the full record. Nothing else here is edited.\n\n36 golfers, twelve physical screens tested against fourteen swing faults — the only study found that tests screen results against faults a coach can SEE, in real golfers. The toe-touch, the bridge and the overhead deep squat reached significance for early hip extension, loss of posture and slide. The LOWER-QUARTER ROTATION screen, the one that isolates hip internal rotation, was associated with NO swing fault at all.\n\nCited BECAUSE it is the negative result, and it supports the shape of this library rather than undermining it. The mechanism is measured directly by ref.kim2015 and is not in doubt; what this caps is how strongly a restriction may be said to produce a visible fault. It is the reason every edge from a hip-rotation restriction to a visible characteristic is Moderate and not Strong, and the reason lead_knee_drifts_in_at_top is authored as an OBSERVATION with four competing causes ranked behind it rather than as a detector that concludes a tight hip. A library that had not read this would have written one Strong edge and been wrong with confidence."
+    },
+    {
+      "id": "ref.wu2005",
+      "doi": "10.1016/j.jbiomech.2004.05.042",
+      "pmid": "15844264",
+      "title": "ISB recommendation on definitions of joint coordinate systems of various joints for the reporting of human joint motion — Part II: shoulder, elbow, wrist and hand",
+      "authors": "Wu, van der Helm, Veeger, Makhsous, Van Roy, Anglin, Nagels, Karduna, McQuade, Wang, Werner, Buchholz",
+      "journal": "Journal of Biomechanics",
+      "volume": "38",
+      "issue": "5",
+      "pages": "981-992",
+      "year": 2005,
+      "generalReading": true,
+      "establishes": "THE SIGN CONVENTION THIS PRODUCT'S WRIST AND FOREARM ANGLES IMPLEMENT. Not one laboratory's preference: it is the recommendation of the Standardization and Terminology Committee of the International Society of Biomechanics, twelve authors across institutions in five countries, published by the society itself as a standard and the companion to the Part I recommendation covering ankle, hip and spine. It defines the joint coordinate system for the wrist on the Grood & Suntay (1983) formalism and fixes the polarity: FLEXION, ULNAR DEVIATION AND PRONATION ARE POSITIVE, and they are positive FOR BOTH THE LEFT AND THE RIGHT ARM — so the standard itself delivers the handedness invariance we want, rather than us bolting it on. A bowed lead wrist is flexion, so bow is positive here and cup is negative.\n\nIT IS ALSO WHY OUR NUMBERS DO NOT MATCH SOME COMMERCIAL WRIST SENSORS. At least one widely used one reports the inverse — cupping positive, bowing negative — and a reader moving between the two who compares raw signs will read every wrist as its own opposite. We follow the published standard rather than the more popular product, and record the disagreement here so it is a known difference rather than a discovered one. Never compare a raw wrist sign across sources without checking the frame."
     }
   ]
 }

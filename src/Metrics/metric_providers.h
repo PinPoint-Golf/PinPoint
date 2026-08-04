@@ -158,12 +158,17 @@ public:
 // UNKNOWN key gets) rather than to "planned". A metric whose every route is planned now says so
 // from its own ladder, in that route's words about why.
 
-// The launch-monitor metrics: face angle and everything downstream of it, spin, strike location and
-// carry. Deliberately NOT a planned placeholder — a planned metric has no producer and is a promise;
-// these have a producer that the golfer may or may not own, so the honest answer is the ordinary
-// requirement one ("needs a launch monitor"), which flips to Measured the moment a connector sets
-// `ShotContext::hasLaunchMonitor`. That makes this class the integration's insertion point rather
-// than a stub somebody will have to delete.
+// The launch-monitor metrics: face angle and everything downstream of it, spin, strike location,
+// carry, and the measured twins of the six quantities we estimate optically. Not a planned
+// placeholder — a planned metric has no producer and is a promise; these have a producer the golfer
+// may or may not own, so the answer is the ordinary requirement one ("needs a launch monitor"),
+// which resolves Measured on any shot the connector reported.
+//
+// EVERY KEY IS `lm.`-PREFIXED AND THE BARE TWINS ARE NOT CLAIMED HERE. Where we also estimate a
+// quantity — clubhead speed, attack angle, and the four planned optical ones — the bare key stays
+// with its own producer and the measurement is a metric of its own. The resolver picks one winner
+// per key, so claiming both would silently replace the estimate with the measurement, and comparing
+// the two is the main reason to own the device at all.
 class LaunchMonitorProvider : public IMetricProvider {
 public:
     std::vector<QString> provides() const override;

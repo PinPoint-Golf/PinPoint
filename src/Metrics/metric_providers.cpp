@@ -136,12 +136,30 @@ std::vector<QString> ScoreProvider::provides() const
 
 std::vector<QString> LaunchMonitorProvider::provides() const
 {
+    // Every key here is `lm.`-prefixed, and the six that duplicate a quantity we
+    // estimate ourselves are NOT claimed under their bare key. That is the whole
+    // point: the bare `clubheadSpeed` stays with the camera producer so the two can
+    // be compared on the same shot. Claiming both here would make the resolver pick
+    // one, which is exactly what must not happen.
     return {
-        QStringLiteral("faceAngle"),      QStringLiteral("faceToPath"),
-        QStringLiteral("spinRate"),       QStringLiteral("spinAxis"),
-        QStringLiteral("smashFactor"),    QStringLiteral("strikeLocation"),
-        QStringLiteral("carryDistance"),  QStringLiteral("dynamicLoft"),
-        QStringLiteral("spinLoft"),
+        // Measured where we also estimate — the validation pairs.
+        QStringLiteral("lm.clubheadSpeed"),  QStringLiteral("lm.ballSpeed"),
+        QStringLiteral("lm.attackAngle"),    QStringLiteral("lm.clubPath"),
+        QStringLiteral("lm.launchAngle"),    QStringLiteral("lm.launchDirection"),
+        // Club delivery no camera of ours can resolve.
+        QStringLiteral("lm.faceAngle"),      QStringLiteral("lm.faceToPath"),
+        QStringLiteral("lm.dynamicLoft"),    QStringLiteral("lm.spinLoft"),
+        QStringLiteral("lm.lieAngle"),       QStringLiteral("lm.closureRate"),
+        // Strike.
+        QStringLiteral("lm.smashFactor"),    QStringLiteral("lm.strikeLocation"),
+        QStringLiteral("lm.strikeHeight"),
+        // Spin.
+        QStringLiteral("lm.spinRate"),       QStringLiteral("lm.backSpin"),
+        QStringLiteral("lm.sideSpin"),       QStringLiteral("lm.spinAxis"),
+        // Flight-model outputs.
+        QStringLiteral("lm.carryDistance"),  QStringLiteral("lm.totalDistance"),
+        QStringLiteral("lm.offline"),        QStringLiteral("lm.peakHeight"),
+        QStringLiteral("lm.descentAngle"),   QStringLiteral("lm.distanceToPin"),
     };
 }
 

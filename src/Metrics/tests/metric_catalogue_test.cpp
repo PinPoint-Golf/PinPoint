@@ -12,6 +12,7 @@
 // (Diagnostics/metric_corridor.h) and is gated by manifest_migration_test.
 
 #include "metric_catalogue.h"
+#include "launch_monitor_reading.h"
 
 #include <algorithm>   // std::find — the "is this key claimed" sweep
 #include <cstdio>
@@ -61,7 +62,7 @@ int main()
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 70, "descriptor count == 70");
+        checkEqI(static_cast<int>(cat.all().size()), 86, "descriptor count == 86");   // 70 + 25 lm. - 9 renamed
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -93,7 +94,7 @@ int main()
         checkEqI(countType(cat, MetricType::TimeSeries),  38, "TimeSeries count");
         // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
         // as duplicates of a series the catalogue already carries.
-        checkEqI(countType(cat, MetricType::PointInTime), 26, "PointInTime count");
+        checkEqI(countType(cat, MetricType::PointInTime), 42, "PointInTime count");   // +16: a monitor reports one number per shot
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
@@ -118,10 +119,10 @@ int main()
         // Strike is what the face did; keeping them apart matters because one of them is mostly
         // camera-resolvable and the other is entirely launch-monitor territory.
         MetricQuery bfq; bfq.group = QStringLiteral("Ball flight");
-        checkEqI(static_cast<int>(cat.query(bfq).size()), 7, "group 'Ball flight' == 7");
+        checkEqI(static_cast<int>(cat.query(bfq).size()), 17, "group 'Ball flight' == 17");
 
         MetricQuery stq; stq.group = QStringLiteral("Strike");
-        checkEqI(static_cast<int>(cat.query(stq).size()), 2, "group 'Strike' == 2");
+        checkEqI(static_cast<int>(cat.query(stq).size()), 3, "group 'Strike' == 3");   // + lm.strikeHeight
 
         // Alignment lost `shoulderAlignment` and `hipAlignment`: each was geometrically the same
         // image-plane line as a series the catalogue already carried, read at other phases, which
@@ -311,7 +312,7 @@ int main()
                              qPrintable(d->key), qPrintable(a.reason));
         }
         std::printf("    %d planned descriptors\n", planned);
-        checkEqI(planned, 25, "25 planned metrics — nothing produces them by any route");
+        checkEqI(planned, 16, "16 planned metrics — nothing produces them by any route");   // the 9 launch-monitor rungs went live with the connector
         checkEqI(unavailable, planned,
                  "every planned metric resolves Unavailable even with every device present");
         checkEqI(saysPlanned, planned,
@@ -457,7 +458,7 @@ int main()
               "toeLineAngle is read at Address only — the golfer is square, the projection is exact");
         check(gain("ballPosition") == SG::None, "…as is ball position");
         check(gain("leadWristFlexExt") == SG::None, "an IMU reading owes a camera nothing");
-        check(gain("spinRate") == SG::None, "…nor does a launch-monitor reading");
+        check(gain("lm.spinRate") == SG::None, "…nor does a launch-monitor reading");
 
         // attackAngle is Refines, and that is NOT in conflict with the design's correction that a
         // DTL camera is the one view which cannot measure it. Both hold: DTL ALONE puts the
@@ -504,22 +505,29 @@ int main()
         check(knee.upgrade.isEmpty(), "no upgrade is offered towards an unbuilt route");
     }
 
-    // 3e. Launch-monitor metrics — a REQUIREMENT *and* a planned rung, which is the pair a route
-    // can state and the old metric-level flag could not.
+    // 3e. Launch-monitor metrics — the connector landed, so this block asserts the opposite of
+    // what it used to.
     //
-    // This block used to assert the opposite: that these nine were NOT planned, and that they went
-    // Measured the moment a connector set `hasLaunchMonitor`. The requirement half was and is right
-    // — the hardware is the golfer's to own, and a metric that needs one must say so rather than
-    // promising work. The rest was aspirational: **nothing in this build sets `hasLaunchMonitor`**,
-    // no code outside a test even mentions it, so "needs a launch monitor" was telling a golfer to
-    // buy a device that would change nothing. Both facts are now stated, on the same rung.
+    // It previously asserted the connector's ABSENCE: that nine metrics required the device AND
+    // were planned, and were Unavailable even with `hasLaunchMonitor` set, because nothing could
+    // read one. It said in as many words that it would flip when a connector arrived. It has.
     //
-    // When a connector lands, dropping `PLANNED` from those nine rungs is the whole change — and
-    // this test flips back with it, which is the point of asserting the connector's absence rather
-    // than assuming it.
+    // Two things changed together and both are checked here. The nine rungs are live. And every
+    // reading is keyed `lm.`, including the ones nothing else could ever produce — because the six
+    // quantities we ALSO estimate must keep their bare keys, or the ladder would resolve one winner
+    // and the measurement would silently replace the estimate. Comparing the two is the reason to
+    // own the device, so that replacement is the failure this block exists to prevent.
     {
-        const char *lm[] = { "faceAngle", "faceToPath", "spinRate", "spinAxis", "smashFactor",
-                             "strikeLocation", "carryDistance", "dynamicLoft", "spinLoft" };
+        // Nothing but a device will ever measure these.
+        const char *lmOnly[] = { "lm.faceAngle", "lm.faceToPath", "lm.spinRate", "lm.spinAxis",
+                                 "lm.smashFactor", "lm.strikeLocation", "lm.carryDistance",
+                                 "lm.dynamicLoft", "lm.spinLoft", "lm.lieAngle", "lm.closureRate",
+                                 "lm.strikeHeight", "lm.backSpin", "lm.sideSpin",
+                                 "lm.totalDistance", "lm.offline", "lm.peakHeight",
+                                 "lm.descentAngle", "lm.distanceToPin" };
+        // These we measure AND estimate. Both keys must exist, independently.
+        const char *paired[] = { "clubheadSpeed", "attackAngle", "ballSpeed",
+                                 "launchAngle", "launchDirection", "clubPath" };
 
         ShotContext capable = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax,
                                           SegmentRole::LeadForearm, SegmentRole::LeadHand },
@@ -527,13 +535,11 @@ int main()
         capable.hasBallTrack = true;
         capable.tier = ReconstructionTier::ClubInstrumented;
 
-        int requiresDevice = 0, planned = 0, unavailableWithout = 0, saysPlanned = 0,
-            stillUnavailableWith = 0, needsFacet = 0;
-        for (const char *k : lm) {
+        int requiresDevice = 0, needsFacet = 0, planned = 0,
+            unavailableWithout = 0, measuredWith = 0, saysNeedsDevice = 0;
+        for (const char *k : lmOnly) {
             const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(k));
             if (!d) continue;
-            // THE HARDWARE FACT SURVIVES. This is what marking them planned used to destroy, and
-            // what keeps them under the "Launch monitor" chip in the directory.
             if (d->baselineRequirement().launchMonitor) ++requiresDevice;
             for (CaptureDevice dev : captureDevicesFor(d->baselineRequirement()))
                 if (dev == CaptureDevice::LaunchMonitor) ++needsFacet;
@@ -541,23 +547,140 @@ int main()
 
             const MetricAvailability without = cat.resolve(QString::fromLatin1(k), capable);
             if (without.state == MetricAvailability::Unavailable) ++unavailableWithout;
-            if (without.reason.contains(QStringLiteral("planned"))) ++saysPlanned;
+            // The requirement is now a true statement with a purchase behind it: buying the device
+            // really does produce the number, which is exactly what was NOT true before.
+            if (without.reason.contains(QStringLiteral("launch monitor"))) ++saysNeedsDevice;
 
-            // And WITH a monitor reported, still unavailable — because we cannot read it. Anything
-            // else here would be the catalogue claiming a number nobody supplied.
             ShotContext withLm = capable;
             withLm.hasLaunchMonitor = true;
-            if (cat.resolve(QString::fromLatin1(k), withLm).state
-                    == MetricAvailability::Unavailable)
-                ++stillUnavailableWith;
+            if (cat.resolve(QString::fromLatin1(k), withLm).state == MetricAvailability::Measured)
+                ++measuredWith;
         }
-        checkEqI(requiresDevice, 9, "all 9 launch-monitor metrics still REQUIRE the device");
-        checkEqI(needsFacet, 9, "…so all 9 still file under the Launch monitor chip");
-        checkEqI(planned, 9, "…and all 9 are planned, because no connector reads one");
-        checkEqI(unavailableWithout, 9, "…Unavailable on a fully-equipped shot without one");
-        checkEqI(saysPlanned, 9, "…saying PLANNED, not 'go and buy a launch monitor'");
-        checkEqI(stillUnavailableWith, 9,
-                 "…and STILL Unavailable with one reported, which is the honest answer today");
+        const int n = int(std::size(lmOnly));
+        checkEqI(requiresDevice, n, "every lm. metric REQUIRES the device");
+        checkEqI(needsFacet, n, "…so every one files under the Launch monitor chip");
+        checkEqI(planned, 0, "…and none is planned any more — a connector reads them");
+        checkEqI(unavailableWithout, n, "…Unavailable on a fully-equipped shot without a monitor");
+        checkEqI(saysNeedsDevice, n, "…saying it needs one, which is now worth acting on");
+        checkEqI(measuredWith, n, "…and Measured the moment a monitor reports the shot");
+
+        // THE SEPARATION. A bare key and its lm. twin both exist, and the measured one does NOT
+        // appear in the bare one's ladder — if it did, resolve() would hand back the device reading
+        // under the estimate's name and the comparison would quietly become an identity.
+        int bothExist = 0, bareUncontaminated = 0;
+        for (const char *k : paired) {
+            const MetricDescriptor *bare = cat.descriptor(QString::fromLatin1(k));
+            const MetricDescriptor *meas = cat.descriptor(QStringLiteral("lm.") + QString::fromLatin1(k));
+            if (bare && meas) ++bothExist;
+            if (!bare) continue;
+            bool anyDeviceRung = false;
+            for (const MetricRoute &r : bare->routes)
+                if (r.requirement.launchMonitor) anyDeviceRung = true;
+            if (!anyDeviceRung) ++bareUncontaminated;
+        }
+        checkEqI(bothExist, int(std::size(paired)),
+                 "each quantity we both measure and estimate has TWO keys");
+        checkEqI(bareUncontaminated, int(std::size(paired)),
+                 "…and no bare key has a launch-monitor rung that would supersede our own producer");
+
+        // A monitor must not change the answer for anything it did not measure. Turning it on
+        // improves the lm. metrics and touches nothing else.
+        ShotContext withLm = capable;
+        withLm.hasLaunchMonitor = true;
+        int drifted = 0;
+        for (const MetricDescriptor *d : cat.all()) {
+            if (d->key.startsWith(QStringLiteral("lm."))) continue;
+            if (cat.resolve(d->key, capable).state != cat.resolve(d->key, withLm).state) ++drifted;
+        }
+        checkEqI(drifted, 0, "connecting a monitor changes no metric outside the lm. namespace");
+    }
+
+    // 3e2. Every metric that can carry a direction says which way is positive.
+    //
+    // The obligation is docs/design/pinpoint_sign_conventions.md's: "a metric whose value carries a
+    // direction MUST state which way is positive in its own MetricDescriptor". That document exists
+    // because THREE SIGNALS SHIPPED INVERTED and none of them failed loudly — an inverted signal
+    // fires happily on the wrong swings with correct-sounding consequence text attached. This is
+    // that obligation as a test rather than as a request.
+    //
+    // signNegative MAY be empty: a carry, a spin rate or a duration cannot go negative, and forcing
+    // prose onto that would invent a meaning. signPositive may not — every metric in a signable
+    // unit has a direction, even the unsigned ones, whose direction is what the magnitude counts.
+    {
+        const QStringList signable = { QStringLiteral("°"), QStringLiteral("°/s"),
+                                       QStringLiteral("mm"), QStringLiteral("cm"),
+                                       QStringLiteral("in"), QStringLiteral("yd"),
+                                       QStringLiteral("ft"), QStringLiteral("mph"),
+                                       QStringLiteral("rpm"), QStringLiteral("ratio") };
+        int silent = 0, glossOnly = 0;
+        for (const MetricDescriptor *d : cat.all()) {
+            const bool carriesDirection =
+                signable.contains(d->unit) || d->unit.startsWith(QStringLiteral("%"));
+            if (!carriesDirection) continue;
+            if (d->signPositive.trimmed().isEmpty()) ++silent;
+
+            // A WORLD-FRAME METRIC MUST NOT BE STATED ONLY AS A RIGHT-HANDED GLOSS. "in-to-out" and
+            // "open" flip for a left-handed golfer; "right of the target line" does not. Naming the
+            // gloss without the frame is the failure mode that misleads exactly half the readership,
+            // and it looks authoritative while doing it.
+            const QString sp = d->signPositive.toLower();
+            const bool namesGloss = sp.contains(QStringLiteral("in-to-out"))
+                                 || sp.contains(QStringLiteral("out-to-in"))
+                                 || sp.contains(QStringLiteral("open for a right"));
+            if (namesGloss && !sp.contains(QStringLiteral("target line"))) ++glossOnly;
+        }
+        checkEqI(silent, 0, "every metric that carries a direction says which way is positive");
+        checkEqI(glossOnly, 0,
+                 "…and no world-frame metric is stated only as a right-handed gloss");
+
+        // The four ISB joint angles, pinned by name. Rule 0: a published standard outranks a
+        // popular product, and a commercial sensor reports the inverse of us on bow/cup — so this
+        // is the assertion that stops somebody "fixing" us to match it.
+        struct IsbRow { const char *key; const char *mustContain; };
+        const IsbRow isb[] = {
+            { "leadWristFlexExt", "flexion" },
+            { "leadWristRadUln",  "ulnar"   },
+            { "forearmPronation", "pronation" },
+            { "leadArmFlexion",   "flexion" },
+        };
+        int compliant = 0;
+        for (const IsbRow &r : isb) {
+            const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(r.key));
+            if (d && d->signPositive.toLower().contains(QString::fromLatin1(r.mustContain)))
+                ++compliant;
+        }
+        checkEqI(compliant, 4, "the four ISB joint angles keep ISB polarity (Wu 2005, ref.wu2005)");
+    }
+
+    // 3f. The reading table and the manifest must agree.
+    //
+    // pinpoint::lm::fieldDefs() repeats each metric's label and unit so that writing a swing.json
+    // does not drag the catalogue into src/Export. That duplication is only safe if something
+    // fails when it drifts, and this is that something: a field added to LaunchMonitorReading with
+    // no descriptor would otherwise be written into swing.json under a key nothing can render.
+    {
+        int missing = 0, labelDrift = 0, unitDrift = 0;
+        for (const pinpoint::lm::FieldDef &f : pinpoint::lm::fieldDefs()) {
+            const MetricDescriptor *d = cat.descriptor(QString::fromLatin1(f.key));
+            if (!d) { ++missing; continue; }
+            if (d->label != QString::fromUtf8(f.label)) ++labelDrift;
+            if (d->unit  != QString::fromUtf8(f.unit))  ++unitDrift;
+        }
+        checkEqI(missing, 0, "every launch-monitor reading field has a descriptor");
+        checkEqI(labelDrift, 0, "…with the same label");
+        checkEqI(unitDrift, 0, "…and the same unit");
+
+        // And the other direction: a descriptor claiming to come from a launch monitor that the
+        // reader cannot actually fill would resolve Measured and then be permanently absent.
+        int unfillable = 0;
+        for (const MetricDescriptor *d : cat.all()) {
+            if (!d->key.startsWith(QStringLiteral("lm."))) continue;
+            bool found = false;
+            for (const pinpoint::lm::FieldDef &f : pinpoint::lm::fieldDefs())
+                if (d->key == QString::fromLatin1(f.key)) found = true;
+            if (!found) ++unfillable;
+        }
+        checkEqI(unfillable, 0, "…and no lm. descriptor exists that no reading field can fill");
     }
 
     // 4. resolve() — club-track / face-on gating (kinematics + foot).

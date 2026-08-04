@@ -34,6 +34,9 @@ class TingPlayer : public QObject
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(double frequency READ frequency WRITE setFrequency)
+    // Output level, 0..1, mapped to QAudioSink::setVolume. Defaults to full scale, so
+    // every caller that predates this property sounds exactly as it did.
+    Q_PROPERTY(double volume READ volume WRITE setVolume)
 
 public:
     explicit TingPlayer(QObject *parent = nullptr);
@@ -42,12 +45,16 @@ public:
     double frequency() const { return m_frequency; }
     void   setFrequency(double hz);
 
+    double volume() const { return m_volume; }
+    void   setVolume(double v);
+
     Q_INVOKABLE void play();
 
 private:
     static QByteArray synthesize(double freq);
 
     double      m_frequency = 1046.5;   // C6
+    double      m_volume    = 1.0;      // full scale — the pre-existing behaviour
     QByteArray  m_pcm;
     QAudioSink *m_sink = nullptr;
     QBuffer    *m_buf  = nullptr;

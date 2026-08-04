@@ -34,6 +34,11 @@
 // e.g. the Ball placeholder / no IMU connected), dim (armed pipeline idle), glow
 // (armed & listening, with a breathing halo). A detector firing flashes its dot
 // green and decays back to the base tier over 2 s.
+//
+// The FOURTH dot is not a detector. It reports that a launch monitor reading was
+// brought in for the shot on screen, and it LATCHES rather than flashing — see
+// lmDot below for why a flash would have been invisible in exactly the case it
+// exists to report.
 
 import QtQuick
 import PinPointStudio
@@ -110,6 +115,23 @@ Item {
                 available: foInst !== null && foInst.ballEnabled
                 presence:  foInst !== null && foInst.ballPresent
             }
+            // Launch monitor: this shot's device reading has been read and written.
+            //
+            // NOT A DETECTOR, and it differs from its three neighbours twice over.
+            // It does not follow auto-detect (that setting governs how a SHOT is
+            // spotted; the monitor is not spotting anything), and it LATCHES instead
+            // of flashing. The latch is the important one: a reading lands while
+            // analysis is still running, when shotController.armed is false and the
+            // whole cluster has yielded its slot to the ANALYSING badge — so a 2 s
+            // flash would fire against a hidden widget every single time. Held
+            // instead, the dot is still green when the cluster comes back, which is
+            // also the more useful statement: "this shot has monitor data".
+            DetectDot {
+                id: lmDot
+                available: launchMonitor.configured
+                isDetector: false
+                presence: root.lmReceived
+            }
         }
     }
 
@@ -123,6 +145,29 @@ Item {
             shotController.triggerShot()
             if (!Theme.reduceMotion) shotFlash.restart()
         }
+    }
+
+    // ── Launch monitor arrival ─────────────────────────────────────────────
+    // Latched for the shot on screen, cleared when the next one is committed.
+    property bool lmReceived: false
+
+    // A short, low ting when a reading is folded into the shot. Deliberately two
+    // octaves below the C8 shot chime it follows by a few seconds, and quieter — it
+    // is a confirmation, not an event, and it must not compete with the shot itself.
+    // Gated on a monitor being configured AND on the user leaving it switched on.
+    TingPlayer { id: lmTing; frequency: 1046.5; volume: 0.35 }
+
+    Connections {
+        target: launchMonitor
+        function onReadingApplied(swingDir) {
+            root.lmReceived = true
+            if (launchMonitor.configured && appSettings.launchMonitorChimeEnabled)
+                lmTing.play()
+        }
+    }
+    Connections {
+        target: shotController
+        function onShotDetected(source, timestampUs, sessionType) { root.lmReceived = false }
     }
 
     // ── Detection-dot flashes ──────────────────────────────────────────────
@@ -149,6 +194,16 @@ Item {
     component DetectDot: Item {
         id: dd
         property bool   available: true
+        // Whether this dot reports a SHOT DETECTOR. True for the three that do, and
+        // it ties them to the capture pipeline twice: they go dim when auto-detect is
+        // off (that setting is exactly what they do), and they are only "armed" while
+        // the pipeline is idle and listening.
+        //
+        // False for the launch monitor, and both halves matter. It keeps reading its
+        // file however shots are being triggered, and — the load-bearing one — it must
+        // stay lit while the processor is busy, because that is precisely when a
+        // reading arrives.
+        property bool   isDetector: true
         property real   flash:     0     // 1 just after a detection → 0
         // Core/halo colour tier — Theme.colorAttention marks a modality that
         // is running but needs attention (e.g. ball detection uncalibrated).
@@ -157,8 +212,8 @@ Item {
         // at the hitting area). Armed tier only.
         property bool   presence:  false
 
-        readonly property bool _live:  available && appSettings.autoDetectSwing
-        readonly property bool armed:  _live && shotController.armed
+        readonly property bool _live:  available && (!dd.isDetector || appSettings.autoDetectSwing)
+        readonly property bool armed:  _live && (!dd.isDetector || shotController.armed)
         readonly property real _alpha: armed ? 1.0 : (_live ? 0.38 : 0.14)
 
         implicitWidth: Theme.sp(8); implicitHeight: Theme.sp(8)

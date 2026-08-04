@@ -226,6 +226,19 @@ class AppSettings : public QObject
     Q_PROPERTY(bool    saveImuStreams        READ saveImuStreams        WRITE setImuStreams            NOTIFY saveImuStreamsChanged)
     Q_PROPERTY(QString imuDataFormat         READ imuDataFormat         WRITE setImuDataFormat         NOTIFY imuDataFormatChanged)
     Q_PROPERTY(bool    saveLaunchMonitorData READ saveLaunchMonitorData WRITE setSaveLaunchMonitorData NOTIFY saveLaunchMonitorDataChanged)
+
+    // ── Launch monitor ──────────────────────────────────────────────────────
+    // Which connector, and where it writes. `launchMonitorKind` holds the token
+    // pinpoint::lm::kindKey() produces ("none" / "gcquad"); the path is a FOLDER, and
+    // the connector finds LastShot.CSV inside it, because that is how FSX2020 is
+    // configured — you tell it a directory, not a filename.
+    Q_PROPERTY(QString launchMonitorKind         READ launchMonitorKind         WRITE setLaunchMonitorKind         NOTIFY launchMonitorKindChanged)
+    Q_PROPERTY(QString launchMonitorPath         READ launchMonitorPath         WRITE setLaunchMonitorPath         NOTIFY launchMonitorPathChanged)
+    Q_PROPERTY(int     launchMonitorPollMs       READ launchMonitorPollMs       WRITE setLaunchMonitorPollMs       NOTIFY launchMonitorPollMsChanged)
+    // The arrival chime. Separate from the shot chime deliberately: this one fires a
+    // few seconds after that one, and a golfer who wants the shot confirmation may
+    // well not want a second sound behind it.
+    Q_PROPERTY(bool    launchMonitorChimeEnabled READ launchMonitorChimeEnabled WRITE setLaunchMonitorChimeEnabled NOTIFY launchMonitorChimeEnabledChanged)
     // Persistent per-athlete·club·camera club-length prior (club_length_fusion.h /
     // plan: robust club length — starry-shimmying-wind). Key = "athleteUuid|clubName|
     // cameraKey" -> {emaPx, varPx, n, disagreeRun, lengthMm, frameW, frameH,
@@ -418,6 +431,11 @@ public:
         m_imuDataFormat         = ppSettings().value(QStringLiteral("storage/imuDataFormat"),         QStringLiteral("json")).toString();
         m_saveLaunchMonitorData = ppSettings().value(QStringLiteral("storage/saveLaunchMonitorData"), true).toBool();
 
+        m_launchMonitorKind         = ppSettings().value(QStringLiteral("launchmonitor/kind"), QStringLiteral("none")).toString();
+        m_launchMonitorPath         = normaliseLibraryPath(ppSettings().value(QStringLiteral("launchmonitor/path"), QStringLiteral("")).toString());
+        m_launchMonitorPollMs       = ppSettings().value(QStringLiteral("launchmonitor/pollIntervalMs"), 250).toInt();
+        m_launchMonitorChimeEnabled = ppSettings().value(QStringLiteral("launchmonitor/chimeEnabled"), true).toBool();
+
         m_clubLenPrior = ppSettings().value(QStringLiteral("analysis/clubLenPrior"), QVariantMap{}).toMap();
     }
 
@@ -524,6 +542,11 @@ public:
     bool    saveImuStreams()        const { return m_saveImuStreams; }
     QString imuDataFormat()         const { return m_imuDataFormat; }
     bool    saveLaunchMonitorData() const { return m_saveLaunchMonitorData; }
+
+    QString launchMonitorKind()         const { return m_launchMonitorKind; }
+    QString launchMonitorPath()         const { return m_launchMonitorPath; }
+    int     launchMonitorPollMs()       const { return m_launchMonitorPollMs; }
+    bool    launchMonitorChimeEnabled() const { return m_launchMonitorChimeEnabled; }
 
     QVariantMap clubLenPrior() const { return m_clubLenPrior; }
 
@@ -1317,6 +1340,40 @@ public:
         emit saveLaunchMonitorDataChanged();
     }
 
+    void setLaunchMonitorKind(const QString &v)
+    {
+        if (m_launchMonitorKind == v) return;
+        m_launchMonitorKind = v;
+        ppSettings().setValue(QStringLiteral("launchmonitor/kind"), v);
+        emit launchMonitorKindChanged();
+    }
+    void setLaunchMonitorPath(const QString &raw)
+    {
+        // Same repair the athlete library needs: a folder chosen through QML's
+        // FolderDialog arrives as file:///C:/... and naive stripping leaves the
+        // stray slash before the drive letter.
+        const QString v = normaliseLibraryPath(raw);
+        if (m_launchMonitorPath == v) return;
+        m_launchMonitorPath = v;
+        ppSettings().setValue(QStringLiteral("launchmonitor/path"), v);
+        emit launchMonitorPathChanged();
+    }
+    void setLaunchMonitorPollMs(int v)
+    {
+        v = qBound(50, v, 10000);
+        if (m_launchMonitorPollMs == v) return;
+        m_launchMonitorPollMs = v;
+        ppSettings().setValue(QStringLiteral("launchmonitor/pollIntervalMs"), v);
+        emit launchMonitorPollMsChanged();
+    }
+    void setLaunchMonitorChimeEnabled(bool v)
+    {
+        if (m_launchMonitorChimeEnabled == v) return;
+        m_launchMonitorChimeEnabled = v;
+        ppSettings().setValue(QStringLiteral("launchmonitor/chimeEnabled"), v);
+        emit launchMonitorChimeEnabledChanged();
+    }
+
     void setClubLenPrior(const QVariantMap &v)
     {
         if (m_clubLenPrior == v) return;
@@ -1424,6 +1481,10 @@ signals:
     void saveImuStreamsChanged();
     void imuDataFormatChanged();
     void saveLaunchMonitorDataChanged();
+    void launchMonitorKindChanged();
+    void launchMonitorPathChanged();
+    void launchMonitorPollMsChanged();
+    void launchMonitorChimeEnabledChanged();
     void clubLenPriorChanged();
 
 private:
@@ -1530,6 +1591,10 @@ private:
     bool    m_saveImuStreams        = true;
     QString m_imuDataFormat         = QStringLiteral("json");
     bool    m_saveLaunchMonitorData = true;
+    QString m_launchMonitorKind;
+    QString m_launchMonitorPath;
+    int     m_launchMonitorPollMs = 250;
+    bool    m_launchMonitorChimeEnabled = true;
 
     QVariantMap m_clubLenPrior;
 

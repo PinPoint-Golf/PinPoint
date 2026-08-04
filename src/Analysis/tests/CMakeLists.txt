@@ -243,8 +243,9 @@ pp_add_test(metric_catalogue_test
             ${SRC}/Metrics/metric_resolver.cpp
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
+            ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
             ${ANALYSIS}/reference_bands.cpp ${NORM_SRC}
-    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+    INCLUDE ${DIAG} ${SRC}/Metrics ${SRC}/LaunchMonitor ${ANALYSIS})
 pp_norm_env(metric_catalogue_test)
 
 # WB4 shared hand geometry (hand_axis.h): handCentroid (byte-identical to the
@@ -266,7 +267,10 @@ pp_add_test(arbiter_test         SOURCES arbiter_test.cpp)           # shot_arbi
 
 # --- Unified swing.json writer/reader round-trip (Export subsystem) ----------
 pp_add_test(swing_doc_test
-    SOURCES ${SRC}/Export/tests/swing_doc_test.cpp ${SRC}/Export/swing_doc.cpp)
+    SOURCES ${SRC}/Export/tests/swing_doc_test.cpp ${SRC}/Export/swing_doc.cpp
+            ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
+            ${SRC}/LaunchMonitor/gcquad_csv_parser.cpp
+    INCLUDE ${SRC}/LaunchMonitor)
 
 # --- Orientation filters (Phase 0.4): Madgwick (header-only) + ESKF (Eigen) ---
 # The ESKF .cpp pulls the vendored imu_ekf headers through the Arduino-style

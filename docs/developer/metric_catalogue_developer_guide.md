@@ -189,6 +189,290 @@ Two easy traps:
   duplicate the mapping. (The diagnostics pack speaks `Phase` throughout, so a corridor lookup never
   crosses; the wrist grid's cell measures encode the position in their id.)
 
+## 1A. Sign conventions — the frames, and what ISB governs
+
+> **The canonical statement is [`docs/design/pinpoint_sign_conventions.md`](../design/pinpoint_sign_conventions.md)**
+> — rules 0/1/2, the per-metric tables, and the ISB compliance audit. Code and
+> `axis_direction_test` cite it by rule number. This section is the working summary for somebody
+> adding a metric; where the two ever disagree, the design doc wins and this one is the bug.
+
+**THE RULE: A SIGN'S MEANING NEVER CHANGES WITH HANDEDNESS.** Whatever transform is needed to hold
+that fixed is the producer's job, never the reader's. A left-handed golfer and a right-handed golfer
+reading the same number must be told the same thing by it.
+
+Two frames express that rule, and every metric belongs to exactly one.
+
+### The world frame — target line, ground, horizon
+
+Referenced to the world, not to the golfer. **Positive is to the RIGHT of the target line, or
+UPWARD.** Nothing is mirrored, because the reference is the world and the world does not care which
+way the golfer stands. `clubPath`, `launchDirection`, `shaftDirection`, `faceAngle`, `attackAngle`,
+`offline`, every `lm.*` reading.
+
+"Right of the target line" is read looking down the line toward the target, so it is the same
+absolute direction for both golfers — which is exactly what makes it handedness-free.
+
+**What flips is the GLOSS, never the sign.** *In-to-out*, *open*, *draw* are right-handed readings
+of a world-frame number: positive `clubPath` is right of the target line for everybody, which is
+in-to-out for a right-hander and **out-to-in for a left-hander**. State the frame-referenced meaning
+first and the gloss second, or a left-handed reader is misled by prose that looks authoritative.
+
+### The anatomical frame — the golfer's own lead side
+
+Referenced to the body. **Positive is flexion, ulnar deviation and pronation.** Producers DO mirror
+a left-handed golfer (`pose_wrist_angle_source.cpp`, `mirrorSign()` in `wrist_assessment_types.h`),
+and that mirror is what holds the meaning fixed: a bowed lead wrist must read negative-of-cupped for
+both golfers. Removing it would invert every left-handed swing's archetype.
+
+### ISB compliance — what the standard governs, and what it does not
+
+The anatomical frame implements **ISB / Wu et al. 2005** (`ref.wu2005`), the recommendation of the
+Standardization and Terminology Committee of the International Society of Biomechanics — a society
+standard, not one laboratory's preference. ISB fixes flexion, ulnar deviation and pronation as
+positive, **and positive for both the left and the right arm**, so the standard itself delivers the
+handedness invariance rather than us bolting it on.
+
+**Four metrics are ISB joint angles, and all four comply:**
+
+| Metric | Ours | ISB (Wu 2005) | |
+|---|---|---|:--:|
+| `leadWristFlexExt` | + flexion (bowed) | flexion + | ✓ |
+| `leadWristRadUln` | + ulnar (hinge) | ulnar deviation + | ✓ |
+| `forearmPronation` | + pronation | pronation + | ✓ |
+| `leadArmFlexion` | + elbow flexion (magnitude) | flexion + | ✓ |
+
+**Every other metric is outside ISB's scope, and saying so is what protects the claim.** The
+credibility risk here runs the other way from the obvious one: declaring ISB conformance for a
+two-dimensional apparent shoulder-line angle taken off one camera is what would fail review, because
+ISB defines three-DOF rotations between segment triads built on palpable bony landmarks, and a
+face-on silhouette supplies none of that. State the boundary precisely rather than implying blanket
+conformance:
+
+| Family | Why ISB does not govern it | Examples |
+|---|---|---|
+| **Club & ball** | ISB defines *human joint* motion. A clubhead is not a joint, and a ball is not a segment. These use the world frame. | every `lm.*`, `clubPath`, `ballSpeed`, `offline` |
+| **Turn magnitudes** | Deliberately UNSIGNED magnitudes of turn away from address, not signed axial rotations about a defined axis. A face-on camera or a single IMU does not give the bony-landmark triad an ISB rotation needs. | `pelvisRotation`, `thoraxRotation`, `xFactor` |
+| **Image-plane body lines** | 2D apparent angles between two keypoints as one camera sees them. Not joint rotations at all; they read the *apparent* line and a golfer stood at an angle to the camera reads differently. | `hipLineTilt`, `shoulderPlaneAngle`, `elbowAlignment`, `feetAlignment`, `toeLineAngle` |
+| **Normalised displacements** | Not angles. Distances expressed as a fraction of stance or shoulder width, or in cm. | `pelvisSway`, `headSway`, `leadKneeDrift`, `ballPosition` |
+| **Composites & timings** | Derived from other metrics, or durations. | `xFactorStretch`, `tempoRatio`, the scores |
+
+None of that is a defect. It is the honest reach of a face-on camera and a wrist IMU, and each of
+those metrics carries its own stated convention below. What must never happen is a descriptor
+implying ISB conformance it does not have.
+
+**A commercial sensor reports the inverse of us on bow/cup.** At least one widely used wrist device
+defines extension (cupping) as positive and flexion (bowing) as negative — the exact inverse of ISB
+and of us. **The published standard wins over the popular product**: a vendor can change their
+convention, and a standard is the thing that lets two datasets be compared at all. The disagreement
+is recorded in `ref.wu2005` and in `docs/reference/wristmetrics.md` so it stays a known difference
+rather than a discovered one. Never compare a raw wrist sign across sources without checking the
+frame.
+
+### Our own lateral channels
+
+Within the non-ISB families the conventions are consistent by family, with two deliberate exceptions
+that each say so in their own `howToRead`:
+
+- **Displacements** — positive is toward the **lead** side (`pelvisSway`, `headSway`,
+  `leadKneeDrift`, `thoraxLateralDrift`).
+- **Body lines** — positive means the **trail** joint sits above the lead joint (`hipLineTilt`,
+  `shoulderPlaneAngle`, `elbowAlignment`, `feetAlignment`).
+- **The two exceptions** — `spineSideBend` is positive toward the **trail** side, and
+  `secondaryAxisTilt` is positive **away from the target**. Both are named for the thing they
+  measure, and inverting either would leave every sentence written about it backwards. They are
+  exceptions on purpose, not drift.
+
+### Declaring it on a new metric
+
+`MetricDescriptor::signPositive` / `signNegative` carry the pair. Both are lower-case fragments
+completing *"positive means …"* / *"negative means …"*, so they read inside a sentence and inside a
+table cell.
+
+- **`signPositive` is required** for anything in a signable unit. Every such metric has a direction,
+  even an unsigned one — its direction is what the magnitude counts.
+- **`signNegative` may be empty**, and empty means *cannot go negative*: a carry, a spin rate, a
+  duration. Writing prose there anyway invents a meaning the metric does not have.
+
+`metric_catalogue_test` enforces three things, so none of this can be forgotten or quietly undone:
+every direction-carrying metric declares `signPositive`; no world-frame metric is stated **only** as
+a right-handed gloss (*"in-to-out"* flips for a left-hander where *"right of the target line"* does
+not); and the four ISB joint angles keep ISB polarity — the assertion that stops somebody "fixing"
+us to match a commercial sensor that reports the inverse.
+
+### Every metric, and what its sign means
+
+**GENERATED — do not hand-edit.** It restates `signPositive` / `signNegative` from
+`metric_catalogue_manifest.cpp`; a second hand-maintained copy of 86 facts is exactly the drift the
+manifest header warns about. Change the descriptor, then run:
+
+```
+python3 tools/metrics/gen_sign_table.py
+```
+
+*Positive means* is stated frame-first: **"right of the target line"** rather than *"in-to-out"*,
+because the gloss flips for a left-handed golfer and the frame does not. *cannot go negative* marks
+a magnitude — a carry, a spin rate, a duration.
+
+<!-- BEGIN GENERATED SIGN TABLE -->
+
+#### Score
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `wristScore` | — | live | *no direction* | *cannot go negative* |
+| `wristResemblance` | — | live | *no direction* | *cannot go negative* |
+| `swingScore` | — | planned | *no direction* | *cannot go negative* |
+
+#### Wrist & forearm
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `leadWristFlexExt` | ° | live | flexion — the lead wrist bowed | extension — the lead wrist cupped |
+| `leadWristRadUln` | ° | live | ulnar deviation — the wrist hinged or cocked | radial deviation |
+| `forearmPronation` | ° | live | pronation — the lead forearm rolled toward face-down | supination |
+| `leadArmFlexion` | ° | live | elbow flexion — a more bent lead arm; 0° is straight | *cannot go negative* |
+| `trailWristFlexExt` | ° | live | extension — the trail wrist cupped, the opposite of the lead wrist's polarity because  the hands are mirror images | flexion — the trail wrist bowed |
+
+#### Body rotation
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `pelvisRotation` | ° | live | turn away from address — a MAGNITUDE, so positive at the top and again at impact,  passing through zero as the body squares | *cannot go negative* |
+| `thoraxRotation` | ° | live | turn away from address — a MAGNITUDE, so positive at the top and again at impact | *cannot go negative* |
+| `xFactor` | ° | live | the chest turned further than the pelvis | the pelvis turned further than the chest |
+| `xFactorStretch` | ° | live | separation still growing after the top — the stretch | separation already unwinding at the top |
+| `hipInternalRotation` | ° | planned | internal rotation of that hip | external rotation |
+| `shoulderPlaneAngle` | ° | live | the TRAIL shoulder sits above the lead shoulder | the lead shoulder sits above the trail shoulder |
+
+#### Spine & tilt
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `spineForwardBend` | ° | planned | more forward bend from the hips | standing taller than upright, which a swing does not reach |
+| `spineSideBend` | ° | live | side bend toward the TRAIL side | side bend toward the lead side |
+| `secondaryAxisTilt` | ° | live | the upper body leaning AWAY from the target — trail-side lean | leaning toward the target |
+| `thoracicFlexion` | ° | planned | a more rounded upper back | a flatter, more extended upper back |
+| `lumbarExtension` | ° | planned | a more arched low back | a flattened low back |
+
+#### Pelvis & lateral
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `pelvisSway` | % stance width | live | the pelvis moved toward the LEAD side | moved away from the lead side |
+| `pelvisThrust` | cm | planned | the pelvis moved toward the ball | moved away from the ball |
+| `pelvisLift` | % stance width | live | the pelvis rose | the pelvis dropped |
+| `hipLineTilt` | ° | live | the TRAIL hip sits above the lead hip | the lead hip sits above the trail hip |
+| `thoraxLateralDrift` | % stance width | live | the chest moved toward the LEAD side | moved away from the lead side |
+
+#### Feet & stance
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `leadKneeDrift` | % stance width | live | the lead knee moved toward the LEAD side | moved toward the trail side — working inward |
+| `stanceWidth` | % shoulder width | live | a wider stance | *cannot go negative* |
+| `stanceWidthMm` | mm | live | a wider stance | *cannot go negative* |
+| `ballPosition` | % stance width | live | the ball further BACK, toward the trail foot — 0% is the lead heel, 100% the trail  heel, the scale other golf software uses | forward of the lead heel, which is a real driver setup |
+| `leadFootFlare` | ° | live | the lead toe turned out, away from the ball | turned in |
+| `trailFootFlare` | ° | live | the trail toe turned out, away from the ball | turned in |
+| `toeLineAngle` | ° | live | a closed stance line as the camera sees it | an open stance line — and this one line metric FLIPS for a mirrored camera |
+| `leadHeelLift` | cm | live | the lead heel further off the ground | *cannot go negative* |
+| `leadKneeFlexion` | ° | planned | more knee bend | *cannot go negative* |
+| `ballBodyDistance` | % shoulder width | planned | standing further from the ball | standing closer to the ball |
+| `trailKneeFlexion` | ° | planned | more knee bend | *cannot go negative* |
+| `comOverLeadFoot` | % stance width | live | further FROM the lead ankle — UNSIGNED, because still back and fallen through are the  same fault seen from either side | *cannot go negative* |
+
+#### Club & speed
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `clubheadSpeed` | mph | live | a faster clubhead | *cannot go negative* |
+| `handSpeed` | mph | live | faster hands | *cannot go negative* |
+| `lagAngle` | ° | live | more lag retained — a tighter forearm-to-shaft angle | *cannot go negative* |
+| `impactShaftLean` | ° | live | the shaft leaning FORWARD, toward the target | leaning back, away from the target |
+| `lm.clubheadSpeed` | mph | device | a faster clubhead | *cannot go negative* |
+
+#### Club delivery
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `swingPlane` | ° | planned | a steeper plane | a flatter plane |
+| `clubPath` | ° | planned | the head travelling RIGHT of the target line — in-to-out for a right-hander | travelling left — out-to-in for a right-hander |
+| `attackAngle` | ° | live | an UPWARD strike | a descending strike |
+| `lowPointAhead` | in | live | the arc bottoming out AHEAD of the ball, on the target side | bottoming out behind the ball |
+| `shaftDirection` | ° | planned | pointing RIGHT of the target line — across the line for a right-hander | pointing left — laid off, or dragged inside |
+| `shaftAngleVsHorizontal` | ° | live | PAST parallel to the ground; zero IS parallel | short of parallel |
+| `lm.attackAngle` | ° | device | an UPWARD strike | a descending strike |
+| `lm.clubPath` | ° | device | the head travelling RIGHT of the target line — in-to-out for a right-hander | travelling left — out-to-in for a right-hander |
+| `lm.faceAngle` | ° | device | the face pointing RIGHT of the target line — OPEN for a right-hander | pointing left — closed for a right-hander |
+| `lm.dynamicLoft` | ° | device | more loft delivered to the ball | the face delofted past square |
+| `lm.spinLoft` | ° | device | a larger angle between delivered loft and the direction of travel | the face delivered below the path direction |
+| `lm.lieAngle` | ° | device | the clubhead sole toe UP relative to the ground at impact | the sole toe DOWN; zero is flat to the ground |
+| `lm.closureRate` | °/s | device | the face rotating CLOSED through impact — a faster closing rate | the face rotating open; a low or stable value is a squarer, held-off release |
+
+#### Tempo & sequence
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `tempoBackswing` | s | live | a longer backswing | *cannot go negative* |
+| `tempoRatio` | :1 | live | a backswing slower relative to the downswing | *cannot go negative* |
+| `kinematicSequence` | — | planned | *no direction* | *cannot go negative* |
+
+#### Alignment
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `elbowAlignment` | ° | live | the TRAIL elbow sits above the lead elbow | the lead elbow sits above the trail elbow |
+| `feetAlignment` | ° | live | the TRAIL ankle sits above the lead ankle — a closed stance | the lead ankle sits above the trail ankle — an open stance |
+
+#### Head
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `headSway` | cm | live | the head moved toward the LEAD side | moved away from the lead side |
+| `headLift` | cm | live | the head rose | the head dropped |
+| `headTilt` | ° | live | the eye line tilted further than at address, trail-end high | tilted the other way from address |
+
+#### Arms
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `leadArmToTorso` | ° | live | the arm further from the torso — UNSIGNED 0–180°, a frontal projection cannot say  which side it left on | *cannot go negative* |
+| `trailElbowHeight` | % shoulder width | live | the trail elbow higher above the shoulder line | below the shoulder line |
+| `leadHandWidth` | % arm length | live | the hands further from the chest — a wider arc | the hands closer to the chest |
+| `leadUpperArmToChest` | % shoulder width | live | a larger gap — the arm further from the chest | *cannot go negative* |
+
+#### Ball flight
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `launchDirection` | ° | planned | the ball starting RIGHT of the target line — a push for a right-hander | starting left — a pull |
+| `launchAngle` | ° | planned | a higher launch | the ball leaving below horizontal |
+| `ballSpeed` | mph | planned | a faster ball off the face | *cannot go negative* |
+| `lm.ballSpeed` | mph | device | a faster ball off the face | *cannot go negative* |
+| `lm.launchAngle` | ° | device | a higher launch | the ball leaving below horizontal |
+| `lm.launchDirection` | ° | device | the ball starting RIGHT of the target line — a push for a right-hander | starting left — a pull |
+| `lm.faceToPath` | ° | device | the face OPEN to the path — curvature to the right, a fade | closed to the path — curvature to the left, a draw |
+| `lm.spinRate` | rpm | device | more total spin | *cannot go negative* |
+| `lm.backSpin` | rpm | device | more backspin | *cannot go negative* |
+| `lm.sideSpin` | rpm | device | spin curving the ball RIGHT | curving the ball left |
+| `lm.spinAxis` | ° | device | the axis tilted RIGHT — a fade or a slice | tilted left — a draw or a hook |
+| `lm.carryDistance` | yd | device | the ball carrying further | *cannot go negative* |
+| `lm.totalDistance` | yd | device | the ball finishing further away | *cannot go negative* |
+| `lm.offline` | yd | device | finishing RIGHT of the target line | finishing left of it |
+| `lm.peakHeight` | ft | device | a higher flight | *cannot go negative* |
+| `lm.descentAngle` | ° | device | a steeper descent — the ball stopping faster | *cannot go negative* |
+| `lm.distanceToPin` | yd | device | finishing further from the pin | *cannot go negative* |
+
+#### Strike
+
+| Metric | Unit | Status | Positive means | Negative means |
+|---|---|---|---|---|
+| `lm.smashFactor` | ratio | device | a more efficient strike — more of the club's speed reaching the ball | *cannot go negative* |
+| `lm.strikeLocation` | mm | device | struck toward the TOE | struck toward the heel |
+| `lm.strikeHeight` | mm | device | struck ABOVE the centre of the face | struck below centre |
+
+<!-- END GENERATED SIGN TABLE -->
+
 ## 2. Recipe — add a new metric
 
 ### Step A — make sure something produces it
@@ -570,6 +854,11 @@ columns are satisfied.
 The table is **exhaustive by construction** — every descriptor appears exactly once, with a status
 matching its flags. If you add a metric, add its row; if you promote one, flip its status here too.
 
+That claim is now checked rather than trusted, because it stopped being true once: the launch
+monitor rename left nine rows pointing at keys that no longer existed and twenty-five descriptors
+with no row at all. `python3 tools/metrics/gen_sign_table.py` regenerates the sign table **and**
+exits non-zero listing any stale or missing Appendix A row. Run it after touching the manifest.
+
 **Legend.** Capture: `F/H/U` = lead forearm/hand/upper-arm IMU · `Plv/Thx/Thg` = pelvis/thorax/thigh
 IMU · `FaceCam` = face-on whole-body camera (pose) · `DTL` = down-the-line camera (depth axis) ·
 `Club` = shaft/club track · `Ball` = ball track · `LM` = connected launch monitor · `Phases` =
@@ -586,7 +875,7 @@ item:
 | Status | Means |
 |---|---|
 | **live** | Some rung has a producer. Resolves Measured (or Bridged) on a shot that satisfies it. |
-| **device** | The *reading* comes from hardware we integrate rather than a producer we author. Still requires the device, and **also planned** until a connector exists — nothing sets `hasLaunchMonitor` today. There is no detection work below, only the connector. |
+| **device** | The *reading* comes from hardware we integrate rather than a producer we author. Requires the device, and **live** — the GC Quad connector reads FSX2020's `LastShot.CSV`, so these resolve Measured on any shot the monitor reported. Every one is keyed `lm.*`: where we also estimate the quantity ourselves the bare key keeps our estimate, because comparing the two is the point. There is no detection work, only the connector. |
 | **planned** | Every rung `PLANNED`. Answers `Unavailable — "planned — <that rung's summary>"`, whatever the shot can do. |
 
 **The Capture column is now derivable, so check it rather than remember it.** It duplicates
@@ -697,6 +986,7 @@ the same frontal plane as sway and lift, and it is read alongside them.
 | `handSpeed` | live | FaceCam + Club (grip); DTL restores the depth component | grip-path speed ✓ | px→mm | `kinematic_series_test` · (launch monitor) |
 | `lagAngle` | live | Club + FaceCam pose | forearm-vs-shaft angle ✓ | px→mm, pose | `kinematic_series_test` · (strobe/montage review) |
 | `impactShaftLean` | live | Club | shaft-lean stage ✓ | px→mm | `shaft_*` tests · (corpus) |
+| `lm.clubheadSpeed` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
 
 ### Club delivery
 
@@ -705,12 +995,16 @@ the same frontal plane as sway and lift, and it is read alongside them.
 | `shaftAngleVsHorizontal` | live | FaceCam + Club | `buildClubDeliverySeries` shaft vs horizontal ✓ | px→mm | `club_delivery_test` · (corpus) |
 | `attackAngle` | live | FaceCam + Club | vertical velocity angle at Impact (`PointInTime`) ✓ | px→mm | `club_delivery_test` · (launch monitor) |
 | `lowPointAhead` | live | FaceCam + Club + Ball | arc low-point vs ball (`PointInTime`) ✓ | px→mm | `club_delivery_test` · (corpus) |
-| `faceAngle` | device | **LM** | read from the monitor | — | (launch monitor) |
-| `dynamicLoft` | device | **LM** | read from the monitor | — | (launch monitor) |
-| `spinLoft` | device | **LM** | read from the monitor | — | (launch monitor) |
+| `lm.faceAngle` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.dynamicLoft` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.spinLoft` | device | **LM** | derived in the connector from the row ✓ | — | `gcquad_csv_parser_test` |
 | `swingPlane` | planned | **DTL** + Club | SVD best-fit plane of head path — needs the path in 3D | stereo | new unit · (DTL cross-check) |
 | `clubPath` | planned | **DTL** + Club | horizontal velocity angle — needs depth | stereo | new unit · (launch monitor) |
 | `shaftDirection` | planned | **DTL** + Club | shaft pointing vs target line — needs depth | stereo | new unit · (DTL cross-check) |
+| `lm.attackAngle` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.clubPath` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.lieAngle` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.closureRate` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
 
 ### Tempo & sequence
 
@@ -756,13 +1050,23 @@ Optical ball flight is not resolvable at our frame rates — see the `launchMoni
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `faceToPath` | device | **LM** | face angle − club path, from the monitor | — | (launch monitor) |
-| `spinAxis` | device | **LM** | from the monitor | — | (launch monitor) |
-| `spinRate` | device | **LM** | from the monitor | — | (launch monitor) |
-| `carryDistance` | device | **LM** | from the monitor | — | (launch monitor) |
+| `lm.faceToPath` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.spinAxis` | device | **LM** | derived in the connector from the row ✓ | — | `gcquad_csv_parser_test` |
+| `lm.spinRate` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.carryDistance` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
 | `launchDirection` | planned | **DTL** + Ball (high rate) | initial ball vector, horizontal | camCal / stereo | new unit · (launch monitor) |
 | `launchAngle` | planned | FaceCam + Ball (high rate) | initial ball vector, vertical | camCal / stereo | new unit · (launch monitor) |
 | `ballSpeed` | planned | FaceCam + Ball (high rate) | post-impact ball speed | px→mm | new unit · (launch monitor) |
+| `lm.ballSpeed` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.launchAngle` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.launchDirection` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.backSpin` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.sideSpin` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.totalDistance` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.offline` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.peakHeight` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.descentAngle` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.distanceToPin` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
 
 ### Strike
 
@@ -770,8 +1074,9 @@ Both read from the monitor; there is no detection work here, only the connector.
 
 | Metric | Status | Capture | Detection | Calibration | Verification & validation |
 |---|---|---|---|---|---|
-| `smashFactor` | device | **LM** | ball speed ÷ clubhead speed, from the monitor | — | (launch monitor) |
-| `strikeLocation` | device | **LM** | face-impact position, from the monitor | — | (launch monitor) |
+| `lm.smashFactor` | device | **LM** | derived in the connector from the row ✓ | — | `gcquad_csv_parser_test` |
+| `lm.strikeLocation` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
+| `lm.strikeHeight` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
 
 ---
 

@@ -149,6 +149,18 @@ QVariantMap ShotReplayController::shotContext(int sessionType) const
     }
     ctx.insert(QStringLiteral("imuRoles"), roles);
 
+    // A launch monitor reported this shot. Read from the PRESENCE OF ITS METRICS rather
+    // than from the top-level "launchMonitor" block, because that block is not part of
+    // analysisDetail and this is the only document view we hold here. It is also the more
+    // honest test: what makes the readings resolve is that they are in `metrics[]`, so
+    // asking the same question the resolver will ask cannot disagree with it.
+    bool hasLm = false;
+    for (const QVariant &sv : d.value(QStringLiteral("series")).toList()) {
+        if (sv.toMap().value(QStringLiteral("key")).toString()
+              .startsWith(QStringLiteral("lm."))) { hasLm = true; break; }
+    }
+    ctx.insert(QStringLiteral("hasLaunchMonitor"), hasLm);
+
     ctx.insert(QStringLiteral("sessionType"), sessionType);
     // archetype/club/shape: not derivable from swing.json today → catalogue defaults.
     return ctx;

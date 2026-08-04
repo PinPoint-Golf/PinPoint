@@ -1,25 +1,51 @@
 # Sign conventions
 
-One rule, with a default that applies only where the rule leaves us free:
+Three rules, in precedence order, the last being a default that applies only where the others
+leave us free:
 
-> **1. Where the outside world already has a convention, follow it.**
+> **0. Where a PUBLISHED STANDARD covers it, follow the standard.**
+> **1. Otherwise, where the outside world already has a convention, follow it.**
 > **2. Otherwise, positive is toward the lead side.**
 
-Rule 1 wins whenever it applies. A number that gets read next to numbers we did not produce — on a
+**And one invariant above all three: A SIGN'S MEANING NEVER CHANGES WITH HANDEDNESS.** Whatever
+transform holds that fixed is the producer's job, never the reader's. A left-handed and a
+right-handed golfer reading the same number must be told the same thing by it. What flips is the
+right-handed *gloss* — in-to-out, open, draw — never the sign.
+
+Rule 0 is why a market-leading sensor does not get to set our wrist polarity; see below. Rule 1
+wins wherever no standard applies. A number that gets read next to numbers we did not produce — on a
 launch monitor, in another piece of golf software, in a coach's notes — has to mean the same thing
 there as here, and no amount of internal elegance is worth a golfer misreading it.
 
 ## What rule 1 covers today
 
-**Aim and path** — where something *points* or *travels*. **Out-to-in and open are NEGATIVE;
-in-to-out and closed are POSITIVE.** This is what every launch monitor reports, and it keeps
-`face − path` carrying the sign the shot shape implies.
+**Aim and path** — where something *points* or *travels*. **POSITIVE IS TO THE RIGHT OF THE TARGET
+LINE**, read looking down the line toward the target. That is what every launch monitor reports, and
+it is what keeps `face − path` carrying the sign the shot shape implies.
 
-| metric | positive means |
-|---|---|
-| `clubPath` | in-to-out. Out-to-in — the over-the-top delivery — is negative. |
-| `faceAngle` | closed. Open is negative. |
-| `toeLineAngle` | closed stance. An open stance is negative. |
+Right of the target line is the same absolute direction for both golfers, which is what makes this
+frame handedness-free. The right-handed *glosses* — in-to-out, open, draw — flip; the sign does not.
+
+| metric | positive means | right-handed gloss |
+|---|---|---|
+| `clubPath` | the head travelling right of the target line | in-to-out; out-to-in is negative |
+| `faceAngle` | the face pointing right of the target line | **open**; closed is negative |
+| `faceToPath` | the face open relative to the path | curvature to the right — a fade |
+| `launchDirection` | the ball starting right of the target line | a push; a pull is negative |
+| `toeLineAngle` | *(see the caveat below — this one is an image-plane proxy, not a device number)* | closed stance |
+
+> **`faceAngle` used to be stated here as closed-positive, and that was wrong twice over.** It was
+> justified as "what every launch monitor reports", and it is the opposite of what they report:
+> Foresight, TrackMan and the general ball-flight literature all state face angle **open-positive**
+> for a right-handed golfer — pointing right of target. It also contradicted this table's own
+> `faceToPath` row, which has always been open-positive. The arithmetic settles it without needing a
+> vendor at all: a real GC Quad row reads Face to Target `6.943`, Horiz Path `1.320`, Face to Path
+> `5.623`, and `6.943 − 1.320 = 5.623` exactly. Closed-positive face gives `−8.262`, which is not
+> face-to-path and not anything. Rule 1 was right; the fact asserted under it was not.
+>
+> Nothing depended on the old wording — the only face-angle producer is the launch monitor connector,
+> which reads the device's own sign and applies no negation, so the fix is to this document and to
+> `m_faceAngle`'s `highMeans`, not to any stored value.
 
 > **`shoulderAlignment` and `hipAlignment` used to be in this table and are gone.** Each named a
 > metric that was geometrically identical to a body-line tilt the catalogue already carried —
@@ -34,6 +60,11 @@ in-to-out and closed are POSITIVE.** This is what every launch monitor reports, 
 > informative: a golfer on level ground with a foot set further from the camera shows that foot
 > higher in the image, so the image-plane tilt does carry open / closed. It is a proxy, and the
 > descriptors say so.
+
+`toeLineAngle` is the one row here that is **not** comparable with an outside number: it is the
+apparent stance line as one camera sees it, not a measured aim, and its sign flips for a mirrored
+camera (see the body-line note below). It keeps closed-positive because that is what a coach reading
+"open / square / closed" expects, but never place it beside a device number and expect agreement.
 
 **Ball position along the stance** — **`0 %` at the LEAD heel, `100 %` at the trail heel**, so a
 high value means the ball is further BACK. This is the scale other golf software uses. Unclamped:
@@ -66,6 +97,53 @@ For a right-handed golfer "closed" points to the *trail* side, and ball position
 the trail foot — both opposite to displacement's lead-positive. **That is not an inconsistency to be
 tidied up.** Each follows the convention its own readership expects, which is exactly what rule 1
 asks for. Do not "fix" one to match another.
+
+## Rule 0 — the anatomical frame follows ISB, and that outranks rule 1
+
+Rule 1 says follow the outside world. Where the outside world has a **published standard** rather
+than a market leader, the standard is what we follow — and for joint angles it does.
+
+The lead wrist, forearm and elbow angles implement **ISB / Wu et al. 2005** (`ref.wu2005`), the
+recommendation of the Standardization and Terminology Committee of the International Society of
+Biomechanics. Twelve authors across institutions in five countries, published by the society itself
+under its standards collection, and the companion to the Part I recommendation covering ankle, hip
+and spine. It is not one laboratory's preference, which is precisely why it wins.
+
+| Metric | Ours | ISB (Wu 2005) | |
+|---|---|---|:--:|
+| `leadWristFlexExt` | + flexion (bowed) | flexion + | ✓ |
+| `leadWristRadUln` | + ulnar (hinge) | ulnar deviation + | ✓ |
+| `forearmPronation` | + pronation | pronation + | ✓ |
+| `leadArmFlexion` | + elbow flexion (magnitude) | flexion + | ✓ |
+
+ISB specifies these as positive **for both the left and the right arm**. So the standard itself
+delivers the handedness invariance this document asks for everywhere else — `mirrorSign()` in
+`wrist_assessment_types.h` is *implementing* ISB, not working around it.
+
+**A widely used commercial wrist sensor reports the inverse of us on bow/cup** — extension (cupping)
+positive, flexion (bowing) negative. When a standard and a popular product disagree, **the standard
+wins**: a vendor can change their convention next release, and a standard is the thing that lets two
+datasets be compared at all. The disagreement is recorded in `ref.wu2005` and in
+[`../reference/wristmetrics.md`](../reference/wristmetrics.md) so it stays a known difference rather
+than a discovered one. Never compare a raw wrist sign across sources without checking the frame.
+
+### What ISB does NOT govern, and why saying so protects the claim
+
+ISB defines three-DOF rotations between segment triads built on palpable bony landmarks. **Four of
+our metrics are ISB joint angles. The rest are not, and must never imply they are** — declaring
+conformance for a two-dimensional apparent shoulder-line angle taken off one camera is what would
+fail review, not the absence of it.
+
+| Family | Why ISB does not govern it | Examples |
+|---|---|---|
+| **Club & ball** | ISB defines *human joint* motion. A clubhead is not a joint. World frame instead. | every `lm.*`, `clubPath`, `ballSpeed` |
+| **Turn magnitudes** | Unsigned magnitudes of turn from address, not signed axial rotations about a defined axis. A face-on camera or one IMU gives no bony-landmark triad. | `pelvisRotation`, `thoraxRotation`, `xFactor` |
+| **Image-plane body lines** | 2D *apparent* angles between two keypoints as one camera sees them. Not joint rotations at all. | `hipLineTilt`, `shoulderPlaneAngle`, `elbowAlignment`, `feetAlignment` |
+| **Normalised displacements** | Not angles. Fractions of stance or shoulder width, or centimetres. | `pelvisSway`, `headSway`, `ballPosition` |
+| **Composites & timings** | Derived from other metrics, or durations. | `xFactorStretch`, `tempoRatio`, the scores |
+
+That is the honest reach of a face-on camera and a wrist IMU. Each of those metrics carries its own
+stated convention in the tables above and below.
 
 ## Why this is written down at all
 
@@ -119,6 +197,8 @@ All written right-handed; handedness is a transform applied at read time, never 
 | `strikeLocation` | toward the TOE; negative toward the heel |
 | `dynamicLoft`, `spinLoft` | more loft delivered / a larger loft-to-path angle |
 | `shaftDirection` | pointing right of the target — across the line at the top, outside in the takeaway |
+| `lieAngle` | the clubhead sole **toe UP** relative to the ground at impact; negative is toe down and zero is flat. Foresight's published convention, taken unchanged |
+| `closureRate` | the face rotating **CLOSED** through impact — a higher positive value is a faster closing rate, a low or stable one a squarer, held-off release. Foresight's published convention. Reported by the device in dps **or** rpm; the connector converts on the header's declared unit, so ours is always °/s |
 | `shaftAngleVsHorizontal` | past parallel; zero IS parallel to the ground |
 | `trailKneeFlexion` | more bend, matching the lead knee |
 | `leadUpperArmToChest` | a larger gap — the arm further from the chest |

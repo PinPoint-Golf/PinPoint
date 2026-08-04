@@ -649,6 +649,107 @@ bool SwingDocWriter::updateReview(const QString &swingDir, int rating, const QSt
     return true;
 }
 
+bool SwingDocWriter::updateLaunchMonitor(const QString &swingDir,
+                                         const lm::LaunchMonitorReading &reading,
+                                         QString *error)
+{
+    const QString path = swingDir + QStringLiteral("/swing.json");
+
+    QFile in(path);
+    if (!in.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("cannot read %1: %2").arg(path, in.errorString());
+        return false;
+    }
+    QJsonParseError pe;
+    QJsonObject root = QJsonDocument::fromJson(in.readAll(), &pe).object();
+    in.close();
+    if (pe.error != QJsonParseError::NoError) {
+        if (error) *error = QStringLiteral("cannot parse %1: %2").arg(path, pe.errorString());
+        return false;
+    }
+
+    // ── The raw block: what the device said, in full ────────────────────────
+    // Everything, including the columns no metric consumes. The reading is already
+    // in catalogue units, so this and the metric entries below cannot disagree —
+    // storing the file's own units here as well would invite exactly that.
+    QJsonObject raw{
+        { QStringLiteral("kind"),          reading.deviceKind },
+        { QStringLiteral("deviceShotId"),  reading.deviceShotId },
+        { QStringLiteral("deviceClub"),    reading.deviceClub },
+        { QStringLiteral("sourcePath"),    reading.sourcePath },
+        { QStringLiteral("readAtMs"),      reading.readAtMs },
+    };
+    for (const lm::FieldDef &f : lm::fieldDefs())
+        if (const auto &v = reading.*(f.member))
+            raw.insert(QString::fromLatin1(f.rawName), *v);
+    root[QStringLiteral("launchMonitor")] = raw;
+
+    // ── The metric entries ──────────────────────────────────────────────────
+    if (root.contains(QStringLiteral("analysis"))) {
+        QJsonObject an = root[QStringLiteral("analysis")].toObject();
+
+        // Impact in the window-relative domain every analysis t_us uses. -1 (or a
+        // missing capture block) means the shot never resolved an impact; anchor at
+        // 0 rather than dropping the readings, since a reduction "at p7" locates the
+        // sample by its phase tag and not by its timestamp.
+        const qint64 impactUs =
+            qMax<qint64>(0, qint64(root[QStringLiteral("capture")].toObject()
+                                       .value(QStringLiteral("impactUs")).toDouble(-1)));
+
+        // Drop any `lm.` entries already present so re-applying replaces rather than
+        // duplicates. Bare keys are untouched — that separation is the whole point.
+        QJsonArray metrics;
+        for (const QJsonValue &v : an[QStringLiteral("metrics")].toArray())
+            if (!v.toObject().value(QStringLiteral("key")).toString()
+                   .startsWith(QStringLiteral("lm.")))
+                metrics.append(v);
+
+        for (const lm::FieldDef &f : lm::fieldDefs()) {
+            const auto &val = reading.*(f.member);
+            if (!val)
+                continue;
+            // An empty curve with one phaseSample at Impact — the representation
+            // club_delivery already uses for its scalars. A launch monitor reports
+            // one number per shot; inventing a curve for it would be a lie the
+            // charts would happily draw.
+            metrics.append(QJsonObject{
+                { QStringLiteral("key"),   QString::fromLatin1(f.key) },
+                { QStringLiteral("label"), QString::fromUtf8(f.label) },
+                { QStringLiteral("unit"),  QString::fromUtf8(f.unit) },
+                { QStringLiteral("t_us"),  QJsonArray{} },
+                { QStringLiteral("value"), QJsonArray{} },
+                { QStringLiteral("phaseSamples"), QJsonArray{ QJsonObject{
+                      { QStringLiteral("phase"), int(analysis::Phase::Impact) },
+                      { QStringLiteral("t_us"),  impactUs },
+                      { QStringLiteral("value"), *val },
+                      { QStringLiteral("band"),  QString() } } } },
+            });
+        }
+
+        an[QStringLiteral("metrics")] = metrics;
+        root[QStringLiteral("analysis")] = an;
+    }
+
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly)) {
+        if (error) *error = QStringLiteral("cannot write %1: %2").arg(path, out.errorString());
+        return false;
+    }
+    out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!out.commit()) {
+        if (error) *error = QStringLiteral("failed to commit %1: %2").arg(path, out.errorString());
+        return false;
+    }
+
+    // Same reason as updateReview: this rewrite moves swing.json's size and mtime,
+    // which is exactly what both sidecar guards key on. Refresh the summary from the
+    // document already in hand rather than leaving a stale guard behind. The phase
+    // grid sidecar is not rewritten here — it is regenerated on demand, and it MUST
+    // be, since the readings we just added are new rows in it.
+    writeSummaryFile(summaryFromRoot(root, swingDir), nullptr);
+    return true;
+}
+
 // ── reader ──────────────────────────────────────────────────────────────────
 
 PersistedShot SwingDocReader::readSwingJson(const QString &swingDir)

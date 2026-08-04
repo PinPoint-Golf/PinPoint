@@ -374,9 +374,38 @@ QtObject {
         { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Signals"),                          subtitle: qsTr("What each condition is detected by — the test, its direction and the measure it reads"),
           actions: "signal signals detection detected by test direction threshold measure reads",
-          itemId: "" }
+          itemId: "" },
 
-        // TODO: add entries when Launch Monitor panel is implemented (panelIndex: 6)
+        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
+          label: qsTr("Device"),                           subtitle: qsTr("Which launch monitor to read — Foresight GC Quad via FSX2020, or none"),
+          actions: "launch monitor device gcquad gc quad foresight fsx2020 fsx connect ball club data",
+          itemId: "setting_lmDevice" },
+
+        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
+          label: qsTr("Shot data folder"),                 subtitle: qsTr("The folder FSX2020 writes LastShot.CSV into — a local path or a share"),
+          actions: "launch monitor folder path directory lastshot csv fsx2020 share network location",
+          itemId: "setting_lmPath" },
+
+        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
+          label: qsTr("Connection status"),                subtitle: qsTr("Whether the configured folder can be read, and what was last read from it"),
+          actions: "launch monitor status connected waiting error not reading last shot",
+          itemId: "setting_lmStatus" },
+
+        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+          label: qsTr("Chime when a reading arrives"),     subtitle: qsTr("A short quiet tone when the monitor's data is folded into the swing"),
+          actions: "launch monitor chime sound ting audio beep tone notify silence mute arrival",
+          itemId: "setting_lmChime" },
+
+        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+          label: qsTr("Store launch monitor data with each swing"), subtitle: qsTr("Off means readings are read and discarded rather than saved to the swing"),
+          actions: "launch monitor store save data swing json record keep discard",
+          itemId: "setting_lmStore" },
+
+        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+          label: qsTr("Check for new shots every"),        subtitle: qsTr("How often the shot data folder is re-read — raise it only for a slow share"),
+          actions: "launch monitor poll interval frequency check rate refresh share slow",
+          itemId: "setting_lmPoll" }
+
         // TODO: add entries when Archiving panel is implemented (panelIndex: 8)
     ]
 }

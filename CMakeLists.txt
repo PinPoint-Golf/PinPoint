@@ -235,6 +235,13 @@ qt_add_executable(PinPointStudio
     src/IMU/ble_imu_transport.h src/IMU/ble_imu_transport.cpp
     src/IMU/wt9011dcl_ble.h   src/IMU/wt9011dcl_ble.cpp
     src/IMU/imu_io_worker.h   src/IMU/imu_io_worker.cpp
+    src/LaunchMonitor/launch_monitor_reading.h   src/LaunchMonitor/launch_monitor_reading.cpp
+    src/LaunchMonitor/launch_monitor_base.h      src/LaunchMonitor/launch_monitor_base.cpp
+    src/LaunchMonitor/launch_monitor_factory.h   src/LaunchMonitor/launch_monitor_factory.cpp
+    src/LaunchMonitor/shot_pairing.h
+    src/LaunchMonitor/gcquad_csv_parser.h        src/LaunchMonitor/gcquad_csv_parser.cpp
+    src/LaunchMonitor/gcquad_monitor.h           src/LaunchMonitor/gcquad_monitor.cpp
+    src/Gui/launchmonitor/launch_monitor_controller.h src/Gui/launchmonitor/launch_monitor_controller.cpp
     src/Audio/onset_detector.h
     src/Audio/acoustic_shot_detector.h src/Audio/acoustic_shot_detector.cpp
     src/Audio/audio_processor_base.h src/Audio/audio_processor_base.cpp
@@ -277,8 +284,8 @@ target_include_directories(PinPointStudio PRIVATE
     src/Gui/app src/Gui/shell src/Gui/athlete src/Gui/monitor src/Gui/cameras
     src/Gui/imu src/Gui/viz src/Gui/session src/Gui/shot src/Gui/review
     src/Gui/media src/Gui/calibration src/Gui/diagnostics src/Gui/markup
-    src/Gui/characteristics src/Gui/diagnosticmodel
-    src/IMU src/Audio src/Video src/Pose src/STT src/TTS src/LLM src/Secrets src/Core src/Buffer
+    src/Gui/characteristics src/Gui/diagnosticmodel src/Gui/launchmonitor
+    src/IMU src/LaunchMonitor src/Audio src/Video src/Pose src/STT src/TTS src/LLM src/Secrets src/Core src/Buffer
     src/Analysis src/Metrics src/Diagnostics
     src/Update
     "${CMAKE_BINARY_DIR}/generated")
@@ -361,6 +368,7 @@ qt_add_qml_module(PinPointStudio
         src/Gui/settings/ImusPanel.qml
         src/Gui/settings/MicrophonesPanel.qml
         src/Gui/settings/StoragePanel.qml
+        src/Gui/settings/LaunchMonitorPanel.qml
         src/Gui/settings/SettingsIndex.qml
         src/Gui/home/HmTypeCard.qml
         src/Gui/session/ScreenSessionWizard.qml

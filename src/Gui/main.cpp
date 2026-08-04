@@ -57,6 +57,7 @@
 #include "shot_list_model.h"
 #include "../Export/swing_doc.h"
 #include "../Export/swing_zip_exporter.h"
+#include "launch_monitor_controller.h"
 #include "shot_processor.h"
 #include "current_swing.h"
 #include "shot_replay_controller.h"
@@ -317,6 +318,11 @@ int main(int argc, char *argv[])
                                             &sessionController, &shotModel);
     cameraManager.setShotProcessor(&shotProcessor);   // teardown stop-barrier
     imuManager.setShotProcessor(&shotProcessor);      // same barrier for IMU deselect
+
+    // The launch monitor. Constructed unconditionally: with nothing configured it
+    // holds an inert connector reporting Disabled, so QML can bind to it without
+    // checking, and the toolbar dot stays dark of its own accord.
+    LaunchMonitorController   launchMonitorController(&appSettings, &shotModel);
     // Disk-backed replay of saved shots (MP4 + swing.json) — independent of the
     // live SwingWindow that ShotProcessor owns for the just-captured shot.
     ShotReplayController      shotReplay(&appSettings);
@@ -365,6 +371,28 @@ int main(int argc, char *argv[])
     // disarms the trigger for the whole pipeline.
     QObject::connect(&shotController, &ShotController::shotDetected,
                      &shotProcessor,  &ShotProcessor::onShotDetected);
+
+    // Launch monitor attribution. A shot commits, which arms the pairing for that
+    // swing; the analyzer/exporter join hands over a swingDir, which flushes whatever
+    // the monitor delivered in the meantime. See ShotPairing for why order alone is
+    // enough to decide which swing a reading belongs to.
+    QObject::connect(&shotController, &ShotController::shotDetected,
+                     &launchMonitorController,
+                     [&launchMonitorController](ShotController::Source, qint64, int) {
+        launchMonitorController.onShotDetected();
+    });
+    QObject::connect(&shotProcessor, &ShotProcessor::shotProcessed,
+                     &launchMonitorController, &LaunchMonitorController::onShotProcessed);
+    QObject::connect(&shotProcessor, &ShotProcessor::shotFailed,
+                     &launchMonitorController,
+                     [&launchMonitorController](const QString &) {
+        launchMonitorController.onShotFailed();
+    });
+    QObject::connect(&shotProcessor, &ShotProcessor::analysisFailed,
+                     &launchMonitorController,
+                     [&launchMonitorController](const QString &) {
+        launchMonitorController.onShotFailed();
+    });
     QObject::connect(&shotProcessor,  &ShotProcessor::busyChanged,
                      &shotController, [&shotController, &shotProcessor] {
         shotController.setProcessorBusy(shotProcessor.busy());
@@ -495,6 +523,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("athleteController"), &athleteController);
     engine.rootContext()->setContextProperty(QStringLiteral("navController"),     &navController);
     engine.rootContext()->setContextProperty(QStringLiteral("imuManager"),       &imuManager);
+    engine.rootContext()->setContextProperty(QStringLiteral("launchMonitor"),   &launchMonitorController);
     engine.rootContext()->setContextProperty(QStringLiteral("controller"),       &controller);
     engine.rootContext()->setContextProperty(QStringLiteral("ttsController"),    &ttsController);
     engine.rootContext()->setContextProperty(QStringLiteral("llmController"),    &llmController);

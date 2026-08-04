@@ -466,7 +466,16 @@ The app forces `QSettings::IniFormat` (see `src/Core/pp_settings.h`), so on Wind
 | `storage/savePoseKeypoints` | `true` | ✅ | Gate is wired — the exporter serialises pose streams when present, but no pose producer exists yet, so nothing is written today |
 | `storage/saveImuStreams` | `true` | ✅ | Embed IMU quaternion/accelerometer streams in `swing.json` |
 | `storage/imuDataFormat` | `"json"` | ✅ | IMU export format (`"json"` inline, or `"csv"`/`"binary"` sidecar) |
-| `storage/saveLaunchMonitorData` | `true` | 📋 | Save ball-flight data from a connected launch monitor (no launch-monitor source yet) |
+| `storage/saveLaunchMonitorData` | `true` | ✅ | Write a connected launch monitor's readings into each swing. Off means readings are read and discarded — nothing lands in `swing.json` and none of the `lm.*` metrics appear |
+
+**Launch monitor** — the device connector (Settings → Launch Monitor)
+
+| Key | Default | Status | What |
+|---|---|---|---|
+| `launchmonitor/kind` | `"none"` | ✅ | Which connector: `"none"`, or `"gcquad"` for a Foresight GC Quad read through FSX2020 |
+| `launchmonitor/path` | `""` | ✅ | The **folder** FSX2020 writes `LastShot.CSV` into (not the file). Usually a share from the Windows machine running it — the connector itself is platform-agnostic |
+| `launchmonitor/pollIntervalMs` | `250` | ✅ | How often that folder is re-read, 50–10000 ms. Raise it only for a slow or busy network share |
+| `launchmonitor/chimeEnabled` | `true` | ✅ | Play a short quiet tone when a reading is folded into a swing. Independent of the shot chime, which fires seconds earlier |
 
 **Athletes** — one group per athlete, keyed by UUID (`athletes/<uuid>/…`)
 

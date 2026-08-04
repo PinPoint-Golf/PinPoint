@@ -1558,129 +1558,329 @@
     {
       "id": "m_faceAngle",
       "kind": "provided",
-      "metricKey": "faceAngle",
+      "metricKey": "lm.faceAngle",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "label": "Face angle, at impact",
       "unit": "°",
-      "highMeans": "the face further closed relative to the target line",
-      "gapReason": "Requires launch monitor: face orientation at impact is a sub-millisecond event and is not optically resolvable at our frame rates."
+      "highMeans": "the face further open relative to the target line — pointing right for a right-handed golfer"
     },
     {
       "id": "m_faceToPath",
       "kind": "provided",
-      "metricKey": "faceToPath",
+      "metricKey": "lm.faceToPath",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "label": "Face to path, at impact",
       "unit": "°",
-      "highMeans": "the face further open relative to the path — curvature to the right",
-      "gapReason": "Requires launch monitor: derived from face angle, which needs the device."
+      "highMeans": "the face further open relative to the path — curvature to the right"
     },
     {
       "id": "m_spinAxis",
       "kind": "provided",
-      "metricKey": "spinAxis",
+      "metricKey": "lm.spinAxis",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "label": "Spin axis",
       "unit": "°",
-      "highMeans": "the axis tilted further right — more curvature to the right",
-      "gapReason": "Requires launch monitor: curvature develops over a flight an indoor capture never sees."
+      "highMeans": "the axis tilted further right — more curvature to the right"
     },
     {
       "id": "m_spinRate",
       "kind": "provided",
-      "metricKey": "spinRate",
+      "metricKey": "lm.spinRate",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "label": "Spin rate",
       "unit": "rpm",
-      "highMeans": "more spin on the ball",
-      "gapReason": "Requires launch monitor: spin is not measurable over the short flight an indoor capture sees."
+      "highMeans": "more spin on the ball"
     },
     {
       "id": "m_smashFactor",
       "kind": "provided",
-      "metricKey": "smashFactor",
+      "metricKey": "lm.smashFactor",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "shape": "floor",
       "label": "Smash factor",
       "unit": "ratio",
-      "highMeans": "more of the clubhead speed reaching the ball — a more efficient strike",
-      "gapReason": "Requires launch monitor: needs a validated clubhead-speed and ball-speed pair."
+      "highMeans": "more of the clubhead speed reaching the ball — a more efficient strike"
     },
     {
       "id": "m_strikeLocation",
       "kind": "provided",
-      "metricKey": "strikeLocation",
+      "metricKey": "lm.strikeLocation",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "label": "Strike location across the face",
       "unit": "mm",
-      "highMeans": "the strike further toward the toe",
-      "gapReason": "Requires launch monitor: impact position on the face is not resolvable from any camera view we take."
+      "highMeans": "the strike further toward the toe"
     },
     {
       "id": "m_carryDistance",
       "kind": "provided",
-      "metricKey": "carryDistance",
+      "metricKey": "lm.carryDistance",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
+      "shape": "floor",
       "label": "Carry",
       "unit": "yd",
-      "highMeans": "the ball carrying further",
-      "gapReason": "Requires launch monitor: carry is a flight-model output, not something an indoor capture observes."
+      "highMeans": "the ball carrying further"
     },
     {
       "id": "m_dynamicLoft",
       "kind": "provided",
-      "metricKey": "dynamicLoft",
+      "metricKey": "lm.dynamicLoft",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "label": "Dynamic loft, at impact",
       "unit": "°",
-      "highMeans": "more loft delivered to the ball — a higher, weaker flight",
-      "gapReason": "Requires launch monitor: derived from face orientation at impact."
+      "highMeans": "more loft delivered to the ball — a higher, weaker flight"
     },
     {
       "id": "m_spinLoft",
       "kind": "provided",
-      "metricKey": "spinLoft",
+      "metricKey": "lm.spinLoft",
       "reducer": {
         "kind": "at",
         "anchor": "p7"
       },
-      "status": "externalDevice",
+      "status": "live",
       "label": "Spin loft, at impact",
       "unit": "°",
-      "highMeans": "a larger angle between delivered loft and the path — more spin, less speed",
-      "gapReason": "Requires launch monitor: derived from delivered loft, which needs face orientation at impact."
+      "highMeans": "a larger angle between delivered loft and the path — more spin, less speed"
+    },
+    {
+      "id": "m_lmClubheadSpeed",
+      "kind": "provided",
+      "metricKey": "lm.clubheadSpeed",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Clubhead speed, measured",
+      "unit": "mph",
+      "highMeans": "a faster clubhead at impact"
+    },
+    {
+      "id": "m_lmBallSpeed",
+      "kind": "provided",
+      "metricKey": "lm.ballSpeed",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Ball speed, measured",
+      "unit": "mph",
+      "highMeans": "a faster ball off the face"
+    },
+    {
+      "id": "m_lmAttackAngle",
+      "kind": "provided",
+      "metricKey": "lm.attackAngle",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Attack angle, measured",
+      "unit": "°",
+      "highMeans": "a more upward strike"
+    },
+    {
+      "id": "m_lmClubPath",
+      "kind": "provided",
+      "metricKey": "lm.clubPath",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Club path, measured",
+      "unit": "°",
+      "highMeans": "the path further in-to-out — travelling right"
+    },
+    {
+      "id": "m_lmLaunchAngle",
+      "kind": "provided",
+      "metricKey": "lm.launchAngle",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Launch angle, measured",
+      "unit": "°",
+      "highMeans": "the ball leaving higher"
+    },
+    {
+      "id": "m_lmLaunchDirection",
+      "kind": "provided",
+      "metricKey": "lm.launchDirection",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Start direction, measured",
+      "unit": "°",
+      "highMeans": "the ball starting further right of the target"
+    },
+    {
+      "id": "m_lmLieAngle",
+      "kind": "provided",
+      "metricKey": "lm.lieAngle",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Lie angle, at impact",
+      "unit": "°",
+      "highMeans": "the toe further up at impact"
+    },
+    {
+      "id": "m_lmClosureRate",
+      "kind": "provided",
+      "metricKey": "lm.closureRate",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Closure rate, through impact",
+      "unit": "°/s",
+      "highMeans": "the face rotating closed faster"
+    },
+    {
+      "id": "m_lmStrikeHeight",
+      "kind": "provided",
+      "metricKey": "lm.strikeHeight",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Strike height, on the face",
+      "unit": "mm",
+      "highMeans": "the strike further above the centre of the face"
+    },
+    {
+      "id": "m_lmBackSpin",
+      "kind": "provided",
+      "metricKey": "lm.backSpin",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Back spin",
+      "unit": "rpm",
+      "highMeans": "more backspin"
+    },
+    {
+      "id": "m_lmSideSpin",
+      "kind": "provided",
+      "metricKey": "lm.sideSpin",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Side spin",
+      "unit": "rpm",
+      "highMeans": "more spin curving the ball right"
+    },
+    {
+      "id": "m_lmTotalDistance",
+      "kind": "provided",
+      "metricKey": "lm.totalDistance",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Total distance",
+      "unit": "yd",
+      "highMeans": "the ball finishing further away"
+    },
+    {
+      "id": "m_lmOffline",
+      "kind": "provided",
+      "metricKey": "lm.offline",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Offline",
+      "unit": "yd",
+      "highMeans": "the ball finishing further right of the target line"
+    },
+    {
+      "id": "m_lmPeakHeight",
+      "kind": "provided",
+      "metricKey": "lm.peakHeight",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Peak height",
+      "unit": "ft",
+      "highMeans": "a higher flight"
+    },
+    {
+      "id": "m_lmDescentAngle",
+      "kind": "provided",
+      "metricKey": "lm.descentAngle",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Descent angle",
+      "unit": "°",
+      "highMeans": "a steeper descent — the ball stopping faster"
+    },
+    {
+      "id": "m_lmDistanceToPin",
+      "kind": "provided",
+      "metricKey": "lm.distanceToPin",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Distance to pin",
+      "unit": "yd",
+      "highMeans": "the ball finishing further from the pin"
     },
     {
       "id": "m_pelvisRotP4",
@@ -2296,7 +2496,7 @@
       "id": "sig_pull",
       "test": "outsideCorridor",
       "measures": [
-        "m_launchDirection"
+        "m_lmLaunchDirection"
       ],
       "direction": "low"
     },
@@ -2304,7 +2504,7 @@
       "id": "sig_push",
       "test": "outsideCorridor",
       "measures": [
-        "m_launchDirection"
+        "m_lmLaunchDirection"
       ],
       "direction": "high"
     },
@@ -9435,6 +9635,61 @@
         "tier": "practice",
         "searchedOn": "2026-08-03",
         "searchTerms": "shaft plane transition early downswing shallow steep golf"
+      }
+    },
+    {
+      "from": "strike_toe",
+      "to": "smash_deficit",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "off centre strike toe ball speed loss smash factor golf"
+      }
+    },
+    {
+      "from": "strike_heel",
+      "to": "smash_deficit",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "off centre strike heel ball speed loss smash factor golf"
+      }
+    },
+    {
+      "from": "open_face_to_path",
+      "to": "smash_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "face to path spin loft energy transfer smash factor golf"
+      }
+    },
+    {
+      "from": "closed_face_to_path",
+      "to": "smash_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "face to path spin loft energy transfer smash factor golf"
+      }
+    },
+    {
+      "from": "excessive_shaft_lean",
+      "to": "spin_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-03",
+        "searchTerms": "forward shaft lean delofting dynamic loft spin loft backspin golf"
       }
     }
   ]

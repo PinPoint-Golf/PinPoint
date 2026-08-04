@@ -4,6 +4,7 @@
 
 #include "../swing_doc.h"
 #include "../swing_paths.h"
+#include "../../LaunchMonitor/gcquad_csv_parser.h"
 #include "../../Analysis/swing_analysis.h"
 
 // Stub — avoids linking swing_paths.cpp (which pulls in the PpLogStream logging deps).
@@ -664,6 +665,118 @@ int main()
               "no review block → DRIVER on both paths");
         check(lean.score == fat.score, "no analysis block → score parity");
         QDir(d2).removeRecursively();
+    }
+
+    std::printf("\n=== launch monitor: late reading folded into an analysed swing ===\n");
+    {
+        // END TO END, from the bytes a launch monitor actually writes. The reading is
+        // parsed from the real LastShot.CSV layout rather than hand-built, so a change
+        // that breaks the connection between the parser and the writer fails here even
+        // though each half still passes its own test.
+        const QString d3 = QStringLiteral("/tmp/swingdoc_test_lm");
+        QDir().mkpath(d3);
+
+        QJsonObject m3 = manifest;
+        m3[QStringLiteral("capture")] = QJsonObject{ { QStringLiteral("impactUs"), 1234567 } };
+
+        SwingAnalysis an;
+        an.tier = int(ReconstructionTier::Angles2D);
+        MetricSeries own;
+        own.key = QStringLiteral("clubheadSpeed");
+        own.label = QStringLiteral("Clubhead speed");
+        own.unit = QStringLiteral("mph");
+        own.phaseSamples.push_back({ Phase::Impact, 1234567, 84.0, QString() });
+        an.series.push_back(own);
+        QString werr;
+        check(SwingDocWriter::writeSwingJson(d3, m3, &an, &werr), "write an analysed doc");
+
+        const QByteArray csv =
+            "Shot ID, Club, Club head Speed (m/s), Ball Speed (m/s), Total Spin (rpm), "
+            "Carry (m), Vert Path (deg), Loft (deg), Horiz Impact (mm)\r\n"
+            "283, Irn, 38.978607, 49.923466, 7614, 137.551910, -6.255224, 29.739687, 2.136441\r\n";
+        auto reading = pinpoint::lm::parseLastShotCsv(csv);
+        check(reading.has_value(), "the device's own bytes parse");
+        reading->deviceKind = QStringLiteral("gcquad");
+        reading->sourcePath = QStringLiteral("/tmp/LastShot.csv");
+        reading->readAtMs   = 1700000000000LL;
+
+        QString lerr;
+        check(SwingDocWriter::updateLaunchMonitor(d3, *reading, &lerr),
+              "the reading folds into the existing document");
+
+        QFile f(d3 + QStringLiteral("/swing.json"));
+        f.open(QIODevice::ReadOnly);
+        const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+        f.close();
+
+        const QJsonObject raw = root[QStringLiteral("launchMonitor")].toObject();
+        check(raw[QStringLiteral("deviceShotId")].toString() == QStringLiteral("283"),
+              "the raw block records the device's own shot id");
+        check(raw[QStringLiteral("deviceClub")].toString() == QStringLiteral("Irn"),
+              "…and the club it thought was in use");
+        check(qAbs(raw[QStringLiteral("clubheadSpeed")].toDouble() - 87.1927) < 0.01,
+              "…with values already in catalogue units");
+
+        const QJsonArray mets = root[QStringLiteral("analysis")].toObject()
+                                    [QStringLiteral("metrics")].toArray();
+        int bare = 0, measured = 0, atImpact = 0, emptyCurve = 0;
+        double bareVal = 0, measuredVal = 0;
+        for (const QJsonValue &v : mets) {
+            const QJsonObject mo = v.toObject();
+            const QString key = mo[QStringLiteral("key")].toString();
+            const QJsonArray ps = mo[QStringLiteral("phaseSamples")].toArray();
+            if (key == QStringLiteral("clubheadSpeed")) {
+                ++bare; bareVal = ps.at(0).toObject()[QStringLiteral("value")].toDouble();
+            }
+            if (!key.startsWith(QStringLiteral("lm."))) continue;
+            ++measured;
+            if (mo[QStringLiteral("t_us")].toArray().isEmpty()
+                && mo[QStringLiteral("value")].toArray().isEmpty()) ++emptyCurve;
+            if (ps.size() == 1
+                && ps.at(0).toObject()[QStringLiteral("phase")].toInt() == int(Phase::Impact)
+                && ps.at(0).toObject()[QStringLiteral("t_us")].toInt() == 1234567) ++atImpact;
+            if (key == QStringLiteral("lm.clubheadSpeed"))
+                measuredVal = ps.at(0).toObject()[QStringLiteral("value")].toDouble();
+        }
+        // 7 metric columns (club speed, ball speed, spin, carry, vert path, loft, horiz
+        // impact) plus smashFactor and spinLoft, both derived from them. NOT spinAxis —
+        // this row carries no side/back spin split, and a value we cannot derive must be
+        // absent rather than zero.
+        check(measured == 9, "every reading became an lm. metric");
+        check(emptyCurve == measured, "…each an empty curve, since a monitor reports one number");
+        check(atImpact == measured, "…anchored at Impact, at the document's own impactUs");
+
+        // THE WHOLE POINT. Our estimate is untouched and sits beside the measurement,
+        // disagreeing — which is what makes the pair worth storing.
+        check(bare == 1, "our own clubheadSpeed survives, exactly once");
+        check(qAbs(bareVal - 84.0) < 1e-9, "…with the value our pipeline produced");
+        check(qAbs(measuredVal - 87.1927) < 0.01, "…and the device's differs from it");
+
+        // Re-applying must replace, not duplicate — the connector can legitimately be
+        // asked to write the same swing twice.
+        check(SwingDocWriter::updateLaunchMonitor(d3, *reading, &lerr), "re-apply succeeds");
+        QFile f2(d3 + QStringLiteral("/swing.json"));
+        f2.open(QIODevice::ReadOnly);
+        const QJsonArray again = QJsonDocument::fromJson(f2.readAll()).object()
+                                     [QStringLiteral("analysis")].toObject()
+                                     [QStringLiteral("metrics")].toArray();
+        f2.close();
+        check(again.size() == mets.size(), "re-applying replaces rather than appending");
+
+        // A shot whose analysis failed still keeps what the device said.
+        const QString d4 = QStringLiteral("/tmp/swingdoc_test_lm_noanalysis");
+        QDir().mkpath(d4);
+        check(SwingDocWriter::writeSwingJson(d4, m3, nullptr, &werr), "write a doc with no analysis");
+        check(SwingDocWriter::updateLaunchMonitor(d4, *reading, &lerr), "…the reading still lands");
+        QFile f3(d4 + QStringLiteral("/swing.json"));
+        f3.open(QIODevice::ReadOnly);
+        const QJsonObject r4 = QJsonDocument::fromJson(f3.readAll()).object();
+        f3.close();
+        check(r4.contains(QStringLiteral("launchMonitor")), "…as a raw block");
+        check(!r4.contains(QStringLiteral("analysis")), "…without inventing an analysis block");
+
+        QDir(d3).removeRecursively();
+        QDir(d4).removeRecursively();
     }
 
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);

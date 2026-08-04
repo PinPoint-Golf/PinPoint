@@ -77,8 +77,9 @@ pp_add_test(shot_list_model_test
             ${GUI}/shot/shot_list_model.cpp
             ${SRC}/Export/swing_doc.cpp
             ${SRC}/Export/swing_paths.cpp
+            ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
             ${SRC}/Core/tests/pp_log_stub.cpp
-    INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core
+    INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core ${SRC}/LaunchMonitor
     LINK    Qt6::Qml  AUTOMOC)
 
 # ReanalysisController — the single re-analyse seam the carousel forwards to.
@@ -90,7 +91,7 @@ pp_add_test(reanalysis_controller_test
             ${GUI}/shot/reanalysis_controller.cpp
             ${SRC}/Core/pp_os_metrics.cpp   # reanalysis_controller.cpp scopes its worker thread
             ${SRC}/Core/tests/pp_log_stub.cpp
-    INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core
+    INCLUDE ${GUI} ${GUI}/review ${SRC} ${SRC}/Core ${SRC}/LaunchMonitor
     LINK    Qt6::Qml Qt6::Concurrent  AUTOMOC)
 
 # No binding may subscribe to a dependency it does not USE.

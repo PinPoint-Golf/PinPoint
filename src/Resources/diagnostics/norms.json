@@ -129,6 +129,20 @@
     "then this is the one population the speed corridors are known to be wrong for, and it is",
     "written here rather than discovered.",
     "",
+    "The THIRTEENTH arrived with the launch monitor connector, and on the same terms — converted at",
+    "the moment it first gained a corridor, so no grade moved:",
+    "",
+    "  m_carryDistance          floor    there is no coaching fault called too much carry; the",
+    "                                    fault is not having enough",
+    "",
+    "Its corridor is a DUFF GUARD rather than a carry corridor, and the floor is what makes that",
+    "honest. Carry is the most club- and athlete-dependent number in the pack, so any corridor",
+    "spanning the bag would grade a normal wedge as a fault; set as a floor at 40 yards it can only",
+    "fire on a full swing carrying under about 30, which is a topped shot and not a short one. It",
+    "exists at all because the measure went live with the connector while its per-club evidence base",
+    "did not, and a live corridor signal with no norm goes dark — the worse failure, because it is",
+    "silent. The per-club rows are the deferred work and the ones that should actually diagnose.",
+    "",
     "One candidate was considered again and NOT converted, and the reason is the same one it",
     "was refused for the first time:",
     "",
@@ -1648,6 +1662,15 @@
       "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
+      "measure": "m_lmLaunchDirection",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 2.0,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "Mirrors the m_launchDirection row exactly — same corridor, same basis — because it grades the same quantity from a different instrument. It exists separately because sig_pull and sig_push were moved onto it: m_launchDirection reads the bare `launchDirection` key, which is our own planned optical route and resolves nothing, so the pull and push outcomes could never fire from it. Should the optical producer ever land, the two rows must be kept in step or the same shot will grade two ways depending on which instrument saw it. Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
+    },
+    {
       "measure": "m_launchAngle",
       "context": "any",
       "mu": 15.0,
@@ -1803,6 +1826,17 @@
       "unit": "°",
       "source": "heuristic",
       "citation": "Provisional. Re-seat from the professional benchmark curves in 10.1123/jab.27.3.242 (means and SDs across the swing cycle for pelvis rotation, upper-torso rotation and X-factor, over 10 professionals); cross-check against 10.3389/fspor.2022.986281. The catalogue's own howToRead for pelvisRotation states roughly 45° of pelvic turn at the top, which is what these are seated on until the curves are read off."
+    },
+    {
+      "measure": "m_carryDistance",
+      "context": "full_swing",
+      "mu": 40.0,
+      "sigmaLo": 10.0,
+      "plausibleLo": 2.0,
+      "plausibleHi": 400.0,
+      "unit": "yd",
+      "source": "heuristic",
+      "citation": "A DUFF GUARD, NOT A CARRY CORRIDOR, and the numbers are chosen so it can only ever say that. Carry is the most club- and athlete-dependent number in the pack — a lob wedge and a driver are 200 yards apart for the same golfer — so any corridor spanning the bag would grade a normal wedge as a fault. Set as a FLOOR at 40 yards, so a full swing has to be carrying under about 30 before sig_carryDeficit fires, which is a topped or duffed shot rather than a short one. There is no fault called too much carry, hence the floor. It exists because m_carryDistance went live with the launch monitor connector while its per-club evidence base did not, and the pack forbids a live corridor signal with no norm — without a row the signal would go dark, which is the worse failure because it is silent. At full_swing rather than any, deliberately: a chip or a pitch carries less than this by design. THE PER-CLUB ROWS ARE THE DEFERRED WORK and the ones that should actually diagnose a short carry — see the m_clubheadSpeedImpact rows for the shape that work takes."
     }
   ]
 }

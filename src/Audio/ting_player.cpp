@@ -72,8 +72,15 @@ void TingPlayer::play()
     m_buf->open(QIODevice::ReadOnly);
 
     m_sink = new QAudioSink(device, fmt);
-    m_sink->setVolume(1.0);
+    m_sink->setVolume(m_volume);
     m_sink->start(m_buf);
+}
+
+void TingPlayer::setVolume(double v)
+{
+    // Applied when the next ting starts rather than to the sink in flight: these are
+    // 600 ms one-shots, so there is nothing to gain from ducking one mid-play.
+    m_volume = std::clamp(v, 0.0, 1.0);
 }
 
 void TingPlayer::setFrequency(double hz)

@@ -19,7 +19,7 @@
 #include "metric_catalogue.h"
 
 // The one place every descriptor is declared (design §3.3 / build order §3) — the full design
-// catalogue (shot_analyzer_design.md §A). 70 descriptors.
+// catalogue (shot_analyzer_design.md §A). 86 descriptors.
 //
 // EVERY DESCRIPTOR DECLARES A ROUTE LADDER, and it is the only statement of what the metric needs.
 // `.routes` is ordered BEST FIRST, and its LAST rung is the cheapest way to get the metric at all;
@@ -33,7 +33,13 @@
 //   body_rotation ×4, club_delivery ×3, the trail-wrist series ×1, tempo_metrics ×2, and the two
 //   wrist Summary scores.
 //
-// PLANNED (25) — every rung planned, so nothing produces them by any route. `.planned` on a ROUTE
+// DEVICE (25) — the `lm.` readings a connected launch monitor supplies. Live, not planned: the
+//   GC Quad connector reads them out of FSX2020's LastShot.CSV. They resolve Measured on a shot the
+//   monitor reported and say "needs a launch monitor" otherwise, which is now a true statement with
+//   a purchase behind it rather than a promise. See the Launch monitor block at the foot of this
+//   file for why every one of them is `lm.`-prefixed even where nothing else could ever produce it.
+//
+// PLANNED (16) — every rung planned, so nothing produces them by any route. `.planned` on a ROUTE
 //   rather than on a metric is the distinction that had been missing, and nine of these were
 //   mis-stated because of it: `clubPath` is not work we owe, it is a metric that needs a camera
 //   pointing down the target line, and saying "planned" about it promised a pipeline while hiding
@@ -53,11 +59,10 @@
 //     · SENSORS WE DO NOT PLACE — hipInternalRotation.
 //     · WORK WE HAVE NOT DONE — launchAngle / ballSpeed need a ball-FLIGHT tracker (the detector we
 //       have is an at-spot presence tracker), kinematicSequence needs angular-SPEED series, and
-//       swingScore needs a live adherence scorer.
-//     · NO CONNECTOR — the nine launch-monitor readings. They REQUIRE the device and are ALSO
-//       planned, which is the pair a route can state and the old metric-level flag could not.
-//       Nothing sets `hasLaunchMonitor` outside a test, so "needs a launch monitor" on its own
-//       would tell a golfer to buy hardware that would change nothing.
+//       swingScore needs a live adherence scorer. These four KEEP their planned rungs even though a
+//       launch monitor now measures the same quantities, because `lm.ballSpeed` is a separate
+//       metric and not a substitute — the point of owning the device is to check our estimate
+//       against it, which needs both to exist.
 //
 // NO DESCRIPTOR AND NO PROVIDER MAY READ `sessionType`. Availability is about the shot's data and
 //   devices; a session type is what the operator meant to capture, which is not evidence about what
@@ -119,6 +124,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "it. Higher is closer to the reference; a low score points you at whichever checkpoint "
             "fell outside its band — most often a cupped lead wrist at the top. It needs the "
             "lead-forearm and lead-hand IMUs and is produced only in a Wrist Motion session."),
+        .signPositive = QString(),
+        .signNegative = QString(),
         .routes = {
             via("wristImus", RM::Inertial, Direct, { .imuRoles = { R::LeadForearm, R::LeadHand } },
                 QStringLiteral("rolled up from the lead-wrist checkpoints the forearm and hand "
@@ -147,6 +154,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "'blended' — the player sits between styles. Use it to read a player's natural pattern "
             "before coaching toward or away from it. v1 scores lead-wrist flex/extension only; it "
             "needs the lead-forearm and lead-hand IMUs."),
+        .signPositive = QString(),
+        .signNegative = QString(),
         .routes = {
             via("wristImus", RM::Inertial, Direct, { .imuRoles = { R::LeadForearm, R::LeadHand } },
                 QStringLiteral("scored from the lead-wrist flex/extension the forearm and hand "
@@ -172,6 +181,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "swing adherence scorer is not yet wired into a live analyzer, so no value is produced "
             "today. When it lands it will summarise the body-rotation, sequence and delivery "
             "metrics the way the wrist score summarises the wrist checkpoints."),
+        .signPositive = QString(),
+        .signNegative = QString(),
         .routes = {
             via("adherence", RM::Derived, Direct, { .faceOnCamera = true },
                 QStringLiteral("the swing adherence scorer is not wired into a live analyzer, so "
@@ -201,6 +212,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "roughly 15–30° more flexed than address, while a cupped top tends to leave the face "
             "open. Restricting this axis costs more clubhead speed than the others, so treat a "
             "cupping trend as a priority. Wrist Motion session; needs the lead-forearm and hand IMUs."),
+        .signPositive = QStringLiteral("flexion — the lead wrist bowed"),
+        .signNegative = QStringLiteral("extension — the lead wrist cupped"),
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
@@ -232,6 +245,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "desirable; better players hold less deviation into impact, where lower handicaps show "
             "noticeably less wandering. This is the least reliable IMU axis (~5° typical error), so "
             "trust the shape of the trend over any single value. Needs the lead-forearm and hand IMUs."),
+        .signPositive = QStringLiteral("ulnar deviation — the wrist hinged or cocked"),
+        .signNegative = QStringLiteral("radial deviation"),
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
@@ -264,6 +279,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "pair with bow/cup — a player short on bow may compensate with roll, and vice versa. It "
             "needs the lead-forearm, hand and upper-arm IMUs (the upper-arm gives the forearm a "
             "reference to rotate against)."),
+        .signPositive = QStringLiteral("pronation — the lead forearm rolled toward face-down"),
+        .signNegative = QStringLiteral("supination"),
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
@@ -298,6 +315,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "through impact is the goal. A chicken-wing — rising flexion into and past impact — "
             "usually signals an early release or a stalling body and shows up here as a growing "
             "value. It needs the lead-forearm, hand and upper-arm IMUs."),
+        .signPositive = QStringLiteral("elbow flexion — a more bent lead arm; 0° is straight"),
+        .signNegative = QString(),
         .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
@@ -337,6 +356,10 @@ void installMetricManifest(MetricCatalogue &cat)
         // flexion-positive, and the two differ because the hands are mirror images seen from the
         // same side — see howToRead. The seven pack corridors are seated on this polarity
         // (m_trailWristFlexExt_p4 at +45°, which is the trail wrist CUPPING at the top).
+        .signPositive = QStringLiteral(
+            "extension — the trail wrist cupped, the opposite of the lead wrist's polarity because "
+            "the hands are mirror images"),
+        .signNegative = QStringLiteral("flexion — the trail wrist bowed"),
         .flexPositive = false,
         .phases = { P::Top, P::Impact },
         // LIVE from the face-on pose (pose_wrist_angle_source.cpp buildTrailWristSeries), as an
@@ -378,6 +401,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "directly; with only a face-on camera it is ESTIMATED from the collapse of the hip "
             "span in the image, which is honest but weakest near square — read small values with "
             "the stated uncertainty rather than at face value."),
+        .signPositive = QStringLiteral(
+            "turn away from address — a MAGNITUDE, so positive at the top and again at impact, "
+            "passing through zero as the body squares"),
+        .signNegative = QString(),
         .phases = { P::Top, P::Impact },
         // THE WORKED LADDER. A pelvis IMU measures the turn; a face-on camera estimates it from the
         // hip span. Both rungs are live, both are stated here, and everything downstream follows —
@@ -422,6 +449,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "from a thorax IMU when one is bound and otherwise estimated from the collapse of the "
             "shoulder span in the face-on image. A full shoulder turn sits near the top of what "
             "that estimate can resolve, which is why the corridor over it is wide."),
+        .signPositive = QStringLiteral("turn away from address — a MAGNITUDE, so positive at the top and again at impact"),
+        .signNegative = QString(),
         .phases = { P::Top, P::Impact },
         .routes = {
             via("thoraxImu", RM::Inertial, Direct, { .imuRoles = { R::Thorax } },
@@ -458,6 +487,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "much the gap grows early in the downswing. It is the difference of the two turn "
             "magnitudes, so it inherits the weaker of them: with no trunk IMUs both halves are "
             "camera estimates and the separation carries both uncertainties."),
+        .signPositive = QStringLiteral("the chest turned further than the pelvis"),
+        .signNegative = QStringLiteral("the pelvis turned further than the chest"),
         .phases = { P::Top },
         .routes = {
             via("trunkImus", RM::Inertial, Direct, { .imuRoles = { R::Pelvis, R::Thorax } },
@@ -490,6 +521,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "sequencing, not more turn. Measured against the X-factor at the top, so it needs a "
             "segmented top of backswing; without one it is absent rather than anchored to an "
             "arbitrary instant."),
+        .signPositive = QStringLiteral("separation still growing after the top — the stretch"),
+        .signNegative = QStringLiteral("separation already unwinding at the top"),
         .phases = { P::Transition, P::Downswing },
         .routes = {
             via("trunkImus", RM::Inertial, Direct, { .imuRoles = { R::Pelvis, R::Thorax } },
@@ -521,6 +554,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "on the trail hip are typical references. Restricted rotation on one side often forces "
             "a compensation elsewhere in the chain, so this is as much a physical-screening tool as "
             "a swing metric. Planned: needs a pelvis IMU plus thigh IMUs."),
+        .signPositive = QStringLiteral("internal rotation of that hip"),
+        .signNegative = QStringLiteral("external rotation"),
         .phases = { P::Top, P::Impact },
         .routes = {
             via("pelvisThighImus", RM::Inertial, Direct,
@@ -560,6 +595,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "irons commonly holding around 30–40° into impact. A loss of forward bend into impact "
             "is early extension and pairs with the pelvis-thrust metric; too much is a dip that "
             "moves the low point. Planned: needs pelvis and thorax IMUs (or a calibrated 3D camera)."),
+        .signPositive = QStringLiteral("more forward bend from the hips"),
+        .signNegative = QStringLiteral("standing taller than upright, which a swing does not reach"),
         .phases = { P::Address, P::Impact },
         .routes = {
             via("dtl", RM::Projected, Direct, { .dtlCamera = true },
@@ -594,6 +631,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "that both exist is the honest reading of thorax-relative-to-pelvis, and the "
             "difference cancels the whole-body lean that secondary axis tilt already reports. "
             "POSITIVE IS SIDE BEND TOWARD THE TRAIL SIDE. Needs a face-on camera."),
+        .signPositive = QStringLiteral("side bend toward the TRAIL side"),
+        .signNegative = QStringLiteral("side bend toward the lead side"),
         .phases = { P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -620,6 +659,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "FROM THE TARGET — the one lateral channel that is trail-positive rather than "
             "lead-positive, because the quantity is named for the lean away from the target and "
             "inverting it would leave every sentence about it backwards. Needs a face-on camera."),
+        .signPositive = QStringLiteral("the upper body leaning AWAY from the target — trail-side lean"),
+        .signNegative = QStringLiteral("leaning toward the target"),
         .phases = { P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -650,6 +691,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "hanging back. The scale is the golfer's own address stance rather than centimetres, "
             "which needs no ruler and asks the question a coach actually asks — how far across the "
             "stance, not how many centimetres across the room. Needs a face-on camera."),
+        .signPositive = QStringLiteral("the pelvis moved toward the LEAD side"),
+        .signNegative = QStringLiteral("moved away from the lead side"),
         .phases = { P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -681,6 +724,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "downswing is early extension and pairs with a loss of spine forward bend. This motion "
             "lives along the camera's optical axis, so it genuinely needs a down-the-line view — a "
             "lone face-on camera cannot resolve it. Planned."),
+        .signPositive = QStringLiteral("the pelvis moved toward the ball"),
+        .signNegative = QStringLiteral("moved away from the ball"),
         .phases = { P::Downswing, P::Impact },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .faceOnCamera = true, .dtlCamera = true },
@@ -709,6 +754,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "the club off its path. Read it alongside pelvis thrust and spine forward bend. This is "
             "the pelvis CENTRE rising or sinking as a whole; one hip riding up above the other is a "
             "different quantity and has its own metric in hip line tilt. Needs a face-on camera."),
+        .signPositive = QStringLiteral("the pelvis rose"),
+        .signNegative = QStringLiteral("the pelvis dropped"),
         .phases = { P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -740,6 +787,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "ALIGNMENT READING: at address and impact the same line answers open / square / closed, "
             "which is why `hipAlignment` is not a separate metric — one curve, sampled at different "
             "phases, and positive still means the trail hip sits higher."),
+        .signPositive = QStringLiteral("the TRAIL hip sits above the lead hip"),
+        .signNegative = QStringLiteral("the lead hip sits above the trail hip"),
         .phases = { P::Address, P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -774,6 +823,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "turns about, so treat a reading here as an observation that points at a cause rather "
             "than as the cause itself — the down-the-line view and a physical hip screen are what "
             "settle it. Needs a face-on camera."),
+        .signPositive = QStringLiteral("the lead knee moved toward the LEAD side"),
+        .signNegative = QStringLiteral("moved toward the trail side — working inward"),
         .phases = { P::Top },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -802,6 +853,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "drivers run about 113 mph and 7-irons about 89 mph, but the right number is club- and "
             "player-dependent. On a single face-on camera this is an in-plane estimate, so treat "
             "motion along the depth axis as approximate. Needs face-on club tracking."),
+        .signPositive = QStringLiteral("a faster clubhead"),
+        .signNegative = QString(),
         .phases = { P::Impact },
         .routes = {
             via("clubSensorFused", RM::Fused, Direct,
@@ -836,6 +889,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "slowing lets the clubhead sling past for maximum speed at the ball. Hands still "
             "accelerating at impact usually mean the release is late or the body has stalled. Needs "
             "face-on club tracking (the grip point)."),
+        .signPositive = QStringLiteral("faster hands"),
+        .signNegative = QString(),
         .phases = { P::Impact },
         .routes = {
             via("faceOn+dtl", RM::Triangulated, Direct,
@@ -865,6 +920,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "downswing means more stored lag, which then releases toward impact. Casting (the angle "
             "widening early) throws away speed and steepens the club, while holding it too long can "
             "leave the face open. It needs both the face-on club track and the lead-forearm pose."),
+        .signPositive = QStringLiteral("more lag retained — a tighter forearm-to-shaft angle"),
+        .signNegative = QString(),
         .phases = { P::Downswing, P::Impact },
         .routes = {
             via("faceOnClub", RM::Projected, Direct, { .faceOnCamera = true, .clubTrack = true },
@@ -891,6 +948,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "for irons, while the driver is played with the shaft close to vertical or leaning "
             "back. Too little lean (or backward lean) on an iron usually means an early release, "
             "with thin/fat tendencies. It needs the face-on club track; Wrist Motion session."),
+        .signPositive = QStringLiteral("the shaft leaning FORWARD, toward the target"),
+        .signNegative = QStringLiteral("leaning back, away from the target"),
         .phases = { P::Impact },
         .routes = {
             via("faceOnClub", RM::Projected, Direct, { .faceOnCamera = true, .clubTrack = true },
@@ -919,6 +978,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "look for consistency across swings more than an absolute target. A down-the-line "
             "camera is the classic view for plane, and with no club tracked the value falls back to "
             "a hand-path proxy that should be labelled as such. Planned: needs the club track."),
+        .signPositive = QStringLiteral("a steeper plane"),
+        .signNegative = QStringLiteral("a flatter plane"),
         .phases = { P::Downswing },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .dtlCamera = true, .clubTrack = true },
@@ -949,10 +1010,17 @@ void installMetricManifest(MetricCatalogue &cat)
             "ball's start line and curvature, making it one of the two numbers that most directly "
             "explain shot shape."),
         .howToRead = QStringLiteral(
-            "Read at Impact; most good iron shots sit within a few degrees either side of zero, "
-            "with the desired path depending on the shape being played. The discriminating axis is "
+            "Read at Impact. POSITIVE IS IN-TO-OUT for a right-handed golfer — the head travelling "
+            "right of the target line — and negative is out-to-in. Most good iron shots sit within "
+            "a few degrees either side of zero, with the desired path depending on the shape being "
+            "played. THIS METRIC IS THE HOUSE CONVENTION for the target-line axis: `launchDirection` "
+            "and `shaftDirection` both state their signs by reference to it, and it is the same "
+            "convention Foresight publishes, so `lm.clubPath` needs no negation on the way in and "
+            "the measured and estimated pair stay directly comparable. The discriminating axis is "
             "the optical (toward-ball) axis, which is exactly what a face-on camera cannot see — "
             "this is a canonical down-the-line metric. Planned: needs the club track and a DTL camera."),
+        .signPositive = QStringLiteral("the head travelling RIGHT of the target line — in-to-out for a right-hander"),
+        .signNegative = QStringLiteral("travelling left — out-to-in for a right-hander"),
         .phases = { P::Impact },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .dtlCamera = true, .clubTrack = true },
@@ -984,6 +1052,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "measure it. What remains is a small cosine term from the path's depth component. "
             "Needs the club track with a MEASURED clubhead — a projected head carries the grip's "
             "motion, and differentiating it gives a confident number about the wrong thing."),
+        .signPositive = QStringLiteral("an UPWARD strike"),
+        .signNegative = QStringLiteral("a descending strike"),
         .phases = { P::Impact },
         .routes = {
             via("faceOnClub", RM::Projected, Direct, { .faceOnCamera = true, .clubTrack = true },
@@ -992,38 +1062,6 @@ void installMetricManifest(MetricCatalogue &cat)
                                "NOT a down-the-line metric")) },
         .usedBy = { QStringLiteral("characteristic:attack_too_shallow"),
                     QStringLiteral("characteristic:attack_too_steep") },
-    });
-
-    cat.addDescriptor({
-        .key = QStringLiteral("faceAngle"),
-        .type = MetricType::PointInTime,
-        .label = QStringLiteral("Face angle"),
-        .shortLabel = QStringLiteral("Face"),
-        .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Club delivery"),
-        .description = QStringLiteral(
-            "Where the clubface is pointing at impact relative to the target line — the primary "
-            "control on where the ball starts, since start direction is dominated by face angle. "
-            "OPEN IS NEGATIVE AND CLOSED IS POSITIVE, the same convention as club path, so face-"
-            "minus-path carries the sign the shot shape implies. Small open/closed differences here "
-            "are the difference between a fairway and a penalty area."),
-        .howToRead = QStringLiteral(
-            "Read at Impact; you want small, repeatable open/closed values matched to the intended "
-            "path. Requires a launch monitor: face orientation at impact is a sub-millisecond event "
-            "and a camera alone can only offer a forearm-and-wrist proxy, which would be an "
-            "estimate wearing a measurement's clothes. The lead-wrist measures corroborate it; they "
-            "do not stand in for it."),
-        .phases = { P::Impact },
-        // Its one rung needs a device AND is planned — see the Launch monitor block below. It had
-        // once been planned with a CLUB-TRACK requirement, which is the mistake worth not repeating:
-        // that said a producer was coming and that club instrumentation would be enough, and the
-        // second half was simply wrong. Naming the right hardware is what matters; whether the
-        // connector exists is a separate field.
-        .routes = {
-            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("read from a launch monitor — not optically resolvable at our "
-                               "frame rates — and no connector is wired in this build yet"),
-                PLANNED) },
     });
 
     cat.addDescriptor({
@@ -1048,6 +1086,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "handedness, so a mirrored camera cannot invert the sign. Needs a face-on camera, the "
             "club track and the ball (which supplies both the reference the answer is stated "
             "against and, through its diameter, the inches it is stated in)."),
+        .signPositive = QStringLiteral("the arc bottoming out AHEAD of the ball, on the target side"),
+        .signNegative = QStringLiteral("bottoming out behind the ball"),
         .phases = { P::Impact },
         .routes = {
             via("faceOnClubBall", RM::Projected, Direct,
@@ -1083,6 +1123,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "than its consistency and its ratio to the downswing (see tempo ratio). Needs a "
             "confidently segmented swing — it is refused rather than estimated when the phase "
             "events are unreliable."),
+        .signPositive = QStringLiteral("a longer backswing"),
+        .signNegative = QString(),
         .phases = { P::Impact },
         .routes = {
             via("phases", RM::Derived, Direct, { },
@@ -1110,6 +1152,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "3:1 — is a reliable early warning of a rhythm problem. Read it alongside its "
             "uncertainty: the top of the swing sits in both halves of the sum, so a small error in "
             "locating it moves this number more than you would expect."),
+        .signPositive = QStringLiteral("a backswing slower relative to the downswing"),
+        .signNegative = QString(),
         .phases = { P::Impact },
         // The corridor that used to be inlined here (green 2.2–3.0, amber 1.8–3.6) is now the
         // `m_tempoRatio` norm row in src/Resources/diagnostics/norms.json, and the note explaining
@@ -1141,6 +1185,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "of speed or a stall. Reference peaks run roughly pelvis ~480, thorax ~605 and lead-arm "
             "~1310 °/s with about a 50 ms transition gap. Planned: needs body IMUs (pelvis, thorax "
             "and lead forearm) and the club track."),
+        .signPositive = QString(),
+        .signNegative = QString(),
         .phases = { P::Transition, P::Impact },
         .routes = {
             via("segmentImus", RM::Inertial, Direct,
@@ -1169,6 +1215,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "millimetres, because a tall player and a short player take genuinely different stances "
             "and neither is wrong; it also happens to be how a stance is described out loud. Needs "
             "a face-on whole-body camera with both shoulders visible at address."),
+        .signPositive = QStringLiteral("a wider stance"),
+        .signNegative = QString(),
         .phases = { P::Address },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1195,6 +1243,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "comparable between golfers of different heights — use the shoulder-width reading for "
             "that, and for any normative judgement. Present only when the ball was detected at "
             "address, since the ball IS the ruler."),
+        .signPositive = QStringLiteral("a wider stance"),
+        .signNegative = QString(),
         .phases = { P::Address },
         .routes = {
             via("faceOnBall", RM::Projected, Direct, { .faceOnCamera = true, .ballTrack = true },
@@ -1225,6 +1275,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "Because this is a ratio of two distances in the same plane it is directly comparable "
             "between swings and cameras, unlike stance width itself. Needs a face-on camera and a "
             "detected ball at address."),
+        .signPositive = QStringLiteral(
+            "the ball further BACK, toward the trail foot — 0% is the lead heel, 100% the trail "
+            "heel, the scale other golf software uses"),
+        .signNegative = QStringLiteral("forward of the lead heel, which is a real driver setup"),
         .phases = { P::Address },
         .routes = {
             via("faceOnBall", RM::Projected, Direct, { .faceOnCamera = true, .ballTrack = true },
@@ -1250,6 +1304,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "A single address measurement. More flare (toe pointing out toward the target) makes it "
             "easier for the lead hip to rotate open and clear through the strike, which can help "
             "players who struggle to finish their turn. Needs a face-on whole-body camera."),
+        .signPositive = QStringLiteral("the lead toe turned out, away from the ball"),
+        .signNegative = QStringLiteral("turned in"),
         .phases = { P::Address },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1273,6 +1329,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "backswing turn, while flaring it out lets the hips turn more freely going back — a "
             "useful lever for players who lack mobility or over-rotate. Needs a face-on whole-body "
             "camera."),
+        .signPositive = QStringLiteral("the trail toe turned out, away from the ball"),
+        .signNegative = QStringLiteral("turned in"),
         .phases = { P::Address },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1297,6 +1355,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "plane. Because it is measured face-on it reads the apparent line rather than true "
             "target-line alignment, which a down-the-line or overhead view would resolve more "
             "directly. Needs a face-on whole-body camera."),
+        .signPositive = QStringLiteral("a closed stance line as the camera sees it"),
+        .signNegative = QStringLiteral("an open stance line — and this one line metric FLIPS for a mirrored camera"),
         .phases = { P::Address },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1323,6 +1383,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "value. The centimetre scale comes from the ball-diameter ruler at the ground plane, so "
             "the metric is absent rather than rescaled when no ball was detected. Needs a face-on "
             "whole-body camera and a detected ball."),
+        .signPositive = QStringLiteral("the lead heel further off the ground"),
+        .signNegative = QString(),
         .phases = { P::Top },
         // ballTrack is not optional decoration: foot_metrics.cpp emits this curve only when
         // mmPerPx resolved, because the reading is centimetres and the ball diameter is the only
@@ -1367,6 +1429,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "way down). Read it together with lead-arm flexion and the shoulder line. POSITIVE "
             "MEANS THE TRAIL ELBOW SITS ABOVE THE LEAD ELBOW, the same convention every body line "
             "in the product uses. Needs a face-on camera."),
+        .signPositive = QStringLiteral("the TRAIL elbow sits above the lead elbow"),
+        .signNegative = QStringLiteral("the lead elbow sits above the trail elbow"),
         .phases = { P::Address, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1397,6 +1461,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "target-line alignment, which a down-the-line or overhead view would resolve directly; "
             "unlike the toe line its sign does not invert for a left-handed golfer or a mirrored "
             "camera. Needs a face-on camera."),
+        .signPositive = QStringLiteral("the TRAIL ankle sits above the lead ankle — a closed stance"),
+        .signNegative = QStringLiteral("the lead ankle sits above the trail ankle — an open stance"),
         .phases = { P::Address, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1427,6 +1493,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "body is sliding. The centimetre scale comes from the inter-ear ruler, so the metric is "
             "absent rather than rescaled when the head is too small or too occluded to measure. "
             "Needs a face-on camera; Wrist Motion session."),
+        .signPositive = QStringLiteral("the head moved toward the LEAD side"),
+        .signNegative = QStringLiteral("moved away from the lead side"),
         .phases = { P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1455,6 +1523,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "suggests a drop into the shot. Read it alongside spine forward bend and pelvis lift. "
             "The centimetre scale comes from the inter-ear ruler, so the metric is absent rather "
             "than rescaled when it does not resolve. Needs a face-on camera; Wrist Motion session."),
+        .signPositive = QStringLiteral("the head rose"),
+        .signNegative = QStringLiteral("the head dropped"),
         .phases = { P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1483,6 +1553,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "normal; a large or abrupt tilt change can accompany a loss of posture or an "
             "over-active head. Read it with head sway and lift for the full picture of head motion. "
             "Needs a face-on camera; Wrist Motion session."),
+        .signPositive = QStringLiteral("the eye line tilted further than at address, trail-end high"),
+        .signNegative = QStringLiteral("tilted the other way from address"),
         .phases = { P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1522,6 +1594,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "shoulders and the hips, so this cannot come from the skeleton — but upper-back "
             "rounding is plainly visible in the BACK CONTOUR of a down-the-line silhouette. That "
             "makes it a producer worth building rather than a gap that can never close."),
+        .signPositive = QStringLiteral("a more rounded upper back"),
+        .signNegative = QStringLiteral("a flatter, more extended upper back"),
         .phases = { P::Address },
         .routes = {
             via("dtlContour", RM::Projected, Direct, { .dtlCamera = true },
@@ -1548,6 +1622,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "reason as thoracic flexion: no pose layout carries a keypoint between the shoulders "
             "and the hips, but the low-back arch is plainly visible in the BACK CONTOUR of a "
             "down-the-line silhouette."),
+        .signPositive = QStringLiteral("a more arched low back"),
+        .signNegative = QStringLiteral("a flattened low back"),
         .phases = { P::Address },
         .routes = {
             via("dtlContour", RM::Projected, Direct, { .dtlCamera = true },
@@ -1578,6 +1654,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "convention as the hip line. Needs a face-on camera. IT IS ALSO THE SHOULDER ALIGNMENT "
             "READING: at address and impact the same line answers open / square / closed, which is "
             "why `shoulderAlignment` is not a separate metric."),
+        .signPositive = QStringLiteral("the TRAIL shoulder sits above the lead shoulder"),
+        .signNegative = QStringLiteral("the lead shoulder sits above the trail shoulder"),
         .phases = { P::Address, P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1604,6 +1682,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "follow-through. Higher means more bend. A knee angle is between two SEGMENTS, not a "
             "property of the knee point itself — which is why the shin and thigh exist separately "
             "in the anatomy vocabulary. Needs a face-on camera."),
+        .signPositive = QStringLiteral("more knee bend"),
+        .signNegative = QString(),
         .phases = { P::Impact, P::ShaftParallelThrough },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .faceOnCamera = true, .dtlCamera = true },
@@ -1634,6 +1714,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "A per-frame curve; the change from impact into the follow-through is the reading that "
             "matters. A rising angle there means the arm is separating from the body rather than "
             "extending down the line. Needs a face-on camera."),
+        .signPositive = QStringLiteral(
+            "the arm further from the torso — UNSIGNED 0–180°, a frontal projection cannot say "
+            "which side it left on"),
+        .signNegative = QString(),
         .phases = { P::Impact, P::ShaftParallelThrough },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1660,6 +1744,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "cannot resolve it, because the distance runs along that camera's own axis. Normalised "
             "by shoulder width: a raw millimetre reading is not comparable between a tall golfer "
             "and a short one."),
+        .signPositive = QStringLiteral("standing further from the ball"),
+        .signNegative = QStringLiteral("standing closer to the ball"),
         .phases = { P::Address },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .dtlCamera = true, .ballTrack = true },
@@ -1688,6 +1774,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "pelvis went with it. Normalised by "
             "stance width so it compares across golfers and camera distances. Needs a face-on "
             "camera."),
+        .signPositive = QStringLiteral("the chest moved toward the LEAD side"),
+        .signNegative = QStringLiteral("moved away from the lead side"),
         .phases = { P::Address, P::ArmParallelDown },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1713,6 +1801,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "risen further above the shoulder line. Normalised by shoulder width rather than left "
             "in millimetres, so the same reading means the same thing for any golfer. Needs a "
             "face-on camera."),
+        .signPositive = QStringLiteral("the trail elbow higher above the shoulder line"),
+        .signNegative = QStringLiteral("below the shoulder line"),
         .phases = { P::Top },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1738,6 +1828,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "Expressed against the golfer's own arm length, so it reads as a fraction of the width "
             "actually available to them rather than as an absolute distance. Needs a face-on "
             "camera."),
+        .signPositive = QStringLiteral("the hands further from the chest — a wider arc"),
+        .signNegative = QStringLiteral("the hands closer to the chest"),
         .phases = { P::Top },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1773,6 +1865,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "A per-frame curve; the change from address to the top is the reading that matters. "
             "HIGHER MEANS MORE BEND, the same convention as the lead knee. A knee angle is between "
             "two SEGMENTS, not a property of the knee point. Needs a face-on camera."),
+        .signPositive = QStringLiteral("more knee bend"),
+        .signNegative = QString(),
         .phases = { P::Address, P::Top },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .faceOnCamera = true, .dtlCamera = true },
@@ -1801,6 +1895,10 @@ void installMetricManifest(MetricCatalogue &cat)
             "FROM THE LEAD ANKLE — still back, or fallen through it — so a balanced finish is the "
             "low end. It is a proxy for balance, not a measurement of it: without pressure data "
             "this reads geometry only. Needs a face-on camera."),
+        .signPositive = QStringLiteral(
+            "further FROM the lead ankle — UNSIGNED, because still back and fallen through are the "
+            "same fault seen from either side"),
+        .signNegative = QString(),
         .phases = { P::Impact, P::Finish },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1828,6 +1926,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "matters. HIGHER MEANS A LARGER GAP — the arm further from the chest. Some separation is "
             "normal and a value of zero would mean the arm is pinned, which is its own fault. Needs "
             "a face-on camera."),
+        .signPositive = QStringLiteral("a larger gap — the arm further from the chest"),
+        .signNegative = QString(),
         .phases = { P::Top },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
@@ -1857,6 +1957,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "left: laid off, or dragged inside. Zero is parallel to the target line, which is the "
             "reference both positions are named against. Planned: needs the club track and a "
             "down-the-line camera."),
+        .signPositive = QStringLiteral("pointing RIGHT of the target line — across the line for a right-hander"),
+        .signNegative = QStringLiteral("pointing left — laid off, or dragged inside"),
         .phases = { P::ShaftParallelBack, P::Top },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .dtlCamera = true, .clubTrack = true },
@@ -1887,6 +1989,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "shaft angle itself, because a line carries a 180° ambiguity that the endpoint pair "
             "resolves for free. Needs the club track with a MEASURED clubhead and a face-on "
             "camera."),
+        .signPositive = QStringLiteral("PAST parallel to the ground; zero IS parallel"),
+        .signNegative = QStringLiteral("short of parallel"),
         .phases = { P::Top },
         .routes = {
             via("faceOnClub", RM::Projected, Direct, { .faceOnCamera = true, .clubTrack = true },
@@ -1927,14 +2031,18 @@ void installMetricManifest(MetricCatalogue &cat)
             "leaves. Beyond that, start direction is "
             "left and right of the target — the depth axis of a face-on camera — so even with a "
             "flight track this one needs a down-the-line or overhead view."),
+        .signPositive = QStringLiteral("the ball starting RIGHT of the target line — a push for a right-hander"),
+        .signNegative = QStringLiteral("starting left — a pull"),
         .phases = { P::Impact },
         .routes = {
             via("dtlFlight", RM::Triangulated, Direct, { .dtlCamera = true, .ballTrack = true },
                 QStringLiteral("where the ball left relative to the target line is a depth-axis "
                                "reading, and it needs a ball-FLIGHT track rather than the at-spot "
                                "detector we have"), PLANNED) },
-        .usedBy = { QStringLiteral("characteristic:pull"),
-                    QStringLiteral("characteristic:push") },
+        // NO usedBy. The pull and push characteristics read the MEASURED start direction
+        // (`lm.launchDirection`), because this route is planned optical work and resolves
+        // nothing — a claim here would point two characteristics at a metric that never
+        // produces a value. It moves back if the optical producer ever lands.
     });
 
     cat.addDescriptor({
@@ -1958,6 +2066,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "reports whether it is still at that spot and records the instant it vanishes, so "
             "BallSample2D::center is always the locked spot and never a ball in the air. What this "
             "metric needs is a tracker that FOLLOWS the ball after it leaves."),
+        .signPositive = QStringLiteral("a higher launch"),
+        .signNegative = QStringLiteral("the ball leaving below horizontal"),
         .phases = { P::Impact },
         .routes = {
             via("ballFlight", RM::Projected, Direct, { .faceOnCamera = true, .ballTrack = true },
@@ -1988,6 +2098,8 @@ void installMetricManifest(MetricCatalogue &cat)
             "BallSample2D::center is always the locked spot and never a ball in the air. What this "
             "metric needs is a tracker that FOLLOWS the ball after it leaves, which is a different "
             "piece of work from the one we have."),
+        .signPositive = QStringLiteral("a faster ball off the face"),
+        .signNegative = QString(),
         .phases = { P::Impact },
         .routes = {
             via("ballFlight", RM::Projected, Direct, { .faceOnCamera = true, .ballTrack = true },
@@ -1999,22 +2111,236 @@ void installMetricManifest(MetricCatalogue &cat)
 
     // ---------------------------------------------------- Launch monitor
     //
-    // BOTH FACTS AT ONCE: the rung requires the device AND is PLANNED, because nothing in this
-    // build can read one. `hasLaunchMonitor` is set by no code outside a test, so a golfer with a
-    // monitor plugged in gets exactly what a golfer without one gets — and telling them "needs a
-    // launch monitor" would be a lie with a price on it, since buying the thing changes nothing.
+    // EVERY READING FROM A LAUNCH MONITOR IS KEYED `lm.`, WITHOUT EXCEPTION — including the ones we
+    // will never produce ourselves, like face angle. That is not a naming preference; it is the
+    // whole design.
     //
-    // This is not a reversal of the rule that hardware is a requirement rather than a roadmap item.
-    // That rule was written when `planned` was a METRIC-level flag with nowhere to put the hardware,
-    // so marking these planned really did erase the requirement and promise work instead. On a route
-    // the two are separate fields and both are stated: the Needs facet still says "Launch monitor",
-    // the badge says Planned, and the reason says why. `clubPath` is the same shape — it needs a
-    // camera we do not have a capture path for AND a producer we have not written.
+    // The monitor's first job here is to be a REFERENCE INSTRUMENT we check our own optical
+    // estimates against. The developer guide already names it as the validation instrument for
+    // clubheadSpeed, handSpeed, attackAngle, clubPath, launchAngle and ballSpeed. But this ladder
+    // resolves exactly ONE winner per key: a Device rung added above `clubheadSpeed`'s camera rung
+    // would not sit beside our estimate, it would replace it, and the comparison that justifies
+    // owning the device would be gone the moment it was plugged in. So the measurement is a metric
+    // of its own and the estimate keeps its bare key untouched. A shot carries both, side by side.
     //
-    // Dropping `PLANNED` from these nine rungs is the whole of the change when a connector lands.
+    // WHICH QUANTITIES KEEP A BARE COUNTERPART: those with a non-launch-monitor route in this file,
+    // live or planned. `clubheadSpeed` and `attackAngle` we produce today; `ballSpeed`,
+    // `launchAngle`, `launchDirection` and `clubPath` are planned optical work we still intend. Each
+    // of those six has an `lm.` twin below and the pair IS the validation surface. Everything else
+    // here has no bare form at all, because nothing but a device will ever measure it — the nine
+    // descriptors that used to carry a PLANNED launchMonitor rung under a bare key were RENAMED
+    // rather than promoted, so no key is left behind resolving Unavailable for ever.
+    //
+    // SIGNS. Foresight states every lateral quantity as POSITIVE-IS-RIGHT for a right-handed golfer,
+    // and positive face angle as OPEN. That is self-consistent — face-to-path really is face minus
+    // path in its numbers — and it already matches what `faceToPath`, `spinAxis` and
+    // `launchDirection` say here. The one place it did NOT match was the old bare `faceAngle`, whose
+    // prose said "OPEN IS NEGATIVE AND CLOSED IS POSITIVE" while the metric it feeds said the
+    // opposite. `lm.faceAngle` states the device's convention, which resolves that disagreement
+    // rather than carrying it forward; the raw block in swing.json and the metric now agree, and a
+    // reader comparing the two never has to know which one was negated on the way in.
 
     cat.addDescriptor({
-        .key = QStringLiteral("faceToPath"),
+        .key = QStringLiteral("lm.clubheadSpeed"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Clubhead speed (measured)"),
+        .shortLabel = QStringLiteral("Club spd (LM)"),
+        .unit = QStringLiteral("mph"),
+        .group = QStringLiteral("Club & speed"),
+        .description = QStringLiteral(
+            "Clubhead speed at impact as a launch monitor measured it. Its whole value beside "
+            "`clubheadSpeed` is that the two can be compared: ours is a projected head-path speed "
+            "from a single face-on camera and loses whatever the club was doing along the depth "
+            "axis, and this is the number that says by how much."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. HIGHER IS FASTER. Expect our camera estimate to sit BELOW this on most "
+            "swings — a projection cannot recover the component pointing at the lens — and treat a "
+            "large or inconsistent gap as a statement about the camera setup rather than about the "
+            "golfer."),
+        .signPositive = QStringLiteral("a faster clubhead"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.ballSpeed"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Ball speed (measured)"),
+        .shortLabel = QStringLiteral("Ball spd (LM)"),
+        .unit = QStringLiteral("mph"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "How fast the ball left the face, measured. It is the single best predictor of distance "
+            "there is, and the numerator of smash factor."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. HIGHER IS FURTHER, for a given launch angle and spin. Read it "
+            "against clubhead speed rather than alone: a ball speed that is low for the speed that "
+            "produced it is a strike problem, not a power problem."),
+        .signPositive = QStringLiteral("a faster ball off the face"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor")) },
+        // NO usedBy: ball_speed_deficit reads the bare `ballSpeed` measure, which is where
+        // the pack has always pointed it. Claiming it here too would have two metrics
+        // answering for one characteristic.
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.smashFactor"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Smash factor"),
+        .shortLabel = QStringLiteral("Smash"),
+        .unit = QStringLiteral("ratio"),
+        .group = QStringLiteral("Strike"),
+        .description = QStringLiteral(
+            "Ball speed divided by clubhead speed — how much of the club's energy reached the ball. "
+            "It isolates strike quality from speed: two golfers swinging identically fast can be a "
+            "club apart in distance because one finds the middle of the face."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. HIGHER IS A MORE EFFICIENT STRIKE, with the practical ceiling set by "
+            "the club's loft — a driver reaches far higher than a wedge, so this is read per club "
+            "and never across them. BOTH SPEEDS COME FROM THE DEVICE. Deriving it from our camera "
+            "clubhead speed instead would put a projection error straight into the ratio and read "
+            "as a strike fault, which is why there is no bare `smashFactor`."),
+        .signPositive = QStringLiteral("a more efficient strike — more of the club's speed reaching the ball"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("ball speed over clubhead speed, both from a launch monitor")) },
+        .usedBy = { QStringLiteral("characteristic:smash_deficit") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.attackAngle"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Attack angle (measured)"),
+        .shortLabel = QStringLiteral("AoA (LM)"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "The vertical direction the clubhead was travelling at impact, measured. The twin of "
+            "our camera-derived `attackAngle`, and the reference that says whether the low-point "
+            "geometry we read off the shaft track is right."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS AN UPWARD STRIKE, negative a descending one — you want "
+            "descending with an iron and level-to-upward with a driver. Compare against our own "
+            "attack angle on the same shot: a consistent offset is a calibration matter, a scattered "
+            "one means the shaft track is not finding the head reliably."),
+        .signPositive = QStringLiteral("an UPWARD strike"),
+        .signNegative = QStringLiteral("a descending strike"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("the vertical club path at impact, read from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.clubPath"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Club path (measured)"),
+        .shortLabel = QStringLiteral("Path (LM)"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "The horizontal direction the clubhead was travelling at impact. With face angle it "
+            "settles both halves of ball flight: the path largely chooses the start line and the "
+            "face-to-path chooses the curve."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS IN-TO-OUT for a right-handed golfer — travelling right of "
+            "the target line — and negative is out-to-in. Zero is neither, which is not the same as "
+            "good: a path is only right relative to the shot being played."),
+        .signPositive = QStringLiteral("the head travelling RIGHT of the target line — in-to-out for a right-hander"),
+        .signNegative = QStringLiteral("travelling left — out-to-in for a right-hander"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("the horizontal club path at impact, read from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.launchAngle"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Launch angle (measured)"),
+        .shortLabel = QStringLiteral("Launch (LM)"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The vertical angle the ball left on. Together with ball speed and spin it settles the "
+            "whole flight, and it is mostly delivered loft plus a contribution from attack angle."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. HIGHER LAUNCHES HIGHER. What is right depends on the club and "
+            "on the spin beside it — a high launch with low spin carries, a high launch with high "
+            "spin balloons and costs distance."),
+        .signPositive = QStringLiteral("a higher launch"),
+        .signNegative = QStringLiteral("the ball leaving below horizontal"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.launchDirection"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Start direction (measured)"),
+        .shortLabel = QStringLiteral("Start (LM)"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The horizontal angle the ball started on, relative to the target line. It is dominated "
+            "by face angle, which is what makes it the cleanest evidence of where the face actually "
+            "pointed — and what makes a pull and a push readable without any club data at all."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. POSITIVE STARTS RIGHT of the target for a right-handed golfer, "
+            "negative starts left. Read it with spin axis: start line plus curvature is the whole "
+            "shot shape, and either on its own can flatter a miss."),
+        .signPositive = QStringLiteral("the ball starting RIGHT of the target line — a push for a right-hander"),
+        .signNegative = QStringLiteral("starting left — a pull"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("the initial ball direction, read from a launch monitor")) },
+        .usedBy = { QStringLiteral("characteristic:pull"),
+                    QStringLiteral("characteristic:push") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.faceAngle"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Face angle"),
+        .shortLabel = QStringLiteral("Face"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "Where the clubface is pointing at impact relative to the target line — the primary "
+            "control on where the ball starts, since start direction is dominated by face angle. "
+            "Small open/closed differences here are the difference between a fairway and a penalty "
+            "area."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS OPEN — pointing right of the target for a right-handed "
+            "golfer — and negative is closed. That is the device's own convention and the same one "
+            "club path and face-to-path use here, so face minus path really is face-to-path. You "
+            "want small, repeatable values matched to the intended path. Not optically resolvable "
+            "at our frame rates: a camera can offer only a forearm-and-wrist proxy, which would be "
+            "an estimate wearing a measurement's clothes. The lead-wrist measures corroborate it; "
+            "they do not stand in for it."),
+        .signPositive = QStringLiteral("the face pointing RIGHT of the target line — OPEN for a right-hander"),
+        .signNegative = QStringLiteral("pointing left — closed for a right-hander"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor — not optically resolvable at our "
+                               "frame rates")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.faceToPath"),
         .type = MetricType::PointInTime,
         .label = QStringLiteral("Face to path"),
         .shortLabel = QStringLiteral("Face/path"),
@@ -2030,86 +2356,116 @@ void installMetricManifest(MetricCatalogue &cat)
             "shot on whatever line the path started it. Requires a launch monitor: face orientation "
             "at impact is a sub-millisecond event and is not optically resolvable at our frame "
             "rates."),
+        .signPositive = QStringLiteral("the face OPEN to the path — curvature to the right, a fade"),
+        .signNegative = QStringLiteral("closed to the path — curvature to the left, a draw"),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("face angle less club path, from a launch monitor; no connector is wired in this build yet"), PLANNED) },
+                QStringLiteral("face angle less club path, from a launch monitor")) },
         .usedBy = { QStringLiteral("characteristic:closed_face_to_path"),
                     QStringLiteral("characteristic:open_face_to_path") },
     });
 
     cat.addDescriptor({
-        .key = QStringLiteral("spinAxis"),
+        .key = QStringLiteral("lm.dynamicLoft"),
         .type = MetricType::PointInTime,
-        .label = QStringLiteral("Spin axis"),
-        .shortLabel = QStringLiteral("Spin axis"),
+        .label = QStringLiteral("Dynamic loft"),
+        .shortLabel = QStringLiteral("Dyn loft"),
         .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Ball flight"),
+        .group = QStringLiteral("Club delivery"),
         .description = QStringLiteral(
-            "The tilt of the ball's axis of rotation, which is what curves the flight. It is the "
-            "outcome the golfer actually sees, where face-to-path is the cause of it at impact."),
+            "The loft actually presented to the ball at impact, as opposed to the loft stamped on "
+            "the club. Shaft lean removes it and flipping the hands adds it, which is why two "
+            "golfers with the same 7-iron can launch it four degrees apart."),
         .howToRead = QStringLiteral(
-            "Read just after Impact. POSITIVE TILTS RIGHT for a right-handed golfer — a fade or a "
-            "slice — and negative tilts left. Requires a launch monitor: the curvature develops "
-            "over a flight an indoor capture never sees."),
+            "Read at Impact. HIGHER MEANS MORE LOFT DELIVERED — a higher, weaker flight. Requires a "
+            "launch monitor: it is derived from face orientation at impact, which is not optically "
+            "resolvable at our frame rates. Our `impactShaftLean` is the camera-side corroboration "
+            "and moves against this one."),
+        .signPositive = QStringLiteral("more loft delivered to the ball"),
+        .signNegative = QStringLiteral("the face delofted past square"),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("read from a launch monitor; no connector is wired in this build yet"), PLANNED) },
-        .usedBy = { QStringLiteral("characteristic:hook"),
-                    QStringLiteral("characteristic:slice") },
+                QStringLiteral("read from a launch monitor")) },
     });
 
     cat.addDescriptor({
-        .key = QStringLiteral("spinRate"),
+        .key = QStringLiteral("lm.spinLoft"),
         .type = MetricType::PointInTime,
-        .label = QStringLiteral("Spin rate"),
-        .shortLabel = QStringLiteral("Spin"),
-        .unit = QStringLiteral("rpm"),
-        .group = QStringLiteral("Ball flight"),
+        .label = QStringLiteral("Spin loft"),
+        .shortLabel = QStringLiteral("Spin loft"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
         .description = QStringLiteral(
-            "How fast the ball is spinning as it leaves. Too much costs distance and makes the "
-            "flight balloon; too little costs the height and stopping power a shot needs to hold a "
-            "green."),
+            "The angle between the delivered loft and the direction the clubhead is travelling. It "
+            "is what generates spin: a small spin loft gives a hot, low-spinning strike, a large one "
+            "trades speed for spin and height."),
         .howToRead = QStringLiteral(
-            "Read just after Impact. HIGHER IS MORE SPIN. Strongly club-dependent — what is a "
-            "knuckleball for a wedge is a spinny drive — so the corridor is authored per club. "
-            "Requires a launch monitor: spin is not measurable over the short flight an indoor "
-            "capture sees."),
+            "Read at Impact. HIGHER MEANS MORE SPIN AND LESS SPEED for the same clubhead speed. "
+            "Dynamic loft less attack angle, both from the device — so it inherits their signs, and "
+            "a descending strike ADDS to it rather than subtracting."),
+        .signPositive = QStringLiteral("a larger angle between delivered loft and the direction of travel"),
+        .signNegative = QStringLiteral("the face delivered below the path direction"),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("read from a launch monitor; no connector is wired in this build yet"), PLANNED) },
-        .usedBy = { QStringLiteral("characteristic:spin_deficit"),
-                    QStringLiteral("characteristic:spin_excess") },
+                QStringLiteral("delivered loft less the vertical club path, from a launch monitor")) },
     });
 
     cat.addDescriptor({
-        .key = QStringLiteral("smashFactor"),
+        .key = QStringLiteral("lm.lieAngle"),
         .type = MetricType::PointInTime,
-        .label = QStringLiteral("Smash factor"),
-        .shortLabel = QStringLiteral("Smash"),
-        .unit = QStringLiteral("ratio"),
-        .group = QStringLiteral("Strike"),
+        .label = QStringLiteral("Lie angle"),
+        .shortLabel = QStringLiteral("Lie"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
         .description = QStringLiteral(
-            "Ball speed divided by clubhead speed — how much of the club's energy reached the ball. "
-            "It isolates strike quality from speed: two golfers swinging identically fast can be a "
-            "club apart in distance because one finds the middle of the face."),
+            "How the sole sat relative to the ground at impact — toe up or toe down. A club whose "
+            "lie does not match the golfer points the face off line at impact even when everything "
+            "else is square, so it is a fitting question that reads as a swing fault."),
         .howToRead = QStringLiteral(
-            "Read at Impact. HIGHER IS A MORE EFFICIENT STRIKE, with the practical ceiling set by "
-            "the club's loft — a driver reaches far higher than a wedge, so this is read per club "
-            "and never across them. Requires a launch monitor: it needs a validated clubhead-speed "
-            "and ball-speed pair, and our clubhead speed is camera-derived."),
+            "Read at Impact. POSITIVE IS TOE UP and negative is toe down, with zero a sole sitting "
+            "flat to the ground — Foresight's own published convention, which we take unchanged. A "
+            "persistent offset across many shots with the same club is a fitting finding; "
+            "shot-to-shot scatter is a delivery one."),
+        .signPositive = QStringLiteral("the clubhead sole toe UP relative to the ground at impact"),
+        .signNegative = QStringLiteral("the sole toe DOWN; zero is flat to the ground"),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("ball speed over clubhead speed, from a launch monitor; no connector is wired in this build yet"),
-                PLANNED) },
-        .usedBy = { QStringLiteral("characteristic:smash_deficit") },
+                QStringLiteral("the sole's angle to the ground at impact, read from a launch monitor")) },
     });
 
     cat.addDescriptor({
-        .key = QStringLiteral("strikeLocation"),
+        .key = QStringLiteral("lm.closureRate"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Closure rate"),
+        .shortLabel = QStringLiteral("Closure"),
+        .unit = QStringLiteral("°/s"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "How fast the face was rotating through impact. It is the reason two golfers with the "
+            "same average face angle can differ enormously in consistency: the faster the face is "
+            "turning, the more a few milliseconds of timing costs in face angle."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS CLOSING — Foresight's published convention: a higher "
+            "positive value is a faster closing face through the hitting area, and a low or stable "
+            "one a squarer, held-off release. LOWER IS MORE FORGIVING, because it makes face angle "
+            "less sensitive to timing. A high closure rate with good face numbers is a golfer "
+            "relying on timing to be repeatable. The device may report this in degrees per second "
+            "OR in revolutions per minute; the connector reads the unit the header declares and "
+            "converts, so the number here is always degrees per second."),
+        .signPositive = QStringLiteral("the face rotating CLOSED through impact — a faster closing rate"),
+        .signNegative = QStringLiteral("the face rotating open; a low or stable value is a squarer, held-off release"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("the face's rotation rate through impact, read from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.strikeLocation"),
         .type = MetricType::PointInTime,
         .label = QStringLiteral("Strike location"),
         .shortLabel = QStringLiteral("Strike"),
@@ -2123,16 +2479,134 @@ void installMetricManifest(MetricCatalogue &cat)
             "Read at Impact. POSITIVE IS TOWARD THE TOE, negative toward the heel, zero at the "
             "centre of the face. Requires a launch monitor, or face impact markers: the impact "
             "position on the face is not resolvable from any camera view we take."),
+        .signPositive = QStringLiteral("struck toward the TOE"),
+        .signNegative = QStringLiteral("struck toward the heel"),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("the face-impact position, from a launch monitor; no connector is wired in this build yet"), PLANNED) },
+                QStringLiteral("the face-impact position, from a launch monitor")) },
         .usedBy = { QStringLiteral("characteristic:strike_heel"),
                     QStringLiteral("characteristic:strike_toe") },
     });
 
     cat.addDescriptor({
-        .key = QStringLiteral("carryDistance"),
+        .key = QStringLiteral("lm.strikeHeight"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Strike height"),
+        .shortLabel = QStringLiteral("Strike ht"),
+        .unit = QStringLiteral("mm"),
+        .group = QStringLiteral("Strike"),
+        .description = QStringLiteral(
+            "Where on the face the ball was struck up the crown-sole axis. It is the other half of "
+            "strike location and the one that explains spin surprises: high on a driver face gives "
+            "the launch-high, spin-low strike that carries, low gives the opposite."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS ABOVE CENTRE, negative below. Read it alongside spin rate "
+            "and launch angle rather than alone — its whole effect is on those two."),
+        .signPositive = QStringLiteral("struck ABOVE the centre of the face"),
+        .signNegative = QStringLiteral("struck below centre"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("the face-impact height, from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.spinRate"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Spin rate"),
+        .shortLabel = QStringLiteral("Spin"),
+        .unit = QStringLiteral("rpm"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "How fast the ball is spinning as it leaves — the TOTAL spin, back and side combined. "
+            "Too much costs distance and makes the flight balloon; too little costs the height and "
+            "stopping power a shot needs to hold a green."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. HIGHER IS MORE SPIN. Strongly club-dependent — what is a "
+            "knuckleball for a wedge is a spinny drive — so the corridor is authored per club. "
+            "Requires a launch monitor: spin is not measurable over the short flight an indoor "
+            "capture sees."),
+        .signPositive = QStringLiteral("more total spin"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor")) },
+        .usedBy = { QStringLiteral("characteristic:spin_deficit"),
+                    QStringLiteral("characteristic:spin_excess") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.backSpin"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Back spin"),
+        .shortLabel = QStringLiteral("Backspin"),
+        .unit = QStringLiteral("rpm"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The component of spin about the horizontal axis — the part that generates lift and "
+            "makes the ball hold its height and stop on landing."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. HIGHER LIFTS AND STOPS MORE. Its value here is mostly as one "
+            "of the two components behind spin axis; total spin is the number to grade against."),
+        .signPositive = QStringLiteral("more backspin"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.sideSpin"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Side spin"),
+        .shortLabel = QStringLiteral("Sidespin"),
+        .unit = QStringLiteral("rpm"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The component of spin about the vertical axis — the part that curves the ball left or "
+            "right."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. POSITIVE CURVES RIGHT for a right-handed golfer. Spin axis is "
+            "the better number to read for shape, because it states the curvature relative to the "
+            "total spin rather than in absolute rpm that mean different things at different speeds."),
+        .signPositive = QStringLiteral("spin curving the ball RIGHT"),
+        .signNegative = QStringLiteral("curving the ball left"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.spinAxis"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Spin axis"),
+        .shortLabel = QStringLiteral("Spin axis"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The tilt of the ball's axis of rotation, which is what curves the flight. It is the "
+            "outcome the golfer actually sees, where face-to-path is the cause of it at impact."),
+        .howToRead = QStringLiteral(
+            "Read just after Impact. POSITIVE TILTS RIGHT for a right-handed golfer — a fade or a "
+            "slice — and negative tilts left. Computed from the device's own side and back spin, so "
+            "it carries their signs. Requires a launch monitor: the curvature develops over a "
+            "flight an indoor capture never sees."),
+        .signPositive = QStringLiteral("the axis tilted RIGHT — a fade or a slice"),
+        .signNegative = QStringLiteral("tilted left — a draw or a hook"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("the tilt of side spin against back spin, from a launch monitor")) },
+        .usedBy = { QStringLiteral("characteristic:hook"),
+                    QStringLiteral("characteristic:slice") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.carryDistance"),
         .type = MetricType::PointInTime,
         .label = QStringLiteral("Carry"),
         .shortLabel = QStringLiteral("Carry"),
@@ -2143,55 +2617,131 @@ void installMetricManifest(MetricCatalogue &cat)
             "and the one every other ball-flight metric is ultimately serving."),
         .howToRead = QStringLiteral(
             "Read after Impact. HIGHER IS FURTHER. Club- and athlete-dependent, so it is read "
-            "against the golfer's own normal for that club. Requires a launch monitor: carry is a "
-            "flight-model output, not something an indoor capture observes."),
+            "against the golfer's own normal for that club. A FLIGHT-MODEL OUTPUT, not an "
+            "observation: indoors the ball is stopped by a screen a few metres away, and every "
+            "carry number anywhere comes from launch conditions plus a model."),
+        .signPositive = QStringLiteral("the ball carrying further"),
+        .signNegative = QString(),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("read from a launch monitor; no connector is wired in this build yet"), PLANNED) },
+                QStringLiteral("read from a launch monitor's flight model")) },
         .usedBy = { QStringLiteral("characteristic:carry_deficit") },
     });
 
     cat.addDescriptor({
-        .key = QStringLiteral("dynamicLoft"),
+        .key = QStringLiteral("lm.totalDistance"),
         .type = MetricType::PointInTime,
-        .label = QStringLiteral("Dynamic loft"),
-        .shortLabel = QStringLiteral("Dyn loft"),
-        .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Club delivery"),
+        .label = QStringLiteral("Total distance"),
+        .shortLabel = QStringLiteral("Total"),
+        .unit = QStringLiteral("yd"),
+        .group = QStringLiteral("Ball flight"),
         .description = QStringLiteral(
-            "The loft actually presented to the ball at impact, as opposed to the loft stamped on "
-            "the club. Shaft lean removes it and flipping the hands adds it, which is why two "
-            "golfers with the same 7-iron can launch it four degrees apart."),
+            "Carry plus roll. It is the more variable of the two by a long way, because roll depends "
+            "on ground the simulator is assuming rather than measuring."),
         .howToRead = QStringLiteral(
-            "Read at Impact. HIGHER MEANS MORE LOFT DELIVERED — a higher, weaker flight. Requires a "
-            "launch monitor: it is derived from face orientation at impact, which is not optically "
-            "resolvable at our frame rates."),
+            "Read after Impact. HIGHER IS FURTHER. Prefer carry when comparing swings: total "
+            "distance moves with the simulated surface as much as with the strike, so a change here "
+            "with no change in carry says nothing about the golfer."),
+        .signPositive = QStringLiteral("the ball finishing further away"),
+        .signNegative = QString(),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("read from a launch monitor; no connector is wired in this build yet"), PLANNED) },
+                QStringLiteral("read from a launch monitor's flight model")) },
     });
 
     cat.addDescriptor({
-        .key = QStringLiteral("spinLoft"),
+        .key = QStringLiteral("lm.offline"),
         .type = MetricType::PointInTime,
-        .label = QStringLiteral("Spin loft"),
-        .shortLabel = QStringLiteral("Spin loft"),
-        .unit = QStringLiteral("°"),
-        .group = QStringLiteral("Club delivery"),
+        .label = QStringLiteral("Offline"),
+        .shortLabel = QStringLiteral("Offline"),
+        .unit = QStringLiteral("yd"),
+        .group = QStringLiteral("Ball flight"),
         .description = QStringLiteral(
-            "The angle between the delivered loft and the direction the clubhead is travelling. It "
-            "is what generates spin: a small spin loft gives a hot, low-spinning strike, a large one "
-            "trades speed for spin and height."),
+            "How far left or right of the target line the ball finished. It is the outcome that "
+            "start direction and spin axis jointly produce, and so an INDEPENDENT WITNESS to both: "
+            "a shot shape read off the club numbers should agree with where the ball actually went, "
+            "and when it does not, one of the two is wrong."),
         .howToRead = QStringLiteral(
-            "Read at Impact. HIGHER MEANS MORE SPIN AND LESS SPEED for the same clubhead speed. "
-            "Requires a launch monitor: it is derived from delivered loft, which needs face "
-            "orientation at impact."),
+            "Read after Impact. POSITIVE IS RIGHT of the target for a right-handed golfer, negative "
+            "left. Read with start direction to separate the two ways of missing right: started "
+            "right and flew straight is a push, started straight and curved is a slice."),
+        .signPositive = QStringLiteral("finishing RIGHT of the target line"),
+        .signNegative = QStringLiteral("finishing left of it"),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
-                QStringLiteral("read from a launch monitor; no connector is wired in this build yet"), PLANNED) },
+                QStringLiteral("read from a launch monitor's flight model")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.peakHeight"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Peak height"),
+        .shortLabel = QStringLiteral("Apex"),
+        .unit = QStringLiteral("ft"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "The highest point of the flight. It is the readable symptom of the launch-and-spin "
+            "pair: a ballooning flight shows up here long before the golfer notices the distance "
+            "it is costing."),
+        .howToRead = QStringLiteral(
+            "Read after Impact. HIGHER IS A HIGHER FLIGHT. Stated in feet, as golf states apex. "
+            "Read with spin rate — a high apex from speed is not the same finding as a high apex "
+            "from spin, and only the second one is costing anything."),
+        .signPositive = QStringLiteral("a higher flight"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor's flight model")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.descentAngle"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Descent angle"),
+        .shortLabel = QStringLiteral("Descent"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "How steeply the ball came down. It is what decides whether a shot holds the green it "
+            "lands on, and it is the reason a long iron that carries far enough can still be the "
+            "wrong club into a firm green."),
+        .howToRead = QStringLiteral(
+            "Read after Impact. HIGHER IS STEEPER, and steeper stops faster. Club-dependent: a "
+            "wedge should come down steeply and a driver should not."),
+        .signPositive = QStringLiteral("a steeper descent — the ball stopping faster"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor's flight model")) },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.distanceToPin"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Distance to pin"),
+        .shortLabel = QStringLiteral("To pin"),
+        .unit = QStringLiteral("yd"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "How far the ball finished from the pin the simulator was playing to. Unlike everything "
+            "else here it is a property of the SHOT THE SOFTWARE SET UP as much as of the swing — "
+            "change the hole and it changes with nothing else moving."),
+        .howToRead = QStringLiteral(
+            "Read after Impact. LOWER IS CLOSER. NEVER COMPARE IT ACROSS SHOTS unless the target "
+            "was the same: it is meaningful within a session aimed at one pin, and meaningless as "
+            "an aggregate. Offline is the one to read for dispersion, because it is stated relative "
+            "to the target line rather than to a distance."),
+        .signPositive = QStringLiteral("finishing further from the pin"),
+        .signNegative = QString(),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("read from a launch monitor's flight model")) },
     });
 }
 

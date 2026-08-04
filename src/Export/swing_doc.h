@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "launch_monitor_reading.h"
+
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -49,6 +51,35 @@ public:
     // was never written (e.g. export failed) simply fails here harmlessly.
     static bool updateReview(const QString &swingDir, int rating, const QString &note,
                              const QString &club, QString *error = nullptr);
+
+    // Fold a launch monitor reading into an existing <swingDir>/swing.json.
+    //
+    // LATE BY DESIGN. The monitor writes its file after the shot, and swing.json is
+    // written only when the analyzer and exporter have both finished (12-37 s), so a
+    // reading normally lands during analysis and sometimes during the first replay.
+    // Rather than hold the document open or re-run analysis, this is the same
+    // read-modify-atomic-rewrite updateReview() performs, and it writes two things:
+    //
+    //   · a top-level "launchMonitor" block — every value as the device reported it,
+    //     including the columns that map to no metric. Additive, so older readers
+    //     ignore it (swing_json_schema.md).
+    //   · one entry per reading in analysis.metrics[], keyed `lm.*`, each an EMPTY
+    //     CURVE carrying a single phaseSample at Impact. That is the shape every
+    //     point-in-time metric already uses, and it is what lets the phase grid,
+    //     the measures, the corridors, the charts and the data viewer pick these up
+    //     with no new machinery anywhere.
+    //
+    // The metric entries are only written when the document already has an "analysis"
+    // block; the raw block is written regardless, so a shot whose analysis failed
+    // still keeps what the device said.
+    //
+    // Idempotent: re-applying replaces any existing "launchMonitor" block and any
+    // existing `lm.` metric entries rather than appending duplicates. Refreshes the
+    // summary sidecar for the same reason updateReview does — this rewrite moves
+    // swing.json's size and mtime, which invalidates both sidecar guards.
+    static bool updateLaunchMonitor(const QString &swingDir,
+                                    const lm::LaunchMonitorReading &reading,
+                                    QString *error = nullptr);
 };
 
 // A reloaded shot — everything ShotListModel::addPersistedShot needs to rebuild a
