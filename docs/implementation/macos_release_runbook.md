@@ -274,12 +274,12 @@ Edit and commit + push:
 CMake derives the bundle version + DMG name from these — nothing else to edit.
 
 ### 1.2 Run the full test suite — ALL must pass (MANDATORY GATE)
-**A release MUST NOT be cut while any test is failing or not building.** PinPoint has
-seven standalone CTest suites (they are *not* part of the app build — see
-[`../../BUILDING.md`](../../BUILDING.md) § Testing). Build and run every one; each must
-report `100% tests passed` (OpenCV comes from Homebrew, so no `OpenCV_DIR` needed —
-CMake asks for the keg-only **`opencv@4`** by name; the plain `opencv` formula is 5.x
-now and is rejected explicitly):
+**A release MUST NOT be cut while any test is failing or not building.** PinPoint's unit
+tests are *not* part of the app build — they are nine standalone CTest suites that the
+`tests/` umbrella configures, builds and runs as a single registry (see
+[`../../BUILDING.md`](../../BUILDING.md) § Testing). OpenCV comes from Homebrew, so no
+`OpenCV_DIR` is needed — CMake asks for the keg-only **`opencv@4`** by name; the plain
+`opencv` formula is 5.x now and is rejected explicitly:
 ```bash
 # Point QT at whichever Qt 6.11.x you actually have installed — `ls ~/Qt` to check.
 # A stale version here fails at the first configure, before any test runs.
@@ -288,17 +288,23 @@ now and is rejected explicitly):
 # mid-release. Never use a bare `-j` here.
 QT=$(ls -d ~/Qt/6.11.*/macos | tail -1)
 JOBS="${JOBS:-6}"
-for s in Buffer=src/Buffer Analysis=src/Analysis/tests Audio=src/Audio/tests \
-         Core=src/Core/tests Gui=src/Gui/tests IMU=src/IMU/tests Pose=src/Pose/tests; do
-  n=${s%%=*}; d=${s#*=}
-  cmake -S "$d" -B "build/tests-$n" -DCMAKE_PREFIX_PATH="$QT" \
-    && cmake --build "build/tests-$n" --parallel "$JOBS" \
-    && ctest --test-dir "build/tests-$n" --output-on-failure \
-    || { echo "❌ RELEASE BLOCKED — $n failed"; break; }
-done
+cmake -S tests -B build/tests -DCMAKE_PREFIX_PATH="$QT" \
+  && cmake --build build/tests --parallel "$JOBS" \
+  && ctest --test-dir build/tests --output-on-failure --parallel "$JOBS" \
+  || echo "❌ RELEASE BLOCKED"
 ```
-**If any suite fails to build or any test fails, STOP — fix it and re-run before you
-tag.** Do not proceed to the build/sign steps below.
+The last line must read `100% tests passed, 0 tests failed out of N` — N grows as suites
+and tests are added (121 as of v0.1-alpha11), so treat the *zero failures*, not the count,
+as the gate. **If the umbrella fails to configure or build, or any test fails, STOP — fix
+it and re-run before you tag.** Do not proceed to the build/sign steps below.
+
+> **Use the umbrella, never a per-suite loop.** `tests/CMakeLists.txt` enumerates the
+> suites, so one added later is picked up by this gate automatically. The hand-rolled loop
+> that lived here until v0.1-alpha11 carried a hardcoded seven-suite list, and silently
+> skipped **LaunchMonitor** and **Update** once they existed — a gate that quietly stops
+> covering new code is worse than no gate. It also pointed at `src/Buffer`, which stopped
+> being the tests' location when they moved to `src/Buffer/tests`; the umbrella builds the
+> `pinpoint_buffer` library first and then pulls those tests in, which the loop never did.
 
 ### 1.3 Build the DMGs — **there are TWO, each on its own Mac**
 
@@ -518,7 +524,7 @@ The two arch columns are done **on their own machines** — `x86_64` on the Inte
 half-shipped release leaves one architecture's feed pointing at an enclosure-less release.
 
 - [ ] Bump `PINPOINT_VERSION_BUILD` (+ MAJOR/MINOR/POSTFIX) in `version.h`; commit, push
-- [ ] **Run all 7 CTest suites — every one `100% tests passed` (mandatory; stop if any fail)**
+- [ ] **Run the `tests/` umbrella — `0 tests failed` across all nine suites (mandatory; stop if any fail)**
 
 | step (run on each Mac for its own arch) | `x86_64` — Intel MBP | `arm64` — M4 |
 |---|---|---|

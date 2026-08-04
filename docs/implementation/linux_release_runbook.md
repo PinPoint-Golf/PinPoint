@@ -33,23 +33,32 @@ The new version must be **strictly newer** than what's installed in the wild or 
 updater won't offer it.
 
 ## 0.5 Run the full test suite — ALL must pass (MANDATORY GATE)
-**A release MUST NOT be cut while any test is failing or not building.** PinPoint has
-seven standalone CTest suites (they are *not* part of the app build — see
-[`../../BUILDING.md`](../../BUILDING.md) § Testing). Build and run every one; each must
-report `100% tests passed` (OpenCV is found from the system, so no `OpenCV_DIR` needed):
+**A release MUST NOT be cut while any test is failing or not building.** PinPoint's unit
+tests are *not* part of the app build — they are nine standalone CTest suites that the
+`tests/` umbrella configures, builds and runs as a single registry (see
+[`../../BUILDING.md`](../../BUILDING.md) § Testing). OpenCV is found from the system, so
+no `OpenCV_DIR` is needed:
 ```bash
 QT=~/Qt/6.11.0/gcc_64
-for s in Buffer=src/Buffer Analysis=src/Analysis/tests Audio=src/Audio/tests \
-         Core=src/Core/tests Gui=src/Gui/tests IMU=src/IMU/tests Pose=src/Pose/tests; do
-  n=${s%%=*}; d=${s#*=}
-  cmake -S "$d" -B "build/tests-$n" -DCMAKE_PREFIX_PATH="$QT" \
-    && cmake --build "build/tests-$n" -j \
-    && ctest --test-dir "build/tests-$n" --output-on-failure \
-    || { echo "❌ RELEASE BLOCKED — $n failed"; break; }
-done
+cmake -S tests -B build/tests -DCMAKE_PREFIX_PATH="$QT" \
+  && cmake --build build/tests -j 4 \
+  && ctest --test-dir build/tests --output-on-failure -j 4 \
+  || echo "❌ RELEASE BLOCKED"
 ```
-**If any suite fails to build or any test fails, STOP — fix it and re-run before you
-tag.** Do not proceed to Path A/B below.
+The last line must read `100% tests passed, 0 tests failed out of N` — N grows as suites
+and tests are added (121 as of v0.1-alpha11), so treat the *zero failures*, not the count,
+as the gate. **If the umbrella fails to configure or build, or any test fails, STOP — fix
+it and re-run before you tag.** Do not proceed to Path A/B below.
+
+> **Use the umbrella, never a per-suite loop.** `tests/CMakeLists.txt` enumerates the
+> suites, so one added later is picked up by this gate automatically. The hand-rolled loop
+> that lived here until v0.1-alpha11 carried a hardcoded seven-suite list, and silently
+> skipped **LaunchMonitor** and **Update** once they existed — a gate that quietly stops
+> covering new code is worse than no gate. It also pointed at `src/Buffer`, which stopped
+> being the tests' location when they moved to `src/Buffer/tests`; the umbrella builds the
+> `pinpoint_buffer` library first and then pulls those tests in, which the loop never did.
+>
+> **Never use a bare `-j`** — it is unbounded and OOMs the 16 GB box mid-gate.
 
 ## Path A — CI builds, you sign locally (recommended)
 CI builds a reproducible **unsigned draft**; you sign that exact artifact and publish.

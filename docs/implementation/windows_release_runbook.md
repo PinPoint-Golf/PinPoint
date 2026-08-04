@@ -54,48 +54,52 @@ That's the *only* version edit — CMake derives the installer version from it, 
 app's WinSparkle display/build version comes from it too. Nothing else to bump.
 
 ### 2. Run the full test suite — ALL must pass (MANDATORY GATE)
-**A release MUST NOT be cut while any test is failing or not building.** PinPoint has
-eight standalone CTest suites (they are *not* part of the app build — see
-[`../../BUILDING.md`](../../BUILDING.md) § Testing). Build and run every one; each must
-report `100% tests passed`. Run this from a Developer (vcvars64) shell with CMake +
-Ninja on `PATH`:
+**A release MUST NOT be cut while any test is failing or not building.** PinPoint's unit
+tests are *not* part of the app build — they are nine standalone CTest suites that the
+`tests/` umbrella configures, builds and runs as a single registry (see
+[`../../BUILDING.md`](../../BUILDING.md) § Testing). Run this from a Developer (vcvars64)
+shell with CMake + Ninja on `PATH`:
 ```powershell
 $Qt  = 'C:/Qt/6.11.0/msvc2022_64'
 $OCV = 'C:/tools/opencv/build'                          # Analysis & Pose need OpenCV
 $env:PATH = "$Qt/bin;$OCV/x64/vc16/bin;$env:PATH"       # so test exes resolve Qt/OpenCV DLLs
-$fail = @()
-foreach ($s in @('Buffer=src/Buffer','Analysis=src/Analysis/tests','Audio=src/Audio/tests',
-                 'Core=src/Core/tests','Gui=src/Gui/tests','IMU=src/IMU/tests','Pose=src/Pose/tests',
-                 'Update=src/Update/tests')) {
-  $n,$d = $s -split '='
-  cmake -S $d -B "build/tests-$n" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=$Qt -DOpenCV_DIR=$OCV
-  if ($LASTEXITCODE) { $fail += "$n (configure)"; continue }
-  cmake --build "build/tests-$n" -j
-  if ($LASTEXITCODE) { $fail += "$n (build)"; continue }
-  ctest --test-dir "build/tests-$n" --output-on-failure
-  if ($LASTEXITCODE) { $fail += "$n (tests)" }
-}
-if ($fail) { Write-Error "RELEASE BLOCKED — failing suites: $($fail -join ', ')" } else { 'ALL SUITES PASSED' }
+cmake -S tests -B build/tests -G Ninja -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_PREFIX_PATH=$Qt" "-DOpenCV_DIR=$OCV"
+if ($LASTEXITCODE) { Write-Error 'RELEASE BLOCKED — configure failed'; return }
+cmake --build build/tests -j 6
+if ($LASTEXITCODE) { Write-Error 'RELEASE BLOCKED — build failed'; return }
+ctest --test-dir build/tests --output-on-failure -j 6
+if ($LASTEXITCODE) { Write-Error 'RELEASE BLOCKED — tests failed' } else { 'ALL SUITES PASSED' }
 ```
-**If any suite fails to build or any test fails, STOP — fix it and re-run before you
-tag.** Do not proceed to the build/sign steps below.
+The last line must read `100% tests passed, 0 tests failed out of N` — N grows as suites
+and tests are added (121 as of v0.1-alpha11), so treat the *zero failures*, not the count,
+as the gate. **If the umbrella fails to configure or build, or any test fails, STOP — fix
+it and re-run before you tag.** Do not proceed to the build/sign steps below.
 
-> **If Analysis or Pose fails at *configure*, suspect the OpenCV path before you suspect
-> the code.** Only those two need OpenCV, and there are two traps that compound:
+> **Use the umbrella, never a per-suite loop.** `tests/CMakeLists.txt` enumerates the
+> suites, so one added later is picked up by this gate automatically. The hand-rolled loop
+> that lived here until v0.1-alpha11 carried a hardcoded list that silently skipped
+> **LaunchMonitor** once it existed — a gate that quietly stops covering new code is worse
+> than no gate. It also pointed at `src/Buffer`, which stopped being the tests' location
+> when they moved to `src/Buffer/tests`; the umbrella builds the `pinpoint_buffer` library
+> first and then pulls those tests in, which the loop never did.
+
+> **If configure fails on OpenCV, suspect the path before you suspect the code.** Only the
+> Analysis and Pose suites need OpenCV, and there are two traps that compound:
 >
 > - **The `-D` arguments must reach CMake expanded.** They have arrived as the literal
 >   strings `$Qt` / `$OCV` — `find_package(OpenCV)` then looks up a nonsense path and
 >   reports the generic "did not find OpenCVConfig.cmake", which reads exactly like a
 >   missing OpenCV install. Confirm what CMake actually received:
 >   ```powershell
->   Select-String 'OpenCV_DIR|CMAKE_PREFIX_PATH' build/tests-Analysis/CMakeCache.txt
+>   Select-String 'OpenCV_DIR|CMAKE_PREFIX_PATH' build/tests/CMakeCache.txt
 >   ```
->   Real paths, not `$OCV`. If in doubt, quote them (`"-DOpenCV_DIR=$OCV"`) or build the
->   argument list as an array and splat it.
+>   Real paths, not `$OCV`. The `-D` arguments are quoted above (`"-DOpenCV_DIR=$OCV"`)
+>   precisely so PowerShell expands them before CMake sees them — keep the quotes.
 > - **The failure is then CACHED.** A failed lookup writes `OpenCV_DIR-NOTFOUND` into
->   `build/tests-<name>/CMakeCache.txt`, so every retry fails identically *even after the
->   argument is fixed*. Delete `build/tests-<name>` and configure again, or you are
->   debugging a stale answer.
+>   `build/tests/CMakeCache.txt`, so every retry fails identically *even after the
+>   argument is fixed*. Delete `build/tests` and configure again, or you are debugging a
+>   stale answer. (Under the umbrella this is one cache for all nine suites, so a bad path
+>   now blocks the whole gate rather than one suite — and one deletion clears it.)
 >
 > What must exist on disk is `C:\tools\opencv\build\OpenCVConfig.cmake`. If it is there
 > and the cache holds real paths, only then is the suite itself worth investigating.
@@ -179,7 +183,7 @@ installer, verifies the signature, and relaunches on the new version — no UAC 
 ## Quick checklist (per release)
 
 - [ ] Bump `PINPOINT_VERSION_BUILD` (+ MAJOR/MINOR/POSTFIX) in `version.h`, commit, push
-- [ ] **Run all 8 CTest suites — every one `100% tests passed` (mandatory; stop if any fail)**
+- [ ] **Run the `tests/` umbrella — `0 tests failed` across all nine suites (mandatory; stop if any fail)**
 - [ ] Build the `-core` installer (CI tag push, or `build_installer.ps1 -Components core`)
 - [ ] If CI: `gh release download` the exact `-core.exe`
 - [ ] `make_appcast.ps1` → signs + writes `appcast-win.xml`

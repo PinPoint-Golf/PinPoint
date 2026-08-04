@@ -385,7 +385,7 @@ app. WinSparkle points at the stable
 
 ## Testing
 
-PinPoint Studio has eight standalone unit-test suites (57 tests). **None are part of the application build** — the root `CMakeLists.txt` forces `BUILD_TESTING OFF`, so building the app never compiles them. Each suite recompiles only the handful of `.cpp` it needs (there is no test-linkable library except `pinpoint_buffer`) and stubs out anything that would drag in the heavy app dependencies — so the tests configure and build in seconds, independent of whisper/FFmpeg/OpenCV/QML.
+PinPoint Studio has nine standalone unit-test suites (121 tests). **None are part of the application build** — the root `CMakeLists.txt` forces `BUILD_TESTING OFF`, so building the app never compiles them. Each suite recompiles only the handful of `.cpp` it needs (there is no test-linkable library except `pinpoint_buffer`) and stubs out anything that would drag in the heavy app dependencies — so the tests configure and build in seconds, independent of whisper/FFmpeg/OpenCV/QML.
 
 There are two ways to build and run them: the **umbrella** (all suites in one configure/build/ctest) and **per-suite standalone** (fastest single-suite iteration). Both use the shared CMake infrastructure in `tests/`. For the architecture, `pp_add_test` reference, and how to add a test or a new suite, see **[docs/developer/testing_developer_guide.md](docs/developer/testing_developer_guide.md)**.
 

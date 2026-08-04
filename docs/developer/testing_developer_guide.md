@@ -3,7 +3,7 @@
 **Audience**: Developers adding or running unit tests in PinPoint Studio
 **Location**: `tests/` (umbrella + shared CMake module + presets), `src/<Sub>/tests/` (the suites)
 **Language**: CMake + C++17/20 (GoogleTest or a hand-rolled `main()`)
-**Status**: 9 suites, 120 test targets, runnable as one umbrella build or individually
+**Status**: 9 suites, 121 test targets, runnable as one umbrella build or individually
 
 ---
 
@@ -128,7 +128,7 @@ One configure produces one CTest registry spanning all suites:
 ```bash
 cmake -S tests -B build/tests
 cmake --build build/tests -j6
-ctest --test-dir build/tests --output-on-failure   # all 120 targets
+ctest --test-dir build/tests --output-on-failure   # all 121 targets
 ```
 
 ---
