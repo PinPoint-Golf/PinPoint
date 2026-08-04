@@ -212,9 +212,9 @@ void installMetricManifest(MetricCatalogue &cat)
             "roughly 15–30° more flexed than address, while a cupped top tends to leave the face "
             "open. Restricting this axis costs more clubhead speed than the others, so treat a "
             "cupping trend as a priority. Wrist Motion session; needs the lead-forearm and hand IMUs."),
+        .flexPositive = true,
         .signPositive = QStringLiteral("flexion — the lead wrist bowed"),
         .signNegative = QStringLiteral("extension — the lead wrist cupped"),
-        .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
         .routes = {
@@ -245,9 +245,9 @@ void installMetricManifest(MetricCatalogue &cat)
             "desirable; better players hold less deviation into impact, where lower handicaps show "
             "noticeably less wandering. This is the least reliable IMU axis (~5° typical error), so "
             "trust the shape of the trend over any single value. Needs the lead-forearm and hand IMUs."),
+        .flexPositive = true,
         .signPositive = QStringLiteral("ulnar deviation — the wrist hinged or cocked"),
         .signNegative = QStringLiteral("radial deviation"),
-        .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
         .routes = {
@@ -279,9 +279,9 @@ void installMetricManifest(MetricCatalogue &cat)
             "pair with bow/cup — a player short on bow may compensate with roll, and vice versa. It "
             "needs the lead-forearm, hand and upper-arm IMUs (the upper-arm gives the forearm a "
             "reference to rotate against)."),
+        .flexPositive = true,
         .signPositive = QStringLiteral("pronation — the lead forearm rolled toward face-down"),
         .signNegative = QStringLiteral("supination"),
-        .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
         .routes = {
@@ -315,9 +315,9 @@ void installMetricManifest(MetricCatalogue &cat)
             "through impact is the goal. A chicken-wing — rising flexion into and past impact — "
             "usually signals an early release or a stalling body and shows up here as a growing "
             "value. It needs the lead-forearm, hand and upper-arm IMUs."),
+        .flexPositive = true,
         .signPositive = QStringLiteral("elbow flexion — a more bent lead arm; 0° is straight"),
         .signNegative = QString(),
-        .flexPositive = true,
         .phases = { P::Top, P::Impact },
         .scored = true,
         .routes = {
@@ -356,11 +356,11 @@ void installMetricManifest(MetricCatalogue &cat)
         // flexion-positive, and the two differ because the hands are mirror images seen from the
         // same side — see howToRead. The seven pack corridors are seated on this polarity
         // (m_trailWristFlexExt_p4 at +45°, which is the trail wrist CUPPING at the top).
+        .flexPositive = false,
         .signPositive = QStringLiteral(
             "extension — the trail wrist cupped, the opposite of the lead wrist's polarity because "
             "the hands are mirror images"),
         .signNegative = QStringLiteral("flexion — the trail wrist bowed"),
-        .flexPositive = false,
         .phases = { P::Top, P::Impact },
         // LIVE from the face-on pose (pose_wrist_angle_source.cpp buildTrailWristSeries), as an
         // APPARENT camera-plane angle. It is not the anatomical DOF: SegmentRole still has no
