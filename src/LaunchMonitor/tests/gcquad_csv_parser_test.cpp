@@ -41,6 +41,21 @@ QByteArray sampleFile()
     return QByteArray(kHeader) + "\r\n" + QByteArray(kRow) + "\r\n";
 }
 
+// A real row captured with NO REFLECTIVE STICKERS on the club, byte for byte. The
+// ball was measured normally; every club quantity is 16777215 — except club head
+// speed, which is the same marker converted mph→m/s (16777215 × 0.44704), and Face
+// to Path, which FSX2020 derived from two markers and printed as a clean zero.
+const char *kNoStickerRow =
+    "55, Irn, 7500086.000000, 52.679398, 15.524854, -0.488643, -141, 3111, 3114, "
+    "37.929298, 166.104904, 182.964951, -5.293125, 22.801300, 159.591858, "
+    "16777215.000000, 16777215.000000, 0.000000, 16777215.000000, 16777215.000000, "
+    "16777215.000000, 16777215.000000, 16777215.000000, 16777215.000000, ";
+
+QByteArray noStickerFile()
+{
+    return QByteArray(kHeader) + "\r\n" + QByteArray(kNoStickerRow) + "\r\n";
+}
+
 } // namespace
 
 // ── The reference row ───────────────────────────────────────────────────────────
@@ -177,6 +192,142 @@ TEST(GcQuadCsvParser, DerivesSpinLoftAsLoftMinusAttackAngle)
     // that gets "simplified" into a subtraction of magnitudes.
     ASSERT_TRUE(r->spinLoft.has_value());
     EXPECT_NEAR(*r->spinLoft, 35.994911, 1e-6);
+}
+
+// ── The club was not tracked: no stickers fitted ────────────────────────────────
+//
+// This is the failure that matters most, because it is silent. Read literally the
+// row still parses, still carries a Shot ID, and publishes 16777215° of loft and a
+// smash factor of 0.000007 — numbers that pass every "is it there" check and are
+// nonsense on the board and in every chart and grade downstream.
+
+TEST(GcQuadCsvParser, NoStickersKeepsTheBallNumbers)
+{
+    // The ball is measured optically and is completely unaffected by the club not
+    // being tracked. Dropping the whole row would throw away a good shot.
+    QString err;
+    const auto r = parseLastShotCsv(noStickerFile(), &err);
+    ASSERT_TRUE(r.has_value()) << err.toStdString();
+
+    EXPECT_EQ(r->deviceShotId.toStdString(), "55");
+    EXPECT_NEAR(*r->ballSpeed,       117.8404, 0.01);   // 52.679398 m/s → mph
+    EXPECT_NEAR(*r->launchAngle,      15.524854, 1e-6);
+    EXPECT_NEAR(*r->launchDirection,  -0.488643, 1e-6);
+    EXPECT_NEAR(*r->spinRate,       3114.0, 1e-6);
+    EXPECT_NEAR(*r->backSpin,       3111.0, 1e-6);
+    EXPECT_NEAR(*r->sideSpin,       -141.0, 1e-6);
+    EXPECT_NEAR(*r->carryDistance,   181.6545, 0.01);   // 166.104904 m → yd
+    EXPECT_NEAR(*r->descentAngle,     37.929298, 1e-6);
+    EXPECT_LT(*r->offline, 0.0);                        // −5.293125 m, left
+}
+
+TEST(GcQuadCsvParser, NoStickersLeavesEveryClubFieldAbsent)
+{
+    const auto r = parseLastShotCsv(noStickerFile());
+    ASSERT_TRUE(r.has_value());
+
+    EXPECT_FALSE(r->attackAngle.has_value());     // Vert Path
+    EXPECT_FALSE(r->clubPath.has_value());        // Horiz Path
+    EXPECT_FALSE(r->faceAngle.has_value());       // Face to Target
+    EXPECT_FALSE(r->lieAngle.has_value());
+    EXPECT_FALSE(r->dynamicLoft.has_value());     // Loft
+    EXPECT_FALSE(r->closureRate.has_value());
+    EXPECT_FALSE(r->strikeLocation.has_value());  // Horiz Impact
+    EXPECT_FALSE(r->strikeHeight.has_value());    // Vert Impact
+}
+
+TEST(GcQuadCsvParser, RecognisesTheMarkerAfterItHasBeenUnitConverted)
+{
+    // Club head speed does NOT arrive as 16777215: FSX2020 holds the marker in mph
+    // and converts it to m/s on the way out, so the cell reads 7500086. Matching the
+    // constant alone would let this one through as 16.8 million mph.
+    const auto r = parseLastShotCsv(noStickerFile());
+    ASSERT_TRUE(r.has_value());
+    EXPECT_FALSE(r->clubheadSpeed.has_value());
+}
+
+TEST(GcQuadCsvParser, NoStickersSuppressesTheDerivationsThatDependOnTheClub)
+{
+    const auto r = parseLastShotCsv(noStickerFile());
+    ASSERT_TRUE(r.has_value());
+
+    // Ball speed survived, so a club speed read as 16.8 million would have produced
+    // a smash factor of 0.000007 rather than nothing at all.
+    EXPECT_FALSE(r->smashFactor.has_value());
+    EXPECT_FALSE(r->spinLoft.has_value());        // needs loft and attack angle
+
+    // Spin axis needs neither, and both its inputs were measured.
+    ASSERT_TRUE(r->spinAxis.has_value());
+    EXPECT_LT(*r->spinAxis, 0.0);                 // side spin −141, tilted left
+}
+
+TEST(GcQuadCsvParser, DropsFaceToPathWhenTheDeviceDerivedItFromTwoMarkers)
+{
+    // The one unmeasured club value that does not look unmeasured. FSX2020 prints
+    // face − path, and marker − marker is 0.000000, which reads as a face perfectly
+    // square to the path and is inside every plausible range.
+    const auto r = parseLastShotCsv(noStickerFile());
+    ASSERT_TRUE(r.has_value());
+    EXPECT_FALSE(r->faceToPath.has_value());
+}
+
+TEST(GcQuadCsvParser, KeepsAGenuineZeroFaceToPath)
+{
+    // The guard must key on both ingredients being MARKED unmeasured, not on the
+    // value being zero. A square face is a real and desirable reading.
+    const QByteArray f =
+        "Shot ID, Horiz Path (deg), Face to Path (deg), Face to Target (deg)\n"
+        "16, 2.5, 0.000000, 2.5\n";
+
+    const auto r = parseLastShotCsv(f);
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r->faceToPath.has_value());
+    EXPECT_NEAR(*r->faceToPath, 0.0, 1e-9);
+}
+
+TEST(GcQuadCsvParser, KeepsFaceToPathWhenTheIngredientColumnsAreMerelyAbsent)
+{
+    // Neither ingredient is present to be marked, so the printed value is the
+    // device's own and stands.
+    const QByteArray f =
+        "Shot ID, Face to Path (deg)\n"
+        "17, 0.000000\n";
+
+    const auto r = parseLastShotCsv(f);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r->faceToPath.has_value());
+}
+
+TEST(GcQuadCsvParser, RejectsARowThatIsNothingButMarkers)
+{
+    // Ball and club both unmeasured. Nothing numeric survives, so this is not a
+    // reading and must not be attributed to a swing or consume the watermark.
+    const QByteArray f =
+        "Shot ID, Club head Speed (m/s), Ball Speed (m/s), Total Spin (rpm)\n"
+        "18, 7500086.000000, 16777215.000000, 16777215.000000\n";
+
+    QString err;
+    EXPECT_FALSE(parseLastShotCsv(f, &err).has_value());
+    EXPECT_FALSE(err.isEmpty());
+}
+
+TEST(GcQuadCsvParser, PlausibleOutliersAreNotFiltered)
+{
+    // The range check is a marker filter, not a validator: it must not quietly
+    // discard a real reading. A long drive with a steep face is still a shot.
+    const QByteArray f =
+        "Shot ID, Club head Speed (mph), Ball Speed (mph), Total Spin (rpm), "
+        "Closure Rate (deg/s), Loft (deg), Carry (yds)\n"
+        "19, 152.0, 231.0, 13500, 4800.0, 62.0, 445.0\n";
+
+    const auto r = parseLastShotCsv(f);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_NEAR(*r->clubheadSpeed,  152.0, 1e-6);
+    EXPECT_NEAR(*r->ballSpeed,      231.0, 1e-6);
+    EXPECT_NEAR(*r->spinRate,     13500.0, 1e-6);
+    EXPECT_NEAR(*r->closureRate,   4800.0, 1e-6);
+    EXPECT_NEAR(*r->dynamicLoft,     62.0, 1e-6);
+    EXPECT_NEAR(*r->carryDistance,  445.0, 1e-6);
 }
 
 // ── Robustness across FSX2020 configurations ────────────────────────────────────

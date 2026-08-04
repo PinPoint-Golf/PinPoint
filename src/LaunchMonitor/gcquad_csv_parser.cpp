@@ -40,6 +40,12 @@ struct ColumnDef {
     const char *defaultUnit;  // assumed when the header declares none
     Dim         dim;
     const char *targetUnit;   // the catalogue's unit for this metric
+    // The widest value this quantity can physically take, IN targetUnit. This is a
+    // sentinel filter and not a validator: every bound is set several times beyond
+    // anything golf produces, so a genuine outlier survives and a "no data" marker
+    // — which arrives six orders of magnitude out — does not. See kNoData below.
+    double      lo;
+    double      hi;
     std::optional<double> LaunchMonitorReading::*member;
 };
 
@@ -49,48 +55,74 @@ const std::vector<ColumnDef> &columnDefs()
 {
     using R = LaunchMonitorReading;
     static const std::vector<ColumnDef> defs = {
-        { "clubheadspeed",   "m/s",   Dim::Speed,    "mph", &R::clubheadSpeed    },
-        { "clubspeed",       "m/s",   Dim::Speed,    "mph", &R::clubheadSpeed    },
-        { "ballspeed",       "m/s",   Dim::Speed,    "mph", &R::ballSpeed        },
+        { "clubheadspeed",   "m/s",   Dim::Speed,    "mph",       0.0,    300.0, &R::clubheadSpeed    },
+        { "clubspeed",       "m/s",   Dim::Speed,    "mph",       0.0,    300.0, &R::clubheadSpeed    },
+        { "ballspeed",       "m/s",   Dim::Speed,    "mph",       0.0,    400.0, &R::ballSpeed        },
 
-        { "launchangle",     "deg",   Dim::Angle,    "deg", &R::launchAngle      },
-        { "azimuth",         "deg",   Dim::Angle,    "deg", &R::launchDirection  },
-        { "launchdirection", "deg",   Dim::Angle,    "deg", &R::launchDirection  },
+        { "launchangle",     "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::launchAngle      },
+        { "azimuth",         "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::launchDirection  },
+        { "launchdirection", "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::launchDirection  },
 
         // Foresight states club path on two axes. The VERTICAL one is what the
         // rest of golf calls attack angle, and it is the twin of our camera
         // estimate; the horizontal one is club path proper.
-        { "vertpath",        "deg",   Dim::Angle,    "deg", &R::attackAngle      },
-        { "attackangle",     "deg",   Dim::Angle,    "deg", &R::attackAngle      },
-        { "horizpath",       "deg",   Dim::Angle,    "deg", &R::clubPath         },
-        { "clubpath",        "deg",   Dim::Angle,    "deg", &R::clubPath         },
+        { "vertpath",        "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::attackAngle      },
+        { "attackangle",     "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::attackAngle      },
+        { "horizpath",       "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::clubPath         },
+        { "clubpath",        "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::clubPath         },
 
-        { "facetotarget",    "deg",   Dim::Angle,    "deg", &R::faceAngle        },
-        { "faceangle",       "deg",   Dim::Angle,    "deg", &R::faceAngle        },
-        { "facetopath",      "deg",   Dim::Angle,    "deg", &R::faceToPath       },
-        { "loft",            "deg",   Dim::Angle,    "deg", &R::dynamicLoft      },
-        { "dynamicloft",     "deg",   Dim::Angle,    "deg", &R::dynamicLoft      },
-        { "lie",             "deg",   Dim::Angle,    "deg", &R::lieAngle         },
-        { "closurerate",     "deg/s", Dim::AngRate,  "deg/s", &R::closureRate    },
+        { "facetotarget",    "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::faceAngle        },
+        { "faceangle",       "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::faceAngle        },
+        { "facetopath",      "deg",   Dim::Angle,    "deg",    -180.0,    180.0, &R::faceToPath       },
+        { "loft",            "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::dynamicLoft      },
+        { "dynamicloft",     "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::dynamicLoft      },
+        { "lie",             "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::lieAngle         },
+        { "closurerate",     "deg/s", Dim::AngRate,  "deg/s", -50000.0,  50000.0, &R::closureRate     },
 
-        { "sidespin",        "rpm",   Dim::Spin,     "rpm", &R::sideSpin         },
-        { "backspin",        "rpm",   Dim::Spin,     "rpm", &R::backSpin         },
-        { "totalspin",       "rpm",   Dim::Spin,     "rpm", &R::spinRate         },
-        { "spinrate",        "rpm",   Dim::Spin,     "rpm", &R::spinRate         },
+        { "sidespin",        "rpm",   Dim::Spin,     "rpm",  -30000.0,  30000.0, &R::sideSpin         },
+        { "backspin",        "rpm",   Dim::Spin,     "rpm",  -30000.0,  30000.0, &R::backSpin         },
+        { "totalspin",       "rpm",   Dim::Spin,     "rpm",       0.0,  30000.0, &R::spinRate         },
+        { "spinrate",        "rpm",   Dim::Spin,     "rpm",       0.0,  30000.0, &R::spinRate         },
 
-        { "horizimpact",     "mm",    Dim::Distance, "mm",  &R::strikeLocation   },
-        { "vertimpact",      "mm",    Dim::Distance, "mm",  &R::strikeHeight     },
+        { "horizimpact",     "mm",    Dim::Distance, "mm",     -500.0,    500.0, &R::strikeLocation   },
+        { "vertimpact",      "mm",    Dim::Distance, "mm",     -500.0,    500.0, &R::strikeHeight     },
 
-        { "carry",           "m",     Dim::Distance, "yd",  &R::carryDistance    },
-        { "carrydistance",   "m",     Dim::Distance, "yd",  &R::carryDistance    },
-        { "totaldistance",   "m",     Dim::Distance, "yd",  &R::totalDistance    },
-        { "offline",         "m",     Dim::Distance, "yd",  &R::offline          },
-        { "peakheight",      "m",     Dim::Distance, "ft",  &R::peakHeight       },
-        { "apex",            "m",     Dim::Distance, "ft",  &R::peakHeight       },
-        { "descentangle",    "deg",   Dim::Angle,    "deg", &R::descentAngle     },
-        { "distancetopin",   "m",     Dim::Distance, "yd",  &R::distanceToPin    },
+        { "carry",           "m",     Dim::Distance, "yd",        0.0,   1000.0, &R::carryDistance    },
+        { "carrydistance",   "m",     Dim::Distance, "yd",        0.0,   1000.0, &R::carryDistance    },
+        { "totaldistance",   "m",     Dim::Distance, "yd",        0.0,   1000.0, &R::totalDistance    },
+        { "offline",         "m",     Dim::Distance, "yd",    -1000.0,   1000.0, &R::offline          },
+        { "peakheight",      "m",     Dim::Distance, "ft",        0.0,   2000.0, &R::peakHeight       },
+        { "apex",            "m",     Dim::Distance, "ft",        0.0,   2000.0, &R::peakHeight       },
+        { "descentangle",    "deg",   Dim::Angle,    "deg",     -90.0,     90.0, &R::descentAngle     },
+        { "distancetopin",   "m",     Dim::Distance, "yd",        0.0,   2000.0, &R::distanceToPin    },
     };
     return defs;
+}
+
+// ── "The device did not measure this" ──────────────────────────────────────────
+//
+// A GCQuad reads the CLUB from reflective stickers on it. With no stickers on the
+// face — or none it could see — the ball numbers are still measured optically and
+// are perfectly good, while every club quantity is unknown. FSX2020 does not leave
+// those cells empty: it writes 16777215 into them. That is 0xFFFFFF, and also the
+// largest integer a float32 represents exactly, which is what it is being used as
+// — an in-band "no value" marker.
+//
+// TAKEN AT FACE VALUE THE ROW IS NOT MERELY WRONG, IT IS PLAUSIBLE-LOOKING NONSENSE
+// that then propagates: 16777215° of dynamic loft, and a smash factor of 0.000007
+// from the derivation below.
+//
+// THE MARKER IS UNIT-CONVERTED ON ITS WAY OUT, so it does not always arrive as
+// 16777215. In a metric-configured installation club head speed reads 7500086 —
+// which is 16777215 mph × 0.44704, i.e. the same marker held internally in mph and
+// converted to m/s like a real measurement. So matching the constant alone is not
+// enough, and the ColumnDef range above is the net that actually catches it: any
+// scaling of a 16.7-million marker lands astronomically outside golf.
+constexpr double kNoData = 16777215.0;
+
+bool isNoDataMarker(double raw)
+{
+    return std::abs(std::abs(raw) - kNoData) < 1.0;
 }
 
 // Multiplier taking `unit` into the family's base unit (m/s, m, deg, deg/s, rpm).
@@ -272,6 +304,11 @@ std::optional<LaunchMonitorReading> parseLastShotCsv(const QByteArray &bytes, QS
     if (clubCol >= 0 && clubCol < cells.size())
         r.deviceClub = cells.at(clubCol);
 
+    // Which fields the device explicitly declined to measure. Needed after the loop
+    // because one printed column is itself derived from two others — see below.
+    bool faceAngleUnmeasured = false;
+    bool clubPathUnmeasured  = false;
+
     for (auto it = boundColumns.cbegin(); it != boundColumns.cend(); ++it) {
         const int idx = it.key();
         if (idx >= cells.size())
@@ -284,8 +321,28 @@ std::optional<LaunchMonitorReading> parseLastShotCsv(const QByteArray &bytes, QS
         if (!ok || !std::isfinite(raw))
             continue;                       // a junk cell loses its own value, not the row
         const ColumnDef *d = it.value().def;
-        r.*(d->member) = convertUnits(raw, d->dim, it.value().unit, d->defaultUnit, d->targetUnit);
+        const double v = convertUnits(raw, d->dim, it.value().unit, d->defaultUnit,
+                                      d->targetUnit);
+
+        // Unmeasured stays ABSENT, exactly like a short row or a junk cell. The
+        // board then shows nothing for it, which is the truth, instead of a number
+        // no golfer can act on.
+        if (isNoDataMarker(raw) || !std::isfinite(v) || v < d->lo || v > d->hi) {
+            if (d->member == &LaunchMonitorReading::faceAngle) faceAngleUnmeasured = true;
+            if (d->member == &LaunchMonitorReading::clubPath)  clubPathUnmeasured  = true;
+            continue;
+        }
+        r.*(d->member) = v;
     }
+
+    // FSX2020 DERIVES Face to Path from face and path, so when both are unmeasured
+    // it prints their difference — a clean 0.000000 that is inside every plausible
+    // range and survives the filter above. It is the one unmeasured club value that
+    // does not look unmeasured, and a face square to the path is precisely what a
+    // golfer would read it as. Drop it only when we positively saw BOTH ingredients
+    // marked unmeasured; a file that simply omits those columns keeps its value.
+    if (r.faceToPath && faceAngleUnmeasured && clubPathUnmeasured)
+        r.faceToPath.reset();
 
     // ── Values the device states implicitly ─────────────────────────────────
     // Foresight prints the ingredients but not these three, and they are the ones

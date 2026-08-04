@@ -41,6 +41,13 @@ namespace pinpoint::lm {
 // A column we do not recognise is ignored rather than fatal — a newer FSX2020
 // adding a column must not stop the shot being read.
 //
+// UNMEASURED QUANTITIES ARE DROPPED, NOT READ. A GCQuad tracks the club from
+// reflective stickers on it; with none fitted the ball numbers are still measured
+// and good, while every club quantity is unknown. FSX2020 fills those cells with
+// an in-band marker (16777215, sometimes unit-converted) rather than leaving them
+// empty, so the parser filters them out and leaves the field absent. See kNoData
+// in the .cpp for the marker and why a plain constant match is not sufficient.
+//
 // Returns nullopt when the input is not a usable reading: no header, no data row,
 // no Shot ID, or no numeric value at all. A torn read — the file caught
 // mid-rewrite — lands here, and the caller must treat it as "nothing yet" and
