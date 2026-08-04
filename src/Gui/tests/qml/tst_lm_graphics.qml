@@ -37,21 +37,31 @@ Item {
     width: 1148; height: 516      // a 1168 x 560 stage less the header and the sp(10) body padding
 
     // One shot, as the model hands it over — the design brief's reference row.
+    // A field with no session spread yet — under the three-shot floor, so no region.
     function field(v, text, unit, abbrev, band) {
         return { value: v, text: text, unit: unit, abbrev: abbrev,
-                 label: abbrev, bandIndex: band, has: true, mean: "", sd: "" }
+                 label: abbrev, bandIndex: band, has: true, mean: "", sd: "",
+                 meanValue: v, sdValue: 0, hasSpread: false, n: 1 }
+    }
+
+    // A field the session HAS a spread for, which is what puts a shaded region behind
+    // its vector.
+    function spreadField(v, text, unit, abbrev, band, mean, sd) {
+        return { value: v, text: text, unit: unit, abbrev: abbrev,
+                 label: abbrev, bandIndex: band, has: true, mean: "", sd: "",
+                 meanValue: mean, sdValue: sd, hasSpread: true, n: 18 }
     }
 
     readonly property var fixture: ({
         leftHanded: false,
         has: true,
         values: {
-            "lm.clubheadSpeed":   field(84.5,  "84.5",  "mph",   "CLUB SPEED",  0),
-            "lm.attackAngle":     field(-3.5,  "−3.5",  "°",     "ATTACK ANG.", 0),
-            "lm.clubPath":        field(-1.8,  "−1.8",  "°",     "CLUB PATH",   0),
-            "lm.faceAngle":       field(-1.1,  "−1.1",  "°",     "FACE ANGLE",  0),
+            "lm.clubheadSpeed":   spreadField(84.5, "84.5", "mph", "CLUB SPEED", 0, 83.9, 2.1),
+            "lm.attackAngle":     spreadField(-3.5, "−3.5", "°", "ATTACK ANG.", 0, -3.2, 0.9),
+            "lm.clubPath":        spreadField(-1.8, "−1.8", "°", "CLUB PATH", 0, -2.1, 1.4),
+            "lm.faceAngle":       spreadField(-1.1, "−1.1", "°", "FACE ANGLE", 0, -0.9, 1.1),
             "lm.faceToPath":      field(1.6,   "1.6",   "°",     "FACE-PATH",   0),
-            "lm.dynamicLoft":     field(17.7,  "17.7",  "°",     "DYN. LOFT",   0),
+            "lm.dynamicLoft":     spreadField(17.7, "17.7", "°", "DYN. LOFT", 0, 18.1, 1.3),
             "lm.spinLoft":        field(21.2,  "21.2",  "°",     "SPIN LOFT",   0),
             "lm.lieAngle":        field(60.7,  "60.7",  "°",     "LIE ANGLE",   0),
             "lm.closureRate":     field(1840,  "1840",  "°/s",   "CLOSURE",     0),
@@ -59,15 +69,15 @@ Item {
             "lm.strikeLocation":  field(3.0,   "3",     "mm",    "STRIKE LOC.", 1),
             "lm.strikeHeight":    field(-6.0,  "−6",    "mm",    "STRIKE HT.",  1),
             "lm.ballSpeed":       field(118.1, "118.1", "mph",   "BALL SPEED",  2),
-            "lm.launchAngle":     field(13.2,  "13.2",  "°",     "LAUNCH ANG.", 2),
-            "lm.launchDirection": field(-1.3,  "−1.3",  "°",     "START DIR.",  2),
+            "lm.launchAngle":     spreadField(13.2, "13.2", "°", "LAUNCH ANG.", 2, 13.6, 1.0),
+            "lm.launchDirection": spreadField(-1.3, "−1.3", "°", "START DIRECTION", 2, -0.8, 1.2),
             "lm.spinRate":        field(4686,  "4686",  "rpm",   "SPIN RATE",   3),
             "lm.backSpin":        field(4670,  "4670",  "rpm",   "BACK SPIN",   3),
             "lm.sideSpin":        field(384,   "384",   "rpm",   "SIDE SPIN",   3),
-            "lm.spinAxis":        field(4.7,   "4.7",   "°",     "SPIN AXIS",   3),
-            "lm.carryDistance":   field(166.6, "166.6", "yd",    "CARRY",       4),
+            "lm.spinAxis":        spreadField(4.7, "4.7", "°", "SPIN AXIS", 3, 3.9, 2.6),
+            "lm.carryDistance":   spreadField(166.6, "166.6", "yd", "CARRY", 4, 164.2, 5.4),
             "lm.totalDistance":   field(181.9, "181.9", "yd",    "TOTAL",       4),
-            "lm.offline":         field(5.1,   "5.1",   "yd",    "OFFLINE",     4),
+            "lm.offline":         spreadField(5.1, "5.1", "yd", "OFFLINE", 4, 2.8, 4.1),
             "lm.peakHeight":      field(63,    "63",    "ft",    "PEAK HT.",    4),
             "lm.descentAngle":    field(37.3,  "37.3",  "°",     "DESCENT",     4),
         },
@@ -93,6 +103,8 @@ Item {
             lateralExtentYd: 5.73, carryYd: 166.6, totalYd: 181.9,
             apexFt: 63.0, offlineYd: 5.1, residualOfflineYd: 3.47,
         },
+        strikeEllipse: { has: true, n: 18, meanX: 1.2, meanY: -2.4,
+                         majorSd: 5.1, minorSd: 2.2, tiltDeg: 28.0 },
         shape:  { has: true, name: "Pull–fade", windowIdx: 0, curveIdx: 2,
                   evidence: "start 1.3° left · face +1.6° to path · finishes 5.1 yd right" },
         strike: { has: true, name: "Low", evidence: "smash +0.01 vs μ" },
@@ -295,6 +307,204 @@ Item {
 
             body.g = probe.fixture
             wait(0)
+        }
+
+        // ── the session's spread, shaded behind the shot ────────────────────
+        // Every PpLmSpread under `item`, however deeply nested.
+        function spreads(item, acc) {
+            acc = acc || []
+            if (!item || !item.children) return acc
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (c.restAlpha !== undefined && c.liveAlpha !== undefined) acc.push(c)
+                spreads(c, acc)
+            }
+            return acc
+        }
+
+        function test_08_regionsAreSubtleAndBehind() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            body.hoveredKey = ""
+            wait(0)
+
+            const rs = spreads(body).filter(r => r.visible)
+            verify(rs.length >= 7, "the vectors with a session spread are shaded, saw " + rs.length)
+
+            for (let i = 0; i < rs.length; ++i) {
+                // Subtle: at rest the fill is a wash, not a colour. Checked on the alpha
+                // rather than on a screenshot so it cannot drift unnoticed.
+                verify(rs[i]._fill.a <= 0.09,
+                       "region " + i + " is faint at rest (" + rs[i]._fill.a + ")")
+                // ...but NOT invisible. This panel's stated home is a bay TV read from
+                // across a hitting bay, where no pointer will ever hover: a region that
+                // only exists on hover would not exist at all in the place it is for.
+                verify(rs[i]._fill.a >= 0.03,
+                       "region " + i + " is still visible at rest (" + rs[i]._fill.a + ")")
+            }
+
+            // Behind. Within a diagram, stacking is declaration order, so every region
+            // must sit at a lower index than every line and label around it.
+            const cs = cards(body)
+            for (let c = 0; c < cs.length; ++c) {
+                const mine = spreads(cs[c])
+                if (mine.length === 0) continue
+                const frame = mine[0].parent
+                let lastRegion = -1, firstOther = frame.children.length
+                for (let i = 0; i < frame.children.length; ++i) {
+                    const ch = frame.children[i]
+                    const isRegion = ch.restAlpha !== undefined
+                    if (isRegion) lastRegion = Math.max(lastRegion, i)
+                    else firstOther = Math.min(firstOther, i)
+                }
+                verify(lastRegion < firstOther,
+                       "card " + c + ": every region stacks behind every mark")
+            }
+        }
+
+        function test_09_hoverLiftsOneRegionOnly() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            body.hoveredKey = ""
+            wait(0)
+
+            const rs = spreads(body).filter(r => r.visible)
+            const rest = rs.map(r => r._fill.a)
+
+            // Drive it through hoveredKey rather than a synthesised pointer: what is
+            // being asserted is that ONE region answers a question about ONE metric,
+            // which is the contract the HoverHandler feeds and not the handler itself.
+            body.hoveredKey = "lm.clubPath"
+            wait(Theme.durationFast + 60)
+
+            let lifted = 0
+            for (let i = 0; i < rs.length; ++i) {
+                if (rs[i].active) {
+                    ++lifted
+                    verify(rs[i]._fill.a > rest[i],
+                           "the asked-about region comes forward")
+                    verify(rs[i]._fill.a <= 0.2,
+                           "…without becoming a corridor (" + rs[i]._fill.a + ")")
+                }
+            }
+            compare(lifted, 1, "exactly one region answers")
+
+            body.hoveredKey = ""
+            wait(Theme.durationFast + 60)
+            for (let i = 0; i < rs.length; ++i)
+                verify(!rs[i].active, "and they all settle back")
+        }
+
+        // Under three shots there is no spread to shade — the same floor that hides the
+        // tiles board's dispersion strip, reaching the schematics.
+        function test_10_noRegionBelowTheSpreadFloor() {
+            probe.width = 1148; probe.height = 516
+            const thin = JSON.parse(JSON.stringify({}))
+            const noSpread = Object.assign({}, probe.fixture, {
+                values: Object.assign({}, probe.fixture.values, {
+                    "lm.clubPath": probe.field(-1.8, "−1.8", "°", "CLUB PATH", 0)
+                }),
+                strikeEllipse: { has: false }
+            })
+            body.g = noSpread
+            wait(0)
+
+            const rs = spreads(body)
+            let clubPathShaded = false
+            for (let i = 0; i < rs.length; ++i)
+                if (rs[i].visible && rs[i].hue === body.hueClub && rs[i].radius === 170)
+                    clubPathShaded = true
+            verify(!clubPathShaded, "a field under the three-shot floor is not shaded")
+
+            body.g = probe.fixture
+            wait(0)
+        }
+
+        // ── hover, through the actual pointer ───────────────────────────────
+        // test_09 drives hoveredKey directly, which asserts what the regions do with an
+        // answer but NOT that anything ever produces one. This moves a real pointer over
+        // a real label, which is the path a golfer takes.
+        function test_11_pointingAtALabelAsksTheQuestion() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            body.hoveredKey = ""
+            wait(0)
+
+            // The CLUB PATH annotation on the PATH & FACE card.
+            const target = annotations(cards(body)[0]).find(a => a.metricKey === "lm.clubPath")
+            verify(target !== undefined, "the club path label is a hover target")
+            verify(target.width > 0 && target.height > 0, "…with a real area to point at")
+
+            const p = target.mapToItem(probe, target.width / 2, target.height / 2)
+            mouseMove(probe, p.x, p.y)
+            wait(60)
+            compare(body.hoveredKey, "lm.clubPath",
+                    "pointing at the label asks about that metric")
+
+            // And leaving it puts the question down again.
+            mouseMove(probe, 2, probe.height - 2)
+            wait(60)
+            compare(body.hoveredKey, "", "leaving the label clears it")
+        }
+
+        // ── pointing at the SHADING, which is the gesture people make ────────
+        // The label is not the only target and never was the natural one: shown the
+        // panel, the first thing a reader does is point at the shaded region itself.
+        // test_11 covers the label; this covers the region, and it is the one that was
+        // missing when the feature was first put in front of someone.
+        function test_12_pointingAtTheShadingAsksTheQuestion() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            body.hoveredKey = ""
+            wait(0)
+
+            const region = spreads(body).find(r => r.visible && r.metricKey === "lm.launchDirection")
+            verify(region !== undefined, "the start direction spread is on screen")
+
+            // Out along the wedge's own centreline, well clear of the pivot — where the
+            // sector is widest and where a reader would actually point.
+            const a = region.meanAngle * Math.PI / 180
+            const rr = region.radius * region.s * 0.7
+            const p = region.mapToItem(probe,
+                                       region.pivotX * region.s + rr * Math.cos(a),
+                                       region.pivotY * region.s + rr * Math.sin(a))
+            mouseMove(probe, p.x, p.y)
+            wait(60)
+            compare(body.hoveredKey, "lm.launchDirection",
+                    "pointing at the shading asks about that metric")
+            verify(region.active, "…and that region is the one that answers")
+
+            mouseMove(probe, 2, probe.height - 2)
+            wait(60)
+            compare(body.hoveredKey, "", "leaving it clears the question")
+        }
+
+        // Every region must be pointable, including the ones only a few pixels wide.
+        // The 1° launch-angle wedge is 7 px across at its widest and the dynamic-loft one
+        // is 3 px: without a floor on the TARGET (never on the drawing) they are shaded
+        // for the eye and unreachable by the hand.
+        function test_13_evenTheThinnestRegionIsPointable() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            body.hoveredKey = ""
+            wait(0)
+
+            for (const key of ["lm.dynamicLoft", "lm.launchAngle", "lm.faceAngle"]) {
+                const region = spreads(body).find(r => r.visible && r.metricKey === key)
+                verify(region !== undefined, key + " is shaded")
+
+                const a = region.meanAngle * Math.PI / 180
+                const rr = region.radius * region.s * 0.6
+                const p = region.mapToItem(probe,
+                                           region.pivotX * region.s + rr * Math.cos(a),
+                                           region.pivotY * region.s + rr * Math.sin(a))
+                mouseMove(probe, p.x, p.y)
+                wait(60)
+                compare(body.hoveredKey, key, "a hairline region is still pointable: " + key)
+
+                mouseMove(probe, 2, probe.height - 2)
+                wait(60)
+            }
         }
 
         // The strike marker's centre, in the STRIKE card's coordinates.

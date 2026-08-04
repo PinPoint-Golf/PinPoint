@@ -225,6 +225,94 @@ inline QString lmFormat(double v, int decimals)
     return s.replace(QLatin1Char('-'), QChar(0x2212));
 }
 
+// ── joint spread: the dispersion ELLIPSE ─────────────────────────────────────
+//
+// Two fields taken together, for the regions the schematics shade behind a vector.
+// Everything above is one field at a time, which is all a tile needs; a strike PATTERN
+// is not two independent spreads and drawing it as one is the thing this exists to
+// avoid.
+//
+// WHY THE COVARIANCE AND NOT JUST TWO SDs. An ellipse built from sdX and sdY alone is
+// axis-aligned, and real miss patterns are not: a golfer who thins it off the heel has a
+// diagonal pattern, and the DIAGONAL IS THE COACHING INSIGHT. Axis-aligned shading would
+// draw that same golfer a fat symmetrical blob — wider than the truth in both directions,
+// and silent about the one thing worth telling them. The extra accumulator costs a line.
+//
+// majorSd/minorSd/tiltDeg are the eigendecomposition of the 2x2 covariance matrix, and
+// they are ONLY meaningful when the two axes share a unit AND are drawn at the same
+// scale. That holds for strike location against strike height (both mm, both 2.6 px/mm)
+// and does not hold for carry against offline (both yards, but drawn at 1.8 and 4.5
+// px/yd). Callers in the second case use sdX/sdY and accept an axis-aligned region;
+// rotating an ellipse and then scaling its axes unequally does not give the ellipse of
+// the scaled data, it gives a wrong one.
+struct LmPairStats {
+    bool   has     = false;   // n >= kMinShotsForSpread && both spreads non-zero
+    int    n       = 0;
+    double meanX   = 0.0, meanY   = 0.0;
+    double sdX     = 0.0, sdY     = 0.0;
+    double r       = 0.0;     // correlation, −1…1
+    double majorSd = 0.0, minorSd = 0.0;
+    double tiltDeg = 0.0;     // of the major axis, from +x, y-down screen convention
+};
+
+// Both fields from the shots that carried BOTH. A shot the monitor read the face on but
+// lost the ball for contributes to neither: a pair statistic assembled from two
+// different subsets is not a statistic about any shot that was actually hit.
+inline LmPairStats lmPairStats(const std::vector<LmShotValues> &shots,
+                               const QString &keyX, const QString &keyY)
+{
+    LmPairStats out;
+
+    std::vector<double> xs, ys;
+    xs.reserve(shots.size());
+    ys.reserve(shots.size());
+    for (const LmShotValues &s : shots) {
+        const auto ix = s.constFind(keyX), iy = s.constFind(keyY);
+        if (ix == s.constEnd() || iy == s.constEnd()) continue;
+        if (!std::isfinite(*ix) || !std::isfinite(*iy)) continue;
+        xs.push_back(*ix);
+        ys.push_back(*iy);
+    }
+    out.n = int(xs.size());
+    if (out.n < kMinShotsForSpread)
+        return out;
+
+    double sx = 0.0, sy = 0.0;
+    for (int i = 0; i < out.n; ++i) { sx += xs[size_t(i)]; sy += ys[size_t(i)]; }
+    out.meanX = sx / out.n;
+    out.meanY = sy / out.n;
+
+    // Two-pass, and n-1 throughout — same reasons as the single-field path above.
+    double vxx = 0.0, vyy = 0.0, vxy = 0.0;
+    for (int i = 0; i < out.n; ++i) {
+        const double dx = xs[size_t(i)] - out.meanX;
+        const double dy = ys[size_t(i)] - out.meanY;
+        vxx += dx * dx; vyy += dy * dy; vxy += dx * dy;
+    }
+    const double denom = double(out.n - 1);
+    vxx /= denom; vyy /= denom; vxy /= denom;
+
+    out.sdX = vxx > 0.0 ? std::sqrt(vxx) : 0.0;
+    out.sdY = vyy > 0.0 ? std::sqrt(vyy) : 0.0;
+    if (out.sdX <= 0.0 || out.sdY <= 0.0)
+        return out;                      // a line, not an ellipse — nothing to shade
+    out.r = std::clamp(vxy / (out.sdX * out.sdY), -1.0, 1.0);
+
+    // Eigenvalues of [[vxx, vxy], [vxy, vyy]]: the variances along the pattern's own
+    // two axes. Closed form for 2x2 — no iteration, no library.
+    const double mid  = 0.5 * (vxx + vyy);
+    const double half = 0.5 * (vxx - vyy);
+    const double disc = std::sqrt(half * half + vxy * vxy);
+    out.majorSd = std::sqrt(std::max(mid + disc, 0.0));
+    out.minorSd = std::sqrt(std::max(mid - disc, 0.0));
+    // atan2(2·vxy, vxx − vyy) / 2 is the major axis' angle. Degenerate when the pattern
+    // is circular, where atan2(0,0) is 0 and any tilt is as good as any other.
+    out.tiltDeg = 0.5 * std::atan2(2.0 * vxy, vxx - vyy) * 180.0 / M_PI;
+
+    out.has = true;
+    return out;
+}
+
 // The em dash every "we do not have this" reads as. One character, one meaning,
 // wherever it appears on the board.
 inline QString lmAbsent() { return QStringLiteral("—"); }

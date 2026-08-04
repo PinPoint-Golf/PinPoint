@@ -402,6 +402,10 @@ qt_add_qml_module(PinPointStudio
         src/Gui/session/PpLmCard.qml
         src/Gui/session/PpLmDiagram.qml
         src/Gui/session/PpLmRule.qml
+        # PpLmSpread is the session's own ±1 SD behind each vector — subtle at rest so it
+        # reads as texture on a bay TV, lifted to the metric's band hue when the reader
+        # hovers that metric's label. Never a corridor: no norm, no grade, no RAG.
+        src/Gui/session/PpLmSpread.qml
         src/Gui/shot/PpDashboardVerdictZone.qml
         src/Gui/shot/PpDashboardSetupZone.qml
         src/Gui/shot/PpDashboardMotionZone.qml

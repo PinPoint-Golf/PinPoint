@@ -47,6 +47,17 @@ static LmShotValues one(const char *key, double v)
     return s;
 }
 
+static QString k(const char *key) { return QString::fromLatin1(key); }
+
+// One shot's strike, as the ellipse tests need it: location across, height up.
+static LmShotValues pair(double loc, double height)
+{
+    LmShotValues s;
+    s.insert(QStringLiteral("lm.strikeLocation"), loc);
+    s.insert(QStringLiteral("lm.strikeHeight"), height);
+    return s;
+}
+
 int main()
 {
     std::printf("lm_session_reductions_test\n");
@@ -335,6 +346,72 @@ int main()
         check(lmMeanText(t) == QStringLiteral("μ 86.0"), "the mean shows below the floor");
         check(lmSdText(t)   == QStringLiteral("—"), "…and the spread reads as an em dash");
         check(lmSdText(t)   == lmAbsent(), "…the same em dash a missing value uses");
+    }
+
+    // ── The joint spread: the dispersion ellipse ────────────────────────────────
+    //
+    // What the schematics shade behind a vector. The single-field statistics above
+    // cannot express a PATTERN — two SDs describe a box, and a golfer's misses lie on a
+    // diagonal inside it.
+    {
+        // A pair of shots is a pair, not a pattern: the same three-shot floor.
+        const std::vector<LmShotValues> two = { pair(2.0, 2.0), pair(-2.0, -2.0) };
+        check(!lmPairStats(two, k("lm.strikeLocation"), k("lm.strikeHeight")).has,
+              "two shots produce no ellipse");
+
+        // Perfectly correlated, on the 45° diagonal: all the variance is on one axis, so
+        // the minor axis collapses and the tilt is 45°. The case an axis-aligned ellipse
+        // gets most wrong — it would draw a square where the truth is a line.
+        const std::vector<LmShotValues> diag = { pair(-4.0, -4.0), pair(0.0, 0.0),
+                                                 pair(4.0, 4.0) };
+        const LmPairStats d = lmPairStats(diag, k("lm.strikeLocation"), k("lm.strikeHeight"));
+        check(d.has, "three correlated shots produce an ellipse");
+        check(d.n == 3, "…over all three of them");
+        check(near(d.meanX, 0.0, 1e-9) && near(d.meanY, 0.0, 1e-9), "centred on the mean");
+        check(near(d.r, 1.0, 1e-9), "…perfectly correlated");
+        check(near(d.tiltDeg, 45.0, 1e-6), "…tilted along the pattern, not the axes");
+        check(near(d.minorSd, 0.0, 1e-9), "…with no width across it");
+        check(near(d.majorSd, std::sqrt(2.0) * d.sdX, 1e-9),
+              "…and its length is the diagonal of the two axis spreads");
+
+        // The other diagonal tilts the other way. A sign error here would draw every
+        // heel-low pattern as toe-low.
+        const std::vector<LmShotValues> anti = { pair(-4.0, 4.0), pair(0.0, 0.0),
+                                                 pair(4.0, -4.0) };
+        const LmPairStats a = lmPairStats(anti, k("lm.strikeLocation"), k("lm.strikeHeight"));
+        check(near(a.r, -1.0, 1e-9), "the opposite diagonal is anti-correlated");
+        check(near(a.tiltDeg, -45.0, 1e-6), "…and tilts the other way");
+
+        // Uncorrelated and unequal: the major axis lies along the wider spread, and the
+        // ellipse is axis-aligned because the data really is.
+        const std::vector<LmShotValues> box = { pair(-6.0, -1.0), pair(6.0, -1.0),
+                                                pair(-6.0, 1.0),  pair(6.0, 1.0) };
+        const LmPairStats b = lmPairStats(box, k("lm.strikeLocation"), k("lm.strikeHeight"));
+        check(b.has, "a square pattern is still an ellipse");
+        check(near(b.r, 0.0, 1e-9), "…uncorrelated");
+        check(near(b.tiltDeg, 0.0, 1e-6), "…so it does not tilt");
+        check(b.majorSd > b.minorSd, "…major axis along the wider spread");
+        check(near(b.majorSd, b.sdX, 1e-9) && near(b.minorSd, b.sdY, 1e-9),
+              "…and the axes are just the two spreads");
+
+        // n-1, the same denominator the rest of the header uses.
+        check(near(b.sdX, 6.0 * std::sqrt(4.0 / 3.0), 1e-9), "sample SD, n-1 denominator");
+
+        // Every shot identical is a point, not a pattern. No divide, no ellipse.
+        const std::vector<LmShotValues> same = { pair(3.0, 3.0), pair(3.0, 3.0),
+                                                 pair(3.0, 3.0) };
+        check(!lmPairStats(same, k("lm.strikeLocation"), k("lm.strikeHeight")).has,
+              "no spread, no ellipse — and no divide by zero");
+
+        // BOTH fields or neither. A shot the monitor read the face on but lost the ball
+        // for must not contribute half a point: a pair statistic assembled from two
+        // different subsets describes no shot anyone hit.
+        std::vector<LmShotValues> partial = { pair(-4.0, -4.0), pair(0.0, 0.0),
+                                              pair(4.0, 4.0) };
+        partial.push_back(one("lm.strikeLocation", 40.0));     // height missing
+        const LmPairStats p = lmPairStats(partial, k("lm.strikeLocation"), k("lm.strikeHeight"));
+        check(p.n == 3, "a half-reported shot is skipped entirely");
+        check(near(p.meanX, 0.0, 1e-9), "…so it cannot drag the mean");
     }
 
     std::printf(g_fail ? "FAILED (%d)\n" : "OK\n", g_fail);

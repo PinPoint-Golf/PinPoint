@@ -88,6 +88,22 @@ Item {
         return Theme.chartSeriesColor(f ? f.bandIndex : 0)
     }
 
+    // The session's own spread for a field, for the shaded regions. `spread()` is the
+    // three-shot floor from lm_session_reductions.h reaching the drawing: under it there
+    // is no region at all, exactly as the tiles board hides its dispersion strip. A ±1 SD
+    // wedge drawn from two shots is a claim about repeatability made from one gap.
+    function spread(key) { const f = fld(key); return !!f && f.hasSpread === true }
+    function sd(key)     { const f = fld(key); return (f && f.hasSpread) ? f.sdValue : 0 }
+    function avg(key)    { const f = fld(key); return (f && f.n > 0) ? f.meanValue : 0 }
+
+    // Which metric the reader is currently asking about, or "" for none.
+    //
+    // ONE PROPERTY RATHER THAN A FLAG PER REGION. Hover is exclusive by nature — a
+    // pointer is over one label — and holding it centrally means a region and its label
+    // cannot disagree about whether they are lit, which two independent booleans
+    // eventually would.
+    property string hoveredKey: ""
+
     readonly property var flight: (g && g.flight) ? g.flight : ({ has: false })
     readonly property var shape:  (g && g.shape)  ? g.shape  : ({ has: false })
     readonly property var strike: (g && g.strike) ? g.strike : ({ has: false })
@@ -278,7 +294,19 @@ Item {
         property string value: "—"
         property string unit: ""
         property color hue: Theme.colorText2
+        // The metric this block names. Setting it makes the block the HOVER TARGET for
+        // that metric's shaded region — the label is a real-sized thing to point at,
+        // where the rotated 1 px line it describes is not.
+        property string metricKey: ""
         spacing: Math.round(2 * s)
+
+        HoverHandler {
+            enabled: anno.metricKey !== ""
+            onHoveredChanged: {
+                if (hovered) root.hoveredKey = anno.metricKey
+                else if (root.hoveredKey === anno.metricKey) root.hoveredKey = ""
+            }
+        }
 
         Text {
             text: anno.label
@@ -323,6 +351,44 @@ Item {
         PpLmDiagram {
             id: pf
             designW: 672; designH: 182
+
+            // ── the session's spread, behind everything ──────────────────────
+            // Declared first, so it stacks under every line and label on the card. Each
+            // wedge carries the SAME gain as the vector it sits behind — a region drawn
+            // true while its line is drawn ×5 would shade the wrong place entirely.
+            PpLmSpread {
+                s: pf.s; hue: root.hueClub; shape: "wedge"
+                metricKey: "lm.clubPath"
+                active: root.hoveredKey === "lm.clubPath"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.clubPath"
+                                    : (root.hoveredKey === "lm.clubPath" ? "" : root.hoveredKey)
+                visible: root.spread("lm.clubPath")
+                pivotX: 300; pivotY: 96; radius: 170
+                meanAngle: root.avg("lm.clubPath") * root.kPlanGain
+                halfAngle: root.sd("lm.clubPath") * root.kPlanGain
+            }
+            PpLmSpread {
+                s: pf.s; hue: root.hueClub; shape: "wedge"
+                metricKey: "lm.faceAngle"
+                active: root.hoveredKey === "lm.faceAngle"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.faceAngle"
+                                    : (root.hoveredKey === "lm.faceAngle" ? "" : root.hoveredKey)
+                visible: root.spread("lm.faceAngle")
+                pivotX: 300; pivotY: 96; radius: 36
+                meanAngle: 90 + root.avg("lm.faceAngle") * root.kPlanGain
+                halfAngle: root.sd("lm.faceAngle") * root.kPlanGain
+            }
+            PpLmSpread {
+                s: pf.s; hue: root.hueLaunch; shape: "wedge"
+                metricKey: "lm.launchDirection"
+                active: root.hoveredKey === "lm.launchDirection"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.launchDirection"
+                                    : (root.hoveredKey === "lm.launchDirection" ? "" : root.hoveredKey)
+                visible: root.spread("lm.launchDirection")
+                pivotX: 300; pivotY: 96; radius: 300
+                meanAngle: root.avg("lm.launchDirection") * root.kPlanGain
+                halfAngle: root.sd("lm.launchDirection") * root.kPlanGain
+            }
 
             PpLmRule {                                   // target line
                 x: pf.d(20); y: pf.d(96); s: pf.s
@@ -376,21 +442,21 @@ Item {
             }
 
             Anno { x: pf.d(16);  y: pf.d(14);  s: pf.s; hue: root.hueClub
-                   label: qsTr("CLUB SPEED");    value: root.txt("lm.clubheadSpeed"); unit: root.unit("lm.clubheadSpeed") }
+                   label: qsTr("CLUB SPEED");    metricKey: "lm.clubheadSpeed"; value: root.txt("lm.clubheadSpeed"); unit: root.unit("lm.clubheadSpeed") }
             Anno { x: pf.d(190); y: pf.d(14);  s: pf.s; hue: root.hueClub
-                   label: qsTr("CLOSURE RATE ↻"); value: root.txt("lm.closureRate");   unit: root.unit("lm.closureRate") }
+                   label: qsTr("CLOSURE RATE ↻"); metricKey: "lm.closureRate"; value: root.txt("lm.closureRate");   unit: root.unit("lm.closureRate") }
             Anno { x: pf.d(372); y: pf.d(14);  s: pf.s; hue: root.hueClub
-                   label: qsTr("FACE TO PATH");  value: root.txt("lm.faceToPath");     unit: root.unit("lm.faceToPath") }
+                   label: qsTr("FACE TO PATH");  metricKey: "lm.faceToPath"; value: root.txt("lm.faceToPath");     unit: root.unit("lm.faceToPath") }
             // Set well right of FACE TO PATH and under the far end of the start-direction
             // ray, which is where the eye already is — and spelled out, because "START
             // DIR." saves eleven pixels on a card that has room and costs the reader the
             // one word that says which direction is meant.
             Anno { x: pf.d(520); y: pf.d(14);  s: pf.s; hue: root.hueLaunch
-                   label: qsTr("START DIRECTION"); value: root.txt("lm.launchDirection"); unit: root.unit("lm.launchDirection") }
+                   label: qsTr("START DIRECTION"); metricKey: "lm.launchDirection"; value: root.txt("lm.launchDirection"); unit: root.unit("lm.launchDirection") }
             Anno { x: pf.d(16);  y: pf.d(128); s: pf.s; hue: root.hueClub
-                   label: qsTr("CLUB PATH");     value: root.txt("lm.clubPath");        unit: root.unit("lm.clubPath") }
+                   label: qsTr("CLUB PATH");     metricKey: "lm.clubPath"; value: root.txt("lm.clubPath");        unit: root.unit("lm.clubPath") }
             Anno { x: pf.d(250); y: pf.d(146); s: pf.s; hue: root.hueClub
-                   label: qsTr("FACE ANGLE");    value: root.txt("lm.faceAngle");       unit: root.unit("lm.faceAngle") }
+                   label: qsTr("FACE ANGLE");    metricKey: "lm.faceAngle"; value: root.txt("lm.faceAngle");       unit: root.unit("lm.faceAngle") }
             // BALL SPEED and SMASH are NOT repeated here. Both lead the headline strip a
             // few pixels above, and a figure printed twice on one screen makes a reader
             // check whether the two agree instead of reading either. The strip is the
@@ -462,6 +528,18 @@ Item {
             id: sp
             designW: 420; designH: 182
 
+            PpLmSpread {
+                s: sp.s; hue: root.hueSpin; shape: "wedge"
+                metricKey: "lm.spinAxis"
+                active: root.hoveredKey === "lm.spinAxis"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.spinAxis"
+                                    : (root.hoveredKey === "lm.spinAxis" ? "" : root.hoveredKey)
+                visible: root.spread("lm.spinAxis")
+                pivotX: 150; pivotY: 84; radius: 90
+                meanAngle: root.avg("lm.spinAxis") * root.kSpinGain
+                halfAngle: root.sd("lm.spinAxis") * root.kSpinGain
+            }
+
             PpLmRule { x: sp.d(16); y: sp.d(84); s: sp.s; len: 264
                        kind: "reference" }
 
@@ -485,13 +563,13 @@ Item {
             }
 
             Anno { x: sp.d(14);  y: sp.d(136); s: sp.s; hue: root.hueSpin
-                   label: qsTr("SPIN AXIS"); value: root.txt("lm.spinAxis"); unit: root.unit("lm.spinAxis") }
+                   label: qsTr("SPIN AXIS"); metricKey: "lm.spinAxis"; value: root.txt("lm.spinAxis"); unit: root.unit("lm.spinAxis") }
             Anno { x: sp.d(272); y: sp.d(16);  s: sp.s; hue: root.hueSpin
-                   label: qsTr("SPIN RATE · TOTAL"); value: root.txt("lm.spinRate"); unit: root.unit("lm.spinRate") }
+                   label: qsTr("SPIN RATE · TOTAL"); metricKey: "lm.spinRate"; value: root.txt("lm.spinRate"); unit: root.unit("lm.spinRate") }
             Anno { x: sp.d(272); y: sp.d(66);  s: sp.s; hue: root.hueSpin
-                   label: qsTr("BACK SPIN"); value: root.txt("lm.backSpin"); unit: root.unit("lm.backSpin") }
+                   label: qsTr("BACK SPIN"); metricKey: "lm.backSpin"; value: root.txt("lm.backSpin"); unit: root.unit("lm.backSpin") }
             Anno { x: sp.d(272); y: sp.d(116); s: sp.s; hue: root.hueSpin
-                   label: qsTr("SIDE SPIN"); value: root.txt("lm.sideSpin"); unit: root.unit("lm.sideSpin") }
+                   label: qsTr("SIDE SPIN"); metricKey: "lm.sideSpin"; value: root.txt("lm.sideSpin"); unit: root.unit("lm.sideSpin") }
         }
     }
 
@@ -502,6 +580,43 @@ Item {
         PpLmDiagram {
             id: im
             designW: 408; designH: 182
+
+            // Attack angle's line runs BACKWARD from the ball, so its wedge is swept
+            // about the same pivot but 180° round — the region has to lie where the line
+            // is drawn, not where its angle nominally points.
+            PpLmSpread {
+                s: im.s; hue: root.hueClub; shape: "wedge"
+                metricKey: "lm.attackAngle"
+                active: root.hoveredKey === "lm.attackAngle"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.attackAngle"
+                                    : (root.hoveredKey === "lm.attackAngle" ? "" : root.hoveredKey)
+                visible: root.spread("lm.attackAngle")
+                pivotX: 150; pivotY: 132; radius: 130
+                meanAngle: 180 - root.avg("lm.attackAngle") * root.kAttackGain
+                halfAngle: root.sd("lm.attackAngle") * root.kAttackGain
+            }
+            PpLmSpread {
+                s: im.s; hue: root.hueClub; shape: "wedge"
+                metricKey: "lm.dynamicLoft"
+                active: root.hoveredKey === "lm.dynamicLoft"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.dynamicLoft"
+                                    : (root.hoveredKey === "lm.dynamicLoft" ? "" : root.hoveredKey)
+                visible: root.spread("lm.dynamicLoft")
+                pivotX: 150; pivotY: 132; radius: 66
+                meanAngle: -90 - root.avg("lm.dynamicLoft")
+                halfAngle: root.sd("lm.dynamicLoft")
+            }
+            PpLmSpread {
+                s: im.s; hue: root.hueLaunch; shape: "wedge"
+                metricKey: "lm.launchAngle"
+                active: root.hoveredKey === "lm.launchAngle"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.launchAngle"
+                                    : (root.hoveredKey === "lm.launchAngle" ? "" : root.hoveredKey)
+                visible: root.spread("lm.launchAngle")
+                pivotX: 150; pivotY: 132; radius: 216
+                meanAngle: -root.avg("lm.launchAngle")
+                halfAngle: root.sd("lm.launchAngle")
+            }
 
             PpLmRule { x: im.d(16); y: im.d(140); s: im.s; len: 376
                        kind: "reference" }
@@ -542,17 +657,17 @@ Item {
             }
 
             Anno { x: im.d(14);  y: im.d(18);  s: im.s; hue: root.hueClub
-                   label: qsTr("ATTACK ANGLE"); value: root.txt("lm.attackAngle"); unit: root.unit("lm.attackAngle") }
+                   label: qsTr("ATTACK ANGLE"); metricKey: "lm.attackAngle"; value: root.txt("lm.attackAngle"); unit: root.unit("lm.attackAngle") }
             Anno { x: im.d(170); y: im.d(20);  s: im.s; hue: root.hueClub
-                   label: qsTr("DYN. LOFT");    value: root.txt("lm.dynamicLoft"); unit: root.unit("lm.dynamicLoft") }
+                   label: qsTr("DYN. LOFT");    metricKey: "lm.dynamicLoft"; value: root.txt("lm.dynamicLoft"); unit: root.unit("lm.dynamicLoft") }
             Anno { x: im.d(262); y: im.d(118); s: im.s; hue: root.hueLaunch
-                   label: qsTr("LAUNCH ANGLE"); value: root.txt("lm.launchAngle"); unit: root.unit("lm.launchAngle") }
+                   label: qsTr("LAUNCH ANGLE"); metricKey: "lm.launchAngle"; value: root.txt("lm.launchAngle"); unit: root.unit("lm.launchAngle") }
             // Spin loft is not drawn as a wedge: it IS the gap between the two club
             // lines already on this card, so the card says so rather than adding a
             // third line that only restates them.
             Anno { x: im.d(150); y: im.d(152); s: im.s; hue: root.hueClub
                    label: qsTr("SPIN LOFT · LOFT LESS ATTACK")
-                   value: root.txt("lm.spinLoft"); unit: root.unit("lm.spinLoft") }
+                   metricKey: "lm.spinLoft"; value: root.txt("lm.spinLoft"); unit: root.unit("lm.spinLoft") }
         }
     }
 
@@ -572,6 +687,34 @@ Item {
             readonly property real cx: 74
             readonly property real cy: 69
             readonly property real pxPerMm: 2.6
+
+            // The session's strike PATTERN — a tilted ±1 SD ellipse, because a golfer's
+            // misses lie on a diagonal and an axis-aligned blob would hide the one thing
+            // a coach reads off this card. Legitimate as a rotated ellipse here (and
+            // nowhere else on the panel) because both axes are millimetres drawn at the
+            // same 2.6 px/mm — see lmPairStats() for why the landing pattern is not.
+            //
+            // Mirrored for a left-hander by negating the tilt along with the horizontal
+            // offset: rotating the pattern without flipping it would draw a heel-low
+            // golfer a toe-low one.
+            PpLmSpread {
+                s: sk.s; hue: root.hueStrike; shape: "ellipse"
+                active: root.hoveredKey === "lm.strikeLocation"
+                         || root.hoveredKey === "lm.strikeHeight"
+                metricKey: "lm.strikeLocation"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.strikeLocation"
+                                    : (root.hoveredKey === "lm.strikeLocation" ? "" : root.hoveredKey)
+                visible: root.g && root.g.strikeEllipse ? root.g.strikeEllipse.has === true : false
+                centreX: sk.cx - sk.mirror * sk.pxPerMm
+                                 * (root.g.strikeEllipse ? root.g.strikeEllipse.meanX : 0)
+                centreY: sk.cy - sk.pxPerMm
+                                 * (root.g.strikeEllipse ? root.g.strikeEllipse.meanY : 0)
+                radiusX: sk.pxPerMm * (root.g.strikeEllipse ? root.g.strikeEllipse.majorSd : 0)
+                radiusY: sk.pxPerMm * (root.g.strikeEllipse ? root.g.strikeEllipse.minorSd : 0)
+                // Screen y runs down while strike height runs up, so the data-space tilt
+                // is negated once for the flip and again for a left-hander.
+                tiltDeg: -sk.mirror * (root.g.strikeEllipse ? root.g.strikeEllipse.tiltDeg : 0)
+            }
 
             PpLmRule { x: sk.d(14); y: sk.d(69); s: sk.s; len: 120     // crosshair, horizontal
                        kind: "reference" }
@@ -638,6 +781,12 @@ Item {
             // colorText2 because they are NUMBERS and colorText3 would be illegible.
             Text {                                       // strike location, on the toe-heel axis
                 objectName: "anno"
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) root.hoveredKey = "lm.strikeLocation"
+                        else if (root.hoveredKey === "lm.strikeLocation") root.hoveredKey = ""
+                    }
+                }
                 x: sk.d(104); y: sk.d(73)
                 text: root.txt("lm.strikeLocation") + " " + root.unit("lm.strikeLocation")
                 font.family: Theme.fontData; font.pixelSize: sk.f(Theme.fontSzMicro)
@@ -646,6 +795,12 @@ Item {
             }
             Text {                                       // strike height, on the high-low axis
                 objectName: "anno"
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) root.hoveredKey = "lm.strikeHeight"
+                        else if (root.hoveredKey === "lm.strikeHeight") root.hoveredKey = ""
+                    }
+                }
                 x: sk.d(78); y: sk.d(99)
                 text: root.txt("lm.strikeHeight") + " " + root.unit("lm.strikeHeight")
                 font.family: Theme.fontData; font.pixelSize: sk.f(Theme.fontSzMicro)
@@ -654,7 +809,7 @@ Item {
             }
 
             Anno { x: sk.d(152); y: sk.d(118); s: sk.s; hue: root.hueClub
-                   label: qsTr("LIE ANGLE");       value: root.txt("lm.lieAngle");       unit: root.unit("lm.lieAngle") }
+                   label: qsTr("LIE ANGLE");       metricKey: "lm.lieAngle"; value: root.txt("lm.lieAngle");       unit: root.unit("lm.lieAngle") }
 
             Column {
                 objectName: "anno"
@@ -727,6 +882,27 @@ Item {
                     out.push(Qt.point(fl.d(px(list[i].x)),
                                       fl.d(lateral ? pz(list[i].y) : py(list[i].y))))
                 return out
+            }
+
+            // The landing pattern: ±1 SD of carry against ±1 SD of offline, on the
+            // ground track. AXIS-ALIGNED, unlike the strike ellipse, and deliberately —
+            // this card draws distance at 1.8 px/yd and lateral at 4.5, so a tilt
+            // computed in yards would be the wrong tilt once drawn. An untilted region
+            // understates the pattern; a wrongly-tilted one would misdescribe it.
+            PpLmSpread {
+                s: fl.s; hue: root.hueFlight; shape: "ellipse"
+                active: root.hoveredKey === "lm.carryDistance"
+                         || root.hoveredKey === "lm.offline"
+                metricKey: "lm.carryDistance"
+                onIsHoveredChanged: root.hoveredKey = isHovered ? "lm.carryDistance"
+                                    : (root.hoveredKey === "lm.carryDistance" ? "" : root.hoveredKey)
+                visible: root.flight.has === true
+                         && root.spread("lm.carryDistance") && root.spread("lm.offline")
+                centreX: fl.px(root.avg("lm.carryDistance") / root.flightTotalYd)
+                centreY: fl.pz(root.avg("lm.offline") / root.flightLatYd)
+                radiusX: root.sd("lm.carryDistance") * root.xPerYd
+                radiusY: root.sd("lm.offline") * root.zPerYd
+                tiltDeg: 0
             }
 
             PpLmRule { x: fl.d(16); y: fl.d(92);  s: fl.s; len: 396      // ground
@@ -822,13 +998,13 @@ Item {
             }
 
             Anno { x: fl.d(52);  y: fl.d(0);   s: fl.s; hue: root.hueFlight
-                   label: qsTr("PEAK HEIGHT"); value: root.txt("lm.peakHeight"); unit: root.unit("lm.peakHeight") }
+                   label: qsTr("PEAK HEIGHT"); metricKey: "lm.peakHeight"; value: root.txt("lm.peakHeight"); unit: root.unit("lm.peakHeight") }
             Anno { x: fl.d(340); y: fl.d(44);  s: fl.s; hue: root.hueFlight
-                   label: qsTr("DESCENT");     value: root.txt("lm.descentAngle"); unit: root.unit("lm.descentAngle") }
+                   label: qsTr("DESCENT");     metricKey: "lm.descentAngle"; value: root.txt("lm.descentAngle"); unit: root.unit("lm.descentAngle") }
             Anno { x: fl.d(258); y: fl.d(116); s: fl.s; hue: root.hueFlight
-                   label: qsTr("TOTAL");       value: root.txt("lm.totalDistance"); unit: root.unit("lm.totalDistance") }
+                   label: qsTr("TOTAL");       metricKey: "lm.totalDistance"; value: root.txt("lm.totalDistance"); unit: root.unit("lm.totalDistance") }
             Anno { x: fl.d(44);  y: fl.d(150); s: fl.s; hue: root.hueFlight
-                   label: qsTr("OFFLINE");     value: root.txt("lm.offline"); unit: root.unit("lm.offline") }
+                   label: qsTr("OFFLINE");     metricKey: "lm.offline"; value: root.txt("lm.offline"); unit: root.unit("lm.offline") }
         }
     }
 }

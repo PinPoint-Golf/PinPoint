@@ -109,6 +109,13 @@ QVariantMap annotationFor(const LmFieldStats &st)
         { QStringLiteral("text"),      lmValueText(st) }, // formatted — the card prints this
         { QStringLiteral("mean"),      lmMeanText(st) },
         { QStringLiteral("sd"),        lmSdText(st) },
+        // The spread as NUMBERS as well as words. The tiles board only ever printed
+        // these; the schematics shade a region from them, and a region cannot be built
+        // out of the string "±5.2".
+        { QStringLiteral("meanValue"), st.mean },
+        { QStringLiteral("sdValue"),   st.sd },
+        { QStringLiteral("hasSpread"), st.hasSpread },
+        { QStringLiteral("n"),         st.n },
         { QStringLiteral("unit"),      QString::fromUtf8(st.def->unit) },
         { QStringLiteral("abbrev"),    QString::fromUtf8(st.def->abbrev) },
         { QStringLiteral("label"),     QString::fromUtf8(st.def->label) },
@@ -385,7 +392,7 @@ void LmSessionModel::rebuild()
             m_bands.push_back(band);
     }
 
-    buildGraphics(stats);
+    buildGraphics(stats, scoped);
 
     endResetModel();
     emit headerChanged();
@@ -403,7 +410,8 @@ void LmSessionModel::rebuild()
 // EVERY DERIVED NUMBER IS DECIDED HERE, not in a binding: the flight polyline, both
 // inferred reads, their evidence strings, the drawn-metric count. QML positions and
 // paints (analysis pipeline guide §6.2).
-void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats)
+void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats,
+                                   const std::vector<LmShotValues> &scoped)
 {
     QVariantMap g;
     g.insert(QStringLiteral("leftHanded"), m_leftHanded);
@@ -492,6 +500,24 @@ void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats)
         { QStringLiteral("evidence"),  shape.evidence },
         { QStringLiteral("windowIdx"), shape.windowIdx },
         { QStringLiteral("curveIdx"),  shape.curveIdx },
+    });
+
+    // The session's strike PATTERN, as an ellipse. Not two independent spreads: a golfer
+    // who thins it off the heel misses on a diagonal, and that diagonal is the thing
+    // worth showing them. Legitimate here because both axes are millimetres AND the face
+    // is drawn at one scale in both directions — see lmPairStats() for why the same
+    // treatment is wrong for the landing pattern, whose two axes are drawn at 1.8 and
+    // 4.5 px/yd and which the FLIGHT card therefore shades axis-aligned.
+    const LmPairStats face = lmPairStats(scoped, QStringLiteral("lm.strikeLocation"),
+                                                 QStringLiteral("lm.strikeHeight"));
+    g.insert(QStringLiteral("strikeEllipse"), QVariantMap{
+        { QStringLiteral("has"),     face.has },
+        { QStringLiteral("n"),       face.n },
+        { QStringLiteral("meanX"),   face.meanX },
+        { QStringLiteral("meanY"),   face.meanY },
+        { QStringLiteral("majorSd"), face.majorSd },
+        { QStringLiteral("minorSd"), face.minorSd },
+        { QStringLiteral("tiltDeg"), face.tiltDeg },
     });
 
     const LmStrikeRead strike = lmStrikeQuality(valueOf(stats, "lm.strikeLocation"),

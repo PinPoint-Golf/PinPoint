@@ -26,14 +26,18 @@
 #include <QQmlEngine>
 #include <QString>
 #include <QVariantList>
+#include <QHash>
 #include <QVariantMap>
 
 #include <vector>
 
-// Forward-declared rather than included: buildGraphics() only takes a reference, and
+// Forward-declared rather than included: buildGraphics() only takes references, and
 // pulling lm_session_reductions.h in here would drag the whole launch monitor field
 // catalogue into every translation unit that touches the model.
-namespace pinpoint::analysis { struct LmFieldStats; }
+namespace pinpoint::analysis {
+struct LmFieldStats;
+using LmShotValues = QHash<QString, double>;
+}
 
 // The launch monitor session board's model (PpLaunchMonitorPanel).
 //
@@ -156,7 +160,8 @@ private:
     // The graphics-mode projection of the SAME statistics rebuild() banded for the
     // tiles. Takes them as an argument rather than recomputing, which is what keeps the
     // two modes incapable of disagreeing about one shot.
-    void buildGraphics(const std::vector<pinpoint::analysis::LmFieldStats> &stats);
+    void buildGraphics(const std::vector<pinpoint::analysis::LmFieldStats> &stats,
+                       const std::vector<pinpoint::analysis::LmShotValues> &scoped);
 
     struct Band {
         QString      name;
