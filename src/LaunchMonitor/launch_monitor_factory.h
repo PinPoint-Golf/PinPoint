@@ -43,4 +43,11 @@ QList<Kind> availableKinds();
 // The name shown in the settings combo box.
 QString kindLabel(Kind kind);
 
+// The SHORT name, for places that name the device in passing rather than offering it
+// as a choice — the session board's scope line, "GC Quad · 7 iron · 18 shots". The
+// combo needs the software it talks to spelled out; a header three words long does
+// not, and would push the club and the shot count off the end of the line.
+// Empty for Kind::None, so a caller can join it into a list without a special case.
+QString kindShortLabel(Kind kind);
+
 } // namespace pinpoint::lm

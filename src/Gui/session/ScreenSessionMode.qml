@@ -143,6 +143,11 @@ Item {
                 // Broad-scope: available on every session screen (Verdict degrades to score +
                 // pattern where the analyzer is still a stub).
                 dashboardDelegate: Component { PpDashboardPanel { sessionType: root.sessionType; interactive: true } }
+                // Launch monitor session board — per SESSION and neutral, where the
+                // dashboard above is per shot and opinionated. Gated on available data
+                // and devices, never on sessionType: a monitor is a monitor whatever
+                // the screen was opened to do. Off until the user asks for it in View.
+                launchMonitorDelegate: Component { PpLaunchMonitorPanel {} }
                 // Table panel — read-only inspector of the focused swing.json. The
                 // focused swing is the active replay, else the carousel's selection.
                 tableDelegate: Component {

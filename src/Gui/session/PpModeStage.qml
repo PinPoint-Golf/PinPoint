@@ -35,6 +35,7 @@ Item {
     property Component cameraDelegate:      null
     property Component chartsDelegate:      null
     property Component dashboardDelegate:   null
+    property Component launchMonitorDelegate: null
     property Component wristMotionDelegate: null
     property Component tableDelegate:       null
     property Component markupDelegate:      null
@@ -45,6 +46,7 @@ Item {
     readonly property var _defs: [
         { key: "camera",      label: qsTr("Camera"),                comp: cameraDelegate },
         { key: "dashboard",   label: qsTr("Dashboard"),             comp: dashboardDelegate },
+        { key: "launchMonitor", label: qsTr("Launch monitor"),      comp: launchMonitorDelegate },
         { key: "wristMotion", label: qsTr("Wrist motion analysis"), comp: wristMotionDelegate },
         { key: "charts",      label: qsTr("Charts"),                comp: chartsDelegate },
         { key: "table",       label: qsTr("Table"),                 comp: tableDelegate },

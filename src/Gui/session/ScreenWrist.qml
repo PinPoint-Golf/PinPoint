@@ -150,6 +150,10 @@ Item {
                 // Post-shot dashboard — the configurable, glanceable, wall-castable summary
                 // (Verdict/Setup/Motion/Sequence), broad-scope across session types.
                 dashboardDelegate: Component { PpDashboardPanel { sessionType: SessionController.Wrist; interactive: true } }
+                // Launch monitor session board. Costs nothing to wire — the panel takes
+                // no sessionType and reads the same shotModel this screen already shows,
+                // and it stays off until the user turns it on in View.
+                launchMonitorDelegate: Component { PpLaunchMonitorPanel {} }
                 // Wrist motion analysis — the detailed Tier-1 assessment surface (per-DOF
                 // trajectory strips, position×phase grid, findings). A normal stage panel:
                 // place/arrange it via the View control like camera/charts/table.

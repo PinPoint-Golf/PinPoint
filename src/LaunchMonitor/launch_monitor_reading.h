@@ -104,8 +104,26 @@ struct FieldDef {
     const char *rawName;    // key within the swing.json `launchMonitor` block
     const char *label;      // matches MetricDescriptor::label exactly
     const char *unit;       // matches MetricDescriptor::unit exactly
+    // Which band of the session board this field sits in — one of fieldGroups(),
+    // cross-checked. NOT MetricDescriptor::group: that taxonomy spans all 86 metrics
+    // and puts thirteen of these in one "Ball flight" bucket that the board splits
+    // three ways, so it cannot be mapped without hand-writing this column anyway.
+    const char *group;
+    // The board abbreviation ("CLUB SPEED", "DYN. LOFT"). Deliberately NOT
+    // MetricDescriptor::shortLabel: that carries the "(LM)" qualifier which exists to
+    // disambiguate against our own estimate, and a panel showing only measured values
+    // has nothing to disambiguate against. The moment a bare-key estimate appears
+    // beside one of these, the qualifier has to come back.
+    const char *abbrev;
     std::optional<double> LaunchMonitorReading::*member;
 };
+
+// The board's bands, in DISPLAY order — which is not derivable from fieldDefs()
+// (first appearance there gives Club, Launch, Strike, …). Every FieldDef::group must
+// name one of these and every band must own at least one field; both are asserted by
+// the catalogue cross-check, so a typo or an orphaned band fails a test rather than
+// producing a silently empty row on the panel.
+const std::vector<const char *> &fieldGroups();
 
 // Declaration order is display order wherever the table drives a list.
 //

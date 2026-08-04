@@ -55,6 +55,9 @@ class LaunchMonitorController : public QObject
     Q_PROPERTY(QString errorText    READ errorText    NOTIFY stateChanged)
     // Where readings are being read from, for the settings panel to show back.
     Q_PROPERTY(QString sourceText   READ sourceText   NOTIFY stateChanged)
+    // The short device name ("GC Quad") for panels that name the device in passing.
+    // Empty when nothing is configured, so a caller can join it into a list unguarded.
+    Q_PROPERTY(QString deviceName   READ deviceName   NOTIFY stateChanged)
     // A one-line summary of the last reading applied ("283 · Irn · 87.2 mph"), so the
     // settings panel can prove the connection works without opening a shot.
     Q_PROPERTY(QString lastReading  READ lastReading  NOTIFY lastReadingChanged)
@@ -75,6 +78,7 @@ public:
     QString stateLabel() const;
     QString errorText()  const;
     QString sourceText() const;
+    QString deviceName() const;
     QString lastReading() const { return m_lastReading; }
 
 public slots:

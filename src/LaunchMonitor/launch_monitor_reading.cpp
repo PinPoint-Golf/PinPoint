@@ -19,45 +19,51 @@
 
 namespace pinpoint::lm {
 
+const std::vector<const char *> &fieldGroups()
+{
+    static const std::vector<const char *> groups = { "Club", "Strike", "Launch", "Spin", "Flight" };
+    return groups;
+}
+
 const std::vector<FieldDef> &fieldDefs()
 {
     using R = LaunchMonitorReading;
     static const std::vector<FieldDef> defs = {
         // Measured where we also estimate — the validation pairs. The labels carry
         // "(measured)" so that a table showing both cannot be misread.
-        { "lm.clubheadSpeed",   "clubheadSpeed",   "Clubhead speed (measured)", "mph",   &R::clubheadSpeed   },
-        { "lm.ballSpeed",       "ballSpeed",       "Ball speed (measured)",     "mph",   &R::ballSpeed       },
-        { "lm.smashFactor",     "smashFactor",     "Smash factor",              "ratio", &R::smashFactor     },
-        { "lm.attackAngle",     "attackAngle",     "Attack angle (measured)",   "°",     &R::attackAngle     },
-        { "lm.clubPath",        "clubPath",        "Club path (measured)",      "°",     &R::clubPath        },
-        { "lm.launchAngle",     "launchAngle",     "Launch angle (measured)",   "°",     &R::launchAngle     },
-        { "lm.launchDirection", "launchDirection", "Start direction (measured)","°",     &R::launchDirection },
+        { "lm.clubheadSpeed",   "clubheadSpeed",   "Clubhead speed (measured)", "mph",   "Club",   "CLUB SPEED",  &R::clubheadSpeed   },
+        { "lm.ballSpeed",       "ballSpeed",       "Ball speed (measured)",     "mph",   "Launch", "BALL SPEED",  &R::ballSpeed       },
+        { "lm.smashFactor",     "smashFactor",     "Smash factor",              "ratio", "Strike", "SMASH FAC.",  &R::smashFactor     },
+        { "lm.attackAngle",     "attackAngle",     "Attack angle (measured)",   "°",     "Club",   "ATTACK ANG.", &R::attackAngle     },
+        { "lm.clubPath",        "clubPath",        "Club path (measured)",      "°",     "Club",   "CLUB PATH",   &R::clubPath        },
+        { "lm.launchAngle",     "launchAngle",     "Launch angle (measured)",   "°",     "Launch", "LAUNCH ANG.", &R::launchAngle     },
+        { "lm.launchDirection", "launchDirection", "Start direction (measured)","°",     "Launch", "START DIR.",  &R::launchDirection },
 
         // Club delivery the cameras cannot resolve.
-        { "lm.faceAngle",       "faceAngle",       "Face angle",    "°",   &R::faceAngle    },
-        { "lm.faceToPath",      "faceToPath",      "Face to path",  "°",   &R::faceToPath   },
-        { "lm.dynamicLoft",     "dynamicLoft",     "Dynamic loft",  "°",   &R::dynamicLoft  },
-        { "lm.spinLoft",        "spinLoft",        "Spin loft",     "°",   &R::spinLoft     },
-        { "lm.lieAngle",        "lieAngle",        "Lie angle",     "°",   &R::lieAngle     },
-        { "lm.closureRate",     "closureRate",     "Closure rate",  "°/s", &R::closureRate  },
+        { "lm.faceAngle",       "faceAngle",       "Face angle",    "°",   "Club", "FACE ANG.",    &R::faceAngle    },
+        { "lm.faceToPath",      "faceToPath",      "Face to path",  "°",   "Club", "FACE TO PATH", &R::faceToPath   },
+        { "lm.dynamicLoft",     "dynamicLoft",     "Dynamic loft",  "°",   "Club", "DYN. LOFT",    &R::dynamicLoft  },
+        { "lm.spinLoft",        "spinLoft",        "Spin loft",     "°",   "Club", "SPIN LOFT",    &R::spinLoft     },
+        { "lm.lieAngle",        "lieAngle",        "Lie angle",     "°",   "Club", "LIE ANG.",     &R::lieAngle     },
+        { "lm.closureRate",     "closureRate",     "Closure rate",  "°/s", "Club", "CLOSURE",      &R::closureRate  },
 
         // Strike.
-        { "lm.strikeLocation",  "strikeLocation",  "Strike location", "mm", &R::strikeLocation },
-        { "lm.strikeHeight",    "strikeHeight",    "Strike height",   "mm", &R::strikeHeight   },
+        { "lm.strikeLocation",  "strikeLocation",  "Strike location", "mm", "Strike", "STRIKE LOC.", &R::strikeLocation },
+        { "lm.strikeHeight",    "strikeHeight",    "Strike height",   "mm", "Strike", "STRIKE HT.",  &R::strikeHeight   },
 
         // Spin.
-        { "lm.spinRate",        "spinRate",        "Spin rate", "rpm", &R::spinRate },
-        { "lm.backSpin",        "backSpin",        "Back spin", "rpm", &R::backSpin },
-        { "lm.sideSpin",        "sideSpin",        "Side spin", "rpm", &R::sideSpin },
-        { "lm.spinAxis",        "spinAxis",        "Spin axis", "°",   &R::spinAxis },
+        { "lm.spinRate",        "spinRate",        "Spin rate", "rpm", "Spin", "SPIN RATE", &R::spinRate },
+        { "lm.backSpin",        "backSpin",        "Back spin", "rpm", "Spin", "BACK SPIN", &R::backSpin },
+        { "lm.sideSpin",        "sideSpin",        "Side spin", "rpm", "Spin", "SIDE SPIN", &R::sideSpin },
+        { "lm.spinAxis",        "spinAxis",        "Spin axis", "°",   "Spin", "SPIN AXIS", &R::spinAxis },
 
         // Flight-model outputs.
-        { "lm.carryDistance",   "carryDistance",   "Carry",            "yd", &R::carryDistance },
-        { "lm.totalDistance",   "totalDistance",   "Total distance",   "yd", &R::totalDistance },
-        { "lm.offline",         "offline",         "Offline",          "yd", &R::offline       },
-        { "lm.peakHeight",      "peakHeight",      "Peak height",      "ft", &R::peakHeight    },
-        { "lm.descentAngle",    "descentAngle",    "Descent angle",    "°",  &R::descentAngle  },
-        { "lm.distanceToPin",   "distanceToPin",   "Distance to pin",  "yd", &R::distanceToPin },
+        { "lm.carryDistance",   "carryDistance",   "Carry",            "yd", "Flight", "CARRY",        &R::carryDistance },
+        { "lm.totalDistance",   "totalDistance",   "Total distance",   "yd", "Flight", "TOTAL",        &R::totalDistance },
+        { "lm.offline",         "offline",         "Offline",          "yd", "Flight", "OFFLINE",      &R::offline       },
+        { "lm.peakHeight",      "peakHeight",      "Peak height",      "ft", "Flight", "PEAK HT.",     &R::peakHeight    },
+        { "lm.descentAngle",    "descentAngle",    "Descent angle",    "°",  "Flight", "DESCENT ANG.", &R::descentAngle  },
+        { "lm.distanceToPin",   "distanceToPin",   "Distance to pin",  "yd", "Flight", "TO PIN",       &R::distanceToPin },
     };
     return defs;
 }

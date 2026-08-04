@@ -475,6 +475,11 @@ QtObject {
                                             : aesthetic === "terrain"    ? Font.DemiBold
                                             : Font.Normal
 
+    // The launch monitor board's headline figure. Larger than fontSzData because that
+    // board is read from a few feet away, standing over the ball, and its whole job is
+    // to be legible at a glance — the tile has room for it precisely because it carries
+    // no corridor, no verdict and no trace.
+    readonly property int  fontSzDataLg:  Math.round(26 * fontScale)
     readonly property int  fontSzData:    Math.round(20 * fontScale)
     readonly property int  fontSzDataSm:  Math.round(13 * fontScale)
     readonly property int  fontSzMicro:   Math.round(10 * fontScale)

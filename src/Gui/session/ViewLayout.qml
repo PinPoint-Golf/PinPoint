@@ -25,8 +25,15 @@
 // that mode's layout in place. Motion DOES have named presets (see below).
 //
 // Panels split into two homes:
-//   stage panels — camera/charts/dashboard/table, arranged inside PpModeStage
+//   stage panels — camera/charts/dashboard/launchMonitor/table, arranged inside
+//                  PpModeStage
 //   rail panels  — timeline/carousel, full-width rails the screen shows/hides
+//
+// A panel key is legal by being in PpModeStage's `_defs` and PpViewPanel's catalogue;
+// nothing here validates one, and a stored key no host wires is simply not shown. What
+// defaultLayout() OMITS is therefore the real switch: "launchMonitor" is deliberately
+// absent from every default, because a golfer with no monitor must never be shown an
+// empty board they did not ask for. They turn it on in View.
 //
 // Storage shape (per mode, key = String(modeInt)):
 //   viewLayoutByMode[k] = {

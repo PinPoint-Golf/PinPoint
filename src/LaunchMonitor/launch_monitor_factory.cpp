@@ -50,4 +50,15 @@ QString kindLabel(Kind kind)
     return QCoreApplication::translate("LaunchMonitor", "None");
 }
 
+QString kindShortLabel(Kind kind)
+{
+    switch (kind) {
+    case Kind::None:
+        return QString();
+    case Kind::GcQuad:
+        return QCoreApplication::translate("LaunchMonitor", "GC Quad");
+    }
+    return QString();
+}
+
 } // namespace pinpoint::lm

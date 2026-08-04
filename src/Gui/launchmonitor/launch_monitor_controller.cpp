@@ -129,6 +129,11 @@ QString LaunchMonitorController::sourceText() const
     return m_monitor ? m_monitor->sourceDescription() : QString();
 }
 
+QString LaunchMonitorController::deviceName() const
+{
+    return m_monitor ? kindShortLabel(m_monitor->kind()) : QString();
+}
+
 void LaunchMonitorController::onShotDetected()
 {
     m_destinationHasDoc = true;   // assume the pipeline will produce one, until it says otherwise

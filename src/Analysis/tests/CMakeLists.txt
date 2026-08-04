@@ -97,6 +97,15 @@ pp_add_test(kinematic_sequence_test SOURCES kinematic_sequence_test.cpp)
 # line), and playhead interpolation with endpoint clamping. The backing for
 # PpBandRail (ChartMetrics::railCheckpoints/railRange/valueAtUs façade).
 pp_add_test(dashboard_reductions_test SOURCES dashboard_reductions_test.cpp)
+
+# Launch monitor session reductions (lm_session_reductions.h) — the n-1 spread, the
+# three-shot floor below which no spread is offered, omit-rather-than-zero for a field
+# the device never reported, the z-score and its tick clamp, and the board's number
+# formatting. Backs PpLaunchMonitorPanel (LmSessionModel façade). Compiles
+# launch_monitor_reading.cpp because the reduction walks fieldDefs() rather than
+# hand-listing keys — which is also what makes the band/abbrev columns testable here.
+pp_add_test(lm_session_reductions_test
+            SOURCES lm_session_reductions_test.cpp ${SRC}/LaunchMonitor/launch_monitor_reading.cpp)
 pp_add_test(imu_calibration_test  SOURCES imu_calibration_test.cpp)   # A·q·M solve + keystone golden
 pp_add_test(live_wrist_angles_test SOURCES live_wrist_angles_test.cpp) # live tick() math contract
 pp_add_test(imu_sample_test       SOURCES imu_sample_test.cpp)         # exported swing.json vector frame

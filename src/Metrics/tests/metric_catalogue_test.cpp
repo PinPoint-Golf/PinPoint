@@ -14,6 +14,8 @@
 #include "metric_catalogue.h"
 #include "launch_monitor_reading.h"
 
+#include <QSet>
+
 #include <algorithm>   // std::find — the "is this key claimed" sweep
 #include <cstdio>
 
@@ -681,6 +683,37 @@ int main()
             if (!found) ++unfillable;
         }
         checkEqI(unfillable, 0, "…and no lm. descriptor exists that no reading field can fill");
+
+        // The BOARD columns — group and abbrev — added for PpLaunchMonitorPanel.
+        //
+        // They are NOT copies of MetricDescriptor::group / ::shortLabel, so there is no
+        // drift to check against the manifest. What has to hold is that the table can
+        // still be walked blind: every field names a band the board draws, and every
+        // band it draws owns at least one field. A 26th reading field added without
+        // them would otherwise produce a tile the panel has nowhere to put.
+        QSet<QString> bands;
+        for (const char *g : pinpoint::lm::fieldGroups())
+            bands.insert(QString::fromLatin1(g));
+        checkEqI(bands.size(), int(pinpoint::lm::fieldGroups().size()), "band names are unique");
+
+        QSet<QString> banded;
+        int noBand = 0, noAbbrev = 0, qualified = 0;
+        for (const pinpoint::lm::FieldDef &f : pinpoint::lm::fieldDefs()) {
+            const QString g = QString::fromLatin1(f.group ? f.group : "");
+            if (!bands.contains(g)) ++noBand;
+            else banded.insert(g);
+            const QString a = QString::fromUtf8(f.abbrev ? f.abbrev : "");
+            if (a.isEmpty()) ++noAbbrev;
+            // The "(measured)" / "(LM)" qualifier exists to separate a reading from our
+            // own estimate. The board shows no estimates, so it does not carry one —
+            // and the day it does, this is what has to be revisited rather than silently
+            // left wrong.
+            if (a.contains(QLatin1Char('('))) ++qualified;
+        }
+        checkEqI(noBand, 0, "every reading field names a band from fieldGroups()");
+        checkEqI(noAbbrev, 0, "…and carries a board abbreviation");
+        checkEqI(qualified, 0, "…which drops the (measured) qualifier the label keeps");
+        checkEqI(banded.size(), bands.size(), "…and every band owns at least one field");
     }
 
     // 4. resolve() — club-track / face-on gating (kinematics + foot).

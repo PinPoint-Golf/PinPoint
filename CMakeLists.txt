@@ -389,6 +389,9 @@ qt_add_qml_module(PinPointStudio
         src/Gui/shot/PpShotFilter.qml
         src/Gui/shot/PpSwingEditPanel.qml
         src/Gui/shot/PpDashboardPanel.qml
+        # Session board — every lm.* reading the connected monitor produced, banded.
+        # Per SESSION and neutral, where the dashboard above is per shot and opinionated.
+        src/Gui/session/PpLaunchMonitorPanel.qml
         src/Gui/shot/PpDashboardVerdictZone.qml
         src/Gui/shot/PpDashboardSetupZone.qml
         src/Gui/shot/PpDashboardMotionZone.qml
@@ -475,6 +478,11 @@ qt_add_qml_module(PinPointStudio
         src/Gui/review/chart_metrics.cpp
         src/Gui/review/metric_catalog.h
         src/Gui/review/metric_catalog.cpp
+        # The launch monitor session board's model. Instantiated by the panel rather
+        # than registered in main.cpp, because the panel is off by default and a machine
+        # with no monitor should not be paying for a model that recomputes on each shot.
+        src/Gui/launchmonitor/lm_session_model.h
+        src/Gui/launchmonitor/lm_session_model.cpp
         # Settings → Reference → Diagnostic Model. One facade over the whole content set: it reads
         # an assembly containing the UNSAVED working copy, which is what lets editing accumulate
         # into one Save and lets the validation strip grade the draft rather than the file.
