@@ -23,7 +23,7 @@
 // e.g. "-beta1", "-alpha1", "-rc2" for pre-releases.
 #define PINPOINT_VERSION_MAJOR   0
 #define PINPOINT_VERSION_MINOR   1
-#define PINPOINT_VERSION_POSTFIX "-alpha10"
+#define PINPOINT_VERSION_POSTFIX "-alpha11"
 
 // ── Monotonic build number ───────────────────────────────────────────────────
 // A single strictly-increasing integer used as the *comparison* key by the
@@ -41,7 +41,8 @@
 // v0.1-alpha8 → 0 + 10000 + 0 + 8 = 10008.
 // v0.1-alpha9 → 0 + 10000 + 0 + 9 = 10009.
 // v0.1-alpha10 → 0 + 10000 + 0 + 10 = 10010.
-#define PINPOINT_VERSION_BUILD   10010
+// v0.1-alpha11 → 0 + 10000 + 0 + 11 = 10011.
+#define PINPOINT_VERSION_BUILD   10011
 
 // ── Assembled string ─────────────────────────────────────────────────────────
 #define PP_STR_IMPL(x) #x
