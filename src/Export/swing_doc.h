@@ -80,6 +80,41 @@ public:
     static bool updateLaunchMonitor(const QString &swingDir,
                                     const lm::LaunchMonitorReading &reading,
                                     QString *error = nullptr);
+
+    // Who the shot belongs to and where it sits — everything a device-only document
+    // needs that the reading itself cannot supply.
+    struct DeviceOnlyMeta {
+        QString swingId;              // "swing_0007"
+        int     swingIndex = 0;
+        QString sessionId;            // the session FOLDER name, for the draw-from filter
+        QString athleteName;
+        QString athleteUuid;          // what a norm COHORT is resolved through
+        QString club;                 // the app's selected club, not the device's code
+        int     sessionType = -1;
+        qint64  wallclockMs = 0;      // when the reading was taken
+    };
+
+    // Write a complete swing.json for a shot that ONLY a launch monitor saw.
+    //
+    // The capture pipeline produced nothing: no camera, no IMU, no buffer window, so no
+    // analysis and no export. This is not a degraded version of writeSwingJson — it is a
+    // different document, and it says so rather than leaving blanks that read as failure:
+    // `streams` is empty, there is no thumbnail, and `analysis` carries metrics and one
+    // phase and nothing else.
+    //
+    // THE IMPACT EVENT IS MANUFACTURED, AND IT HAS TO BE. Every lm.* measure reduces
+    // "at p7", and buildPhaseGrid returns an EMPTY grid when `analysis.phases[]` is empty
+    // — "unsegmented: no phase to read anything at, so nothing is producible" — so
+    // without a phase entry the readings would persist and then resolve to nothing at
+    // all. A ball WAS struck, which is why `conf` is 1.0: what is unknown is the
+    // instant, not the event. That unknown is carried honestly by `capture.impactUs`,
+    // which stays at its -1 "unknown" sentinel while the phase sits at t_us 0.
+    //
+    // Returns false (and sets *error) if the directory cannot be written.
+    static bool writeDeviceOnlySwing(const QString &swingDir,
+                                     const lm::LaunchMonitorReading &reading,
+                                     const DeviceOnlyMeta &meta,
+                                     QString *error = nullptr);
 };
 
 // A reloaded shot — everything ShotListModel::addPersistedShot needs to rebuild a

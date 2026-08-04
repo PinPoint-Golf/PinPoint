@@ -255,6 +255,28 @@ measurement must sit beside the estimate rather than replace it.
 The metric entries are written only when the document already has an `analysis` block; the raw block
 above is written regardless, so a shot whose analysis failed still keeps what the device said.
 
+### Device-only swings
+
+When `launchmonitor/standaloneShots` is on and nothing else is capturing, the reading creates the
+whole document (`SwingDocWriter::writeDeviceOnlySwing`). It is not a degraded capture — it is a
+different document, and it says so rather than leaving blanks that read as failure:
+
+| Block | In a device-only swing |
+|---|---|
+| `streams` | **`[]`** — the fact, not a failure. `hasVideo` derives from it, so the picker and carousel already read it right. |
+| `thumbnail` | **absent** — an empty block would point at a file never written. |
+| `window` | zero-length. There was nothing to capture, and a fabricated span would put a scrubber on a shot with no frames. |
+| `capture.shotSource` | `"launchMonitor"`, so a reader never infers it from the absence of streams. |
+| `capture.impactUs` | **`-1`** — the device says a ball was struck, never when. |
+| `analysis` | `metrics[]` (the `lm.*` readings) and `phases[]` (one entry) and **nothing else** — no `score`, no `pose2d`, no `club`, no `bindings`. Omitting them is what stops this being mistaken for an analysed swing whose analysis came out empty. |
+
+**The Impact phase event is manufactured, and it has to be.** Every `lm.*` measure reduces `at p7`,
+and `buildPhaseGrid` returns an empty grid when `phases[]` is empty — *"unsegmented: no phase to read
+anything at, so nothing is producible"* — so without it the readings would persist and then resolve
+to nothing at all. Its `conf` is `1.0` because the **event** is certain: a ball was struck and the
+device measured it. What is unknown is the *instant*, and that is carried by `capture.impactUs = -1`,
+not by pretending the timestamp is good.
+
 ---
 
 ## `analysis` (`pinpoint.analysis/3`)

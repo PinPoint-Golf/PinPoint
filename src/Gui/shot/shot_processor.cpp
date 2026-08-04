@@ -1415,6 +1415,8 @@ void ShotProcessor::maybeJoin()
                              imuDataWarning);
     }
 
+    m_lastShotId = newShotId;
+
     // "Reviewable on disk": analysis + export both succeeded AND a swing.json was
     // actually written — that is the swing the UI promotes straight into Review for
     // instant playback (the disk replay reads the just-written MP4(s), not the ring).

@@ -467,6 +467,57 @@ QString sourcePath (const QString &swingDir) { return swingDir + QStringLiteral(
 // THE extractor for the session-picker scalars. readSwingJson() and the sidecar both go
 // through this, so the cheap path can never disagree with the full path about a score
 // shape, a club fallback or a thumbnail name.
+// ── Launch monitor blocks, shared by the two paths that write them ──────────
+//
+// updateLaunchMonitor() folds a reading into a swing the capture pipeline produced;
+// writeDeviceOnlySwing() creates the whole document from the reading alone. They must
+// emit byte-identical blocks or a device-only shot and a camera shot would carry the
+// same measurement in two shapes, which is exactly the drift a reader would never spot.
+
+QJsonObject lmRawBlock(const lm::LaunchMonitorReading &reading)
+{
+    // Everything, including the columns no metric consumes. The reading is already in
+    // catalogue units, so this and the metric entries cannot disagree — storing the
+    // file's own units here as well would invite exactly that.
+    QJsonObject raw{
+        { QStringLiteral("kind"),          reading.deviceKind },
+        { QStringLiteral("deviceShotId"),  reading.deviceShotId },
+        { QStringLiteral("deviceClub"),    reading.deviceClub },
+        { QStringLiteral("sourcePath"),    reading.sourcePath },
+        { QStringLiteral("readAtMs"),      reading.readAtMs },
+    };
+    for (const lm::FieldDef &f : lm::fieldDefs())
+        if (const auto &v = reading.*(f.member))
+            raw.insert(QString::fromLatin1(f.rawName), *v);
+    return raw;
+}
+
+// One entry per reading: an EMPTY CURVE carrying a single phaseSample at Impact — the
+// representation club_delivery already uses for its scalars. A launch monitor reports
+// one number per shot; inventing a curve for it would be a lie the charts would draw.
+QJsonArray lmMetricEntries(const lm::LaunchMonitorReading &reading, qint64 impactUs)
+{
+    QJsonArray metrics;
+    for (const lm::FieldDef &f : lm::fieldDefs()) {
+        const auto &val = reading.*(f.member);
+        if (!val)
+            continue;
+        metrics.append(QJsonObject{
+            { QStringLiteral("key"),   QString::fromLatin1(f.key) },
+            { QStringLiteral("label"), QString::fromUtf8(f.label) },
+            { QStringLiteral("unit"),  QString::fromUtf8(f.unit) },
+            { QStringLiteral("t_us"),  QJsonArray{} },
+            { QStringLiteral("value"), QJsonArray{} },
+            { QStringLiteral("phaseSamples"), QJsonArray{ QJsonObject{
+                  { QStringLiteral("phase"), int(analysis::Phase::Impact) },
+                  { QStringLiteral("t_us"),  impactUs },
+                  { QStringLiteral("value"), *val },
+                  { QStringLiteral("band"),  QString() } } } },
+        });
+    }
+    return metrics;
+}
+
 SwingSummary summaryFromRoot(const QJsonObject &root, const QString &swingDir)
 {
     SwingSummary s;
@@ -672,17 +723,7 @@ bool SwingDocWriter::updateLaunchMonitor(const QString &swingDir,
     // Everything, including the columns no metric consumes. The reading is already
     // in catalogue units, so this and the metric entries below cannot disagree —
     // storing the file's own units here as well would invite exactly that.
-    QJsonObject raw{
-        { QStringLiteral("kind"),          reading.deviceKind },
-        { QStringLiteral("deviceShotId"),  reading.deviceShotId },
-        { QStringLiteral("deviceClub"),    reading.deviceClub },
-        { QStringLiteral("sourcePath"),    reading.sourcePath },
-        { QStringLiteral("readAtMs"),      reading.readAtMs },
-    };
-    for (const lm::FieldDef &f : lm::fieldDefs())
-        if (const auto &v = reading.*(f.member))
-            raw.insert(QString::fromLatin1(f.rawName), *v);
-    root[QStringLiteral("launchMonitor")] = raw;
+    root[QStringLiteral("launchMonitor")] = lmRawBlock(reading);
 
     // ── The metric entries ──────────────────────────────────────────────────
     if (root.contains(QStringLiteral("analysis"))) {
@@ -704,27 +745,8 @@ bool SwingDocWriter::updateLaunchMonitor(const QString &swingDir,
                    .startsWith(QStringLiteral("lm.")))
                 metrics.append(v);
 
-        for (const lm::FieldDef &f : lm::fieldDefs()) {
-            const auto &val = reading.*(f.member);
-            if (!val)
-                continue;
-            // An empty curve with one phaseSample at Impact — the representation
-            // club_delivery already uses for its scalars. A launch monitor reports
-            // one number per shot; inventing a curve for it would be a lie the
-            // charts would happily draw.
-            metrics.append(QJsonObject{
-                { QStringLiteral("key"),   QString::fromLatin1(f.key) },
-                { QStringLiteral("label"), QString::fromUtf8(f.label) },
-                { QStringLiteral("unit"),  QString::fromUtf8(f.unit) },
-                { QStringLiteral("t_us"),  QJsonArray{} },
-                { QStringLiteral("value"), QJsonArray{} },
-                { QStringLiteral("phaseSamples"), QJsonArray{ QJsonObject{
-                      { QStringLiteral("phase"), int(analysis::Phase::Impact) },
-                      { QStringLiteral("t_us"),  impactUs },
-                      { QStringLiteral("value"), *val },
-                      { QStringLiteral("band"),  QString() } } } },
-            });
-        }
+        for (const QJsonValue &v : lmMetricEntries(reading, impactUs))
+            metrics.append(v);
 
         an[QStringLiteral("metrics")] = metrics;
         root[QStringLiteral("analysis")] = an;
@@ -746,6 +768,115 @@ bool SwingDocWriter::updateLaunchMonitor(const QString &swingDir,
     // document already in hand rather than leaving a stale guard behind. The phase
     // grid sidecar is not rewritten here — it is regenerated on demand, and it MUST
     // be, since the readings we just added are new rows in it.
+    writeSummaryFile(summaryFromRoot(root, swingDir), nullptr);
+    return true;
+}
+
+bool SwingDocWriter::writeDeviceOnlySwing(const QString &swingDir,
+                                          const lm::LaunchMonitorReading &reading,
+                                          const DeviceOnlyMeta &meta,
+                                          QString *error)
+{
+    if (!reading.hasAnyValue()) {
+        if (error) *error = QStringLiteral("refusing to write a shot from a reading with no values");
+        return false;
+    }
+
+    const QDateTime when = meta.wallclockMs > 0
+                               ? QDateTime::fromMSecsSinceEpoch(meta.wallclockMs, Qt::UTC)
+                               : QDateTime::currentDateTimeUtc();
+
+    QJsonObject root;
+    root[QStringLiteral("schema")] = QStringLiteral("pinpoint.swing/2");
+
+    // t0_us is 0, not a buffer instant: there IS no buffer. Every t_us in this document
+    // is therefore already window-relative, which is the domain every reader expects.
+    root[QStringLiteral("clock")] = QJsonObject{
+        { QStringLiteral("t0_us"),     0 },
+        { QStringLiteral("wallclock"), when.toString(Qt::ISODateWithMs) },
+    };
+    // A zero-length window. Not a placeholder for a window we failed to capture — there
+    // was nothing to capture, and a fabricated span would put a scrubber on a shot with
+    // no frames behind it.
+    root[QStringLiteral("window")] = QJsonObject{
+        { QStringLiteral("startUs"), 0 },
+        { QStringLiteral("endUs"),   0 },
+    };
+    root[QStringLiteral("swing")] = QJsonObject{
+        { QStringLiteral("index"), meta.swingIndex },
+        { QStringLiteral("id"),    meta.swingId },
+    };
+    root[QStringLiteral("session")] = QJsonObject{
+        { QStringLiteral("id"), meta.sessionId },
+    };
+    root[QStringLiteral("athlete")] = QJsonObject{
+        { QStringLiteral("uuid"), meta.athleteUuid },
+        { QStringLiteral("name"), meta.athleteName },
+    };
+    root[QStringLiteral("capture")] = QJsonObject{
+        { QStringLiteral("sessionType"), meta.sessionType },
+        // Names the launch monitor as what saw this shot, so a reader never has to infer
+        // it from the absence of streams.
+        { QStringLiteral("shotSource"),  QStringLiteral("launchMonitor") },
+        // -1 is the schema's existing "impact unknown" sentinel, and it is the honest
+        // value: the device tells us a ball was struck, never when. The manufactured
+        // phase below sits at 0 and this stays -1 deliberately — the two answer
+        // different questions and collapsing them would hide which one we know.
+        { QStringLiteral("impactUs"),    -1 },
+    };
+    // EMPTY, and that is the fact rather than a failure. hasVideo is derived from this,
+    // so the picker and the carousel already read it correctly.
+    root[QStringLiteral("streams")] = QJsonArray{};
+    // No thumbnail key at all: an absent block is what summaryFromRoot reads as "no
+    // thumbnail", where an empty one would point at a file that was never written.
+
+    root[QStringLiteral("launchMonitor")] = lmRawBlock(reading);
+
+    // The club is the app's selection, not the device's code — the same rule the
+    // fold-in path follows, and what a normative corridor resolves through.
+    if (!meta.club.isEmpty())
+        root[QStringLiteral("review")] = QJsonObject{
+            { QStringLiteral("rating"), 0 },
+            { QStringLiteral("note"),   QString() },
+            { QStringLiteral("club"),   meta.club },
+        };
+
+    // ── analysis: metrics and ONE phase, and nothing else ───────────────────
+    //
+    // No score: nothing scored it. No pose, no club, no ball, no bindings, no
+    // segmentation. Omitting them is what stops a reader mistaking this for an analysed
+    // swing whose analysis came out empty.
+    QJsonObject an;
+    an[QStringLiteral("schema")]  = QStringLiteral("pinpoint.analysis/3");
+    an[QStringLiteral("tier")]    = int(analysis::ReconstructionTier::Angles2D);
+    an[QStringLiteral("metrics")] = lmMetricEntries(reading, /*impactUs*/ 0);
+    an[QStringLiteral("phases")]  = QJsonArray{ QJsonObject{
+        { QStringLiteral("phase"),   int(analysis::Phase::Impact) },
+        { QStringLiteral("t_us"),    0 },
+        // The EVENT is certain — a ball was struck and the device measured it. Only its
+        // instant is unknown, and that is stated by capture.impactUs, not here.
+        { QStringLiteral("conf"),    1.0 },
+        { QStringLiteral("segment"), int(analysis::SegmentRole::Unknown) },
+    } };
+    root[QStringLiteral("analysis")] = an;
+
+    if (!QDir().mkpath(swingDir)) {
+        if (error) *error = QStringLiteral("cannot create %1").arg(swingDir);
+        return false;
+    }
+
+    const QString path = swingDir + QStringLiteral("/swing.json");
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly)) {
+        if (error) *error = QStringLiteral("cannot write %1: %2").arg(path, out.errorString());
+        return false;
+    }
+    out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!out.commit()) {
+        if (error) *error = QStringLiteral("failed to commit %1: %2").arg(path, out.errorString());
+        return false;
+    }
+
     writeSummaryFile(summaryFromRoot(root, swingDir), nullptr);
     return true;
 }

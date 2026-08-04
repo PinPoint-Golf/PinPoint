@@ -476,6 +476,22 @@ The app forces `QSettings::IniFormat` (see `src/Core/pp_settings.h`), so on Wind
 | `launchmonitor/path` | `""` | ✅ | The **folder** FSX2020 writes `LastShot.CSV` into (not the file). Usually a share from the Windows machine running it — the connector itself is platform-agnostic |
 | `launchmonitor/pollIntervalMs` | `250` | ✅ | How often that folder is re-read, 50–10000 ms. Raise it only for a slow or busy network share |
 | `launchmonitor/chimeEnabled` | `true` | ✅ | Play a short quiet tone when a reading is folded into a swing. Independent of the shot chime, which fires seconds earlier |
+| `launchmonitor/standaloneShots` | `false` | ✅ | Create a swing from the monitor's reading alone when no camera or IMU saw it — no video, no analysis, only its own measurements. Only while **capture is active**, with an athlete selected and a session running: recording a shot is a question about what the user is doing, and with no devices the buffer cannot answer it. Off by default |
+
+**Testing the connector without a launch monitor.** `touch` will not do it — the connector treats
+byte-identical contents as the same shot, correctly, since nothing about the file has changed. Use
+the generator, which copies the real header verbatim from an exemplar and writes a genuinely
+different row:
+
+```bash
+python3 tools/launchmonitor/fake_shot.py <the folder the connector watches>
+python3 tools/launchmonitor/fake_shot.py <folder> --shots 6 --interval 4     # a session
+python3 tools/launchmonitor/fake_shot.py <folder> --club Drv --shape slice   # a shaped shot
+```
+
+Shot ids continue from whatever is already in the target file, and the numbers stay internally
+consistent — face-to-path really is face minus path, total spin is the resultant of back and side,
+and the shape asked for is the shape the spin axis and the offline distance describe.
 
 **Athletes** — one group per athlete, keyed by UUID (`athletes/<uuid>/…`)
 

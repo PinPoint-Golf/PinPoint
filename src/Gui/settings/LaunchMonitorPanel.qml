@@ -409,6 +409,41 @@ Item {
                 }
             }
 
+            // Standalone shots — the one row here that changes what a shot IS.
+            RowLayout {
+                objectName: "setting_lmStandalone"
+                Layout.fillWidth: true
+                spacing: Theme.sp(16)
+                property bool searchHighlight: false
+                Rectangle { x: -Theme.sp(6); y: -Theme.sp(6); width: parent.width + Theme.sp(12); height: parent.height + Theme.sp(12); color: Theme.colorAccentLight; radius: Theme.radius; opacity: parent.searchHighlight ? 1.0 : 0.0; z: -1 }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.sp(3)
+                    Text {
+                        text:           qsTr("Record shots the monitor sees on its own")
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzBody
+                        color:          Theme.colorText
+                    }
+                    Text {
+                        text:           qsTr("Creates a swing from the monitor's reading alone, with no video and no analysis — only its own measurements. Only while CAPTURE IS ACTIVE, with an athlete selected and a session running. Leave this off unless you are hitting into the monitor without cameras: while capture is running it records every ball the monitor sees, including another player's.")
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                        wrapMode:       Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+
+                TogglePill {
+                    checked:     appSettings.launchMonitorStandalone
+                    enabledPill: root.configured
+                    onToggled:   (v) => appSettings.launchMonitorStandalone = v
+                    Layout.alignment: Qt.AlignVCenter
+                }
+            }
+
             // Poll interval
             RowLayout {
                 objectName: "setting_lmPoll"

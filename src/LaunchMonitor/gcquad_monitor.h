@@ -87,8 +87,9 @@ private:
     // one failure mode with no visible symptom. The file is two lines; reading it
     // outright four times a second costs nothing worth protecting.
     QByteArray m_seenBytes;
-    // The Shot ID we have already dealt with — what actually decides a row is new,
-    // since FSX2020 rewrites the file to restate a shot it has already reported.
+    // The Shot ID we last read. PROVENANCE ONLY — it decides nothing, because FSX2020's
+    // counter is per session and restarts, so a genuinely new shot can carry an id we
+    // have already seen. Kept for the log line and for the raw block.
     QString    m_seenShotId;
     // True once the baseline has been taken. Until then nothing is ever claimed.
     bool       m_primed = false;

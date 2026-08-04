@@ -809,6 +809,27 @@ ApplicationWindow {
         }
     }
 
+    // A shot the capture pipeline could not record, saved from the monitor's reading
+    // alone. This REPLACES the analysis-failure toast rather than stacking under it:
+    // "Shot analysis failed" describes the pipeline, and telling somebody their shot
+    // failed when it was in fact saved is the wrong sentence in the one place they look.
+    PpToast {
+        id: deviceOnlyToast
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: saveErrorToast.y - (saveErrorToast.visible ? height + Theme.sp(10) : 0)
+        z: 101
+        glyph: "◎"
+        severity: "info"
+        showUndo: false
+    }
+    Connections {
+        target: launchMonitor
+        function onDeviceOnlyShotSaved(swingDir) {
+            analysisErrorToast.visible = false
+            deviceOnlyToast.show(qsTr("Launch monitor only — shot saved without video or analysis"))
+        }
+    }
+
     // ── Linux in-app update banner (design §5 surface A) ─────────────────────
     // Non-modal, bottom-centred, stacked above the error toasts. Suppressed during
     // a session, for skipped versions, and on the wizard. Inert off-Linux.

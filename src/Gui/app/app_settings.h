@@ -239,6 +239,14 @@ class AppSettings : public QObject
     // few seconds after that one, and a golfer who wants the shot confirmation may
     // well not want a second sound behind it.
     Q_PROPERTY(bool    launchMonitorChimeEnabled READ launchMonitorChimeEnabled WRITE setLaunchMonitorChimeEnabled NOTIFY launchMonitorChimeEnabledChanged)
+    // Create a shot from a launch monitor reading when no camera or IMU saw it.
+    //
+    // Still requires an athlete, a running session, and CAPTURE TO BE ACTIVE — recording
+    // a shot is a question about what the user is doing, not about what the buffer can
+    // register, and with no devices the buffer cannot answer it at all. Off by default:
+    // with it on, a session left capturing records every ball anyone hits on the
+    // simulator.
+    Q_PROPERTY(bool    launchMonitorStandalone READ launchMonitorStandalone WRITE setLaunchMonitorStandalone NOTIFY launchMonitorStandaloneChanged)
     // Persistent per-athlete·club·camera club-length prior (club_length_fusion.h /
     // plan: robust club length — starry-shimmying-wind). Key = "athleteUuid|clubName|
     // cameraKey" -> {emaPx, varPx, n, disagreeRun, lengthMm, frameW, frameH,
@@ -435,6 +443,7 @@ public:
         m_launchMonitorPath         = normaliseLibraryPath(ppSettings().value(QStringLiteral("launchmonitor/path"), QStringLiteral("")).toString());
         m_launchMonitorPollMs       = ppSettings().value(QStringLiteral("launchmonitor/pollIntervalMs"), 250).toInt();
         m_launchMonitorChimeEnabled = ppSettings().value(QStringLiteral("launchmonitor/chimeEnabled"), true).toBool();
+        m_launchMonitorStandalone   = ppSettings().value(QStringLiteral("launchmonitor/standaloneShots"), false).toBool();
 
         m_clubLenPrior = ppSettings().value(QStringLiteral("analysis/clubLenPrior"), QVariantMap{}).toMap();
     }
@@ -547,6 +556,7 @@ public:
     QString launchMonitorPath()         const { return m_launchMonitorPath; }
     int     launchMonitorPollMs()       const { return m_launchMonitorPollMs; }
     bool    launchMonitorChimeEnabled() const { return m_launchMonitorChimeEnabled; }
+    bool    launchMonitorStandalone()   const { return m_launchMonitorStandalone; }
 
     QVariantMap clubLenPrior() const { return m_clubLenPrior; }
 
@@ -1373,6 +1383,13 @@ public:
         ppSettings().setValue(QStringLiteral("launchmonitor/chimeEnabled"), v);
         emit launchMonitorChimeEnabledChanged();
     }
+    void setLaunchMonitorStandalone(bool v)
+    {
+        if (m_launchMonitorStandalone == v) return;
+        m_launchMonitorStandalone = v;
+        ppSettings().setValue(QStringLiteral("launchmonitor/standaloneShots"), v);
+        emit launchMonitorStandaloneChanged();
+    }
 
     void setClubLenPrior(const QVariantMap &v)
     {
@@ -1485,6 +1502,7 @@ signals:
     void launchMonitorPathChanged();
     void launchMonitorPollMsChanged();
     void launchMonitorChimeEnabledChanged();
+    void launchMonitorStandaloneChanged();
     void clubLenPriorChanged();
 
 private:
@@ -1595,6 +1613,7 @@ private:
     QString m_launchMonitorPath;
     int     m_launchMonitorPollMs = 250;
     bool    m_launchMonitorChimeEnabled = true;
+    bool    m_launchMonitorStandalone = false;
 
     QVariantMap m_clubLenPrior;
 

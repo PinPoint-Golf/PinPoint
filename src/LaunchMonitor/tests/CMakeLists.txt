@@ -41,14 +41,16 @@ pp_add_test(gcquad_csv_parser_test
 # ShotPairing is header-only and pure. GcQuadMonitor is a QObject and does real file
 # I/O against a QTemporaryDir (the repo convention — tests write their own fixtures),
 # so this target needs AUTOMOC and Qt6::Core's event loop for its QTimer.
+# pp_log_stub, NOT pp_debug.cpp: the real one drags in whisper/ggml (testing guide §9).
 pp_add_test(gcquad_pairing_test
     SOURCES gcquad_pairing_test.cpp
             ${LM}/gcquad_monitor.cpp
             ${LM}/launch_monitor_base.cpp
             ${LM}/gcquad_csv_parser.cpp
             ${LM}/launch_monitor_reading.cpp
+            ${SRC}/Core/tests/pp_log_stub.cpp
             ${LM}/gcquad_monitor.h
             ${LM}/launch_monitor_base.h
-    INCLUDE ${LM}
+    INCLUDE ${LM} ${SRC}/Core
     LINK    Qt6::Test
     GTEST_NO_MAIN AUTOMOC)

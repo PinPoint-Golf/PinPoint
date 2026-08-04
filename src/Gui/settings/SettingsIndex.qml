@@ -404,7 +404,12 @@ QtObject {
         { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
           label: qsTr("Check for new shots every"),        subtitle: qsTr("How often the shot data folder is re-read — raise it only for a slow share"),
           actions: "launch monitor poll interval frequency check rate refresh share slow",
-          itemId: "setting_lmPoll" }
+          itemId: "setting_lmPoll" },
+
+        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+          label: qsTr("Record shots the monitor sees on its own"), subtitle: qsTr("Create a swing from the monitor's reading alone, with no video and no analysis"),
+          actions: "launch monitor standalone device only no camera solo shots without cameras record alone",
+          itemId: "setting_lmStandalone" }
 
         // TODO: add entries when Archiving panel is implemented (panelIndex: 8)
     ]

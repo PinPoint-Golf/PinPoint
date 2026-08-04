@@ -101,6 +101,15 @@ public:
     // back. No-op if the dir isn't in this model or the doc can't be read.
     Q_INVOKABLE void refreshShot(const QString &swingDir);
 
+    // Give an EXISTING row a swingDir it did not have, and re-read it from there.
+    //
+    // A shot whose analysis and export both produced nothing still gets a carousel row,
+    // with an empty swingDir — it is in-memory only. When a launch monitor later fills
+    // that shot's folder with a device-only document, the row has to be pointed at it
+    // rather than a second row appearing: two rows for one swing is worse than none.
+    // No-op when the id is unknown or the row already has a different swingDir.
+    Q_INVOKABLE void attachSwingDir(int id, const QString &swingDir);
+
     // Point the (live) carousel at one session folder: clear(), then reload every
     // swing.json under `dir` via SwingDocReader (as addPersistedShot). An empty
     // `dir` just clears — an empty carousel. Called on wrist-screen entry and at

@@ -322,7 +322,9 @@ int main(int argc, char *argv[])
     // The launch monitor. Constructed unconditionally: with nothing configured it
     // holds an inert connector reporting Disabled, so QML can bind to it without
     // checking, and the toolbar dot stays dark of its own accord.
-    LaunchMonitorController   launchMonitorController(&appSettings, &shotModel);
+    LaunchMonitorController   launchMonitorController(&appSettings, &shotModel,
+                                                      &athleteController, &sessionController,
+                                                      &cameraManager);
     // Disk-backed replay of saved shots (MP4 + swing.json) — independent of the
     // live SwingWindow that ShotProcessor owns for the just-captured shot.
     ShotReplayController      shotReplay(&appSettings);
@@ -383,15 +385,15 @@ int main(int argc, char *argv[])
     });
     QObject::connect(&shotProcessor, &ShotProcessor::shotProcessed,
                      &launchMonitorController, &LaunchMonitorController::onShotProcessed);
+    // The processor allocates the swing folder before it runs anything, so a shot that
+    // produced no document still has somewhere for a reading to go. analysisFailed is
+    // NOT wired here: it fires while export may still succeed, and the join's shotFailed
+    // is the one that means the shot produced nothing at all.
     QObject::connect(&shotProcessor, &ShotProcessor::shotFailed,
                      &launchMonitorController,
-                     [&launchMonitorController](const QString &) {
-        launchMonitorController.onShotFailed();
-    });
-    QObject::connect(&shotProcessor, &ShotProcessor::analysisFailed,
-                     &launchMonitorController,
-                     [&launchMonitorController](const QString &) {
-        launchMonitorController.onShotFailed();
+                     [&launchMonitorController, &shotProcessor](const QString &) {
+        launchMonitorController.onShotFailed(shotProcessor.lastSwingDir(),
+                                            shotProcessor.lastShotId());
     });
     QObject::connect(&shotProcessor,  &ShotProcessor::busyChanged,
                      &shotController, [&shotController, &shotProcessor] {

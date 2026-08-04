@@ -221,10 +221,10 @@ TEST(GcQuadMonitor, EmitsWhenANewShotIdAppears)
     EXPECT_GT(r.readAtMs, 0);
 }
 
-TEST(GcQuadMonitor, IgnoresARewriteCarryingTheSameShotId)
+TEST(GcQuadMonitor, IgnoresAByteIdenticalRewrite)
 {
-    // The file moves — different size, new mtime — but FSX2020 is restating the shot
-    // it already told us about. Emitting again would give the next swing a stale row.
+    // A `touch`, or FSX2020 rewriting a row it has already reported. The mtime moves and
+    // the shot does not, so nothing is emitted.
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
     const QString path = dir.filePath(QStringLiteral("LastShot.csv"));
@@ -235,14 +235,35 @@ TEST(GcQuadMonitor, IgnoresARewriteCarryingTheSameShotId)
     m.setSourcePath(dir.path());
     m.start();
 
-    ASSERT_TRUE(writeFile(path, csvFor(QStringLiteral("100"), 41.123456)));
+    ASSERT_TRUE(writeFile(path, csvFor(QStringLiteral("100"))));   // same bytes
     m.pollNow();
     EXPECT_EQ(spy.count(), 0);
+}
 
-    // A genuinely new id still gets through afterwards.
-    ASSERT_TRUE(writeFile(path, csvFor(QStringLiteral("101"))));
+TEST(GcQuadMonitor, ANewShotReusingAnOldIdIsStillANewShot)
+{
+    // FSX2020's Shot ID is a PER-SESSION counter and it restarts. Close it, reopen it,
+    // and the first shot of the new session can carry an id we have already seen. Keying
+    // "is this new" on the id drops that shot silently — the worst way to lose one — so
+    // the CONTENT is the identity and the id is provenance only.
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("LastShot.csv"));
+    ASSERT_TRUE(writeFile(path, csvFor(QStringLiteral("1"), 38.0)));
+
+    GcQuadMonitor m;
+    QSignalSpy spy(&m, &LaunchMonitorBase::readingAvailable);
+    m.setSourcePath(dir.path());
+    m.start();
+    ASSERT_EQ(spy.count(), 0);              // baseline, not claimed
+
+    // Same id, different swing — a new FSX2020 session.
+    ASSERT_TRUE(writeFile(path, csvFor(QStringLiteral("1"), 44.5)));
     m.pollNow();
-    EXPECT_EQ(spy.count(), 1);
+    ASSERT_EQ(spy.count(), 1);
+    const auto r = spy.at(0).at(0).value<LaunchMonitorReading>();
+    EXPECT_EQ(r.deviceShotId.toStdString(), "1");
+    EXPECT_NEAR(*r.clubheadSpeed, 44.5 / 0.44704, 0.01);
 }
 
 TEST(GcQuadMonitor, ATornReadDoesNotConsumeTheWatermark)

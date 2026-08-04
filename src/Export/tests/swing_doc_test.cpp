@@ -779,6 +779,94 @@ int main()
         QDir(d4).removeRecursively();
     }
 
+    std::printf("\n=== launch monitor: a shot only the device saw ===\n");
+    {
+        // No camera, no IMU, no buffer window — so no analysis and no export. The whole
+        // document comes from the reading.
+        const QString d5 = QStringLiteral("/tmp/swingdoc_test_lm_only");
+        QDir().mkpath(d5);
+
+        const QByteArray csv =
+            "Shot ID, Club, Club head Speed (m/s), Ball Speed (m/s), Total Spin (rpm), Carry (m)\r\n"
+            "901, Drv, 45.0, 66.0, 2600, 230.0\r\n";
+        auto reading = pinpoint::lm::parseLastShotCsv(csv);
+        check(reading.has_value(), "the device's bytes parse");
+        reading->deviceKind = QStringLiteral("gcquad");
+        reading->readAtMs   = 1700000000000LL;
+
+        SwingDocWriter::DeviceOnlyMeta meta;
+        meta.swingId     = QStringLiteral("swing_0001");
+        meta.swingIndex  = 1;
+        meta.sessionId   = QStringLiteral("2026-08-04_Test_Swing_01");
+        meta.athleteName = QStringLiteral("Test Athlete");
+        meta.athleteUuid = QStringLiteral("uuid-1234");
+        meta.club        = QStringLiteral("DRIVER");
+        meta.wallclockMs = 1700000000000LL;
+
+        QString derr;
+        check(SwingDocWriter::writeDeviceOnlySwing(d5, *reading, meta, &derr),
+              "a device-only swing.json is written");
+
+        QFile f(d5 + QStringLiteral("/swing.json"));
+        f.open(QIODevice::ReadOnly);
+        const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+        f.close();
+
+        check(root[QStringLiteral("streams")].toArray().isEmpty(),
+              "streams is empty — the fact, not a failure");
+        check(!root.contains(QStringLiteral("thumbnail")),
+              "no thumbnail block, rather than one pointing at a file never written");
+        check(root[QStringLiteral("capture")].toObject()[QStringLiteral("shotSource")].toString()
+                  == QStringLiteral("launchMonitor"),
+              "the capture block names what saw the shot");
+        check(root[QStringLiteral("capture")].toObject()[QStringLiteral("impactUs")].toInt() == -1,
+              "impactUs stays UNKNOWN — the device says a ball was struck, never when");
+
+        const QJsonObject an = root[QStringLiteral("analysis")].toObject();
+        check(!an.contains(QStringLiteral("score")), "no score — nothing scored it");
+        check(!an.contains(QStringLiteral("pose2d")) && !an.contains(QStringLiteral("club")),
+              "…and no pose or club block to mistake for an empty analysis");
+
+        // THE MANUFACTURED IMPACT, and why it has to be there: buildPhaseGrid returns an
+        // empty grid on an empty phases[], so without this every reading would persist
+        // and then resolve to nothing.
+        const QJsonArray phases = an[QStringLiteral("phases")].toArray();
+        check(phases.size() == 1, "exactly one phase event");
+        check(phases.at(0).toObject()[QStringLiteral("phase")].toInt() == int(Phase::Impact),
+              "…and it is Impact");
+
+        // The readings are present and anchored where a measure will look for them.
+        int atImpact = 0, lm = 0;
+        for (const QJsonValue &v : an[QStringLiteral("metrics")].toArray()) {
+            const QJsonObject mo = v.toObject();
+            if (!mo[QStringLiteral("key")].toString().startsWith(QStringLiteral("lm."))) continue;
+            ++lm;
+            const QJsonArray ps = mo[QStringLiteral("phaseSamples")].toArray();
+            if (ps.size() == 1
+                && ps.at(0).toObject()[QStringLiteral("phase")].toInt() == int(Phase::Impact))
+                ++atImpact;
+        }
+        // 4 metric columns (club speed, ball speed, spin, carry) + smashFactor derived
+        // from the speed pair. NOT spinAxis (needs the side/back split) and NOT spinLoft
+        // (needs loft and vert path) — a value we cannot derive is absent, never zero.
+        check(lm == 5, "every reading became an lm. metric");
+        check(atImpact == lm, "…each anchored at the manufactured Impact");
+
+        // It reads back as an ordinary shot, with no video.
+        const PersistedShot ps = SwingDocReader::readSwingJson(d5);
+        check(ps.ok, "it reloads as a shot");
+        check(!ps.hasVideo, "…knowing it has no video");
+        check(ps.club == QStringLiteral("DRIVER"), "…carrying the app's club, not the device's");
+        check(ps.athleteUuid == QStringLiteral("uuid-1234"), "…and the athlete a cohort resolves through");
+        check(ps.score == 0, "…and no score");
+
+        const SwingSummary sum = SwingDocReader::readSwingSummary(d5);
+        check(sum.ok && sum.fromSidecar, "the picker sidecar was written at the same time");
+        check(!sum.hasVideo, "…and it agrees there is no video");
+
+        QDir(d5).removeRecursively();
+    }
+
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }

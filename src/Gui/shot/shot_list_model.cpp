@@ -201,6 +201,40 @@ void ShotListModel::refreshShot(const QString &swingDir)
                      { ScoreRole, MetricsRole, AnalysisDetailRole });
 }
 
+void ShotListModel::attachSwingDir(int id, const QString &swingDir)
+{
+    if (swingDir.isEmpty())
+        return;
+    int row = -1;
+    for (int i = 0; i < m_shots.size(); ++i)
+        if (m_shots.at(i).id == id) { row = i; break; }
+    if (row < 0)
+        return;
+
+    Shot &s = m_shots[row];
+    if (!s.swingDir.isEmpty() && s.swingDir != swingDir) {
+        ppWarn() << "[ShotListModel] attachSwingDir: row" << id
+                 << "already points at" << s.swingDir << "— refusing to repoint it at" << swingDir;
+        return;
+    }
+
+    const pinpoint::PersistedShot p = pinpoint::SwingDocReader::readSwingJson(swingDir);
+    if (!p.ok) {
+        ppWarn() << "[ShotListModel] attachSwingDir: could not read" << swingDir;
+        return;
+    }
+
+    s.swingDir       = swingDir;
+    s.score          = p.score;
+    s.metrics        = p.metrics;
+    s.analysisDetail = p.analysisDetail;
+    s.club           = p.club;
+    s.timestampLabel = p.timestampLabel;
+    emit dataChanged(index(row), index(row),
+                     { SwingDirRole, ScoreRole, MetricsRole, AnalysisDetailRole,
+                       ClubRole, TimestampLabelRole });
+}
+
 void ShotListModel::clear()
 {
     if (m_shots.isEmpty())

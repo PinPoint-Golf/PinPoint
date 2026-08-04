@@ -46,6 +46,19 @@ Rectangle {
     required property string swingDir
     required property bool   dataWarning   // IMU re-fusion parity failed → not re-analysable
 
+    // A shot only a launch monitor saw: no video AND every metric it carries is an lm.
+    // reading. Derived rather than carried as a role, because it is already implied by
+    // the data — and the alternative, defaulting a new property to false, would label a
+    // device-only shot "IMU ONLY" on every card that forgot to set it.
+    readonly property bool deviceOnly: {
+        if (card.hasVideo) return false
+        var keys = Object.keys(card.metrics || {})
+        if (keys.length === 0) return false
+        for (var i = 0; i < keys.length; ++i)
+            if (keys[i].indexOf("lm.") !== 0) return false
+        return true
+    }
+
     property bool selected: false
     property bool hovered:  hover.hovered
 
@@ -115,15 +128,29 @@ Rectangle {
                 leftMargin: Theme.sp(7); rightMargin: Theme.sp(7)
             }
             height:  Theme.sp(34)
-            visible: !card.hasVideo
+            visible: !card.hasVideo && !card.deviceOnly
             points:  card.tracePoints
+        }
+
+        // A device-only shot has no trace to draw — no pose, no IMU, nothing over time.
+        // Without this the card is simply blank, which reads as a broken tile rather
+        // than as a shot whose only witness was the monitor.
+        Text {
+            anchors.centerIn: parent
+            visible:        card.deviceOnly
+            text:           "◎"
+            font.family:    Theme.fontSymbol
+            font.pixelSize: Math.round(Theme.sp(22) * Theme.symbolScale("◎"))
+            color:          Theme.colorText3
         }
 
         Text {
             anchors { left: parent.left; bottom: parent.bottom
                       leftMargin: Theme.sp(7); bottomMargin: Theme.sp(22) }
             visible:        !card.hasVideo
-            text:           qsTr("IMU ONLY")
+            // "IMU ONLY" on a shot with no IMU would be a small lie in the one place a
+            // reader looks to find out what produced it.
+            text:           card.deviceOnly ? qsTr("MONITOR ONLY") : qsTr("IMU ONLY")
             font.family:    Theme.fontData
             font.pixelSize: Theme.fontSzMicro
             font.letterSpacing: Theme.trackingLabel

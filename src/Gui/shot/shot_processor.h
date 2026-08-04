@@ -108,6 +108,16 @@ public:
     QVariantMap replayAnalysisDetail() const { return m_replayAnalysisDetail; }
     double  analysisProgress() const { return m_analysisProgress; }
     QString activeSessionDir() const { return m_swingPaths.currentSessionDir(); }
+    // The folder allocated for the shot being processed, or the last one processed.
+    // Set BEFORE the export runs, so it survives a shot that produced no document at
+    // all — which is exactly when a launch monitor reading has somewhere to go and the
+    // rest of the pipeline does not. Empty when no shot has been processed.
+    QString lastSwingDir() const { return m_swingDir; }
+    // The carousel row id the last processed shot was given. addShot() runs even when
+    // everything else failed, so a shot that produced no document still HAS a row —
+    // in-memory, with no swingDir. A launch monitor filling that folder must point that
+    // row at it rather than adding a second one. -1 when no shot has been processed.
+    int lastShotId() const { return m_lastShotId; }
 
     // User-initiated skip (ESC). Only meaningful mid-replay: the shot is
     // already on the carousel and saved by the time the replay runs, so
@@ -191,6 +201,8 @@ private:
         size_t                             idx      = 0;
         BallSnapshot                       ball;   // frozen at window capture
     };
+
+    int  m_lastShotId = -1;
 
     void setState(State s);
     void setAnalysisProgress(double p);

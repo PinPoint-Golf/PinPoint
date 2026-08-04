@@ -19,6 +19,8 @@
 
 #include "gcquad_csv_parser.h"
 
+#include "pp_debug.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -156,9 +158,16 @@ void GcQuadMonitor::pollNow()
     const QByteArray bytes = f.readAll();
     f.close();
 
-    // Byte-identical to what we last accepted: nothing has happened.
-    if (!bytes.isEmpty() && bytes == m_seenBytes)
+    // Byte-identical to what we last accepted: nothing has happened. A `touch` lands
+    // here — the mtime moved and the shot did not — and so does FSX2020 rewriting a row
+    // it has already reported. Said out loud because a tester touching the file to
+    // simulate a shot would otherwise see nothing at all and have no way to know why.
+    if (!bytes.isEmpty() && bytes == m_seenBytes) {
+        ppDebug() << "LaunchMonitor: file touched but its contents are identical — same shot"
+                  << m_seenShotId
+                  << "(to simulate a new one, change a VALUE; the Shot ID alone decides nothing)";
         return;
+    }
 
     QString parseError;
     const auto reading = parseLastShotCsv(bytes, &parseError);
@@ -169,16 +178,28 @@ void GcQuadMonitor::pollNow()
         return;
     }
 
-    // The file changed, and it is genuinely a different shot. A rewrite carrying the
-    // same Shot ID is FSX2020 restating what it already told us.
-    const bool isNewShot = reading->deviceShotId != m_seenShotId;
+    // THE CONTENT IS THE IDENTITY, NOT THE SHOT ID. Reaching here already means the
+    // bytes differ from the last reading we accepted, and different numbers mean a
+    // different strike.
+    //
+    // Keying on the Shot ID instead loses shots, because FSX2020's counter is PER
+    // SESSION and restarts: close it, reopen it, and the first shot of the new session
+    // can carry an id we have already seen. Same id, different numbers — and an
+    // id-keyed rule drops it silently, which is the worst way to lose a shot. The id
+    // stays as provenance and as the thing the raw block records; it decides nothing.
+    //
+    // The case this gives up is FSX2020 restating one shot with ADJUSTED values, which
+    // would read as two. Nothing in the file distinguishes that from two real shots, and
+    // between inventing a duplicate and dropping a real strike, the duplicate is the one
+    // a user can see and delete.
+    const bool isNewShot = true;
 
     m_seenBytes  = bytes;
     m_seenShotId = reading->deviceShotId;
     setState(State::Ready, QString());
 
     if (!m_primed || !isNewShot)
-        return;
+        return;   // isNewShot is structural — see above; kept so the guard reads whole
 
     LaunchMonitorReading out = *reading;
     out.deviceKind = kindKey(kind());
