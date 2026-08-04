@@ -106,6 +106,21 @@ pp_add_test(dashboard_reductions_test SOURCES dashboard_reductions_test.cpp)
 # hand-listing keys — which is also what makes the band/abbrev columns testable here.
 pp_add_test(lm_session_reductions_test
             SOURCES lm_session_reductions_test.cpp ${SRC}/LaunchMonitor/launch_monitor_reading.cpp)
+
+# Launch monitor ball flight (lm_flight_path.h) — the drag + Magnus integration against
+# the design brief's reference shot, the launch/descent asymmetry that is the only reason
+# the curve is drawn rather than sketched, and the normalisation that pins the drawn
+# endpoints to the device's reported carry, apex and offline. Backs the graphics mode's
+# FLIGHT card. No fieldDefs() walk, so no launch_monitor_reading.cpp.
+pp_add_test(lm_flight_path_test SOURCES lm_flight_path_test.cpp)
+
+# Launch monitor inferred reads (lm_inferred_reads.h) — the nine flight-shape windows,
+# both severity tiers, every threshold boundary, left-handed mirroring of the GLOSS (never
+# the reading), and the rule that a missing input yields no read rather than a default one.
+# These are the only two claims on the panel the device did not make, so the evidence
+# strings are asserted to the character: a future export has to quote them verbatim.
+pp_add_test(lm_inferred_reads_test SOURCES lm_inferred_reads_test.cpp)
+
 pp_add_test(imu_calibration_test  SOURCES imu_calibration_test.cpp)   # A·q·M solve + keystone golden
 pp_add_test(live_wrist_angles_test SOURCES live_wrist_angles_test.cpp) # live tick() math contract
 pp_add_test(imu_sample_test       SOURCES imu_sample_test.cpp)         # exported swing.json vector frame

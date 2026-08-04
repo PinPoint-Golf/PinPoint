@@ -392,6 +392,16 @@ qt_add_qml_module(PinPointStudio
         # Session board — every lm.* reading the connected monitor produced, banded.
         # Per SESSION and neutral, where the dashboard above is per shot and opinionated.
         src/Gui/session/PpLaunchMonitorPanel.qml
+        # ...and its second mode: the same shot drawn on five schematics instead of
+        # listed. PpLmGraphicsBody takes LmSessionModel's `graphics` map and nothing
+        # else, which is what lets the offscreen QML test press it with a fixture.
+        # PpLmDiagram holds the design-pixel coordinate space the brief's anchors are
+        # quoted in; PpLmRule holds the line grammar (hue-dashed = a club axis,
+        # grey-dashed = a reference) so no call site can blur those two.
+        src/Gui/session/PpLmGraphicsBody.qml
+        src/Gui/session/PpLmCard.qml
+        src/Gui/session/PpLmDiagram.qml
+        src/Gui/session/PpLmRule.qml
         src/Gui/shot/PpDashboardVerdictZone.qml
         src/Gui/shot/PpDashboardSetupZone.qml
         src/Gui/shot/PpDashboardMotionZone.qml
@@ -2940,6 +2950,11 @@ if(PINPOINT_BUILD_QML_TESTS)
         target_compile_definitions(qml_ui_test PRIVATE
             QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/tests/qml"
             PP_QML_TEST_IMPORTS="${_pp_qml_stage}")
+        # NOT linked against QuickShapes, deliberately. PpLmGraphicsBody's FLIGHT card
+        # draws its two curves with Shape/ShapePath, and that plugin resolves off the QML
+        # import path at run time exactly as it does for the app (which also links only
+        # Qt6::Quick). Everything else on the five launch monitor schematics is a rotated
+        # Rectangle, which is what keeps the rest of the body loadable regardless.
         target_link_libraries(qml_ui_test PRIVATE
             Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickTest)
 

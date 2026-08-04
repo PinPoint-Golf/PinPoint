@@ -26,6 +26,14 @@
 #include <QQmlEngine>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
+
+#include <vector>
+
+// Forward-declared rather than included: buildGraphics() only takes a reference, and
+// pulling lm_session_reductions.h in here would drag the whole launch monitor field
+// catalogue into every translation unit that touches the model.
+namespace pinpoint::analysis { struct LmFieldStats; }
 
 // The launch monitor session board's model (PpLaunchMonitorPanel).
 //
@@ -70,6 +78,11 @@ class LmSessionModel : public QAbstractListModel
     // "GC Quad" — the short device name for the header. Empty is fine; the scope line
     // then starts with the club.
     Q_PROPERTY(QString deviceName READ deviceName WRITE setDeviceName NOTIFY headerChanged)
+    // The athlete's handedness, passed in for the same reason as `connected` and
+    // `saving`: the panel already has athleteController in scope and a model that
+    // reached for the singleton itself would be untestable. It changes only the two
+    // INFERRED reads' wording and the strike diagram's mirroring — never a reading.
+    Q_PROPERTY(bool leftHanded READ leftHanded WRITE setLeftHanded NOTIFY graphicsChanged)
 
     // "GC Quad · 7 iron · 18 shots". States the scope in words, because a mean whose
     // scope you cannot see is a number you cannot use.
@@ -86,6 +99,13 @@ class LmSessionModel : public QAbstractListModel
     // screen, and it cannot do that arithmetic without knowing the shape up front —
     // a Repeater only reveals a band's tile count once the band is already laid out.
     Q_PROPERTY(QVariantList bandCounts READ bandCounts NOTIFY headerChanged)
+
+    // EVERYTHING GRAPHICS MODE DRAWS, in one map. See graphics() in the .cpp for the
+    // shape and for why it is one property rather than a second model: the two modes
+    // are two projections of ONE set of statistics, computed once in rebuild(), and a
+    // separate model would be a second chance for the board and the schematics to
+    // disagree about the same shot.
+    Q_PROPERTY(QVariantMap graphics READ graphics NOTIFY graphicsChanged)
 
 public:
     enum Roles {
@@ -110,18 +130,22 @@ public:
     void           setSaving(bool on);
     QString        deviceName() const { return m_deviceName; }
     void           setDeviceName(const QString &name);
+    bool           leftHanded() const { return m_leftHanded; }
+    void           setLeftHanded(bool on);
 
     QString scopeText()  const { return m_scopeText; }
     QString valueLabel() const { return m_valueLabel; }
     QString      emptyText()  const;
     int          shotCount()  const { return m_shotCount; }
     QVariantList bandCounts() const;
+    QVariantMap  graphics()   const { return m_graphics; }
 
 signals:
     void shotModelChanged();
     void focusedShotIdChanged();
     void headerChanged();
     void stateTextChanged();
+    void graphicsChanged();
 
 private:
     // Recompute everything. 25 fields across tens of shots is arithmetic no profiler
@@ -129,6 +153,10 @@ private:
     // a club change or a re-read simply rebuilds.
     void rebuild();
     void connectShotModel();
+    // The graphics-mode projection of the SAME statistics rebuild() banded for the
+    // tiles. Takes them as an argument rather than recomputing, which is what keeps the
+    // two modes incapable of disagreeing about one shot.
+    void buildGraphics(const std::vector<pinpoint::analysis::LmFieldStats> &stats);
 
     struct Band {
         QString      name;
@@ -139,9 +167,11 @@ private:
     int                     m_focusedShotId = -1;
     bool                    m_connected = false;
     bool                    m_saving = false;
+    bool                    m_leftHanded = false;
     QString                 m_deviceName;
 
     QVector<Band> m_bands;
+    QVariantMap   m_graphics;
     QString       m_scopeText;
     QString       m_valueLabel;
     int           m_shotCount = 0;

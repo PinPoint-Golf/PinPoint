@@ -70,7 +70,17 @@ Rectangle {
         connected:     launchMonitor.configured
         saving:        appSettings.saveLaunchMonitorData
         deviceName:    launchMonitor.deviceName
+        // Changes only how the two INFERRED reads are WORDED and which way the strike
+        // face is drawn — never a reading. See lm_inferred_reads.h.
+        leftHanded:    athleteController.currentHandedness === "Left"
     }
+
+    // ── mode ─────────────────────────────────────────────────────────────────
+    // TILES is the banded board; GRAPHICS is the same shot drawn on five schematics.
+    // Neither is a subset of the other — both surface every metric the device reported.
+    // Persisted per user rather than per session mode: which drawing of the same
+    // readings a golfer prefers is a fact about them, not about what they are doing.
+    readonly property bool graphicsMode: appSettings.lmPanelMode === "graphics"
 
     // ── the design's own proportions, at k = 1 ───────────────────────────────
     // The mock's pixels, and the only place they appear. Everything else is one of
@@ -148,17 +158,18 @@ Rectangle {
         return best ? best : fallback
     }
 
-    // The header is chrome, not data. It scales so it does not look stranded beside a
-    // board twice its size, but at a slower rate — a title that grows with the figures
-    // competes with them.
-    readonly property real headerK: Math.min(k, 1.6)
-
-    // The fit is measured against the panel MINUS a fixed header reserve, not against
-    // the body's actual height. That is deliberate and load-bearing: the header scales
-    // with k, so feeding its real height back into the fit would be a binding loop
-    // (fit → k → header height → body height → fit). Reserving the header's maximum
-    // costs a few pixels of board and cannot oscillate.
-    readonly property int headerReserve: Math.round(Theme.sp(34) * 1.6)
+    // THE HEADER DOES NOT SCALE WITH THE BOARD. It is chrome, and it is sized like every
+    // other band of chrome in the session — the shot carousel's header band (sp(36) tall,
+    // sp(16) side margins, sp(22) controls, fontSzBody2 text), which answers only to
+    // fontScale. An earlier version grew it with the board's own fit scale so it would
+    // not look stranded beside big figures; on a bay TV that produced a title bar half
+    // again too large, competing with the numbers it was captioning rather than framing
+    // them. Chrome that grows with its content is not chrome.
+    //
+    // Fixing it also removes the reason the fit could not see the header's real height:
+    // there is no longer a fit → k → header → body → fit cycle to break, so the reserve
+    // below is simply the header, exactly.
+    readonly property int headerReserve: Theme.sp(36)
     readonly property var fit: root._fitFor(root.width - 2 * Theme.sp(10),
                                             root.height - headerReserve - Theme.sp(10),
                                             board.bandCounts)
@@ -169,18 +180,18 @@ Rectangle {
     Item {
         id: header
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: Math.round(Theme.sp(34) * root.headerK)
+        height: root.headerReserve
 
         Row {
             anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-            anchors.leftMargin: Math.round(Theme.sp(12) * root.headerK)
-            spacing: Math.round(Theme.sp(10) * root.headerK)
+            anchors.leftMargin: Theme.sp(16)
+            spacing: Theme.sp(10)
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: qsTr("LAUNCH MONITOR")
                 font.family: Theme.fontData
-                font.pixelSize: Math.round(Theme.fontSzMicro * root.headerK)
+                font.pixelSize: Theme.fontSzMicro
                 font.letterSpacing: Theme.trackingMicro
                 color: Theme.colorText3
             }
@@ -192,24 +203,45 @@ Rectangle {
                 visible: board.emptyText === "" && text !== ""
                 text: board.scopeText
                 font.family: Theme.fontBody
-                font.pixelSize: Math.round(Theme.fontSzBody2 * root.headerK)
+                font.pixelSize: Theme.fontSzBody2
                 color: Theme.colorText3
             }
         }
 
-        // The legend for the strip. It says what the band and the tick ARE, because
-        // nothing else on the tile can: a reader who thinks the band is a corridor has
-        // been told the opposite of the truth.
-        Text {
+        Row {
             anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-            anchors.rightMargin: Math.round(Theme.sp(12) * root.headerK)
-            visible: board.emptyText === ""
-            text: qsTr("band ±1 SD · tick %1").arg(board.valueLabel)
-            font.family: Theme.fontBody
-            font.pixelSize: Math.round(Theme.fontSzBody2 * root.headerK)
-            color: Theme.colorText3
-            elide: Text.ElideRight
-            width: Math.min(implicitWidth, root.width * 0.4)
+            anchors.rightMargin: Theme.sp(16)
+            spacing: Theme.sp(10)
+
+            // What the tiles board's marks ARE. A reader who takes the ±1 SD band for a
+            // corridor has been told the opposite of the truth, so the strip says so.
+            // Graphics needs no such line: its geometry is labelled where it is drawn.
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: board.emptyText === "" && !root.graphicsMode
+                text: qsTr("band ±1 SD · tick %1").arg(board.valueLabel)
+                font.family: Theme.fontBody
+                font.pixelSize: Theme.fontSzBody2
+                color: Theme.colorText3
+                elide: Text.ElideRight
+                width: Math.min(implicitWidth, root.width * 0.4)
+            }
+
+            // THE standard selector (PpSegmentedControl), not a lookalike — the same
+            // control the chart panel, the markup panel and the session toolbar use, so
+            // a two-way choice looks and behaves the same wherever a golfer meets one.
+            // Sized to the carousel header's own control height, sp(22), so a stage
+            // panel's title bar and the rail below it read as one system. Appearance is
+            // entirely the shared component's — only the box it fills is set here.
+            PpSegmentedControl {
+                anchors.verticalCenter: parent.verticalCenter
+                width: Theme.sp(130)
+                height: Theme.sp(22)
+                options:  [qsTr("Tiles"), qsTr("Graphics")]
+                selected: root.graphicsMode ? qsTr("Graphics") : qsTr("Tiles")
+                onActivated: (v) => appSettings.lmPanelMode =
+                                     (v === qsTr("Graphics")) ? "graphics" : "tiles"
+            }
         }
     }
 
@@ -228,14 +260,35 @@ Rectangle {
         color: Theme.colorText3
     }
 
-    // ── body ─────────────────────────────────────────────────────────────────
+    // ── body: graphics ───────────────────────────────────────────────────────
+    // A Loader, so the unused body is never built. The graphics view is five schematics
+    // and a physics-modelled flight curve; a golfer reading the tiles board should not
+    // be paying to keep it alive behind them.
+    //
+    // It takes the model's `graphics` map and NOTHING ELSE — see PpLmGraphicsBody for
+    // why that decoupling is what makes the layout assertions cheap.
+    Loader {
+        anchors {
+            top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom
+            leftMargin: Theme.sp(10); rightMargin: Theme.sp(10); bottomMargin: Theme.sp(10)
+        }
+        active: root.graphicsMode && board.emptyText === ""
+        visible: active
+        sourceComponent: graphicsBodyComp
+    }
+    Component {
+        id: graphicsBodyComp
+        PpLmGraphicsBody { g: board.graphics }
+    }
+
+    // ── body: tiles ──────────────────────────────────────────────────────────
     Flickable {
         id: body
         anchors {
             top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom
             leftMargin: Theme.sp(10); rightMargin: Theme.sp(10); bottomMargin: Theme.sp(10)
         }
-        visible: board.emptyText === ""
+        visible: board.emptyText === "" && !root.graphicsMode
         clip: true
         contentHeight: bands.implicitHeight
         contentWidth: width
