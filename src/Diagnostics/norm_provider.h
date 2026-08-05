@@ -168,10 +168,37 @@ std::unique_ptr<INormProvider> makeResourceNormProvider(
     const QString &normsPath    = QStringLiteral(":/diagnostics/norms.json"),
     const QString &contextsPath = QStringLiteral(":/diagnostics/contexts.json"));
 
-// User norm sets from a directory (QStandardPaths::AppDataLocation/diagnostics by default). Every
-// *.norms.json in the directory is a norm set; an unreadable one is reported, not fatal.
+// Every norm-set file in a directory (QStandardPaths::AppDataLocation/diagnostics by default), in
+// LAYERING ORDER: `user.norms.json` first if present, then the rest alphabetically. The `*.norms
+// .json` suffix is the whole filter — unlike the pack side, nothing else in the shared directory
+// can match it. Exposed for the same reason characteristicPackFilesIn() is: the ordering rule has
+// more than one caller and must not be copied.
+QStringList normSetFilesIn(const QString &directory = QString());
+
+// ONE norm-set file (userNormPath() by default), plus optionally the directory's shared
+// `contexts.json`. A missing file is not an error — no user norm set is the normal case; an
+// unreadable or malformed one is reported through report() and yields an empty set, so a broken
+// community set costs the library that set and nothing else.
+//
+// `contextsFile` is handed in rather than derived, because the context tree belongs to the
+// DIRECTORY and not to any one norm set: several sets in one directory share one tree, and exactly
+// one provider should carry it. See makeFileNormProviders().
 std::unique_ptr<INormProvider> makeFileNormProvider(
-    const QString &directory = QString(), PackOrigin origin = PackOrigin::LocalUser);
+    const QString &normsFile = QString(), PackOrigin origin = PackOrigin::LocalUser,
+    const QString &contextsFile = QString());
+
+// One provider per norm-set file in the directory, in normSetFilesIn() order, with the origin each
+// file's name implies: `user.norms.json` is LocalUser (the corridor editor writes it), everything
+// else is Community. The shared `contexts.json` goes to the first provider only — the merger unions
+// trees, so a second copy would change nothing and report its faults twice. A directory holding a
+// context tree and no norm sets still yields one (norm-less) provider, so a club the user named
+// does not vanish with their last corridor.
+//
+// One provider PER FILE, which is what the merger has always expected and what nothing built until
+// now: a single directory-wide provider can only hold one set, so every set after the first was
+// parsed, had its faults reported, and then had its corridors silently dropped.
+std::vector<std::unique_ptr<INormProvider>> makeFileNormProviders(
+    const QString &directory = QString());
 
 // Core + user, in that order.
 //

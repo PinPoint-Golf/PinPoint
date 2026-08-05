@@ -19,10 +19,13 @@
 #pragma once
 
 #include "characteristic_pack.h"     // CharacteristicPack, ValidationIssue
+#include "drill_pack.h"              // DrillSet, for the unknownDrillRef / drillNo* checks
 #include "norm_provider.h"
 #include "reference_pack.h"          // ReferenceSet, for referenceHealth()
+#include "screen_pack.h"             // ScreenSet, for the unknownScreenRef / screenNo* checks
 #include "../Metrics/metric_catalogue.h"
 
+#include <optional>
 #include <vector>
 
 // The ASSEMBLED-LIBRARY health checks — the ones no single validator can make.
@@ -168,13 +171,43 @@ struct CorpusGradeCounts {
     int total() const { return ideal + good + watch + action; }
 };
 
+// The decision `oneBandCorpus` is built from, factored out of corpusShareHealth() so a second caller
+// with its own single corridor's counts — corridor_plot.cpp's per-plot note — can ask the same
+// question without re-deriving it in a second hand-rolled loop. That happened once already: the plot
+// note used to test the same kOneBandShare / kMinCorpusForShare thresholds inline, in its own loop,
+// with its own wording and without the Ideal-vs-mislocated distinction below — two implementations of
+// one check, free to drift and silently missing half the argument in one of them.
+//
+// Empty when there are too few readings to mean anything, or no band crosses the share.
+struct OneBandShare {
+    QString word;    // the band's own name: "Ideal", "Good", "Watch" or "Action"
+    int     n     = 0;
+    int     total = 0;
+
+    // Which way it is wrong, in one clause — and the two are opposite fixes, not degrees of the same
+    // one. Almost everything OUTSIDE Ideal means the corridor is centred wrong or scaled wrong;
+    // almost everything Ideal means it is so wide it can never say anything. A hint that did not
+    // distinguish them would send an author to check the wrong half of the corridor.
+    QString hint;
+};
+std::optional<OneBandShare> oneBandShareOf(const CorpusGradeCounts &counts);
+
 // The registry-only checks: everything decidable from the assembled library alone. Includes the
 // REFERENTIAL norm validation (`validateNormsAgainst` — unknown measure/context, unit mismatch, a
 // norm on a measure no sensor can produce), which existed from stage 1 and which nothing in the app
 // had ever called.
+//
+// `screens` and `drills` are the registries the unknownScreenRef / unknownDrillRef / screenNo* /
+// drillNo* checks join against — taken as arguments for the reason dag_layout.h states as this
+// area's doctrine: a module takes what it needs as arguments, and a global read here would make the
+// picture depend on process state no test could set. See referenceHealth() below for the same seam
+// applied to the bibliography; this is that argument applied one registry further. Callers reading
+// the shipped library pass sharedScreenSet() / sharedDrillSet() and see no change.
 std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                                const INormProvider      &norms,
-                                               const MetricCatalogue    &catalogue);
+                                               const MetricCatalogue    &catalogue,
+                                               const ScreenSet          &screens,
+                                               const DrillSet           &drills);
 
 // The corpus-share check, over counts a caller has already gathered.
 std::vector<ValidationIssue> corpusShareHealth(const std::vector<CorpusGradeCounts> &counts);
@@ -183,9 +216,7 @@ std::vector<ValidationIssue> corpusShareHealth(const std::vector<CorpusGradeCoun
 // `validateReferenceSet()` takes a ReferenceSet and so cannot see who cites what.
 //
 // Split out rather than folded into diagnosticsHealth() for the same reason corpusShareHealth() is:
-// it is the seam that makes the check testable. diagnosticsHealth() reads its screen and drill sets
-// from the process-global singletons, and a check reachable only that way can be tested only against
-// whatever registry happens to be on the path. Taking the set as a parameter lets both directions be
+// it is the seam that makes the check testable. Taking the set as a parameter lets both directions be
 // asserted over fixtures — and a check whose negative case is untested passes everything.
 // diagnosticsHealth() calls this with sharedReferenceSet(), so callers see no change.
 std::vector<ValidationIssue> referenceHealth(const CharacteristicPack &pack,

@@ -10,6 +10,8 @@
 
 #include "../characteristic_pack.h"
 
+#include "../enum_table_p.h"   // the shared enum-table machinery — see the UTF-8 label check below
+
 #include <QDate>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -415,12 +417,113 @@ int main()
         QJsonObject root = savePack(goodPack());
         root.insert(QStringLiteral("schemaVersion"), kPackSchemaVersion + 1);
         const PackLoadResult res = loadPack(root, QStringLiteral("future"));
-        check(!res.loaded && hasError(res.report, "schemaVersion"),
+        // `schemaTooNew`, the code the norm set has always used. `schemaVersion` is kept for a
+        // version field that is malformed rather than merely ahead of us — one code for both left
+        // a reader unable to tell "your build is old" from "your file is wrong".
+        check(!res.loaded && !res.parsed && hasError(res.report, "schemaTooNew"),
               "a newer schema is refused, not partially read");
     }
     {
         const PackLoadResult res = loadPack(QByteArray("{ not json"), QStringLiteral("broken"));
         check(!res.loaded && hasError(res.report, "parse"), "unparseable JSON is reported, not thrown");
+    }
+
+    // ── The codes that used to be borrowed ──────────────────────────────────────
+    //
+    // Three loader faults reported under a code that belonged to a different fault, which is worse
+    // than an ugly name: it sends the author who searches for it to the wrong rule. A pack with one
+    // of everything was told it had a DUPLICATE; a misread measure kind was told its FACETS were
+    // bad; a misread signal test was told its ARITY was wrong. Each now says what happened.
+    {
+        QJsonObject root = savePack(goodPack());
+        root.remove(QStringLiteral("id"));
+        const PackLoadResult res = loadPack(root, QStringLiteral("no-id"));
+        check(!res.parsed && hasError(res.report, "noPackId"),
+              "a pack with no id says so, rather than reporting a duplicate");
+    }
+    {
+        QJsonObject root     = savePack(goodPack());
+        QJsonArray  measures = root.value(QStringLiteral("measures")).toArray();
+        QJsonObject first    = measures.at(0).toObject();
+        first.insert(QStringLiteral("kind"), QStringLiteral("compsoed"));
+        measures.replace(0, first);
+        root.insert(QStringLiteral("measures"), measures);
+        const PackLoadResult res = loadPack(root, QStringLiteral("kind-typo"));
+        check(hasError(res.report, "unknownKind"), "a misread measure kind is not a facet failure");
+    }
+    {
+        QJsonObject root      = savePack(goodPack());
+        QJsonArray  signalDef = root.value(QStringLiteral("signals")).toArray();
+        QJsonObject first     = signalDef.at(0).toObject();
+        first.insert(QStringLiteral("test"), QStringLiteral("outsdieCorridor"));
+        signalDef.replace(0, first);
+        root.insert(QStringLiteral("signals"), signalDef);
+        const PackLoadResult res = loadPack(root, QStringLiteral("test-typo"));
+        check(hasError(res.report, "unknownSignalTest"),
+              "a misread signal test is not an arity failure");
+    }
+
+    // ── One regime for every closed vocabulary ──────────────────────────────────
+    //
+    // Six fields used to accept a misspelt token in silence and land on their default. Every one of
+    // them decides something invisible — which section of the browser a condition appears in, which
+    // rules reason about it, whether a corridor can ever be graded — so a typo produced a row that
+    // loaded, rendered and validated clean against the wrong answer. An ABSENT key still means the
+    // documented default; this is only about a key that is present and wrong.
+    {
+        const auto conditionWith = [](const QString &field, const QString &token) {
+            QJsonObject root  = savePack(goodPack());
+            QJsonArray  conds = root.value(QStringLiteral("conditions")).toArray();
+            QJsonObject first = conds.at(0).toObject();
+            first.insert(field, token);
+            conds.replace(0, first);
+            root.insert(QStringLiteral("conditions"), conds);
+            return loadPack(root, QStringLiteral("token-typo"));
+        };
+        check(hasError(conditionWith(QStringLiteral("group"), QStringLiteral("postrue")).report,
+                       "unknownGroup"),
+              "a misspelt group is refused, not filed under Setup");
+        check(hasError(conditionWith(QStringLiteral("observability"),
+                                     QStringLiteral("latnet")).report, "unknownObservability"),
+              "a misspelt observability is refused, not read as Observable");
+        check(hasError(conditionWith(QStringLiteral("confirmedBy"),
+                                     QStringLiteral("screend")).report, "unknownConfirmedBy"),
+              "a misspelt confirmedBy is refused, not read as Measured");
+        check(hasError(conditionWith(QStringLiteral("state"), QStringLiteral("actve")).report,
+                       "unknownState"),
+              "a misspelt state is refused, not read as Draft");
+
+        const auto measureWith = [](const QString &field, const QString &token) {
+            QJsonObject root     = savePack(goodPack());
+            QJsonArray  measures = root.value(QStringLiteral("measures")).toArray();
+            QJsonObject first    = measures.at(0).toObject();
+            first.insert(field, token);
+            measures.replace(0, first);
+            root.insert(QStringLiteral("measures"), measures);
+            return loadPack(root, QStringLiteral("token-typo"));
+        };
+        check(hasError(measureWith(QStringLiteral("viewNeeded"),
+                                   QStringLiteral("downTheLien")).report, "unknownViewNeeded"),
+              "a misspelt viewNeeded is refused, not read as Any");
+        check(hasError(measureWith(QStringLiteral("status"),
+                                   QStringLiteral("notCaptureable")).report, "unknownStatus"),
+              "a misspelt status is refused, not read as Live");
+
+        // The other half of the regime, and the half a test has to state: an ABSENT key is not an
+        // error. Every fixture in this file that writes a condition by hand relies on it, and so
+        // does every pack authored before one of these fields existed.
+        QJsonObject root  = savePack(goodPack());
+        QJsonArray  conds = root.value(QStringLiteral("conditions")).toArray();
+        QJsonObject first = conds.at(0).toObject();
+        for (const char *k : { "group", "observability", "confirmedBy", "state", "kind" })
+            first.remove(QLatin1String(k));
+        conds.replace(0, first);
+        root.insert(QStringLiteral("conditions"), conds);
+        const PackLoadResult bare = loadPack(root, QStringLiteral("token-absent"));
+        check(!hasError(bare.report, "unknownGroup") && !hasError(bare.report, "unknownObservability")
+                  && !hasError(bare.report, "unknownConfirmedBy") && !hasError(bare.report, "unknownState")
+                  && !hasError(bare.report, "unknownConditionKind"),
+              "an absent key is still the documented default, not a refusal");
     }
 
     // ── Spinal roles are classified by the loader, not trusted to the author ────
@@ -497,6 +600,39 @@ int main()
         check(!shapeIsOneSided(Shape::Target) && shapeIsOneSided(Shape::Floor)
                   && shapeIsOneSided(Shape::Ceiling),
               "shapeIsOneSided is the one place 'has an open tail' is decided");
+    }
+
+    // ── The label tables decode as UTF-8 ───────────────────────────────────────
+    //
+    // This side's enum machinery used to be a private copy of the norm side's, differing in exactly
+    // one line: it read labels with fromLatin1. Nothing was wrong, because no label here has yet
+    // used a character outside ASCII — the first author to write one ("±2°", an en dash in a range)
+    // would have got mojibake on screen with nothing failing to say so. The copies are now one
+    // header (enum_table_p.h) and labels decode as UTF-8.
+    //
+    // Every shipped label being ASCII is why this probes a table of its own rather than a shipped
+    // one: the table is over a REAL enum and goes through the SAME `labelOf` instantiation the
+    // vocabulary below it uses, so it fails the day that decoding is changed back.
+    {
+        static const detail::Row<Shape> kUtf8Probe[] = {
+            { Shape::Target,  "target",  "a range: 55–64" },
+            { Shape::Floor,   "floor",   "at least 2°" },
+            { Shape::Ceiling, "ceiling", "at most 2°" },
+        };
+
+        const QString range = detail::labelOf(kUtf8Probe, Shape::Target);
+        check(range.size() == 14 && range.contains(QChar(0x2013)),
+              "a label with an en dash survives labelOf as one character, not three");
+        check(detail::labelOf(kUtf8Probe, Shape::Floor).contains(QChar(0x00B0))
+                  && detail::labelOf(kUtf8Probe, Shape::Floor).size() == 11,
+              "…and a degree sign as one, not two");
+
+        // The vocabulary itself: ASCII today, and reading it through the shared helper must not
+        // have moved it. If this ever fails alongside the two above, the labels have been rewired
+        // away from labelOf rather than the encoding having changed.
+        check(shapeLabel(Shape::Floor) == QLatin1String("Higher is better")
+                  && conditionGroupLabel(ConditionGroup::ArmsAndClub) == QLatin1String("Arms & club"),
+              "the shipped labels read exactly as authored");
     }
 
     // ── ExternalDevice: roadmap work gated on hardware, not a capture gap ───────

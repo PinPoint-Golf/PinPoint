@@ -18,14 +18,13 @@
 
 #include "drill_pack.h"
 
-#include <QDir>
+#include "pack_io.h"
+
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
-#include <QStandardPaths>
 
 #include <algorithm>
 
@@ -40,24 +39,7 @@ const Drill *DrillSet::drill(const QString &did) const
 
 namespace {
 
-void add(ValidationReport &r, IssueSeverity sev, const QString &code, const QString &subject,
-         const QString &message)
-{
-    r.issues.push_back(ValidationIssue{ sev, code, subject, message });
-}
-
-QString userDrillPath()
-{
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return dir.isEmpty() ? QString() : dir + QStringLiteral("/diagnostics/drills.json");
-}
-
-QStringList readStringList(const QJsonValue &v)
-{
-    QStringList out;
-    for (const QJsonValue &e : v.toArray()) out << e.toString();
-    return out;
-}
+QString userDrillPath() { return diagnosticsFilePath(QStringLiteral("drills.json")); }
 
 } // namespace
 
@@ -108,11 +90,25 @@ DrillLoadResult loadDrillSet(const QByteArray &json, const QString &sourceLabel)
         return out;
     }
 
-    const QJsonObject root = doc.object();
-    out.set.id            = root.value(QStringLiteral("id")).toString();
-    out.set.version       = root.value(QStringLiteral("version")).toString();
-    out.set.schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(1);
-    out.set.sourceLabel   = sourceLabel;
+    const QJsonObject root   = doc.object();
+    const int         schema = root.value(QStringLiteral("schemaVersion")).toInt(kDrillSchemaVersion);
+
+    // Refused rather than partially read — see the same gate in loadScreenSet(), and loadPack()
+    // before it. `parsed` stays false: a caller merging layers must not take a file this build
+    // could not read for one it did.
+    if (schema > kDrillSchemaVersion) {
+        err(out.report, QStringLiteral("schemaTooNew"), sourceLabel,
+            QStringLiteral("Drill set '%1' declares schema %2; this build understands %3. "
+                           "Refusing to load rather than silently dropping content.")
+                .arg(sourceLabel.isEmpty() ? QStringLiteral("(unnamed)") : sourceLabel)
+                .arg(schema).arg(kDrillSchemaVersion));
+        return out;
+    }
+
+    out.pack.id            = root.value(QStringLiteral("id")).toString();
+    out.pack.version       = root.value(QStringLiteral("version")).toString();
+    out.pack.schemaVersion = schema;
+    out.pack.sourceLabel   = sourceLabel;
 
     for (const QJsonValue &v : root.value(QStringLiteral("drills")).toArray()) {
         const QJsonObject o = v.toObject();
@@ -123,11 +119,11 @@ DrillLoadResult loadDrillSet(const QByteArray &json, const QString &sourceLabel)
         d.targets     = o.value(QStringLiteral("targets")).toString();
         d.equipment   = readStringList(o.value(QStringLiteral("equipment")));
         d.note        = o.value(QStringLiteral("note")).toString();
-        out.set.drills.push_back(std::move(d));
+        out.pack.drills.push_back(std::move(d));
     }
 
     out.parsed = true;
-    out.report = validateDrillSet(out.set);
+    out.report = validateDrillSet(out.pack);
     out.loaded = out.report.ok();
     return out;
 }
@@ -171,7 +167,7 @@ DrillSet loadCoreDrillSet()
     QFile    f(corePath);
     if (f.open(QIODevice::ReadOnly)) {
         DrillLoadResult res = loadDrillSet(f.readAll(), corePath);
-        out = std::move(res.set);
+        out = std::move(res.pack);
     }
     out.readOnly = true;
     return out;
@@ -214,33 +210,12 @@ DrillSet loadUserDrillSet()
     QFile         f(path);
     if (path.isEmpty() || !f.open(QIODevice::ReadOnly)) return {};
     DrillLoadResult res = loadDrillSet(f.readAll(), path);
-    return res.parsed ? std::move(res.set) : DrillSet{};
+    return res.parsed ? std::move(res.pack) : DrillSet{};
 }
 
 bool saveUserDrillSet(const DrillSet &set, QString *whyNot)
 {
-    const QString path = userDrillSetPath();
-    if (path.isEmpty()) {
-        if (whyNot) *whyNot = QStringLiteral("No writable application data location.");
-        return false;
-    }
-    QDir().mkpath(QFileInfo(path).absolutePath());
-
-    const QString tmpPath = path + QStringLiteral(".tmp");
-    QFile         tmp(tmpPath);
-    if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (whyNot) *whyNot = QStringLiteral("Could not write to %1.").arg(tmpPath);
-        return false;
-    }
-    tmp.write(saveDrillSet(set));
-    tmp.close();
-
-    QFile::remove(path);
-    if (!QFile::rename(tmpPath, path)) {
-        if (whyNot) *whyNot = QStringLiteral("Could not replace %1.").arg(path);
-        return false;
-    }
-    return true;
+    return atomicWrite(userDrillSetPath(), saveDrillSet(set), whyNot);
 }
 
 const DrillSet &sharedDrillSet()

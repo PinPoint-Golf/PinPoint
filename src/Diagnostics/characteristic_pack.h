@@ -19,6 +19,10 @@
 #pragma once
 
 #include "characteristic.h"
+// The issue vocabulary and `LoadResult<T>` live there — shared with the norm, reference, screen and
+// drill registries, which report through the same types. Included here rather than forward-declared
+// so every consumer of this header still finds ValidationReport exactly where it always did.
+#include "pack_io.h"
 
 #include <QByteArray>
 #include <QJsonObject>
@@ -41,32 +45,34 @@ namespace pinpoint::analysis {
 // through an older build and lose content.
 inline constexpr int kPackSchemaVersion = 1;
 
-enum class IssueSeverity {
-    Error,     // the pack is not usable as-is
-    Warning,   // the pack loads, but something is wrong or incomplete — this is the health list
-};
-
-struct ValidationIssue {
-    IssueSeverity severity = IssueSeverity::Error;
-    QString       code;      // machine-readable, e.g. "unknownMeasure", "cycle", "singleTailAxis"
-    QString       subject;   // the id at fault
-    QString       message;   // human-readable
-};
-
-struct ValidationReport {
-    std::vector<ValidationIssue> issues;
-
-    bool                         ok() const;            // no errors (warnings are fine)
-    int                          errorCount() const;
-    int                          warningCount() const;
-    std::vector<ValidationIssue> withCode(const QString &code) const;
-    std::vector<ValidationIssue> withSeverity(IssueSeverity s) const;
-    QStringList                  messages(IssueSeverity s) const;
-};
-
 // ── Validation ──────────────────────────────────────────────────────────────
 //
-// ERRORS — the pack is structurally broken:
+// LOAD-TIME ERRORS — the file cannot be read as this build understands packs:
+//   parse                the bytes are not JSON, or not a JSON object
+//   schemaTooNew         the pack declares a schema version above kPackSchemaVersion. Refused
+//                        outright rather than partially read — see the constant above
+//   noPackId             a pack with no id at all. Nothing can namespace it, nothing can layer it,
+//                        and every issue it raises would be attributed to the empty string
+//   unknownKind          a MEASURE declares a kind that is not composed or provided
+//   unknownSignalTest    a signal declares a test that is not one of the four
+//   unknownShape         a measure declares a shape that is not target/floor/ceiling. An error
+//                        rather than a fall back to Target: "flooor" would grade the good tail
+//   unknownDirection     a measure's unwatchedTail is not high or low — same reasoning
+//   unknownConditionKind a condition declares a kind that is not one of the seven. A misread kind
+//                        lands the row in Fault, where the kind rules then accuse it of the wrong
+//                        defect entirely
+//   unknownProminence    a condition declares a rung that is not one of the five
+//   unknownGroup · unknownObservability · unknownConfirmedBy · unknownState · unknownViewNeeded ·
+//   unknownStatus        the same rule for the six fields that used to fall back silently. Each
+//                        decides something invisible — which section a condition appears in, which
+//                        rules reason about it, whether a corridor can ever be graded — so a typo
+//                        produced a row that loaded, rendered and validated clean against the wrong
+//                        answer
+//
+// ONE REGIME across all of those: an ABSENT key still means the documented default, and only a
+// token that is present and unrecognised is refused.
+//
+// STRUCTURAL ERRORS — the pack parsed, and is broken:
 //   duplicateId          two entities share an id
 //   unknownMeasure       a signal references a measure that does not exist
 //   unknownSignal        a condition's detectedBy names a signal that does not exist
@@ -86,16 +92,9 @@ struct ValidationReport {
 //   axisMismatch         two tails share an axis id but not a series — then they are not tails
 //   badFacets            a measure's series fails the validity table
 //   badReducer           a measure's reducer is malformed
-//   unknownShape         a measure declares a shape that is not target/floor/ceiling. An error
-//                        rather than a fall back to Target: "flooor" would grade the good tail
-//   unknownDirection     a measure's unwatchedTail is not high or low — same reasoning
 //   unwatchedTailShaped  a one-sided measure claiming a tail is "deliberately unwatched". The shape
 //                        already says which tail does not grade; the two cannot both be true
 //   unwatchedTailWatched a measure claiming a tail is unwatched that a corridor signal watches
-//   unknownConditionKind a condition declares a kind that is not one of the seven. An error for
-//                        unknownShape's reason: a misread kind lands the row in Fault, where the
-//                        kind rules then accuse it of the wrong defect entirely
-//   unknownProminence    a condition declares a rung that is not one of the five — same reasoning
 //
 // WARNINGS — the pack works, but the health list should show it:
 //   observableNoSignal   an Observable and Measured condition nothing can detect. Scoped to
@@ -146,16 +145,11 @@ struct ValidationReport {
 ValidationReport validatePack(const CharacteristicPack &pack);
 
 // ── Persistence ─────────────────────────────────────────────────────────────
-struct PackLoadResult {
-    CharacteristicPack pack;
-    ValidationReport   report;
-    bool               loaded = false;   // parsed AND validated clean
-    // Parsed successfully, whatever validation said. An overlay pack (user or community) routinely
-    // fails standalone referential integrity — its edges point at CORE conditions it does not
-    // itself contain — so referential checks are only meaningful on the ASSEMBLED library. A caller
-    // merging packs must key off `parsed`; keying off `loaded` silently discards every overlay.
-    bool               parsed = false;
-};
+//
+// The four fields, and the `parsed` / `loaded` distinction that a merging caller has to get right,
+// are LoadResult<T>'s — see pack_io.h. The alias stays because `PackLoadResult` is the name every
+// caller of loadPack() already writes.
+using PackLoadResult = LoadResult<CharacteristicPack>;
 
 // Parse + validate. Parse failures land in `report` as errors rather than being thrown or logged,
 // so a bad community pack surfaces in the UI instead of vanishing.

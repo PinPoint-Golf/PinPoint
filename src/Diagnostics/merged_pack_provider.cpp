@@ -21,6 +21,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <cstddef>
 
 namespace pinpoint::analysis {
 
@@ -53,8 +54,43 @@ public:
 
         // Re-validate the assembled library: cross-pack edges can create cycles that neither pack
         // contained on its own, and that is exactly the case a per-pack check cannot see.
-        const ValidationReport combined = validatePack(m_pack);
-        for (const ValidationIssue &i : combined.issues) m_report.issues.push_back(i);
+        //
+        // Through appendUnreported(), not a plain append, and the difference is the whole reason
+        // this line is interesting. The layer reports above ALREADY carry each pack's standalone
+        // validatePack() findings, and most of them survive the merge unchanged — an uncited tier on
+        // a shipped condition is still an uncited tier afterwards. Appending the assembled report
+        // wholesale therefore listed every one of them twice, so the health list's counts were
+        // roughly double the number of things actually wrong.
+        //
+        // What must NOT be lost is the other half: this pass is the authoritative check for
+        // cross-pack referential integrity, which is why file_pack_provider drops the referential
+        // codes from its own layer report (see the note there — an overlay's edges point at core
+        // content it does not contain, so standalone referential integrity is meaningless for it).
+        // Those findings have never been said by a layer, so they land here, which is exactly the
+        // asymmetry appendUnreported()'s (code, subject) key preserves.
+        //
+        // One wrinkle the (code, subject) key cannot see on its own: a COMMUNITY layer's entities
+        // are renamed on the way in. Its own report says `c_flip`, because that is what the file
+        // calls it and that is the name its author has to search for; the assembled library calls
+        // the same thing `theirpack:c_flip`. Two different subjects, one finding, and the dedupe
+        // would keep both. So the already-said set is seeded with the qualified spelling too — the
+        // merge is the only thing that knows the mapping, and it knows it exactly, because
+        // qualify() is the same function that did the renaming. Nothing is REPORTED under the
+        // alias; it only suppresses the second telling.
+        ValidationReport said = m_report;
+        for (const auto &up : m_user) {
+            if (!up || up->origin() == PackOrigin::LocalUser) continue;   // LocalUser ids are verbatim
+            for (const ValidationIssue &i : up->report().issues) {
+                ValidationIssue alias = i;
+                alias.subject = qualify(up->pack().id, i.subject);
+                if (alias.subject != i.subject) said.issues.push_back(alias);
+            }
+        }
+
+        const std::size_t base = said.issues.size();
+        appendUnreported(said, validatePack(m_pack));
+        m_report.issues.insert(m_report.issues.end(),
+                               said.issues.begin() + std::ptrdiff_t(base), said.issues.end());
     }
 
     const CharacteristicPack &pack() const override { return m_pack; }
@@ -219,9 +255,17 @@ std::unique_ptr<ICharacteristicPackProvider> makeMergedPackProvider(
 
 std::unique_ptr<ICharacteristicPackProvider> makeCharacteristicPackProvider()
 {
-    std::vector<std::unique_ptr<ICharacteristicPackProvider>> user;
-    user.push_back(makeFilePackProvider());
-    return makeMergedPackProvider(makeResourcePackProvider(), std::move(user));
+    // ONE PROVIDER PER PACK FILE. This used to construct a single file provider over the whole
+    // directory, which could only ever hold one pack — so a second installed pack was opened,
+    // parsed, had its validation issues added to the health list, and then had every characteristic
+    // in it dropped on the floor. The report said the pack was there; the library did not contain
+    // it, and nothing said so.
+    //
+    // makeFilePackProviders() decides the order and the origin of each layer; see its comment for
+    // why `user.json` leads and why everything else is Community. MergedPackProvider has always
+    // taken a vector, so no generalisation was needed there — the contract simply had nobody
+    // fulfilling it.
+    return makeMergedPackProvider(makeResourcePackProvider(), makeFilePackProviders());
 }
 
 } // namespace pinpoint::analysis

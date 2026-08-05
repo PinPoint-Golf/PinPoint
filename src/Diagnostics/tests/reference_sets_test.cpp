@@ -186,17 +186,66 @@ int main()
     std::printf("=== round-trip ===\n");
     {
         const ScreenLoadResult rs = loadScreenSet(saveScreenSet(screens), QStringLiteral("rt"));
-        check(rs.loaded && rs.set.screens.size() == screens.screens.size(),
+        check(rs.loaded && rs.pack.screens.size() == screens.screens.size(),
               "a screen set survives save and load");
         const Screen *before = screens.screen(QStringLiteral("screen.ankleDorsiflexion"));
-        const Screen *after  = rs.set.screen(QStringLiteral("screen.ankleDorsiflexion"));
+        const Screen *after  = rs.pack.screen(QStringLiteral("screen.ankleDorsiflexion"));
         check(before && after && after->passAtLeast.has_value()
                   && *after->passAtLeast == *before->passAtLeast && after->unit == before->unit,
               "…including the optional numeric floor and its unit");
 
         const DrillLoadResult rd = loadDrillSet(saveDrillSet(drills), QStringLiteral("rt"));
-        check(rd.loaded && rd.set.drills.size() == drills.drills.size(),
+        check(rd.loaded && rd.pack.drills.size() == drills.drills.size(),
               "a drill set survives save and load");
+    }
+
+    // ── The schema gate ─────────────────────────────────────────────────────
+    //
+    // All three registries parsed a `schemaVersion` and then ignored what it said, which is the
+    // worst of the three possible behaviours: a set from a newer build was read as far as this one
+    // understood it, and the keys it had never heard of were dropped in silence. Round-trip that
+    // through an editing panel — which is the NORMAL way these files get written — and the newer
+    // build's content is gone, with nothing on any screen to say so.
+    //
+    // `parsed` must be false too, and that is the load-bearing half. A layer that merely failed
+    // validation is still a layer; a file this build could not read is not one, and a merge that
+    // took it for one would write the truncated result back over the original.
+    {
+        const auto tooNew = [](const char *arrayKey) {
+            return QByteArray("{\"id\":\"x\",\"version\":\"1\",\"schemaVersion\":99,\"")
+                   + arrayKey + "\":[]}";
+        };
+
+        const ScreenLoadResult s = loadScreenSet(tooNew("screens"), QStringLiteral("future"));
+        check(!s.parsed && !s.loaded && hasCode(s.report, "schemaTooNew"),
+              "a screen set from a newer build is refused, not partially read");
+
+        const DrillLoadResult d = loadDrillSet(tooNew("drills"), QStringLiteral("future"));
+        check(!d.parsed && !d.loaded && hasCode(d.report, "schemaTooNew"),
+              "a drill set from a newer build is refused, not partially read");
+
+        const ReferenceLoadResult r = loadReferenceSet(tooNew("references"),
+                                                       QStringLiteral("future"));
+        check(!r.parsed && !r.loaded && hasCode(r.report, "schemaTooNew"),
+              "a reference set from a newer build is refused, not partially read");
+
+        // The version this build writes is still readable by this build — the gate has to admit
+        // its own output, and a k-constant bumped without the writer following it would not.
+        check(loadScreenSet(saveScreenSet(screens), QStringLiteral("rt")).parsed
+                  && loadDrillSet(saveDrillSet(drills), QStringLiteral("rt")).parsed
+                  && loadReferenceSet(saveReferenceSet(refs), QStringLiteral("rt")).parsed,
+              "…and what this build writes still loads through the gate");
+
+        // Unparseable bytes are `parse` in all three. The reference loader reported this as
+        // `schemaVersion` — a code naming a fault the file had not committed, on the one registry
+        // where a reader chasing "which version is wrong?" would find nothing to fix.
+        check(hasCode(loadScreenSet(QByteArray("{ not json"), QStringLiteral("broken")).report,
+                      "parse")
+                  && hasCode(loadDrillSet(QByteArray("{ not json"),
+                                          QStringLiteral("broken")).report, "parse")
+                  && hasCode(loadReferenceSet(QByteArray("{ not json"),
+                                              QStringLiteral("broken")).report, "parse"),
+              "and unparseable bytes are `parse` in all three, one word for one fault");
     }
 
     // ── The bibliography ────────────────────────────────────────────────────
@@ -283,7 +332,7 @@ int main()
         std::printf("        (%d references cited by nothing — kept deliberately)\n", uncited);
 
         const ReferenceLoadResult rr = loadReferenceSet(saveReferenceSet(refs), QStringLiteral("rt"));
-        check(rr.loaded && rr.set.references.size() == refs.references.size(),
+        check(rr.loaded && rr.pack.references.size() == refs.references.size(),
               "a reference set survives save and load");
 
         // A journal that issues no DOI is not a reason to drop a source. The PMID is the same join
@@ -456,8 +505,8 @@ int main()
 
             const ReferenceLoadResult rt = loadReferenceSet(saveReferenceSet(gr),
                                                             QStringLiteral("rt"));
-            check(rt.loaded && rt.set.references.size() == 1
-                      && rt.set.references.front().generalReading,
+            check(rt.loaded && rt.pack.references.size() == 1
+                      && rt.pack.references.front().generalReading,
                   "generalReading survives save and load");
 
             // The absence of the flag and a false flag are the same fact, which is the entire
@@ -469,7 +518,7 @@ int main()
                        .contains(QStringLiteral("generalReading")),
                   "…and a false flag is omitted on save, so absent and false stay indistinguishable");
             check(!loadReferenceSet(saveReferenceSet(plain), QStringLiteral("rt"))
-                       .set.references.front().generalReading,
+                       .pack.references.front().generalReading,
                   "…and an absent flag parses back as false");
 
             // THE FLAG IS NOT AN EXEMPTION. The failure mode worth a test rather than a comment is

@@ -29,6 +29,11 @@ namespace {
 // One table row per role. Kept as a single flat table so the vocabulary can be read in one screen —
 // the moment role metadata is spread across several switch statements it starts to disagree with
 // itself.
+//
+// Deliberately NOT the shared `Row<E>` of enum_table_p.h, close cousin though it is: the two extra
+// columns are the point of the table, and the lookup below is a direct index on the enum ordinal
+// (asserted complete), not the linear scan the shared helpers do. If a label here ever goes
+// non-ASCII, decode it with fromUtf8 — see enum_table_p.h for why.
 struct RoleInfo {
     AnatomyRole role;
     RoleClass   cls;

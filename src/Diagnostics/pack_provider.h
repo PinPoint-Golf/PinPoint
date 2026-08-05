@@ -72,14 +72,36 @@ bool saveUserPack(const CharacteristicPack &pack, QString *whyNot = nullptr);
 std::unique_ptr<ICharacteristicPackProvider> makeResourcePackProvider(
     const QString &resourcePath = QStringLiteral(":/diagnostics/core.json"));
 
-// User packs from a directory (QStandardPaths::AppDataLocation/diagnostics by default). Every
-// *.json in the directory is a pack EXCEPT the sibling registries that share the directory
-// (`*.norms.json`, `screens.json`, `drills.json`, `references.json` — see file_pack_provider.cpp);
-// an unreadable one is reported, not fatal.
-std::unique_ptr<ICharacteristicPackProvider> makeFilePackProvider(
-    const QString &directory = QString(), PackOrigin origin = PackOrigin::LocalUser);
+// Every characteristic pack file in a directory (QStandardPaths::AppDataLocation/diagnostics by
+// default), in LAYERING ORDER: `user.json` first if present, then the rest alphabetically. Every
+// *.json is a pack EXCEPT the sibling registries that share the directory (`*.norms.json`,
+// `screens.json`, `drills.json`, `references.json`, `contexts.json`).
+//
+// Exposed because the skip list and the ordering are ONE decision with two callers — the provider
+// factory below, and any tool or test that needs to know what the app will read — and a second copy
+// of either would eventually disagree with this one. The argument for both lives at the definition
+// in file_pack_provider.cpp.
+QStringList characteristicPackFilesIn(const QString &directory = QString());
 
-// Core + user, in that order. Collision policy depends on origin (see PackOrigin):
+// ONE pack file (userPackPath() by default). A missing file is not an error — no user pack is the
+// normal case; an unreadable or malformed one is reported through report() and yields an empty
+// pack, so a broken community pack costs the library that pack and nothing else.
+std::unique_ptr<ICharacteristicPackProvider> makeFilePackProvider(
+    const QString &packFile = QString(), PackOrigin origin = PackOrigin::LocalUser);
+
+// One provider per pack file in the directory, in characteristicPackFilesIn() order, with the
+// origin each file's name implies: `user.json` is LocalUser (the editor writes it), everything else
+// is Community (it was imported from someone else). Feed the result straight to
+// makeMergedPackProvider().
+//
+// One provider PER FILE, which is what the merger has always expected and what nothing built until
+// now: a single directory-wide provider can only hold one pack, so every pack after the first was
+// parsed, had its faults reported, and then had its content silently dropped.
+std::vector<std::unique_ptr<ICharacteristicPackProvider>> makeFilePackProviders(
+    const QString &directory = QString());
+
+// Core + user layers, in that order, and any number of user layers. Collision policy depends on
+// origin (see PackOrigin):
 //   * LocalUser entities keep their ids and REPLACE a core entity with the same id — an override.
 //     They are not prefixed, because a prefix would make overriding impossible.
 //   * Community entities are prefixed with "<packId>:", and on a surviving collision CORE WINS,

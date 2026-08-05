@@ -18,6 +18,8 @@
 
 #include "norm_pack.h"
 
+#include "enum_table_p.h"
+
 #include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -31,42 +33,15 @@ namespace pinpoint::analysis {
 
 namespace {
 
-// One table per enum, so a spelling exists in exactly one place — same shape as characteristic.cpp.
+// The Row/nameOf/labelOf/fromName/tokenList machinery is shared with characteristic.cpp — see
+// enum_table_p.h, which carries this file's reason for decoding a label as UTF-8 and a token as
+// Latin-1. What stays here is the tables: one per enum, so a spelling exists in exactly one place.
 // Every `name` is a stable JSON token and must never change once a norm set has shipped with it.
-template <typename E>
-struct Row {
-    E           value;
-    const char *name;
-    const char *label;
-};
-
-template <typename E, size_t N>
-QString nameOf(const Row<E> (&rows)[N], E v)
-{
-    for (const auto &r : rows)
-        if (r.value == v) return QString::fromLatin1(r.name);
-    return QString::fromLatin1(rows[0].name);
-}
-
-// fromUtf8 on the LABEL and fromLatin1 on the token, and the asymmetry is not an oversight. A token
-// is ASCII by contract — it is a JSON key that must never change. A label is prose, and the age-band
-// labels carry an en dash ("18–54"); read as Latin-1 that becomes three mojibake characters on
-// screen, with nothing failing anywhere to say so.
-template <typename E, size_t N>
-QString labelOf(const Row<E> (&rows)[N], E v)
-{
-    for (const auto &r : rows)
-        if (r.value == v) return QString::fromUtf8(r.label);
-    return QString::fromUtf8(rows[0].label);
-}
-
-template <typename E, size_t N>
-bool fromName(const Row<E> (&rows)[N], const QString &s, E &out)
-{
-    for (const auto &r : rows)
-        if (s == QLatin1String(r.name)) { out = r.value; return true; }
-    return false;
-}
+using detail::fromName;
+using detail::labelOf;
+using detail::nameOf;
+using detail::Row;
+using detail::tokenList;
 
 // The label column carries the user-facing words: "authored figure" says what a heuristic norm IS
 // to a reader who has never seen the enum, where the token is only the JSON spelling.
@@ -103,14 +78,6 @@ const Row<AgeBand> kAgeBands[] = {
     { AgeBand::Adult55_64,  "adult_55_64",  "55–64" },
     { AgeBand::Adult65Plus, "adult_65plus", "65+" },
 };
-
-template <typename E, size_t N>
-QString tokenList(const Row<E> (&rows)[N])
-{
-    QStringList out;
-    for (const auto &r : rows) out << QString::fromLatin1(r.name);
-    return out.join(QStringLiteral(", "));
-}
 
 } // namespace
 
@@ -840,11 +807,10 @@ NormPackLoadResult loadFrom(const QJsonObject &root, const QString &sourceLabel)
     if (schema > kNormPackSchemaVersion) {
         // Refused rather than partially read: dropping fields this build does not understand would
         // let a newer set round-trip through an older build and lose content silently.
-        out.report.issues.push_back(ValidationIssue{
-            IssueSeverity::Error, QStringLiteral("schemaTooNew"), sourceLabel,
+        err(out.report, QStringLiteral("schemaTooNew"), sourceLabel,
             QStringLiteral("Norm set '%1' declares schema %2; this build understands %3.")
                 .arg(sourceLabel.isEmpty() ? QStringLiteral("(unnamed)") : sourceLabel)
-                .arg(schema).arg(kNormPackSchemaVersion) });
+                .arg(schema).arg(kNormPackSchemaVersion));
         return out;
     }
 
@@ -884,12 +850,14 @@ NormPackLoadResult loadNormPack(const QByteArray &json, const QString &sourceLab
     QJsonParseError perr{};
     const QJsonDocument doc = QJsonDocument::fromJson(json, &perr);
     if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
+        // `parse`, which is what the other four registries call it. `badNormFile` said the same
+        // thing in a spelling only this file used, so a surface listing "the files that would not
+        // read" had to know the norm set was special in order to include it.
         NormPackLoadResult out;
-        out.report.issues.push_back(ValidationIssue{
-            IssueSeverity::Error, QStringLiteral("badNormFile"), sourceLabel,
+        err(out.report, QStringLiteral("parse"), sourceLabel,
             QStringLiteral("Could not parse %1: %2")
                 .arg(sourceLabel.isEmpty() ? QStringLiteral("the norm set") : sourceLabel,
-                     perr.errorString()) });
+                     perr.errorString()));
         return out;
     }
     return loadFrom(doc.object(), sourceLabel);

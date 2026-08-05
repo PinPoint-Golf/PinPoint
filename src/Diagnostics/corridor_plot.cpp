@@ -18,12 +18,13 @@
 
 #include "corridor_plot.h"
 
-#include "diagnostics_health.h"   // kOneBandShare / kMinCorpusForShare — ONE threshold, not two
+#include "diagnostics_health.h"   // kMinCorpusForShare, oneBandShareOf() — ONE decision, not two
 
 #include <QObject>
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace pinpoint::analysis {
 
@@ -227,23 +228,37 @@ CorridorPlot layoutCorridorPlot(const Norm &norm, Shape shape, const std::vector
     // ── The finding, in words ───────────────────────────────────────────────
     //
     // The whole argument for showing a distribution at all: a corridor grading almost everything
-    // into one band is visibly wrong to somebody who has never heard of a standard deviation. The
-    // threshold is diagnostics_health.h's, not a second one invented here, so this view and the
-    // health list cannot disagree about the same corridor.
+    // into one band is visibly wrong to somebody who has never heard of a standard deviation.
+    // `oneBandShareOf()` is diagnostics_health.h's decision, not a second one invented here — this
+    // used to be its own loop over the same two constants, with its own wording and without the
+    // Ideal-vs-mislocated distinction, so a note here could disagree with the health row over the
+    // same corridor and only one of them would say which way it was wrong. Called once, on this
+    // plot's own counts, rather than through corpusShareHealth(): that function's job is a library
+    // scan's worth of (measure, context) rows, and this plot already has the one it is drawing.
     if (p.n >= kMinCorpusForShare) {
-        struct Share { Grade g; int n; const char *word; };
-        const Share shares[] = { { Grade::Ideal,  p.ideal,  QT_TR_NOOP("Ideal") },
-                                 { Grade::Good,   p.good,   QT_TR_NOOP("Good") },
-                                 { Grade::Watch,  p.watch,  QT_TR_NOOP("Watch") },
-                                 { Grade::Action, p.action, QT_TR_NOOP("Action") } };
-        for (const Share &s : shares) {
-            if (double(s.n) / double(p.n) < kOneBandShare) continue;
-            p.note = QObject::tr("%1% of %2 readings grade %3 — this corridor is not telling "
-                                 "swings apart.")
-                         .arg(int(std::lround(100.0 * s.n / p.n)))
-                         .arg(p.n)
-                         .arg(QObject::tr(s.word));
-            break;
+        CorpusGradeCounts counts;
+        counts.measureId = norm.measureId;
+        counts.contextId = norm.contextId;
+        counts.ideal     = p.ideal;
+        counts.good      = p.good;
+        counts.watch     = p.watch;
+        counts.action    = p.action;
+
+        if (const std::optional<OneBandShare> finding = oneBandShareOf(counts); finding.has_value()) {
+            // Terse, not word-for-word with the health row: this renders in a small UI slot beside
+            // the plot it is about, which already shows the reader which corridor and which band.
+            // The Ideal-vs-mislocated split still has to survive the trim — it is the one thing that
+            // tells an author which half of the corridor to go check.
+            p.note = (finding->word == QLatin1String("Ideal"))
+                ? QObject::tr("%1% of %2 readings grade Ideal — this corridor is too wide to "
+                              "report a deviation.")
+                      .arg(int(std::lround(100.0 * finding->n / finding->total)))
+                      .arg(finding->total)
+                : QObject::tr("%1% of %2 readings grade %3 — this corridor is not telling "
+                              "swings apart.")
+                      .arg(int(std::lround(100.0 * finding->n / finding->total)))
+                      .arg(finding->total)
+                      .arg(finding->word);
         }
         if (p.note.isEmpty() && p.implausible > 0
             && double(p.implausible) / double(p.implausible + p.n) > 0.05)

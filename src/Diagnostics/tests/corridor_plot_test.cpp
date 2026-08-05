@@ -232,6 +232,14 @@ int main(int argc, char **argv)
         check(p.ideal == p.n, "a corridor this loose grades everything Ideal");
         check(!p.note.isEmpty(), "and the picture says so rather than leaving it to be noticed");
         check(p.note.contains(QStringLiteral("Ideal")), "naming the band it collapsed into");
+        // The TOO-WIDE hint, shared with diagnostics_health.h's oneBandShareOf(): nothing in the
+        // library falls outside the corridor, so it cannot report a deviation. Distinct in wording
+        // from the mislocated case below, and the two must never read as the same finding — they
+        // send an author to check opposite halves of the corridor.
+        check(p.note.contains(QStringLiteral("too wide")),
+              "the Ideal branch names the specific failure — too wide to report a deviation");
+        check(!p.note.contains(QStringLiteral("not telling swings apart")),
+              "…and does not borrow the mislocated branch's wording");
 
         // Too few readings to judge by — a different statement from "this corridor is fine", and
         // the two must not look the same.
@@ -247,6 +255,24 @@ int main(int argc, char **argv)
         for (int i = 0; i < 60; ++i) spread.push_back(20.0 + i * 0.5);
         const CorridorPlot ok = layoutCorridorPlot(tight, Shape::Target, spread, {}, {});
         check(ok.note.isEmpty(), "a corridor that tells swings apart is not commented on");
+
+        // The MISLOCATED branch: a tight, narrow corridor with the library clustered nowhere near
+        // mu lands almost everything in one outer band instead — the opposite failure from the loose
+        // corridor above, and the opposite fix (move or rescale the corridor, not widen it).
+        Norm offCentre    = makeNorm();
+        offCentre.sigmaLo = 1.0;
+        offCentre.sigmaHi = 1.0;
+        std::vector<double> farAway;
+        for (int i = 0; i < 20; ++i) farAway.push_back(45.0 + i * 0.01);   // 15 sigma from mu
+        const CorridorPlot mislocated = layoutCorridorPlot(offCentre, Shape::Target, farAway, {}, {});
+        check(mislocated.action == mislocated.n,
+              "a corridor sitting nowhere near the library grades everything Action");
+        check(!mislocated.note.isEmpty(), "and that is reported too");
+        check(mislocated.note.contains(QStringLiteral("Action")), "naming the band it collapsed into");
+        check(mislocated.note.contains(QStringLiteral("not telling swings apart")),
+              "the mislocated branch's own wording");
+        check(!mislocated.note.contains(QStringLiteral("too wide")),
+              "…and not the too-wide hint the Ideal branch uses — the fix is the opposite one");
     }
 
     std::printf("=== an empty library still draws the claim ===\n");

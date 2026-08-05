@@ -508,6 +508,10 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/measure_facets.cpp
         src/Diagnostics/characteristic.h
         src/Diagnostics/characteristic.cpp
+        # The five content registries' shared machinery: the issue vocabulary, LoadResult<T>, and
+        # the user-data path and atomic-write helpers each of them used to own a copy of.
+        src/Diagnostics/pack_io.h
+        src/Diagnostics/pack_io.cpp
         src/Diagnostics/characteristic_pack.h
         src/Diagnostics/characteristic_pack.cpp
         src/Diagnostics/pack_provider.h
@@ -2710,6 +2714,7 @@ if(PINPOINT_BUILD_TOOLS)
         # reference_bands.cpp hosts NormBandProvider — the corridors it used to compile in are now
         # content in src/Resources/diagnostics/norms.json, so the offline stack needs the norm
         # stack too. Omit these and swinglab_run / in-app re-analyse fail at link time.
+        src/Diagnostics/pack_io.cpp
         src/Diagnostics/norm_pack.cpp
         src/Diagnostics/context_tree.cpp
         src/Diagnostics/characteristic_pack.cpp
@@ -2929,6 +2934,7 @@ if(PINPOINT_BUILD_QML_TESTS)
             src/Metrics/metric_catalogue_manifest.cpp
             src/Metrics/metric_providers.cpp
             src/Analysis/reference_bands.cpp
+            src/Diagnostics/pack_io.cpp
             src/Diagnostics/norm_pack.cpp
             src/Diagnostics/context_tree.cpp
             src/Diagnostics/characteristic_pack.cpp

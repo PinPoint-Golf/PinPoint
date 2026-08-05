@@ -15,8 +15,13 @@
 
 #include "../norm_provider.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
+#include <QTemporaryDir>
 
 #include <cstdio>
 
@@ -36,6 +41,22 @@ static bool hasCode(const ValidationReport &r, const char *code)
     for (const ValidationIssue &i : r.issues)
         if (i.code == QLatin1String(code)) return true;
     return false;
+}
+
+static int countCode(const ValidationReport &r, const char *code)
+{
+    int n = 0;
+    for (const ValidationIssue &i : r.issues)
+        if (i.code == QLatin1String(code)) ++n;
+    return n;
+}
+
+// Write a file into a directory, terse enough that a fixture directory reads as a list of files.
+static void writeFile(const QDir &dir, const char *name, const char *content)
+{
+    QFile f(dir.filePath(QString::fromLatin1(name)));
+    check(f.open(QIODevice::WriteOnly), name);
+    f.write(content);
 }
 
 static Norm makeNorm(const char *measure, const char *context, double mu, double sigma,
@@ -436,8 +457,11 @@ int main()
         check(!res.parsed && hasCode(res.report, "schemaTooNew"),
               "a set from a newer build is refused rather than partially read");
 
+        // `parse`, the code every registry uses for the same fault. This was `badNormFile`, a
+        // spelling only the norm set had, which meant anything listing "the files that would not
+        // read" had to know to ask for it by a second name.
         const NormPackLoadResult bad = loadNormPack(QByteArray("{ not json"));
-        check(!bad.parsed && hasCode(bad.report, "badNormFile"),
+        check(!bad.parsed && hasCode(bad.report, "parse"),
               "unparseable JSON is reported, not thrown");
     }
 
@@ -1185,6 +1209,139 @@ int main()
         twoCohorts.norms.push_back(women);
         check(hasCode(validateNormPack(twoCohorts), "duplicateNorm"),
               "…and two rows on the SAME cohort still collide");
+    }
+
+    std::printf("=== norm provider: one finding, reported once ===\n");
+    {
+        // The merged provider does two things that OVERLAP: it copies each layer's own load-time
+        // report, and it re-validates the assembled set. A standalone warning on a layer's content
+        // — a zero tolerance, an implausible corridor — survives the merge unchanged, so appending
+        // both wholesale listed it twice and the health list's counts were roughly double the
+        // number of things actually wrong. See appendUnreported().
+        //
+        // A FILE-backed layer, deliberately: the in-memory fake above never validates, so it has no
+        // report to duplicate and could not see this fault at all.
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the duplicate-report case is created");
+        QDir dir(tmp.path());
+
+        // A zero tolerance is a WARNING that validateNormPack makes about one set on its own, and
+        // it is still true of the assembly — which is exactly the shape that used to double.
+        writeFile(dir, "core.norms.json",
+                  R"({"id":"core_test","norms":[{"measure":"m_a","context":"full_swing",)"
+                  R"("mu":10,"sigmaLo":0,"sigmaHi":0,"unit":"°"}]})");
+
+        auto core = makeFileNormProvider(dir.filePath(QStringLiteral("core.norms.json")),
+                                         PackOrigin::Core);
+        check(countCode(core->report(), "zeroSigma") == 1, "the layer reports its zero tolerance");
+
+        const auto prov = makeMergedNormProvider(std::move(core), {});
+        check(countCode(prov->report(), "zeroSigma") == 1,
+              "…and the merged report says it ONCE, not once per validation pass");
+
+        // The general form, so a future finding that doubles fails here rather than being noticed
+        // as a suspiciously long health list.
+        QSet<QString> seen;
+        bool          anyRepeat = false;
+        for (const ValidationIssue &i : prov->report().issues) {
+            const QString k = i.code + QLatin1Char('\n') + i.subject;
+            if (seen.contains(k)) anyRepeat = true;
+            seen.insert(k);
+        }
+        check(!anyRepeat, "no (code, subject) is reported twice anywhere in the merged report");
+    }
+
+    std::printf("=== norm sets: one provider per FILE ===\n");
+    {
+        // The contract file_norm_provider.cpp already claimed in a comment — "a directory holding
+        // several is represented by several providers, which is what the merger expects" — and
+        // which nothing built: makeNormProvider() constructed exactly one provider over the whole
+        // directory, so the second set was opened, parsed, had its issues reported, and had every
+        // corridor in it dropped. The report said the set was there; the assembly did not contain
+        // it, and nothing said so.
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the multi-set case is created");
+        QDir dir(tmp.path());
+
+        writeFile(dir, "user.norms.json",
+                  R"({"id":"user_norms","norms":[{"measure":"m_user","context":"full_swing",)"
+                  R"("mu":10,"sigmaLo":2,"sigmaHi":2,"unit":"°"}]})");
+        // Sorts AHEAD of user.norms.json, so the order assertion below distinguishes the
+        // user-first rule from plain alphabetical.
+        writeFile(dir, "acme.norms.json",
+                  R"({"id":"acme_norms","norms":[{"measure":"m_acme","context":"full_swing",)"
+                  R"("mu":20,"sigmaLo":3,"sigmaHi":3,"unit":"°"}]})");
+        // The shared context tree. It belongs to the DIRECTORY, not to any one set.
+        writeFile(dir, "contexts.json",
+                  R"({"contexts":[{"id":"any","label":"Any"},)"
+                  R"({"id":"full_swing","label":"Full swing","parent":"any"},)"
+                  R"({"id":"hickory","label":"Hickory","parent":"full_swing"}]})");
+
+        QStringList names;
+        for (const QString &p : normSetFilesIn(dir.path())) names << QFileInfo(p).fileName();
+        check(names == QStringList({ QStringLiteral("user.norms.json"),
+                                     QStringLiteral("acme.norms.json") }),
+              "the norm-set files are enumerated user-first, then alphabetically");
+
+        auto provs = makeFileNormProviders(dir.path());
+        check(provs.size() == 2, "two norm sets in one directory yield TWO providers");
+        if (provs.size() == 2) {
+            check(provs[0]->origin() == PackOrigin::LocalUser
+                      && provs[1]->origin() == PackOrigin::Community,
+                  "user.norms.json is the user's own layer; anything else is Community");
+            // The shared tree is carried by ONE provider. Loading it in both would change nothing
+            // about the assembled tree (the merger unions by id) while reporting its faults twice —
+            // the very duplication the section above exists to prevent.
+            check(provs[0]->contexts().contains(QStringLiteral("hickory")),
+                  "the directory's context tree is carried by the first provider");
+            check(provs[1]->contexts().nodes().empty(),
+                  "…and by that one only, so its faults are never reported twice");
+
+            const auto merged = makeMergedNormProvider(fake(NormPack{}, PackOrigin::Core),
+                                                       std::move(provs));
+            check(merged->resolve(QStringLiteral("m_user"), QStringLiteral("full_swing")).found(),
+                  "the user's corridors reach the assembled set");
+            check(merged->resolve(QStringLiteral("m_acme"), QStringLiteral("full_swing")).found(),
+                  "and so do the SECOND set's — which used to be parsed and then thrown away");
+            check(merged->contexts().contains(QStringLiteral("hickory")),
+                  "the user's own context reaches the assembled tree");
+        }
+    }
+
+    std::printf("=== norm sets: a broken set costs that set only ===\n");
+    {
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the broken-neighbour case is created");
+        QDir dir(tmp.path());
+
+        writeFile(dir, "user.norms.json",
+                  R"({"id":"user_norms","norms":[{"measure":"m_user","context":"full_swing",)"
+                  R"("mu":10,"sigmaLo":2,"sigmaHi":2,"unit":"°"}]})");
+        writeFile(dir, "zbroken.norms.json", "{ not json at all");
+
+        auto provs = makeFileNormProviders(dir.path());
+        check(provs.size() == 2, "the unreadable set still gets a provider — it has a report to give");
+        if (provs.size() == 2) {
+            check(provs[0]->norms().norms.size() == 1 && provs[0]->report().issues.empty(),
+                  "the good set loads clean, unaffected by its broken neighbour");
+            check(provs[1]->norms().norms.empty(), "the broken set contributes no corridors");
+
+            bool blamedItsOwnFile = false;
+            for (const ValidationIssue &i : provs[1]->report().issues)
+                if (i.code == QLatin1String("parse")
+                    && i.subject == dir.filePath(QStringLiteral("zbroken.norms.json")))
+                    blamedItsOwnFile = true;
+            check(blamedItsOwnFile,
+                  "and its parse failure names the FILE it came from, so the health list can say "
+                  "which set to fix");
+
+            const auto merged = makeMergedNormProvider(fake(NormPack{}, PackOrigin::Core),
+                                                       std::move(provs));
+            check(merged->resolve(QStringLiteral("m_user"), QStringLiteral("full_swing")).found(),
+                  "and the good set still grades, which is the whole point of one provider per file");
+            check(hasCode(merged->report(), "parse"),
+                  "…with the broken file's fault still visible in the assembled report");
+        }
     }
 
     std::printf("=== norm provider: the SHIPPED norm set ===\n");

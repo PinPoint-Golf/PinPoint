@@ -24,6 +24,10 @@ namespace pinpoint::analysis {
 
 namespace {
 
+// The same (enum → token, label) idiom as enum_table_p.h, with a third column. It stays hand-rolled
+// because `Row<E>` carries exactly two strings: splitting `unitHint` into a second table beside a
+// Row table would put one row's spelling in two places, which is the one thing these tables exist to
+// prevent. If a label here ever goes non-ASCII, decode it with fromUtf8 — see enum_table_p.h for why.
 struct QuantityInfo {
     Quantity    q;
     const char *name;

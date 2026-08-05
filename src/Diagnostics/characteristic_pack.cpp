@@ -31,62 +31,7 @@
 
 namespace pinpoint::analysis {
 
-// ── ValidationReport ────────────────────────────────────────────────────────
-
-bool ValidationReport::ok() const { return errorCount() == 0; }
-
-int ValidationReport::errorCount() const
-{
-    return int(std::count_if(issues.begin(), issues.end(),
-                             [](const ValidationIssue &i) { return i.severity == IssueSeverity::Error; }));
-}
-
-int ValidationReport::warningCount() const
-{
-    return int(issues.size()) - errorCount();
-}
-
-std::vector<ValidationIssue> ValidationReport::withCode(const QString &code) const
-{
-    std::vector<ValidationIssue> out;
-    std::copy_if(issues.begin(), issues.end(), std::back_inserter(out),
-                 [&](const ValidationIssue &i) { return i.code == code; });
-    return out;
-}
-
-std::vector<ValidationIssue> ValidationReport::withSeverity(IssueSeverity s) const
-{
-    std::vector<ValidationIssue> out;
-    std::copy_if(issues.begin(), issues.end(), std::back_inserter(out),
-                 [&](const ValidationIssue &i) { return i.severity == s; });
-    return out;
-}
-
-QStringList ValidationReport::messages(IssueSeverity s) const
-{
-    QStringList out;
-    for (const ValidationIssue &i : issues)
-        if (i.severity == s) out << i.message;
-    return out;
-}
-
 namespace {
-
-void add(ValidationReport &r, IssueSeverity sev, const QString &code, const QString &subject,
-         const QString &message)
-{
-    r.issues.push_back(ValidationIssue{ sev, code, subject, message });
-}
-
-void err(ValidationReport &r, const QString &code, const QString &subject, const QString &message)
-{
-    add(r, IssueSeverity::Error, code, subject, message);
-}
-
-void warn(ValidationReport &r, const QString &code, const QString &subject, const QString &message)
-{
-    add(r, IssueSeverity::Warning, code, subject, message);
-}
 
 // ── The book gate ───────────────────────────────────────────────────────────
 //
@@ -147,13 +92,6 @@ QJsonValue writeLocalised(const LocalisedText &t)
     for (auto it = t.byLocale.constBegin(); it != t.byLocale.constEnd(); ++it)
         o.insert(it.key(), it.value());
     return o;
-}
-
-QStringList readStringList(const QJsonValue &v)
-{
-    QStringList out;
-    for (const QJsonValue &e : v.toArray()) out << e.toString();
-    return out;
 }
 
 QJsonArray writeStringList(const QStringList &l)
@@ -977,16 +915,24 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
     out.pack.schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(kPackSchemaVersion);
     out.pack.sourceLabel   = sourceLabel;
 
+    // Its own code, not `duplicateId`. A pack with no id is not a collision — it is content that
+    // cannot be namespaced, layered, or named in any issue it goes on to raise, and an author
+    // hunting the word "duplicate" for a file that has exactly one of everything is being sent the
+    // wrong way by the only word the message gave them.
     if (out.pack.id.isEmpty()) {
-        err(r, QStringLiteral("duplicateId"), QString(), QStringLiteral("Pack has no id."));
+        err(r, QStringLiteral("noPackId"), QString(), QStringLiteral("Pack has no id."));
         return out;
     }
 
     // A newer schema is refused outright rather than partially read. Dropping fields this build
     // does not understand would let a newer pack round-trip through an older one and lose content
     // silently — the worst possible failure for authored content.
+    //
+    // `schemaTooNew`, which is what the norm set has always called it, rather than `schemaVersion`:
+    // the version field being ABSENT or malformed is a different fault with a different fix, and
+    // one code for both left a reader unable to tell "your build is old" from "your file is wrong".
     if (out.pack.schemaVersion > kPackSchemaVersion) {
-        err(r, QStringLiteral("schemaVersion"), out.pack.id,
+        err(r, QStringLiteral("schemaTooNew"), out.pack.id,
             QStringLiteral("Pack '%1' declares schema version %2; this build understands %3. "
                            "Refusing to load rather than silently dropping content.")
                 .arg(out.pack.id).arg(out.pack.schemaVersion).arg(kPackSchemaVersion));
@@ -999,8 +945,13 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         Measure           m;
         m.id = o.value(QStringLiteral("id")).toString();
 
+        // `unknownKind`, not `badFacets`: the facets are the series, and a measure whose KIND was
+        // misread has not failed the validity table — it has been filed as the other sort of thing
+        // entirely, which is what decides whether the series is even consulted.
         if (!measureKindFromName(o.value(QStringLiteral("kind")).toString(QStringLiteral("composed")), m.kind))
-            err(r, QStringLiteral("badFacets"), m.id, QStringLiteral("Measure '%1' has an unknown kind.").arg(m.id));
+            err(r, QStringLiteral("unknownKind"), m.id,
+                QStringLiteral("Measure '%1' declares kind '%2'; the kinds are composed and provided.")
+                    .arg(m.id, o.value(QStringLiteral("kind")).toString()));
 
         QString why;
         if (m.kind == MeasureKind::Composed
@@ -1031,13 +982,31 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
                         .arg(m.id, o.value(QStringLiteral("unwatchedTail")).toString()));
         }
 
-        if (o.contains(QStringLiteral("viewNeeded")))
-            viewNeededFromName(o.value(QStringLiteral("viewNeeded")).toString(), m.viewNeeded);
-        else if (m.kind == MeasureKind::Composed)
+        // An absent `viewNeeded` on a Composed measure is DERIVED from the series rather than
+        // defaulted — the facets already say which camera can see the thing — and a misspelt one is
+        // an error like every other closed vocabulary here. The two are not the same case: derived
+        // is an answer, and a fall back to Any would be a claim that any camera will do, which is
+        // how a measure that needs the down-the-line view ends up asked for on a face-on capture.
+        if (o.contains(QStringLiteral("viewNeeded"))) {
+            if (!viewNeededFromName(o.value(QStringLiteral("viewNeeded")).toString(), m.viewNeeded))
+                err(r, QStringLiteral("unknownViewNeeded"), m.id,
+                    QStringLiteral("Measure '%1' declares viewNeeded '%2'; the views are any, faceOn "
+                                   "and downTheLine.")
+                        .arg(m.id, o.value(QStringLiteral("viewNeeded")).toString()));
+        } else if (m.kind == MeasureKind::Composed) {
             m.viewNeeded = deriveViewNeeded(m.series);
+        }
 
-        if (o.contains(QStringLiteral("status")))
-            measureStatusFromName(o.value(QStringLiteral("status")).toString(), m.status);
+        // Absent => Live, and a misspelt token must not land there: `status` is what the roadmap,
+        // the capture-gap classification and `normNotCapturable` all read, so a measure that meant
+        // "notCapturable" and typed "notCaptureable" would carry a norm nothing can ever grade and
+        // report itself as working.
+        if (o.contains(QStringLiteral("status"))
+            && !measureStatusFromName(o.value(QStringLiteral("status")).toString(), m.status))
+            err(r, QStringLiteral("unknownStatus"), m.id,
+                QStringLiteral("Measure '%1' declares status '%2'; the statuses are live, planned, "
+                               "noProducer, notCapturable and externalDevice.")
+                    .arg(m.id, o.value(QStringLiteral("status")).toString()));
 
         // Absent => Target, which is what every measure authored before shapes existed means. An
         // unknown token is an ERROR rather than a silent fall back to Target: a pack that meant
@@ -1085,8 +1054,14 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         s.id       = o.value(QStringLiteral("id")).toString();
         s.measures = readStringList(o.value(QStringLiteral("measures")));
 
+        // `unknownSignalTest`, not `signalArity`: arity is a count, and a misread test has not
+        // brought the wrong number of measures — it has silently become an outsideCorridor test,
+        // which then inherits a corridor the author never meant it to grade against.
         if (!signalTestFromName(o.value(QStringLiteral("test")).toString(QStringLiteral("outsideCorridor")), s.test))
-            err(r, QStringLiteral("signalArity"), s.id, QStringLiteral("Signal '%1' has an unknown test.").arg(s.id));
+            err(r, QStringLiteral("unknownSignalTest"), s.id,
+                QStringLiteral("Signal '%1' declares test '%2'; the tests are outsideCorridor, "
+                               "threshold, order and ratio.")
+                    .arg(s.id, o.value(QStringLiteral("test")).toString()));
 
         if (o.contains(QStringLiteral("direction"))) {
             Direction d{};
@@ -1115,18 +1090,55 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         c.injuryNote  = readLocalised(o.value(QStringLiteral("injuryNote")));
         c.supersededBy = o.value(QStringLiteral("supersededBy")).toString();
 
-        conditionGroupFromName(o.value(QStringLiteral("group")).toString(), c.group);
-        observabilityFromName(o.value(QStringLiteral("observability")).toString(), c.observability);
-        confirmedByFromName(o.value(QStringLiteral("confirmedBy")).toString(), c.confirmedBy);
-        conditionStateFromName(o.value(QStringLiteral("state")).toString(), c.state);
+        // ONE REGIME for every closed vocabulary a condition carries: absent means the documented
+        // default, a MISSPELT token is an error.
+        //
+        // Group, observability, confirmedBy and state swallowed an unknown token silently until
+        // now, on the argument that kind and prominence were the two worth refusing because the
+        // kind rules go on to accuse a misfiled row of the wrong defect. That was right about kind
+        // and wrong about the split. `postrue` lands in Setup, where the group decides which section of
+        // the browser the condition appears in and which coaching context it is read against;
+        // `screend` lands in Measured, where `inconsistentReach` and `screenedHasCause` then reason
+        // about a condition that is not reached the way they think; `latnet` lands in Observable,
+        // which is the input to `observableNoSignal` and `faultNotObservable` both. Every one of
+        // them is a token whose misreading is INVISIBLE — the row loads, renders, and validates
+        // clean against the wrong answer. There is no version of that which is worth a silent
+        // default, and there never was: the four were unguarded because nobody had written the
+        // guard, not because anybody had argued they should be.
+        //
+        // Every message names the FIELD, because `setup` is a legal token of two different enums
+        // here and `kind` is the third meaning of that JSON key in this file (Measure::kind,
+        // Reducer::kind).
+        if (o.contains(QStringLiteral("group"))
+            && !conditionGroupFromName(o.value(QStringLiteral("group")).toString(), c.group))
+            err(r, QStringLiteral("unknownGroup"), c.id,
+                QStringLiteral("Condition '%1' declares group '%2'; the groups are setup, posture, "
+                               "lateral, armsAndClub, release, sequence, impact, finish and "
+                               "ballFlight.")
+                    .arg(c.id, o.value(QStringLiteral("group")).toString()));
 
-        // These two follow `shape` below rather than the four lines above them: absent means the
-        // documented default, a MISSPELT token is an error. The four above swallow an unknown token
-        // silently, which is how a condition typed "postrue" lands in Setup with nobody told — and a
-        // misread kind is worse than a misread group, because the kind rules would then accuse the
-        // row of the wrong defect entirely. Both messages name the FIELD, because `setup` is a legal
-        // token of two different enums here and `kind` is the third meaning of that JSON key in this
-        // file (Measure::kind, Reducer::kind).
+        if (o.contains(QStringLiteral("observability"))
+            && !observabilityFromName(o.value(QStringLiteral("observability")).toString(),
+                                      c.observability))
+            err(r, QStringLiteral("unknownObservability"), c.id,
+                QStringLiteral("Condition '%1' declares observability '%2'; it is observable, latent "
+                               "or both.")
+                    .arg(c.id, o.value(QStringLiteral("observability")).toString()));
+
+        if (o.contains(QStringLiteral("confirmedBy"))
+            && !confirmedByFromName(o.value(QStringLiteral("confirmedBy")).toString(), c.confirmedBy))
+            err(r, QStringLiteral("unknownConfirmedBy"), c.id,
+                QStringLiteral("Condition '%1' declares confirmedBy '%2'; it is measured, screened "
+                               "or asserted.")
+                    .arg(c.id, o.value(QStringLiteral("confirmedBy")).toString()));
+
+        if (o.contains(QStringLiteral("state"))
+            && !conditionStateFromName(o.value(QStringLiteral("state")).toString(), c.state))
+            err(r, QStringLiteral("unknownState"), c.id,
+                QStringLiteral("Condition '%1' declares state '%2'; the states are draft, candidate, "
+                               "active, needsRevalidation, superseded and retired.")
+                    .arg(c.id, o.value(QStringLiteral("state")).toString()));
+
         if (o.contains(QStringLiteral("kind"))
             && !conditionKindFromName(o.value(QStringLiteral("kind")).toString(), c.kind))
             err(r, QStringLiteral("unknownConditionKind"), c.id,

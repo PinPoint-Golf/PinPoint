@@ -18,14 +18,13 @@
 
 #include "screen_pack.h"
 
-#include <QDir>
+#include "pack_io.h"
+
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
-#include <QStandardPaths>
 
 #include <algorithm>
 
@@ -40,17 +39,7 @@ const Screen *ScreenSet::screen(const QString &sid) const
 
 namespace {
 
-void add(ValidationReport &r, IssueSeverity sev, const QString &code, const QString &subject,
-         const QString &message)
-{
-    r.issues.push_back(ValidationIssue{ sev, code, subject, message });
-}
-
-QString userScreenPath()
-{
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return dir.isEmpty() ? QString() : dir + QStringLiteral("/diagnostics/screens.json");
-}
+QString userScreenPath() { return diagnosticsFilePath(QStringLiteral("screens.json")); }
 
 } // namespace
 
@@ -109,11 +98,27 @@ ScreenLoadResult loadScreenSet(const QByteArray &json, const QString &sourceLabe
         return out;
     }
 
-    const QJsonObject root = doc.object();
-    out.set.id            = root.value(QStringLiteral("id")).toString();
-    out.set.version       = root.value(QStringLiteral("version")).toString();
-    out.set.schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(1);
-    out.set.sourceLabel   = sourceLabel;
+    const QJsonObject root   = doc.object();
+    const int         schema = root.value(QStringLiteral("schemaVersion")).toInt(kScreenSchemaVersion);
+
+    // Refused rather than partially read, exactly as loadPack() refuses a newer characteristic
+    // pack: dropping keys this build has never heard of would let a newer set round-trip through an
+    // older one and lose them silently. `parsed` stays false — the bytes were JSON, but nothing
+    // here is a screen set this build can claim to have read, and a caller merging layers must not
+    // take it for one.
+    if (schema > kScreenSchemaVersion) {
+        err(out.report, QStringLiteral("schemaTooNew"), sourceLabel,
+            QStringLiteral("Screen set '%1' declares schema %2; this build understands %3. "
+                           "Refusing to load rather than silently dropping content.")
+                .arg(sourceLabel.isEmpty() ? QStringLiteral("(unnamed)") : sourceLabel)
+                .arg(schema).arg(kScreenSchemaVersion));
+        return out;
+    }
+
+    out.pack.id            = root.value(QStringLiteral("id")).toString();
+    out.pack.version       = root.value(QStringLiteral("version")).toString();
+    out.pack.schemaVersion = schema;
+    out.pack.sourceLabel   = sourceLabel;
 
     for (const QJsonValue &v : root.value(QStringLiteral("screens")).toArray()) {
         const QJsonObject o = v.toObject();
@@ -128,11 +133,11 @@ ScreenLoadResult loadScreenSet(const QByteArray &json, const QString &sourceLabe
         s.note          = o.value(QStringLiteral("note")).toString();
         if (o.value(QStringLiteral("passAtLeast")).isDouble())
             s.passAtLeast = o.value(QStringLiteral("passAtLeast")).toDouble();
-        out.set.screens.push_back(std::move(s));
+        out.pack.screens.push_back(std::move(s));
     }
 
     out.parsed = true;
-    out.report = validateScreenSet(out.set);
+    out.report = validateScreenSet(out.pack);
     out.loaded = out.report.ok();
     return out;
 }
@@ -175,7 +180,7 @@ ScreenSet loadCoreScreenSet()
     QFile     f(corePath);
     if (f.open(QIODevice::ReadOnly)) {
         ScreenLoadResult res = loadScreenSet(f.readAll(), corePath);
-        out = std::move(res.set);
+        out = std::move(res.pack);
     }
     out.readOnly = true;
     return out;
@@ -223,35 +228,14 @@ ScreenSet loadUserScreenSet()
     QFile         f(path);
     if (path.isEmpty() || !f.open(QIODevice::ReadOnly)) return {};
     ScreenLoadResult res = loadScreenSet(f.readAll(), path);
-    return res.parsed ? std::move(res.set) : ScreenSet{};
+    return res.parsed ? std::move(res.pack) : ScreenSet{};
 }
 
 bool saveUserScreenSet(const ScreenSet &set, QString *whyNot)
 {
-    const QString path = userScreenSetPath();
-    if (path.isEmpty()) {
-        if (whyNot) *whyNot = QStringLiteral("No writable application data location.");
-        return false;
-    }
-    QDir().mkpath(QFileInfo(path).absolutePath());
-
-    // Write to a temporary and rename, exactly as saveUserPack() does — an interrupted save must not
-    // truncate a set the author has spent time on.
-    const QString tmpPath = path + QStringLiteral(".tmp");
-    QFile         tmp(tmpPath);
-    if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (whyNot) *whyNot = QStringLiteral("Could not write to %1.").arg(tmpPath);
-        return false;
-    }
-    tmp.write(saveScreenSet(set));
-    tmp.close();
-
-    QFile::remove(path);
-    if (!QFile::rename(tmpPath, path)) {
-        if (whyNot) *whyNot = QStringLiteral("Could not replace %1.").arg(path);
-        return false;
-    }
-    return true;
+    // Temporary-and-rename, so an interrupted save cannot truncate a set the author has spent time
+    // on — see atomicWrite(), which is where that argument now lives for all four writers.
+    return atomicWrite(userScreenSetPath(), saveScreenSet(set), whyNot);
 }
 
 const ScreenSet &sharedScreenSet()

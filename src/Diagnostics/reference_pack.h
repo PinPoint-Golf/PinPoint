@@ -95,6 +95,13 @@
 
 namespace pinpoint::analysis {
 
+// Refused above this, never partially read — the same contract as kPackSchemaVersion. It has stayed
+// at 1 through five additive fields (containerTitle, editor, volume, issue, pages) and the
+// generalReading flag, deliberately: each is optional and a reader that has never heard of it still
+// loads every record and still resolves every citation. See the notes on those fields — a schema
+// version that moves for a no-op teaches the next author that the number means nothing.
+inline constexpr int kReferenceSchemaVersion = 1;
+
 struct Reference {
     QString id;           // `ref.*`
     QString doi;          // the join key with Provenance::citation — an exact string match
@@ -152,7 +159,7 @@ struct Reference {
 struct ReferenceSet {
     QString                id;
     QString                version;
-    int                    schemaVersion = 1;
+    int                    schemaVersion = kReferenceSchemaVersion;
     QString                sourceLabel;
     bool                   readOnly = false;
     std::vector<Reference> references;
@@ -164,6 +171,13 @@ struct ReferenceSet {
 };
 
 // ── Validation ──────────────────────────────────────────────────────────────
+//
+// LOAD-TIME ERRORS (loadReferenceSet):
+//   parse               the bytes are not JSON, or not a JSON object. This was reported as
+//                       `schemaVersion` until the vocabularies were aligned — a code that named a
+//                       fault the file had not committed, on the one registry where a reader
+//                       chasing "which version is wrong?" would find nothing to fix
+//   schemaTooNew        the set is from a newer build — see kReferenceSchemaVersion
 //
 // ERRORS:
 //   duplicateId         two references share an id
@@ -203,12 +217,7 @@ ValidationReport validateReferenceSet(const ReferenceSet &set);
 QString citationLabel(const QString &citation, const ReferenceSet &set);
 QString citationLabel(const QString &citation);
 
-struct ReferenceLoadResult {
-    ReferenceSet     set;
-    ValidationReport report;
-    bool             loaded = false;
-    bool             parsed = false;
-};
+using ReferenceLoadResult = LoadResult<ReferenceSet>;
 
 ReferenceLoadResult loadReferenceSet(const QByteArray &json, const QString &sourceLabel);
 QByteArray          saveReferenceSet(const ReferenceSet &set);
@@ -234,5 +243,23 @@ QByteArray          exportReferenceSetCsl(const ReferenceSet &set);
 
 const ReferenceSet &sharedReferenceSet();
 void                resetSharedReferenceSet();
+
+// ── The two layers, separately ──────────────────────────────────────────────
+//
+// sharedReferenceSet() is the MERGE, which is what everybody who only reads wants. Anything that
+// WRITES needs the layers apart: it must write back the user's own records and never a flattened
+// copy of the shipped bibliography, and it has to be able to answer "does this ship?", which the
+// merge cannot.
+//
+// The same split screens and drills already have, arriving here for parity rather than for a
+// caller: the Diagnostic Model panel holds references READ-ONLY on purpose — they are regenerated
+// on every pack build, so an edit made there would be overwritten — and that argument is about the
+// panel, not about the registry. A user layer has always been read and merged here; it simply had
+// no way to be written, which made "imported, so read-only" a property of the code rather than a
+// decision anyone had taken.
+const ReferenceSet &coreReferenceSet();          // shipped only, cached like the merge
+ReferenceSet        loadUserReferenceSet();      // the user layer alone; empty when there is no file
+QString             userReferenceSetPath();
+bool                saveUserReferenceSet(const ReferenceSet &set, QString *whyNot = nullptr);
 
 } // namespace pinpoint::analysis

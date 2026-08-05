@@ -78,11 +78,22 @@ public:
         // Re-validate the assembled set. Cross-layer collisions can produce a duplicate that
         // neither set contained on its own, and a user row can reference a context only their own
         // tree defines — exactly the cases a per-set check cannot see.
-        const ValidationReport combined = validateNormPack(m_norms);
-        for (const ValidationIssue &i : combined.issues) m_report.issues.push_back(i);
+        //
+        // Through appendUnreported(), not a plain append, for the reason argued in full at the same
+        // line in merged_pack_provider.cpp and again at the function itself. The layer reports above
+        // already carry each set's standalone validateNormPack() findings, and a zero tolerance or
+        // an implausible corridor is still that after the merge — so appending this wholesale
+        // reported every shipped norm warning twice. What survives the dedupe is what no layer could
+        // have said: a duplicate that only exists once two sets are assembled, and a row pointing at
+        // a context that only the other layer's tree defines.
+        appendUnreported(m_report, validateNormPack(m_norms));
 
-        const ValidationReport ctx = validateContextTree(m_contexts);
-        for (const ValidationIssue &i : ctx.issues) m_report.issues.push_back(i);
+        // The context tree is UNIONED across layers, so the same argument holds twice over: every
+        // layer that carried a `contexts.json` reported its own tree's faults at load, and the
+        // assembled tree contains all of those nodes. The findings worth having here are the ones
+        // that only exist once the trees are one tree — a node whose parent lives in another layer,
+        // and the cycle two layers can close between them.
+        appendUnreported(m_report, validateContextTree(m_contexts));
     }
 
     const NormPack         &norms() const override { return m_norms; }
@@ -216,9 +227,12 @@ std::unique_ptr<INormProvider> makeMergedNormProvider(
 
 std::unique_ptr<INormProvider> makeNormProvider()
 {
-    std::vector<std::unique_ptr<INormProvider>> user;
-    user.push_back(makeFileNormProvider());
-    return makeMergedNormProvider(makeResourceNormProvider(), std::move(user));
+    // ONE PROVIDER PER NORM-SET FILE, the same correction as makeCharacteristicPackProvider(). This
+    // used to construct a single file provider over the whole directory, which could only hold one
+    // set — so a second installed set was opened, parsed, had its issues added to the health list,
+    // and then had every corridor in it dropped. See makeFileNormProviders() for the order, the
+    // origin rule, and where the shared context tree goes.
+    return makeMergedNormProvider(makeResourceNormProvider(), makeFileNormProviders());
 }
 
 namespace {

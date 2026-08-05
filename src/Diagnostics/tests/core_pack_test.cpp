@@ -14,6 +14,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -530,7 +531,7 @@ int main()
         // an ISBN and a DOI is a paper that also happens to have been collected into a volume, and
         // it is peer-reviewed on the strength of the DOI.
         QSet<QString> bookOnly;
-        for (const Reference &r : rres.set.references)
+        for (const Reference &r : rres.pack.references)
             if (r.doi.isEmpty() && r.pmid.isEmpty() && !r.isbn.isEmpty()) bookOnly.insert(r.isbn);
 
         const auto peer = [](ProvenanceTier t) {
@@ -647,16 +648,21 @@ int main()
         check(unexplained == 0, "every condition that can fire today has at least one cause");
     }
 
-    // ── FilePackProvider ignores the sibling registries in its shared directory ─
+    // ── The pack enumeration: sibling registries out, every real pack in ───────
     // AppData/diagnostics is not exclusive to characteristic packs: file_norm_provider.cpp writes
     // `user.norms.json` there (see its note on why norms and packs share one directory), and
     // screen_pack.cpp / drill_pack.cpp / reference_pack.cpp write `screens.json` / `drills.json` /
     // `references.json` into the very same place, and file_norm_provider.cpp also reads a fixed
-    // `contexts.json` from it. A `*.json` glob that does not know about them picks all five up: each has no top-level `id` of its own, so it injects a spurious "Pack has
-    // no id" issue into this provider's report — and worse, QDir::Name sorts `drills.json` ahead of
-    // `user.json`, so a sibling that DOES carry a non-empty `id` can silently become the "user pack"
-    // in place of the real one. Regression, not a smoke test: this directory is shared on purpose,
-    // so the sibling files are always going to be sitting right there.
+    // `contexts.json` from it. A `*.json` glob that does not know about them picks all five up: each
+    // has no top-level `id` of its own, so it injects a spurious "Pack has no id" issue into a
+    // provider's report — and worse, QDir::Name sorts `drills.json` ahead of `user.json`, so a
+    // sibling that DOES carry a non-empty `id` can silently become a pack in the assembled library.
+    // Regression, not a smoke test: this directory is shared on purpose, so the sibling files are
+    // always going to be sitting right there.
+    //
+    // The skip list moved into characteristicPackFilesIn() when the directory stopped being one
+    // provider, so that is what this now exercises — the enumeration AND the layering order it
+    // decides. Extended rather than replaced: every original assertion is still made below.
     {
         QTemporaryDir tmp;
         check(tmp.isValid(), "temp directory for the shared-directory regression is created");
@@ -678,13 +684,79 @@ int main()
         write("drills.json", R"({"id":"drills_should_not_load"})");
         write("references.json", "{}");
         write("contexts.json", "{}");
+        // A SECOND pack, sorting ahead of `user.json`. Two things ride on it. It is the file the
+        // directory-wide provider used to swallow — parsed, reported, then discarded, because only
+        // the first readable pack became "this provider's pack" while the comment beside that line
+        // claimed a directory of several was represented by several providers. Nothing built the
+        // several. And its name proves the ORDER rule below is the user-first one rather than plain
+        // alphabetical, which sorting after `user.json` could not distinguish.
+        write("community.json", R"({"id":"community_test"})");
 
-        const std::unique_ptr<ICharacteristicPackProvider> fp =
-            makeFilePackProvider(tmp.path(), PackOrigin::LocalUser);
-        check(fp->pack().id == QStringLiteral("user_test"),
-              "the real user pack loads, and no sibling registry is mistaken for it");
-        check(fp->report().issues.empty(),
-              "the sibling registries raise no issues in the pack provider's report");
+        const QStringList packs = characteristicPackFilesIn(tmp.path());
+        QStringList       names;
+        for (const QString &p : packs) names << QFileInfo(p).fileName();
+        check(names == QStringList({ QStringLiteral("user.json"),
+                                     QStringLiteral("community.json") }),
+              "the pack files are the two packs, user.json FIRST and the rest alphabetically");
+
+        const std::vector<std::unique_ptr<ICharacteristicPackProvider>> fps =
+            makeFilePackProviders(tmp.path());
+        check(fps.size() == 2, "a directory holding two packs yields TWO providers, one per file");
+        if (fps.size() == 2) {
+            check(fps[0]->pack().id == QStringLiteral("user_test"),
+                  "the real user pack loads, and no sibling registry is mistaken for it");
+            check(fps[1]->pack().id == QStringLiteral("community_test"),
+                  "…and the second pack is not silently discarded, as it was for as long as one "
+                  "provider covered the whole directory");
+            // Origin is decided by file NAME because that is the only evidence there is, and it
+            // decides whether a pack may redefine shipped content. A downloaded pack merged as
+            // LocalUser could overwrite a core characteristic with no warning anywhere.
+            check(fps[0]->origin() == PackOrigin::LocalUser,
+                  "user.json is the user's own layer, so it may override core");
+            check(fps[1]->origin() == PackOrigin::Community,
+                  "anything else arrived from somebody else, so core wins over it");
+            check(fps[0]->report().issues.empty() && fps[1]->report().issues.empty(),
+                  "the sibling registries raise no issues in either pack provider's report");
+        }
+    }
+
+    // ── A broken pack costs the library that pack and nothing else ─────────────
+    // The containment claim one-provider-per-file is FOR. While a directory was one provider, a
+    // malformed file's issues landed in the same report as the good pack's and there was no way to
+    // read off which file was at fault; worse, the good pack could be the one that got dropped,
+    // purely by sorting second. Both halves are asserted: the fault is attributed to its own file,
+    // and the neighbour still loads.
+    {
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the broken-neighbour case is created");
+        QDir dir(tmp.path());
+
+        auto write = [&](const char *name, const char *content) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            check(f.open(QIODevice::WriteOnly), name);
+            f.write(content);
+        };
+
+        write("user.json", R"({"id":"user_test"})");
+        write("zbroken.json", "{ this is not json");
+
+        const std::vector<std::unique_ptr<ICharacteristicPackProvider>> fps =
+            makeFilePackProviders(tmp.path());
+        check(fps.size() == 2, "the unreadable pack still gets a provider — it has a report to give");
+        if (fps.size() == 2) {
+            check(fps[0]->pack().id == QStringLiteral("user_test") && fps[0]->report().issues.empty(),
+                  "the good pack loads clean, unaffected by its broken neighbour");
+            check(fps[1]->pack().id.isEmpty(), "the broken pack contributes no content");
+
+            bool blamedItsOwnFile = false;
+            for (const ValidationIssue &i : fps[1]->report().issues)
+                if (i.code == QLatin1String("parse")
+                    && i.subject == dir.filePath(QStringLiteral("zbroken.json")))
+                    blamedItsOwnFile = true;
+            check(blamedItsOwnFile,
+                  "and its parse failure names the FILE it came from, so the health list can say "
+                  "which pack to fix");
+        }
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");

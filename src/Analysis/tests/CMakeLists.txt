@@ -44,6 +44,10 @@ pp_add_test(wrist_angle_sampling_test SOURCES wrist_angle_sampling_test.cpp)
 # includes swing_analysis.h non-relatively), so any test touching it needs all three on the path.
 set(NORM_INC ${SRC}/Diagnostics ${SRC}/Metrics ${ANALYSIS})
 set(NORM_SRC ${SRC}/Diagnostics/norm_pack.cpp ${SRC}/Diagnostics/context_tree.cpp
+             # Every registry loader reports through the shared issue vocabulary and returns a
+             # LoadResult<T>, and both are defined in pack_io.cpp — so it travels with the pack the
+             # way reference_pack.cpp does, on every link line that compiles one of them.
+             ${SRC}/Diagnostics/pack_io.cpp
              ${SRC}/Diagnostics/characteristic_pack.cpp ${SRC}/Diagnostics/characteristic.cpp
              # The pack loader resolves a citation against the bibliography to decide whether a
              # peer tier is resting on a BOOK, so every target that compiles characteristic_pack.cpp
@@ -527,7 +531,8 @@ pp_add_test(measure_facets_test
 
 # Pack schema, loader and validator. Every rejection path is exercised: a validator whose
 # negative cases are untested is a validator that passes everything.
-set(DIAG_PACK ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
+set(DIAG_PACK ${DIAG}/pack_io.cpp    # the shared issue vocabulary and LoadResult<T> — see NORM_SRC
+              ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
               # See NORM_SRC above: the loader's book-citation tier gate resolves through the
               # bibliography, so the two travel together on every link line.
               ${DIAG}/reference_pack.cpp
@@ -675,6 +680,7 @@ pp_add_test(dag_layout_test
 
 # ── Norms ───────────────────────────────────────────────────────────────────
 set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+              ${DIAG}/pack_io.cpp                  # same pairing as DIAG_PACK
               ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
               ${DIAG}/reference_pack.cpp            # same pairing as DIAG_PACK
               ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp)
@@ -684,6 +690,7 @@ set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
 # that makes the corridors migrated out of reference_bands.cpp reproduce exactly.
 pp_add_test(norm_test
     SOURCES ${DIAG}/tests/norm_test.cpp ${DIAG}/norm_pack.cpp ${DIAG}/characteristic_pack.cpp
+            ${DIAG}/pack_io.cpp          # spelled out with the rest; keep the pairing
             ${DIAG}/characteristic.cpp ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp
             ${DIAG}/reference_pack.cpp   # spelled out rather than DIAG_NORM; keep the pairing
             ${DIAG}/context_tree.cpp

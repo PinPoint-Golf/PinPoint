@@ -17,7 +17,9 @@
 //   ctest --test-dir build/analyzer-tests -R diagnostics_health --output-on-failure
 
 #include "../diagnostics_health.h"
+#include "../drill_pack.h"
 #include "../pack_provider.h"
+#include "../screen_pack.h"
 
 #include <QFile>
 
@@ -25,6 +27,14 @@
 #include <memory>
 
 using namespace pinpoint::analysis;
+
+// Empty registries for every fixture that is not exercising the screen/drill checks themselves —
+// which is most of them. Passing these explicitly, rather than reaching for sharedScreenSet() /
+// sharedDrillSet(), is the whole point of the seam: a fixture pack here never carries a screenRef or
+// a drill id, so an empty registry is the correct one, and it is one this test controls rather than
+// one it happens to inherit from whatever the shipped set contains this week.
+static const ScreenSet g_noScreens;
+static const DrillSet  g_noDrills;
 
 static int  g_fail = 0;
 static void check(bool c, const char *label)
@@ -233,7 +243,7 @@ int main()
         FakeNorms norms;
         norms.add("m_normed", "full_swing", 10.0, 2.0);
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
 
         check(hasSubject(issues, "signalNoNorm", QStringLiteral("sig_unnormed")),
               "a LIVE measure with no norm anywhere is reported");
@@ -285,7 +295,7 @@ int main()
         norms.add("m_floor",    "full_swing", 1.48, 0.05);
         norms.add("m_ceiling",  "full_swing", 0.0,  2.0);
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
 
         check(hasSubject(issues, "signalOnOpenTail", QStringLiteral("sig_floorHigh")),
               "a High signal on a FLOOR is reported");
@@ -360,7 +370,7 @@ int main()
         norms.add("m_wrongTail", "full_swing", 10.0, 2.0);
         // m_noCorridor deliberately gets none.
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
 
         check(hasSubject(issues, "ungradedTail", QStringLiteral("m_oneTail")),
               "a Target measure with a norm and ONE direction is reported");
@@ -396,7 +406,7 @@ int main()
         norms.add("m_normed",   "full_swing", 10.0, 2.0);
         norms.add("m_unnormed", "full_swing", 10.0, 2.0);
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         for (const ValidationIssue &i : issues)
             if (i.code != QLatin1String("ungradedTail")
                 && i.message.contains(QStringLiteral("tail"), Qt::CaseInsensitive))
@@ -423,7 +433,7 @@ int main()
         norms.add("m_normed",   "full_swing", 10.0, 2.0, /*n*/ 0, /*mine*/ true);
         norms.add("m_unnormed", "full_swing", 10.0, 2.0, /*n*/ 0, /*mine*/ false);
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         check(countCode(issues, "personalNormNoSample") == 1,
               "exactly one row — the user's own");
         check(hasSubject(issues, "personalNormNoSample", QStringLiteral("m_normed @ full_swing")),
@@ -453,7 +463,7 @@ int main()
             FakeNorms norms;
             norms.add("m_normed",   "full_swing", 10.0, 2.0);
             norms.add("m_unnormed", "full_swing", 10.0, 2.0);
-            check(countCode(diagnosticsHealth(pack, norms, cat), "cohortGap") == 0,
+            check(countCode(diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills), "cohortGap") == 0,
                   "an unqualified set says nothing about cohorts");
         }
 
@@ -466,7 +476,7 @@ int main()
             norms.addFor(cohortOf(std::nullopt, AgeBand::Adult55_64), "m_normed", "full_swing",
                          8.0, 2.0);
 
-            const auto issues = diagnosticsHealth(pack, norms, cat);
+            const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
             check(countCode(issues, "cohortGap") == 1,
                   "a sex-only row beside an age-only row, with no combination, is one nudge");
             check(hasSubject(issues, "cohortGap", QStringLiteral("m_normed @ full_swing")),
@@ -476,7 +486,7 @@ int main()
             // the combined row must silence it.
             norms.addFor(cohortOf(Sex::Female, AgeBand::Adult55_64), "m_normed", "full_swing",
                          7.0, 2.0);
-            check(countCode(diagnosticsHealth(pack, norms, cat), "cohortGap") == 0,
+            check(countCode(diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills), "cohortGap") == 0,
                   "…and authoring the combination silences it");
         }
 
@@ -491,12 +501,12 @@ int main()
                          8.0, 2.0);
             norms.addFor(cohortOf(std::nullopt, AgeBand::Adult55_64), "m_normed", "full_swing",
                          7.0, 2.0);
-            check(countCode(diagnosticsHealth(pack, norms, cat), "shadowedCohort") == 0,
+            check(countCode(diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills), "shadowedCohort") == 0,
                   "with one sub-band still unauthored the parent row is reachable, and silent");
 
             norms.addFor(cohortOf(std::nullopt, AgeBand::Adult65Plus), "m_normed", "full_swing",
                          6.0, 2.0);
-            check(countCode(diagnosticsHealth(pack, norms, cat), "shadowedCohort") == 1,
+            check(countCode(diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills), "shadowedCohort") == 1,
                   "…and once all three are authored the parent can never resolve, so it is reported");
         }
     }
@@ -513,7 +523,7 @@ int main()
         norms.add("m_normed",   "full_swing", 10.0, 2.0);
         norms.add("m_unnormed", "driver",     10.0, 2.0);
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         check(hasSubject(issues, "emptyContext", QStringLiteral("wedge")),
               "wedge carries nothing of its own, but full_swing above it does — a control with no "
               "effect, not a hole");
@@ -532,7 +542,7 @@ int main()
         FakeNorms norms;
         norms.add("m_normed", "driver", 10.0, 2.0);
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         check(hasSubject(issues, "ungradedContext", QStringLiteral("wedge")),
               "with nothing anywhere up its chain, a shot in wedge is graded by NOTHING");
         check(!hasSubject(issues, "emptyContext", QStringLiteral("wedge")),
@@ -551,13 +561,13 @@ int main()
 
         // Before any base exists, the check must be SILENT rather than reporting every override:
         // "yours differs from theirs" is what an override IS.
-        check(countCode(diagnosticsHealth(pack, norms, cat), "overrideCoreChanged") == 0,
+        check(countCode(diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills), "overrideCoreChanged") == 0,
               "an override with no recorded base is silent — we do not know, so we do not say");
 
         norms.rebase("m_normed", "full_swing", /*base*/ 10.0, /*shipped now*/ 12.0);
         norms.rebase("m_unnormed", "full_swing", /*base*/ 10.0, /*shipped now*/ 10.0);
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         check(hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_normed @ full_swing")),
               "the shipped row moved away from the base → reported");
         check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed @ full_swing")),
@@ -578,7 +588,7 @@ int main()
         norms.rebaseCapOnly("m_normed",   "full_swing", std::nullopt, 15.0);   // gained a cap
         norms.rebaseCapOnly("m_unnormed", "full_swing", 15.0,         15.0);   // same cap as before
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         check(hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_normed @ full_swing")),
               "a shipped row that gained a cap is reported, corridor unchanged or not");
         check(!hasSubject(issues, "overrideCoreChanged", QStringLiteral("m_unnormed @ full_swing")),
@@ -659,7 +669,7 @@ int main()
         norms.add("m_unnormed", "full_swing", 10.0, 2.0);
         norms.add("m_ghost",    "full_swing", 10.0, 2.0);                  // no such measure
 
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         check(countCode(issues, "normUnitMismatch") >= 1,
               "a norm in % against a measure in ° is reported — the check existed and nothing ran it");
         check(countCode(issues, "unknownNormMeasure") >= 1,
@@ -697,7 +707,7 @@ int main()
         over("m_unknown",  "notAMetric",    "cm",    ReducerKind::At);
 
         FakeNorms norms;
-        const auto issues = diagnosticsHealth(pack, norms, cat);
+        const auto issues = diagnosticsHealth(pack, norms, cat, g_noScreens, g_noDrills);
         check(countCode(issues, "measureUnitMismatch") == 1, "exactly the one, and no others");
         check(hasSubject(issues, "measureUnitMismatch", QStringLiteral("m_disagrees")),
               "a measure graded in cm over a metric produced in ° is reported");
@@ -707,6 +717,88 @@ int main()
               "a Rate reducer divides by time by design — mph/s over mph is not a mistake");
         check(!hasSubject(issues, "measureUnitMismatch", QStringLiteral("m_unknown")),
               "a metricKey the catalogue does not have is a different check's row, not this one's");
+    }
+
+    // ── A screen or drill reference pointing at nothing ──────────────────────
+    //
+    // The reason this block exists at all: before diagnosticsHealth() took its registries as
+    // arguments, these checks read sharedScreenSet() / sharedDrillSet() straight off the process
+    // singleton, so a test could only ever see whatever the shipped registry happened to contain on
+    // the day it ran — no fixture, no negative case, and screenNoProtocol / screenNoPass /
+    // drillNoInstruction / drillNoTarget could not be constructed at all. Passing the sets in is what
+    // makes both directions assertable, which is exactly the argument diagnostics_health.h makes for
+    // referenceHealth()'s ReferenceSet parameter, one registry further.
+    std::printf("=== a screen or drill reference pointing at nothing ===\n");
+    {
+        CharacteristicPack pack = fakePack();
+
+        auto condition = [&](const char *id, const char *screenRef, const QStringList &drills) {
+            Condition c;
+            c.id            = QLatin1String(id);
+            c.label         = QLatin1String(id);
+            c.observability = Observability::Observable;
+            c.screenRef     = QLatin1String(screenRef);
+            c.drills        = drills;
+            pack.conditions.push_back(c);
+        };
+        condition("c_knownRefs", "screen.hipIR",
+                  QStringList{ QStringLiteral("drill.hipFlexorStretch") });
+        condition("c_unknownRefs", "screen.ghost", QStringList{ QStringLiteral("drill.ghost") });
+
+        ScreenSet screens;
+        Screen ok;
+        ok.id            = QStringLiteral("screen.hipIR");
+        ok.label         = QStringLiteral("Hip internal rotation");
+        ok.protocol      = QStringLiteral("Seated, knee at 90°, rotate the shin inward.");
+        ok.passCriterion = QStringLiteral("At least 30° without the pelvis rotating.");
+        screens.screens.push_back(ok);
+        Screen incomplete;                              // authored, but not finished — a different
+        incomplete.id = QStringLiteral("screen.incomplete");   // check's row, not unknownScreenRef's
+        screens.screens.push_back(incomplete);
+
+        DrillSet drills;
+        Drill okDrill;
+        okDrill.id          = QStringLiteral("drill.hipFlexorStretch");
+        okDrill.label       = QStringLiteral("Hip flexor stretch");
+        okDrill.instruction = QStringLiteral("Kneel in a half-lunge and shift weight forward.");
+        okDrill.targets     = QStringLiteral("to feel the trail hip accept load");
+        drills.drills.push_back(okDrill);
+        Drill incompleteDrill;
+        incompleteDrill.id = QStringLiteral("drill.incomplete");
+        drills.drills.push_back(incompleteDrill);
+
+        FakeNorms norms;
+        norms.add("m_normed",   "full_swing", 10.0, 2.0);
+        norms.add("m_unnormed", "full_swing", 10.0, 2.0);
+
+        const auto issues = diagnosticsHealth(pack, norms, cat, screens, drills);
+
+        check(hasSubject(issues, "unknownScreenRef", QStringLiteral("c_unknownRefs")),
+              "a screenRef the registry does not have is reported");
+        check(!hasSubject(issues, "unknownScreenRef", QStringLiteral("c_knownRefs")),
+              "…and a screenRef the registry DOES have is not");
+        check(hasSubject(issues, "unknownDrillRef", QStringLiteral("c_unknownRefs")),
+              "a drill id the registry does not have is reported");
+        check(!hasSubject(issues, "unknownDrillRef", QStringLiteral("c_knownRefs")),
+              "…and a drill id the registry DOES have is not");
+
+        // The other direction is deliberately silent: a screen or drill nothing points at yet is a
+        // library being written, not a library that is wrong. screen.incomplete and drill.incomplete
+        // are cited by nothing above, and neither unknownScreenRef nor unknownDrillRef names them —
+        // they can only ever be a condition's subject, never a registry row's.
+        check(!hasSubject(issues, "unknownScreenRef", QStringLiteral("screen.incomplete")),
+              "an unused screen is not reported as an orphan reference");
+
+        // validateScreenSet() / validateDrillSet() still run over the sets passed in, which is how a
+        // screen or drill can be AUTHORED — so the join succeeds — and still incomplete.
+        check(countCode(issues, "screenNoProtocol") == 1,
+              "a screen with no protocol authored is reported — nobody could run it");
+        check(countCode(issues, "screenNoPass") == 1,
+              "…and separately, one with no pass criterion — its answer is unrecordable");
+        check(countCode(issues, "drillNoInstruction") == 1,
+              "a drill that does not say what the golfer does is reported");
+        check(countCode(issues, "drillNoTarget") == 1,
+              "…and separately, one that does not say what it is trying to change");
     }
 
     // ── The shipped library ─────────────────────────────────────────────────
@@ -724,7 +816,10 @@ int main()
         check(!pack.measures.empty(), "the shipped pack loaded");
         check(!norms->norms().norms.empty(), "the shipped norm set loaded");
 
-        const auto issues = diagnosticsHealth(pack, *norms, cat);
+        // The real registries here, not the empty fixtures above: this block is checking the
+        // shipped library actually holds together, and a screenRef or drill id resolved against an
+        // empty set would report every one of them as unknown regardless of whether it is.
+        const auto issues = diagnosticsHealth(pack, *norms, cat, sharedScreenSet(), sharedDrillSet());
         std::printf("      %zu health rows over the shipped library\n", issues.size());
         for (const ValidationIssue &i : issues)
             std::printf("        [%s] %s\n", qPrintable(i.code), qPrintable(i.subject));

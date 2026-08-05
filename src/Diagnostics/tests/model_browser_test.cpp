@@ -40,6 +40,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -53,6 +54,22 @@ static void check(bool c, const char *label)
 {
     std::printf("  [%s] %s\n", c ? "PASS" : "FAIL", label);
     if (!c) ++g_fail;
+}
+
+static int countIssueCode(const ValidationReport &r, const char *code)
+{
+    int n = 0;
+    for (const ValidationIssue &i : r.issues)
+        if (i.code == QLatin1String(code)) ++n;
+    return n;
+}
+
+static int countIssueSubject(const ValidationReport &r, const char *code, const char *subject)
+{
+    int n = 0;
+    for (const ValidationIssue &i : r.issues)
+        if (i.code == QLatin1String(code) && i.subject == QLatin1String(subject)) ++n;
+    return n;
 }
 
 static QVariantMap rowFor(const QVariantList &rows, const QString &id)
@@ -3322,6 +3339,149 @@ int main(int argc, char **argv)
         check(columnIndex(m.columns(QStringLiteral("measures")), QStringLiteral("swingValue")) < 0,
               "clearing the swing removes the column again");
         check(!m.currentSwingHasValues(), "and the readings go with it, immediately");
+    }
+
+    // ── The provider layer beneath the façade ──────────────────────────────────
+    //
+    // Not about ModelBrowser, and it is here for a link-line reason worth stating: this is the
+    // suite that compiles the resource, file, merged AND memory pack providers together, so it is
+    // the only place the assembly the panel actually reads can be built from scratch. The panel
+    // itself only ever assembles core + ONE memory layer, which is precisely the shape that hides
+    // both faults below.
+    std::printf("=== pack layers: one finding, reported once ===\n");
+    {
+        // The merged provider copies each layer's own load-time report and THEN re-validates the
+        // assembled library. The two overlap: a standalone warning on shipped content — an uncited
+        // tier, a single-tail axis — survives the merge unchanged, so it used to be reported by the
+        // core layer and again by the re-validation. Every shipped warning appeared twice, so the
+        // health list's counts were roughly double the number of things actually wrong.
+        //
+        // What must NOT be lost is the other half: the re-validation is the authoritative check for
+        // cross-pack referential integrity, and it is the ONLY thing that can make it, because
+        // file_pack_provider deliberately drops referential codes from a layer's own report (an
+        // overlay's edges point at core content it does not contain). Both halves are asserted.
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the layered-report case is created");
+        QDir dir(tmp.path());
+
+        auto writePack = [&](const char *name, const char *content) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            check(f.open(QIODevice::WriteOnly), name);
+            f.write(content);
+        };
+
+        // The core pack lives in a SUBDIRECTORY, because the directory being enumerated is the user
+        // data directory and core is not installed there — putting it beside the user packs would
+        // merge it a second time as a community layer, which is not a library anybody has.
+        dir.mkdir(QStringLiteral("shipped"));
+        // A condition with no provenance sits at the Proposed tier, which validatePack warns about
+        // — a standalone finding, still true of the assembly, i.e. exactly the shape that doubled.
+        writePack("shipped/core.json",
+                  R"({"id":"core_test","conditions":[{"id":"c_a","label":"A"}]})");
+        // The user's own layer, adding a cause that names a condition NOBODY carries. Its own
+        // report cannot say so (referential codes are dropped there, on purpose); the assembled
+        // re-validation is where this has to surface.
+        writePack("user.json",
+                  R"({"id":"user_test","edges":[{"from":"c_a","to":"c_ghost","type":"causes"}]})");
+        // And a community pack, whose ids are namespaced on the way in.
+        writePack("acme.json",
+                  R"({"id":"acme","conditions":[{"id":"c_b","label":"B"}]})");
+
+        auto core = makeFilePackProvider(dir.filePath(QStringLiteral("shipped/core.json")),
+                                         PackOrigin::Core);
+        check(countIssueCode(core->report(), "proposedTier") == 1,
+              "the core layer reports its uncited condition");
+
+        const auto merged = makeMergedPackProvider(std::move(core),
+                                                   makeFilePackProviders(dir.path()));
+
+        // (a) Load-time findings stay, and stay attributed to their layer — but ONCE each.
+        check(countIssueSubject(merged->report(), "proposedTier", "c_a") == 1,
+              "a core-layer warning appears exactly ONCE in the merged report");
+        check(countIssueSubject(merged->report(), "proposedTier", "c_b") == 1,
+              "…and a community layer's warning likewise, under the id its own author would search "
+              "for rather than twice under two spellings");
+        check(countIssueSubject(merged->report(), "proposedTier", "acme:c_b") == 0,
+              "the namespaced spelling of that same finding is suppressed, not reported beside it");
+
+        // (b) The assembled re-validation is still authoritative for what only it can see.
+        check(countIssueSubject(merged->report(), "unknownCondition", "c_ghost") == 1,
+              "a cross-pack referential error is reported by the assembled re-validation — the "
+              "only pass that can make that check");
+
+        // The general form, so a future finding that doubles fails here rather than being noticed
+        // as a suspiciously long health list.
+        QSet<QString> seen;
+        QStringList   repeats;
+        for (const ValidationIssue &i : merged->report().issues) {
+            const QString k = i.code + QLatin1Char('\n') + i.subject;
+            if (seen.contains(k)) repeats << k;
+            seen.insert(k);
+        }
+        for (const QString &r : repeats)
+            std::printf("        reported twice: %s\n", qPrintable(QString(r).replace(
+                                                            QLatin1Char('\n'), QLatin1Char(' '))));
+        check(repeats.isEmpty(), "no (code, subject) is reported twice anywhere in the merged report");
+    }
+
+    std::printf("=== pack layers: every installed pack reaches the library ===\n");
+    {
+        // The contract file_pack_provider.cpp already claimed in a comment — "a directory holding
+        // several is represented by several providers, which is what the merger expects" — and
+        // which nothing built: makeCharacteristicPackProvider() constructed exactly ONE file
+        // provider, so the second pack was opened, parsed, had its issues added to the health list,
+        // and then had every characteristic in it dropped. The report said the pack was there; the
+        // library did not contain it, and nothing said so.
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the multi-pack case is created");
+        QDir dir(tmp.path());
+
+        auto writePack = [&](const char *name, const char *content) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            check(f.open(QIODevice::WriteOnly), name);
+            f.write(content);
+        };
+
+        dir.mkdir(QStringLiteral("shipped"));   // core is not installed in the user directory
+        writePack("shipped/core.json",
+                  R"({"id":"core_test","conditions":[{"id":"c_a","label":"A"}]})");
+        writePack("user.json", R"({"id":"user_test","conditions":[{"id":"c_mine","label":"Mine"}]})");
+        writePack("acme.json", R"({"id":"acme","conditions":[{"id":"c_theirs","label":"Theirs"}]})");
+        // A sibling registry carrying a non-empty id AND content, sorting ahead of everything: the
+        // file that used to be able to become "the user pack" outright. core_pack_test gates the
+        // enumeration itself; this gates that the ASSEMBLY never sees it either.
+        writePack("drills.json",
+                  R"({"id":"drills_should_not_load","conditions":[{"id":"c_drill","label":"D"}]})");
+        writePack("zbroken.json", "{ not json at all");
+
+        const auto merged = makeMergedPackProvider(
+            makeFilePackProvider(dir.filePath(QStringLiteral("shipped/core.json")),
+                                 PackOrigin::Core),
+            makeFilePackProviders(dir.path()));
+        const CharacteristicPack &lib = merged->pack();
+
+        check(lib.condition(QStringLiteral("c_a")) != nullptr, "core content is in the library");
+        check(lib.condition(QStringLiteral("c_mine")) != nullptr,
+              "the user's own pack reaches the library, un-namespaced so it can override core");
+        // Namespaced, because it came from somebody else and core must win any collision with it.
+        check(lib.condition(QStringLiteral("acme:c_theirs")) != nullptr,
+              "and so does the SECOND pack — which used to be parsed and then thrown away");
+        check(lib.condition(QStringLiteral("c_drill")) == nullptr
+                  && lib.condition(QStringLiteral("drills_should_not_load:c_drill")) == nullptr,
+              "no sibling registry becomes a layer, under either spelling");
+
+        // A broken pack costs the library that pack and nothing else — the containment claim that
+        // one-provider-per-file is FOR. Its fault is named against its own file, so a health list
+        // can say which pack to fix.
+        bool blamedItsOwnFile = false;
+        for (const ValidationIssue &i : merged->report().issues)
+            if (i.code == QLatin1String("parse")
+                && i.subject == dir.filePath(QStringLiteral("zbroken.json")))
+                blamedItsOwnFile = true;
+        check(blamedItsOwnFile,
+              "the broken pack's parse failure names the file it came from…");
+        check(lib.condition(QStringLiteral("c_mine")) != nullptr,
+              "…and its neighbours still load");
     }
 
     // Leave no user pack behind: a test with a side effect on the product is not a test.

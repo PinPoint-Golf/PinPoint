@@ -124,6 +124,12 @@ QVariantMap cohortToMap(const Cohort &cohort);
 // are only meaningful on the ASSEMBLED library.
 //
 // PARSE (loadNormPack) — ERRORS:
+//   parse                the bytes are not JSON, or not a JSON object. The shared spelling — this
+//                        was `badNormFile`, which meant the same thing in a word only this file
+//                        used, so anything listing "the files that would not read" had to know the
+//                        norm set was special in order to include it
+//   schemaTooNew         the set declares a version above kNormPackSchemaVersion, so it is refused
+//                        rather than partially read
 //   unknownCohort        a `cohort` object naming a sex or an age band this build does not know.
 //                        The ROW IS DROPPED, which is where this differs from `unknownShape`:
 //                        falling back to the default there means Target, a corridor that grades
@@ -174,12 +180,8 @@ ValidationReport validateNormsAgainst(const NormPack               &norms,
                                       const ContextTree            &contexts);
 
 // ── Persistence ─────────────────────────────────────────────────────────────
-struct NormPackLoadResult {
-    NormPack         pack;
-    ValidationReport report;
-    bool             loaded = false;   // parsed AND validated clean
-    bool             parsed = false;   // parsed, whatever validation said — see the note above
-};
+// The four fields and the `parsed` / `loaded` distinction are LoadResult<T>'s — see pack_io.h.
+using NormPackLoadResult = LoadResult<NormPack>;
 
 NormPackLoadResult loadNormPack(const QJsonObject &root, const QString &sourceLabel = QString());
 NormPackLoadResult loadNormPack(const QByteArray &json, const QString &sourceLabel = QString());

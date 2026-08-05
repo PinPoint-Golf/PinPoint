@@ -48,6 +48,14 @@
 
 namespace pinpoint::analysis {
 
+// The schema version this build writes, and the ceiling it will read. Same contract as
+// kPackSchemaVersion: a set declaring a HIGHER version is refused rather than partially read,
+// because silently dropping fields this build has never heard of would let a newer set round-trip
+// through an older one and lose content. A screen registry is small and hand-edited, which makes it
+// MORE exposed to that, not less — the round trip through an editing panel is the normal way it
+// gets written.
+inline constexpr int kScreenSchemaVersion = 1;
+
 struct Screen {
     QString id;               // `screen.*`, matching Condition::screenRef
     QString label;
@@ -68,7 +76,7 @@ struct Screen {
 struct ScreenSet {
     QString             id;
     QString             version;
-    int                 schemaVersion = 1;
+    int                 schemaVersion = kScreenSchemaVersion;
     QString             sourceLabel;
     bool                readOnly = false;
     std::vector<Screen> screens;
@@ -77,6 +85,10 @@ struct ScreenSet {
 };
 
 // ── Validation ──────────────────────────────────────────────────────────────
+//
+// LOAD-TIME ERRORS (loadScreenSet):
+//   parse                the bytes are not JSON, or not a JSON object
+//   schemaTooNew         the set is from a newer build — see kScreenSchemaVersion
 //
 // ERRORS:
 //   duplicateId          two screens share an id
@@ -88,12 +100,8 @@ struct ScreenSet {
 //   screenNoPass         no pass criterion, so the answer is unrecordable
 ValidationReport validateScreenSet(const ScreenSet &set);
 
-struct ScreenLoadResult {
-    ScreenSet        set;
-    ValidationReport report;
-    bool             parsed = false;   // the JSON was read; may still have failed validation
-    bool             loaded = false;   // parsed AND valid
-};
+// The payload member is `pack`, as it is for all five registries — see LoadResult<T> in pack_io.h.
+using ScreenLoadResult = LoadResult<ScreenSet>;
 
 ScreenLoadResult loadScreenSet(const QByteArray &json, const QString &sourceLabel);
 QByteArray       saveScreenSet(const ScreenSet &set);

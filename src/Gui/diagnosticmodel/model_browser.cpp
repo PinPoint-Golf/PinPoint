@@ -1701,7 +1701,8 @@ QVariantList ModelBrowser::rawRows(const QString &type) const
         if (m_norms) {
             for (const ValidationIssue &i : m_norms->report().issues)
                 if (i.severity == IssueSeverity::Warning) issues.push_back(i);
-            for (const ValidationIssue &i : diagnosticsHealth(p, *m_norms, m_cat))
+            for (const ValidationIssue &i :
+                 diagnosticsHealth(p, *m_norms, m_cat, sharedScreenSet(), sharedDrillSet()))
                 issues.push_back(i);
         }
 

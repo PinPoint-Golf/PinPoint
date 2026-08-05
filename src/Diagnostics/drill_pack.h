@@ -43,6 +43,10 @@
 
 namespace pinpoint::analysis {
 
+// Refused above this, never partially read — the same contract and the same reasoning as
+// kScreenSchemaVersion, which see.
+inline constexpr int kDrillSchemaVersion = 1;
+
 struct Drill {
     QString     id;            // `drill.*`, matching Condition::drills
     QString     label;
@@ -55,7 +59,7 @@ struct Drill {
 struct DrillSet {
     QString            id;
     QString            version;
-    int                schemaVersion = 1;
+    int                schemaVersion = kDrillSchemaVersion;
     QString            sourceLabel;
     bool               readOnly = false;
     std::vector<Drill> drills;
@@ -63,16 +67,12 @@ struct DrillSet {
     const Drill *drill(const QString &id) const;
 };
 
+// LOAD-TIME ERRORS: parse (not JSON) · schemaTooNew (from a newer build — kDrillSchemaVersion)
 // ERRORS: duplicateId · drillIdNamespace (outside `drill.`, so nothing can point at it)
 // WARNINGS: drillNoInstruction (nobody could do it) · drillNoTarget (nobody could say why)
 ValidationReport validateDrillSet(const DrillSet &set);
 
-struct DrillLoadResult {
-    DrillSet         set;
-    ValidationReport report;
-    bool             parsed = false;
-    bool             loaded = false;
-};
+using DrillLoadResult = LoadResult<DrillSet>;
 
 DrillLoadResult loadDrillSet(const QByteArray &json, const QString &sourceLabel);
 QByteArray      saveDrillSet(const DrillSet &set);

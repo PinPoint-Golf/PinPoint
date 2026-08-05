@@ -18,12 +18,13 @@
 
 #include "reference_pack.h"
 
+#include "pack_io.h"
+
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
-#include <QStandardPaths>
 
 #include <algorithm>
 
@@ -113,17 +114,7 @@ const Reference *ReferenceSet::byCitation(const QString &c) const
 
 namespace {
 
-void add(ValidationReport &r, IssueSeverity sev, const QString &code, const QString &subject,
-         const QString &message)
-{
-    r.issues.push_back(ValidationIssue{ sev, code, subject, message });
-}
-
-QString userReferencePath()
-{
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return dir.isEmpty() ? QString() : dir + QStringLiteral("/diagnostics/references.json");
-}
+QString userReferencePath() { return diagnosticsFilePath(QStringLiteral("references.json")); }
 
 } // namespace
 
@@ -232,16 +223,31 @@ ReferenceLoadResult loadReferenceSet(const QByteArray &json, const QString &sour
     QJsonParseError pe{};
     const QJsonDocument doc = QJsonDocument::fromJson(json, &pe);
     if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
-        add(out.report, IssueSeverity::Error, QStringLiteral("schemaVersion"), sourceLabel,
+        err(out.report, QStringLiteral("parse"), sourceLabel,
             QStringLiteral("Cannot parse %1: %2").arg(sourceLabel, pe.errorString()));
         return out;
     }
 
     const QJsonObject root = doc.object();
-    out.set.id            = root.value(QStringLiteral("id")).toString();
-    out.set.version       = root.value(QStringLiteral("version")).toString();
-    out.set.schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(1);
-    out.set.sourceLabel   = sourceLabel;
+    const int schema = root.value(QStringLiteral("schemaVersion")).toInt(kReferenceSchemaVersion);
+
+    // Refused rather than partially read — see the same gate in loadPack(). A bibliography is the
+    // registry where a dropped field is HARDEST to notice: the record still resolves, still opens,
+    // and simply renders without whatever the newer build knew about it, so nothing on any screen
+    // looks wrong.
+    if (schema > kReferenceSchemaVersion) {
+        err(out.report, QStringLiteral("schemaTooNew"), sourceLabel,
+            QStringLiteral("Reference set '%1' declares schema %2; this build understands %3. "
+                           "Refusing to load rather than silently dropping content.")
+                .arg(sourceLabel.isEmpty() ? QStringLiteral("(unnamed)") : sourceLabel)
+                .arg(schema).arg(kReferenceSchemaVersion));
+        return out;
+    }
+
+    out.pack.id            = root.value(QStringLiteral("id")).toString();
+    out.pack.version       = root.value(QStringLiteral("version")).toString();
+    out.pack.schemaVersion = schema;
+    out.pack.sourceLabel   = sourceLabel;
 
     for (const QJsonValue &v : root.value(QStringLiteral("references")).toArray()) {
         const QJsonObject o = v.toObject();
@@ -263,11 +269,11 @@ ReferenceLoadResult loadReferenceSet(const QByteArray &json, const QString &sour
         ref.establishes = o.value(QStringLiteral("establishes")).toString();
         // Absent reads as false, which is the whole reason this needed no schema bump.
         ref.generalReading = o.value(QStringLiteral("generalReading")).toBool(false);
-        out.set.references.push_back(std::move(ref));
+        out.pack.references.push_back(std::move(ref));
     }
 
     out.parsed = true;
-    out.report = validateReferenceSet(out.set);
+    out.report = validateReferenceSet(out.pack);
     out.loaded = out.report.ok();
     return out;
 }
@@ -422,7 +428,7 @@ QByteArray exportReferenceSetCsl(const ReferenceSet &set)
 
 namespace {
 
-ReferenceSet assembleReferenceSet()
+ReferenceSet loadCoreReferenceSet()
 {
     const QByteArray override = qgetenv("PINPOINT_CORE_REFERENCES");
     const QString    corePath = override.isEmpty()
@@ -433,33 +439,70 @@ ReferenceSet assembleReferenceSet()
     QFile        f(corePath);
     if (f.open(QIODevice::ReadOnly)) {
         ReferenceLoadResult res = loadReferenceSet(f.readAll(), corePath);
-        out = std::move(res.set);
+        out = std::move(res.pack);
     }
     out.readOnly = true;
+    return out;
+}
 
-    const QString userPath = userReferencePath();
-    QFile         uf(userPath);
-    if (!userPath.isEmpty() && uf.open(QIODevice::ReadOnly)) {
-        ReferenceLoadResult res = loadReferenceSet(uf.readAll(), userPath);
-        if (res.parsed) {
-            for (const Reference &ref : res.set.references) {
-                auto it = std::find_if(out.references.begin(), out.references.end(),
-                                       [&](const Reference &x) { return x.id == ref.id; });
-                if (it != out.references.end()) *it = ref;
-                else                            out.references.push_back(ref);
-            }
-            out.readOnly = false;
+ReferenceSet assembleReferenceSet()
+{
+    ReferenceSet out = loadCoreReferenceSet();
+
+    // The user's own layer, by id. A user record REPLACES the shipped one rather than merging field
+    // by field: half of one paper's metadata carrying half of another's is worse than either, and
+    // the identifier is the join key — a record whose DOI came from one source and whose title came
+    // from another is the "plausible-looking identifier" this registry's header calls worse than no
+    // citation at all.
+    const ReferenceSet user = loadUserReferenceSet();
+    if (!user.references.empty()) {
+        for (const Reference &ref : user.references) {
+            auto it = std::find_if(out.references.begin(), out.references.end(),
+                                   [&](const Reference &x) { return x.id == ref.id; });
+            if (it != out.references.end()) *it = ref;
+            else                            out.references.push_back(ref);
         }
+        out.readOnly = false;
     }
     return out;
 }
 
 ReferenceSet *g_refs = nullptr;
+ReferenceSet *g_core = nullptr;
 
 } // namespace
 
+const ReferenceSet &coreReferenceSet()
+{
+    if (!g_core) g_core = new ReferenceSet(loadCoreReferenceSet());
+    return *g_core;
+}
+
+QString userReferenceSetPath() { return userReferencePath(); }
+
+ReferenceSet loadUserReferenceSet()
+{
+    // `parsed`, NOT `loaded`, for the reason the screen and drill layers are read that way. A user
+    // bibliography holds the records that author added, so it fails nothing standalone — but it is
+    // read through the same door, and a door that behaved differently here would be a difference
+    // nobody could explain later.
+    const QString path = userReferencePath();
+    QFile         f(path);
+    if (path.isEmpty() || !f.open(QIODevice::ReadOnly)) return {};
+    ReferenceLoadResult res = loadReferenceSet(f.readAll(), path);
+    return res.parsed ? std::move(res.pack) : ReferenceSet{};
+}
+
+bool saveUserReferenceSet(const ReferenceSet &set, QString *whyNot)
+{
+    return atomicWrite(userReferenceSetPath(), saveReferenceSet(set), whyNot);
+}
+
 const ReferenceSet &sharedReferenceSet()
 {
+    // Cached process-wide, exactly like sharedScreenSet(). Not thread-safe against concurrent
+    // readers — call resetSharedReferenceSet() from the UI thread after writing a user layer, or
+    // every reader keeps the assembly it already has.
     if (!g_refs) g_refs = new ReferenceSet(assembleReferenceSet());
     return *g_refs;
 }
@@ -468,6 +511,8 @@ void resetSharedReferenceSet()
 {
     delete g_refs;
     g_refs = nullptr;
+    // The core layer is immutable and cached separately, so it deliberately survives — nothing a
+    // user write can do changes what shipped.
 }
 
 } // namespace pinpoint::analysis

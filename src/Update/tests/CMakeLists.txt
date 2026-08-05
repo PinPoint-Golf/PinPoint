@@ -54,6 +54,9 @@ pp_add_test(update_controller_policy_test
             # context_tree.cpp in turn — the same pairing every other suite that compiles it uses.
             ${SRC}/Diagnostics/norm_pack.cpp
             ${SRC}/Diagnostics/context_tree.cpp
+            # The registries' shared machinery — the issue vocabulary and LoadResult<T> — so it
+            # travels on every link line that compiles one of them.
+            ${SRC}/Diagnostics/pack_io.cpp
             ${SRC}/Diagnostics/characteristic_pack.cpp
             ${SRC}/Diagnostics/characteristic.cpp
             # characteristic_pack.cpp resolves a citation against the bibliography to decide whether

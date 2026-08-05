@@ -18,6 +18,8 @@
 
 #include "characteristic.h"
 
+#include "enum_table_p.h"
+
 #include <QObject>   // tr() for the direction phrasing — the only user-facing strings in this file
 
 #include <algorithm>
@@ -27,38 +29,14 @@ namespace pinpoint::analysis {
 
 namespace {
 
-// One table per enum, so a spelling exists in exactly one place. Every `name` is a stable JSON
-// token and must never change once a pack has shipped with it.
-template <typename E>
-struct Row {
-    E           value;
-    const char *name;
-    const char *label;
-};
-
-template <typename E, size_t N>
-QString nameOf(const Row<E> (&rows)[N], E v)
-{
-    for (const auto &r : rows)
-        if (r.value == v) return QString::fromLatin1(r.name);
-    return QString::fromLatin1(rows[0].name);
-}
-
-template <typename E, size_t N>
-QString labelOf(const Row<E> (&rows)[N], E v)
-{
-    for (const auto &r : rows)
-        if (r.value == v) return QString::fromLatin1(r.label);
-    return QString::fromLatin1(rows[0].label);
-}
-
-template <typename E, size_t N>
-bool fromName(const Row<E> (&rows)[N], const QString &s, E &out)
-{
-    for (const auto &r : rows)
-        if (s == QLatin1String(r.name)) { out = r.value; return true; }
-    return false;
-}
+// The Row/nameOf/labelOf/fromName machinery is shared with norm_pack.cpp — see enum_table_p.h,
+// which also carries the reason a label is decoded as UTF-8 and a token as Latin-1. What stays here
+// is what is genuinely this file's: one table per enum, so a spelling exists in exactly one place.
+// Every `name` is a stable JSON token and must never change once a pack has shipped with it.
+using detail::fromName;
+using detail::labelOf;
+using detail::nameOf;
+using detail::Row;
 
 const Row<MeasureKind> kMeasureKinds[] = {
     { MeasureKind::Composed, "composed", "composed" },

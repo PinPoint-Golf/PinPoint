@@ -102,7 +102,9 @@ QString believeClause(const std::optional<double> &lo, const std::optional<doubl
 
 std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
                                                const INormProvider      &norms,
-                                               const MetricCatalogue    &catalogue)
+                                               const MetricCatalogue    &catalogue,
+                                               const ScreenSet          &screens,
+                                               const DrillSet           &drills)
 {
     std::vector<ValidationIssue> out;
 
@@ -230,10 +232,12 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
     // that was meant to tell a coach how to run the test shows nothing at all, with no error
     // anywhere to say why. That is the same shape as a corridor keyed on the wrong phase, which
     // cost two stages before it was found.
+    //
+    // `screens` and `drills` arrive as parameters rather than sharedScreenSet() / sharedDrillSet()
+    // reads, for the reason referenceHealth() below takes a ReferenceSet: a check reachable only
+    // through a process-global singleton can be tested only against whatever registry happens to be
+    // on the path, and a check whose negative case is untested passes everything.
     {
-        const ScreenSet &screens = sharedScreenSet();
-        const DrillSet  &drills  = sharedDrillSet();
-
         for (const Condition &c : pack.conditions) {
             if (!c.screenRef.isEmpty() && !screens.screen(c.screenRef))
                 out.push_back(warn(QStringLiteral("unknownScreenRef"), c.id,
@@ -532,41 +536,51 @@ std::vector<ValidationIssue> referenceHealth(const CharacteristicPack &pack,
     return out;
 }
 
+std::optional<OneBandShare> oneBandShareOf(const CorpusGradeCounts &c)
+{
+    const int total = c.total();
+    if (total < kMinCorpusForShare) return std::nullopt;   // too few readings to mean anything
+
+    struct Band { int n; const char *word; };
+    const Band bands[] = { { c.ideal, "Ideal" }, { c.good, "Good" },
+                           { c.watch, "Watch" }, { c.action, "Action" } };
+
+    for (const Band &b : bands) {
+        const double share = double(b.n) / double(total);
+        if (share < kOneBandShare) continue;
+
+        // Which way it is wrong matters, because the two have opposite fixes: almost everything
+        // outside Ideal means the corridor is in the wrong place or the wrong unit; almost
+        // everything Ideal means it is so wide it can never say anything.
+        const QString hint = (qstrcmp(b.word, "Ideal") == 0)
+            ? QObject::tr("so wide that nothing in the library falls outside it — it cannot "
+                          "report a deviation")
+            : QObject::tr("grading almost the whole library into one band — check the corridor's "
+                          "centre and its unit before trusting it");
+
+        return OneBandShare{ QString::fromLatin1(b.word), b.n, total, hint };
+    }
+    return std::nullopt;
+}
+
 std::vector<ValidationIssue> corpusShareHealth(const std::vector<CorpusGradeCounts> &counts)
 {
     std::vector<ValidationIssue> out;
 
     for (const CorpusGradeCounts &c : counts) {
-        const int total = c.total();
-        if (total < kMinCorpusForShare) continue;        // too few readings to mean anything
+        const std::optional<OneBandShare> finding = oneBandShareOf(c);
+        if (!finding.has_value()) continue;
 
-        struct Band { int n; const char *word; };
-        const Band bands[] = { { c.ideal, "Ideal" }, { c.good, "Good" },
-                               { c.watch, "Watch" }, { c.action, "Action" } };
-
-        for (const Band &b : bands) {
-            const double share = double(b.n) / double(total);
-            if (share < kOneBandShare) continue;
-
-            // Which way it is wrong matters, because the two have opposite fixes: almost everything
-            // outside means the corridor is in the wrong place or the wrong unit; almost everything
-            // Ideal means it is so wide it can never say anything.
-            const QString hint = (qstrcmp(b.word, "Ideal") == 0)
-                ? QObject::tr("so wide that nothing in the library falls outside it — it cannot "
-                              "report a deviation")
-                : QObject::tr("grading almost the whole library into one band — check the corridor's "
-                              "centre and its unit before trusting it");
-
-            out.push_back({ IssueSeverity::Warning, QStringLiteral("oneBandCorpus"),
-                            normKeyLabel(c.measureId, c.contextId),
-                            QObject::tr("%1 grades %2 of %3 drawn swings as %4 — %5.")
-                                .arg(c.measureId)
-                                .arg(b.n)
-                                .arg(total)
-                                .arg(QString::fromLatin1(b.word))
-                                .arg(hint) });
-            break;                                       // one row per corridor, not four
-        }
+        out.push_back({ IssueSeverity::Warning, QStringLiteral("oneBandCorpus"),
+                        normKeyLabel(c.measureId, c.contextId),
+                        QObject::tr("%1 grades %2 of %3 drawn swings as %4 — %5.")
+                            .arg(c.measureId)
+                            .arg(finding->n)
+                            .arg(finding->total)
+                            .arg(finding->word)
+                            .arg(finding->hint) });
+        // one row per corridor, not four — oneBandShareOf() already stopped at the first band that
+        // crosses the share.
     }
     return out;
 }
