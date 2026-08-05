@@ -13,6 +13,7 @@
 
 #include "../characteristic_pack.h"
 #include "../diagnostics_health.h"    // referenceHealth()
+#include "../norm_pack.h"             // requiredNormSchemaVersion()
 #include "../reference_pack.h"
 
 #include "model_browser.h"
@@ -263,6 +264,33 @@ int main()
                 }
         }
         check(hits == 0, "no commercial brand is named in the metrics the pack depends on");
+    }
+
+    // ── The shipped norm set's declared schemaVersion cannot lag its own content ───────────────
+    //
+    // norms.json is hand-maintained, and the number at the top of the file is the one thing about
+    // it nothing else checks. kNormPackSchemaVersion went to 2 specifically so a norm pack carrying
+    // a `cohort` row is refused by a build that predates it, rather than silently read with the key
+    // dropped — the failure mode is grading everyone against a row that describes women over 65.
+    // requiredNormSchemaVersion() computes what the content genuinely needs; nothing stops a future
+    // edit from adding a cohort row without bumping the declared version to match, which would
+    // reopen exactly the hole the bump exists to close. This gate is what makes that impossible:
+    // the declared number may overstate what the content needs, never understate it.
+    std::printf("=== the shipped norm set declares a schemaVersion its content actually needs ===\n");
+    {
+        // No dedicated compile-time path for norms.json on this target — derived from
+        // PP_CORE_PACK_PATH's directory instead of adding one, so this gate costs nothing to build.
+        const QString normsPath = QFileInfo(QStringLiteral(PP_CORE_PACK_PATH)).absolutePath()
+                                 + QStringLiteral("/norms.json");
+        QFile nf(normsPath);
+        check(nf.open(QIODevice::ReadOnly), "the shipped norm set is readable");
+        const NormPackLoadResult nres = loadNormPack(nf.readAll(), QStringLiteral("norms.json"));
+        check(nres.loaded, "the shipped norm set loads and validates clean");
+
+        const int required = requiredNormSchemaVersion(nres.pack);
+        check(nres.pack.schemaVersion >= required,
+              "declared schemaVersion is not hand-edited below what the content needs");
+        std::printf("        (declared %d, content requires %d)\n", nres.pack.schemaVersion, required);
     }
 
     // ── The roadmap ranks by SERIES, not by reduced measure ────────────────────

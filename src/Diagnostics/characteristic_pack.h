@@ -74,8 +74,13 @@ struct ValidationReport {
 //   cycle                the condition graph is not a DAG
 //   selfEdge             an edge from a condition to itself
 //   signalArity          wrong measure count for the test (2 for order/ratio, 1 otherwise)
-//   signalDirection      a corridor/threshold signal with no direction — it cannot identify a tail
-//   signalThreshold      a threshold on a non-threshold test, or a threshold test with no number
+//   signalDirection      a corridor/threshold/ratio signal with no direction — it cannot identify a
+//                        tail, and a ratio has two of them like anything else
+//   signalThreshold      an authored number on a test that inherits one, or none on a test that has
+//                        nothing to inherit from (threshold and ratio — a quotient keys no norm)
+//   signalRatioUnit      a ratio whose two measures are not in one unit, or do not state it. The
+//                        quotient is then not a pure number and the authored figure is in a unit
+//                        the model cannot name
 //   corroboratesCausal   Corroborates between conditions that already have a causal path. The pair
 //                        would double-count in the confidence ranking; one relationship or the other
 //   axisMismatch         two tails share an axis id but not a series — then they are not tails

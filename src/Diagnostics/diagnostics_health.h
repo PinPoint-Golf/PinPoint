@@ -42,7 +42,7 @@
 //   signalNoNorm           A corridor signal on a live measure with no norm in any context. It
 //                          cannot fire — not "does not fire on this swing", cannot, ever. Author a
 //                          norm or accept that the characteristic is undetectable.
-//   signalOnOpenTail       A corridor or ratio signal watching the tail a one-sided measure does not
+//   signalOnOpenTail       A corridor or threshold signal watching the tail a one-sided measure does not
 //                          grade — a High signal on a floor, or a Low one on a ceiling. It can never
 //                          fire, and unlike signalNoNorm no producer will ever change that: the
 //                          measure has no fault on that side. Point it at the other tail, or accept

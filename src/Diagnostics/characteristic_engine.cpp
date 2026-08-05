@@ -148,9 +148,39 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
     }
     case SignalTest::Threshold: {
         const MeasureReading &r = readings.front();
-        const double          t = sig.threshold.value_or(0.0);
-        const Direction       d = sig.direction.value_or(Direction::High);
-        v.fired = (d == Direction::High) ? (r.value > t) : (r.value < t);
+
+        // The two refusals its siblings make, made here too — and their absence was not a
+        // simplification. A threshold test reads the SAME reading off the same norm-joined source
+        // as a corridor test; only the number it compares against differs. So every argument for
+        // refusing over there holds here word for word, and a branch that skipped both was the one
+        // place in the engine where an authored number was trusted more than the norm that said the
+        // reading was not real.
+        //
+        // A reading the norm does not believe was NOT ASSESSED. That an author typed the number
+        // rather than inheriting it changes nothing: a smash of 1.62 is a mis-tracked ball, and
+        // answering "yes, above 1.55" about it launders a capture fault into a confident diagnosis
+        // — exactly what Norm::plausibleLo exists to prevent. Unavailable is the state for it.
+        if (r.implausible) {
+            v.available = false;
+            v.missing << sig.measures.value(0);
+            return v;
+        }
+
+        const double    t = sig.threshold.value_or(0.0);
+        const Direction d = sig.direction.value_or(Direction::High);
+
+        // A signal watching a tail the measure's own shape says never grades cannot fire, and says
+        // so outright rather than reaching the answer by arithmetic — the corridor branch's rule,
+        // and the same authoring mistake behind it. A floor has no upper fault whoever writes the
+        // number.
+        //
+        // NOTE WHAT IS NOT REQUIRED: a corridor. Threshold is the test kind that exists to work
+        // where no norm has been authored, so demanding hasCorridor here would dark precisely the
+        // signals this branch is for. With no norm both flags are false and this costs nothing;
+        // with a norm behind the reading, its shape is believed.
+        const bool tailOpen = (d == Direction::High) ? r.highOpen : r.lowOpen;
+
+        v.fired = !tailOpen && ((d == Direction::High) ? (r.value > t) : (r.value < t));
         break;
     }
     case SignalTest::Order:
@@ -159,25 +189,64 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
         v.fired = readings[0].value >= readings[1].value;
         break;
     case SignalTest::Ratio: {
+        // THE RATIO CONTRACT, and why it is not the obvious one.
+        //
+        // This branch divides one measure by another, and the quotient is DIMENSIONLESS. It used to
+        // grade that quotient against readings.front()'s corridor — a norm keyed on
+        // sig.measures[0], whose unit norm.h requires to match THAT measure's unit ("MUST match the
+        // measure's unit; load fails if not"). So the corridor was in degrees, or seconds, while
+        // the value was a pure number. That is not a strict test or a lenient one, it is a category
+        // error: no author could write a ratio signal that meant what they thought it meant, and
+        // the reason the shipped pack contains none of them may simply be that nobody could.
+        //
+        // THE TEMPTING REPAIR DOES NOT WORK, and the reason is structural rather than a matter of
+        // taste. Let the ratio carry its own norm — name a measure whose unit is dimensionless and
+        // author a corridor on it. But a norm reaches this engine only through IMeasureSource::read
+        // and A READING REQUIRES A VALUE: NormMeasureSource returns nullopt the instant the value
+        // source cannot produce one, corridor or no corridor. Nothing produces the quotient. That
+        // is the entire reason this test kind exists rather than one corridor signal on a produced
+        // ratio measure — which is what m_tempoRatio already is, unit ":1", norm and all. So the
+        // stand-in measure would resolve to nullopt, the signal would report Unavailable forever,
+        // and the corridor authored for it would never once be read.
+        //
+        // So: THE NUMBER THAT GRADES A DERIVED QUANTITY IS AUTHORED ON THE SIGNAL THAT DERIVES IT,
+        // because the pack has nowhere else to put a number for something that is not a measure. A
+        // norm keys on a measure; a quotient is not one and cannot be made into one without a
+        // producer. The mechanism already exists and already carries the right doctrine —
+        // Signal::threshold, "an authored number; needs a citation to be more than an opinion",
+        // which is exactly the standing of a published 3:1 tempo figure. Ratio is Threshold applied
+        // to a quotient, and the validator demands the number and the direction from it the same
+        // way (signalThreshold, signalDirection).
+        //
+        // What the two inputs must share is a UNIT, and `signalRatioUnit` enforces that at load:
+        // seconds over seconds cancels and the authored figure means something, while degrees over
+        // seconds is a rate wearing a ratio's name and the figure would be in a unit nothing in the
+        // model records.
         const double denom = readings[1].value;
         if (denom == 0.0) { v.available = false; v.missing = sig.measures; return v; }
-        const double ratio = readings[0].value / denom;
-        const MeasureReading &r = readings.front();
-        if (!r.hasCorridor) { v.available = false; v.missing = sig.measures; return v; }
-        if (r.implausible || readings[1].implausible) {
+
+        if (readings[0].implausible || readings[1].implausible) {
             // Same rule as the corridor branch: a ratio built from a reading nobody believes was
             // not assessed, whichever half of it was wrong.
             v.available = false;
             v.missing   = sig.measures;
             return v;
         }
-        const Direction d = sig.direction.value_or(Direction::High);
-        // The ratio is computed here, so the reading's own grade (which grades readings[0]'s value,
-        // not the ratio) does not apply. The corridor edges do.
-        const bool ratioTailOpen = (d == Direction::High) ? r.highOpen : r.lowOpen;
-        v.fired = !ratioTailOpen
-                  && ((d == Direction::High) ? (ratio > r.greenHi) : (ratio < r.greenLo));
-        if (r.contextInferred) v.confidence *= kInferredContextConfidence;
+
+        const double    ratio = readings[0].value / denom;
+        const double    t     = sig.threshold.value_or(0.0);
+        const Direction d     = sig.direction.value_or(Direction::High);
+        v.fired = (d == Direction::High) ? (ratio > t) : (ratio < t);
+
+        // NO corridor requirement, and NO open-tail check. Both belong to a measure's norm and the
+        // quotient has neither. Requiring a corridor would dark every ratio signal for want of a
+        // band it does not consult; and the numerator's shape describes which tail of the NUMERATOR
+        // faults, which says nothing whatever about the quotient — a small enough denominator sends
+        // it high however one-sided the measure above the line is. `diagnostics_health` follows the
+        // same line: signalOnOpenTail now reads corridor and threshold signals, not ratios.
+        //
+        // Nor is confidence demoted for an inferred context. That demotion asks "was the right norm
+        // used to judge this?", and here no norm judges it — the number came from the author.
         break;
     }
     }

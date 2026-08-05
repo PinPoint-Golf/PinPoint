@@ -549,6 +549,7 @@ pp_add_test(characteristic_pack_test
 # PP_CORE_REFERENCES_PATH, precisely so the validator and the content are gated separately.
 pp_add_test(core_pack_test
     SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK} ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+            ${DIAG}/file_pack_provider.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json"
                     -DPP_CORE_NORMS_PATH="${DIAGRES}/norms.json"

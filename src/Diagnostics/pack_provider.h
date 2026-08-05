@@ -73,7 +73,9 @@ std::unique_ptr<ICharacteristicPackProvider> makeResourcePackProvider(
     const QString &resourcePath = QStringLiteral(":/diagnostics/core.json"));
 
 // User packs from a directory (QStandardPaths::AppDataLocation/diagnostics by default). Every
-// *.json in the directory is a pack; an unreadable one is reported, not fatal.
+// *.json in the directory is a pack EXCEPT the sibling registries that share the directory
+// (`*.norms.json`, `screens.json`, `drills.json`, `references.json` — see file_pack_provider.cpp);
+// an unreadable one is reported, not fatal.
 std::unique_ptr<ICharacteristicPackProvider> makeFilePackProvider(
     const QString &directory = QString(), PackOrigin origin = PackOrigin::LocalUser);
 

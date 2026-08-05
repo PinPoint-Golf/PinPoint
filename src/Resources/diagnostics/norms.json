@@ -1,7 +1,7 @@
 {
   "id": "core",
   "version": "1.0.0",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "_comment": [
     "The shipped norm set. A norm is the normative distribution a measured value is graded",
     "against, keyed by (measure, context, cohort) — NEVER BY ATHLETE ID. ALL NORMS HERE ARE",

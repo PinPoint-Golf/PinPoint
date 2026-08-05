@@ -557,20 +557,59 @@ ValidationReport validatePack(const CharacteristicPack &pack)
                     .arg(s.id, signalTestName(s.test)).arg(want).arg(s.measures.size()));
 
         // A condition is ONE TAIL of one measure. Without a direction the signal cannot say which
-        // tail fired, so it cannot identify a condition.
-        const bool tailed = (s.test == SignalTest::OutsideCorridor || s.test == SignalTest::Threshold);
+        // tail fired, so it cannot identify a condition. Ratio is in this set: its quotient has a
+        // high side and a low side exactly as a measure does — too much backswing for the
+        // downswing, or too little — and those are two different faults. Order is not, because the
+        // ordering it tests is inherent in which measure the author wrote first.
+        const bool tailed = (s.test == SignalTest::OutsideCorridor
+                             || s.test == SignalTest::Threshold
+                             || s.test == SignalTest::Ratio);
         if (tailed && !s.direction.has_value())
             err(r, QStringLiteral("signalDirection"), s.id,
                 QStringLiteral("Signal '%1' needs a direction — which side of the corridor is it?").arg(s.id));
 
-        if (s.test == SignalTest::Threshold && !s.threshold.has_value())
+        // WHO AUTHORS THE NUMBER. Two tests grade against a figure no norm supplies. Threshold is
+        // the obvious one; Ratio is the other, and it is not a relaxation — a quotient is not a
+        // measure, so nothing in the norm set can key on it, and the engine's Ratio branch sets out
+        // at length why a stand-in measure carrying a dimensionless corridor cannot be made to
+        // work. The remaining two inherit their numbers from the catalogue and must not author one.
+        const bool authorsNumber = (s.test == SignalTest::Threshold || s.test == SignalTest::Ratio);
+        if (authorsNumber && !s.threshold.has_value())
             err(r, QStringLiteral("signalThreshold"), s.id,
-                QStringLiteral("Signal '%1' is a threshold test with no threshold.").arg(s.id));
-        if (s.test != SignalTest::Threshold && s.threshold.has_value())
+                QStringLiteral("Signal '%1' is a %2 test with no threshold — there is no norm for "
+                               "it to inherit one from.").arg(s.id, signalTestName(s.test)));
+        if (!authorsNumber && s.threshold.has_value())
             err(r, QStringLiteral("signalThreshold"), s.id,
                 QStringLiteral("Signal '%1' carries a threshold but is a %2 test. Corridor tests "
                                "inherit their numbers from the catalogue and must not author one.")
                     .arg(s.id, signalTestName(s.test)));
+
+        // ── A ratio must be DIMENSIONLESS ───────────────────────────────────
+        //
+        // The engine divides the first measure by the second and compares the quotient against the
+        // authored number. That number only means anything if the units cancel: seconds over
+        // seconds is a pure figure and "3.0" is a tempo, while degrees over seconds is a rate
+        // wearing a ratio's name and "3.0" is stated in a unit nothing in this model records. The
+        // model has no vocabulary for compound units, and this is the check that keeps it from
+        // needing one.
+        //
+        // An UNSTATED unit fails too, deliberately. "We cannot tell whether these cancel" and "they
+        // cancel" are different answers and only one of them makes the authored figure defensible;
+        // two measures that really are commensurate need only say so once each.
+        if (s.test == SignalTest::Ratio && s.measures.size() == 2) {
+            const Measure *num = pack.measure(s.measures.at(0));
+            const Measure *den = pack.measure(s.measures.at(1));
+            const auto     unitOf = [](const Measure *m) {
+                return m->unit.isEmpty() ? QStringLiteral("no unit") : m->unit;
+            };
+            if (num != nullptr && den != nullptr
+                && (num->unit.isEmpty() || num->unit != den->unit))
+                err(r, QStringLiteral("signalRatioUnit"), s.id,
+                    QStringLiteral("Signal '%1' divides '%2' (%3) by '%4' (%5). A ratio is a pure "
+                                   "number only when the units cancel, so its authored figure means "
+                                   "nothing here — state one unit on both measures.")
+                        .arg(s.id, num->id, unitOf(num), den->id, unitOf(den)));
+        }
     }
 
     for (const Measure &m : pack.measures)

@@ -9,13 +9,16 @@
 
 #include "../characteristic_pack.h"
 #include "../norm_pack.h"
+#include "../pack_provider.h"
 #include "../reference_pack.h"
 
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QTemporaryDir>
 
 #include <algorithm>
 #include <cstdio>
@@ -642,6 +645,46 @@ int main()
                     fireable, unexplained);
         check(fireable > 0, "there are conditions that can fire");
         check(unexplained == 0, "every condition that can fire today has at least one cause");
+    }
+
+    // ── FilePackProvider ignores the sibling registries in its shared directory ─
+    // AppData/diagnostics is not exclusive to characteristic packs: file_norm_provider.cpp writes
+    // `user.norms.json` there (see its note on why norms and packs share one directory), and
+    // screen_pack.cpp / drill_pack.cpp / reference_pack.cpp write `screens.json` / `drills.json` /
+    // `references.json` into the very same place, and file_norm_provider.cpp also reads a fixed
+    // `contexts.json` from it. A `*.json` glob that does not know about them picks all five up: each has no top-level `id` of its own, so it injects a spurious "Pack has
+    // no id" issue into this provider's report — and worse, QDir::Name sorts `drills.json` ahead of
+    // `user.json`, so a sibling that DOES carry a non-empty `id` can silently become the "user pack"
+    // in place of the real one. Regression, not a smoke test: this directory is shared on purpose,
+    // so the sibling files are always going to be sitting right there.
+    {
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the shared-directory regression is created");
+        QDir dir(tmp.path());
+
+        auto write = [&](const char *name, const char *content) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            const bool opened = f.open(QIODevice::WriteOnly);
+            check(opened, name);
+            f.write(content);
+        };
+
+        write("user.json", R"({"id":"user_test"})");
+        write("user.norms.json", "{}");
+        write("screens.json", "{}");
+        // A non-empty top-level `id`, deliberately: this is the file that USED TO be mistaken for
+        // the user pack, because `drills.json` sorts ahead of `user.json` under QDir::Name and the
+        // old glob had no way to tell a drill registry from a characteristic pack.
+        write("drills.json", R"({"id":"drills_should_not_load"})");
+        write("references.json", "{}");
+        write("contexts.json", "{}");
+
+        const std::unique_ptr<ICharacteristicPackProvider> fp =
+            makeFilePackProvider(tmp.path(), PackOrigin::LocalUser);
+        check(fp->pack().id == QStringLiteral("user_test"),
+              "the real user pack loads, and no sibling registry is mistaken for it");
+        check(fp->report().issues.empty(),
+              "the sibling registries raise no issues in the pack provider's report");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");

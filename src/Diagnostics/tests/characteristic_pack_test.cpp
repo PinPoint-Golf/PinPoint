@@ -323,6 +323,60 @@ int main()
         check(hasError(validatePack(p), "signalArity"), "a ratio test needs two measures");
     }
 
+    // ── The ratio contract ──────────────────────────────────────────────────────
+    //
+    // A quotient is not a measure, so nothing in the norm set can key on it and there is no corridor
+    // for a ratio to inherit. Its number is therefore AUTHORED on the signal, exactly as a
+    // threshold's is — and an authored number is only meaningful if the division produces a pure
+    // number, which is what `signalRatioUnit` is for. Both halves are pinned here because a
+    // validator whose negative cases are untested passes everything.
+    {
+        auto tempoPack = [](const char *numUnit, const char *denUnit) {
+            CharacteristicPack p = goodPack();
+
+            Measure back = p.measures.front();     // same series and reducer; only the id and unit differ
+            back.id      = QStringLiteral("backswingTime");
+            back.unit    = QString::fromLatin1(numUnit);
+            Measure down = back;
+            down.id      = QStringLiteral("downswingTime");
+            down.unit    = QString::fromLatin1(denUnit);
+            p.measures.push_back(back);
+            p.measures.push_back(down);
+
+            Signal tempo;
+            tempo.id        = QStringLiteral("sigTempo");
+            tempo.test      = SignalTest::Ratio;
+            tempo.measures  = { back.id, down.id };
+            tempo.direction = Direction::High;
+            tempo.threshold = 3.0;
+            p.signalDefs.push_back(tempo);
+            return p;
+        };
+
+        const ValidationReport wellFormed = validatePack(tempoPack("s", "s"));
+        check(!hasError(wellFormed, "signalRatioUnit") && !hasError(wellFormed, "signalThreshold")
+                  && !hasError(wellFormed, "signalDirection") && !hasError(wellFormed, "signalArity"),
+              "a ratio over two measures in one unit, with a number and a direction, is accepted");
+
+        check(hasError(validatePack(tempoPack("s", "deg")), "signalRatioUnit"),
+              "a ratio dividing seconds by degrees is rejected — that quotient is a rate, not a ratio");
+        check(hasError(validatePack(tempoPack("", "")), "signalRatioUnit"),
+              "…and so is one whose measures state no unit: 'cannot tell' is not 'they cancel'");
+
+        {
+            CharacteristicPack p = tempoPack("s", "s");
+            p.signalDefs.back().threshold.reset();
+            check(hasError(validatePack(p), "signalThreshold"),
+                  "a ratio with no number is rejected — it has no norm to inherit one from");
+        }
+        {
+            CharacteristicPack p = tempoPack("s", "s");
+            p.signalDefs.back().direction.reset();
+            check(hasError(validatePack(p), "signalDirection"),
+                  "a ratio with no direction is rejected — its two sides are two different faults");
+        }
+    }
+
     // ── Axis pairing ────────────────────────────────────────────────────────────
     // Two tails must sit on the SAME series, or they are not tails of one corridor.
     {

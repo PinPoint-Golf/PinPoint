@@ -173,7 +173,11 @@ enum class SignalTest {
     OutsideCorridor,   // preferred: authors no numbers, inherits the measure's norm
     Threshold,         // an authored number; needs a citation to be more than an opinion
     Order,             // two measures, temporal ordering (kinematic sequence)
-    Ratio,             // two measures, a ratio (tempo)
+    Ratio,             // two measures IN THE SAME UNIT, their quotient against an authored number
+                       // (tempo). A quotient is not a measure, so no norm can key on it — see the
+                       // Ratio branch of characteristic_engine.cpp for why a stand-in measure with
+                       // a dimensionless corridor cannot be made to work, and why the number is
+                       // therefore authored on the signal exactly as Threshold's is.
 };
 
 // (`Direction` is declared above `Measure`, which needs it for `unwatchedTail`.)
@@ -183,7 +187,10 @@ struct Signal {
     SignalTest               test = SignalTest::OutsideCorridor;
     QStringList              measures;     // 1 for corridor/threshold, 2 for order/ratio
     std::optional<Direction> direction;
-    std::optional<double>    threshold;    // ONLY when test == Threshold
+    // The authored number, for the two tests that grade against one no norm supplies: Threshold,
+    // and Ratio — whose quotient cannot key a norm at all. Required on both and refused on the
+    // other two, which inherit their numbers from the catalogue (signalThreshold).
+    std::optional<double>    threshold;
 };
 
 // ── Condition ───────────────────────────────────────────────────────────────

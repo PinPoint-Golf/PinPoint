@@ -42,6 +42,18 @@ public:
 
         const QStringList files = dir.entryList({ QStringLiteral("*.json") }, QDir::Files, QDir::Name);
         for (const QString &name : files) {
+            // This directory is shared with every other user registry (norm sets, contexts, screens,
+            // drills, references) — see the note in file_norm_provider.cpp on why it is one directory rather
+            // than several. Left unfiltered, `*.json` picks up their files too: each has no top-level
+            // `id`, so it either injects a spurious "Pack has no id" issue into this report, or, worse,
+            // if it DOES have a non-empty `id` (unlikely today but not contractually ruled out), QDir::Name
+            // sorts it ahead of `user.json` and it silently BECOMES the user pack. Skip every sibling
+            // registry by name so this provider only ever sees files that are actually packs.
+            if (name.endsWith(QLatin1String(".norms.json"))) continue;
+            if (name == QLatin1String("screens.json") || name == QLatin1String("drills.json")
+                || name == QLatin1String("references.json")
+                || name == QLatin1String("contexts.json")) continue;
+
             const QString path = dir.filePath(name);
             QFile         f(path);
             if (!f.open(QIODevice::ReadOnly)) {

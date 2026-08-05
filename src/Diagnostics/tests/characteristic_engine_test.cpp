@@ -673,6 +673,211 @@ int main()
               "…and the finding names the measure, so the UI can say which reading was wrong");
     }
 
+    // ── A threshold makes the same two refusals a corridor does ────────────
+    //
+    // The number being authored rather than inherited changes what the signal COMPARES against and
+    // nothing else: it is the same reading, off the same norm-joined source, and the norm's two
+    // veto powers over it are unaffected. This branch skipped both, which made it the one place in
+    // the engine where a typed-in figure was trusted further than the norm that said the reading
+    // was not real.
+    std::printf("\nthreshold signals\n");
+    {
+        CharacteristicPack p;
+        Measure            m;
+        m.id     = QStringLiteral("m_speed");
+        m.status = MeasureStatus::Live;
+        p.measures.push_back(m);
+
+        Signal fast;
+        fast.id        = QStringLiteral("sigFast");
+        fast.test      = SignalTest::Threshold;
+        fast.measures  = { m.id };
+        fast.direction = Direction::High;
+        fast.threshold = 100.0;
+        p.signalDefs.push_back(fast);
+
+        Condition c;
+        c.id         = QStringLiteral("c_fast");
+        c.detectedBy = { fast.id };
+        c.state      = ConditionState::Active;
+        p.conditions.push_back(c);
+
+        // The positive case first, and deliberately WITHOUT a corridor: a threshold test exists to
+        // work where no norm has been authored, so a guard that demanded one would dark exactly the
+        // signals this test kind is for.
+        {
+            FakeSource over;
+            over.addWithoutCorridor(m.id, 120.0);
+            check(detect(p, over).find("c_fast")->state == FindingState::Fired,
+                  "a threshold fires above its number with no corridor in sight");
+
+            FakeSource under;
+            under.addWithoutCorridor(m.id, 80.0);
+            check(detect(p, under).find("c_fast")->state == FindingState::NotFired,
+                  "…and does not fire below it");
+        }
+
+        // An implausible reading is not a big reading. It was NOT ASSESSED, and answering "yes,
+        // above 100" about a number the norm refuses to believe launders a capture fault into a
+        // confident diagnosis.
+        {
+            FakeSource src;
+            src.addImplausible(m.id, 9999.0, 0.0, 200.0);
+            const DetectionResult r = detect(p, src);
+            const Finding        *f = r.find("c_fast");
+            check(f && f->state == FindingState::Unavailable,
+                  "an implausible reading does not fire a threshold — it was never assessed");
+            check(f && f->missingMeasures.contains(m.id),
+                  "…and the finding names the measure, exactly as the corridor branch does");
+        }
+    }
+
+    // A threshold watching the tail a one-sided measure does not grade cannot fire, whoever wrote
+    // the number. Same authoring mistake as on a corridor signal, and now the same answer.
+    {
+        CharacteristicPack p;
+        Measure            m;
+        m.id     = QStringLiteral("m_smash");
+        m.status = MeasureStatus::Live;
+        m.shape  = Shape::Floor;
+        p.measures.push_back(m);
+
+        Signal high;                       // the misunderstanding: a floor has no upper fault
+        high.id        = QStringLiteral("sigHigh");
+        high.test      = SignalTest::Threshold;
+        high.measures  = { m.id };
+        high.direction = Direction::High;
+        high.threshold = 1.00;
+        p.signalDefs.push_back(high);
+
+        Signal low;                        // the graded tail, with an authored number on it
+        low.id        = QStringLiteral("sigLow");
+        low.test      = SignalTest::Threshold;
+        low.measures  = { m.id };
+        low.direction = Direction::Low;
+        low.threshold = 1.40;
+        p.signalDefs.push_back(low);
+
+        auto condition = [&](const char *id, const QString &sig) {
+            Condition c;
+            c.id         = QString::fromLatin1(id);
+            c.detectedBy = { sig };
+            c.state      = ConditionState::Active;
+            p.conditions.push_back(c);
+        };
+        condition("c_high", high.id);
+        condition("c_low", low.id);
+
+        FakeSource above;
+        above.addOneSided(m.id, 2.20, 1.48, 0.05, Shape::Floor);   // way past 1.00, on the open side
+        const DetectionResult ra = detect(p, above);
+        check(ra.find("c_high") && ra.find("c_high")->state == FindingState::NotFired,
+              "a High threshold on a floor does not fire, however far past its number the value is");
+        check(ra.find("c_low") && ra.find("c_low")->state == FindingState::NotFired,
+              "…and the graded tail is quiet, because nothing is wrong");
+
+        FakeSource below;
+        below.addOneSided(m.id, 1.28, 1.48, 0.05, Shape::Floor);
+        const DetectionResult rb = detect(p, below);
+        check(rb.find("c_low") && rb.find("c_low")->state == FindingState::Fired,
+              "the graded tail fires on its authored number as usual");
+        check(rb.find("c_high") && rb.find("c_high")->state == FindingState::NotFired,
+              "…and the open tail stays silent on the same swing");
+    }
+
+    // ── The ratio contract ─────────────────────────────────────────────────
+    //
+    // A quotient is DIMENSIONLESS and it is not a measure, so no norm can key on it. The branch used
+    // to grade it against the NUMERATOR's corridor — a band in the numerator's own unit — which is
+    // a category error rather than a mis-tuned test. It now grades against the signal's authored
+    // number, the way Threshold does, and the validator requires both that number and a direction.
+    //
+    // The load-bearing check below is the last one: a numerator sitting comfortably inside its own
+    // corridor whose quotient is still past the authored figure. Under the old branch that swing
+    // could not fire; under this one the corridor is not consulted at all.
+    std::printf("\nratio signals\n");
+    {
+        CharacteristicPack p;
+        for (const char *id : { "m_backTime", "m_downTime" }) {
+            Measure m;
+            m.id     = QString::fromLatin1(id);
+            m.unit   = QStringLiteral("s");
+            m.status = MeasureStatus::Live;
+            p.measures.push_back(m);
+        }
+
+        Signal tempo;
+        tempo.id        = QStringLiteral("sigTempo");
+        tempo.test      = SignalTest::Ratio;
+        tempo.measures  = { QStringLiteral("m_backTime"), QStringLiteral("m_downTime") };
+        tempo.direction = Direction::High;
+        tempo.threshold = 3.0;
+        p.signalDefs.push_back(tempo);
+
+        Condition c;
+        c.id         = QStringLiteral("c_slowTransition");
+        c.detectedBy = { tempo.id };
+        c.state      = ConditionState::Active;
+        p.conditions.push_back(c);
+
+        // No corridor anywhere, and the signal still works: the number came from the author.
+        FakeSource slow;
+        slow.addWithoutCorridor(QStringLiteral("m_backTime"), 1.5);
+        slow.addWithoutCorridor(QStringLiteral("m_downTime"), 0.4);      // 3.75
+        check(detect(p, slow).find("c_slowTransition")->state == FindingState::Fired,
+              "a ratio past its authored number fires, with no corridor on either measure");
+
+        FakeSource brisk;
+        brisk.addWithoutCorridor(QStringLiteral("m_backTime"), 1.0);
+        brisk.addWithoutCorridor(QStringLiteral("m_downTime"), 0.4);     // 2.5
+        check(detect(p, brisk).find("c_slowTransition")->state == FindingState::NotFired,
+              "…and a ratio short of it does not");
+
+        // The other tail is a different fault and must be authorable as one.
+        CharacteristicPack quick = p;
+        quick.signalDefs.front().direction = Direction::Low;
+        check(detect(quick, brisk).find("c_slowTransition")->state == FindingState::Fired,
+              "the low tail of a ratio fires on the other side of the same number");
+        check(detect(quick, slow).find("c_slowTransition")->state == FindingState::NotFired,
+              "…and not on this one");
+
+        // A zero denominator is not a very large ratio, it is no ratio at all.
+        FakeSource zero;
+        zero.addWithoutCorridor(QStringLiteral("m_backTime"), 1.5);
+        zero.addWithoutCorridor(QStringLiteral("m_downTime"), 0.0);
+        check(detect(p, zero).find("c_slowTransition")->state == FindingState::Unavailable,
+              "a zero denominator is Unavailable, never a very large ratio");
+
+        // Either half being unbelievable makes the whole quotient unassessed.
+        for (const char *bad : { "m_backTime", "m_downTime" }) {
+            FakeSource src;
+            src.addWithoutCorridor(QStringLiteral("m_backTime"), 1.5);
+            src.addWithoutCorridor(QStringLiteral("m_downTime"), 0.4);
+            src.addImplausible(QString::fromLatin1(bad), 9999.0, 0.0, 10.0);
+            const DetectionResult r = detect(p, src);
+            check(r.find("c_slowTransition")->state == FindingState::Unavailable,
+                  QByteArray("an implausible ").append(bad)
+                      .append(" makes the ratio Unavailable, whichever half was wrong").constData());
+        }
+
+        // THE REGRESSION THIS CONTRACT EXISTS FOR. The numerator is dead centre of its own corridor
+        // — a wholly ordinary backswing — and the quotient is still 3.75. The old branch compared
+        // 3.75 against greenHi = 2.0 SECONDS and answered by accident; this one compares it against
+        // the 3.0 the author wrote, and the corridor is not read.
+        FakeSource graded;
+        graded.add(QStringLiteral("m_backTime"), 1.5, 1.0, 2.0);        // inside, grades Ideal
+        graded.addWithoutCorridor(QStringLiteral("m_downTime"), 0.4);
+        check(detect(p, graded).find("c_slowTransition")->state == FindingState::Fired,
+              "the ratio is graded against its authored number, not the numerator's corridor");
+
+        // …and the mirror: a numerator OUTSIDE its corridor whose quotient is fine says nothing.
+        FakeSource wide;
+        wide.add(QStringLiteral("m_backTime"), 1.0, 0.1, 0.2);          // far above its band
+        wide.addWithoutCorridor(QStringLiteral("m_downTime"), 0.5);     // 2.0, short of 3.0
+        check(detect(p, wide).find("c_slowTransition")->state == FindingState::NotFired,
+              "…and a numerator outside its own corridor does not fire a ratio whose quotient is fine");
+    }
+
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
 }

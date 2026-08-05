@@ -153,8 +153,16 @@ std::vector<ValidationIssue> diagnosticsHealth(const CharacteristicPack &pack,
     //
     // The engine refuses it at runtime as well (characteristic_engine.cpp). Both, deliberately:
     // the runtime guard makes the answer right, and this makes the mistake visible.
+    //
+    // THRESHOLD, not ratio, is the second test in this set. A threshold signal reads the same
+    // norm-joined reading a corridor signal does and the engine refuses its open tail identically,
+    // so the mistake is the same mistake and belongs in the same list. A RATIO's tails are not a
+    // measure's at all: the engine grades its quotient against an authored number, and the shape of
+    // the measure above the line says which tail of THAT quantity faults, not which tail of the
+    // quotient does — a small enough denominator sends the quotient high off a floor's good side.
+    // Reporting a ratio here would accuse an author of a mistake they had not made.
     for (const Signal &s : pack.signalDefs) {
-        if (s.test != SignalTest::OutsideCorridor && s.test != SignalTest::Ratio) continue;
+        if (s.test != SignalTest::OutsideCorridor && s.test != SignalTest::Threshold) continue;
         const Measure *m = pack.measure(s.measures.value(0));
         if (m == nullptr || !shapeIsOneSided(m->shape)) continue;
 
