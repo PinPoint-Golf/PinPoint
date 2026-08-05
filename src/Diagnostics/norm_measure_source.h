@@ -111,14 +111,14 @@ public:
         // a reading can be a deviation that is on neither tail. They agreed before this only
         // because every shipped preset has goodMaxZ >= 1 — an accident, now an asserted invariant
         // (gradePolicyIsOrdered, norm.h).
-        const NormBandEdges e = bandEdgesOf(*res.norm, m_policy, -1.0, shape);
+        const NormBandEdges e = bandEdgesOf(*res.norm, shape, m_policy, -1.0);
 
         r.hasCorridor     = true;
         r.greenLo         = e.idealLo;
         r.greenHi         = e.idealHi;
         r.lowOpen         = e.lowOpen;
         r.highOpen        = e.highOpen;
-        r.grade           = grade(v->value, *res.norm, m_policy, shape);
+        r.grade           = grade(v->value, *res.norm, shape, m_policy);
         r.implausible     = res.norm->isImplausible(v->value);
         r.normContextId   = res.contextId;
         r.normCohort      = res.cohort();

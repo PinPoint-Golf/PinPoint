@@ -506,6 +506,7 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/anatomy_vocabulary.cpp
         src/Diagnostics/measure_facets.h
         src/Diagnostics/measure_facets.cpp
+        src/Diagnostics/measure_vocabulary.h
         src/Diagnostics/characteristic.h
         src/Diagnostics/characteristic.cpp
         # The five content registries' shared machinery: the issue vocabulary, LoadResult<T>, and
@@ -529,6 +530,7 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/dag_layout.h
         src/Diagnostics/dag_layout.cpp
         src/Diagnostics/norm.h
+        src/Diagnostics/norm.cpp
         src/Diagnostics/context_tree.h
         src/Diagnostics/context_tree.cpp
         src/Diagnostics/norm_pack.h
@@ -2715,6 +2717,7 @@ if(PINPOINT_BUILD_TOOLS)
         # content in src/Resources/diagnostics/norms.json, so the offline stack needs the norm
         # stack too. Omit these and swinglab_run / in-app re-analyse fail at link time.
         src/Diagnostics/pack_io.cpp
+        src/Diagnostics/norm.cpp
         src/Diagnostics/norm_pack.cpp
         src/Diagnostics/context_tree.cpp
         src/Diagnostics/characteristic_pack.cpp
@@ -2935,6 +2938,7 @@ if(PINPOINT_BUILD_QML_TESTS)
             src/Metrics/metric_providers.cpp
             src/Analysis/reference_bands.cpp
             src/Diagnostics/pack_io.cpp
+            src/Diagnostics/norm.cpp
             src/Diagnostics/norm_pack.cpp
             src/Diagnostics/context_tree.cpp
             src/Diagnostics/characteristic_pack.cpp

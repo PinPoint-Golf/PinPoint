@@ -47,7 +47,7 @@ public:
         Norm n;
         n.mu = mu;
         n.sigmaLo = n.sigmaHi = sigma;
-        const NormBandEdges e = bandEdgesOf(n, {}, -1.0, shape);
+        const NormBandEdges e = bandEdgesOf(n, shape);
 
         MeasureReading r;
         r.value       = value;
@@ -56,7 +56,7 @@ public:
         r.greenHi     = e.idealHi;
         r.lowOpen     = e.lowOpen;
         r.highOpen    = e.highOpen;
-        r.grade       = grade(value, n, {}, shape);
+        r.grade       = grade(value, n, shape);
         m[id]         = r;
     }
     // A reading outside what its norm is willing to believe.

@@ -43,7 +43,7 @@ pp_add_test(wrist_angle_sampling_test SOURCES wrist_angle_sampling_test.cpp)
 # reference_bands.h now pulls Diagnostics -> Metrics -> Analysis transitively (metric_reducer.h
 # includes swing_analysis.h non-relatively), so any test touching it needs all three on the path.
 set(NORM_INC ${SRC}/Diagnostics ${SRC}/Metrics ${ANALYSIS})
-set(NORM_SRC ${SRC}/Diagnostics/norm_pack.cpp ${SRC}/Diagnostics/context_tree.cpp
+set(NORM_SRC ${SRC}/Diagnostics/norm.cpp ${SRC}/Diagnostics/norm_pack.cpp ${SRC}/Diagnostics/context_tree.cpp
              # Every registry loader reports through the shared issue vocabulary and returns a
              # LoadResult<T>, and both are defined in pack_io.cpp — so it travels with the pack the
              # way reference_pack.cpp does, on every link line that compiles one of them.
@@ -553,7 +553,7 @@ pp_add_test(characteristic_pack_test
 # pass by watching the fix rather than the fault. It reads references.json itself, through
 # PP_CORE_REFERENCES_PATH, precisely so the validator and the content are gated separately.
 pp_add_test(core_pack_test
-    SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK} ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+    SOURCES ${DIAG}/tests/core_pack_test.cpp ${DIAG_PACK} ${DIAG}/norm.cpp ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
             ${DIAG}/file_pack_provider.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS}
     COMPILE_OPTIONS -DPP_CORE_PACK_PATH="${DIAGRES}/core.json"
@@ -621,7 +621,7 @@ pp_add_test(diagnostics_catalogue_integrity_test
             ${SRC}/Metrics/metric_resolver.cpp
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
-            ${ANALYSIS}/reference_bands.cpp ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+            ${ANALYSIS}/reference_bands.cpp ${DIAG}/norm.cpp ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
             ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
             ${DIAG}/merged_norm_provider.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS} ${SRC}/Gui/diagnosticmodel
@@ -643,7 +643,7 @@ set_tests_properties(diagnostics_catalogue_integrity_test PROPERTIES
 # single-tail axis, which must NOT be reported.
 pp_add_test(diagnostics_health_test
     SOURCES ${DIAG}/tests/diagnostics_health_test.cpp ${DIAG}/diagnostics_health.cpp ${DIAG}/screen_pack.cpp ${DIAG}/drill_pack.cpp ${DIAG_PACK}
-            ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+            ${DIAG}/norm.cpp ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
             ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
             ${DIAG}/merged_norm_provider.cpp
             ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
@@ -679,7 +679,7 @@ pp_add_test(dag_layout_test
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 
 # ── Norms ───────────────────────────────────────────────────────────────────
-set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
+set(DIAG_NORM ${DIAG}/norm.cpp ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
               ${DIAG}/pack_io.cpp                  # same pairing as DIAG_PACK
               ${DIAG}/characteristic_pack.cpp ${DIAG}/characteristic.cpp
               ${DIAG}/reference_pack.cpp            # same pairing as DIAG_PACK
@@ -689,7 +689,7 @@ set(DIAG_NORM ${DIAG}/norm_pack.cpp ${DIAG}/context_tree.cpp
 # that an explicit monitor band dominates the z-derived outer edge in BOTH directions — the rule
 # that makes the corridors migrated out of reference_bands.cpp reproduce exactly.
 pp_add_test(norm_test
-    SOURCES ${DIAG}/tests/norm_test.cpp ${DIAG}/norm_pack.cpp ${DIAG}/characteristic_pack.cpp
+    SOURCES ${DIAG}/tests/norm_test.cpp ${DIAG}/norm.cpp ${DIAG}/norm_pack.cpp ${DIAG}/characteristic_pack.cpp
             ${DIAG}/pack_io.cpp          # spelled out with the rest; keep the pairing
             ${DIAG}/characteristic.cpp ${DIAG}/measure_facets.cpp ${DIAG}/anatomy_vocabulary.cpp
             ${DIAG}/reference_pack.cpp   # spelled out rather than DIAG_NORM; keep the pairing

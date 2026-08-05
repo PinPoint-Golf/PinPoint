@@ -29,7 +29,7 @@ namespace pinpoint::analysis {
 
 namespace {
 
-// The Row/nameOf/labelOf/fromName machinery is shared with norm_pack.cpp — see enum_table_p.h,
+// The Row/nameOf/labelOf/fromName machinery is shared with norm.cpp — see enum_table_p.h,
 // which also carries the reason a label is decoded as UTF-8 and a token as Latin-1. What stays here
 // is what is genuinely this file's: one table per enum, so a spelling exists in exactly one place.
 // Every `name` is a stable JSON token and must never change once a pack has shipped with it.

@@ -18,7 +18,7 @@
 
 #include "pack_provider.h"
 
-#include <QFile>
+#include "provider_leaf_p.h"
 
 namespace pinpoint::analysis {
 
@@ -28,41 +28,13 @@ namespace {
 // JSON committed at src/Resources/diagnostics/core.json, from which the resource is built at build
 // time. That split is what lets a community contribution arrive as a pull request against readable
 // content rather than a binary blob.
-class ResourcePackProvider final : public ICharacteristicPackProvider {
+//
+// Nothing else to say, which is the point: loadShipped() carries the PINPOINT_CORE_PACK seam, the
+// open-or-report-an-error, the read-only mark and the Core origin, and it carries the identical
+// versions of all four for the norm set beside it. See provider_leaf_p.h.
+class ResourcePackProvider final : public detail::PackLeaf {
 public:
-    explicit ResourcePackProvider(const QString &resourcePath)
-    {
-        // Tooling/test seam: the Qt resource only exists inside the app binary, so a standalone
-        // test or an offline tool has no way to reach the shipped pack. PINPOINT_CORE_PACK points
-        // at the reviewable JSON in the repo instead. Unset in every normal run.
-        const QByteArray override = qgetenv("PINPOINT_CORE_PACK");
-        const QString    path     = override.isEmpty() ? resourcePath
-                                                       : QString::fromLocal8Bit(override);
-        m_label = path;
-
-        QFile f(path);
-        if (!f.open(QIODevice::ReadOnly)) {
-            m_report.issues.push_back(ValidationIssue{
-                IssueSeverity::Error, QStringLiteral("parse"), path,
-                QStringLiteral("Could not open the core pack at '%1'.").arg(path) });
-            return;
-        }
-
-        PackLoadResult res = loadPack(f.readAll(), path);
-        m_pack             = std::move(res.pack);
-        m_report           = std::move(res.report);
-        m_pack.readOnly    = true;   // the shipped pack is never edited in place
-    }
-
-    const CharacteristicPack &pack() const override { return m_pack; }
-    const ValidationReport   &report() const override { return m_report; }
-    QString                   label() const override { return m_label; }
-    PackOrigin                origin() const override { return PackOrigin::Core; }
-
-private:
-    CharacteristicPack m_pack;
-    ValidationReport   m_report;
-    QString            m_label;
+    explicit ResourcePackProvider(const QString &resourcePath) { loadShipped(resourcePath); }
 };
 
 } // namespace

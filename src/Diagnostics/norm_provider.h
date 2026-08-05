@@ -46,9 +46,14 @@ struct NormResolution {
     bool        overridden = false;
 
     bool  found() const { return norm != nullptr; }
-    Grade grade(double value, const GradePolicy &policy = {}) const
+
+    // NO DEFAULT SHAPE, for the same reason the free grade() has none (norm.h): this resolution
+    // knows only the Norm it found, keyed by a bare measureId — it holds no Measure and cannot look
+    // one up — so the caller, who resolved by measureId and therefore has the Measure in hand, is
+    // the only one who can say which way the corridor opens.
+    Grade grade(double value, Shape shape, const GradePolicy &policy = {}) const
     {
-        return norm ? pinpoint::analysis::grade(value, *norm, policy) : Grade::NotMeasured;
+        return norm ? pinpoint::analysis::grade(value, *norm, shape, policy) : Grade::NotMeasured;
     }
 
     // WHICH COHORT ANSWERED — the third half of the same provenance `contextId` and `overridden`

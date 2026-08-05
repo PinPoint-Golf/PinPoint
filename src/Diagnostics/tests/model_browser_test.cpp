@@ -3484,6 +3484,89 @@ int main(int argc, char **argv)
               "…and its neighbours still load");
     }
 
+    std::printf("=== pack layers: the census names the layers, never \"merged\" ===\n");
+    {
+        // The pack side's counterpart of the norm-set census (norm_pack_test's layers() cases).
+        // MergedPackProvider::label() answers "merged" and origin() answers Core, which is right for
+        // the ASSEMBLY and wrong for anything a user reads: a list of installed packs has to show
+        // the shipped library and their own as separate rows, because that separation is what the
+        // override relationship between them means. layers() is the surface that says so, and this
+        // is what pins it.
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp directory for the pack census is created");
+        QDir dir(tmp.path());
+
+        auto writePack = [&](const char *name, const char *content) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            check(f.open(QIODevice::WriteOnly), name);
+            f.write(content);
+        };
+
+        writePack("user.json",
+                  R"({"id":"user_test","conditions":[{"id":"c_mine","label":"Mine"}],)"
+                  R"("measures":[{"id":"m_mine","kind":"provided","label":"Mine"}]})");
+        writePack("acme.json", R"({"id":"acme","conditions":[{"id":"c_theirs","label":"Theirs"}]})");
+
+        // The SHIPPED pack for core, not a file pack posing as one: read-only and Core are part of
+        // what the census reports, and only the resource leaf sets them.
+        const auto merged = makeMergedPackProvider(makeResourcePackProvider(),
+                                                   makeFilePackProviders(dir.path()));
+
+        const std::vector<PackLayerInfo> ls = merged->layers();
+        check(ls.size() == 3, "one row per layer — the shipped pack and both installed ones");
+
+        bool sawImplementationWord = false;
+        for (const PackLayerInfo &l : ls)
+            if (l.id == QLatin1String("merged") || l.label == QLatin1String("merged"))
+                sawImplementationWord = true;
+        check(!sawImplementationWord, "…and none of them is the assembly's own name for itself");
+        check(merged->label() == QLatin1String("merged")
+                  && merged->origin() == PackOrigin::Core,
+              "label()/origin() still answer for the ASSEMBLY — the census is layers(), not those");
+
+        if (ls.size() == 3) {
+            // SHIPPED FIRST, and the order is the override order: a reader of the list has to be
+            // able to take "later wins" from the layout rather than from a legend.
+            check(ls[0].id == QLatin1String("core") && ls[0].origin == PackOrigin::Core
+                      && ls[0].readOnly,
+                  "the shipped pack leads, named by its own id, and is read-only");
+            // ORIGIN BY FILE NAME, as makeFilePackProviders() decides it: `user.json` is the file
+            // the editor writes, so it may override core; anything else was imported.
+            check(ls[1].id == QLatin1String("user_test") && ls[1].origin == PackOrigin::LocalUser
+                      && !ls[1].readOnly,
+                  "the user's own pack is next, and is not read-only");
+            check(ls[2].id == QLatin1String("acme") && ls[2].origin == PackOrigin::Community,
+                  "and an imported pack is Community");
+
+            // The counts are the LAYER's, not the assembly's — that is the whole reason a census
+            // beats reading pack() and calling it one thing.
+            check(ls[1].conditionCount == 1 && ls[1].measureCount == 1,
+                  "each row counts what ITS OWN file carries");
+            check(ls[2].conditionCount == 1 && ls[2].measureCount == 0,
+                  "…including a layer that carries conditions and no measures");
+            check(ls[0].conditionCount > 1 && ls[0].measureCount > 1,
+                  "…and the shipped row counts the shipped library");
+
+            // Nothing collides here, so the layers have to add up to the assembly. A row silently
+            // reporting the merged totals would pass every check above and fail this one.
+            int conditions = 0;
+            for (const PackLayerInfo &l : ls) conditions += l.conditionCount;
+            check(conditions == int(merged->pack().conditions.size()),
+                  "with no collisions the layer counts sum to the assembled library");
+        }
+
+        // A leaf IS its own single layer — which is what makes the merged override meaningful.
+        const auto leaf = makeResourcePackProvider();
+        check(leaf->layers().size() == 1 && leaf->layers().front().id == QLatin1String("core"),
+              "a leaf provider reports itself, named by the pack's id rather than its file path");
+
+        // And a file leaf that read nothing reports NO layer: an absent user pack is the normal
+        // case, and a row the user cannot act on and did not create is indistinguishable from a
+        // real but empty pack they authored.
+        const auto absent = makeFilePackProvider(dir.filePath(QStringLiteral("nothing.json")));
+        check(absent->layers().empty(), "a pack file that is not there is not a layer");
+    }
+
     // Leave no user pack behind: a test with a side effect on the product is not a test.
     QFile::remove(userPackPath());
     QFile::remove(userNormPath());

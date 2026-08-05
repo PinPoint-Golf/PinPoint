@@ -99,7 +99,7 @@ CorridorPlot layoutCorridorPlot(const Norm &norm, Shape shape, const std::vector
     // The edges that GRADE. bandEdgesOf() is the one definition grade() applies, monitor-band
     // precedence included; recomputing them here is exactly how a surface ends up drawing a
     // corridor the app does not use.
-    const NormBandEdges edges = bandEdgesOf(norm, policy, /*marginOverride*/ -1.0, shape);
+    const NormBandEdges edges = bandEdgesOf(norm, shape, policy, /*marginOverride*/ -1.0);
     p.lowOpen  = edges.lowOpen;
     p.highOpen = edges.highOpen;
 
@@ -192,7 +192,7 @@ CorridorPlot layoutCorridorPlot(const Norm &norm, Shape shape, const std::vector
         if (norm.isImplausible(v)) { ++p.implausible; continue; }
         clean.push_back(v);
 
-        switch (grade(v, norm, policy, shape)) {
+        switch (grade(v, norm, shape, policy)) {
         case Grade::Ideal:  ++p.ideal;  break;
         case Grade::Good:   ++p.good;   break;
         case Grade::Watch:  ++p.watch;  break;

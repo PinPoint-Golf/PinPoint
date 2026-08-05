@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "characteristic.h"        // Measure
+#include "measure_vocabulary.h"    // Measure
 #include "../Metrics/metric_reducer.h"
 
 #include <QByteArray>

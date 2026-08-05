@@ -960,4 +960,186 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     return out;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// THE HUB
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Everything that is not a condition gets this instead: one box in the middle, what points at it
+// down the left, what it points to down the right, and a line from each of them to the middle.
+//
+// It lives HERE, next to layoutDag(), and it did not always. It was written inline in the browser
+// façade, in among the pack lookups that gather the neighbours — a hundred lines of arithmetic
+// re-declaring the node and edge schema by hand, in a file nothing points a geometry test at.
+//
+// What that cost is recorded in section H3 below, in the arithmetic that used to be wrong. The
+// summary is that a picture shipped with lines drawn between two points belonging to neither box at
+// either end of them, and it survived because the ONE case anybody looked at — a column holding a
+// single neighbour — cancels the error out. That is precisely the class of defect this module was
+// carved out of the view to make assertable, and the hub was the one picture still outside it.
+//
+// ── H0. What it does NOT do ─────────────────────────────────────────────────
+//
+// No ranking, no walk, no waypoints, no fan, no gutter. A one-hop picture cannot cross a rank, so
+// nothing can be routed through a third box; every line runs from a column straight to the middle,
+// and the only thing that could go wrong is where its two ends are. Reusing section 9's machinery
+// here would be reusing an answer to a question this picture does not ask.
+//
+// It also draws no headings and never reports `truncated`. The hub is handed a list and draws all of
+// it, so there is nothing to count as hidden; and a word over a column of corridors would have to
+// say something about the relation, which is the caller's knowledge and not this function's.
+
+DagLayout layoutHub(const HubGraph &hub, const DagLayoutOptions &opt)
+{
+    DagLayout out;
+    if (hub.hubId.isEmpty()) return out;   // as an unknown focus does: nothing, never a guess
+
+    // ── H1. Three columns of ONE width ──────────────────────────────────────
+    //
+    // Every box is `maxW` wide — the hub's and both columns' — rather than fitted to its label the
+    // way a ranked node is. A hub column is a LIST of peers: a measure, its corridors, the signals
+    // that read it. Sizing each to its own text makes a ragged edge down the column that reads as a
+    // hierarchy, and the reader is being shown things that are all the same kind of thing. The
+    // labels here are also not the caller's to shorten — a corridor's context, a paper's title —
+    // so fitting would mostly produce a column of boxes all clamped at the cap anyway.
+    //
+    // The picture is therefore THREE columns wide whatever it holds, including when one side is
+    // empty. That is deliberate: the hub stays in the middle of the canvas and the empty side stays
+    // visibly empty. Collapsing to two columns would slide the hub sideways and make "nothing points
+    // at this" look like a picture that had been cropped.
+    const double colW = opt.maxW;
+    const double rowH = opt.nodeH + opt.gapY;
+
+    std::vector<const HubNeighbour *> left, right;
+    for (const HubNeighbour &n : hub.neighbours) (n.side < 0 ? left : right).push_back(&n);
+
+    const double colH   = std::max({ double(left.size()), double(right.size()), 1.0 }) * rowH;
+    const double height = colH + opt.nodeH;
+    const double width  = opt.padX * 2.0 + colW * 3.0 + opt.gapX * 2.0;
+
+    const double leftX   = opt.padX;
+    const double centreX = opt.padX + colW + opt.gapX;
+    const double rightX  = centreX + colW + opt.gapX;
+    const double hubY    = (height - opt.nodeH) / 2.0;
+
+    // ── H2. Both columns centred on the hub's own row ───────────────────────
+    //
+    // Each column is centred in the same box, so a side holding one neighbour puts it level with the
+    // hub and a side holding six spreads evenly above and below it. The two sides are centred
+    // INDEPENDENTLY rather than sharing a top: one reader of a measure and five conditions detected
+    // by it is the ordinary shape, and aligning the tops would leave the single line running
+    // diagonally across most of the picture to reach a box at the top of an otherwise empty column.
+    //
+    // What a column actually SPANS is `n * rowH - gapY`, because the last box carries no trailing
+    // gap. Centring on `n * rowH` instead — which is what the inline version did — biases every
+    // column half a gap upwards, so a single neighbour sat seven pixels above the hub it was joined
+    // to and its line ran very slightly downhill for no reason anybody could name. Small, and worth
+    // getting right precisely because it is the case that used to be held up as proof the arithmetic
+    // was sound.
+    auto place = [&](const std::vector<const HubNeighbour *> &col, double x, DagNodeKind kind,
+                     int rank) {
+        const double span = double(col.size()) * rowH - opt.gapY;
+        const double top  = (height - span) / 2.0;
+        for (size_t i = 0; i < col.size(); ++i) {
+            DagNode n;
+            n.id    = col[i]->id;
+            n.label = col[i]->label;
+            n.kind  = kind;
+            n.rank  = rank;
+            n.x     = x;
+            n.y     = top + double(i) * rowH;
+            n.w     = colW;
+            n.h     = opt.nodeH;
+            out.nodes.push_back(n);
+        }
+    };
+    // Cause and Effect, not one kind for both. The left column points at the hub and the right is
+    // pointed at by it, which is the same claim `rank` makes and the same one the arrangement makes;
+    // typing both sides the same would have the node contradict its own position. Rank is ±1 because
+    // that is literally the distance — a hub picture is one hop by construction.
+    place(left,  leftX,  DagNodeKind::Cause,  -1);
+    place(right, rightX, DagNodeKind::Effect, +1);
+
+    DagNode centre;
+    centre.id    = hub.hubId;
+    centre.label = hub.hubLabel;
+    centre.kind  = DagNodeKind::Focus;
+    centre.rank  = 0;
+    centre.x     = centreX;
+    centre.y     = hubY;
+    centre.w     = colW;
+    centre.h     = opt.nodeH;
+    out.nodes.push_back(centre);   // last, so the two columns keep the order the caller gave them
+
+    // ── H3. Every line runs from a right-hand edge to a left-hand edge ──────
+    //
+    // The whole geometry of a hub line, and the whole of what was once wrong with it:
+    //
+    //   The TAIL always sits on the right-hand edge of the box it leaves, and the HEAD always on
+    //   the left-hand edge of the box it enters. Which of the two boxes is the hub does not enter
+    //   into it.
+    //
+    // Stated that way it is one rule with no cases in it. It used to be four loose doubles crossed
+    // by a pair of ternaries, and for the RIGHT-hand column the crossing paired the neighbour's x
+    // with the hub's y and the hub's x with the neighbour's y — two points belonging to neither box,
+    // so the line was drawn between thin air and thin air. It also left BOTH ends on the hub's left
+    // edge, so a line to a node on the right set off across the hub box to get there.
+    //
+    // It shipped, and it shipped because of the case it does not break. A column holding exactly one
+    // neighbour centres that neighbour on the hub's own row, so the two y values are equal and the
+    // crossed pair lands correctly by accident. Most types in the browser have one relation each way,
+    // so most pictures were right; the left column was right in every case, which made the whole
+    // thing look like a rendering fault rather than an arithmetic one. It is asserted now, on a hub
+    // with several neighbours a side, in dag_layout_test.
+    for (const DagNode &n : out.nodes) {
+        if (n.kind == DagNodeKind::Focus) continue;
+        const bool isLeft = n.kind == DagNodeKind::Cause;
+
+        // The two ends as POINTS, each x kept with its own y — which is the invariant the crossing
+        // broke. `tail` is on some box's right edge, `head` on some box's left edge, always.
+        const QPointF tail = isLeft ? QPointF(n.x + n.w, n.y + n.h / 2.0)
+                                    : QPointF(centreX + colW, hubY + opt.nodeH / 2.0);
+        const QPointF head = isLeft ? QPointF(centreX, hubY + opt.nodeH / 2.0)
+                                    : QPointF(n.x, n.y + n.h / 2.0);
+
+        DagEdge e;
+        // Direction is a claim about the RELATION and says nothing about which end is drawn where:
+        // a left-column node points at the hub, a right-column one is pointed at by it, and both
+        // lines are drawn left to right.
+        e.from = isLeft ? n.id : hub.hubId;
+        e.to   = isLeft ? hub.hubId : n.id;
+        e.x1   = tail.x();  e.y1 = tail.y();
+        e.x2   = head.x();  e.y2 = head.y();
+
+        // Horizontal tangents at both ends, so the curve leaves and arrives along the edge it is
+        // anchored to rather than cutting the corner of the box. Same half-span offset section 9
+        // uses between ranks — one hop of a routed causal line and one hub line are the same drawing
+        // and must not be two arithmetics.
+        const double dx = (e.x2 - e.x1) * 0.5;
+        e.c1x = e.x1 + dx;  e.c1y = e.y1;
+        e.c2x = e.x2 - dx;  e.c2y = e.y2;
+
+        // No arrowhead, and `symmetric` says why rather than the view being left to infer it from a
+        // missing triangle. A hub relation is not causation: a corridor grades a measure and a signal
+        // reads one, and an arrow on either would be read as a claim about cause. What the hub states
+        // is adjacency, and the columns already say which way round it runs.
+        e.symmetric = true;
+        e.tip       = false;
+        // One rung for every line. Weight encodes STRENGTH, and no relation drawn here has one — a
+        // paper does not cite a condition strongly. Varying it would invent an ordering.
+        e.weight    = 1.0;
+
+        out.edges.push_back(e);
+    }
+
+    // ── H4. The bounding box ────────────────────────────────────────────────
+    // Computed rather than measured, because it is fixed by the three-column rule above and the view
+    // scrolls inside it. The origin is already (0, 0) — nothing here is ever placed at a negative
+    // coordinate — so unlike section 7 there is nothing to normalise.
+    out.width  = width;
+    out.height = height;
+    out.focusX = centreX + colW / 2.0;
+    out.focusY = hubY + opt.nodeH / 2.0;
+    return out;
+}
+
 } // namespace pinpoint::analysis

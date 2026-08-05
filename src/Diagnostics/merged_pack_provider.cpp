@@ -95,8 +95,37 @@ public:
 
     const CharacteristicPack &pack() const override { return m_pack; }
     const ValidationReport   &report() const override { return m_report; }
-    QString                   label() const override { return QStringLiteral("merged"); }
-    PackOrigin                origin() const override { return PackOrigin::Core; }
+
+    // "merged" and Core are the ASSEMBLY's own name for itself, and they stay. They are what a
+    // provider is called when something asks the assembly what it is — the id stamped on the
+    // library, matching m_pack.id above — and Core is right because the assembly is read-only-ish
+    // by construction: it is not any single layer, so no writer can be pointed at it.
+    //
+    // They are NOT a census, and the temptation to fix them into one is what layers() exists to
+    // remove. A user reading a list of installed packs must never see the word "merged": they need
+    // the shipped library and their own as separate rows, because that separation is what the
+    // override relationship between them means. Making label() return, say, the core layer's label
+    // would half-answer that — it would name one layer and silently drop the rest, which is worse
+    // than an implementation word a UI has no reason to render. Exactly the resolution the norm
+    // side reached; MergedNormProvider::label() still returns "merged" beside its own layers().
+    QString    label() const override { return QStringLiteral("merged"); }
+    PackOrigin origin() const override { return PackOrigin::Core; }
+
+    // The CHILDREN, shipped first — never this object. The counterpart of
+    // MergedNormProvider::layers(), and the same doctrine: one row per layer, named by the pack's
+    // own id, carrying that layer's OWN counts rather than the assembly's. A layer that read
+    // nothing reports no row (see FilePackProvider::layers()), so an installation with no user
+    // packs is a census of one rather than a census with a blank in it.
+    std::vector<PackLayerInfo> layers() const override
+    {
+        std::vector<PackLayerInfo> out;
+        if (m_core)
+            for (const PackLayerInfo &i : m_core->layers()) out.push_back(i);
+        for (const auto &up : m_user)
+            if (up)
+                for (const PackLayerInfo &i : up->layers()) out.push_back(i);
+        return out;
+    }
 
 private:
     QString qualify(const QString &packId, const QString &id) const

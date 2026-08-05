@@ -327,9 +327,13 @@ int main()
             }
 
             ++rows;
-            n.hasExplicitMonitor() ? ++withMonitor : ++withoutMonitor;
+            // Shape::Target throughout this sweep: it is testing NormBandProvider, which — per its
+            // own comment in reference_bands.cpp — only ever grades the migrated (DOF, position)
+            // wrist-angle cells, all of them two-sided, and Band itself has no way to express an
+            // open tail.
+            n.hasExplicitMonitor(Shape::Target) ? ++withMonitor : ++withoutMonitor;
 
-            const NormBandEdges e = bandEdgesOf(n, policy);
+            const NormBandEdges e = bandEdgesOf(n, Shape::Target, policy);
             Band b;
             b.valid   = true;
             b.greenLo = e.idealLo;
@@ -347,7 +351,7 @@ int main()
 
             for (double v : values) {
                 ++samples;
-                const PpRag viaGrade = ragOf(grade(v, n, policy));
+                const PpRag viaGrade = ragOf(grade(v, n, Shape::Target, policy));
                 const PpRag viaBand  = classifyDelta(v, b);
                 if (viaGrade != viaBand) {
                     ++mismatch;

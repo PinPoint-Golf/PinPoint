@@ -3394,9 +3394,18 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
     // dag_layout.h; QML positions nothing.
     const DagLayout l = layoutDag(pack(), conditionId, opt);
 
-    const bool hideWeak     = options.value(QStringLiteral("hideWeak")).toBool();
-    const bool hideProposed = options.value(QStringLiteral("hideProposed")).toBool();
+    return marshalLayout(l, options.value(QStringLiteral("hideWeak")).toBool(),
+                         options.value(QStringLiteral("hideProposed")).toBool());
+}
 
+// ONE marshaller, for both pictures. The causal DAG and the hub are different layouts and the same
+// OUTPUT — DagLayout in, the map ModelGraph.qml reads out — so every key the view knows about is
+// written in exactly one place. The hub used to write its own copy of this by hand, which is how it
+// came to declare a literal `available: true` to satisfy a contract nothing was holding it to, and
+// how its edge geometry drifted far enough to draw a line between two points that were on no box at
+// all.
+QVariantMap ModelBrowser::marshalLayout(const DagLayout &l, bool hideWeak, bool hideProposed) const
+{
     QVariantList nodes;
     for (const DagNode &n : l.nodes) {
         QVariantMap m;
@@ -6864,7 +6873,7 @@ QString ModelBrowser::swingTone(const Measure &m, const std::optional<double> &v
 
     // The measure's SHAPE decides which tails grade — one-sidedness is a property of the quantity,
     // invariant across contexts, which is why it lives on the measure and not on the norm.
-    const Grade g = grade(*value, *res.norm, gradePolicyByName(m_policyName), m.shape);
+    const Grade g = grade(*value, *res.norm, m.shape, gradePolicyByName(m_policyName));
 
     // NotMeasured here can only mean implausible (a norm resolved, and there is a value). The
     // reading is SHOWN — hiding it is what makes a mis-tracked ball look like an absence — but it
@@ -7093,113 +7102,51 @@ QVariantMap ModelBrowser::neighbourhood(const QString &type, const QString &id,
         return {};
     }
 
-    // ── Positions ───────────────────────────────────────────────────────────
-    std::vector<const Rel *> left, right;
-    for (const Rel &r : rels) (r.side < 0 ? left : right).push_back(&r);
+    // ── Geometry: not here ──────────────────────────────────────────────────
+    //
+    // Everything above this line is DOMAIN work — which pack objects stand next to this one, and
+    // what each of them is called. Everything below it is arithmetic, and arithmetic belongs in
+    // dag_layout.cpp where a test can reach it. It did not always: this function used to place the
+    // three columns and compute the cubics itself, in a hundred lines nothing pointed a geometry
+    // test at, and it shipped a coordinate crossing that drew half its lines between two points
+    // lying on no box at all. The story is told at the new site, next to the arithmetic it is about.
+    HubGraph hub;
+    hub.hubId    = id;
+    hub.hubLabel = focusLabel;
+    for (const Rel &r : rels) hub.neighbours.push_back({ r.id, r.label, r.side });
 
-    const double rowH   = nodeH + gapY;
-    const double colH   = std::max({ double(left.size()), double(right.size()), 1.0 }) * rowH;
-    const double height = colH + nodeH;
-    const double width  = padX * 2 + colW * 3 + gapX * 2;
+    DagLayoutOptions lopt;
+    lopt.nodeH = nodeH;
+    lopt.gapY  = gapY;
+    lopt.gapX  = gapX;
+    lopt.maxW  = colW;   // the hub's column width, not a cap — see layoutHub()
+    lopt.padX  = padX;
 
-    auto place = [&](const std::vector<const Rel *> &col, double x, QVariantList &nodes) {
-        const double top = (height - col.size() * rowH) / 2.0;
-        for (size_t i = 0; i < col.size(); ++i) {
-            QVariantMap n;
-            n.insert(QStringLiteral("id"), col[i]->id);
-            n.insert(QStringLiteral("kind"), QStringLiteral("cause"));
-            n.insert(QStringLiteral("label"), col[i]->label);
-            n.insert(QStringLiteral("statusLabel"), col[i]->detail);
-            n.insert(QStringLiteral("x"), x);
-            n.insert(QStringLiteral("y"), top + i * rowH);
-            n.insert(QStringLiteral("w"), colW);
-            n.insert(QStringLiteral("h"), nodeH);
-            n.insert(QStringLiteral("available"), true);
-            decorateNode(n, col[i]->type, col[i]->id);
-            nodes.append(n);
-        }
-    };
+    // The same marshaller the causal DAG goes through. Nothing here re-declares a key.
+    QVariantMap out = marshalLayout(layoutHub(hub, lopt), /*hideWeak*/ false,
+                                    /*hideProposed*/ false);
 
-    const double leftX   = padX;
-    const double centreX = padX + colW + gapX;
-    const double rightX  = centreX + colW + gapX;
-    const double focusY  = (height - nodeH) / 2.0;
+    // ── What only this side knows ───────────────────────────────────────────
+    //
+    // The layout is handed ids and labels and no types, because a type is a fact about the pack and
+    // the pack is not its business. So the colour key, the glyph, the source and the one line a node
+    // can say about itself are put on afterwards, exactly as graph() does for the causal DAG — one
+    // habit for both pictures.
+    QHash<QString, const Rel *> byId;
+    for (const Rel &r : rels) byId.insert(r.id, &r);
 
     QVariantList nodes;
-    place(left, leftX, nodes);
-    place(right, rightX, nodes);
-
-    QVariantMap focus;
-    focus.insert(QStringLiteral("id"), id);
-    focus.insert(QStringLiteral("kind"), QStringLiteral("focus"));
-    focus.insert(QStringLiteral("label"), focusLabel);
-    focus.insert(QStringLiteral("x"), centreX);
-    focus.insert(QStringLiteral("y"), focusY);
-    focus.insert(QStringLiteral("w"), colW);
-    focus.insert(QStringLiteral("h"), nodeH);
-    focus.insert(QStringLiteral("available"), true);
-    decorateNode(focus, type, id);
-    nodes.append(focus);
-
-    QVariantList edges;
-    for (const QVariant &v : nodes) {
-        const QVariantMap n = v.toMap();
-        if (n.value(QStringLiteral("kind")).toString() == QStringLiteral("focus")) continue;
-        const double nx     = n.value(QStringLiteral("x")).toDouble();
-        const double ny      = n.value(QStringLiteral("y")).toDouble();
-        const bool   isLeft = nx < centreX;
-
-        // The two ends as POINTS, each x kept with its own y.
-        //
-        // These used to be four loose doubles crossed by a pair of ternaries, and for the RIGHT
-        // column the crossing paired the node's x with the focus's y and the focus's x with the
-        // node's y — two points belonging to neither box, so the line was drawn between thin air
-        // and thin air. It also left both ends on the focus's LEFT edge, so a line to a node on the
-        // right set off across the focus box to get there. The left column happened to come out
-        // right, which is why it looked like a rendering fault rather than an arithmetic one.
-        const double nodeX  = isLeft ? nx + colW : nx;                 // the edge facing the focus
-        const double nodeY  = ny + nodeH / 2.0;
-        const double focX   = isLeft ? centreX : centreX + colW;       // …and the focus's, facing back
-        const double focY   = focusY + nodeH / 2.0;
-
-        // Direction is a claim about the RELATION and says nothing about which end is where: a
-        // left-column node points at the focus, a right-column one is pointed at by it.
-        const double x1 = isLeft ? nodeX : focX;
-        const double y1 = isLeft ? nodeY : focY;
-        const double x2 = isLeft ? focX  : nodeX;
-        const double y2 = isLeft ? focY  : nodeY;
-
-        QVariantMap e;
-        e.insert(QStringLiteral("from"), isLeft ? n.value(QStringLiteral("id")) : QVariant(id));
-        e.insert(QStringLiteral("to"), isLeft ? QVariant(id) : n.value(QStringLiteral("id")));
-        e.insert(QStringLiteral("x1"), x1);
-        e.insert(QStringLiteral("y1"), y1);
-        e.insert(QStringLiteral("x2"), x2);
-        e.insert(QStringLiteral("y2"), y2);
-        // Horizontal tangents at both ends, so the curve leaves and arrives along the edge it is
-        // anchored to rather than cutting the corner of the box.
-        e.insert(QStringLiteral("c1x"), (x1 + x2) / 2.0);
-        e.insert(QStringLiteral("c1y"), y1);
-        e.insert(QStringLiteral("c2x"), (x1 + x2) / 2.0);
-        e.insert(QStringLiteral("c2y"), y2);
-        e.insert(QStringLiteral("weight"), 1.0);
-        e.insert(QStringLiteral("symmetric"), true);   // one hop, no direction to claim
-        e.insert(QStringLiteral("tip"), false);
-        e.insert(QStringLiteral("label"), QString());
-        e.insert(QStringLiteral("labelX"), (x1 + x2) / 2.0);
-        e.insert(QStringLiteral("labelY"), (y1 + y2) / 2.0);
-        edges.append(e);
+    for (const QVariant &v : out.value(QStringLiteral("nodes")).toList()) {
+        QVariantMap   n   = v.toMap();
+        const QString nid = n.value(QStringLiteral("id")).toString();
+        if (const Rel *r = byId.value(nid, nullptr)) {
+            decorateNode(n, r->type, nid);
+        } else {
+            decorateNode(n, type, nid);   // the hub itself
+        }
+        nodes.append(n);
     }
-
-    QVariantMap out;
     out.insert(QStringLiteral("nodes"), nodes);
-    out.insert(QStringLiteral("edges"), edges);
-    out.insert(QStringLiteral("headings"), QVariantList());
-    out.insert(QStringLiteral("width"), width);
-    out.insert(QStringLiteral("height"), height);
-    out.insert(QStringLiteral("focusX"), centreX + colW / 2.0);
-    out.insert(QStringLiteral("focusY"), focusY + nodeH / 2.0);
-    out.insert(QStringLiteral("truncated"), false);
     return out;
 }
 

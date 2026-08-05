@@ -18,37 +18,26 @@
 
 #include "norm_provider.h"
 
+#include "provider_leaf_p.h"
+
 namespace pinpoint::analysis {
 
 namespace {
 
 // A norm set already in memory, presented through the provider seam. See makeMemoryNormProvider()'s
 // comment for WHY this exists: it is the editor's unsaved working copy, not a test double.
-class MemoryNormProvider final : public INormProvider {
+//
+// adopt() validates it on construction exactly as a loaded set is validated, and the argument for
+// doing so on advisory content lives with it in provider_leaf_p.h. The tree is handed in for the
+// same reason it is everywhere on this side: a norm set does not carry one, and resolution is
+// meaningless without it.
+class MemoryNormProvider final : public detail::NormLeaf {
 public:
     MemoryNormProvider(NormPack pack, ContextTree contexts, QString label, PackOrigin origin)
-        : m_pack(std::move(pack)), m_contexts(std::move(contexts)), m_label(std::move(label)),
-          m_origin(origin)
     {
-        // Validated on construction exactly as a loaded set is. A user layer routinely fails
-        // referential checks on its own — its rows name measures it does not itself contain — so
-        // this report is advisory and the caller reads the ASSEMBLED one. Skipping it entirely
-        // would still be wrong: a duplicate key or a mismatched unit is a fault of this set alone.
-        m_report = validateNormPack(m_pack);
+        m_contexts = std::move(contexts);
+        adopt(std::move(pack), std::move(label), origin);
     }
-
-    const NormPack         &norms() const override { return m_pack; }
-    const ContextTree      &contexts() const override { return m_contexts; }
-    const ValidationReport &report() const override { return m_report; }
-    QString                 label() const override { return m_label; }
-    PackOrigin              origin() const override { return m_origin; }
-
-private:
-    NormPack         m_pack;
-    ContextTree      m_contexts;
-    ValidationReport m_report;
-    QString          m_label;
-    PackOrigin       m_origin;
 };
 
 } // namespace

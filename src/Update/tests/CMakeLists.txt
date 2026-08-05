@@ -50,8 +50,11 @@ pp_add_test(update_controller_policy_test
             ${SRC}/Gui/athlete/athlete_controller.cpp
             ${SRC}/Core/tests/pp_log_stub.cpp
             # athlete_controller.cpp includes Diagnostics/norm_pack.h for Cohort/cohortFor()/
-            # cohortToMap(), so the definitions have to come with it. norm_pack.cpp needs
-            # context_tree.cpp in turn — the same pairing every other suite that compiles it uses.
+            # cohortToMap(), so the definitions have to come with it. cohortFor() and cohortToMap's
+            # sexFromName/ageBandFromName are defined in norm.cpp now (norm.h's out-of-line
+            # functions), so it comes along too. norm_pack.cpp needs context_tree.cpp in turn — the
+            # same pairing every other suite that compiles it uses.
+            ${SRC}/Diagnostics/norm.cpp
             ${SRC}/Diagnostics/norm_pack.cpp
             ${SRC}/Diagnostics/context_tree.cpp
             # The registries' shared machinery — the issue vocabulary and LoadResult<T> — so it

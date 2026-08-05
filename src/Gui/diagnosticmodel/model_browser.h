@@ -36,6 +36,10 @@
 #include <memory>
 #include <vector>
 
+// Forward-declared rather than included: only the two layout marshallers below name it, and both
+// are private. dag_layout.h is a heavy header for a signature.
+namespace pinpoint::analysis { struct DagLayout; }
+
 // ModelBrowser — the whole Diagnostic Model panel's model: one connected content graph, read and
 // edited through one object.
 //
@@ -667,9 +671,21 @@ private:
     // author whose content they are about to change.
     QString sourceOf(const QString &id) const;
 
-    // The neighbourhood of a non-condition object, in the same shape layoutDag() returns.
+    // The neighbourhood of a non-condition object. Gathers the domain data, hands it to
+    // layoutHub(), and marshals the result through marshalLayout() — the SAME function the causal
+    // DAG goes through, because QML reads one schema and a second hand-written copy of it is how
+    // this view once shipped lines drawn between two points belonging to neither box.
     QVariantMap neighbourhood(const QString &type, const QString &id,
                               const QVariantMap &options) const;
+
+    // A DagLayout as the graph delegate reads it. ONE marshaller for both pictures: the causal DAG
+    // and the hub are two layouts, and every key QML reads is declared here exactly once.
+    //
+    // `hideWeak` and `hideProposed` are the two view switches that drop whole EDGES, and they are
+    // applied here rather than by the caller because dropping an edge after marshalling would mean
+    // filtering a QVariantMap on a string it had just finished writing.
+    QVariantMap marshalLayout(const pinpoint::analysis::DagLayout &l,
+                              bool hideWeak, bool hideProposed) const;
     // The type's own colour key and glyph, and whatever one line a node can say about itself.
     void        decorateNode(QVariantMap &node, const QString &type, const QString &id) const;
 

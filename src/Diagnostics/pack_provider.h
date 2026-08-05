@@ -44,6 +44,26 @@ namespace pinpoint::analysis {
 // So the protection is kept exactly where it was aimed, and no wider.
 enum class PackOrigin { Core, LocalUser, Community };
 
+// One layer in an assembled library, for the census a UI shows. The counterpart of NormSetInfo, and
+// deliberately the same idea: a provider that assembles others reports its CHILDREN here, never
+// itself, because "merged" is an implementation word and a user reading a list of installed packs
+// needs to see the shipped library and their own as separate things — that separation is what the
+// override relationship between them means.
+//
+// WHICH COUNTS, and why not all four. A norm set holds one kind of row, so one number says how big
+// it is. A pack holds four (measures, signals, conditions, edges) and reporting all of them would
+// answer a question nobody asks of a layer list. Conditions and measures are what a reader judges a
+// pack BY — the faults it can name, and the things it can measure to name them. Signals and edges
+// are the wiring between those two, so their counts move with them and say nothing on their own.
+struct PackLayerInfo {
+    QString    id;
+    QString    label;
+    PackOrigin origin         = PackOrigin::Core;
+    int        conditionCount = 0;
+    int        measureCount   = 0;
+    bool       readOnly       = true;
+};
+
 class ICharacteristicPackProvider {
 public:
     virtual ~ICharacteristicPackProvider() = default;
@@ -58,6 +78,26 @@ public:
 
     virtual QString label() const = 0;
     virtual PackOrigin origin() const = 0;
+
+    // The layers behind this provider, shipped first. The default reports THIS provider as its own
+    // single layer, which is right for every leaf; only the merged provider overrides it.
+    //
+    // The pack's OWN id names it, not the provider's label: a leaf labels itself with where it was
+    // read from (":/diagnostics/core.json", or a file path), and a file path is not what a pack is
+    // called. The label falls back to it only when the pack has no id to give — a pack that failed
+    // to parse, where naming the file is the most useful thing left to say.
+    //
+    // Defined INLINE, where the norm side's identical default sits in resource_norm_provider.cpp.
+    // Not a stylistic difference: the pack providers are compiled into test targets one .cpp at a
+    // time (core_pack_test links file_pack_provider.cpp and nothing else), so an out-of-line default
+    // would put the definition in a translation unit half its callers never see.
+    virtual std::vector<PackLayerInfo> layers() const
+    {
+        const CharacteristicPack &p    = pack();
+        const QString             name = p.id.isEmpty() ? label() : p.id;
+        return { PackLayerInfo{ name, name, origin(), int(p.conditions.size()),
+                                int(p.measures.size()), p.readOnly } };
+    }
 };
 
 // Where the user's own pack lives. Exposed so the editor writes to the same file the provider

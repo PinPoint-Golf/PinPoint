@@ -18,9 +18,7 @@
 
 #include "norm_provider.h"
 
-#include <QFile>
-
-#include <optional>
+#include "provider_leaf_p.h"
 
 namespace pinpoint::analysis {
 
@@ -124,66 +122,28 @@ namespace {
 // TRUTH is the reviewable JSON committed at src/Resources/diagnostics/, from which the resources
 // are built. That split is what lets a community contribution arrive as a pull request against
 // readable content rather than a binary blob.
-class ResourceNormProvider final : public INormProvider {
+class ResourceNormProvider final : public detail::NormLeaf {
 public:
     ResourceNormProvider(const QString &normsPath, const QString &contextsPath)
     {
-        // Tooling/test seam, mirroring PINPOINT_CORE_PACK: the Qt resource only exists inside the
-        // app binary, so a standalone test or an offline tool has no way to reach the shipped
-        // content. Unset in every normal run.
-        const QString np = overridePath("PINPOINT_CORE_NORMS", normsPath);
-        const QString cp = overridePath("PINPOINT_CORE_CONTEXTS", contextsPath);
-        m_label = np;
-
-        // Contexts first: the norm set's referential validation needs the tree.
-        if (const auto data = readAll(cp, QStringLiteral("context tree"))) {
+        // Contexts FIRST, and the order is deliberate rather than incidental: the tree is what the
+        // norm set's rows are referentially checked against, so a report that lists the tree's own
+        // faults before the corridors that hang on them reads in the order an author would fix them.
+        //
+        // Hand-written where the norm set beside it is loadShipped()'s, because this is the SECOND
+        // shipped file and the leaf skeleton knows about one. Both halves still go through the same
+        // env seam and the same open-or-report — see provider_leaf_p.h; what is spelled here is only
+        // the sequencing and the tree's own loader.
+        const QString cp = detail::overridePath(detail::NormTraits::kContextsEnv, contextsPath);
+        if (const auto data = detail::readShipped(cp, QStringLiteral("context tree"), m_report)) {
             ContextTreeLoadResult res = loadContextTree(*data, cp);
-            m_contexts = std::move(res.tree);
-            appendIssues(res.report);
+            m_contexts                = std::move(res.tree);
+            detail::appendIssues(m_report, res.report);
         }
 
-        if (const auto data = readAll(np, QStringLiteral("norm set"))) {
-            NormPackLoadResult res = loadNormPack(*data, np);
-            m_norms          = std::move(res.pack);
-            m_norms.readOnly = true;   // the shipped set is never edited in place
-            appendIssues(res.report);
-        }
+        // PINPOINT_CORE_NORMS, the label, the read-only mark and the Core origin all come with this.
+        loadShipped(normsPath);
     }
-
-    const NormPack         &norms() const override { return m_norms; }
-    const ContextTree      &contexts() const override { return m_contexts; }
-    const ValidationReport &report() const override { return m_report; }
-    QString                 label() const override { return m_label; }
-    PackOrigin              origin() const override { return PackOrigin::Core; }
-
-private:
-    static QString overridePath(const char *env, const QString &fallback)
-    {
-        const QByteArray ov = qgetenv(env);
-        return ov.isEmpty() ? fallback : QString::fromLocal8Bit(ov);
-    }
-
-    std::optional<QByteArray> readAll(const QString &path, const QString &what)
-    {
-        QFile f(path);
-        if (!f.open(QIODevice::ReadOnly)) {
-            m_report.issues.push_back(ValidationIssue{
-                IssueSeverity::Error, QStringLiteral("parse"), path,
-                QStringLiteral("Could not open the core %1 at '%2'.").arg(what, path) });
-            return std::nullopt;
-        }
-        return f.readAll();
-    }
-
-    void appendIssues(const ValidationReport &r)
-    {
-        for (const ValidationIssue &i : r.issues) m_report.issues.push_back(i);
-    }
-
-    NormPack         m_norms;
-    ContextTree      m_contexts;
-    ValidationReport m_report;
-    QString          m_label;
 };
 
 } // namespace

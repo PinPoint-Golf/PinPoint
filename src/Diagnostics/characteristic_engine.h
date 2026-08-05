@@ -112,8 +112,12 @@ struct MeasureReading {
         Norm n;
         n.mu      = (greenLo + greenHi) / 2.0;
         n.sigmaLo = n.sigmaHi = halfWidth / k;
+        // Shape::Target, explicitly, and not a stand-in for a missing Measure: this factory's own
+        // inputs are a bare (greenLo, greenHi) pair, which is a TWO-SIDED band by construction — a
+        // one-sided producer has no greenHi (or no greenLo) to hand in, so a caller reaching this
+        // path could not express Floor or Ceiling even if it had a Measure to read one off.
         // Qualified: the `grade` MEMBER shadows the free grade() inside this scope.
-        r.grade   = ::pinpoint::analysis::grade(value, n, policy);
+        r.grade   = ::pinpoint::analysis::grade(value, n, Shape::Target, policy);
         return r;
     }
 };

@@ -171,7 +171,7 @@ QVariantMap cohortToMap(const Cohort &cohort);
 //                        preset, so the answer cannot depend on the reader's grade-policy setting
 //
 // Shape checks live HERE and not in the standalone validator for the same reason normUnitMismatch
-// does: shape is a property of the MEASURE (see characteristic.h), a norm row carries only numbers,
+// does: shape is a property of the MEASURE (see measure_vocabulary.h), a norm row carries only numbers,
 // and only the assembled library can join the two.
 ValidationReport validateNormPack(const NormPack &pack);
 

@@ -392,4 +392,47 @@ DagLayout layoutDag(const CharacteristicPack &pack,
                     const QString            &focusId,
                     const DagLayoutOptions   &opt = {});
 
+// ── The hub, for everything that is not a condition ────────────────────────────────────────────
+//
+// A measure, a signal, a corridor, a screen, a drill, a paper, a metric, one causal link: none of
+// them has a causal distance, so none of them can be RANKED, and layoutDag() has nothing to say
+// about any of them. What they do have is one hop in each direction — what points at this, and what
+// this points to — and that is the picture the browser draws when the selected row is not a
+// condition.
+//
+// It is a DIFFERENT layout and deliberately the SAME OUTPUT. The view is one QML file reading one
+// schema; a second result type would fork the marshaller, fork the delegate, and hand the reader two
+// pictures with two sets of habits for the same gesture. DagLayout is what QML already reads, so the
+// hub speaks it — with the fields a one-hop picture has no answer for left at their defaults rather
+// than filled with a guess. There is no rank beyond ±1, nothing is ever truncated (a hub draws
+// everything it was handed), and there are no headings: "Caused by" over a column of corridors would
+// be a claim the relation does not make.
+//
+// The DOMAIN work stays with the caller. This function is handed a hub and two lists and knows
+// nothing about packs, types or labels — which is the whole point of it being here, because what
+// broke last time was arithmetic and arithmetic is the part a test can reach.
+
+// One thing beside the hub, and which side of it that thing sits on.
+struct HubNeighbour {
+    QString id;
+    QString label;
+    // NEGATIVE puts it on the left — it points AT the hub. Anything else puts it on the right — the
+    // hub points at it. Left-to-right therefore reads the way the causal DAG reads, so the two
+    // pictures do not teach a reader opposite habits for the same shape.
+    int side = -1;
+};
+
+struct HubGraph {
+    QString                   hubId;
+    QString                   hubLabel;
+    std::vector<HubNeighbour> neighbours;   // in the order the caller wants them stacked
+};
+
+// Lay the hub out: two columns of neighbours either side of one centred box, and a line from each of
+// them to it. An empty `hubId` returns an EMPTY layout, for the same reason an unknown focus does.
+//
+// Reads `nodeH`, `gapX`, `gapY`, `padX` and `maxW` from the options; `maxW` is the width of EVERY
+// box here rather than a cap on a fitted one. See the note in the .cpp.
+DagLayout layoutHub(const HubGraph &hub, const DagLayoutOptions &opt = {});
+
 } // namespace pinpoint::analysis

@@ -134,39 +134,39 @@ int main(int argc, char **argv)
 
             // 1.55 — comfortably above mu. As a target norm this graded Good, i.e. an amber chip
             // for an excellent strike. There is no upper fault in smash factor.
-            check(grade(1.55, *n, std, Shape::Floor) == Grade::Ideal,
+            check(grade(1.55, *n, Shape::Floor, std) == Grade::Ideal,
                   "a driver smash of 1.55 grades IDEAL — the strike is efficient, and efficiency "
                   "has no upper fault");
-            check(grade(1.55, *n, std, Shape::Target) == Grade::Good,
+            check(grade(1.55, *n, Shape::Target, std) == Grade::Good,
                   "…where the same number under the OLD two-sided reading was Good, which is the "
                   "defect this conversion exists to remove");
 
             // 1.62 — not a swing finding at all. Grading it in EITHER direction would launder a
             // capture fault into a confident diagnosis.
-            check(grade(1.62, *n, std, Shape::Floor) == Grade::NotMeasured,
+            check(grade(1.62, *n, Shape::Floor, std) == Grade::NotMeasured,
                   "1.62 is not graded: it is a mis-tracked ball, not a swing");
             check(n->isImplausible(1.62),
                   "…and it says so through the flag, so a surface can distinguish 'not believed' "
                   "from 'not measured'");
-            check(!isDeviation(grade(1.62, *n, std, Shape::Floor)),
+            check(!isDeviation(grade(1.62, *n, Shape::Floor, std)),
                   "…and it is emphatically not a finding");
 
             // 1.30 — a genuinely poor strike, and unchanged. The graded tail is an ordinary
             // corridor and the conversion must not have loosened it.
-            check(grade(1.30, *n, std, Shape::Floor) == Grade::Action,
+            check(grade(1.30, *n, Shape::Floor, std) == Grade::Action,
                   "1.30 is still Action — the graded tail is untouched");
-            check(grade(1.30, *n, std, Shape::Target) == Grade::Action,
+            check(grade(1.30, *n, Shape::Target, std) == Grade::Action,
                   "…exactly as it was before");
 
             // The far end of the open tail, up to the cap: all one answer. A future 0-100 score
             // built on z must not climb past the aspiration and invent a target nobody set.
-            check(grade(1.50, *n, std, Shape::Floor) == Grade::Ideal
-                      && grade(1.56, *n, std, Shape::Floor) == Grade::Ideal,
+            check(grade(1.50, *n, Shape::Floor, std) == Grade::Ideal
+                      && grade(1.56, *n, Shape::Floor, std) == Grade::Ideal,
                   "everything from the aspiration up to the cap grades the same: Ideal");
             check(normZ(1.56, *n, Shape::Floor) == 0.0,
                   "…and z is 0 across all of it, so nothing rewards overshooting a floor");
 
-            const NormBandEdges e = bandEdgesOf(*n, std, -1.0, Shape::Floor);
+            const NormBandEdges e = bandEdgesOf(*n, Shape::Floor, std, -1.0);
             check(e.highOpen && !e.lowOpen, "the corridor is open ABOVE and graded below");
             check(qFuzzyCompare(1.0 + e.idealHi, 1.0 + n->mu),
                   "…and the open side's numeric edge is mu, the aspiration, never a sentinel");

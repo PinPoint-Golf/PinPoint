@@ -69,7 +69,13 @@ Band NormBandProvider::band(PpJointDof dof, PpSwingPosition pos, const BandConte
     // ONE place that precedence (explicit monitor over z-derived, SwingLab margin over both) is
     // stated. The wrist grid renders these four numbers directly, so a second copy of that rule
     // here is how the grid ends up drawing an edge the engine does not grade on.
-    const NormBandEdges e = bandEdgesOf(*res.norm, m_policy, ctx.tuning.marginFor(dof));
+    //
+    // Shape::Target, explicitly: this provider only ever grades the 39 migrated (DOF, position)
+    // wrist-angle cells, and the class holds no CharacteristicPack — only an INormProvider keyed on
+    // a bare measureId string — so there is no Measure in reach to read a shape off. Every one of
+    // those cells is a two-sided joint-angle corridor; none of the shipped one-sided measures
+    // (smash factor and its kin) route through this grid at all.
+    const NormBandEdges e = bandEdgesOf(*res.norm, Shape::Target, m_policy, ctx.tuning.marginFor(dof));
 
     Band b;
     b.greenLo = e.idealLo;

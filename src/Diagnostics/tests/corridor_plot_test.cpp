@@ -99,7 +99,7 @@ int main(int argc, char **argv)
         opt.height = 100.0;
 
         const CorridorPlot p = layoutCorridorPlot(n, Shape::Target, {}, strict, opt);
-        const NormBandEdges e = bandEdgesOf(n, strict, -1.0, Shape::Target);
+        const NormBandEdges e = bandEdgesOf(n, Shape::Target, strict, -1.0);
 
         auto toX = [&](double v) { return (v - p.xMin) / (p.xMax - p.xMin) * p.width; };
         check(near(p.idealLoX, toX(e.idealLo), 1e-6), "the ideal low handle is bandEdgesOf's edge");
@@ -165,7 +165,7 @@ int main(int argc, char **argv)
         int ideal = 0, good = 0, watch = 0, action = 0;
         for (double v : values) {
             if (n.isImplausible(v)) continue;
-            switch (grade(v, n, policy, Shape::Target)) {
+            switch (grade(v, n, Shape::Target, policy)) {
             case Grade::Ideal:  ++ideal;  break;
             case Grade::Good:   ++good;   break;
             case Grade::Watch:  ++watch;  break;
@@ -190,7 +190,7 @@ int main(int argc, char **argv)
         check(p.xMin < -90.0, "the window reaches the lowest reading");
         check(p.xMax > 240.0, "and the highest");
 
-        const NormBandEdges e = bandEdgesOf(n, {}, -1.0, Shape::Target);
+        const NormBandEdges e = bandEdgesOf(n, Shape::Target, {}, -1.0);
         check(p.xMin < e.watchLo && p.xMax > e.watchHi,
               "and still contains the whole graded corridor");
 

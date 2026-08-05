@@ -19,6 +19,7 @@
 #include "pack_provider.h"
 
 #include "pack_io.h"
+#include "provider_leaf_p.h"
 
 #include <QDir>
 #include <QFile>
@@ -40,57 +41,32 @@ const QLatin1String kUserPackName("user.json");
 // That containment is the reason this is one file per provider rather than one directory: a
 // provider holds exactly one pack, so "which file was that fault in" has an answer, and a fault in
 // one file cannot decide what another file contributes.
-class FilePackProvider final : public ICharacteristicPackProvider {
+//
+// The mechanics — the path default, "absent is normal", the warning that names the file, dropping
+// the referential codes a layer cannot honestly make, and keying off `parsed` rather than `loaded`
+// — are loadLayer()'s, shared with the norm side's file leaf. The argument for each lives at
+// provider_leaf_p.h; what is here is what only a PACK layer has to say.
+class FilePackProvider final : public detail::PackLeaf {
 public:
     FilePackProvider(const QString &packFile, PackOrigin origin)
-        : m_path(packFile.isEmpty() ? userPackPath() : packFile), m_origin(origin)
     {
-        m_label = m_path;
-        if (m_path.isEmpty()) return;   // no writable app data location at all
-
-        QFile f(m_path);
-        if (!f.exists()) return;        // no user pack is the normal case, not a problem
-        if (!f.open(QIODevice::ReadOnly)) {
-            m_report.issues.push_back(ValidationIssue{
-                IssueSeverity::Warning, QStringLiteral("parse"), m_path,
-                QStringLiteral("Could not read user pack '%1'.")
-                    .arg(QFileInfo(m_path).fileName()) });
-            return;
-        }
-
-        PackLoadResult res = loadPack(f.readAll(), m_path);
-
-        // Keep every issue for the health list, but drop only the REFERENTIAL ones: an overlay
-        // pack's edges point at core conditions it does not contain, so standalone referential
-        // integrity is meaningless here. The merged provider re-validates the assembled
-        // library, and that is the authoritative check — see the note at its re-validation for why
-        // this drop is what stops the two passes reporting the same finding twice.
-        for (ValidationIssue &i : res.report.issues) {
-            const bool crossPack = (i.code == QLatin1String("unknownCondition")
-                                    || i.code == QLatin1String("unknownSignal")
-                                    || i.code == QLatin1String("unknownMeasure")
-                                    || i.code == QLatin1String("noCause")
-                                    || i.code == QLatin1String("orphanCause")
-                                    || i.code == QLatin1String("observableNoSignal"));
-            if (!crossPack) m_report.issues.push_back(std::move(i));
-        }
-
-        // `parsed`, not `loaded` — see PackLoadResult. Keying off `loaded` here would discard
-        // every user pack that references a shipped characteristic, which is most of them.
-        if (res.parsed) m_pack = std::move(res.pack);
+        m_origin = origin;
+        loadLayer(packFile.isEmpty() ? userPackPath() : packFile);
     }
 
-    const CharacteristicPack &pack() const override { return m_pack; }
-    const ValidationReport   &report() const override { return m_report; }
-    QString                   label() const override { return m_label; }
-    PackOrigin                origin() const override { return m_origin; }
-
-private:
-    CharacteristicPack m_pack;
-    ValidationReport   m_report;
-    QString            m_path;
-    QString            m_label;
-    PackOrigin         m_origin = PackOrigin::LocalUser;
+    // A provider that read NOTHING is not a layer. No user pack is the normal case, and reporting
+    // the absent file as an installed pack would put a row in the census that a user cannot act on
+    // and did not create — indistinguishable from a real but empty pack they authored. Exactly the
+    // rule FileNormProvider::layers() applies, for exactly the same reason; it is stated on the two
+    // FILE leaves only, because a memory layer with nothing in it is still the editor's working
+    // copy and does own its row.
+    std::vector<PackLayerInfo> layers() const override
+    {
+        if (m_pack.id.isEmpty() && m_pack.conditions.empty() && m_pack.measures.empty()
+            && m_pack.signalDefs.empty() && m_pack.edges.empty())
+            return {};
+        return ICharacteristicPackProvider::layers();
+    }
 };
 
 } // namespace

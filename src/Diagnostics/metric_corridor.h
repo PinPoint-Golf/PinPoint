@@ -107,7 +107,7 @@ inline std::optional<MetricCorridor> corridorForMetricAtPhase(const Characterist
         if (!res.found())
             continue;
 
-        const NormBandEdges e = bandEdgesOf(*res.norm, policy, -1.0, m->shape);
+        const NormBandEdges e = bandEdgesOf(*res.norm, m->shape, policy, -1.0);
 
         MetricCorridor c;
         c.phase            = phase;

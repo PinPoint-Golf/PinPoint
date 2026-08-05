@@ -53,6 +53,7 @@ pp_add_test(chart_metrics_test
             ${SRC}/Metrics/metric_catalogue_manifest.cpp
             ${SRC}/Metrics/metric_providers.cpp
             ${SRC}/Analysis/reference_bands.cpp
+            ${SRC}/Diagnostics/norm.cpp
             ${SRC}/Diagnostics/norm_pack.cpp ${SRC}/Diagnostics/context_tree.cpp
             ${SRC}/Diagnostics/pack_io.cpp   # the registries' shared vocabulary and LoadResult<T>
             ${SRC}/Diagnostics/characteristic_pack.cpp ${SRC}/Diagnostics/characteristic.cpp

@@ -18,6 +18,8 @@
 
 #include "pack_provider.h"
 
+#include "provider_leaf_p.h"
+
 namespace pinpoint::analysis {
 
 namespace {
@@ -25,29 +27,15 @@ namespace {
 // A pack that is already in memory, presented through the provider seam so it can be merged with
 // core exactly as a file-backed one is. See makeMemoryPackProvider()'s comment for WHY this exists:
 // it is the editor's unsaved working copy, not a test double.
-class MemoryPackProvider final : public ICharacteristicPackProvider {
+//
+// adopt() validates it on construction exactly as a loaded pack is validated, and the argument for
+// doing so on advisory content lives with it in provider_leaf_p.h.
+class MemoryPackProvider final : public detail::PackLeaf {
 public:
-    MemoryPackProvider(const CharacteristicPack &pack, QString label, PackOrigin origin)
-        : m_pack(pack), m_label(std::move(label)), m_origin(origin)
+    MemoryPackProvider(const CharacteristicPack &content, QString label, PackOrigin origin)
     {
-        // Validated on construction, exactly as a loaded pack is. An overlay routinely fails
-        // STANDALONE referential integrity — its edges point at core conditions it does not itself
-        // contain — so this report is advisory and the caller is expected to read the ASSEMBLED
-        // one. Skipping validation here would still be wrong: a duplicate id or a malformed reducer
-        // is a fault of this pack alone, and it is worth naming before the merge buries it.
-        m_report = validatePack(m_pack);
+        adopt(content, std::move(label), origin);
     }
-
-    const CharacteristicPack &pack() const override { return m_pack; }
-    const ValidationReport   &report() const override { return m_report; }
-    QString                   label() const override { return m_label; }
-    PackOrigin                origin() const override { return m_origin; }
-
-private:
-    CharacteristicPack m_pack;
-    ValidationReport   m_report;
-    QString            m_label;
-    PackOrigin         m_origin;
 };
 
 } // namespace

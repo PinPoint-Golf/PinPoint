@@ -19,6 +19,7 @@
 #include "norm_provider.h"
 
 #include "pack_io.h"
+#include "provider_leaf_p.h"
 
 #include <QDir>
 #include <QFile>
@@ -48,71 +49,51 @@ const QLatin1String kContextsName("contexts.json");
 // fails to parse is REPORTED and skipped, never fatal: a single malformed community set must not
 // take the whole library down with it, and — now that a directory of several sets becomes several
 // of these — must not take its NEIGHBOURS down either.
-class FileNormProvider final : public INormProvider {
+//
+// The norm set itself is loadLayer()'s — "absent is normal", the warning that names the file, and
+// keying off `parsed` rather than `loaded` are the same decisions the pack side's file leaf makes,
+// and they are argued once at provider_leaf_p.h. THE CONTEXT TREE IS NOT, and that asymmetry is the
+// reason this leaf is not simply two lines:
+//
+//   * it is a SECOND file, handed in rather than derived, because the tree belongs to the DIRECTORY
+//     and not to any one norm set — see makeFileNormProviders() for why exactly one provider in a
+//     directory carries it, and why loading it N times would report its faults N times;
+//   * it is optional on terms nothing else uses. A set that is present but unreadable is a warning,
+//     because somebody installed it and it is not working. A contexts.json that will not open is
+//     passed over in silence: this provider was handed a path it did not ask for and may not be the
+//     one that owns it, and the directory enumeration has already established the file is there;
+//   * and it is why this leaf can be labelled by a file it did not read. A directory holding a tree
+//     and no norm sets still yields one provider, whose only content is the tree — so when there is
+//     no norm-set path to name it by, the tree's path is the honest answer.
+class FileNormProvider final : public detail::NormLeaf {
 public:
     FileNormProvider(const QString &normsFile, PackOrigin origin, const QString &contextsFile)
-        : m_path(normsFile), m_origin(origin)
     {
-        m_label = m_path.isEmpty() ? contextsFile : m_path;
+        m_origin = origin;
+        loadLayer(normsFile);   // sets the label to the norm-set path, or leaves it empty
+        if (m_label.isEmpty()) m_label = contextsFile;
 
-        if (!m_path.isEmpty()) {
-            QFile f(m_path);
-            if (!f.exists()) {
-                // No user norm set is the normal case, not a problem.
-            } else if (!f.open(QIODevice::ReadOnly)) {
-                m_report.issues.push_back(ValidationIssue{
-                    IssueSeverity::Warning, QStringLiteral("parse"), m_path,
-                    QStringLiteral("Could not read user norm set '%1'.")
-                        .arg(QFileInfo(m_path).fileName()) });
-            } else {
-                NormPackLoadResult res = loadNormPack(f.readAll(), m_path);
-                for (const ValidationIssue &i : res.report.issues)
-                    m_report.issues.push_back(i);
-
-                // `parsed`, not `loaded` — an overlay set is validated referentially only once the
-                // library is assembled, so keying off `loaded` would discard sets that are
-                // perfectly fine in context.
-                if (res.parsed) m_norms = std::move(res.pack);
-            }
-        }
-
-        // A user set may add contexts of its own (a club the shipped tree does not name). Handed in
-        // rather than looked up, because the tree belongs to the DIRECTORY and not to any one norm
-        // set: see makeFileNormProviders() for why exactly one provider in a directory carries it.
+        // A user set may add contexts of its own (a club the shipped tree does not name).
         if (!contextsFile.isEmpty() && QFile::exists(contextsFile)) {
             QFile cf(contextsFile);
             if (cf.open(QIODevice::ReadOnly)) {
                 ContextTreeLoadResult res = loadContextTree(cf.readAll(), contextsFile);
-                m_contexts = std::move(res.tree);
-                for (const ValidationIssue &i : res.report.issues)
-                    m_report.issues.push_back(i);
+                m_contexts                = std::move(res.tree);
+                detail::appendIssues(m_report, res.report);
             }
         }
     }
 
-    const NormPack         &norms() const override { return m_norms; }
-    const ContextTree      &contexts() const override { return m_contexts; }
-    const ValidationReport &report() const override { return m_report; }
-    QString                 label() const override { return m_label; }
-    PackOrigin              origin() const override { return m_origin; }
-
     // A provider that read NOTHING is not a layer. No user norms is the normal case, and reporting
     // the empty directory as a norm set would put a second row in the census that a user cannot
-    // act on and did not create — indistinguishable from a real but empty set they authored.
+    // act on and did not create — indistinguishable from a real but empty set they authored. The
+    // contexts-only provider above is exactly that case, and this is what keeps it out of the list.
     std::vector<NormSetInfo> layers() const override
     {
-        if (m_norms.id.isEmpty() && m_norms.norms.empty())
+        if (m_pack.id.isEmpty() && m_pack.norms.empty())
             return {};
         return INormProvider::layers();
     }
-
-private:
-    NormPack         m_norms;
-    ContextTree      m_contexts;
-    ValidationReport m_report;
-    QString          m_path;
-    QString          m_label;
-    PackOrigin       m_origin = PackOrigin::LocalUser;
 };
 
 } // namespace

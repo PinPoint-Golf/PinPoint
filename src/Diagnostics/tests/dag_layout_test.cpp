@@ -14,6 +14,12 @@
 //   4. AN ISOLATED NODE lays out. It is the empty state of this view and the most likely one for a
 //      freshly authored characteristic.
 //
+// The HUB layout — layoutHub(), the picture for everything that is not a condition — is asserted at
+// the end of this file, and it is here for a reason worth stating at the top. It used to be written
+// inline in the browser façade, and it shipped lines drawn between two points that lay on no box at
+// all. Nothing could have caught that where it was: the arithmetic was in a file no geometry test
+// pointed at. It is in this module now, and the failure it once had is pinned as an assertion.
+//
 //   cmake --build build/analyzer-tests --target dag_layout_test
 //   ctest --test-dir build/analyzer-tests -R dag_layout --output-on-failure
 
@@ -975,6 +981,277 @@ int main()
         for (const DagEdge &e : lr.edges)
             if (e.relation == QLatin1String("corroborates")) ++offFocus;
         check(offFocus == 0, "a non-causal edge that does not touch the focus is not drawn");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // THE HUB
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    // layoutHub() is the picture for everything that is NOT a condition — a measure, a signal, a
+    // corridor, a paper, one causal link. One hop each way, so there is no rank to assign and no
+    // route to find, and the only thing that can be wrong is where a line's two ends are.
+    //
+    // Which is exactly what WAS wrong. This layout lived inline in the browser façade, hand-rolling
+    // the node and edge schema in a file no geometry test pointed at, and it shipped a coordinate
+    // crossing: for the right-hand column it paired the neighbour's x with the hub's y and the hub's
+    // x with the neighbour's y, so the line was drawn between two points lying on neither box — thin
+    // air to thin air — and both ends sat on the hub's LEFT edge, sending a line to a right-hand node
+    // back across the hub to get there.
+    //
+    // It survived review because of the case it does not break: a column holding ONE neighbour
+    // centres that neighbour on the hub's own row, the two y values coincide, and the crossed pair
+    // lands correctly by accident. Every assertion below that matters is therefore made on a column
+    // holding SEVERAL, which is the shape that exposes it.
+    auto hubFixture = []() {
+        HubGraph h;
+        h.hubId    = QStringLiteral("m_hub");
+        h.hubLabel = QStringLiteral("The measure everything hangs off");
+        // One reader on the left, FOUR conditions on the right. The asymmetry is the point: it is
+        // the ordinary shape for a measure, and it is the shape the crossing got wrong.
+        h.neighbours.push_back({ QStringLiteral("metricA"), QStringLiteral("A metric"), -1 });
+        for (int i = 0; i < 4; ++i)
+            h.neighbours.push_back({ QStringLiteral("cond%1").arg(i),
+                                     QStringLiteral("Condition %1").arg(i), +1 });
+        return h;
+    };
+
+    std::printf("\nA hub is two columns and a middle, and stays that shape\n");
+    {
+        const HubGraph  h = hubFixture();
+        const DagLayout l = layoutHub(h);
+
+        check(l.nodes.size() == 6, "every neighbour is drawn, and the hub with them");
+        const DagNode *hub = nodeById(l, "m_hub");
+        check(hub && hub->kind == DagNodeKind::Focus, "the hub is the focus of its own picture");
+        check(hub && hub->rank == 0, "…at rank 0");
+
+        // Side is the whole ordering a one-hop relation has, and it must read the way the causal
+        // band reads or the two pictures teach opposite habits for the same shape.
+        check(nodeById(l, "metricA")->x < hub->x, "what points AT the hub is drawn to the LEFT");
+        check(nodeById(l, "cond0")->x > hub->x, "what the hub points to, to the RIGHT");
+        check(nodeById(l, "metricA")->kind == DagNodeKind::Cause, "…and says so in its kind");
+        check(nodeById(l, "cond0")->kind == DagNodeKind::Effect, "…on both sides");
+        check(nodeById(l, "metricA")->rank == -1 && nodeById(l, "cond0")->rank == 1,
+              "rank is the hop, signed by the side");
+
+        // One lane per side: every box in a column shares an x, and the three columns are three
+        // distinct ones. A column that drifted would be a column the reader cannot scan.
+        bool oneLane = true;
+        for (const DagNode &n : l.nodes)
+            if (n.rank == 1 && n.x != nodeById(l, "cond0")->x) oneLane = false;
+        check(oneLane, "a column is one lane, not a staircase");
+        check(nodeById(l, "metricA")->w == nodeById(l, "cond0")->w
+              && nodeById(l, "cond0")->w == hub->w,
+              "and every box is the same width — a hub column is a list of peers");
+
+        // Stacked in the order the caller handed them over. The caller has already ranked them, and
+        // a layout that re-sorted would silently overrule it.
+        for (int i = 1; i < 4; ++i)
+            check(nodeById(l, qPrintable(QStringLiteral("cond%1").arg(i - 1)))->y
+                      < nodeById(l, qPrintable(QStringLiteral("cond%1").arg(i)))->y,
+                  "the column keeps the order it was given");
+
+        bool ok = true;
+        for (size_t i = 0; i < l.nodes.size(); ++i)
+            for (size_t j = i + 1; j < l.nodes.size(); ++j)
+                if (overlaps(l.nodes[i], l.nodes[j])) ok = false;
+        check(ok, "no two boxes overlap");
+
+        // Centred, so the view can scroll to the thing the reader asked about.
+        check(std::abs(l.focusX - (hub->x + hub->w / 2.0)) < 0.001
+              && std::abs(l.focusY - (hub->y + hub->h / 2.0)) < 0.001,
+              "the centre point is the hub's own centre");
+        check(l.width > 0 && l.height > 0, "the bounding box is real");
+        check(l.headings.empty(), "no heading is invented over a relation that has no direction");
+        check(!l.truncated, "a hub draws everything it was handed, and does not claim otherwise");
+
+        // The origin, unlike the ranked layout, needs no normalising — so nothing may be negative.
+        bool inside = true;
+        for (const DagNode &n : l.nodes)
+            if (n.x < -0.001 || n.y < -0.001) inside = false;
+        check(inside, "nothing is placed at a negative coordinate");
+    }
+
+    // ⚠ THE REGRESSION. Thin air to thin air.
+    std::printf("Every hub line starts and ends ON a box\n");
+    {
+        const DagLayout l = layoutHub(hubFixture());
+        check(l.edges.size() == 5, "one line per neighbour, and no more");
+
+        int anchored = 0, tailRight = 0, headLeft = 0, ownY = 0;
+        for (const DagEdge &e : l.edges) {
+            const DagNode *a = nodeById(l, qPrintable(e.from));
+            const DagNode *b = nodeById(l, qPrintable(e.to));
+            if (!a || !b) continue;
+
+            // THE assertion the inline code would have failed: each end lies on the rect of its OWN
+            // node — x on one of that box's vertical sides, y within that box's height. A crossed
+            // pair satisfies neither, because the point it produces belongs to no box at all.
+            const auto onBox = [](const DagNode &n, double x, double y) {
+                const bool onSide = std::abs(x - n.x) < 0.001 || std::abs(x - (n.x + n.w)) < 0.001;
+                return onSide && y >= n.y - 0.001 && y <= n.y + n.h + 0.001;
+            };
+            if (onBox(*a, e.x1, e.y1) && onBox(*b, e.x2, e.y2)) ++anchored;
+
+            // And the rule that makes it one case rather than four: the tail is always on the
+            // RIGHT-hand edge of the box it leaves, the head always on the LEFT-hand edge of the box
+            // it enters. The crossing put both ends of a right-hand line on the hub's left edge, so
+            // the line set off across the hub box to reach a node beside it.
+            if (std::abs(e.x1 - (a->x + a->w)) < 0.001) ++tailRight;
+            if (std::abs(e.x2 - b->x) < 0.001) ++headLeft;
+
+            // Each x kept with its OWN y — stated separately, because this is the pairing that was
+            // swapped and a box-membership check alone can be satisfied by two correct points.
+            if (std::abs(e.y1 - (a->y + a->h / 2.0)) < 0.001
+                && std::abs(e.y2 - (b->y + b->h / 2.0)) < 0.001)
+                ++ownY;
+        }
+        check(anchored == int(l.edges.size()), "both ends of every line sit on their own box");
+        check(tailRight == int(l.edges.size()), "every tail leaves a right-hand edge");
+        check(headLeft == int(l.edges.size()), "every head arrives at a left-hand edge");
+        check(ownY == int(l.edges.size()), "and each end keeps its own row, not the other's");
+
+        // The case that hid it. With one neighbour a side the two y values coincide, so the crossed
+        // arithmetic came out right — this is asserted so the SYMMETRIC case cannot be what a future
+        // change is checked against.
+        {
+            HubGraph one;
+            one.hubId    = QStringLiteral("hub");
+            one.hubLabel = QStringLiteral("Hub");
+            one.neighbours.push_back({ QStringLiteral("l"), QStringLiteral("Left"), -1 });
+            one.neighbours.push_back({ QStringLiteral("r"), QStringLiteral("Right"), +1 });
+            const DagLayout lo = layoutHub(one);
+            check(std::abs(nodeById(lo, "l")->y - nodeById(lo, "hub")->y) < 0.001
+                  && std::abs(nodeById(lo, "r")->y - nodeById(lo, "hub")->y) < 0.001,
+                  "a single neighbour a side sits level with the hub — the case that hid the bug");
+            for (const DagEdge &e : lo.edges)
+                check(std::abs(e.y1 - e.y2) < 0.001, "…so its line is level too");
+        }
+
+        // And a column of several is centred on the hub too — the same rule, which is what makes
+        // the level single-neighbour case a consequence rather than a coincidence.
+        {
+            const DagNode *first = nodeById(l, "cond0");
+            const DagNode *last  = nodeById(l, "cond3");
+            check(std::abs((first->y + (last->y + last->h)) / 2.0
+                           - (nodeById(l, "m_hub")->y + nodeById(l, "m_hub")->h / 2.0)) < 0.001,
+                  "a column of four is centred on the hub's own row");
+        }
+
+        // Direction is a claim about the RELATION, and the drawing runs left to right regardless.
+        int intoHub = 0, outOfHub = 0;
+        for (const DagEdge &e : l.edges) {
+            if (e.to == QLatin1String("m_hub")) ++intoHub;
+            if (e.from == QLatin1String("m_hub")) ++outOfHub;
+            check(e.x2 >= e.x1 - 0.001, "no hub line is drawn backwards");
+        }
+        check(intoHub == 1 && outOfHub == 4, "the left column points at the hub, the right is pointed at");
+
+        // Nothing crosses a third box. A one-hop picture cannot route through a rank, so this is a
+        // property of the columns rather than of any routing — which is why it is worth pinning.
+        QString why;
+        const bool bad = linesCrossBoxes(l, &why);
+        if (bad) std::printf("      %s\n", qPrintable(why));
+        check(!bad, "and no line is drawn through a box that is not its own end");
+    }
+
+    std::printf("Hub curves leave and arrive along the edge they are anchored to\n");
+    {
+        const DagLayout l = layoutHub(hubFixture());
+        int flat = 0, mid = 0;
+        for (const DagEdge &e : l.edges) {
+            // HORIZONTAL TANGENTS: the control point beside each end shares that end's y, so the
+            // curve leaves along the box edge rather than cutting the corner of it.
+            if (std::abs(e.c1y - e.y1) < 0.001 && std::abs(e.c2y - e.y2) < 0.001) ++flat;
+            // Both controls on the half-way line, which is what makes the S symmetric — and the same
+            // half-span the ranked layout uses between columns.
+            if (std::abs(e.c1x - (e.x1 + e.x2) / 2.0) < 0.001
+                && std::abs(e.c2x - (e.x1 + e.x2) / 2.0) < 0.001) ++mid;
+
+            // No arrowhead, and it says why. A corridor grading a measure is not causation, and an
+            // arrow would be read as a claim about cause.
+            check(e.symmetric, "a hub line claims no direction");
+            check(!e.tip, "…so it carries no arrowhead");
+            check(e.weight == 1.0, "…and no strength, which would invent an ordering");
+            check(e.label.isEmpty(), "…and no word on the line");
+        }
+        check(flat == int(l.edges.size()), "both tangents are horizontal");
+        check(mid == int(l.edges.size()), "and both controls sit on the half-way line");
+    }
+
+    std::printf("A hub with nothing on one side is still a hub\n");
+    {
+        // The empty state, and the most likely one for a freshly authored object: a drill nothing
+        // uses yet, a paper nothing cites. The picture must not collapse to two columns and slide the
+        // hub sideways — "nothing points at this" has to look different from a cropped canvas.
+        const DagLayout full = layoutHub(hubFixture());
+
+        HubGraph rightOnly;
+        rightOnly.hubId    = QStringLiteral("m_hub");
+        rightOnly.hubLabel = QStringLiteral("Hub");
+        for (int i = 0; i < 4; ++i)
+            rightOnly.neighbours.push_back({ QStringLiteral("cond%1").arg(i),
+                                             QStringLiteral("Condition %1").arg(i), +1 });
+        const DagLayout r = layoutHub(rightOnly);
+        check(r.nodes.size() == 5, "the side that has something is drawn whole");
+        check(std::abs(r.width - full.width) < 0.001, "the canvas is the same three columns wide");
+        check(std::abs(nodeById(r, "m_hub")->x - nodeById(full, "m_hub")->x) < 0.001,
+              "and the hub has not moved into the empty side");
+        check(nodeById(r, "cond0")->x > nodeById(r, "m_hub")->x, "its neighbours are still right");
+
+        HubGraph leftOnly = rightOnly;
+        for (HubNeighbour &n : leftOnly.neighbours) n.side = -1;
+        const DagLayout le = layoutHub(leftOnly);
+        check(std::abs(le.width - full.width) < 0.001, "…and the same the other way round");
+        check(nodeById(le, "cond0")->x < nodeById(le, "m_hub")->x, "with the column on the left");
+
+        // Both sides empty: one box, and a canvas to put it on. A drill nothing uses yet still opens.
+        HubGraph alone;
+        alone.hubId    = QStringLiteral("lonely");
+        alone.hubLabel = QStringLiteral("Nothing stands beside this");
+        const DagLayout la = layoutHub(alone);
+        check(la.nodes.size() == 1 && nodeById(la, "lonely"), "a hub with no neighbours draws itself");
+        check(la.edges.empty(), "and invents no line to draw one to");
+        check(la.width > 0 && la.height > 0, "on a canvas with a size");
+        check(std::abs(la.width - full.width) < 0.001, "still three columns wide");
+
+        // Every one of those, laid out: no overlap, nothing loose.
+        for (const DagLayout *any : { &r, &le, &la }) {
+            bool ok = true;
+            for (size_t i = 0; i < any->nodes.size(); ++i)
+                for (size_t j = i + 1; j < any->nodes.size(); ++j)
+                    if (overlaps(any->nodes[i], any->nodes[j])) ok = false;
+            check(ok, "no two boxes overlap");
+            check(!linesCrossBoxes(*any), "and no line crosses one");
+        }
+    }
+
+    std::printf("A hub with no id draws nothing, and lays out the same way every time\n");
+    {
+        const DagLayout none = layoutHub(HubGraph{});
+        check(none.nodes.empty() && none.edges.empty(),
+              "an empty hub id lands on nothing, exactly as an unknown focus does");
+        check(none.width == 0 && none.height == 0, "and takes no space");
+
+        const DagLayout a = layoutHub(hubFixture());
+        const DagLayout b = layoutHub(hubFixture());
+        bool same = a.nodes.size() == b.nodes.size() && a.edges.size() == b.edges.size();
+        for (size_t i = 0; same && i < a.nodes.size(); ++i)
+            same = a.nodes[i].id == b.nodes[i].id && a.nodes[i].x == b.nodes[i].x
+                   && a.nodes[i].y == b.nodes[i].y;
+        check(same, "node order and position are identical across runs");
+
+        // The options are honoured rather than being decoration: a caller passing the theme's own
+        // metrics must get a picture in them, or the browser's numbers and the layout's diverge.
+        DagLayoutOptions o;
+        o.nodeH = 34; o.gapY = 14; o.gapX = 90; o.maxW = 210; o.padX = 12;
+        const DagLayout t = layoutHub(hubFixture(), o);
+        check(nodeById(t, "m_hub")->h == 34 && nodeById(t, "m_hub")->w == 210,
+              "the box is the size the caller asked for");
+        check(std::abs(t.width - (12 * 2 + 210 * 3 + 90 * 2)) < 0.001,
+              "and so is the canvas it sits on");
+        check(std::abs(nodeById(t, "cond1")->y - nodeById(t, "cond0")->y - (34 + 14)) < 0.001,
+              "with the column pitched at height plus the gap");
     }
 
     std::printf("\n%s (%d failure%s)\n", g_fail == 0 ? "PASSED" : "FAILED", g_fail,

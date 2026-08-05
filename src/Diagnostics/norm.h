@@ -19,7 +19,7 @@
 #pragma once
 
 #include "../Analysis/wrist_assessment_types.h"   // PpRag
-#include "characteristic.h"                       // Shape — a property of the MEASURE
+#include "measure_vocabulary.h"                   // Shape — a property of the MEASURE
 
 #include <QDate>
 #include <QString>
@@ -30,6 +30,12 @@
 #include <vector>
 
 // Norms — the normative distribution a measured value is graded against.
+//
+// The out-of-line functions declared here — gradePolicyPresets, cohortProbeOrder, ageBandFor,
+// cohortFor, normIsWeak, the enum <-> string conversions and the phrase builders near the bottom —
+// are DEFINED in norm.cpp. The load/save and validation layer for a norm SET lives in norm_pack.h /
+// norm_pack.cpp instead, which is a different concern (content persistence, not the grading model),
+// and it is the reason the definitions are not there despite the similar filename.
 //
 // The word is `norm`, never "reference". `reference` is already taken: it is the "relative to" role
 // in a measure's facets (Series::reference, CharacteristicEditorModel::referencesFor). A second
@@ -324,7 +330,13 @@ struct Norm {
     // everything else: a floor's high tail is open, so `monitorLo` alone is a COMPLETE monitor
     // band there. Answering false would make grade() and bandEdgesOf() silently ignore a bound the
     // author wrote down — the corridor would look authored and grade as though it were not.
-    bool hasExplicitMonitor(Shape shape = Shape::Target) const
+    //
+    // NO DEFAULT. With 13 shipped one-sided norms, a caller that forgets the shape and gets Target
+    // for free would grade both tails of a floor — the good, open tail would suddenly need a
+    // monitor bound to avoid Action, and it has none, because nothing authors one for a tail that
+    // was never meant to grade. The compiler enumerating every call site is what makes that mistake
+    // impossible instead of silent; see norm_measure_source.h for the concrete failure this refuses.
+    bool hasExplicitMonitor(Shape shape) const
     {
         switch (shape) {
         case Shape::Floor:   return monitorLo.has_value();
@@ -337,7 +349,10 @@ struct Norm {
     // Past the explicit Watch edge on a tail that grades. The open tail is never outside it,
     // whatever a stray bound says — `normShapeMonitor` refuses one, but a pack that loaded with
     // errors must not then grade against the thing that was refused.
-    bool outsideMonitor(double value, Shape shape = Shape::Target) const
+    //
+    // NO DEFAULT — see hasExplicitMonitor(). A floor graded with an assumed Target would treat its
+    // open high tail as bounded and start flagging Action on the good side.
+    bool outsideMonitor(double value, Shape shape) const
     {
         if (shape != Shape::Ceiling && monitorLo.has_value() && value < *monitorLo) return true;
         if (shape != Shape::Floor   && monitorHi.has_value() && value > *monitorHi) return true;
@@ -394,7 +409,12 @@ inline bool gradePolicyIsOrdered(const GradePolicy &p)
 // score that climbed past the aspiration would invent a target nobody set.
 //
 // Continuous at mu by construction: both formulations give 0 there.
-inline double normZ(double value, const Norm &norm, Shape shape = Shape::Target)
+//
+// NO DEFAULT SHAPE. A caller that forgets it on a floor or a ceiling gets a Target's two-tailed
+// arithmetic instead — a real number that grades the open, good tail as though it had a fault edge.
+// Silent and plausible-looking is worse than a compile error, so the compiler now enumerates every
+// caller instead of one of them quietly mis-grading a one-sided measure's good side.
+inline double normZ(double value, const Norm &norm, Shape shape)
 {
     if (shape == Shape::Floor   && value >= norm.mu) return 0.0;
     if (shape == Shape::Ceiling && value <= norm.mu) return 0.0;
@@ -426,8 +446,10 @@ inline double normZ(double value, const Norm &norm, Shape shape = Shape::Target)
 // edge is `mu - threshold * sigmaLo`, compared inclusively, exactly as a target's low edge is. The
 // open side is admitted outright, so the good side of a floor is inside every band at every
 // threshold — Ideal by construction, at every policy.
-inline bool withinBand(double value, const Norm &norm, double threshold,
-                       Shape shape = Shape::Target)
+//
+// NO DEFAULT — see normZ(). An assumed Target here is the same mistake with the sign reversed: the
+// open side would be compared against a fault edge nobody authored instead of admitted outright.
+inline bool withinBand(double value, const Norm &norm, double threshold, Shape shape)
 {
     // The degenerate case needs no branch of its own, and used to have one. With sigma = 0 the
     // computed edge is `mu - threshold * 0 == mu`, so the inclusive comparison already says
@@ -452,8 +474,16 @@ inline bool withinBand(double value, const Norm &norm, double threshold,
 // is not graded at all — not Action, not Ideal. Grading it either way would answer a question about
 // the swing using a number that describes the capture, and the more confident the answer looked the
 // worse it would be. See Norm::plausibleLo.
-inline Grade grade(double value, const Norm &norm, const GradePolicy &policy = {},
-                   Shape shape = Shape::Target)
+//
+// NO DEFAULT SHAPE. This is the entry point most callers actually reach for, which makes it the one
+// most worth refusing to grade wrong for free: a floor graded as a Target penalises its good tail
+// (norm_measure_source.h spells out the concrete symptom). `policy` keeps its default because
+// GradePolicy::standard is a genuinely safe fallback everywhere; there is no equivalent safe shape.
+// `shape` moved ahead of `policy` in the parameter list to make that legal — C++ requires every
+// defaulted parameter to trail every non-defaulted one, so a required shape cannot sit after an
+// optional policy. A caller passing both still writes them in the order that now matches grade()'s
+// two closest neighbours, hasExplicitMonitor()/outsideMonitor(), which take shape and nothing else.
+inline Grade grade(double value, const Norm &norm, Shape shape, const GradePolicy &policy = {})
 {
     if (norm.isImplausible(value))
         return Grade::NotMeasured;
@@ -514,8 +544,13 @@ struct NormBandEdges {
 // edge with the Ideal band widened by a fixed number of units either side. It exists because half
 // the shipped norms do not store their Watch edge as a margin at all, so sweeping "the margin"
 // without it would silently do nothing on those.
-inline NormBandEdges bandEdgesOf(const Norm &n, const GradePolicy &policy = {},
-                                 double marginOverride = -1.0, Shape shape = Shape::Target)
+//
+// NO DEFAULT SHAPE — see grade(). A caller that let this default to Target would draw a closed
+// corridor on a one-sided measure: the open tail would show a hard edge and a fault colour beyond
+// it that the measure never grades against. `shape` sits ahead of `policy`/`marginOverride`, both of
+// which keep their defaults, for the same C++ ordering reason grade() reordered its parameters.
+inline NormBandEdges bandEdgesOf(const Norm &n, Shape shape, const GradePolicy &policy = {},
+                                 double marginOverride = -1.0)
 {
     NormBandEdges e;
     e.lowOpen  = (shape == Shape::Ceiling);

@@ -145,7 +145,7 @@ int main()
         if (back) {
             check(near(back->mu, 12.0) && near(back->sigmaLo, 4.0) && near(back->sigmaHi, 9.0),
                   "asymmetric tolerances survive the round-trip");
-            check(back->hasExplicitMonitor() && near(*back->monitorLo, -6.0)
+            check(back->hasExplicitMonitor(Shape::Target) && near(*back->monitorLo, -6.0)
                       && near(*back->monitorHi, 30.0),
                   "explicit monitor bounds survive the round-trip");
             check(back->n == 42 && back->source == NormSource::Seated,
@@ -509,7 +509,11 @@ int main()
         const NormResolution none =
             prov->resolve(QStringLiteral("m_ballPosition"), QStringLiteral("hovercraft"));
         check(!none.found(), "an unknown context resolves to nothing, never to the default");
-        check(none.grade(50.0) == Grade::NotMeasured, "…and grades NotMeasured, never a pass");
+        // Shape::Target: irrelevant to this assertion (an unresolved norm short-circuits before
+        // shape is ever consulted), and m_ballPosition — the measure this resolution is for — is a
+        // two-sided corridor anyway.
+        check(none.grade(50.0, Shape::Target) == Grade::NotMeasured,
+              "…and grades NotMeasured, never a pass");
 
         const NormResolution defaulted = prov->resolve(QStringLiteral("m_ballPosition"), QString());
         check(defaulted.found() && defaulted.contextId == QLatin1String("full_swing"),
