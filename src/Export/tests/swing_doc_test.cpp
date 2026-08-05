@@ -859,6 +859,10 @@ int main()
         check(ps.club == QStringLiteral("DRIVER"), "…carrying the app's club, not the device's");
         check(ps.athleteUuid == QStringLiteral("uuid-1234"), "…and the athlete a cohort resolves through");
         check(ps.score == 0, "…and no score");
+        // WHICH DEVICE MEASURED IT, surviving the round trip. The session board captions a
+        // reviewed session from this and nothing else — the connector attached today says
+        // nothing about a session hit last week, and may not be attached at all.
+        check(ps.lmDeviceKind == QStringLiteral("gcquad"), "…and the device that measured it");
 
         const SwingSummary sum = SwingDocReader::readSwingSummary(d5);
         check(sum.ok && sum.fromSidecar, "the picker sidecar was written at the same time");

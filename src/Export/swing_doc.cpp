@@ -917,6 +917,13 @@ PersistedShot SwingDocReader::readSwingJson(const QString &swingDir)
     ps.athleteUuid    = athlete[QStringLiteral("uuid")].toString();
     ps.athleteName    = athlete[QStringLiteral("name")].toString();
 
+    // The kind alone out of the raw block, for the same reason as the athlete above and
+    // NOT into SwingSummary: the picker names sessions, not devices. Everything else in
+    // that block (deviceShotId, sourcePath, the raw columns) is provenance for tooling
+    // and has no reader here — the readings are already in the metrics.
+    ps.lmDeviceKind   = root[QStringLiteral("launchMonitor")].toObject()
+                            .value(QStringLiteral("kind")).toString();
+
     // Only video presence is reconstructed here. imu / pose streams and the raw
     // sidecar are not parsed on reload yet — see the "Reload & replay consumer
     // contract" in docs/developer/swing_export_developer_guide.md for the shapes a future

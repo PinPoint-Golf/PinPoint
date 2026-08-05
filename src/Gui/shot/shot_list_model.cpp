@@ -55,6 +55,7 @@ QVariant ShotListModel::data(const QModelIndex &index, int role) const
     case AnalysisDetailRole:  return s.analysisDetail;
     case SwingDirRole:        return s.swingDir;
     case DataWarningRole:     return s.dataWarning;
+    case LmDeviceKindRole:    return s.lmDeviceKind;
     default:                  return {};
     }
 }
@@ -76,6 +77,7 @@ QHash<int, QByteArray> ShotListModel::roleNames() const
         { AnalysisDetailRole,  "analysisDetail"  },
         { SwingDirRole,        "swingDir"        },
         { DataWarningRole,     "dataWarning"     },
+        { LmDeviceKindRole,    "lmDeviceKind"    },
     };
 }
 
@@ -129,7 +131,7 @@ void ShotListModel::addPersistedShot(const QString &swingDir, int ordinal,
                                      bool hasVideo, const QUrl &thumbnailSource, int score,
                                      int rating, const QString &note,
                                      const QVariantMap &metrics, const QVariantMap &analysisDetail,
-                                     bool dataWarning)
+                                     bool dataWarning, const QString &lmDeviceKind)
 {
     Shot shot;
     shot.id              = m_nextId++;
@@ -145,6 +147,7 @@ void ShotListModel::addPersistedShot(const QString &swingDir, int ordinal,
     shot.metrics         = metrics;
     shot.analysisDetail  = analysisDetail;
     shot.dataWarning     = dataWarning;
+    shot.lmDeviceKind    = lmDeviceKind;
 
     // Prepend (newest first); callers reload ascending so the highest ordinal lands first.
     beginInsertRows(QModelIndex(), 0, 0);
@@ -172,7 +175,7 @@ void ShotListModel::loadSessionDir(const QString &dir)
                          ps.thumbnailPath.isEmpty() ? QUrl()
                                                     : QUrl::fromLocalFile(ps.thumbnailPath),
                          ps.score, ps.rating, ps.note, ps.metrics, ps.analysisDetail,
-                         ps.dataWarning);
+                         ps.dataWarning, ps.lmDeviceKind);
     }
 }
 
@@ -197,8 +200,11 @@ void ShotListModel::refreshShot(const QString &swingDir)
     s.score          = p.score;
     s.metrics        = p.metrics;
     s.analysisDetail = p.analysisDetail;
+    // Re-read alongside the readings it belongs to: this is the path a live row takes when
+    // a monitor's numbers are folded in, so it is where the row learns which device sent them.
+    s.lmDeviceKind   = p.lmDeviceKind;
     emit dataChanged(index(row), index(row),
-                     { ScoreRole, MetricsRole, AnalysisDetailRole });
+                     { ScoreRole, MetricsRole, AnalysisDetailRole, LmDeviceKindRole });
 }
 
 void ShotListModel::attachSwingDir(int id, const QString &swingDir)
@@ -230,9 +236,10 @@ void ShotListModel::attachSwingDir(int id, const QString &swingDir)
     s.analysisDetail = p.analysisDetail;
     s.club           = p.club;
     s.timestampLabel = p.timestampLabel;
+    s.lmDeviceKind   = p.lmDeviceKind;
     emit dataChanged(index(row), index(row),
                      { SwingDirRole, ScoreRole, MetricsRole, AnalysisDetailRole,
-                       ClubRole, TimestampLabelRole });
+                       ClubRole, TimestampLabelRole, LmDeviceKindRole });
 }
 
 void ShotListModel::clear()

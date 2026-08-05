@@ -17,6 +17,9 @@
 
 #include "lm_session_model.h"
 
+#include "../../LaunchMonitor/launch_monitor_base.h"
+#include "../../LaunchMonitor/launch_monitor_factory.h"
+
 #include "../../Analysis/lm_flight_path.h"
 #include "../../Analysis/lm_inferred_reads.h"
 #include "../../Analysis/lm_session_reductions.h"
@@ -227,7 +230,8 @@ void LmSessionModel::connectShotModel()
                 if (roles.isEmpty()
                     || roles.contains(int(ShotListModel::AnalysisDetailRole))
                     || roles.contains(int(ShotListModel::MetricsRole))
-                    || roles.contains(int(ShotListModel::ClubRole)))
+                    || roles.contains(int(ShotListModel::ClubRole))
+                    || roles.contains(int(ShotListModel::LmDeviceKindRole)))
                     rebuild();
             });
     connect(m_shots, &QObject::destroyed, this, [this]() { rebuild(); });
@@ -360,6 +364,10 @@ void LmSessionModel::rebuild()
     std::vector<LmShotValues> scoped;
     scoped.reserve(size_t(rows));
     int latestIndex = -1;
+    // The devices that actually MEASURED the shots in scope, in the order they first
+    // appear. Normally one; more than one is a session hit across a device change, and
+    // naming both is the only honest caption for it.
+    QStringList devices;
     for (int r = 0; r < rows; ++r) {
         LmShotValues v = readingsFor(
             m_shots->data(m_shots->index(r), ShotListModel::AnalysisDetailRole).toMap());
@@ -374,6 +382,16 @@ void LmSessionModel::rebuild()
             if (rc.compare(club, Qt::CaseInsensitive) != 0)
                 continue;
         }
+        // Only a shot that produced readings names a device: an unmeasured swing sitting
+        // in the same session says nothing about what measured the ones beside it.
+        if (!v.isEmpty()) {
+            const QString kind = m_shots->data(m_shots->index(r),
+                                               ShotListModel::LmDeviceKindRole).toString();
+            const QString label = pinpoint::lm::kindShortLabel(pinpoint::lm::kindFromKey(kind));
+            if (!label.isEmpty() && !devices.contains(label))
+                devices << label;
+        }
+
         if (r == focusedRow)
             latestIndex = int(scoped.size());
         scoped.push_back(std::move(v));
@@ -388,10 +406,17 @@ void LmSessionModel::rebuild()
     m_valueLabel = focusIsNewest ? tr("latest") : tr("this shot");
 
     QStringList bits;
-    // The live connector's name heads the scope only for the live session. A saved
-    // session may have been recorded on another device entirely, and captioning its
-    // readings with whatever is plugged in today would be a claim we cannot support.
-    if (!m_reviewing && !m_deviceName.isEmpty()) bits << m_deviceName;
+    // WHICH DEVICE, ASKED OF THE RIGHT PLACE. Live, that is the connector currently
+    // attached — it is the thing producing the numbers. In a loaded session it is
+    // whatever each shot's own document recorded, because a session may have been hit on
+    // another device entirely and captioning it with whatever is plugged in today would
+    // be a claim we cannot support. A document written before the reader carried the kind
+    // simply names no device, which is the truth about what we know of it.
+    if (m_reviewing) {
+        if (!devices.isEmpty()) bits << devices.join(QStringLiteral(" + "));
+    } else if (!m_deviceName.isEmpty()) {
+        bits << m_deviceName;
+    }
     bits << (club.isEmpty() ? tr("all clubs") : club);
     // Spelled out rather than tr()'s %n plural form: with no translation catalogue
     // loaded, %n falls back to the SOURCE string, and the header read "1 shot(s)".

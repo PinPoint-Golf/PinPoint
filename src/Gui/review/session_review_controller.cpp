@@ -211,7 +211,8 @@ void SessionReviewController::loadSession(const QString &sessionId)
         m_reviewModel.addPersistedShot(
             ps.swingDir, ps.ordinal, ps.timestampLabel, ps.club, ps.hasVideo,
             ps.thumbnailPath.isEmpty() ? QUrl() : QUrl::fromLocalFile(ps.thumbnailPath),
-            ps.score, ps.rating, ps.note, ps.metrics, ps.analysisDetail, ps.dataWarning);
+            ps.score, ps.rating, ps.note, ps.metrics, ps.analysisDetail, ps.dataWarning,
+            ps.lmDeviceKind);
         ins.append({ ps.score, ps.hasVideo, ps.wallclockMs, ps.club, ps.thumbnailPath });
     }
 

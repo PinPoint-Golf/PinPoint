@@ -61,6 +61,7 @@ public:
         AnalysisDetailRole,
         SwingDirRole,
         DataWarningRole,   // IMU re-fusion parity failed → shot not re-analysable
+        LmDeviceKindRole,  // launchMonitor.kind ("gcquad"); empty for a shot no device measured
     };
 
     explicit ShotListModel(QObject *parent = nullptr);   // starts empty
@@ -92,7 +93,7 @@ public:
                           const QString &club, bool hasVideo, const QUrl &thumbnailSource,
                           int score, int rating, const QString &note,
                           const QVariantMap &metrics, const QVariantMap &analysisDetail,
-                          bool dataWarning = false);
+                          bool dataWarning = false, const QString &lmDeviceKind = {});
 
     // Re-read <swingDir>/swing.json (SwingDocReader) and update the matching row's
     // score / metrics / analysisDetail in place — emits dataChanged for just those
@@ -182,6 +183,7 @@ private:
         QVariantMap  analysisDetail;  // { tier, overall, series:[…], phases:[…] } for the graph
         QString      swingDir;        // on-disk folder, for reloaded shots (replay-from-MP4 later)
         bool         dataWarning = false;  // IMU re-fusion parity failed → not re-analysable
+        QString      lmDeviceKind;    // which device measured it; only reloaded shots carry it
     };
 
     int  rowForId(int id) const;

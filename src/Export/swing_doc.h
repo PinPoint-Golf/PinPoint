@@ -145,6 +145,11 @@ struct PersistedShot {
     QVariantMap metrics;            // key -> { label, value } at Impact
     QVariantMap analysisDetail;     // { tier, overall, series, phases } for the graph
     bool        dataWarning = false;// IMU re-fusion parity failed (imuIntegrity block) → not re-analysable
+    // WHICH DEVICE MEASURED IT — the launchMonitor.kind token ("gcquad"), empty when the
+    // shot has no device block. The readings themselves come back through analysisDetail's
+    // `lm.` series; this is the only place their provenance survives a reload, and without
+    // it a reviewed session could only be captioned with whatever is plugged in today.
+    QString     lmDeviceKind;
 };
 
 // The handful of fields a session-list row needs — everything pinpoint::ShotSummaryInput
