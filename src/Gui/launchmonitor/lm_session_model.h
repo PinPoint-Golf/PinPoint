@@ -79,6 +79,12 @@ class LmSessionModel : public QAbstractListModel
     // singletons itself would be untestable and would couple the board to main.cpp.
     Q_PROPERTY(bool connected READ connected WRITE setConnected NOTIFY stateTextChanged)
     Q_PROPERTY(bool saving READ saving WRITE setSaving NOTIFY stateTextChanged)
+    // Whether the shots being boarded are a LOADED session's rather than the live one's.
+    // It changes no reading and no statistic — only which empty line is honest, and
+    // whether the live device's name may head the scope. `connected` and `saving` are
+    // facts about capturing the NEXT shot; neither can unwrite readings already on disk,
+    // so neither may hide them.
+    Q_PROPERTY(bool reviewing READ reviewing WRITE setReviewing NOTIFY stateTextChanged)
     // "GC Quad" — the short device name for the header. Empty is fine; the scope line
     // then starts with the club.
     Q_PROPERTY(QString deviceName READ deviceName WRITE setDeviceName NOTIFY headerChanged)
@@ -132,6 +138,8 @@ public:
     void           setConnected(bool on);
     bool           saving() const { return m_saving; }
     void           setSaving(bool on);
+    bool           reviewing() const { return m_reviewing; }
+    void           setReviewing(bool on);
     QString        deviceName() const { return m_deviceName; }
     void           setDeviceName(const QString &name);
     bool           leftHanded() const { return m_leftHanded; }
@@ -172,6 +180,7 @@ private:
     int                     m_focusedShotId = -1;
     bool                    m_connected = false;
     bool                    m_saving = false;
+    bool                    m_reviewing = false;
     bool                    m_leftHanded = false;
     QString                 m_deviceName;
 

@@ -256,6 +256,14 @@ void LmSessionModel::setSaving(bool on)
     emit stateTextChanged();
 }
 
+void LmSessionModel::setReviewing(bool on)
+{
+    if (m_reviewing == on) return;
+    m_reviewing = on;
+    rebuild();               // the scope line drops the live device's name
+    emit stateTextChanged();
+}
+
 void LmSessionModel::setDeviceName(const QString &name)
 {
     if (m_deviceName == name) return;
@@ -282,6 +290,19 @@ QVariantList LmSessionModel::bandCounts() const
 
 QString LmSessionModel::emptyText() const
 {
+    // A LOADED SESSION IS JUDGED ONLY ON WHAT IS IN IT. Whether a monitor is plugged in
+    // now, and whether the next shot would be stored, are facts about capturing — they
+    // cannot unwrite readings already on disk, and "Settings → Launch Monitor" is not a
+    // fix for a session recorded last week. So both live gates are skipped, and the two
+    // remaining lines are worded in the past tense the reader is actually in.
+    if (m_reviewing) {
+        if (!m_anyReadings)
+            return tr("No launch monitor readings in this session");
+        if (m_bands.isEmpty())
+            return tr("No readings for this club in this session");
+        return {};
+    }
+
     // Ordered by what the user can do about it. "No monitor" outranks "not saving"
     // outranks "nothing yet", because the fix for each is a different screen and only
     // the innermost one is a matter of hitting another ball.
@@ -367,7 +388,10 @@ void LmSessionModel::rebuild()
     m_valueLabel = focusIsNewest ? tr("latest") : tr("this shot");
 
     QStringList bits;
-    if (!m_deviceName.isEmpty()) bits << m_deviceName;
+    // The live connector's name heads the scope only for the live session. A saved
+    // session may have been recorded on another device entirely, and captioning its
+    // readings with whatever is plugged in today would be a claim we cannot support.
+    if (!m_reviewing && !m_deviceName.isEmpty()) bits << m_deviceName;
     bits << (club.isEmpty() ? tr("all clubs") : club);
     // Spelled out rather than tr()'s %n plural form: with no translation catalogue
     // loaded, %n falls back to the SOURCE string, and the header read "1 shot(s)".

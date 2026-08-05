@@ -59,14 +59,22 @@ Rectangle {
     border.color: Theme.colorBorderMid
     clip: true
 
-    // The session-global carousel list. Aliased because binding `shotModel: shotModel`
-    // inside the model would resolve to the model's OWN property, not the context one.
-    readonly property var sessionShots: shotModel
+    // THE SESSION ON SCREEN, not the live one: sessionReviewController.activeShots is
+    // the same list the carousel is showing, so opening a past session boards THAT
+    // session's readings. Binding the live `shotModel` context property instead drew the
+    // live carousel over a loaded session — which, on a launch-monitor-only session
+    // opened from the drawer, is an empty board over a folder full of readings.
+    readonly property var sessionShots: sessionReviewController.activeShots
+    readonly property bool reviewing:   sessionReviewController.reviewActive
 
     LmSessionModel {
         id: board
         shotModel:     root.sessionShots
         focusedShotId: SessionMode.focusedShotId
+        // The two live-capture gates, and they answer for the LIVE session only — see
+        // emptyText(). A saved session's readings are on disk whatever the device is
+        // doing now.
+        reviewing:     root.reviewing
         connected:     launchMonitor.configured
         saving:        appSettings.saveLaunchMonitorData
         deviceName:    launchMonitor.deviceName

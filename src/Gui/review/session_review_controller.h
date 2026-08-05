@@ -52,6 +52,12 @@ class SessionReviewController : public QObject
     Q_PROPERTY(bool     reviewActive   READ reviewActive   NOTIFY reviewActiveChanged)
     Q_PROPERTY(QObject *sessionsModel  READ sessionsModel  CONSTANT)
     Q_PROPERTY(QObject *shots          READ shots          CONSTANT)
+    // THE SHOTS THE APP IS ACTUALLY SHOWING: the loaded session's while reviewing, the
+    // live carousel's otherwise. One answer, in one place, because every panel that
+    // boards "the session" has to agree with the carousel about which session that is —
+    // the launch monitor board took the live model unconditionally and so drew an empty
+    // board over a loaded session that was full of readings.
+    Q_PROPERTY(ShotListModel *activeShots READ activeShots NOTIFY reviewActiveChanged)
     // Loaded-session header bits for the toolbar review strip + carousel chip.
     Q_PROPERTY(QString  activeDayLabel  READ activeDayLabel  NOTIFY reviewActiveChanged)
     Q_PROPERTY(QString  activeTimeLabel READ activeTimeLabel NOTIFY reviewActiveChanged)
@@ -67,6 +73,7 @@ public:
     bool     reviewActive()   const { return m_reviewActive; }
     QObject *sessionsModel()        { return &m_sessionsModel; }
     QObject *shots()                { return &m_reviewModel; }
+    ShotListModel *activeShots()    { return m_reviewActive ? &m_reviewModel : m_liveModel; }
     QString  activeDayLabel()  const { return m_activeDayLabel; }
     QString  activeTimeLabel() const { return m_activeTimeLabel; }
     QString  activeClubMix()   const { return m_activeClubMix; }
