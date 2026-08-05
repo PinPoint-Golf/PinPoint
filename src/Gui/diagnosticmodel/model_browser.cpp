@@ -3453,8 +3453,6 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
         }
         m.insert(QStringLiteral("references"), refRows);
         m.insert(QStringLiteral("groupLabel"), n.groupLabel);
-        m.insert(QStringLiteral("statusLabel"), n.statusLabel);
-        m.insert(QStringLiteral("metricKey"), n.metricKey);
         m.insert(QStringLiteral("dirty"), dirtyIds().contains(n.id));
         nodes.append(m);
     }
@@ -3476,9 +3474,7 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
         m.insert(QStringLiteral("from"), e.from);
         m.insert(QStringLiteral("to"), e.to);
         m.insert(QStringLiteral("strength"), e.strength);
-        m.insert(QStringLiteral("strengthLabel"), e.strengthLabel);
         m.insert(QStringLiteral("weight"), e.weight);
-        m.insert(QStringLiteral("detects"), e.detects);
         m.insert(QStringLiteral("offeredOnly"), e.offeredOnly);
         m.insert(QStringLiteral("relation"), e.relation);
         m.insert(QStringLiteral("symmetric"), e.symmetric);
@@ -3503,10 +3499,9 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
         m.insert(QStringLiteral("tipCx"), e.tipCx);
         m.insert(QStringLiteral("tipCy"), e.tipCy);
 
-        // The row id, so clicking a line selects the same object the Causal links table does. Only
-        // a real edge has one — a measure's detection line is not an edge in the pack.
+        // The row id, so clicking a line selects the same object the Causal links table does.
         EdgeType t = EdgeType::Causes;
-        if (!e.detects && edgeTypeFromName(e.relation, t)) {
+        if (edgeTypeFromName(e.relation, t)) {
             const QString rid = edgeId(e.from, e.to, t);
             if (hideProposed) {
                 bool proposed = false;
@@ -6620,8 +6615,6 @@ QVariantMap ModelBrowser::corridorPlot(const QString &measureId, const QString &
     out.insert(QStringLiteral("muX"), plot.muX);
     out.insert(QStringLiteral("idealLoX"), plot.idealLoX);
     out.insert(QStringLiteral("idealHiX"), plot.idealHiX);
-    out.insert(QStringLiteral("watchLoX"), plot.watchLoX);
-    out.insert(QStringLiteral("watchHiX"), plot.watchHiX);
     out.insert(QStringLiteral("lowOpen"), plot.lowOpen);
     out.insert(QStringLiteral("highOpen"), plot.highOpen);
     out.insert(QStringLiteral("n"), plot.n);
@@ -7189,7 +7182,6 @@ QVariantMap ModelBrowser::neighbourhood(const QString &type, const QString &id,
         e.insert(QStringLiteral("c2x"), (x1 + x2) / 2.0);
         e.insert(QStringLiteral("c2y"), y2);
         e.insert(QStringLiteral("weight"), 1.0);
-        e.insert(QStringLiteral("detects"), false);
         e.insert(QStringLiteral("symmetric"), true);   // one hop, no direction to claim
         e.insert(QStringLiteral("tip"), false);
         e.insert(QStringLiteral("label"), QString());

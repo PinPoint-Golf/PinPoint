@@ -302,11 +302,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             if (other.isEmpty() || rankOf.contains(other) || !admissible(other)) continue;
             if (opt.maxPerRank > 0 && int(byRank[0].size()) >= opt.maxPerRank) continue;
             rankOf.insert(other, 0);
-            // ABOVE the focus, so the focus stays at the bottom of its own column. The detection
-            // lane hangs beneath rank 0 and its edges run straight up into the focus; a partner
-            // stacked below would sit in that path, and the test caught exactly that
-            // (`mLive->focus crosses rival`). Keeping the focus adjacent to its lane is a property
-            // of the ordering, not something the router has to work around.
+            // ABOVE the focus, so the focus stays at the bottom of its own column.
             byRank[0].insert(byRank[0].begin(), other);
         }
     }
@@ -684,7 +680,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
     }
 
 
-    // ── 7. Headings ─────────────────────────────────────────────────────────
+    // ── 6. Headings ─────────────────────────────────────────────────────────
     // Left-to-right means "causes", and a reader should not have to infer that from arrowheads.
     {
         double causeX0 = 0, causeX1 = 0, effectX0 = 0, effectX1 = 0;
@@ -712,7 +708,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             out.headings.push_back({ QStringLiteral("Leads to"), effectX0, 0.0, effectX1 - effectX0 });
     }
 
-    // ── 8. Normalise to the origin ──────────────────────────────────────────
+    // ── 7. Normalise to the origin ──────────────────────────────────────────
     {
         double minX = 0, minY = 0, maxX = 0, maxY = 0;
         bool   first = true;
@@ -741,7 +737,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
         out.focusY = f.y + f.h / 2.0;
     }
 
-    // ── 9. What the bound cut off ───────────────────────────────────────────
+    // ── 8. What the bound cut off ───────────────────────────────────────────
     // Counted per node, not summed globally, because "there are more" is only useful where it is —
     // a reader needs to know WHICH box has something behind it before they tap it.
     for (DagNode &n : out.nodes) {
@@ -752,7 +748,7 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
         if (n.hiddenCauses > 0 || n.hiddenEffects > 0) out.truncated = true;
     }
 
-    // ── 10. Edge routing ────────────────────────────────────────────────────
+    // ── 9. Edge routing ─────────────────────────────────────────────────────
     //
     // Every hop of every route is resolved to two points before anything is drawn. The two rules
     // that keep the picture readable both live here:

@@ -484,14 +484,10 @@ Item {
                 readonly property real tdy: tailSeg ? root._ndy(modelData.to,   root._nudgeRev) : 0
 
                 ShapePath {
-                    strokeColor: edgeShape.modelData.detects
-                                     ? Theme.colorText3
-                                     : (edgeShape.selected ? Theme.colorAccent : Theme.colorBorderStrong)
+                    strokeColor: edgeShape.selected ? Theme.colorAccent : Theme.colorBorderStrong
                     strokeWidth: edgeShape.selected ? 2 : Math.max(1, edgeShape.modelData.weight || 1)
                     fillColor:   "transparent"
-                    // A detection line is not a causal claim, so it must not look like one.
-                    strokeStyle: edgeShape.modelData.detects ? ShapePath.DashLine : ShapePath.SolidLine
-                    dashPattern: [ 3, 3 ]
+                    strokeStyle: ShapePath.SolidLine
                     capStyle:    ShapePath.RoundCap
 
                     startX: edgeShape.modelData.x1 + edgeShape.fdx
@@ -704,8 +700,7 @@ Item {
                             Layout.fillWidth: true
                             text: nodeItem.refused   ? nodeItem.refusal.text
                                 : nodeItem.hotTarget ? root._dropHint()
-                                                     : (nodeItem.modelData.note
-                                                        || nodeItem.modelData.statusLabel || "")
+                                                     : (nodeItem.modelData.note || "")
                             visible: text.length > 0
                             font.family:    Theme.fontData
                             font.pixelSize: Theme.fontSzMicro

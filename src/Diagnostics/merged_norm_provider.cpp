@@ -214,23 +214,11 @@ std::unique_ptr<INormProvider> makeMergedNormProvider(
     return std::make_unique<MergedNormProvider>(std::move(core), std::move(user), disabled);
 }
 
-namespace {
-// Function-local static for the same reason sharedSlot() is one: nothing runs before main().
-QStringList &disabledSlot()
-{
-    static QStringList slot;
-    return slot;
-}
-} // namespace
-
-void        setDisabledNormSets(const QStringList &ids) { disabledSlot() = ids; }
-QStringList disabledNormSets() { return disabledSlot(); }
-
 std::unique_ptr<INormProvider> makeNormProvider()
 {
     std::vector<std::unique_ptr<INormProvider>> user;
     user.push_back(makeFileNormProvider());
-    return makeMergedNormProvider(makeResourceNormProvider(), std::move(user), disabledNormSets());
+    return makeMergedNormProvider(makeResourceNormProvider(), std::move(user));
 }
 
 namespace {

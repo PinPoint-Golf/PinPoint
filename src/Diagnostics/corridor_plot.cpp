@@ -170,8 +170,6 @@ CorridorPlot layoutCorridorPlot(const Norm &norm, Shape shape, const std::vector
     p.muX      = toX(norm.mu);
     p.idealLoX = toX(edges.idealLo);
     p.idealHiX = toX(edges.idealHi);
-    p.watchLoX = toX(edges.watchLo);
-    p.watchHiX = toX(edges.watchHi);
 
     // ── The curve the norm claims ───────────────────────────────────────────
     const int steps = std::max(8, options.curveSteps);

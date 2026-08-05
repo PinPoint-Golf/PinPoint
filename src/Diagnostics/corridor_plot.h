@@ -123,8 +123,6 @@ struct CorridorPlot {
     double muX      = 0.0;
     double idealLoX = 0.0;
     double idealHiX = 0.0;
-    double watchLoX = 0.0;
-    double watchHiX = 0.0;
 
     bool lowOpen  = false;   // this tail does not grade
     bool highOpen = false;
@@ -138,8 +136,6 @@ struct CorridorPlot {
 
     bool    truncated = false;   // more readings than maxSamplePoints; the scatter is a subset
     QString note;                // the finding, in words. Empty when there is nothing to say.
-
-    bool hasSamples() const { return n > 0; }
 };
 
 // ── How precisely a corridor may be stated ──────────────────────────────────

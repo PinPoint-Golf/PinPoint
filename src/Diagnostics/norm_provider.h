@@ -213,17 +213,6 @@ std::unique_ptr<INormProvider> makeMemoryNormProvider(
     const NormPack &pack, const ContextTree &contexts, const QString &label = QString(),
     PackOrigin origin = PackOrigin::LocalUser);
 
-// ── Which layers take part, process-wide ────────────────────────────────────
-//
-// Set from AppSettings by the app so the Diagnostics module keeps no settings dependency, exactly
-// as the grade policy is. Changing it does NOT rebuild anything on its own — call
-// resetSharedNormProvider() after, or every existing reader keeps the assembly it already has.
-//
-// This is what turns the norm-set strip from a census into a selector: until a second set exists
-// there is nothing to switch, and until this exists there is no way to switch it.
-void        setDisabledNormSets(const QStringList &ids);
-QStringList disabledNormSets();
-
 // The process-wide assembled norm set, built on FIRST USE and cached.
 //
 // This exists because norms are read from files while the compiled table they replaced was free,

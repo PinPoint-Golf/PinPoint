@@ -133,8 +133,6 @@ enum class FindingState {
     Unavailable,  // could NOT be assessed. Distinct from NotFired, and never merged with it.
 };
 
-QString findingStateName(FindingState s);
-
 struct Finding {
     QString      conditionId;
     FindingState state      = FindingState::Unavailable;

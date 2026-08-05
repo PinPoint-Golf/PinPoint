@@ -28,16 +28,6 @@ namespace pinpoint::analysis {
 // what is uncertain is whether the right norm was used to judge it.
 constexpr float kInferredContextConfidence = 0.7f;
 
-QString findingStateName(FindingState s)
-{
-    switch (s) {
-    case FindingState::Fired:       return QStringLiteral("fired");
-    case FindingState::NotFired:    return QStringLiteral("notFired");
-    case FindingState::Unavailable: return QStringLiteral("unavailable");
-    }
-    return QStringLiteral("unavailable");
-}
-
 const Finding *DetectionResult::find(const QString &conditionId) const
 {
     const auto it = std::find_if(findings.begin(), findings.end(),
@@ -72,7 +62,7 @@ struct SignalVerdict {
     QStringList missing;
 };
 
-SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const IMeasureSource &src)
+SignalVerdict evaluate(const Signal &sig, const IMeasureSource &src)
 {
     SignalVerdict v;
 
@@ -251,7 +241,6 @@ SignalVerdict evaluate(const Signal &sig, const CharacteristicPack &pack, const 
     }
     }
 
-    (void)pack;
     return v;
 }
 
@@ -305,7 +294,7 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
             const Signal *sig = pack.signal(sid);
             if (!sig) { anyUnavailable = true; f.missingMeasures << sid; continue; }
 
-            const SignalVerdict v = evaluate(*sig, pack, source);
+            const SignalVerdict v = evaluate(*sig, source);
             if (!v.available) {
                 anyUnavailable = true;
                 f.missingMeasures << v.missing;

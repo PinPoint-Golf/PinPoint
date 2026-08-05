@@ -204,8 +204,6 @@ struct DagNode {
     // opened and then walked away from cannot draw itself as open on a graph it is not in.
     bool    expanded      = false;
     QString groupLabel;
-    QString statusLabel;         // measure nodes only — "Live", "No producer", …
-    QString metricKey;           // measure nodes only
 };
 
 // One drawn curve. A single causal relationship spanning more than one rank is emitted as SEVERAL
@@ -214,7 +212,7 @@ struct DagNode {
 struct DagEdge {
     QString from;      // the CAUSE (Edge's own orientation, unchanged)
     QString to;        // the EFFECT
-    QString strength;  // veryWeak | weak | moderate | strong | veryStrong; empty on a detection edge
+    QString strength;  // veryWeak | weak | moderate | strong | veryStrong
     QString strengthLabel;
 
     // STROKE WIDTH in px, 1..3, spread evenly across the five rungs — not strengthWeight(), which
@@ -223,13 +221,10 @@ struct DagEdge {
     // line by it; nothing prints it.
     double  weight = 2.0;
 
-    // The detection lane: measure -> condition. Not a causal claim, and drawn differently.
-    bool    detects = false;
-
-    // Which relationship this line states: "causes" | "corroborates" | "excludes" (empty on a
-    // detection edge). The graph is RANKED by causal distance, so a symmetric relation has no
-    // direction to rank by and is only ever drawn on the focus's own rank — see the admission rule
-    // in the .cpp. It also gets no arrowhead: an arrow claims a direction these two do not have.
+    // Which relationship this line states: "causes" | "corroborates" | "excludes". The graph is
+    // RANKED by causal distance, so a symmetric relation has no direction to rank by and is only
+    // ever drawn on the focus's own rank — see the admission rule in the .cpp. It also gets no
+    // arrowhead: an arrow claims a direction these two do not have.
     QString relation;
     bool    symmetric = false;
 

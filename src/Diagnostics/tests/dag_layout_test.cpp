@@ -525,9 +525,6 @@ int main()
         for (const auto &kv : labelled) if (kv.second != 1) once = false;
         check(once, "each relationship states its strength once");
 
-        for (const DagEdge &e : l.edges)
-            if (e.detects) check(e.label.isEmpty(), "a measure has no strength to state");
-
         // An isolated focus has nothing to name on either side, and must not invent a heading over
         // an empty column.
         const DagLayout iso = layoutDag(p, QStringLiteral("island"));
@@ -560,11 +557,7 @@ int main()
         check(nodeById(l, "island") != nullptr, "and it is the one asked for");
         check(l.width > 0 && l.height > 0, "the bounding box is real");
         check(!l.truncated, "nothing was cut off, and it does not claim otherwise");
-
-        bool onlyEdgesAreDetection = true;
-        for (const DagEdge &e : l.edges)
-            if (!e.detects) onlyEdgesAreDetection = false;
-        check(onlyEdgesAreDetection, "no causal edge is invented for it");
+        check(l.edges.empty(), "no causal edge is invented for it");
     }
 
     std::printf("An unknown focus draws nothing\n");
@@ -586,8 +579,6 @@ int main()
         const DagLayout l = layoutDag(p, QStringLiteral("focus"));
 
         check(!nodeById(l, "mLive"), "a measure is not a node any more");
-        for (const DagEdge &e : l.edges)
-            check(!e.detects, "and nothing draws a detection line");
 
         const DagNode *f = nodeById(l, "focus");
         check(f && f->measures.size() == 1, "the focus carries its own detector as a row");
@@ -806,7 +797,6 @@ int main()
         // would fail the next time one is added without anything actually being wrong.
         double wStrong = 0, wModerate = 0, wWeak = 0;
         for (const DagEdge &e : l.edges) {
-            if (e.detects) continue;
             if (e.from == QLatin1String("cause1")) wStrong = e.weight;
             if (e.from == QLatin1String("cause2")) wModerate = e.weight;
             if (e.from == QLatin1String("cause3") && e.to == QLatin1String("focus")) wWeak = e.weight;
