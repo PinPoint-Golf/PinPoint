@@ -154,8 +154,13 @@ public:
     // Backs the wrist diagnostics "compare to previous" ghost.
     Q_INVOKABLE QVariantMap previousAnalysisDetail(const QString &swingDir) const;
 
-    // The analysisDetail of the swing at `swingDir` (empty if not in this model). Backs the wrist
-    // diagnostics "compare to reference" ghost.
+    // The analysisDetail of the swing at `swingDir`, from this model if it holds that row and
+    // FROM DISK IF IT DOES NOT. Backs the wrist diagnostics "compare to reference" ghost, and
+    // the fallback is what makes that ghost work at all: the reference is a swing the golfer
+    // marked once and it persists in settings, so by tomorrow it belongs to a session no model
+    // has loaded. Answering "not in this list" as "does not exist" made the reference curve
+    // disappear overnight without a word. Empty only when the document cannot be read.
+    // One full parse on the miss, and the callers bind it to a swingDir that rarely changes.
     Q_INVOKABLE QVariantMap analysisDetailForSwingDir(const QString &swingDir) const;
 
 signals:

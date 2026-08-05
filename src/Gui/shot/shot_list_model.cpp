@@ -380,6 +380,9 @@ QVariantMap ShotListModel::analysisDetailForSwingDir(const QString &swingDir) co
     for (const Shot &s : m_shots)
         if (s.swingDir == swingDir)
             return s.analysisDetail;
-    return {};
+    // Not in this list is not "does not exist" — see the header. The row is the fast path
+    // (it is already parsed); the document is the truth.
+    const pinpoint::PersistedShot ps = pinpoint::SwingDocReader::readSwingJson(swingDir);
+    return ps.ok ? ps.analysisDetail : QVariantMap{};
 }
 

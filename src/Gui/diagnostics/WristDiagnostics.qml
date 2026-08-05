@@ -34,8 +34,19 @@ Item {
         id: dx
         analysisDetail: shotReplay.analysisDetail
         playheadUs:     shotReplay.positionUs
-        previousAnalysisDetail:  shotModel.previousAnalysisDetail(shotReplay.swingDir)
-        referenceAnalysisDetail: shotModel.analysisDetailForSwingDir(appSettings.wristReferenceSwingDir)
+        // The PREVIOUS swing is "the one before this in the list on screen", so it has to be
+        // asked of the list on screen: the live carousel, or a loaded session's own shots
+        // while reviewing. Asking the live model unconditionally meant every past session's
+        // ghost came back empty — the replayed swing was not in that list to have a
+        // predecessor in it.
+        previousAnalysisDetail:  sessionReviewController.activeShots
+                                     .previousAnalysisDetail(shotReplay.swingDir)
+        // The REFERENCE is a benchmark, not a neighbour: it outlives the session it was
+        // marked in, so the lookup falls through to the document on disk when no loaded
+        // list holds it. Asked of the list on screen only because that is where a hit is
+        // likeliest and costs no parse — the answer is the same from either.
+        referenceAnalysisDetail: sessionReviewController.activeShots
+                                     .analysisDetailForSwingDir(appSettings.wristReferenceSwingDir)
     }
 
     readonly property var _pos: dx.positions[dx.selectedPosition]
