@@ -38,18 +38,25 @@ Item {
 
     // One shot, as the model hands it over — the design brief's reference row.
     // A field with no session spread yet — under the three-shot floor, so no region.
-    function field(v, text, unit, abbrev, band) {
+    //
+    // `grade` is LmSessionModel's corridor verdict — "" | "ideal" | "good" | "watch" |
+    // "action". Defaulted to empty, which is what MOST readings carry: 18 of the 25 have
+    // no norm in the shipped set, and the fixture would misrepresent the panel's normal
+    // state if every field arrived graded.
+    function field(v, text, unit, abbrev, band, grade) {
         return { value: v, text: text, unit: unit, abbrev: abbrev,
                  label: abbrev, bandIndex: band, has: true, mean: "", sd: "",
-                 meanValue: v, sdValue: 0, hasSpread: false, n: 1 }
+                 meanValue: v, sdValue: 0, hasSpread: false, n: 1,
+                 grade: grade !== undefined ? grade : "" }
     }
 
     // A field the session HAS a spread for, which is what puts a shaded region behind
     // its vector.
-    function spreadField(v, text, unit, abbrev, band, mean, sd) {
+    function spreadField(v, text, unit, abbrev, band, mean, sd, grade) {
         return { value: v, text: text, unit: unit, abbrev: abbrev,
                  label: abbrev, bandIndex: band, has: true, mean: "", sd: "",
-                 meanValue: mean, sdValue: sd, hasSpread: true, n: 18 }
+                 meanValue: mean, sdValue: sd, hasSpread: true, n: 18,
+                 grade: grade !== undefined ? grade : "" }
     }
 
     readonly property var fixture: ({
@@ -60,7 +67,11 @@ Item {
             "lm.attackAngle":     spreadField(-3.5, "−3.5", "°", "ATTACK ANG.", 0, -3.2, 0.9),
             "lm.clubPath":        spreadField(-1.8, "−1.8", "°", "CLUB PATH", 0, -2.1, 1.4),
             "lm.faceAngle":       spreadField(-1.1, "−1.1", "°", "FACE ANGLE", 0, -0.9, 1.1),
-            "lm.faceToPath":      field(1.6,   "1.6",   "°",     "FACE-PATH",   0),
+            // GRADED, and both of these carry a norm in the shipped set — face-to-path and
+            // spin axis are two of the seven that do. Club path beside them does not, so
+            // the fixture holds all three states the view has to draw: out to Action, out
+            // to Watch, and the one that is simply not graded at all.
+            "lm.faceToPath":      field(1.6,   "1.6",   "°",     "FACE-PATH",   0, "action"),
             "lm.dynamicLoft":     spreadField(17.7, "17.7", "°", "DYN. LOFT", 0, 18.1, 1.3),
             "lm.spinLoft":        field(21.2,  "21.2",  "°",     "SPIN LOFT",   0),
             "lm.lieAngle":        field(60.7,  "60.7",  "°",     "LIE ANGLE",   0),
@@ -74,7 +85,7 @@ Item {
             "lm.spinRate":        field(4686,  "4686",  "rpm",   "SPIN RATE",   3),
             "lm.backSpin":        field(4670,  "4670",  "rpm",   "BACK SPIN",   3),
             "lm.sideSpin":        field(384,   "384",   "rpm",   "SIDE SPIN",   3),
-            "lm.spinAxis":        spreadField(4.7, "4.7", "°", "SPIN AXIS", 3, 3.9, 2.6),
+            "lm.spinAxis":        spreadField(4.7, "4.7", "°", "SPIN AXIS", 3, 3.9, 2.6, "watch"),
             "lm.carryDistance":   spreadField(166.6, "166.6", "yd", "CARRY", 4, 164.2, 5.4),
             "lm.totalDistance":   field(181.9, "181.9", "yd",    "TOTAL",       4),
             "lm.offline":         spreadField(5.1, "5.1", "yd", "OFFLINE", 4, 2.8, 4.1),
@@ -788,6 +799,85 @@ Item {
             // And IMPACT starts where PATH & FACE does, so the outer edges agree too.
             fuzzyCompare(pf.mapToItem(body, 0, 0).x, impact.mapToItem(body, 0, 0).x, 1.0,
                          "both rows start at the same x")
+        }
+
+        // Every PpLmRead under `item`, keyed by the metric it names. Identified by the
+        // property rather than by objectName: `anno` is shared with the inferred-read
+        // blocks and the flight card's dimension plates, and only a reading has a grade.
+        function readsByKey(item, acc) {
+            acc = acc || ({})
+            if (!item || !item.children) return acc
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (c.metricKey !== undefined && c.grade !== undefined && c.metricKey !== ""
+                    && c.visible)
+                    acc[c.metricKey] = c
+                readsByKey(c, acc)
+            }
+            return acc
+        }
+
+        // The figure inside a reading block — the Text the corridor colour lands on.
+        function valueTextOf(read) {
+            let found = null
+            function walk(item) {
+                if (!item || !item.children) return
+                for (let i = 0; i < item.children.length; ++i) {
+                    if (item.children[i].objectName === "readValue") found = item.children[i]
+                    walk(item.children[i])
+                }
+            }
+            walk(read)
+            return found
+        }
+
+        // ── the corridor state ──────────────────────────────────────────────
+        //
+        // The ONE verdict this view carries, and the assertion is on the colour a reader
+        // actually sees rather than on the `grade` string that produced it. A binding that
+        // stopped reaching the Text would leave every property in this file correct and
+        // every number on screen the wrong colour, which is precisely the failure mode a
+        // hue-only signal has.
+        //
+        // The silent case is asserted alongside the loud ones deliberately. 18 of the 25
+        // readings carry no norm, so "uncoloured" is this panel's ordinary state, and a
+        // change that quietly painted everything would still pass a test that only ever
+        // looked at the two graded fields.
+        function test_20_aReadingOutsideItsCorridorIsColoured() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            wait(0)
+
+            const reads = readsByKey(body)
+            const action = reads["lm.faceToPath"]
+            const watch  = reads["lm.spinAxis"]
+            const plain  = reads["lm.clubPath"]
+            verify(action && watch && plain,
+                   "the three graded states are all on screen")
+
+            compare(action.grade, "action", "face to path is out to Action")
+            verify(Qt.colorEqual(valueTextOf(action).color, Theme.colorRagFault),
+                   "…and its figure is the app's Action red, saw "
+                   + valueTextOf(action).color)
+
+            compare(watch.grade, "watch", "spin axis is out to Watch")
+            verify(Qt.colorEqual(valueTextOf(watch).color, Theme.colorRagWatch),
+                   "…and its figure is the app's Watch amber, saw "
+                   + valueTextOf(watch).color)
+
+            // NOT COLOURED, and this is the half of the rule that stops the panel becoming
+            // a dashboard: a reading with no corridor is drawn exactly as a reading inside
+            // one, so the board never implies an opinion it does not hold.
+            compare(plain.grade, "", "club path carries no corridor in the shipped set")
+            verify(Qt.colorEqual(valueTextOf(plain).color, Theme.colorText2),
+                   "…and its figure is the ordinary reading colour, saw "
+                   + valueTextOf(plain).color)
+
+            // The LABEL keeps its band hue whatever the grade. Two channels, two facts:
+            // colour on the words says which metric, colour on the figure says out of
+            // corridor — and a grade that repainted the label would collapse them.
+            compare(action.hue, plain.hue,
+                   "both readings keep the Club band's hue on their label")
         }
 
         // The strike marker's centre, in the STRIKE card's coordinates.

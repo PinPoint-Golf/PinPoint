@@ -25,6 +25,11 @@
 #include "../../Analysis/lm_session_reductions.h"
 #include "../../Analysis/swing_analysis.h"
 
+#include "../../Diagnostics/context_tree.h"
+#include "../../Diagnostics/metric_corridor.h"
+#include "../../Diagnostics/norm_provider.h"
+#include "../../Diagnostics/pack_provider.h"
+
 #include <QPointF>
 #include <QStringList>
 #include <QVariantMap>
@@ -96,10 +101,14 @@ std::optional<double> opticalLowPointFor(const QVariantMap &analysisDetail)
     return std::nullopt;
 }
 
-QVariantMap tileFor(const LmFieldStats &st)
+QVariantMap tileFor(const LmFieldStats &st, const QString &grade)
 {
     return QVariantMap{
         { QStringLiteral("key"),       st.key },
+        // "" | "ideal" | "good" | "watch" | "action". The panel paints only the last two —
+        // see gradesFor() for why an empty string is the answer to three different
+        // questions and why the tile is right to draw all three the same way.
+        { QStringLiteral("grade"),     grade },
         { QStringLiteral("label"),     QString::fromUtf8(st.def->label) },
         { QStringLiteral("abbrev"),    QString::fromUtf8(st.def->abbrev) },
         { QStringLiteral("unit"),      QString::fromUtf8(st.def->unit) },
@@ -135,10 +144,13 @@ int bandIndexOf(const char *group)
 }
 
 // One field, as an annotation needs it.
-QVariantMap annotationFor(const LmFieldStats &st)
+QVariantMap annotationFor(const LmFieldStats &st, const QString &grade)
 {
     return QVariantMap{
         { QStringLiteral("value"),     st.latest },       // RAW — geometry rotates by this
+        // The SAME string the tile carries, from the same map. A schematic and a tile
+        // showing one reading in two colours would be the panel arguing with itself.
+        { QStringLiteral("grade"),     grade },
         { QStringLiteral("text"),      lmValueText(st) }, // formatted — the card prints this
         { QStringLiteral("mean"),      lmMeanText(st) },
         { QStringLiteral("sd"),        lmSdText(st) },
@@ -208,7 +220,16 @@ QVariantMap pointMap(const LmPoint &p)
 
 } // namespace
 
-LmSessionModel::LmSessionModel(QObject *parent) : QAbstractListModel(parent) {}
+LmSessionModel::LmSessionModel(QObject *parent)
+    : QAbstractListModel(parent)
+    , m_pack(makeCharacteristicPackProvider())
+    , m_norms(sharedNormProvider())
+    , m_policyName(QStringLiteral("standard"))
+{
+}
+
+// Out of line because the header holds a unique_ptr to an incomplete type.
+LmSessionModel::~LmSessionModel() = default;
 
 int LmSessionModel::rowCount(const QModelIndex &parent) const
 {
@@ -313,6 +334,67 @@ void LmSessionModel::setLeftHanded(bool on)
     rebuild();               // both inferred reads are worded from it
 }
 
+void LmSessionModel::setGradePolicy(const QString &name)
+{
+    // Resolved through the shared table rather than stored as handed in — the same rule
+    // MetricCatalog and NormModel follow: an unknown name must grade against the default
+    // AND read back as the default, or a typo in a binding would leave the property
+    // claiming a policy no corridor on screen was actually graded under.
+    const QString resolved = QString::fromLatin1(gradePolicyPresetFor(name).name);
+    if (resolved == m_policyName) return;
+    m_policyName = resolved;
+    emit gradePolicyChanged();
+    rebuild();               // every corridor edge moves with the policy
+}
+
+// The (metric, phase) → measure → norm join, once per rebuild, for the focused shot.
+//
+// PHASE::IMPACT AND ONLY IMPACT, because that is what a launch monitor reading IS: every
+// one of the 25 reading measures anchors at p7, and the swing.json writer tags them there
+// too (see readingsFor()). This is not a simplification of a phase walk — there is no
+// second phase for these metrics to be read at.
+//
+// It grades through the measure the CORRIDOR resolved on, not through a second lookup of
+// its own. corridorForMetricAtPhase() walks the measures in preference order and reports
+// which one answered; grading against a different one would draw a corridor from one norm
+// and colour it from another.
+QHash<QString, QString> LmSessionModel::gradesFor(const std::vector<LmFieldStats> &stats,
+                                                  const QString &contextId)
+{
+    QHash<QString, QString> out;
+    if (!m_pack || !m_norms)
+        return out;
+
+    const CharacteristicPack &pack   = m_pack->pack();
+    const GradePolicy         policy = gradePolicyByName(m_policyName);
+
+    for (const LmFieldStats &st : stats) {
+        // No reading, no grade. A session mean is not what a corridor judges — the panel
+        // colours THIS shot, and a mean that happens to sit outside a corridor says
+        // something about the session that a tile's frame is the wrong place to say.
+        if (!st.hasLatest)
+            continue;
+
+        const std::optional<MetricCorridor> c =
+            corridorForMetricAtPhase(pack, *m_norms, st.key, Phase::Impact, contextId, policy);
+        if (!c)
+            continue;                     // no measure reads it, or no norm anywhere on the chain
+
+        const NormResolution res = m_norms->resolve(c->measureId, contextId);
+        if (!res.found())
+            continue;                     // cannot happen — the corridor resolved on it — but a
+                                          // dereference guarded by "cannot happen" is a crash
+        const Grade g = res.grade(st.latest, c->shape, policy);
+        // NotMeasured means the norm calls the value implausible: a device glitch, not a
+        // fault in the swing. It is left uncoloured rather than shown as an Action, which
+        // is the one grade that would be a lie about the golfer rather than about the kit.
+        if (g == Grade::NotMeasured)
+            continue;
+        out.insert(st.key, gradeName(g));
+    }
+    return out;
+}
+
 QVariantList LmSessionModel::bandCounts() const
 {
     QVariantList out;
@@ -360,6 +442,7 @@ void LmSessionModel::rebuild()
     m_bands.clear();
     m_graphics.clear();
     m_scopeText.clear();
+    m_corridorScope.clear();
     m_valueLabel = tr("latest");
     m_shotCount = 0;
     m_anyReadings = false;
@@ -464,13 +547,32 @@ void LmSessionModel::rebuild()
     // fieldGroups() outside and the stats inside keeps both orders where they are
     // declared — bands in display order, fields in fieldDefs() order within a band.
     const std::vector<LmFieldStats> stats = lmSessionStats(scoped, latestIndex);
+
+    // WHICH CORRIDORS, AND ONLY WHEN THE SCOPE HAS A CLUB. An unknown club already puts
+    // the board on the whole session and says "all clubs" in the header; grading a mixed
+    // bag against the full-swing default would be the same error the mean refuses to make,
+    // wearing a colour. Every corridor that matters here is club-shaped — the driver spin
+    // rate row and the wedge one are 3,000 rpm apart — so with no club there is nothing
+    // honest to resolve against and the board stays a readout.
+    const QString contextId = club.isEmpty() ? QString() : contextIdForClub(club);
+    const QHash<QString, QString> grades =
+        contextId.isEmpty() ? QHash<QString, QString>() : gradesFor(stats, contextId);
+    // Named only when a corridor actually resolved: a legend over a board showing no
+    // colour is a promise the board is not keeping.
+    if (!grades.isEmpty() && m_norms) {
+        if (const ContextNode *cn = m_norms->contexts().node(contextId))
+            m_corridorScope = cn->label;
+        else
+            m_corridorScope = club;
+    }
+
     for (const char *g : pinpoint::lm::fieldGroups()) {
         const QString name = QString::fromLatin1(g);
         Band band;
         band.name = name;
         for (const LmFieldStats &st : stats)
             if (st.def && QString::fromLatin1(st.def->group) == name)
-                band.tiles.append(tileFor(st));
+                band.tiles.append(tileFor(st, grades.value(st.key)));
         // A band no shot produced a reading for is not drawn at all — an empty gutter
         // rule with a zero beside it says the device measured nothing, which is a
         // different claim from "the device does not report spin".
@@ -478,7 +580,7 @@ void LmSessionModel::rebuild()
             m_bands.push_back(band);
     }
 
-    buildGraphics(stats, scoped,
+    buildGraphics(stats, scoped, grades,
                   (latestIndex >= 0 && size_t(latestIndex) < opticalLowPoint.size())
                       ? opticalLowPoint[size_t(latestIndex)] : std::nullopt);
 
@@ -500,6 +602,7 @@ void LmSessionModel::rebuild()
 // paints (analysis pipeline guide §6.2).
 void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats,
                                    const std::vector<LmShotValues> &scoped,
+                                   const QHash<QString, QString> &grades,
                                    const std::optional<double> &opticalLowPoint)
 {
     QVariantMap g;
@@ -512,7 +615,7 @@ void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats,
     int reported = 0;
     for (const LmFieldStats &st : stats) {
         if (!st.def) continue;
-        values.insert(st.key, annotationFor(st));
+        values.insert(st.key, annotationFor(st, grades.value(st.key)));
         if (st.hasLatest) ++reported;
     }
     g.insert(QStringLiteral("values"), values);

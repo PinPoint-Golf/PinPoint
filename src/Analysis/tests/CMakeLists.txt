@@ -776,6 +776,24 @@ pp_add_test(seed_conversion_test
 set_tests_properties(seed_conversion_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
 
+# The launch monitor panel's corridor join, on the shipped content: club name -> context -> (metric,
+# Impact) -> measure -> norm -> Grade, which is the chain LmSessionModel::gradesFor() runs to decide
+# the one colour that board carries. Every link is tested elsewhere; the CHAIN is not, and it can
+# fail silently — resolved at the default context instead of the club's, spin rate finds the `any`
+# row (written too wide to ever fire) and the panel simply never colours anything. Pins WHICH seven
+# readings are gradable too, so authoring the eighth norm is a deliberate edit here rather than a
+# colour appearing on a golfer's board unannounced. No Metrics link: this asks the pack and the norm
+# set directly, exactly as the model does.
+pp_add_test(lm_corridor_test
+    SOURCES ${DIAG}/tests/lm_corridor_test.cpp
+            ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+    INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
+set_tests_properties(lm_corridor_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")
+
 pp_add_test(manifest_migration_test
     SOURCES ${DIAG}/tests/manifest_migration_test.cpp
             ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp

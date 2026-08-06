@@ -32,6 +32,13 @@
 // state. The band hue appears only on hover, where it means "this region belongs to the
 // line you are asking about" and nothing more.
 //
+// THE PANEL DOES GRADE, and this region is why it does so in a different channel. A
+// reading outside its corridor is said in COLOUR, on the figure that states it (PpLmRead)
+// — never as a second shaded region on the drawing. One drawing carrying two shaded areas
+// that mean different things is the failure this separation exists to prevent, and it is
+// why nothing in this file consults `grade`. Region = the golfer's own spread, always.
+// Colour on a number = outside the corridor. Neither ever borrows the other's channel.
+//
 // SUBTLE AT REST, SHARPER ON ENQUIRY. Nine of these on screen at full strength would bury
 // the shot they exist to place. So at rest they are texture — faint enough to read as
 // grain behind the drawing, present enough to still be visible on a bay TV across a

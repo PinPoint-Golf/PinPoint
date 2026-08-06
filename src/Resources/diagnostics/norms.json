@@ -1229,10 +1229,19 @@
       "measure": "m_clubPathAtImpact",
       "context": "any",
       "mu": 0.0,
-      "sigmaLo": 3.0,
+      "sigmaLo": 1.3333333333333333,
       "unit": "°",
       "source": "heuristic",
-      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
+      "citation": "THE FAULT LINE IS ±4°, AND SIGMA IS SET TO PUT IT THERE: 4/3 of a degree, so Action begins at exactly ±4 under the Standard policy (watchMaxZ = 3) and moves with the policy as every corridor in this pack does. Coaching judgement, not a fitted spread — a path more than four degrees either way is a fault whatever else the delivery is doing. Sigma was 3.0, which put the fault line at ±9° and could only ever have fired on a shank. KEPT IN STEP WITH m_lmClubPath, deliberately and by the same rule the m_lmLaunchDirection row states: this is our own planned optical route and that one is the launch monitor's reading of the same quantity, and a corridor is a fact about the swing rather than about the instrument that saw it. Change one and change the other. Distributional cross-check: delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
+    },
+    {
+      "measure": "m_lmClubPath",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 1.3333333333333333,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "Mirrors the m_clubPathAtImpact row exactly — same corridor, same basis — because it grades the same quantity from a different instrument. It exists separately because that measure is our own planned optical route and resolves nothing today, so a launch monitor session could not be graded on path at all without it; sig_inToOutPath and sig_outToInPath still key on the optical measure and will start firing the day its producer lands. The two rows must be kept in step or the same shot will grade two ways depending on which instrument saw it. See that row for where ±4° comes from and why sigma is 4/3."
     },
     {
       "measure": "m_feetAlignment",
@@ -1647,10 +1656,10 @@
       "measure": "m_faceToPath",
       "context": "any",
       "mu": 0.0,
-      "sigmaLo": 2.0,
+      "sigmaLo": 1.0,
       "unit": "°",
       "source": "heuristic",
-      "citation": "Provisional. Delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
+      "citation": "THE FAULT LINE IS ±3°, AND SIGMA IS SET TO PUT IT THERE: one degree, so Action begins at exactly ±3 under the Standard policy (watchMaxZ = 3) and moves with the policy as every corridor in this pack does. Coaching judgement, not a fitted spread. Sigma was 2.0, which put the fault line at ±6° — a face six degrees across its own path is not a shot shape, it is a slice, so sig_openFaceToPath and sig_closedFaceToPath could barely fire. They now fire beyond ±3 rather than ±6, which is the intended consequence and the reason this row moved. NOT A CORRIDOR ON THE SHOT SHAPE, and it cannot be one: the same −2° is a push-draw off an in-to-out path and a pull-hook off a square one, and no corridor on a single measure can tell those apart. It grades how far the face and the path disagree, which is a fault on its own terms whichever way the ball then goes. Left at `any` rather than full_swing to match the m_clubPathAtImpact and m_launchDirection rows beside it, which means a putt inherits it — as it already did at 2.0. Distributional cross-check: delivery-parameter distributions in 10.3390/proceedings2060249 cover face angle, club path and attack angle across club types."
     },
     {
       "measure": "m_launchDirection",

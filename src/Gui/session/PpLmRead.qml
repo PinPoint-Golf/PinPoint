@@ -28,6 +28,12 @@
 // while keeping every number at the contrast the tiles board settled on, after a
 // mid-chroma hue on colorSurface failed review once.
 //
+// WHICH LEAVES THE FIGURE FREE TO SAY ONE OTHER THING, and it says exactly one: that this
+// reading is outside its corridor. Band identity is already on the label above it, so the
+// two channels never compete for the same glyph — the words stay the metric's colour
+// whatever the grade, and the number goes amber or red or stays as it was. Nothing here
+// resolves a corridor; `grade` arrives from LmSessionModel with the reading it describes.
+//
 // FIXED TYPE. Nothing here answers to the diagram's scale — that is the whole point of
 // the graphics view's type rule, and it is what makes this block safe to drop into a
 // laid-out strip as well as onto a scaled drawing.
@@ -52,6 +58,13 @@ Column {
     // from two others on the same card. Never silent: this panel's premise is that you can
     // tell what produced a number.
     property string note: ""
+    // "" | "ideal" | "good" | "watch" | "action". Empty for a reading with no corridor, no
+    // value, or a value the norm calls implausible — and drawn the same as Ideal and Good,
+    // because this panel marks what is OUT and stays silent about everything else.
+    property string grade: ""
+    readonly property bool flagged: grade === "watch" || grade === "action"
+    readonly property color flagColor: grade === "action" ? Theme.colorRagFault
+                                                          : Theme.colorRagWatch
 
     signal hovered(string key, bool on)
 
@@ -83,6 +96,10 @@ Column {
     Row {
         spacing: Theme.sp(3)
         Text {
+            // Named so the layout test can assert what colour a reading is printed in.
+            // The corridor state is a fact a reader sees only as a hue, and a hue is
+            // exactly the kind of thing that goes wrong silently.
+            objectName: "readValue"
             id: readValue
             text: root.value
             // THE READING, at the size the headline strip prints its figures. It sat at
@@ -90,7 +107,7 @@ Column {
             // six at the top quieter than the labels naming them deserved.
             font.family: Theme.fontData
             font.pixelSize: Theme.fontSzData
-            color: Theme.colorText2
+            color: root.flagged ? root.flagColor : Theme.colorText2
         }
         Text {
             anchors.baseline: readValue.baseline

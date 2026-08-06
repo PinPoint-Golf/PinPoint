@@ -60,9 +60,11 @@ Item {
     property Component diagram: null
 
     // The card's readings, ALREADY RESOLVED: a list of
-    // { label, value, unit, hue, metricKey, note }. Resolved by the body, which owns the
-    // graphics map, rather than looked up here — it keeps this file free of any knowledge
-    // of what a reading is, which is what lets the layout test drive it with a literal.
+    // { label, value, unit, hue, metricKey, grade, note }. Resolved by the body, which owns
+    // the graphics map, rather than looked up here — it keeps this file free of any
+    // knowledge of what a reading is, which is what lets the layout test drive it with a
+    // literal. `grade` included: a corridor is a fact about a reading, and a card that
+    // resolved one itself would be a second place this panel could decide a colour.
     property var reads: []
 
     // An inferred read — { label, name, evidence } — or null. Rendered as its own line
@@ -240,6 +242,7 @@ Item {
                     unit: modelData.unit !== undefined ? modelData.unit : ""
                     hue: modelData.hue !== undefined ? modelData.hue : Theme.colorText2
                     metricKey: modelData.metricKey !== undefined ? modelData.metricKey : ""
+                    grade: modelData.grade !== undefined ? modelData.grade : ""
                     note: modelData.note !== undefined ? modelData.note : ""
                 }
             }

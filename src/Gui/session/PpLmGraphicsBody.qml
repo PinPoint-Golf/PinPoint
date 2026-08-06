@@ -55,6 +55,14 @@
 // carry one colour meaning between this view and the tiles board. Lines carry the hue;
 // numbers stay colorText2, because a mid-chroma hue on colorSurface is the contrast
 // failure the tiles board already had to fix once.
+//
+// WITH ONE EXCEPTION, AND IT IS THE ONLY VERDICT ON THIS VIEW: a reading outside its
+// corridor is printed in the app's Watch amber or Action red. Nothing else moves — the
+// label keeps its band hue, the line keeps its geometry, and a reading inside its corridor
+// or with no corridor at all looks exactly as it always did. Every figure goes through
+// gradeOf(), and the grade itself is LmSessionModel's; see PpLaunchMonitorPanel's header
+// for the three rules that keep this from turning the panel into a dashboard, and
+// PpLmSpread for why the ±1 SD regions stay out of it.
 
 import QtQuick
 import QtQuick.Layouts
@@ -103,6 +111,19 @@ Item {
     function hue(key) {
         const f = fld(key)
         return Theme.chartSeriesColor(f ? f.bandIndex : 0)
+    }
+    // Whether this reading sits outside its corridor: "" | "ideal" | "good" | "watch" |
+    // "action", resolved by LmSessionModel and carried on the field. Empty for a metric
+    // nobody has authored a norm for, which is most of them — see PpLaunchMonitorPanel's
+    // header for why that stays uncoloured rather than being filled in with a guess.
+    //
+    // ONE ACCESSOR, AND EVERY FIGURE ON THIS VIEW GOES THROUGH IT. The Read component
+    // below reads it off its own metricKey, so the two dozen readings at design anchors
+    // inside the schematics need no wiring of their own and cannot be forgotten one at a
+    // time. Nothing on this view is graded anywhere else.
+    function gradeOf(key) {
+        const f = fld(key)
+        return (f && f.grade !== undefined) ? f.grade : ""
     }
 
     // The session's own spread for a field, for the shaded regions. `spread()` is the
@@ -255,6 +276,11 @@ Item {
                            unit:  lp.has === true ? lp.unit : "",
                            hue:   root.hueClub,
                            metricKey: "",
+                           // NEVER GRADED, and not for want of a corridor. This figure may
+                           // be PinPoint's own optical estimate rather than a reading, and
+                           // colouring an estimate against a norm authored for a measured
+                           // one would put a verdict on our own error bar.
+                           grade: "",
                            note:  (lp.has === true && lp.source === "inferred")
                                   ? qsTr("· PPS EST.") : "" })
                 continue
@@ -264,6 +290,7 @@ Item {
                        unit:  root.unit(r.key),
                        hue:   root.hue(r.key),
                        metricKey: r.key,
+                       grade: root.gradeOf(r.key),
                        note:  r.note !== undefined ? r.note : "" })
         }
         return out
@@ -503,7 +530,17 @@ Item {
                                         font.family: Theme.fontData
                                         font.pixelSize: Theme.fontSzData
                                         font.letterSpacing: -0.8
-                                        color: Theme.colorText
+                                        // The headline carries the same six fields the
+                                        // cards do, off the same map, so it grades with
+                                        // them. Four of the six are capability rather than
+                                        // quality — ball speed, club speed, carry, total —
+                                        // and carry no norm, which is why the strip is
+                                        // usually silent even when a card below it is not.
+                                        color: (modelData.grade === "action")
+                                                   ? Theme.colorRagFault
+                                             : (modelData.grade === "watch")
+                                                   ? Theme.colorRagWatch
+                                             : Theme.colorText
                                     }
                                     Text {
                                         anchors.baseline: headlineValue.baseline
@@ -533,6 +570,11 @@ Item {
     // the two dozen call sites below do not each repeat the hover wiring.
     component Read : PpLmRead {
         onHovered: (key, on) => root.setHovered(key, on)
+        // Derived from the block's OWN metricKey rather than passed in at each of the two
+        // dozen call sites below. Every one of them already names its metric, so this is
+        // the same fact read from where it already is — and a reading that could be
+        // annotated without being graded is a reading somebody will forget to grade.
+        grade: root.gradeOf(metricKey)
     }
 
     // A BAND OF READINGS BESIDE A DRAWING — two across, or two down.
@@ -585,6 +627,7 @@ Item {
                 value: root.txt(modelData.key)
                 unit:  root.unit(modelData.key)
                 hue:   root.hue(modelData.key)
+                grade: root.gradeOf(modelData.key)
                 onHovered: (key, on) => root.setHovered(key, on)
             }
         }
@@ -1350,7 +1393,16 @@ Item {
                                              .arg(root.unit("lm.carryDistance"))
                     font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                     font.letterSpacing: Theme.trackingMicro
-                    color: Theme.colorText2
+                    // Graded like every other figure on the view. It sits on the bracket it
+                    // dimensions rather than in a reading block, which makes it look like
+                    // chrome — but it prints a reading and a unit, and the same number in
+                    // the headline strip above would then be the one that went amber while
+                    // this one did not.
+                    color: (root.gradeOf("lm.carryDistance") === "action")
+                               ? Theme.colorRagFault
+                         : (root.gradeOf("lm.carryDistance") === "watch")
+                               ? Theme.colorRagWatch
+                         : Theme.colorText2
                 }
             }
 

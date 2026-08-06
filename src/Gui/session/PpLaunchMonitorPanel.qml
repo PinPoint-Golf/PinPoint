@@ -20,11 +20,30 @@
 // session, banded, each tile showing this shot's value, the session mean beside it and
 // the session SD as the ±, over a strip that puts the shot against its own spread.
 //
-// PER SESSION AND NEUTRAL, which is what makes it a stage panel of its own rather than
-// a dashboard zone. PpDashboardPanel is per shot and opinionated; this answers "what
-// did the device measure, and how repeatable was I", and that question needs no verdict
-// to be worth asking. So: NO grading, no RAG colour, no corridors, no comparison
-// against our own optical estimates. The only colour here is band identity.
+// PER SESSION, which is what makes it a stage panel of its own rather than a dashboard
+// zone. PpDashboardPanel is per shot; this answers "what did the device measure, and how
+// repeatable was I", and that question is worth asking whether or not anything is wrong.
+// So the board's DEFAULT STATE IS SILENT: no comparison against our own optical estimates,
+// no reassurance, no green, and the only standing colour is band identity.
+//
+// IT SPEAKS UP FOR EXACTLY ONE THING — a reading outside its corridor. The frame and the
+// figure take the app's Watch amber, or its Action red, and nothing else on the tile
+// changes. Three rules keep that from becoming grading by the back door:
+//
+//   · A reading INSIDE its corridor looks exactly like a reading with no corridor at all.
+//     There is no Ideal colour and no Good colour, so the board says "this one is out"
+//     and never "these others are fine" — which it has no standing to say about a metric
+//     nobody has authored a norm for, and there are 18 of those.
+//   · The colour and the ±1 SD strip mean DIFFERENT THINGS and are drawn in different
+//     channels on purpose. The strip is the golfer against their own other shots — pure
+//     geometry, no norm, unchanged — and the corridor is colour. Two shaded regions on one
+//     tile would be the version of this that misreads, and neither this board nor the
+//     schematics draw one.
+//   · Only when the scope has a CLUB. An unknown club boards the whole session and says
+//     "all clubs"; corridors are club-shaped, so there the board stays a plain readout.
+//
+// LmSessionModel resolves all of it — this file paints a string it is handed. See its
+// gradesFor().
 //
 // IT SIZES ITSELF TO THE SCREEN IT IS ON. This board's normal home is a bay TV read
 // from across a hitting area, so a fixed tile size is the wrong answer twice over: on
@@ -84,6 +103,10 @@ Rectangle {
         connected:     launchMonitor.configured
         saving:        appSettings.saveLaunchMonitorData
         deviceName:    launchMonitor.deviceName
+        // The SAME setting MetricCatalog is bound to wherever it is hosted. A corridor
+        // graded here against the default while the golfer has chosen Strict would put a
+        // different colour on this panel than on the dashboard for one reading.
+        gradePolicy:   appSettings.diagnosticsGradePolicy
         // Changes only how the two INFERRED reads are WORDED and which way the strike
         // face is drawn — never a reading. See lm_inferred_reads.h.
         leftHanded:    athleteController.currentHandedness === "Left"
@@ -256,6 +279,26 @@ Rectangle {
                 width: Math.min(implicitWidth, root.width * 0.4)
             }
 
+            // WHAT THE COLOUR MEANS, and which corridors it came from. A separate Text
+            // rather than more words on the line above, for two reasons: it applies to
+            // BOTH modes where that one is the tiles board's strip legend only, and each
+            // then elides on its own budget — appending it would have made the newest fact
+            // on the header the first one to disappear in a narrow split.
+            //
+            // Absent unless a corridor actually resolved. A legend over a board showing no
+            // colour is a promise the board is not keeping, and with 18 of the 25 readings
+            // carrying no norm that is a state a golfer will genuinely be in.
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: board.emptyText === "" && board.corridorScope !== ""
+                text: qsTr("colour: outside the %1 corridor").arg(board.corridorScope)
+                font.family: Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
+                color: Theme.colorText3
+                elide: Text.ElideRight
+                width: Math.min(implicitWidth, root.width * 0.4)
+            }
+
             // THE standard selector (PpSegmentedControl), not a lookalike — the same
             // control the chart panel, the markup panel and the session toolbar use, so
             // a two-way choice looks and behaves the same wherever a golfer meets one.
@@ -414,8 +457,29 @@ Rectangle {
                                 height: root.fit.tileH
                                 radius: root.px(Theme.radius)
                                 color: Theme.colorSurface
-                                border.width: 1
-                                border.color: Theme.colorBorderMid
+
+                                // "" | "ideal" | "good" | "watch" | "action", from the
+                                // model. Only the last two show — see the file header.
+                                readonly property string grade:
+                                    modelData.grade !== undefined ? modelData.grade : ""
+                                readonly property bool flagged:
+                                    grade === "watch" || grade === "action"
+                                // The app's grading pair, not a pair of this panel's own.
+                                // A golfer meets these two colours on the dashboard, the
+                                // wrist grid and every range bar; a launch monitor tile is
+                                // not the place to teach them a third meaning for a hue.
+                                readonly property color flagColor:
+                                    grade === "action" ? Theme.colorRagFault
+                                                       : Theme.colorRagWatch
+
+                                // THE FRAME SCALES WITH THE BOARD and the resting one does
+                                // not. A 1 px hairline is the right weight for a border
+                                // that only separates a tile from its neighbour, but this
+                                // one carries a reading — on a bay TV at k = 3 it would be
+                                // a third the apparent weight of the same mark on a laptop,
+                                // which is exactly backwards for the screen it is for.
+                                border.width: flagged ? Math.max(2, root.px(2)) : 1
+                                border.color: flagged ? flagColor : Theme.colorBorderMid
 
                                 readonly property int padX: root.px(Theme.sp(10))
                                 readonly property int padY: root.px(Theme.sp(7))
@@ -528,7 +592,14 @@ Rectangle {
                                         font.family: Theme.fontData
                                         font.pixelSize: root.px(Theme.fontSzDataLg)
                                         font.letterSpacing: -1.1 * root.k
-                                        color: Theme.colorText
+                                        // THE SECOND CHANNEL, and the reason there are
+                                        // two. A frame alone is a mark the eye reads at
+                                        // the edge of a tile it may not be looking at; the
+                                        // figure is what a reader is actually reading. The
+                                        // mean and the SD beside it stay colorText2 — they
+                                        // are the session, and the corridor judges this
+                                        // shot.
+                                        color: tile.flagged ? tile.flagColor : Theme.colorText
                                         elide: Text.ElideRight
                                     }
                                 }
