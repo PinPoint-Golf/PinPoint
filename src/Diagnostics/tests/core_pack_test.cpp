@@ -191,8 +191,16 @@ int main()
         // produce and neither is evidence of it on its own — see the design doc on why the face-on
         // signature is ambiguous — which is why both edges are Moderate and why the explanation
         // pass, not the detector, is what names the cause.
-        check(coverage("limited_trail_hip_ir") == 13, "limited trail-hip internal rotation explains 13");
-        check(coverage("poor_core_stability") == 10, "poor core stability explains 10");
+        //
+        // 13 -> 14 and 10 -> 11 with the early-extension causes audit. Both restrictions are named
+        // in the coaching account of early extension and neither had a route to it: a trail hip
+        // that cannot internally rotate leaves the downswing no room to turn into, and a pelvis
+        // nothing is holding in its hinge comes out of the hinge instead of rotating within it.
+        // The core case was the conspicuous one — it already carried an edge to BACKING OFF THE
+        // BALL, which is the opposite tail of the same pelvis-thrust axis, so the graph could
+        // explain the rarer direction of that fault and not the common one.
+        check(coverage("limited_trail_hip_ir") == 14, "limited trail-hip internal rotation explains 14");
+        check(coverage("poor_core_stability") == 11, "poor core stability explains 11");
 
         const int topFive = coverage("poor_pelvic_disassociation") + coverage("limited_thoracic_rotation")
                           + coverage("limited_lead_hip_ir") + coverage("limited_trail_hip_ir")
@@ -601,6 +609,52 @@ int main()
         std::printf("        (%d live corridor signals, %d without a norm)\n", live, dark);
         check(live > 0, "there are live corridor signals to check");
         check(dark == 0, "every LIVE corridor signal resolves a norm — the pack cannot go dark");
+
+        // ── Where the pelvis-thrust corridors call a fault, and where they SURFACE ──
+        //
+        // TWO DIFFERENT NUMBERS, and a corridor row states neither of them directly. The fault
+        // line is `watchMaxZ * sigma`; the point where the detector first surfaces the condition
+        // is `goodMaxZ * sigma`, two thirds of it, because evaluate() fires on a DEVIATION and
+        // not merely on leaving Ideal. An author reading 1.33 cm off the row would guess wrong
+        // about both. Worth pinning here rather than trusting a comment, because a Finding
+        // carries no severity — Watch and Action reach a reader identically — so the gap between
+        // the two is invisible everywhere else in the app.
+        //
+        // Asserted through grade() rather than by multiplying it out, so the day the policy table
+        // or the deviation rule moves, this fails instead of quietly agreeing with stale
+        // arithmetic. Shape is read off the MEASURE, never assumed: m_pelvisThrustBack is a
+        // ceiling and passing Target here would grade its open tail.
+        {
+            const GradePolicy pol = gradePolicyByName(QStringLiteral("standard"));
+            auto gradeOf = [&](const char *measureId, double cm) {
+                const Measure *m = p.measure(QString::fromLatin1(measureId));
+                const Norm    *n = nres.pack.find(QString::fromLatin1(measureId),
+                                                  QStringLiteral("any"));
+                return (m && n) ? grade(cm, *n, m->shape, pol) : Grade::NotMeasured;
+            };
+            auto isFault   = [&](const char *id, double cm) { return gradeOf(id, cm) == Grade::Action; };
+            auto surfaces  = [&](const char *id, double cm) { return isDeviation(gradeOf(id, cm)); };
+
+            check(!isFault("m_pelvisThrustBack", 3.9),
+                  "3.9 cm of pelvis thrust toward the ball going back is not yet a fault");
+            check(isFault("m_pelvisThrustBack", 4.1),
+                  "…and beyond 4 cm it is — the line this corridor was authored for");
+            check(!surfaces("m_pelvisThrustBack", 2.6) && surfaces("m_pelvisThrustBack", 2.8),
+                  "…while the CONDITION surfaces from about 2.7 cm, two thirds of the fault line");
+            // The open tail. A ceiling makes no claim about the pelvis sitting back going back,
+            // and this is the assertion that would fail if somebody 'tidied' the shape to Target.
+            check(gradeOf("m_pelvisThrustBack", -6.0) == Grade::Ideal,
+                  "and moving AWAY from the ball going back is not graded at all");
+
+            // The same quantity's DOWNSWING row, stated so the asymmetry is visible rather than
+            // buried in two sigmas eight lines apart in a JSON file. Early extension itself does
+            // not reach Action until 12 cm, three times the backswing figure. Some late thrust is
+            // normal, so the two are not meant to match — but only the backswing number has been
+            // sanctioned, and a reader should be able to see that here without computing it.
+            check(!isFault("m_pelvisThrustDown", 11.9),
+                  "early extension is not a fault at 11.9 cm of downswing thrust");
+            check(isFault("m_pelvisThrustDown", 12.1), "…and is beyond 12 cm");
+        }
 
         // ── Nothing the app can DETECT is left without an EXPLANATION ───────────
         // The counterpart to the check above, and the one that nearly slipped. A signal that can

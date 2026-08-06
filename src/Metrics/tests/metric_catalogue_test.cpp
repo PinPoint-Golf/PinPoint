@@ -64,7 +64,10 @@ int main()
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 87, "descriptor count == 87");   // 70 + 26 lm. - 9 renamed
+        // 87 -> 88 with balanceHeelToe, the depth-axis partner to comOverLeadFoot. Balance was
+        // measured along the stance line only, so a golfer sat on their heels — which is one of
+        // the setup causes of early extension — had no metric to be sat on their heels IN.
+        checkEqI(static_cast<int>(cat.all().size()), 88, "descriptor count == 88");   // 71 + 26 lm. - 9 renamed
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -93,7 +96,7 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  38, "TimeSeries count");
+        checkEqI(countType(cat, MetricType::TimeSeries),  39, "TimeSeries count");   // +balanceHeelToe
         // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
         // as duplicates of a series the catalogue already carries.
         checkEqI(countType(cat, MetricType::PointInTime), 43, "PointInTime count");   // +17: a monitor reports one number per shot
@@ -314,7 +317,7 @@ int main()
                              qPrintable(d->key), qPrintable(a.reason));
         }
         std::printf("    %d planned descriptors\n", planned);
-        checkEqI(planned, 16, "16 planned metrics — nothing produces them by any route");   // the 9 launch-monitor rungs went live with the connector
+        checkEqI(planned, 17, "17 planned metrics — nothing produces them by any route");   // the 9 launch-monitor rungs went live with the connector; +balanceHeelToe, which needs the down-the-line view
         checkEqI(unavailable, planned,
                  "every planned metric resolves Unavailable even with every device present");
         checkEqI(saysPlanned, planned,

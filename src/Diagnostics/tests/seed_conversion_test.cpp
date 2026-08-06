@@ -69,10 +69,16 @@ int main(int argc, char **argv)
     // header, and a THIRTEENTH shape appearing without that conversation is the thing this catches.
     // The count is updated deliberately when a measure is added or converted, never loosened to a
     // `>=`: the claim is that these are the shapes somebody argued for, not that there are some.
+    // The FOURTEENTH is m_pelvisThrustBack, and it is the first to be caught by the health check
+    // rather than argued for up front: authored as a target, it graded the pelvis moving AWAY from
+    // the ball during the backswing, which no condition explains and which is not a fault — a
+    // centimetre of sitting back going back is ordinary and some coaches teach it. A ceiling says
+    // that in the one place the whole app reads it from. Its downswing partner stays a target
+    // because both of ITS tails are real and both are authored.
     int oneSided = 0;
     for (const Measure &mm : pack.measures)
         if (shapeIsOneSided(mm.shape)) ++oneSided;
-    check(oneSided == 13, "…and one of exactly thirteen one-sided measures in the shipped pack");
+    check(oneSided == 14, "…and one of exactly fourteen one-sided measures in the shipped pack");
 
     // ── The rows ────────────────────────────────────────────────────────────
     //

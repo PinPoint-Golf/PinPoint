@@ -1913,6 +1913,38 @@
       "unit": "°",
       "highMeans": "the shaft moved OUTSIDE the plane it was on at the top — the club is working out toward the ball line rather than down",
       "viewNeeded": "downTheLine"
+    },
+    {
+      "id": "m_pelvisThrustBack",
+      "kind": "provided",
+      "metricKey": "pelvisThrust",
+      "reducer": {
+        "kind": "extremum",
+        "window": [
+          "p1",
+          "p4"
+        ],
+        "sense": "max",
+        "anchor": "p1"
+      },
+      "shape": "ceiling",
+      "status": "planned",
+      "label": "Pelvis thrust toward the ball, peak P1 to P4 from P1",
+      "unit": "cm",
+      "highMeans": "the pelvis further toward the ball by the top of the backswing"
+    },
+    {
+      "id": "m_balanceHeelToeAddress",
+      "kind": "provided",
+      "metricKey": "balanceHeelToe",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p1"
+      },
+      "status": "planned",
+      "label": "Balance heel to toe, at address",
+      "unit": "% foot length",
+      "highMeans": "the balance point further toward the toes at address"
     }
   ],
   "signals": [
@@ -2865,6 +2897,22 @@
       "test": "outsideCorridor",
       "measures": [
         "m_transitionPlaneShift"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_pelvisThrustBackswing",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_pelvisThrustBack"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_weightInHeelsAddress",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_balanceHeelToeAddress"
       ],
       "direction": "low"
     }
@@ -6262,6 +6310,72 @@
         "tier": "practice",
         "searchedOn": "2026-08-03",
         "searchTerms": "shaft plane transition early downswing shallow steep golf"
+      }
+    },
+    {
+      "id": "pelvis_thrust_backswing",
+      "label": "Pelvis moves toward the ball in the backswing",
+      "aliases": [
+        "early extension going back"
+      ],
+      "axis": "pelvis_thrust_backswing",
+      "group": "posture",
+      "kind": "fault",
+      "prominence": "occasional",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_pelvisThrustBackswing"
+      ],
+      "state": "draft",
+      "consequence": "Moving toward the ball on the way back spends the room the arms need before the downswing has started, so the club has to arrive from somewhere other than where it was set up to. The golfer then either backs out of the shot or stands up out of it, and standing up is the commoner answer. It is the depth-axis partner to the pelvis rising or sinking going back, and it is read the same way: what the pelvis did before the transition, not after it. IT IS ALSO WHY THE DOWNSWING READING NEEDS THIS ONE BESIDE IT. m_pelvisThrustDown is the peak between P5 and P7 measured from ADDRESS, so a golfer who moves toward the ball going back and simply holds it registers that displacement in the downswing window and scores as early extension without ever having extended. The two measures separate what happened before the top from what happened after it, and neither reads correctly alone.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension backswing pelvis depth toward the ball"
+      }
+    },
+    {
+      "id": "poor_glute_strength",
+      "label": "Weak glutes",
+      "aliases": [
+        "glutes not firing"
+      ],
+      "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.gluteStrength",
+      "state": "active",
+      "consequence": "The glutes are what hold the pelvis in its address hinge while the hips turn under a bending trunk. Without them the position cannot be held under load, and the pelvis comes out of the hinge toward the ball rather than rotating within it. Separate from core stability and screened separately: a golfer can hold a plank for a minute and still have nothing to stabilise the hip with, and the two failures ask for different work.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "gluteal strength endurance golf swing pelvis stability early extension"
+      }
+    },
+    {
+      "id": "weight_in_heels_address",
+      "label": "Weight in the heels at address",
+      "aliases": [
+        "sitting back on the heels"
+      ],
+      "axis": "balance_heel_toe_address",
+      "group": "setup",
+      "kind": "setup",
+      "prominence": "occasional",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_weightInHeelsAddress"
+      ],
+      "state": "draft",
+      "consequence": "Starting back on the heels leaves the golfer with only one direction to move in when the downswing loads the ground, and that direction is toward the ball. It is a different quantity from weight on the trail foot, which is measured along the target line: this one is the depth axis, heels to toes.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     }
   ],
@@ -9690,6 +9804,127 @@
         "tier": "practice",
         "searchedOn": "2026-08-03",
         "searchTerms": "forward shaft lean delofting dynamic loft spin loft backspin golf"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension golf swing physical limitation hip mobility core stability"
+      }
+    },
+    {
+      "from": "poor_core_stability",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension golf swing physical limitation hip mobility core stability"
+      }
+    },
+    {
+      "from": "limited_hip_extension",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension golf swing physical limitation hip mobility core stability"
+      }
+    },
+    {
+      "from": "limited_hamstring_length",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension golf swing physical limitation hip mobility core stability"
+      }
+    },
+    {
+      "from": "over_the_top",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension golf swing compensation downswing arms room"
+      }
+    },
+    {
+      "from": "casting",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension golf swing compensation downswing arms room"
+      }
+    },
+    {
+      "from": "hanging_back",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension golf swing compensation downswing arms room"
+      }
+    },
+    {
+      "from": "excessive_knee_flex",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "address setup geometry stance width posture golf swing"
+      }
+    },
+    {
+      "from": "pelvis_thrust_backswing",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "early extension backswing pelvis depth toward the ball"
+      }
+    },
+    {
+      "from": "poor_glute_strength",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "gluteal strength golf swing early extension"
+      }
+    },
+    {
+      "from": "weight_in_heels_address",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "address setup geometry stance width posture golf swing"
       }
     }
   ]

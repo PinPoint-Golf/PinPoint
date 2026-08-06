@@ -153,6 +153,16 @@
       "passAtLeast": 70.0,
       "unit": "deg",
       "note": "The reading that matters is where the PELVIS gives way, not where the leg stops — short hamstrings tether the pelvis, and it is that tether the address position has to work around."
+    },
+    {
+      "id": "screen.gluteStrength",
+      "label": "Glute strength",
+      "bodyRegion": "Hip",
+      "protocol": "A single-leg glute bridge, held with the pelvis level. Lie on your back, one foot planted, the other leg straight out, and lift the hips until the trunk and thigh are in line. The test ends when the pelvis drops on the free-leg side or the lower back takes over the position, not when it hurts. Test both sides.",
+      "passCriterion": "At least 30 seconds each side, with the pelvis staying level.",
+      "passAtLeast": 30.0,
+      "unit": "s",
+      "note": "Endurance under load rather than peak strength, for the same reason the core screen is: the swing asks for the hinge to be held repeatedly. Read it beside core stability rather than instead of it — a golfer can hold a long plank and still have nothing stabilising the hip itself, and the two failures ask for different work."
     }
   ]
 }

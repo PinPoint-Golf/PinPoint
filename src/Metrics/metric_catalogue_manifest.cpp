@@ -726,14 +726,20 @@ void installMetricManifest(MetricCatalogue &cat)
             "lone face-on camera cannot resolve it. Planned."),
         .signPositive = QStringLiteral("the pelvis moved toward the ball"),
         .signNegative = QStringLiteral("moved away from the ball"),
-        .phases = { P::Downswing, P::Impact },
+        // TOP AS WELL AS THE DOWNSWING, and it is not a widening of scope. The pelvis moving
+        // toward the ball on the way BACK is its own fault, and reading it needs its own
+        // window: the downswing measure is the peak between P5 and P7 taken from address, so
+        // a golfer who moves in going back and holds it scores as early extension without
+        // having extended. See pelvis_thrust_backswing.
+        .phases = { P::Top, P::Downswing, P::Impact },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .faceOnCamera = true, .dtlCamera = true },
                 QStringLiteral("toward-and-away-from-the-ball travel lies along the face-on "
                                "camera's blind axis, so it takes the down-the-line view to see it "
                                "at all"), PLANNED) },
         .usedBy = { QStringLiteral("characteristic:early_extension"),
-                    QStringLiteral("characteristic:backing_off_the_ball") },
+                    QStringLiteral("characteristic:backing_off_the_ball"),
+                    QStringLiteral("characteristic:pelvis_thrust_backswing") },
     });
 
     cat.addDescriptor({
@@ -1905,6 +1911,38 @@ void installMetricManifest(MetricCatalogue &cat)
                 QStringLiteral("the balance point against the lead foot, in the face-on image "
                                "against the ground plane")) },
         .usedBy = { QStringLiteral("characteristic:off_balance_finish") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("balanceHeelToe"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Balance heel to toe"),
+        .shortLabel = QStringLiteral("Heel/toe"),
+        .unit = QStringLiteral("% foot length"),
+        .group = QStringLiteral("Feet & stance"),
+        .description = QStringLiteral(
+            "Where the balance point sits between the heels and the toes, as a percentage of foot "
+            "length from the heel. THE DEPTH-AXIS PARTNER TO BALANCE OVER THE LEAD FOOT, which "
+            "measures along the stance line instead — a golfer can be perfectly placed between "
+            "their feet and still be sat on their heels, and the two faults have nothing to do "
+            "with one another. The reading that matters is at address: starting on the heels "
+            "leaves only one direction to move in when the downswing loads the ground, and that "
+            "direction is toward the ball."),
+        .howToRead = QStringLiteral(
+            "Read at Address. HIGHER MEANS FURTHER TOWARD THE TOES; 50 % is the middle of the "
+            "foot. Like balance over the lead foot this is a proxy and not a measurement — "
+            "without pressure data it reads geometry only, and it inherits that metric's caveat "
+            "rather than improving on it. Heel-to-toe travel lies along the face-on camera's "
+            "blind axis, so it needs the down-the-line view. Planned."),
+        .signPositive = QStringLiteral("the balance point further toward the toes"),
+        .signNegative = QStringLiteral("further back toward the heels"),
+        .phases = { P::Address },
+        .routes = {
+            via("dtl", RM::Triangulated, Direct, { .faceOnCamera = true, .dtlCamera = true },
+                QStringLiteral("heel-to-toe travel lies along the face-on camera's blind axis, "
+                               "the same axis pelvis thrust lives on, so it takes the "
+                               "down-the-line view to see at all"), PLANNED) },
+        .usedBy = { QStringLiteral("characteristic:weight_in_heels_address") },
     });
 
     // ---------------------------------------------------- Arms

@@ -274,6 +274,16 @@ static const Expect kExpected[] = {
     { "sig_headDriftLeadBackswing", Direction::Low,
       "m_headSwayBack highMeans 'the head further from the ball line, off the ball' — i.e. toward "
       "the TRAIL side; drifting toward the target is the low end" },
+    // The SAME tail as sig_earlyExtension and on the same metric, over the backswing window
+    // instead. Not a duplicate: m_pelvisThrustDown is the P5–P7 peak taken from address, so a
+    // golfer who moves toward the ball going back and holds it reads as early extension without
+    // having extended. Two measures, one convention, two windows.
+    { "sig_pelvisThrustBackswing",  Direction::High,
+      "m_pelvisThrustBack highMeans 'the pelvis further toward the ball by the top of the "
+      "backswing'; moving in on the way back is the high end" },
+    { "sig_weightInHeelsAddress",   Direction::Low,
+      "m_balanceHeelToeAddress highMeans 'the balance point further toward the toes at address'; "
+      "sitting back on the heels is the low end" },
 
     // Arms and club.
     { "sig_inToOutPath",            Direction::High,
