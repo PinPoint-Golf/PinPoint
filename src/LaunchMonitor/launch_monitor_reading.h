@@ -65,6 +65,13 @@ struct LaunchMonitorReading {
     std::optional<double> launchAngle;      // °    ← bare `launchAngle`, planned
     std::optional<double> launchDirection;  // °    ← bare `launchDirection`, planned
     std::optional<double> clubPath;         // °    ← bare `clubPath`, planned
+    // Signed INCHES along the target line, positive = the arc bottomed out AHEAD of
+    // (target-side of) the ball. The same quantity and the same sign convention as our
+    // optical `lowPointAhead` (club_delivery.h) — deliberately, because the pair is a
+    // validation surface and a convention that disagreed would make the comparison
+    // meaningless rather than merely awkward. No connector fills this yet: a GCQuad does
+    // not report low point, and an empty optional is the honest statement of that.
+    std::optional<double> lowPointAhead;    // in   ← bare `lowPointAhead`, camera
 
     // ── Measured, and ours alone will never be ──────────────────────────────
     std::optional<double> faceAngle;        // °
@@ -95,7 +102,7 @@ struct LaunchMonitorReading {
 };
 
 // The catalogue identity of one reading field. This table is the SINGLE place the
-// 25 launch-monitor metrics are enumerated: the swing.json writer, the MetricSeries
+// 26 launch-monitor metrics are enumerated: the swing.json writer, the MetricSeries
 // emitter and the manifest cross-check test all walk it, so a field added to the
 // struct without a descriptor (or vice versa) fails a test rather than going quietly
 // missing from a shot.

@@ -136,7 +136,7 @@ std::vector<QString> ScoreProvider::provides() const
 
 std::vector<QString> LaunchMonitorProvider::provides() const
 {
-    // Every key here is `lm.`-prefixed, and the six that duplicate a quantity we
+    // Every key here is `lm.`-prefixed, and the seven that duplicate a quantity we
     // estimate ourselves are NOT claimed under their bare key. That is the whole
     // point: the bare `clubheadSpeed` stays with the camera producer so the two can
     // be compared on the same shot. Claiming both here would make the resolver pick
@@ -146,6 +146,7 @@ std::vector<QString> LaunchMonitorProvider::provides() const
         QStringLiteral("lm.clubheadSpeed"),  QStringLiteral("lm.ballSpeed"),
         QStringLiteral("lm.attackAngle"),    QStringLiteral("lm.clubPath"),
         QStringLiteral("lm.launchAngle"),    QStringLiteral("lm.launchDirection"),
+        QStringLiteral("lm.lowPointAhead"),
         // Club delivery no camera of ours can resolve.
         QStringLiteral("lm.faceAngle"),      QStringLiteral("lm.faceToPath"),
         QStringLiteral("lm.dynamicLoft"),    QStringLiteral("lm.spinLoft"),

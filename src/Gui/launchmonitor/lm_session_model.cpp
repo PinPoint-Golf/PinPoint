@@ -66,6 +66,36 @@ LmShotValues readingsFor(const QVariantMap &analysisDetail)
     return out;
 }
 
+// PinPoint's OWN optical low point for one shot — the bare `lowPointAhead` our cameras
+// estimate (club_delivery.cpp), read the same way as a reading because it reaches Impact
+// the same way: a PointInTime scalar on an otherwise empty curve.
+//
+// READ SEPARATELY, AND DELIBERATELY SO. It must not join the LmShotValues map: that map
+// is "what the device measured", and rebuild() tests it for emptiness to decide whether
+// the monitor has said anything at all and which device to name. An optical estimate
+// dropped into it would make a camera-only session claim a monitor reported it. It is
+// used for exactly one thing — the IMPACT card's low point falling back to an estimate,
+// badged as one — and nothing else may reach for it.
+std::optional<double> opticalLowPointFor(const QVariantMap &analysisDetail)
+{
+    const QVariantList series = analysisDetail.value(QStringLiteral("series")).toList();
+    for (const QVariant &sv : series) {
+        const QVariantMap m = sv.toMap();
+        if (m.value(QStringLiteral("key")).toString() != QLatin1String("lowPointAhead"))
+            continue;
+        for (const QVariant &pv : m.value(QStringLiteral("phaseSamples")).toList()) {
+            const QVariantMap ps = pv.toMap();
+            if (ps.value(QStringLiteral("phase")).toInt() != int(Phase::Impact))
+                continue;
+            bool ok = false;
+            const double v = ps.value(QStringLiteral("value")).toDouble(&ok);
+            if (ok) return v;
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
 QVariantMap tileFor(const LmFieldStats &st)
 {
     return QVariantMap{
@@ -363,14 +393,20 @@ void LmSessionModel::rebuild()
 
     std::vector<LmShotValues> scoped;
     scoped.reserve(size_t(rows));
+    // Kept in step with `scoped`, index for index, so the focused shot's estimate is
+    // found by the same latestIndex the statistics use rather than by a second search
+    // that could disagree with it about which shot is on screen.
+    std::vector<std::optional<double>> opticalLowPoint;
+    opticalLowPoint.reserve(size_t(rows));
     int latestIndex = -1;
     // The devices that actually MEASURED the shots in scope, in the order they first
     // appear. Normally one; more than one is a session hit across a device change, and
     // naming both is the only honest caption for it.
     QStringList devices;
     for (int r = 0; r < rows; ++r) {
-        LmShotValues v = readingsFor(
-            m_shots->data(m_shots->index(r), ShotListModel::AnalysisDetailRole).toMap());
+        const QVariantMap detail =
+            m_shots->data(m_shots->index(r), ShotListModel::AnalysisDetailRole).toMap();
+        LmShotValues v = readingsFor(detail);
         // Session-wide, deliberately: it separates "the monitor has given us nothing"
         // from "this club has nothing yet", which are different sentences to read.
         if (!v.isEmpty())
@@ -395,6 +431,7 @@ void LmSessionModel::rebuild()
         if (r == focusedRow)
             latestIndex = int(scoped.size());
         scoped.push_back(std::move(v));
+        opticalLowPoint.push_back(opticalLowPointFor(detail));
     }
     m_shotCount = int(scoped.size());
 
@@ -441,7 +478,9 @@ void LmSessionModel::rebuild()
             m_bands.push_back(band);
     }
 
-    buildGraphics(stats, scoped);
+    buildGraphics(stats, scoped,
+                  (latestIndex >= 0 && size_t(latestIndex) < opticalLowPoint.size())
+                      ? opticalLowPoint[size_t(latestIndex)] : std::nullopt);
 
     endResetModel();
     emit headerChanged();
@@ -460,7 +499,8 @@ void LmSessionModel::rebuild()
 // inferred reads, their evidence strings, the drawn-metric count. QML positions and
 // paints (analysis pipeline guide §6.2).
 void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats,
-                                   const std::vector<LmShotValues> &scoped)
+                                   const std::vector<LmShotValues> &scoped,
+                                   const std::optional<double> &opticalLowPoint)
 {
     QVariantMap g;
     g.insert(QStringLiteral("leftHanded"), m_leftHanded);
@@ -569,6 +609,30 @@ void LmSessionModel::buildGraphics(const std::vector<LmFieldStats> &stats,
         { QStringLiteral("majorSd"), face.majorSd },
         { QStringLiteral("minorSd"), face.minorSd },
         { QStringLiteral("tiltDeg"), face.tiltDeg },
+    });
+
+    // ── low point ───────────────────────────────────────────────────────────
+    // THE ONE READING ON THIS PANEL THAT MAY COME FROM US. Everywhere else the rule holds
+    // absolutely — the board shows what the device measured and never our estimate beside
+    // it — and it holds here too for the tiles board, which sees `lm.lowPointAhead` and
+    // nothing else. The IMPACT card is allowed the fallback because the drawing is a
+    // GEOMETRIC one: it already shows attack angle and dynamic loft meeting at the ball,
+    // and where the arc bottomed out is the third side of that figure. A side view with
+    // the low point missing is an incomplete drawing, not a shorter list.
+    //
+    // WHICH ONE IT IS TRAVELS WITH IT. `source` is not decoration: an estimate printed as
+    // a measurement is the failure this whole `lm.` namespace exists to prevent, and the
+    // card badges it from this field rather than inferring it from anything else.
+    const std::optional<double> measuredLowPoint = valueOf(stats, "lm.lowPointAhead");
+    const std::optional<double> lowPoint = measuredLowPoint ? measuredLowPoint : opticalLowPoint;
+    g.insert(QStringLiteral("lowPoint"), QVariantMap{
+        { QStringLiteral("has"),    lowPoint.has_value() },
+        { QStringLiteral("value"),  lowPoint.value_or(0.0) },
+        { QStringLiteral("text"),   lowPoint ? lmFormat(*lowPoint, lmDecimals(QStringLiteral("in")))
+                                             : lmAbsent() },
+        { QStringLiteral("unit"),   QStringLiteral("in") },
+        { QStringLiteral("source"), measuredLowPoint ? QStringLiteral("measured")
+                                                     : QStringLiteral("inferred") },
     });
 
     const LmStrikeRead strike = lmStrikeQuality(valueOf(stats, "lm.strikeLocation"),

@@ -38,6 +38,7 @@ const std::vector<FieldDef> &fieldDefs()
         { "lm.clubPath",        "clubPath",        "Club path (measured)",      "°",     "Club",   "CLUB PATH",   &R::clubPath        },
         { "lm.launchAngle",     "launchAngle",     "Launch angle (measured)",   "°",     "Launch", "LAUNCH ANG.", &R::launchAngle     },
         { "lm.launchDirection", "launchDirection", "Start direction (measured)","°",     "Launch", "START DIR.",  &R::launchDirection },
+        { "lm.lowPointAhead",   "lowPointAhead",   "Low point (measured)",      "in",    "Club",   "LOW POINT",   &R::lowPointAhead   },
 
         // Club delivery the cameras cannot resolve.
         { "lm.faceAngle",       "faceAngle",       "Face angle",    "°",   "Club", "FACE ANG.",    &R::faceAngle    },

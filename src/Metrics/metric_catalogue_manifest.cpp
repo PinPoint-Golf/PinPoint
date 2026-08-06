@@ -33,7 +33,7 @@
 //   body_rotation ×4, club_delivery ×3, the trail-wrist series ×1, tempo_metrics ×2, and the two
 //   wrist Summary scores.
 //
-// DEVICE (25) — the `lm.` readings a connected launch monitor supplies. Live, not planned: the
+// DEVICE (26) — the `lm.` readings a connected launch monitor supplies. Live, not planned: the
 //   GC Quad connector reads them out of FSX2020's LastShot.CSV. They resolve Measured on a shot the
 //   monitor reported and say "needs a launch monitor" otherwise, which is now a true statement with
 //   a purchase behind it rather than a promise. See the Launch monitor block at the foot of this
@@ -2308,6 +2308,30 @@ void installMetricManifest(MetricCatalogue &cat)
                 QStringLiteral("the initial ball direction, read from a launch monitor")) },
         .usedBy = { QStringLiteral("characteristic:pull"),
                     QStringLiteral("characteristic:push") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("lm.lowPointAhead"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Low point (measured)"),
+        .shortLabel = QStringLiteral("Low pt (LM)"),
+        .unit = QStringLiteral("in"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "Where the bottom of the swing arc was relative to the ball, measured. The twin of our "
+            "camera-derived `lowPointAhead`, and the reference that says whether the arc vertex we "
+            "refine out of the shaft track is landing in the right place."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS AHEAD OF THE BALL, on the target side — the descending, "
+            "ball-first strike you want with an iron; a driver is normally struck behind it. "
+            "Compare against our own low point on the same shot: a consistent offset is a "
+            "calibration matter, a scattered one means the arc vertex is not being found reliably."),
+        .signPositive = QStringLiteral("the arc bottoming out AHEAD of the ball, on the target side"),
+        .signNegative = QStringLiteral("bottoming out behind the ball"),
+        .phases = { P::Impact },
+        .routes = {
+            via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
+                QStringLiteral("the low point of the swing arc, read from a launch monitor")) },
     });
 
     cat.addDescriptor({

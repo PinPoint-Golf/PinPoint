@@ -29,6 +29,7 @@
 #include <QHash>
 #include <QVariantMap>
 
+#include <optional>
 #include <vector>
 
 // Forward-declared rather than included: buildGraphics() only takes references, and
@@ -168,8 +169,13 @@ private:
     // The graphics-mode projection of the SAME statistics rebuild() banded for the
     // tiles. Takes them as an argument rather than recomputing, which is what keeps the
     // two modes incapable of disagreeing about one shot.
+    //
+    // `opticalLowPoint` is the FOCUSED shot's camera-estimated low point, or empty. It
+    // arrives separately from the readings because it is not one — see opticalLowPointFor()
+    // in the .cpp for why an estimate must never enter the `lm.` map.
     void buildGraphics(const std::vector<pinpoint::analysis::LmFieldStats> &stats,
-                       const std::vector<pinpoint::analysis::LmShotValues> &scoped);
+                       const std::vector<pinpoint::analysis::LmShotValues> &scoped,
+                       const std::optional<double> &opticalLowPoint);
 
     struct Band {
         QString      name;

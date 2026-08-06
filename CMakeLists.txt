@@ -402,6 +402,9 @@ qt_add_qml_module(PinPointStudio
         src/Gui/session/PpLmCard.qml
         src/Gui/session/PpLmDiagram.qml
         src/Gui/session/PpLmRule.qml
+        # PpLmRead is one reading, in one file because it has two homes: at a design anchor
+        # on a drawing that is big enough to carry it, and in the card's strip when it is not.
+        src/Gui/session/PpLmRead.qml
         # PpLmSpread is the session's own ±1 SD behind each vector — subtle at rest so it
         # reads as texture on a bay TV, lifted to the metric's band hue when the reader
         # hovers that metric's label. Never a corridor: no norm, no grade, no RAG.

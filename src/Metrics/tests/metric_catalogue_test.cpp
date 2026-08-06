@@ -64,7 +64,7 @@ int main()
     // parallel registry of measures. See diagnostics_catalogue_integrity_test, which checks the two
     // registries agree in both directions.
     {
-        checkEqI(static_cast<int>(cat.all().size()), 86, "descriptor count == 86");   // 70 + 25 lm. - 9 renamed
+        checkEqI(static_cast<int>(cat.all().size()), 87, "descriptor count == 87");   // 70 + 26 lm. - 9 renamed
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -96,7 +96,7 @@ int main()
         checkEqI(countType(cat, MetricType::TimeSeries),  38, "TimeSeries count");
         // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
         // as duplicates of a series the catalogue already carries.
-        checkEqI(countType(cat, MetricType::PointInTime), 42, "PointInTime count");   // +16: a monitor reports one number per shot
+        checkEqI(countType(cat, MetricType::PointInTime), 43, "PointInTime count");   // +17: a monitor reports one number per shot
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
@@ -515,7 +515,7 @@ int main()
     // read one. It said in as many words that it would flip when a connector arrived. It has.
     //
     // Two things changed together and both are checked here. The nine rungs are live. And every
-    // reading is keyed `lm.`, including the ones nothing else could ever produce — because the six
+    // reading is keyed `lm.`, including the ones nothing else could ever produce — because the seven
     // quantities we ALSO estimate must keep their bare keys, or the ladder would resolve one winner
     // and the measurement would silently replace the estimate. Comparing the two is the reason to
     // own the device, so that replacement is the failure this block exists to prevent.
@@ -529,7 +529,8 @@ int main()
                                  "lm.descentAngle", "lm.distanceToPin" };
         // These we measure AND estimate. Both keys must exist, independently.
         const char *paired[] = { "clubheadSpeed", "attackAngle", "ballSpeed",
-                                 "launchAngle", "launchDirection", "clubPath" };
+                                 "launchAngle", "launchDirection", "clubPath",
+                                 "lowPointAhead" };
 
         ShotContext capable = wristShot({ SegmentRole::Pelvis, SegmentRole::Thorax,
                                           SegmentRole::LeadForearm, SegmentRole::LeadHand },

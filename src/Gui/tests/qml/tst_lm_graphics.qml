@@ -105,6 +105,9 @@ Item {
         },
         strikeEllipse: { has: true, n: 18, meanX: 1.2, meanY: -2.4,
                          majorSd: 5.1, minorSd: 2.2, tiltDeg: 28.0 },
+        // No device reported low point, so this one is PinPoint's own optical estimate —
+        // the case the IMPACT card has to badge rather than print bare.
+        lowPoint: { has: true, value: 3.1, text: "3.1", unit: "in", source: "inferred" },
         shape:  { has: true, name: "Pull–fade", windowIdx: 0, curveIdx: 2,
                   evidence: "start 1.3° left · axis 4.7° right · curved 8.9 yd right" },
         strike: { has: true, name: "Low", evidence: "smash +0.01 vs μ" },
@@ -149,6 +152,19 @@ Item {
             return acc
         }
 
+        // ONE CARD, BY NAME AND NOT BY INDEX. A Repeater whose model is replaced rebuilds
+        // its delegates, and the order they land in the parent's `children` array is not
+        // promised to match the model's — so an index-based lookup silently starts
+        // measuring the card next door. It did: mirroring the fixture re-evaluated the
+        // card list (the STRIKE caption names the handed side) and the assertion was then
+        // comparing a mark on one card against the same mark mapped into another's frame.
+        function cardTitled(t) {
+            const cs = cards(body)
+            for (let i = 0; i < cs.length; ++i)
+                if (cs[i].title === t) return cs[i]
+            return null
+        }
+
         // Is `anno` fully inside the card that contains it? Measured in the CARD's own
         // coordinates, which is the frame a reader sees the edge of.
         function escapes(card, anno) {
@@ -190,7 +206,13 @@ Item {
             probe.width = 1148; probe.height = 516
             wait(0)
             compare(body.reflow, false, "the design size is the wide composition")
-            fuzzyCompare(body.s, 1.0, 0.02, "and it draws at the design scale")
+            compare(cards(body).length, 5, "five cards")
+            // The design's proportions, as widths rather than as one scale factor: the
+            // composition is a layout now, and this is what says the weights still decide
+            // the share. PATH & FACE is 696/1148 of the top row, SPIN 444/1148.
+            const ratio = cardTitled("Path & face").width / cardTitled("Spin").width
+            fuzzyCompare(ratio, 696 / 444, 0.08,
+                         "the top row keeps the design's proportions, got " + ratio)
             checkContainment("design size")
         }
 
@@ -198,12 +220,18 @@ Item {
         // Type on these cards comes from Theme.fontSzMicro, which carries fontScale,
         // while the geometry is pinned to the container. So a larger fontScale is
         // exactly the case where a label outgrows the space reserved for it.
+        //
+        // SET ON Theme, NOT ON appSettings. The arrow runs Main.qml → Theme.fontScale, and
+        // Main.qml is not in this harness — so assigning appSettings here changed nothing
+        // and this test had been asserting the default size twice. It matters more now
+        // than it did: fixed type means fontScale is what decides how much room the chrome
+        // needs, and therefore when the composition gives way to a column.
         function test_02_containsAtLargerFontScale() {
-            const was = appSettings.fontScale
-            appSettings.fontScale = 1.25
+            const was = Theme.fontScale
+            Theme.fontScale = 1.25
             wait(0)
             checkContainment("fontScale 1.25")
-            appSettings.fontScale = was
+            Theme.fontScale = was
             wait(0)
         }
 
@@ -226,7 +254,7 @@ Item {
         function test_04_reflowsWhenNarrow() {
             probe.width = 700; probe.height = 500
             wait(0)
-            verify(body.fitS < body.kReflowFloor, "700 px is below the reflow floor")
+            verify(probe.width < body.kMinWideW, "700 px is below the wide composition's floor")
             compare(body.reflow, true, "and the cards stack")
 
             const cs = cards(body)
@@ -300,7 +328,6 @@ Item {
 
             // 3 mm toward the toe: left of the crosshair for a right-hander, right of it
             // for a left-hander. Equal and opposite about the same centre.
-            const card = cards(body)[3]
             verify(right < left,
                    "a toe strike sits further left for a right-hander (" + right
                    + " vs " + left + ")")
@@ -431,7 +458,7 @@ Item {
             wait(0)
 
             // The CLUB PATH annotation on the PATH & FACE card.
-            const target = annotations(cards(body)[0]).find(a => a.metricKey === "lm.clubPath")
+            const target = annotations(cardTitled("Path & face")).find(a => a.metricKey === "lm.clubPath")
             verify(target !== undefined, "the club path label is a hover target")
             verify(target.width > 0 && target.height > 0, "…with a real area to point at")
 
@@ -507,10 +534,266 @@ Item {
             }
         }
 
+        // ── type is fixed; drawings are not ─────────────────────────────────
+        // Every Text under `item`, however deeply nested.
+        function texts(item, acc) {
+            acc = acc || []
+            if (!item || !item.children) return acc
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (c.font !== undefined && c.text !== undefined) acc.push(c)
+                texts(c, acc)
+            }
+            return acc
+        }
+
+        // The DISTINCT pixel sizes in use across every visible reading on the board.
+        //
+        // A set, not a tally. An earlier version compared sorted multisets and broke the
+        // moment a card changed how many readings it drew — which is a layout decision and
+        // none of this test's business. What is this test's business is that the sizes
+        // themselves do not move. Invisible items are skipped: the bands carry hidden
+        // sizers to measure themselves against, and their text is not on screen.
+        function readTypeSizes() {
+            const cs = cards(body)
+            const seen = []
+            for (let i = 0; i < cs.length; ++i) {
+                const as = annotations(cs[i])
+                for (let j = 0; j < as.length; ++j) {
+                    if (!as[j].visible) continue
+                    const ts = texts(as[j])
+                    for (let k = 0; k < ts.length; ++k) {
+                        if (!ts[k].visible || ts[k].text === "") continue
+                        const px = ts[k].font.pixelSize
+                        if (seen.indexOf(px) < 0) seen.push(px)
+                    }
+                }
+            }
+            return seen.sort(function (a, b) { return a - b }).join(",")
+        }
+
+        // THE ASSERTION THIS WHOLE REWRITE EXISTS FOR. The graphics view used to multiply
+        // one fit factor into every font size, so the same label was a different size in a
+        // stage split and on a bay TV — it read as a different application at either end.
+        // Type is now Theme tokens throughout, and this is what says so: the identical set
+        // of sizes at a frame size where the drawings differ by nearly 2×.
+        function test_14_typeDoesNotScaleWithTheFrame() {
+            probe.width = 1148; probe.height = 516
+            wait(0)
+            compare(body.reflow, false, "the design size is the composition")
+            const wide = readTypeSizes()
+            verify(wide.length > 0, "there are readings to measure")
+
+            probe.width = 700; probe.height = 500
+            wait(0)
+            compare(body.reflow, true, "700 px reflows")
+            compare(readTypeSizes(), wide,
+                    "the readings use the same sizes in both layouts")
+
+            // …and those sizes are the app's tokens, not numbers of this view's own.
+            const distinct = wide.split(",").map(Number)
+            for (let i = 0; i < distinct.length; ++i)
+                verify(distinct[i] === Theme.fontSzMicro || distinct[i] === Theme.fontSzData,
+                       "size " + distinct[i] + " is a Theme token")
+
+            probe.width = 1148; probe.height = 516
+            wait(0)
+        }
+
+        // Every scaled design frame under `item`.
+        function frames(item, acc) {
+            acc = acc || []
+            if (!item || !item.children) return acc
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (c.objectName === "diagramFrame") acc.push(c)
+                frames(c, acc)
+            }
+            return acc
+        }
+
+        // One drawing, by the title of the card it is in.
+        function frameOf(title) {
+            const card = cardTitled(title)
+            if (card === null) return null
+            const fs = frames(card)
+            return fs.length > 0 ? fs[0] : null
+        }
+
+        // The other half of the same change: the geometry DOES answer to the frame.
+        // Reflowing to a column gives every card the full width, so a drawing there is at
+        // least as big as its slot in the composition was — never smaller. That is the
+        // point of reflowing rather than shrinking on, and it is only true because the
+        // chrome around the drawing stopped growing with it.
+        //
+        // NOT "strictly bigger for all five". PATH & FACE already takes 696 of the design's
+        // 1148, so a 700 px column is the width it nearly had — the two come out level to
+        // within half a percent, and demanding an increase there would assert arithmetic
+        // rather than behaviour. The gain belongs to the NARROW cards, and STRIKE, the
+        // narrowest at 248, is where it has to show up. Modestly: a card in the column is
+        // capped at sp(200) of drawing height, so the squarest schematic gains from the
+        // extra width only as far as that cap lets it.
+        function test_15_drawingsScaleWithTheirCard() {
+            const titles = ["Path & face", "Spin", "Impact", "Strike", "Flight"]
+
+            probe.width = 1148; probe.height = 516
+            wait(0)
+            const wide = {}
+            for (let i = 0; i < titles.length; ++i) {
+                const f = frameOf(titles[i])
+                verify(f !== null && f.width > 0, titles[i] + " has a drawing")
+                wide[titles[i]] = f.width
+            }
+
+            probe.width = 700; probe.height = 500
+            wait(0)
+            for (let j = 0; j < titles.length; ++j) {
+                const f = frameOf(titles[j])
+                verify(f !== null, titles[j] + " survives the reflow")
+                // Half a percent of slack: the two layouts round independently, and a card
+                // that is a wash between them must not read as a shrink.
+                verify(f.width >= wide[titles[j]] * 0.99,
+                       titles[j] + " is not smaller in the column (" + Math.round(f.width)
+                       + " vs " + Math.round(wide[titles[j]]) + ")")
+            }
+
+            const strike = frameOf("Strike")
+            verify(strike.width > wide["Strike"],
+                   "the narrowest card gains from the column ("
+                   + Math.round(strike.width) + " vs " + Math.round(wide["Strike"]) + ")")
+
+            probe.width = 1148; probe.height = 516
+            wait(0)
+        }
+
+        // Bigger type needs more room, so the same frame that composes at normal size must
+        // reflow at a larger one. The old scale-based floor could not express this: it
+        // asked how small the drawing would have to be, which fontScale never touched.
+        function test_16_largerTypeReflowsEarlier() {
+            const was = Theme.fontScale
+            probe.width = 900; probe.height = 520
+            Theme.fontScale = 1.0
+            wait(0)
+            compare(body.reflow, false, "900 × 520 composes at normal type")
+
+            Theme.fontScale = 1.5
+            wait(0)
+            compare(body.reflow, true, "…and stacks once the type is half again bigger")
+
+            Theme.fontScale = was
+            probe.width = 1148; probe.height = 516
+            wait(0)
+        }
+
+        // ── low point, and whose number it is ───────────────────────────────
+        // The fixture's low point is PinPoint's optical estimate, not a device reading. An
+        // estimate printed as a measurement is the one failure the `lm.` namespace exists
+        // to prevent, so the card must say which it is showing.
+        function test_17_lowPointIsDrawnAndBadgedWhenEstimated() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            wait(0)
+
+            const impact = cardTitled("Impact")
+            verify(impact !== null, "the IMPACT card is on the view")
+            const labels = annotations(impact).map(function (a) {
+                return texts(a).map(function (t) { return t.text }).join(" ") })
+            const low = labels.find(function (l) { return l.indexOf("LOW POINT") >= 0 })
+            verify(low !== undefined, "the IMPACT card reports low point, saw " + labels)
+            verify(low.indexOf("3.1") >= 0, "…with the value, got " + low)
+            verify(low.indexOf("EST.") >= 0, "…badged as an estimate, got " + low)
+
+            // The same reading, measured this time: no badge.
+            const measured = Object.assign({}, probe.fixture, {
+                lowPoint: { has: true, value: 3.1, text: "3.1", unit: "in",
+                            source: "measured" } })
+            body.g = measured
+            wait(0)
+            const after = annotations(cardTitled("Impact")).map(function (a) {
+                return texts(a).map(function (t) { return t.text }).join(" ") })
+            const lowMeasured = after.find(function (l) { return l.indexOf("LOW POINT") >= 0 })
+            verify(lowMeasured !== undefined, "still reported when the device measured it")
+            verify(lowMeasured.indexOf("EST.") < 0,
+                   "…and NOT badged, got " + lowMeasured)
+
+            body.g = probe.fixture
+            wait(0)
+            checkContainment("low point")
+        }
+
+        // ── where a reading lives, and what decides it ──────────────────────
+        // The strip is the FALLBACK. A reading belongs beside the line it names, and only
+        // moves into a row underneath when the drawing is too small to hold it — so the
+        // test is on the DRAWING's size, not on which layout is showing.
+        function test_18_readingsStayOnADrawingBigEnoughToHoldThem() {
+            probe.width = 1148; probe.height = 516
+            body.g = probe.fixture
+            wait(0)
+
+            const pf = cardTitled("Path & face")
+            verify(pf !== null, "the path & face card is on the view")
+            verify(pf.hosted, "at the design size the drawing carries its own readings"
+                              + " (scale " + pf.hostScale.toFixed(3) + ")")
+            compare(pf.reads.length, 0, "…so the strip under it is empty")
+            const onDrawing = annotations(pf).filter(function (a) {
+                return a.visible && a.width > 0 })
+            verify(onDrawing.length >= 6,
+                   "…and the readings are on the drawing, saw " + onDrawing.length)
+            checkContainment("hosted on the drawing")
+
+            // Small enough that the drawing can no longer hold them.
+            probe.width = 600; probe.height = 420
+            wait(0)
+            const small = cardTitled("Path & face")
+            verify(!small.hosted, "a small card cannot host them"
+                                  + " (scale " + small.hostScale.toFixed(3) + ")")
+            verify(small.reads.length >= 6,
+                   "…so they fall back to the strip, saw " + small.reads.length)
+            checkContainment("fallen back to the strip")
+
+            probe.width = 1148; probe.height = 516
+            wait(0)
+        }
+
+        // ── the seam between the two columns ────────────────────────────────
+        // SPIN sits above FLIGHT and PATH & FACE above IMPACT + STRIKE, so the board has
+        // one vertical seam down it. The brief's own figures did NOT give it one — SPIN was
+        // 704…1148 against FLIGHT's 696…1148 — and eight pixels of step at full screen is
+        // exactly the kind of thing that reads as sloppy without being nameable. The
+        // composition splits both rows on one pair of weights now; this is what says so.
+        function test_19_theTwoRowsShareOneColumnSeam() {
+            probe.width = 1148; probe.height = 516
+            wait(0)
+            compare(body.reflow, false, "the composition is showing")
+
+            const pf     = cardTitled("Path & face")
+            const spin   = cardTitled("Spin")
+            const impact = cardTitled("Impact")
+            const strike = cardTitled("Strike")
+            const flight = cardTitled("Flight")
+            verify(pf && spin && impact && strike && flight, "all five cards are present")
+
+            // The right column: same width, same left edge, in both rows.
+            fuzzyCompare(spin.width, flight.width, 1.0,
+                         "SPIN and FLIGHT are the same width ("
+                         + Math.round(spin.width) + " vs " + Math.round(flight.width) + ")")
+            fuzzyCompare(spin.mapToItem(body, 0, 0).x, flight.mapToItem(body, 0, 0).x, 1.0,
+                         "…and begin at the same x")
+
+            // The left column: PATH & FACE ends where STRIKE ends.
+            fuzzyCompare(pf.mapToItem(body, pf.width, 0).x,
+                         strike.mapToItem(body, strike.width, 0).x, 1.0,
+                         "the left column ends at the same x in both rows")
+
+            // And IMPACT starts where PATH & FACE does, so the outer edges agree too.
+            fuzzyCompare(pf.mapToItem(body, 0, 0).x, impact.mapToItem(body, 0, 0).x, 1.0,
+                         "both rows start at the same x")
+        }
+
         // The strike marker's centre, in the STRIKE card's coordinates.
         function strikeMarkerX() {
-            const cs = cards(body)
-            if (cs.length < 4) return null
+            const card = cardTitled("Strike")
+            if (card === null) return null
             let found = null
             function walk(item) {
                 if (!item || !item.children) return
@@ -521,8 +804,8 @@ Item {
                     walk(c)
                 }
             }
-            walk(cs[3])
-            return found ? found.mapToItem(cs[3], 0, 0).x : null
+            walk(card)
+            return found ? found.mapToItem(card, 0, 0).x : null
         }
     }
 }

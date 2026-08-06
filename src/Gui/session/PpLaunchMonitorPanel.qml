@@ -36,6 +36,12 @@
 // derived. k never drops below 1: below that the board scrolls instead of shrinking,
 // because a value too small to read is not a smaller board, it is a useless one.
 //
+// THAT IS THE TILES BOARD'S RULE AND ONLY THE TILES BOARD'S. Graphics mode does the
+// opposite deliberately — fixed type, scaled drawings — and the two are not inconsistent:
+// a tile IS its figure, so growing the tile without growing the figure would leave a big
+// card with small writing on it, while a schematic is a picture whose labels are captions
+// on it. See PpLmGraphicsBody for the argument on that side.
+//
 // Every number and every string on it comes from LmSessionModel — this file positions
 // and paints and does no arithmetic beyond fitting the grid.
 //
@@ -166,10 +172,13 @@ Rectangle {
         return best ? best : fallback
     }
 
-    // THE HEADER DOES NOT SCALE WITH THE BOARD. It is chrome, and it is sized like every
-    // other band of chrome in the session — the shot carousel's header band (sp(36) tall,
-    // sp(16) side margins, sp(22) controls, fontSzBody2 text), which answers only to
-    // fontScale. An earlier version grew it with the board's own fit scale so it would
+    // THE HEADER DOES NOT SCALE WITH THE BOARD. It answers only to fontScale, like every
+    // other band of chrome in the session. It is sp(44) rather than the carousel band's
+    // sp(36) because it carries a real title now (fontSzHeading over a micro meta line,
+    // the Diagnostic Model screen's pairing) instead of the ten-pixel tracked label that
+    // made this panel the only content surface in the app whose name was smaller than its
+    // own captions. sp(16) side margins and sp(22) controls are unchanged, so it still
+    // lines up with the rail below it. An earlier version grew it with the board's own fit scale so it would
     // not look stranded beside big figures; on a bay TV that produced a title bar half
     // again too large, competing with the numbers it was captioning rather than framing
     // them. Chrome that grows with its content is not chrome.
@@ -177,7 +186,7 @@ Rectangle {
     // Fixing it also removes the reason the fit could not see the header's real height:
     // there is no longer a fit → k → header → body → fit cycle to break, so the reserve
     // below is simply the header, exactly.
-    readonly property int headerReserve: Theme.sp(36)
+    readonly property int headerReserve: Theme.sp(44)
     readonly property var fit: root._fitFor(root.width - 2 * Theme.sp(10),
                                             root.height - headerReserve - Theme.sp(10),
                                             board.bandCounts)
@@ -195,13 +204,23 @@ Rectangle {
             anchors.leftMargin: Theme.sp(16)
             spacing: Theme.sp(10)
 
+            // THE PANEL'S TITLE, sized as a title. It was a ten-pixel tracked label, which
+            // made this the only content surface in PinPoint whose name was smaller than
+            // its own captions — set beside the Diagnostic Model's screen title it did not
+            // read as the same application. It is the heading token now, paired with a
+            // micro meta line exactly as that screen pairs "Diagnostic Model" with
+            // "core v1.0.0 · schema 1" (DiagnosticModel.qml:721-733).
+            //
+            // fontSzHeading and NOT fontSzDisplay, deliberately. That screen is a screen;
+            // this is one panel among several sharing a stage, and a 30 px serif title
+            // inside it would be the loudest thing on a view it is not the subject of.
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("LAUNCH MONITOR")
-                font.family: Theme.fontData
-                font.pixelSize: Theme.fontSzMicro
-                font.letterSpacing: Theme.trackingMicro
-                color: Theme.colorText3
+                text: qsTr("Launch monitor")
+                font.family: Theme.fontBody
+                font.pixelSize: Theme.fontSzHeading
+                font.weight: Theme.fontBodyWeight
+                color: Theme.colorText
             }
             // The scope, in words. A mean whose scope you cannot see is a number you
             // cannot use — and when the club is unknown this says "all clubs" rather
@@ -210,8 +229,8 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: board.emptyText === "" && text !== ""
                 text: board.scopeText
-                font.family: Theme.fontBody
-                font.pixelSize: Theme.fontSzBody2
+                font.family: Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
                 color: Theme.colorText3
             }
         }
@@ -228,8 +247,10 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: board.emptyText === "" && !root.graphicsMode
                 text: qsTr("band ±1 SD · tick %1").arg(board.valueLabel)
-                font.family: Theme.fontBody
-                font.pixelSize: Theme.fontSzBody2
+                // Micro, like the scope on the other end of the band: two meta lines on
+                // one header at two different sizes read as a mistake.
+                font.family: Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
                 color: Theme.colorText3
                 elide: Text.ElideRight
                 width: Math.min(implicitWidth, root.width * 0.4)
