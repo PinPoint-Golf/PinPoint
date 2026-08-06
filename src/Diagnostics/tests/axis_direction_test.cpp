@@ -284,6 +284,11 @@ static const Expect kExpected[] = {
     { "sig_weightInHeelsAddress",   Direction::Low,
       "m_balanceHeelToeAddress highMeans 'the balance point further toward the toes at address'; "
       "sitting back on the heels is the low end" },
+    // The same tail as sig_leadKneeDriftIn on the same metric, read at impact instead of the top.
+    // The HIGH tail is the post-up and is declared unwatched on the measure, not signalled here.
+    { "sig_leadKneeValgusImpact",   Direction::Low,
+      "m_leadKneeDriftImpact highMeans 'the lead knee further toward the lead side than its own "
+      "hip'; falling inward is the low end" },
 
     // Arms and club.
     { "sig_inToOutPath",            Direction::High,

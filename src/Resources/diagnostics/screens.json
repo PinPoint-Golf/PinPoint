@@ -97,16 +97,6 @@
       "note": "The trail arm needs this to fold at the top without the elbow flying."
     },
     {
-      "id": "screen.ankleDorsiflexion",
-      "label": "Ankle dorsiflexion",
-      "bodyRegion": "Ankle",
-      "protocol": "Knee-to-wall: foot square to a wall, drive the knee forward over the toes until the heel begins to lift, and measure the distance from the big toe to the wall.",
-      "passCriterion": "At least 10 cm.",
-      "passAtLeast": 10.0,
-      "unit": "cm",
-      "note": "A stiff ankle takes away the lead leg's ability to accept load, which shows up at the finish."
-    },
-    {
       "id": "screen.hipExtension",
       "label": "Hip extension",
       "bodyRegion": "Hip",
@@ -163,6 +153,34 @@
       "passAtLeast": 30.0,
       "unit": "s",
       "note": "Endurance under load rather than peak strength, for the same reason the core screen is: the swing asks for the hinge to be held repeatedly. Read it beside core stability rather than instead of it — a golfer can hold a long plank and still have nothing stabilising the hip itself, and the two failures ask for different work."
+    },
+    {
+      "id": "screen.leadAnkleDorsiflexion",
+      "label": "Lead ankle dorsiflexion",
+      "bodyRegion": "Ankle",
+      "protocol": "Knee-to-wall: foot square to a wall, drive the knee forward over the toes until the heel begins to lift, and measure the distance from the big toe to the wall. Run it on the lead ankle; the two sides are separate screens because they answer different questions and a golfer is regularly restricted on one only.",
+      "passCriterion": "At least 10 cm.",
+      "passAtLeast": 10.0,
+      "unit": "cm",
+      "note": "Accepts the downswing: the tibia has to travel over a planted lead foot for the golfer to get onto that side and stay in posture doing it."
+    },
+    {
+      "id": "screen.trailAnkleDorsiflexion",
+      "label": "Trail ankle dorsiflexion",
+      "bodyRegion": "Ankle",
+      "protocol": "Knee-to-wall: foot square to a wall, drive the knee forward over the toes until the heel begins to lift, and measure the distance from the big toe to the wall. Run it on the trail ankle; the two sides are separate screens because they answer different questions and a golfer is regularly restricted on one only.",
+      "passCriterion": "At least 10 cm.",
+      "passAtLeast": 10.0,
+      "unit": "cm",
+      "note": "Holds posture while the weight goes back. The backswing half of the same story."
+    },
+    {
+      "id": "screen.singleLegSquat",
+      "label": "Single-leg squat",
+      "bodyRegion": "Hip",
+      "protocol": "A single-leg squat or a step-down from a low box, watching the KNEE rather than the depth. Stand on one leg, hands on hips, and bend to about a quarter squat under control. The test fails when the knee travels inside the line of the foot, when the pelvis drops on the free-leg side, or when the trunk has to lean to get down. Test both sides and note which.",
+      "passCriterion": "Five controlled repetitions each side with the knee tracking over the foot.",
+      "note": "The screen that predicts a knee falling in, and the reason it is separate from both of its neighbours: single-leg balance is unloaded, and the glute bridge loads the hip without asking the knee to hold a line. This one loads it and watches the line."
     }
   ]
 }

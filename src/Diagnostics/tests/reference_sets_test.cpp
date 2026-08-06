@@ -188,8 +188,8 @@ int main()
         const ScreenLoadResult rs = loadScreenSet(saveScreenSet(screens), QStringLiteral("rt"));
         check(rs.loaded && rs.pack.screens.size() == screens.screens.size(),
               "a screen set survives save and load");
-        const Screen *before = screens.screen(QStringLiteral("screen.ankleDorsiflexion"));
-        const Screen *after  = rs.pack.screen(QStringLiteral("screen.ankleDorsiflexion"));
+        const Screen *before = screens.screen(QStringLiteral("screen.leadAnkleDorsiflexion"));
+        const Screen *after  = rs.pack.screen(QStringLiteral("screen.leadAnkleDorsiflexion"));
         check(before && after && after->passAtLeast.has_value()
                   && *after->passAtLeast == *before->passAtLeast && after->unit == before->unit,
               "…including the optional numeric floor and its unit");

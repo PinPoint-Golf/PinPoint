@@ -831,13 +831,17 @@ void installMetricManifest(MetricCatalogue &cat)
             "settle it. Needs a face-on camera."),
         .signPositive = QStringLiteral("the lead knee moved toward the LEAD side"),
         .signNegative = QStringLiteral("moved toward the trail side — working inward"),
-        .phases = { P::Top },
+        // IMPACT AS WELL, and for the same reason pelvisThrust gained Top: the knee falling
+        // inward THROUGH impact is a different fault from it working in at the top, and the
+        // model carried only the second. See lead_knee_valgus_impact.
+        .phases = { P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("lateral travel of the lead knee in the face-on image, against the "
                                "ground plane")) },
         .usedBy = { QStringLiteral("chart:review"),
-                    QStringLiteral("characteristic:lead_knee_drifts_in_at_top") },
+                    QStringLiteral("characteristic:lead_knee_drifts_in_at_top"),
+                    QStringLiteral("characteristic:lead_knee_valgus_impact") },
     });
 
     // ------------------------------------------------------- Club & speed (face-on club track, 2D)

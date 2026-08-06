@@ -1137,6 +1137,16 @@
       "citation": "UNSEATED, and unusually so — no published figure exists for this quantity in any unit, so mu and sigma are not a re-expression of somebody else's number but a placeholder wide enough not to fire on ordinary variation. The centre is zero because a lead knee that tracks its own hip is the null hypothesis this metric was built to state. Seat it from the corpus before anybody reads a grade off it."
     },
     {
+      "measure": "m_leadKneeDriftImpact",
+      "context": "any",
+      "mu": 0.0,
+      "sigmaLo": 8.0,
+      "sigmaHi": 8.0,
+      "unit": "% stance width",
+      "source": "heuristic",
+      "citation": "MIRRORS THE m_leadKneeDriftTop ROW because it is the same quantity in the same units and there is no better basis for either — that row is an unseated heuristic too, and inventing a second unseated number would only make them disagree. SANCTION NEEDED ON mu, and it is the part most likely to be wrong: a posted lead knee at impact probably sits OUTSIDE its own hip rather than level with it, which would put mu positive and make this corridor forgiving of the very pattern it is meant to reward. Zero is the placeholder that grades no direction unfairly, not a claim. Only the LOW tail is watched — the high tail is the post-up and is declared unwatched on the measure."
+    },
+    {
       "measure": "m_hipLineTiltTop",
       "context": "any",
       "mu": 10.0,

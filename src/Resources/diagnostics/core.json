@@ -1945,6 +1945,25 @@
       "label": "Balance heel to toe, at address",
       "unit": "% foot length",
       "highMeans": "the balance point further toward the toes at address"
+    },
+    {
+      "id": "m_leadKneeDriftImpact",
+      "kind": "provided",
+      "metricKey": "leadKneeDrift",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Lead knee drift, at impact",
+      "unit": "% stance width",
+      "viewNeeded": "faceOn",
+      "aliases": [
+        "knee falling in through impact"
+      ],
+      "highMeans": "the lead knee further toward the lead side than its own hip — working away from the trail leg",
+      "unwatchedTail": "high",
+      "unwatchedReason": "A lead knee OUTSIDE its own hip at impact is the posted-up position, not a fault — it is the thing good players do violently. Naming a characteristic for it would put a fault on the pattern this whole cluster exists to encourage. Same tail, same reason, as the reading at the top."
     }
   ],
   "signals": [
@@ -2913,6 +2932,14 @@
       "test": "outsideCorridor",
       "measures": [
         "m_balanceHeelToeAddress"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_leadKneeValgusImpact",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadKneeDriftImpact"
       ],
       "direction": "low"
     }
@@ -3886,16 +3913,16 @@
       }
     },
     {
-      "id": "limited_ankle_dorsiflexion",
-      "label": "Limited ankle dorsiflexion",
+      "id": "limited_lead_ankle_dorsiflexion",
+      "label": "Limited lead-ankle dorsiflexion",
       "group": "setup",
       "kind": "capacity",
       "prominence": "common",
       "observability": "latent",
       "confirmedBy": "screened",
-      "screenRef": "screen.ankleDorsiflexion",
+      "screenRef": "screen.leadAnkleDorsiflexion",
       "state": "active",
-      "consequence": "Restricted ankles reduce how much the golfer can stay in their posture while the pelvis rotates.",
+      "consequence": "The lead tibia has to travel forward over a planted foot for the golfer to accept load on that side and keep the hinge while doing it. When it cannot, the body finds the room by standing up instead, or never gets there at all. Split from a single unsided condition because the two ankles do different jobs: this one accepts the downswing, the trail one holds posture while the weight goes back.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
@@ -6377,6 +6404,68 @@
         "searchedOn": "2026-08-06",
         "searchTerms": "address setup geometry stance width posture golf swing"
       }
+    },
+    {
+      "id": "limited_trail_ankle_dorsiflexion",
+      "label": "Limited trail-ankle dorsiflexion",
+      "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.trailAnkleDorsiflexion",
+      "state": "active",
+      "consequence": "The trail ankle holds the golfer in their posture while the weight goes back. A restriction here is the backswing half of the same story its lead-side partner tells about the downswing, and it is authored WEAK rather than moderate because the coaching account of early extension names the ankles without saying which.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "ankle dorsiflexion golf swing posture lead trail"
+      }
+    },
+    {
+      "id": "poor_hip_abductor_control",
+      "label": "Poor hip abductor control",
+      "aliases": [
+        "glute med weakness",
+        "knee falling in"
+      ],
+      "group": "setup",
+      "kind": "capacity",
+      "prominence": "common",
+      "observability": "latent",
+      "confirmedBy": "screened",
+      "screenRef": "screen.singleLegSquat",
+      "state": "active",
+      "consequence": "Holding the knee over the foot while the hip takes load is the abductors' job, and it is a different job from the one the bridge screens. Without it the knee falls inward the moment the lead side is asked to accept weight, so the golfer either collapses through it or declines to go there. SCREENED UNDER LOAD, which is the point: a golfer can balance on one leg for half a minute and still lose the knee the moment that leg has to bend under them.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "gluteus medius hip abductor single leg squat knee valgus golf"
+      }
+    },
+    {
+      "id": "lead_knee_valgus_impact",
+      "label": "Lead knee falls inward through impact",
+      "aliases": [
+        "knee valgus",
+        "knee caving in"
+      ],
+      "axis": "lead_knee_drift_impact",
+      "group": "lateral",
+      "kind": "fault",
+      "prominence": "occasional",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_leadKneeValgusImpact"
+      ],
+      "state": "draft",
+      "consequence": "The lead knee falling toward the trail side under load takes the brace out of the leg the downswing is meant to rotate around. THE OTHER HALF OF A PAIR the model already carried one of: late_buckle reads the knee staying BENT through impact, this reads it moving IN, and a knee can do either without doing the other. Both end the same way — the hips stop turning and the arms take over.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "knee valgus impact golf swing lead leg brace"
+      }
     }
   ],
   "edges": [
@@ -6616,7 +6705,7 @@
       }
     },
     {
-      "from": "limited_ankle_dorsiflexion",
+      "from": "limited_lead_ankle_dorsiflexion",
       "to": "early_extension",
       "type": "causes",
       "strength": "moderate",
@@ -9576,7 +9665,7 @@
       }
     },
     {
-      "from": "limited_ankle_dorsiflexion",
+      "from": "limited_lead_ankle_dorsiflexion",
       "to": "lead_knee_drifts_in_at_top",
       "type": "causes",
       "strength": "weak",
@@ -9925,6 +10014,138 @@
         "tier": "practice",
         "searchedOn": "2026-08-06",
         "searchTerms": "address setup geometry stance width posture golf swing"
+      }
+    },
+    {
+      "from": "poor_glute_strength",
+      "to": "late_buckle",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "late_buckle",
+      "to": "hip_stall",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "limited_lead_hip_ir",
+      "to": "hip_stall",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "hip_stall",
+      "to": "push",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "hip_stall",
+      "to": "hook",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "late_buckle",
+      "to": "ball_speed_deficit",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "hanging_back",
+      "to": "ball_speed_deficit",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "limited_trail_ankle_dorsiflexion",
+      "to": "early_extension",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "ankle dorsiflexion golf swing posture lead trail"
+      }
+    },
+    {
+      "from": "poor_hip_abductor_control",
+      "to": "late_buckle",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "poor_hip_abductor_control",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "poor_hip_abductor_control",
+      "to": "lead_knee_valgus_impact",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
+      }
+    },
+    {
+      "from": "lead_knee_valgus_impact",
+      "to": "hip_stall",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-06",
+        "searchTerms": "lead side loading golf swing ground reaction force post up lead leg"
       }
     }
   ]

@@ -180,7 +180,10 @@ int main()
         // short) and one to the lead hip (a hip that cannot internally rotate spins the pelvis out
         // rather than turning over a stable lead leg).
         check(coverage("limited_thoracic_rotation") == 15, "limited thoracic rotation explains 15");
-        check(coverage("limited_lead_hip_ir") == 9, "limited lead-hip internal rotation explains 9");
+        // 9 -> 10 with the lead-side audit: the hip that cannot internally rotate cannot accept the
+        // load and turn over it, so the rotation stops rather than being slow to start — which is
+        // late_pelvis_rotation, a fault it already explained and a different one.
+        check(coverage("limited_lead_hip_ir") == 10, "limited lead-hip internal rotation explains 10");
         // 10 -> 11 when the trail hip was given its route to over-the-top: a pelvis that cannot
         // finish turning away leaves the downswing no room to rotate into, and the arms take it
         // over the top. Updated deliberately, per the note below on the pelvis-sway count — these
