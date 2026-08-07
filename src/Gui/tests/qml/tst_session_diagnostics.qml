@@ -46,10 +46,19 @@ Item {
 
     property var src: null
 
+    // What the panel asked for, and never what it did about it — the screen flow is not
+    // designed (brief §9), so the signal is the whole of the contract under test.
+    property string lastScreenRef: ""
+    property string lastScreenCondition: ""
+
     PpSessionDiagnosticsBody {
         id: body
         anchors.fill: parent
         source: probe.src
+        onScreenRequested: (ref, cond) => {
+            probe.lastScreenRef = ref
+            probe.lastScreenCondition = cond
+        }
     }
 
     // ── fixtures, in the shape the model publishes ───────────────────────────
@@ -140,6 +149,137 @@ Item {
         }
     }
 
+    // ── the rail ─────────────────────────────────────────────────────────────
+    // Brief §4's two chains, because between them they are the whole honesty argument:
+    // chain A is a fully live spine and chain B is mostly unmeasurable — a screened root, two
+    // ghosts, one live card and the miss the golfer declared. All five link grades appear
+    // across the two, which is the point of pressing both rather than one nice one.
+    function chainNode(id, name, kind, mark, extra) {
+        const n = {
+            id: id, name: name, kind: kind, mark: mark,
+            measure: "", phase: "", focused: false,
+            recurrence: "", ticks: [], trend: "stable", trendArrow: "",
+            state: "notAssessable", statePill: "NOT MEASURED", evidence: ""
+        }
+        for (const k in extra)
+            n[k] = extra[k]
+        return n
+    }
+
+    function liveNode(id, name, phase, measure, recurrence, state, pill, trend, arrow, evidence) {
+        return chainNode(id, name, "live", "", {
+            phase: phase, measure: measure, recurrence: recurrence,
+            state: state, statePill: pill, trend: trend, trendArrow: arrow,
+            evidence: evidence,
+            ticks: [tick("fired"), tick("notAssessable"), tick("fired"),
+                    tick("clean"), tick("fired"), tick("fired")]
+        })
+    }
+
+    function chainLink(from, to, grade, word, stroke, width, arrow, opacity, note) {
+        return { from: from, to: to, grade: grade, word: word, stroke: stroke,
+                 width: width, arrow: arrow, opacity: opacity, note: note, pairs: 12 }
+    }
+
+    function establishedSource(eligible) {
+        const chainA = {
+            anyLive: true, liveCount: 4,
+            nodes: [
+                liveNode("rushed_transition", "Rushed transition", "transition", "transition tempo",
+                         "5 of 6 measurable shots", "fired", "FIRED", "worsening", "↑",
+                         "Rushed transition on 5 of the 6 swings measured."),
+                liveNode("casting", "Casting", "downswing", "wrist release rate",
+                         "4 of 6 measurable shots", "fired", "FIRED", "worsening", "↑",
+                         "Casting on 4 of the 5 swings where rushed transition fired — on 0 of the 1 where it did not."),
+                liveNode("shaft_lean", "Not enough shaft lean", "impact", "shaft lean at impact",
+                         "4 of 6 measurable shots", "clean", "CLEAN", "stable", "",
+                         "Shaft lean sits behind the ball on 4 of 6."),
+                liveNode("scooping", "Scooping", "impact", "lead wrist extension",
+                         "3 of 6 measurable shots", "fired", "FIRED", "improving", "↓",
+                         "Scooping on 3 of the 6 swings measured.")
+            ],
+            links: [
+                chainLink("rushed_transition", "casting", "movedTogether", "Moved together",
+                          "solidAccent", 2.0, true, 1.0, "baseline 5 · 6 since focus"),
+                chainLink("casting", "shaft_lean", "conditionallyDependent", "Conditionally dependent",
+                          "solid", 1.5, true, 1.0, "Fisher exact · 12 paired shots"),
+                chainLink("shaft_lean", "scooping", "coherent", "Coherent",
+                          "dashed", 1.5, false, 1.0, "no variance to test")
+            ]
+        }
+        const chainB = {
+            anyLive: true, liveCount: 1,
+            nodes: [
+                chainNode("pelvic_disassociation", "Poor pelvic disassociation", "screenedRoot",
+                          "screened root · needs a physical screen",
+                          { evidence: "A thirty-second physical test would settle whether this is the root." }),
+                chainNode("pelvis_slow", "Pelvis slow to start turning", "ghost",
+                          "ghost · measure planned", {}),
+                chainNode("over_the_top", "Over the top", "ghost",
+                          "ghost · authored as asserted, no measure", {}),
+                liveNode("path_out_to_in", "Path too far out-to-in", "impact", "club path",
+                         "5 of 6 measurable shots", "fired", "FIRED", "worsening", "↑",
+                         "Path sits left of neutral on 5 of the 6 swings the monitor read."),
+                chainNode("slice", "Slice", "outcome", "declared miss · launch-monitor verified",
+                          { recurrence: "5 of 6 shots", state: "fired", statePill: "FIRED" })
+            ],
+            links: [
+                chainLink("pelvic_disassociation", "pelvis_slow", "unanchored", "Unanchored",
+                          "dottedFaint", 1.0, false, 0.5, "screen would confirm"),
+                chainLink("pelvis_slow", "over_the_top", "presentTogether", "Present together",
+                          "dotted", 1.0, false, 1.0, "neither measured"),
+                chainLink("over_the_top", "path_out_to_in", "coherent", "Coherent",
+                          "dashed", 1.5, false, 1.0, "no variance to test"),
+                chainLink("path_out_to_in", "slice", "conditionallyDependent", "Conditionally dependent",
+                          "solid", 1.5, true, 1.0, "Fisher exact · 6 paired shots")
+            ]
+        }
+
+        const driver = eligible
+            ? { eligible: true,
+                rootId: "rushed_transition", rootName: "Rushed transition", coverage: 3,
+                whyText: "Rushed transition — would explain 3 of your patterns",
+                explains: [{ id: "casting", name: "Casting" }],
+                screenConditionId: "pelvic_disassociation",
+                screenRef: "screen.pelvic_disassociation",
+                screenLabel: "Seated trunk rotation",
+                screenCta: "Seated trunk rotation would anchor this chain",
+                screenReason: "it would explain 4 of your patterns",
+                screenProtocol: "Sit, cross the arms, rotate.",
+                rival: { childId: "casting", childName: "Casting",
+                         chosenParentId: "rushed_transition", chosenName: "Rushed transition",
+                         rivalParentId: "grip_strength", rivalName: "Grip too strong",
+                         adjudicated: false,
+                         text: "Grip too strong could also explain Casting — not adjudicated: it is not measurable on this capture." },
+                offered: [] }
+            : { eligible: false,
+                waitingText: "the driver appears once the pattern set has held still for 3 shots" }
+
+        return {
+            stage: "established",
+            headerInfo: {
+                stage: "established", stageLabel: "ESTABLISHED", shotLabel: "shot 11",
+                countLine: "4 patterns · counted over all 11 shots",
+                cadenceNote: "", coldLine: "", formingLine: "", closingLine: ""
+            },
+            thisShot: [
+                { id: "casting", name: "Casting", kind: "fired", tier: "pattern", focus: false },
+                { kind: "notAssessable", name: "2 not assessable on this capture" }
+            ],
+            quiet: false,
+            afterShotDelta: { headline: "3 of 9 conditions fired on this swing · 2 of them patterns",
+                              note: "", surfaced: true },
+            cards: [], expectations: [], bookends: [],
+            chains: [chainA, chainB],
+            unchained: [{ id: "face_roll", name: "Face roll through impact",
+                          recurrence: "3 of 11 measurable shots" }],
+            unchainedLine: "Face roll through impact is a pattern the model authors no edge for this session — reported on its own.",
+            driver: driver,
+            watching: [{ id: "sway", name: "Lateral sway", recurrence: "1 of 11 measurable shots" }],
+            coverageLine: "23 of 140 characteristics measurable with current capture"
+        }
+    }
+
     function closingSource() {
         const s = formingSource(false)
         s.stage = "closing"
@@ -210,7 +350,28 @@ Item {
             Theme.themeIndex = 5          // studio dark, the design's own frame
             Theme.fontScale = 1.0
             body.watchingExpanded = false
+            body.expandedChain = -1
+            probe.lastScreenRef = ""
+            probe.lastScreenCondition = ""
             wait(0)
+        }
+
+        // ── rail helpers ─────────────────────────────────────────────────────
+
+        function linkByGrade(grade) {
+            const all = visibleAll(body, "sdChainLink")
+            for (let i = 0; i < all.length; ++i)
+                if (all[i].grade === grade)
+                    return all[i]
+            return null
+        }
+
+        function nodeById(id) {
+            const all = findAll(body, "sdChainNode")
+            for (let i = 0; i < all.length; ++i)
+                if (all[i].node && all[i].node.id === id && shown(all[i]))
+                    return all[i]
+            return null
         }
 
         // ── Cold ─────────────────────────────────────────────────────────────
@@ -442,12 +603,202 @@ Item {
             wait(0)
         }
 
+        // ── Established: the chain rail ──────────────────────────────────────
+
+        function test_14_establishedDrawsBothChainsAndOnlyTheEdgesTheModelAuthored() {
+            setSource(establishedSource(true))
+
+            verify(shown(one(body, "sdEstablishedBody")), "the rail is the body")
+            verify(!shown(one(body, "sdCardsBody")), "and the flat card row is gone")
+
+            const rails = visibleAll(body, "sdChainRail")
+            compare(rails.length, 2, "both chains are drawn as rows")
+
+            // Four nodes and three links, five nodes and four links. An edge is drawn ONLY
+            // where the model published one, so a rail can never join two nodes because they
+            // happened to be adjacent.
+            compare(findAll(rails[0], "sdChainNode").length, 4)
+            compare(findAll(rails[1], "sdChainNode").length, 5)
+            compare(visibleAll(body, "sdChainLink").length, 7,
+                    "three edges on chain A and four on chain B, and no others")
+        }
+
+        // §4.1's table, drawn. The word and the stroke are published together so a surface
+        // cannot pick them independently; this is the half that checks the stroke arrives.
+        function test_15_everyLinkGradeGetsItsOwnStroke() {
+            setSource(establishedSource(true))
+
+            const moved = linkByGrade("movedTogether")
+            verify(moved, "the moved-together edge is on screen")
+            compare(moved.strokeStyle, "solid")
+            compare(moved.strokeColor, Theme.colorAccent, "accent, and only this grade is")
+            fuzzyCompare(moved.strokeWidth, 2.0, 0.01)
+            compare(moved.hasArrow, true, "a direction the evidence supports gets a head")
+            compare(one(moved, "sdChainLinkWord").text, "Moved together")
+            compare(one(moved, "sdChainLinkNote").text, "baseline 5 · 6 since focus")
+
+            const dep = linkByGrade("conditionallyDependent")
+            compare(dep.strokeStyle, "solid")
+            compare(dep.strokeColor, Theme.colorText2)
+            fuzzyCompare(dep.strokeWidth, 1.5, 0.01)
+            compare(dep.hasArrow, true)
+            verify(one(dep, "sdChainLinkNote").text.indexOf("Fisher exact") >= 0)
+
+            // The three that cannot carry a direction do not get a head, and the stroke is
+            // what says so — which is why 12c can drop the note and keep the claim.
+            const coh = linkByGrade("coherent")
+            compare(coh.strokeStyle, "dashed")
+            compare(coh.strokeColor, Theme.colorText2)
+            fuzzyCompare(coh.strokeWidth, 1.5, 0.01)
+            compare(coh.hasArrow, false, "nothing varied, so nothing was tested")
+            compare(one(coh, "sdChainLinkNote").text, "no variance to test")
+
+            const pres = linkByGrade("presentTogether")
+            compare(pres.strokeStyle, "dotted")
+            compare(pres.strokeColor, Theme.colorText3)
+            fuzzyCompare(pres.strokeWidth, 1.0, 0.01)
+            compare(pres.hasArrow, false)
+            compare(one(pres, "sdChainLinkNote").text, "neither measured")
+
+            const unan = linkByGrade("unanchored")
+            compare(unan.strokeStyle, "dotted")
+            compare(unan.strokeColor, Theme.colorText3)
+            compare(unan.hasArrow, false)
+            fuzzyCompare(unan.opacity, 0.5, 0.01,
+                         "a root nobody has screened is drawn as barely there")
+            compare(one(unan, "sdChainLinkNote").text, "screen would confirm")
+        }
+
+        // Chain B is the reason the honesty devices exist (brief §4). Each of the three
+        // non-live kinds says a different thing and none of them borrows the live card.
+        function test_16_ghostScreenedRootAndOutcomeAreEachDrawnAsThemselves() {
+            setSource(establishedSource(true))
+
+            const live = nodeById("casting")
+            compare(live.kind, "live")
+            compare(one(live, "sdChainNodeName").text, "Casting")
+            compare(one(live, "sdChainNodePill").children[0].text, "FIRED")
+            // The line the Forming card has no data for and the chain card does.
+            compare(one(live, "sdChainNodePhase").text, "downswing · wrist release rate")
+            compare(one(live, "sdChainNodeRecurrence").text, "4 of 6 measurable shots")
+            compare(findAll(one(live, "sdChainNodeRun"), "sdTick").length, 6,
+                    "one tick per shot on the rail too")
+
+            const ghost = nodeById("over_the_top")
+            compare(ghost.kind, "ghost")
+            verify(one(ghost, "sdChainGhostFrame").visible,
+                   "dashed, because it is not evidence from this session")
+            verify(ghost.opacity < 1.0, "and dimmed with it")
+            compare(one(ghost, "sdChainNodeMark").text, "ghost · authored as asserted, no measure")
+            verify(!shown(one(ghost, "sdChainNodeRecurrence")),
+                   "a node nobody measured reports no recurrence")
+
+            const screened = nodeById("pelvic_disassociation")
+            compare(screened.kind, "screenedRoot")
+            compare(one(screened, "sdChainNodeMark").text, "screened root · needs a physical screen")
+            verify(shown(one(screened, "sdChainScreenCta")),
+                   "a screened root is drawn as a request, never as a finding")
+
+            const outcome = nodeById("slice")
+            compare(outcome.kind, "outcome")
+            compare(one(outcome, "sdChainNodeName").text, "Slice")
+            compare(one(outcome, "sdChainNodeMark").text, "declared miss · launch-monitor verified")
+            compare(one(outcome, "sdChainNodeRecurrence").text, "5 of 6 shots")
+        }
+
+        // ── the driver footer ────────────────────────────────────────────────
+
+        function test_17_driverPrintsItsOwnFalsifiers() {
+            setSource(establishedSource(true))
+
+            verify(shown(one(body, "sdDriverFooter")), "the footer is up")
+            compare(one(body, "sdDriverName").text, "Rushed transition")
+            verify(one(body, "sdDriverWhy").text.indexOf("3 of your patterns") >= 0,
+                   "a count of what it accounts for, never a score")
+            verify(shown(one(body, "sdScreenCta")), "with the screen that would anchor it")
+            verify(one(body, "sdScreenWhy").text.indexOf("4 of your patterns") >= 0)
+
+            // The two disclosures that stop the driver reading as a verdict.
+            verify(one(body, "sdDriverRival").text.indexOf("not adjudicated") >= 0,
+                   "the rival parent is named and explicitly not adjudicated")
+            verify(one(body, "sdDriverCoverage").text.indexOf("140") >= 0,
+                   "and the coverage line rides beside it")
+            compare(one(body, "sdCoverageLine").visible, false,
+                    "so the panel does not state it twice")
+
+            // The CTA asks; it does not run a screen. Brief §9 — that flow is not designed.
+            mouseClick(one(body, "sdDriverFooter"))
+            compare(probe.lastScreenRef, "screen.pelvic_disassociation")
+            compare(probe.lastScreenCondition, "pelvic_disassociation")
+        }
+
+        function test_18_anUnstablePatternSetSaysSoRatherThanShowingADriver() {
+            setSource(establishedSource(false))
+
+            verify(shown(one(body, "sdDriverFooter")), "the footer keeps its place")
+            verify(shown(one(body, "sdDriverWaiting")), "and says what it is waiting for")
+            verify(one(body, "sdDriverWaiting").text.indexOf("held still") >= 0)
+            verify(!shown(one(body, "sdDriverName")), "with no driver named")
+            // The right-hand column is gone with the driver, so the coverage line goes back
+            // to the bottom rather than disappearing with it.
+            compare(one(body, "sdCoverageLine").visible, true)
+
+            verify(shown(one(body, "sdUnchainedRow")),
+                   "a pattern with no authored edge still gets its own line on the rail")
+        }
+
+        // ── 12c: the spine ───────────────────────────────────────────────────
+
+        function test_19_narrowTurnsTheRailAndCollapsesEveryChainButTheFirst() {
+            setSource(establishedSource(true))
+            probe.width = 396; probe.height = 560
+            wait(0)
+
+            compare(body.compact, true)
+            const rails = visibleAll(body, "sdChainRail")
+            compare(rails.length, 1, "one chain open, the rest collapsed")
+            compare(rails[0].vertical, true, "and it is the vertical form")
+            compare(findAll(rails[0], "sdChainNodeDot").length, 4,
+                    "one line per node, mark carried by the dot")
+            // The grade survives the collapse because it is carried by the stroke.
+            const moved = linkByGrade("movedTogether")
+            verify(moved, "the graded link survives the turn")
+            compare(moved.vertical, true)
+            compare(moved.strokeColor, Theme.colorAccent)
+            compare(moved.hasArrow, true)
+
+            const collapsed = visibleAll(body, "sdChainCollapsed")
+            compare(collapsed.length, 1, "chain B is one line")
+            compare(one(collapsed[0], "sdChainCollapsedToggle").text, "OPEN ▸")
+            verify(one(collapsed[0], "sdChainCollapsedSummary").text.indexOf("Slice") >= 0,
+                   "the summary names what the chain ends in")
+
+            // Expanding opens THE SAME rail, in place, not a different view (brief §8).
+            mouseClick(collapsed[0])
+            wait(0)
+            compare(body.expandedChain, 1)
+            const openRails = visibleAll(body, "sdChainRail")
+            compare(openRails.length, 2, "the second rail opened where the summary was")
+            compare(openRails[1].vertical, true)
+            compare(findAll(openRails[1], "sdChainNodeDot").length, 5,
+                    "with every node the model authored, and no fewer")
+            compare(one(collapsed[0], "sdChainCollapsedToggle").text, "CLOSE ▴")
+
+            // 12c's footer keeps the driver and the screen and drops the ranking sentence.
+            verify(shown(one(body, "sdDriverName")), "the driver keeps its screen at 396")
+            verify(shown(one(body, "sdScreenCtaCompact")))
+            verify(!shown(one(body, "sdDriverWhy")))
+            compare(one(body, "sdCoverageLine").visible, true,
+                    "and the coverage line is stated at the bottom instead")
+        }
+
         // ── nothing escapes the panel ────────────────────────────────────────
         // The chrome is 1 px of border and a radius; a card or a strip that overhung it
         // would be clipped away rather than drawn, which is a finding gone missing.
-        function test_13_nothingOverhangsTheChrome() {
+        function test_20_nothingOverhangsTheChrome() {
             const sizes = [[1168, 560], [396, 560], [820, 420]]
-            const sources = [coldSource(probe.expectationRows), formingSource(false), closingSource()]
+            const sources = [coldSource(probe.expectationRows), formingSource(false),
+                             closingSource(), establishedSource(true)]
 
             for (let s = 0; s < sources.length; ++s) {
                 setSource(sources[s])
@@ -455,8 +806,15 @@ Item {
                     probe.width = sizes[i][0]; probe.height = sizes[i][1]
                     wait(0)
 
+                    // In the 396 arrangement the rail lives in a clipped Flickable and
+                    // SCROLLS (12c), so the things inside it are checked through the
+                    // Flickable rather than against the panel — a node below the fold there
+                    // is one scroll away, not one gone missing.
                     const names = ["sdPatternCard", "sdExpectationCard", "sdThisShotStrip",
-                                   "sdBookends", "sdColdBody", "sdCardsBody"]
+                                   "sdBookends", "sdColdBody", "sdCardsBody",
+                                   "sdChainsFlick", "sdDriverFooter"]
+                        .concat(body.compact ? []
+                                             : ["sdChainRail", "sdChainNode", "sdChainLink"])
                     for (let n = 0; n < names.length; ++n) {
                         const items = visibleAll(body, names[n])
                         for (let j = 0; j < items.length; ++j) {

@@ -55,6 +55,17 @@ Item {
     // file having to know.
     property alias source: body.source
 
+    // A screen was asked for — the driver footer's CTA, or a screened root on the rail.
+    //
+    // DELIBERATELY UNCONNECTED. Running a screen is a thirty-second physical test with a
+    // protocol to read and a present/absent to record, and that flow is not designed (brief
+    // §9: "tapping a chain node through … come back for a design"). The model already has the
+    // other half — SessionDiagnosticsModel::recordScreenResult() — so when the protocol UI
+    // lands it hangs off this signal and nothing on the panel moves. What must not happen in
+    // the meantime is a screen UI invented here, because a screened root presented as settled
+    // by a guess is precisely the claim §5.4 forbids.
+    signal screenRequested(string screenRef, string conditionId)
+
     SessionDiagnosticsModel {
         id: diagModel
 
@@ -92,5 +103,6 @@ Item {
         id: body
         anchors.fill: parent
         source: diagModel
+        onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
     }
 }

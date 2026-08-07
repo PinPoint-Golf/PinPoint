@@ -150,6 +150,14 @@ Item {
                 // Post-shot dashboard — the configurable, glanceable, wall-castable summary
                 // (Verdict/Setup/Motion/Sequence), broad-scope across session types.
                 dashboardDelegate: Component { PpDashboardPanel { sessionType: SessionController.Wrist; interactive: true } }
+                // Session diagnostics — the same evidence in the other tense: what KEEPS
+                // happening across this session's shots, and what the model authors as its
+                // cause. Takes no sessionType (analysis is gated on available data, never on
+                // what the screen was opened to do) and, unlike the Loaders above, needs no
+                // _screenActive gate: PpModeStage already instantiates a delegate only when
+                // the View control has that panel on, and the panel is off by default because
+                // it owns a characteristic pack and a detection thread.
+                sessionDiagnosticsDelegate: Component { PpSessionDiagnosticsPanel {} }
                 // Launch monitor session board. Costs nothing to wire — the panel takes
                 // no sessionType and reads the same shotModel this screen already shows,
                 // and it stays off until the user turns it on in View.

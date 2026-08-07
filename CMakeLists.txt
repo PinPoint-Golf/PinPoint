@@ -399,6 +399,17 @@ qt_add_qml_module(PinPointStudio
         src/Gui/diagnostics/PpSessionDiagnosticsBody.qml
         src/Gui/diagnostics/PpThisShotStrip.qml
         src/Gui/diagnostics/PpPatternCard.qml
+        # The chain rail. PpChainNodeCard is the four things a node can be — live card, ghost,
+        # screened root, declared outcome — and is NOT PpPatternCard in a compact mode because
+        # they share four fields out of nine (see its header). PpChainLink carries the link
+        # GRADE in its stroke, which is what lets the 396 arrangement drop the note and keep
+        # the meaning.
+        src/Gui/diagnostics/PpChainRail.qml
+        src/Gui/diagnostics/PpChainNodeCard.qml
+        src/Gui/diagnostics/PpChainLink.qml
+        # The panel's one conclusion, printed beside its own falsifier: the screen that would
+        # confirm it and the rival parent this session could not adjudicate.
+        src/Gui/diagnostics/PpDriverFooter.qml
         # One tick per shot, and never a gap: a not-assessable shot is drawn short and
         # outlined, because a gap would read as "nothing happened on that swing".
         src/Gui/diagnostics/PpTickRun.qml

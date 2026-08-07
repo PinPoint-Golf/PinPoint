@@ -53,8 +53,18 @@ Rectangle {
     property var source: null
 
     // Panel-local, and per brief §8 the only state this panel owns beyond the carousel's
-    // selection and the cadence setting.
+    // selection and the cadence setting. Two collapsed regions, both of which open into the
+    // SAME content rather than a different view: Watching (n), and — in the 396 arrangement
+    // only — every chain after the first.
     property bool watchingExpanded: false
+    property int  expandedChain: -1
+
+    // A screen was asked for, from the driver footer's CTA or from a screened root on the
+    // rail. `screenRef` is the model's when it recommended that screen and empty when it did
+    // not; `conditionId` always names what the screen would settle, so a host can route on
+    // whichever it has. THIS PANEL RUNS NO SCREEN: the protocol UI is not designed yet
+    // (brief §9) and inventing one here would be inventing a design.
+    signal screenRequested(string screenRef, string conditionId)
 
     objectName: "sdBody"
 
@@ -104,6 +114,8 @@ Rectangle {
     readonly property var cards:        source ? source.cards         : []
     readonly property var expectations: source ? source.expectations  : []
     readonly property var bookends:     source ? source.bookends      : []
+    readonly property var chains:       source ? source.chains        : []
+    readonly property var driver:       source ? source.driver        : null
 
     readonly property bool isCold:      stage === "cold"
     readonly property bool isEstablished: stage === "established"
@@ -123,6 +135,49 @@ Rectangle {
         return Math.min(n, perRow)
     }
     readonly property int _cardsHidden: (cards ? cards.length : 0) - _cardsShown
+
+    // ── how many chains the rail draws ───────────────────────────────────────
+    // The model sorts most-evidenced first (buildChains()), so taking the first two is a
+    // decision about a 560 px column and never about which chain matters. A session's
+    // authored neighbourhood can yield eighteen rails; what does not fit is COUNTED, exactly
+    // as the card row counts what it could not draw.
+    readonly property int _chainsShown: root.compact
+                                        ? (chains ? chains.length : 0)
+                                        : Math.min(chains ? chains.length : 0, 2)
+    readonly property int _chainsHidden: (chains ? chains.length : 0) - _chainsShown
+
+    // driver.screenConditionId / screenRef — the only place the published surface carries a
+    // screen ref for the screened-root node the rail draws.
+    readonly property string _screenConditionId: driver ? (driver.screenConditionId || "") : ""
+    readonly property string _screenRef:         driver ? (driver.screenRef || "") : ""
+
+    // The footer exists in Established and Closing, which is where the mock has it.
+    readonly property bool _hasDriverFooter: (isEstablished || isClosing) && !!driver
+    // ...but it only carries the coverage line in the wide arrangement with a driver to sit
+    // beside. A waiting footer and 12c's three-line footer both drop the right-hand column,
+    // and the coverage line is never dropped with it (brief §1) — it goes back to the bottom.
+    readonly property bool _footerCarriesCoverage:
+        _hasDriverFooter && !compact && driver.eligible === true
+
+    // 12c's collapsed chain, from the model's own node names — the arrow and the separator are
+    // the only things composed here, the same contribution PpWatchingRow makes to its line.
+    function _chainSummary(c) {
+        if (!c || !c.nodes) return ""
+        const parts = []
+        for (let i = 0; i < c.nodes.length; ++i)
+            parts.push(c.nodes[i].name || "")
+        return parts.join(" → ")
+    }
+    // ...and the marks, which are what make a collapsed chain B worth opening: it is mostly
+    // ghosts and a screened root, and the summary must not hide that.
+    function _chainNote(c) {
+        if (!c || !c.nodes) return ""
+        const parts = []
+        for (let i = 0; i < c.nodes.length; ++i)
+            if (c.nodes[i].mark)
+                parts.push(c.nodes[i].mark)
+        return parts.join(" · ")
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -538,15 +593,208 @@ Rectangle {
                 }
             }
 
-            // ── Established ──────────────────────────────────────────────────
-            // TODO(phase 7): the chain rail — chain A's live spine, chain B's screened root
-            // and ghosts, the graded link columns, and the LIKELY DRIVER strip below it.
-            // Deliberately empty rather than placeholdered: an "Established" panel showing a
-            // "coming soon" card would be claiming the model found nothing to chain.
+            // ── Established: the chain rail ──────────────────────────────────
             Item {
                 objectName: "sdEstablishedBody"
                 anchors.fill: parent
                 visible: root.isEstablished
+
+                // ── wide: chains stacked as rows ─────────────────────────────
+                Column {
+                    id: wideChains
+                    anchors.fill: parent
+                    visible: !root.compact
+                    spacing: root.px(8)
+
+                    readonly property int _tailH: chainsTail.visible
+                                                  ? chainsTail.implicitHeight + root.px(4) : 0
+                    readonly property int _railH:
+                        root._chainsShown > 0
+                        ? Math.max(0, Math.floor((height - _tailH
+                                                  - (root._chainsShown - 1) * spacing)
+                                                 / root._chainsShown))
+                        : 0
+
+                    Repeater {
+                        model: root.compact ? 0 : root._chainsShown
+
+                        PpChainRail {
+                            required property int index
+                            width:  wideChains.width
+                            height: wideChains._railH
+                            chain:  root.chains[index]
+                            fit:    root.k
+                            screenConditionId: root._screenConditionId
+                            screenRef:         root._screenRef
+                            onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                        }
+                    }
+
+                    Text {
+                        id: chainsTail
+                        objectName: "sdChainsTail"
+                        width: parent.width
+                        visible: root._chainsHidden > 0
+                        horizontalAlignment: Text.AlignRight
+                        // The card row's own tail, verbatim: it counts and it does not decline
+                        // a noun, so "+1 more" is right at every count.
+                        text: qsTr("+%1 more").arg(root._chainsHidden)
+                        font.family: Theme.fontData
+                        font.pixelSize: root.tzCaption
+                        color: Theme.colorText3
+                    }
+                }
+
+                // ── 12c: the spine, turned on its side ───────────────────────
+                // A 560 px column cannot hold a vertical rail AND the strips around it, and
+                // the mock's answer is not pagination — it is that the rail scrolls and
+                // everything below it stays put. Paging a chain would break the one thing the
+                // rail is for, which is reading it as a single shape.
+                Flickable {
+                    id: narrowChains
+                    objectName: "sdChainsFlick"
+                    anchors.fill: parent
+                    visible: root.compact
+                    contentWidth: width
+                    contentHeight: narrowCol.implicitHeight
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    Column {
+                        id: narrowCol
+                        width: narrowChains.width
+                        spacing: root.px(7)
+
+                        // The first chain is open, because a panel whose every chain is
+                        // collapsed has drawn no rail at all.
+                        PpChainRail {
+                            width:  narrowCol.width
+                            height: implicitHeight
+                            visible: root.compact && !!root.chains && root.chains.length > 0
+                            chain:  (root.chains && root.chains.length > 0) ? root.chains[0] : null
+                            fit:    root.k
+                            vertical: true
+                            screenConditionId: root._screenConditionId
+                            screenRef:         root._screenRef
+                            onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                        }
+
+                        Repeater {
+                            model: root.compact
+                                   ? Math.max(0, (root.chains ? root.chains.length : 0) - 1)
+                                   : 0
+
+                            Column {
+                                id: collapsedChain
+                                required property int index
+                                readonly property int chainIndex: index + 1
+                                readonly property bool open: root.expandedChain === chainIndex
+                                readonly property var chainData: root.chains[chainIndex]
+
+                                width: narrowCol.width
+                                spacing: root.px(7)
+
+                                Item {
+                                    objectName: "sdChainCollapsed"
+                                    width: parent.width
+                                    height: summaryCol.implicitHeight + 2 * root.px(8)
+
+                                    // Dashed for the same reason the Cold expectations are:
+                                    // this is a chain the panel has not drawn yet, not a
+                                    // finding of its own.
+                                    PpDashedFrame {
+                                        anchors.fill: parent
+                                        frameRadius: Theme.radius
+                                        strokeColor: Theme.colorBorderMid
+                                        dashOn:  Math.max(1, root.px(3))
+                                        dashOff: Math.max(1, root.px(3))
+                                    }
+
+                                    Column {
+                                        id: summaryCol
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.leftMargin:  root.px(9)
+                                        anchors.rightMargin: root.px(9)
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: root.px(4)
+
+                                        Item {
+                                            width: parent.width
+                                            height: chainLabel.implicitHeight
+
+                                            Text {
+                                                id: chainLabel
+                                                objectName: "sdChainCollapsedLabel"
+                                                anchors.left: parent.left
+                                                text: qsTr("CHAIN %1").arg(collapsedChain.chainIndex + 1)
+                                                font.family: Theme.fontData
+                                                font.pixelSize: root.tzCaption
+                                                font.letterSpacing: Theme.trackingMicro
+                                                color: Theme.colorText2
+                                            }
+                                            Text {
+                                                objectName: "sdChainCollapsedToggle"
+                                                anchors.right: parent.right
+                                                anchors.baseline: chainLabel.baseline
+                                                text: collapsedChain.open ? qsTr("CLOSE ▴")
+                                                                          : qsTr("OPEN ▸")
+                                                font.family: Theme.fontData
+                                                font.pixelSize: root.tzCaption
+                                                font.letterSpacing: Theme.trackingLabel
+                                                color: Theme.colorAccent
+                                            }
+                                        }
+
+                                        Text {
+                                            objectName: "sdChainCollapsedSummary"
+                                            width: parent.width
+                                            text: root._chainSummary(collapsedChain.chainData)
+                                            wrapMode: Text.WordWrap
+                                            lineHeight: 1.4
+                                            font.family: Theme.fontBody
+                                            font.pixelSize: root.tzMicro
+                                            font.weight: Theme.fontBodyWeight
+                                            color: Theme.colorText
+                                        }
+                                        Text {
+                                            objectName: "sdChainCollapsedNote"
+                                            width: parent.width
+                                            visible: text !== ""
+                                            text: root._chainNote(collapsedChain.chainData)
+                                            wrapMode: Text.WordWrap
+                                            lineHeight: 1.4
+                                            font.family: Theme.fontData
+                                            font.pixelSize: root.tzCaption
+                                            color: Theme.colorText3
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: root.expandedChain =
+                                            collapsedChain.open ? -1 : collapsedChain.chainIndex
+                                    }
+                                }
+
+                                // Opening reveals THE SAME RAIL, in place — same nodes, same
+                                // links, same grades (brief §8). Nothing about the chain was
+                                // being withheld by the summary.
+                                PpChainRail {
+                                    width:  collapsedChain.width
+                                    height: visible ? implicitHeight : 0
+                                    visible: collapsedChain.open
+                                    chain:  collapsedChain.chainData
+                                    fit:    root.k
+                                    vertical: true
+                                    screenConditionId: root._screenConditionId
+                                    screenRef:         root._screenRef
+                                    onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -602,12 +850,29 @@ Rectangle {
             onToggled: root.watchingExpanded = !root.watchingExpanded
         }
 
+        // STATED EXACTLY ONCE. In Established and Closing the driver footer carries the
+        // coverage line, because the mock puts it in the footer's right-hand column beside
+        // the rival it could not adjudicate — the two are the same disclosure. Drawing it in
+        // both places would not be twice as honest, it would read as two different numbers.
         PpCoverageLine {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? implicitHeight : 0
             Layout.leftMargin: root.px(4)
-            line: root.source ? (root.source.coverageLine || "") : ""
+            line: root._footerCarriesCoverage ? ""
+                                              : (root.source ? (root.source.coverageLine || "") : "")
             fit: root.k
+        }
+
+        // ── likely driver ────────────────────────────────────────────────────
+        PpDriverFooter {
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? implicitHeight : 0
+            visible: root._hasDriverFooter
+            driver: root.driver
+            coverageLine: root.source ? (root.source.coverageLine || "") : ""
+            fit: root.k
+            compact: root.compact
+            onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
         }
     }
 }
