@@ -111,6 +111,16 @@ pp_add_test(dashboard_reductions_test SOURCES dashboard_reductions_test.cpp)
 pp_add_test(lm_session_reductions_test
             SOURCES lm_session_reductions_test.cpp ${SRC}/LaunchMonitor/launch_monitor_reading.cpp)
 
+# Session diagnostics ledger (diagnostic_ledger.h) — the Wilson lower bound, Theil–Sen
+# and Kendall τ-b, the one-sided Fisher exact, every tier/direction/resolving gate at its
+# boundary, the one-way stage ratchet, all five link grades with the screened-root and
+# range-restriction caps, chain extraction with ghosts/rivals/unchained patterns, the
+# anti-churn devices and diagnostics.json round-trip — plus one test per never-do rule in
+# the design brief and a parity block replaying the design mock's own nine fires arrays.
+# Backs PpSessionDiagnosticsPanel (SessionDiagnosticsModel façade). Header-only, and the
+# seeded corpus generator (synthetic_session_corpus.h) is test-side and ships in nothing.
+pp_add_test(diagnostic_ledger_test SOURCES diagnostic_ledger_test.cpp)
+
 # Launch monitor ball flight (lm_flight_path.h) — the drag + Magnus integration against
 # the design brief's reference shot, the launch/descent asymmetry that is the only reason
 # the curve is drawn rather than sketched, and the normalisation that pins the drawn
