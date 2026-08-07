@@ -58,6 +58,20 @@ enum class MeasureStatus {
 // (MetricRequirement::launchMonitor): a user with no launch monitor gets "needs a launch monitor"
 // through the same path a missing face-on camera already takes, which is what makes the absence
 // graceful rather than a hole. `gapReason` is required here exactly as it is for NotCapturable.
+//
+// WHY THE VOCABULARY HOLDS SOME QUANTITIES TWICE — once as our own estimate (m_launchAngle,
+// m_ballSpeed, m_attackAngle, m_clubPathAtImpact…) and once as a launch-monitor reading
+// (m_lmLaunchAngle, m_lmBallSpeed, m_lmAttackAngle, m_lmClubPath…). The pairs look like drift and
+// are deliberate, for two reasons that pull in the same direction. First, not every user owns a
+// launch monitor, so every ball-flight quantity a diagnosis can rest on must be producible from
+// our own pixels; the m_* rows are that commitment, and the `planned` ones among them are roadmap,
+// not leftovers. Second, for a user who owns both, the two are INDEPENDENT measurements of one
+// event — and the monitor's reading is the standard our estimate is validated against. One merged
+// measure could do neither job: it would leave monitor-less users without the quantity, and a
+// measure cannot validate itself. Resolution is an exact metricKey match with no fallback
+// (measure_sample.cpp), so which of the pair a signal binds to is a per-quantity authoring
+// decision made where the signal is written — not something a loader infers from what happens to
+// be plugged in.
 
 // Which way a measure's corridor is open.
 //

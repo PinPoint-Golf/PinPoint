@@ -272,6 +272,17 @@ enum class Strength { VeryWeak, Weak, Moderate, Strong, VeryStrong };
 // because no downstream count can catch the mistake: cause-coverage totals are identical under edge
 // reversal, so a wholly inverted graph passes every coverage assertion. The structural check lives
 // in the pack validator (screened causes have out-degree > 0 and in-degree 0).
+//
+// AN EDGE IS AN INDEPENDENT CLAIM, NEVER A COVERAGE DEVICE. Coverage is deliberately ONE HOP —
+// `findingsCoveredBy` reads direct edges only, no closure — so it is tempting to author A -> C
+// purely to let a distant cause "reach" a finding it only influences through B. Do not. Write
+// A -> C only when a coach would state the direct claim without mentioning B, so the edge can
+// carry its own strength and provenance honestly. Triangles (A -> B, B -> C and A -> C together)
+// are legitimate and the pack ships 55 of them — audited 2026-08-07, every one a claim coaching
+// states directly; the audit and its reasoning classes are §12 of
+// docs/design/swing_fault_ontology.md. What the rule forbids is the edge written for reach alone:
+// it inherits a strength nobody meant, and once in the pack it is indistinguishable from a claim
+// somebody did mean.
 struct Edge {
     QString  from;
     QString  to;

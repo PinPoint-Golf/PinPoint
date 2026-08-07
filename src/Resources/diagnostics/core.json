@@ -4564,7 +4564,7 @@
       "id": "head_rise_backswing",
       "label": "Head rises in the backswing",
       "aliases": [
-        "standing up going back"
+        "head comes up going back"
       ],
       "axis": "head_height_backswing",
       "group": "posture",
@@ -7699,6 +7699,28 @@
       }
     },
     {
+      "from": "inside_takeaway",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
+    },
+    {
+      "from": "flying_elbow",
+      "to": "across_the_line",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-27",
+        "searchTerms": "takeaway shaft position top of backswing swing plane golf"
+      }
+    },
+    {
       "from": "across_the_line",
       "to": "over_the_top",
       "type": "causes",
@@ -8626,6 +8648,28 @@
         "tier": "practice",
         "searchedOn": "2026-07-28",
         "searchTerms": "shoulder plane shaft plane downswing golf"
+      }
+    },
+    {
+      "from": "steep_backswing_plane",
+      "to": "steep_downswing_shaft",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-07-28",
+        "searchTerms": "shoulder plane shaft plane downswing golf"
+      }
+    },
+    {
+      "from": "insufficient_knee_flex",
+      "to": "ball_speed_deficit",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-07",
+        "searchTerms": "knee flexion address posture clubhead speed ball speed golf swing biomechanics study"
       }
     },
     {

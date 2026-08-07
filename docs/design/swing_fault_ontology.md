@@ -519,3 +519,89 @@ against a 3× prevalence ratio — the two ladders behaving commensurably, which
 argument was for. The top of the list is `early_extension` over `late_pelvis_rotation`,
 `out_to_in_path` over `late_pelvis_rotation`, and `over_the_top` over `poor_core_stability` — which
 is, precisely, this document's §3.2 complaint being answered.
+
+---
+
+## 12. The duplication review — shortcut edges audited, twins separated (2026-08-07)
+
+**Occasioned by**: "the model contains duplication and has added complexity of limited value."
+The review swept the whole graph structurally — parallel edges, reciprocal edges, corroborates
+shadowing a causal path, dangling screen/drill/citation references, duplicated norm corridors —
+and found the enforced invariants holding on all of them. What it did find is below, with what was
+done about each. Figures in this section were read at 152 conditions / 334 edges and the section's
+changes take the pack to 338.
+
+### 12.1 Fifty-five triangles, and the rule that makes them legal
+
+55 of the 311 causal edges are transitive shortcuts: `A → C` where a causal chain `A → B → C` also
+ships. Under this resolver none of them is redundant — coverage is deliberately ONE HOP
+(`findingsCoveredBy` → `effectsOf`), so a screened capacity's direct edges are precisely what let a
+recommendation say "this screen would explain four of your findings". But a graph that holds both
+chains and shortcuts is doing two jobs at once, and nothing said which job a given edge was doing.
+Now something does: **an edge is an independent claim, never a coverage device** — normative at the
+`Edge` struct (`characteristic.h`), which is where an author writing one is looking.
+
+Each of the 55 was read against that rule. They fall into four classes, and every one survives:
+
+| class | n | verdict, with exemplars |
+|---|---:|---|
+| Screened-capacity fan-out | 21 | The load-bearing class. `limited_lead_hip_ir → early_extension`, `poor_pelvic_disassociation → sway` — each is screen doctrine stated directly, and each is what makes the capacity's screen recommendation reach the findings it should. |
+| Fault-to-fault compensation | 21 | `over_the_top → strike_heel`, `casting → thin`, `posture_too_bent → shank` — coaching states these without mentioning the mediator, which is the test the rule sets. |
+| Setup and intent geometry | 9 | `ball_back → launch_low`, `ball_too_close → shank`, `grip_strong → closed_face_to_path` — first-order geometry a coach teaches as one step. |
+| Delivery-to-outcome laws | 4 | `under_plane_stuck → push`, `excessive_shaft_lean → launch_low` — ball-flight law shortcuts; the delivery mediator exists but the claim is made directly everywhere it is taught. |
+
+**Zero removed.** That is a finding, not a formality: the pack's shortcuts were all written as
+claims, none for reach. The rule exists so the next fifty-five are too.
+
+### 12.2 Conditions the graph could not tell apart
+
+Seven sets of conditions shared identical edge neighbourhoods — as candidate causes the resolver
+could order them only alphabetically. Three were accidents of thin authoring and got the edge each
+one's own `consequence` text already claimed:
+
+- `inside_takeaway` said "throwing it out and over, **or** by getting stuck underneath" but only
+  the stuck half was an edge. Now also `→ over_the_top`, separating it from
+  `flat_backswing_plane`.
+- `steep_backswing_plane` said "sets up a steep, out-to-in delivery" but pointed only at
+  `over_the_top`. Now also `→ steep_downswing_shaft`, separating it from `outside_takeaway` and
+  `across_the_line`.
+- `flying_elbow` said "requires a re-route to deliver the club" and caused **nothing** — a fault
+  whose own text promises a consequence the graph never stated. Now `→ across_the_line`, which
+  also separates `across_the_line` from `outside_takeaway`.
+
+The remaining four sets are deliberate, and saying so here is the fix:
+
+- `laid_off` / `shallowing` — both express "club under the plane coming down"; the distinction is
+  carried by kind (Fault vs Delivery) and by their measures, not by their edges, and shallowing's
+  own text says it is not a fault at all.
+- `excessive_knee_flex` / `pelvis_thrust_backswing` / `weight_in_heels_address` /
+  `limited_trail_ankle_dorsiflexion` — four genuinely different address-and-backswing precursors
+  of one downswing fault. Interchangeable as covers, separated by kind, confirmedBy and strength,
+  which is what the resolver ranks on.
+- `ball_too_far` / `thoracic_kyphosis` — a setup and a capacity that produce the same posture;
+  separated by kind, confirmedBy and strength. The pair is the model's own point: the coach fixes
+  one with a ball position and the other with a referral.
+- The `feet_alignment` / `hip_alignment` open and closed pairs — parallel segment readings of one
+  aim, corroborating `alignment_*` by design.
+
+### 12.3 Two one-line repairs
+
+- "standing up going back" answered to both `pelvis_rise_backswing` and `head_rise_backswing` — a
+  live `duplicateAlias` warning, and a search term that led to whichever loaded first. The pelvis
+  condition owns it (it is the whole-body phrase); the head condition now answers to "head comes
+  up going back".
+- `insufficient_knee_flex` was the pack's only edgeless condition — it could fire and then land in
+  `unexplained`, explaining nothing, while its own text claimed "the arms and shoulders end up
+  supplying the speed". That claim is now its edge: `→ ball_speed_deficit`, weak, practice tier
+  (searched 2026-08-07, nothing peer-reviewed tests the address-flex-to-speed link directly).
+
+### 12.4 What the review deliberately left alone
+
+Two apparent duplications are working as designed and are now documented where an author will meet
+them. The launch-monitor measure pairs (`m_ballSpeed` / `m_lmBallSpeed` and kin) exist because a
+monitor-less user still needs every ball-flight quantity producible from our pixels, and a user
+with a monitor gets an independent reading to validate our estimate against — one merged measure
+could do neither job; the full argument sits with `MeasureStatus` in `measure_vocabulary.h`. And
+the signal layer's near-1:1 shape (121 of 122 signals are one corridor test on one measure) is a
+stage, not a ceiling — signals grow multi-measure tests in later iterations, which is why the
+layer is not folded into the conditions it serves.
