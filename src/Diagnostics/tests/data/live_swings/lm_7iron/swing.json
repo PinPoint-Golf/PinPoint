@@ -1,0 +1,505 @@
+{
+    "analysis": {
+        "metrics": [
+            {
+                "key": "lm.clubheadSpeed",
+                "label": "Clubhead speed (measured)",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 81.84368065497495
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "mph",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.ballSpeed",
+                "label": "Ball speed (measured)",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 113.63689155332855
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "mph",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.smashFactor",
+                "label": "Smash factor",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 1.388462623429449
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "ratio",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.attackAngle",
+                "label": "Attack angle (measured)",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -2.730836
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.clubPath",
+                "label": "Club path (measured)",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -0.494054
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.launchAngle",
+                "label": "Launch angle (measured)",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 19.798056
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.launchDirection",
+                "label": "Start direction (measured)",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -0.861282
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.faceAngle",
+                "label": "Face angle",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -0.912254
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.faceToPath",
+                "label": "Face to path",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -0.4182
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.dynamicLoft",
+                "label": "Dynamic loft",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 25.548281
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.spinLoft",
+                "label": "Spin loft",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 28.279117
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.lieAngle",
+                "label": "Lie angle",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -0.767198
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.closureRate",
+                "label": "Closure rate",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 3079.591553
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°/s",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.strikeLocation",
+                "label": "Strike location",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 2.849204
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "mm",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.strikeHeight",
+                "label": "Strike height",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -14.114308
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "mm",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.spinRate",
+                "label": "Spin rate",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 4824
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "rpm",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.backSpin",
+                "label": "Back spin",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 4824
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "rpm",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.sideSpin",
+                "label": "Side spin",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -25
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "rpm",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.spinAxis",
+                "label": "Spin axis",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -0.29692820574770473
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.carryDistance",
+                "label": "Carry",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 164.53303258967628
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "yd",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.totalDistance",
+                "label": "Total distance",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 176.19949803149606
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "yd",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.offline",
+                "label": "Offline",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": -3.1047451881014876
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "yd",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.peakHeight",
+                "label": "Peak height",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 95.04413385826771
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "ft",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.descentAngle",
+                "label": "Descent angle",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 46.110027
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "°",
+                "value": [
+                ]
+            },
+            {
+                "key": "lm.distanceToPin",
+                "label": "Distance to pin",
+                "phaseSamples": [
+                    {
+                        "band": "",
+                        "phase": 5,
+                        "t_us": 0,
+                        "value": 198.2891655730534
+                    }
+                ],
+                "t_us": [
+                ],
+                "unit": "yd",
+                "value": [
+                ]
+            }
+        ],
+        "phases": [
+            {
+                "conf": 1,
+                "phase": 5,
+                "segment": 0,
+                "t_us": 0
+            }
+        ],
+        "schema": "pinpoint.analysis/3",
+        "tier": 0
+    },
+    "athlete": {
+        "name": "Mark Liversedge",
+        "uuid": "52ff45d8-37a6-4474-bdc6-5a4184f78387"
+    },
+    "capture": {
+        "impactUs": -1,
+        "sessionType": 1,
+        "shotSource": "launchMonitor"
+    },
+    "clock": {
+        "t0_us": 0,
+        "wallclock": "2026-08-04T14:46:43.585Z"
+    },
+    "launchMonitor": {
+        "attackAngle": -2.730836,
+        "backSpin": 4824,
+        "ballSpeed": 113.63689155332855,
+        "carryDistance": 164.53303258967628,
+        "closureRate": 3079.591553,
+        "clubPath": -0.494054,
+        "clubheadSpeed": 81.84368065497495,
+        "descentAngle": 46.110027,
+        "deviceClub": "Fw",
+        "deviceShotId": "107",
+        "distanceToPin": 198.2891655730534,
+        "dynamicLoft": 25.548281,
+        "faceAngle": -0.912254,
+        "faceToPath": -0.4182,
+        "kind": "gcquad",
+        "launchAngle": 19.798056,
+        "launchDirection": -0.861282,
+        "lieAngle": -0.767198,
+        "offline": -3.1047451881014876,
+        "peakHeight": 95.04413385826771,
+        "readAtMs": 1785854803585,
+        "sideSpin": -25,
+        "smashFactor": 1.388462623429449,
+        "sourcePath": "C:/Program Files (x86)/Foresight Sports Experience/System/LastShot.csv",
+        "spinAxis": -0.29692820574770473,
+        "spinLoft": 28.279117,
+        "spinRate": 4824,
+        "strikeHeight": -14.114308,
+        "strikeLocation": 2.849204,
+        "totalDistance": 176.19949803149606
+    },
+    "review": {
+        "club": "7 IRON",
+        "note": "",
+        "rating": 0
+    },
+    "schema": "pinpoint.swing/2",
+    "session": {
+        "id": "2026-08-04_Mark-Liversedge_Wrist_05"
+    },
+    "streams": [
+    ],
+    "swing": {
+        "id": "swing_0025",
+        "index": 25
+    },
+    "window": {
+        "endUs": 0,
+        "startUs": 0
+    }
+}

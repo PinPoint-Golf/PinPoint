@@ -550,6 +550,10 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/reference_pack.cpp
         src/Diagnostics/measure_sample.h
         src/Diagnostics/measure_sample.cpp
+        # The live value source. No app-side caller yet — the session model is the next stage — but
+        # it compiles here so the app build is the gate on it rather than the test suite alone.
+        src/Diagnostics/live_measure_source.h
+        src/Diagnostics/live_measure_source.cpp
         src/Diagnostics/resource_norm_provider.cpp
         src/Diagnostics/file_norm_provider.cpp
         src/Diagnostics/merged_norm_provider.cpp

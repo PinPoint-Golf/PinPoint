@@ -734,6 +734,36 @@ pp_add_test(measure_sample_test
     SOURCES ${DIAG}/tests/measure_sample_test.cpp ${DIAG}/measure_sample.cpp ${DIAG_NORM}
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 
+# THE FIRST LIVE WIRING: the shipped pack and norm set run over REAL RECORDED SWINGS.
+#
+# Every other Diagnostics test is dark — synthetic values, fake norms, hand-written grids — so none
+# of them can fail when the content is wrong about what a capture actually carries. This one links
+# the whole chain (swing.json -> phase grid -> measure -> norm -> grade -> finding) and its
+# load-bearing output is a MEASUREMENT: how many of the 152 conditions a real swing can answer
+# today. The counts are observed and pinned, because a silent collapse from 24 assessable
+# conditions to 3 looks exactly like a healthy run.
+#
+# The fixtures under ${DIAG}/tests/data/live_swings are copied out of the corpus; the test stages
+# them into a temporary directory before reading, because readPhaseGrid() writes a sidecar beside
+# whatever it parses and a test must not leave artefacts in the source tree.
+#
+# The RESOURCE providers are used rather than the merged ones (which is why file_/merged_ are on the
+# line at all — the factories reach them), so the pinned numbers do not depend on which packs and
+# norm sets the developer running the suite happens to have installed.
+pp_add_test(live_measure_source_test
+    SOURCES ${DIAG}/tests/live_measure_source_test.cpp
+            ${DIAG}/live_measure_source.cpp ${DIAG}/measure_sample.cpp
+            ${DIAG}/characteristic_engine.cpp
+            ${DIAG_NORM}
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+    INCLUDE ${NORM_INC}
+    COMPILE_OPTIONS -DPP_LIVE_SWINGS_DIR="${DIAG}/tests/data/live_swings")
+set_tests_properties(live_measure_source_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${DIAGRES}/core.json;PINPOINT_CORE_NORMS=${DIAGRES}/norms.json;PINPOINT_CORE_CONTEXTS=${DIAGRES}/contexts.json")
+
 # Every corridor signal points the way its own condition claims. An inverted signal does not fail
 # loudly — it fires on the wrong swings with correct-sounding text attached — so the fixture states
 # the expected direction and the catalogue quote that decides it. A new signal with no fixture row
