@@ -51,6 +51,26 @@ per the brief's own rule. These are the places that rule fired, plus what real d
 13. **Selected carousel cell**: the accent ~10% fill is painted on the pip band, not the whole
     cell — washing the thumbnail fought what the cell exists to show.
 
+## Found on first real use (2026-08-07, fixed same day) — mock regeneration items
+
+14. **13a at real coverage.** The mock's review strip enumerates 9 conditions; a real capture
+    measures ~31, and drawing them all swallowed the panel. Now: cells ordered by information
+    (fired → in → unmeasured-here-but-seen), band bounded to ~2 rows, low-information tail
+    ("clean all session, not measurable on this swing") collapsed behind one expandable row.
+    The headline denominator is the measurable set, matching the grid. **The mock should be
+    redrawn at ≥30 conditions** to sanction this composition.
+15. **Forming at close.** A session can end without ever establishing (2 patterns, no authored
+    edge — common on wrist-only capture). Review previously forced the rail composition via
+    ghost scaffolding; now the rail requires the session to have actually reached Established,
+    and a Forming close reviews as the mock's Forming picture (full cards, runs, no chain).
+    **The mock has no Forming-at-close frame** — worth drawing.
+16. **Driver footer at close** is definitive per B7 — the stability debounce is bypassed and
+    an edgeless session states "No driver: this session's patterns share no authored cause."
+    The mock never drew the no-driver close.
+17. Consistent-direction wording is now a count ("The high side on 5 of its 6 firings." /
+    "…, every firing."), never a percentage; the agreement % appears only in the dispersion
+    sentence, as the mock authored it.
+
 ## Rejected mock variant (deliberate)
 
 The mock script carries a "hindsight off" review mode (counts "as of this shot"). Brief §6

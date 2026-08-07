@@ -260,11 +260,20 @@ Rectangle {
         }
 
         // ── direction, or the sentence saying the direction claim is withheld ─
+        //
+        // THE FIRST THING TO GO WHEN THE CARD IS SHORT, and it goes before the run does. What
+        // is under this line is the ledger — the run, and what happened after the reviewed
+        // shot — and prose must not push evidence off the bottom of its own card. Dropped
+        // whole, never half-drawn: a tick run cut through the middle reads as a run of short
+        // ticks, which is a claim about the session that the ledger never made.
         Text {
+            id: directionTxt
             objectName: "sdCardDirection"
             width: col.width
             text: root.card ? (root.card.directionText || "") : ""
             visible: text !== ""
+                     && col.height - y - height
+                        >= run.height + trendRow.height + 2 * col.spacing
             wrapMode: Text.WordWrap
             maximumLineCount: 2
             elide: Text.ElideRight
@@ -275,16 +284,23 @@ Rectangle {
         }
 
         // ── the run ──────────────────────────────────────────────────────────
+        // Last to go, and only when the card cannot hold it whole.
         PpTickRun {
+            id: run
             objectName: "sdTickRun"
             width: col.width
+            visible: col.height - y >= height
             ticks: root.card ? root.card.ticks : []
             fit: root.fit
         }
 
         // ── trend + recency, and the focus affordance ────────────────────────
         Item {
+            id: trendRow
             width: col.width
+            // Never above the run it annotates: a trend arrow with no run under it is a claim
+            // with its evidence removed.
+            visible: run.visible && col.height - y >= height
             height: Math.max(trendTxt.implicitHeight, focusTag.implicitHeight)
 
             Text {
@@ -343,7 +359,7 @@ Rectangle {
             objectName: "sdCardEvidence"
             width: col.width
             height: Math.max(0, col.height - y)
-            visible: height >= root.tzMicro * lineHeight
+            visible: trendRow.visible && height >= root.tzMicro * lineHeight
             text: root.card ? (root.card.evidence || "") : ""
             wrapMode: Text.WordWrap
             elide: Text.ElideRight

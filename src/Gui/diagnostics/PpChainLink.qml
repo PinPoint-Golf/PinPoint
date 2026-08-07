@@ -50,6 +50,13 @@ Item {
 
     objectName: "sdChainLink"
 
+    // The node beside it is overflow:hidden and so is this. A link column is centred on its
+    // row, so when the row is shorter than the word-stroke-note stack the stack hangs out of
+    // BOTH ends and lands on the node cards either side — the loose "Unanchored / not
+    // established / screen would confirm" fragments floating over a squeezed rail were this and
+    // nothing else. Clipped, the same overflow can only ever cost the caption.
+    clip: true
+
     function px(n) { return Math.round(n * Theme.fontScale * root.fit) }
 
     readonly property int tzCaption: Math.max(1, Math.round(Theme.sp(8) * fit))
@@ -71,6 +78,8 @@ Item {
                                           : (stroke === "dashed" ? "dashed" : "dotted")
     readonly property real strokeWidth: Math.max(1, (link ? (link.width || 1) : 1)
                                                     * Theme.fontScale * root.fit)
+    // The stroke's own row height in the wide column — the one thing that is never dropped.
+    readonly property int _strokeH: Math.round(Math.max(strokeWidth, px(7)))
 
     // The half-opacity of an unanchored link is the model's, not a style choice here: a link
     // whose root has never been screened is drawn as barely there because that is what the
@@ -95,9 +104,16 @@ Item {
         visible: !root.vertical
         spacing: root.px(5)
 
+        // THE STROKE IS THE GRADE; the word and the note are the grade said twice more. When
+        // the row is too short for all three, the captions go and the stroke stays — dropped
+        // whole rather than clipped mid-word, for the same reason the node card drops its
+        // evidence sentence rather than shrinking it. Measured off the Texts' own implicit
+        // heights, which do not depend on whether they are shown, so this cannot chase itself.
         Text {
+            id: linkWord
             objectName: "sdChainLinkWord"
             width: parent.width
+            visible: root.height >= implicitHeight + root._strokeH + root.px(5)
             text: root.word
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
@@ -112,7 +128,7 @@ Item {
             id: horizStroke
             objectName: "sdChainLinkStroke"
             width: parent.width
-            height: Math.max(root.strokeWidth, root.px(7))
+            height: root._strokeH
 
             onWidthChanged:  requestPaint()
             onHeightChanged: requestPaint()
@@ -152,9 +168,12 @@ Item {
         }
 
         Text {
+            id: linkNote
             objectName: "sdChainLinkNote"
             width: parent.width
             visible: text !== ""
+                     && root.height >= linkWord.implicitHeight + implicitHeight
+                                       + root._strokeH + 2 * root.px(5)
             text: root.note
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap

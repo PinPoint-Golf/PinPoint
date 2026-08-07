@@ -149,6 +149,9 @@ Item {
             stage: "forming",
             headerInfo: {
                 stage: "forming", stageLabel: "FORMING", shotLabel: "shot 5",
+                // The ratcheted stage, published beside the displayed one. Forming never
+                // reached Established, and that is what decides the composition.
+                recordedStage: "forming", reachedEstablished: false,
                 countLine: "2 patterns · counted over all 5 shots",
                 cadenceNote: quiet ? "BANDWIDTH · QUIET" : "",
                 coldLine: "",
@@ -306,6 +309,7 @@ Item {
             stage: "established",
             headerInfo: {
                 stage: "established", stageLabel: "ESTABLISHED", shotLabel: "shot 11",
+                recordedStage: "established", reachedEstablished: true,
                 countLine: "4 patterns · counted over all 11 shots",
                 cadenceNote: "", coldLine: "", formingLine: "", closingLine: ""
             },
@@ -401,41 +405,171 @@ Item {
     // The nine cells: fired, clean and the two the capture could not answer — which are the
     // ones this fixture exists for. Their value slot reads "not measurable" and their corridor
     // slot carries the REASON, and neither is ever blank.
+    //
+    // IN THE MODEL'S OWN ORDER, WITH THE TAIL MARKED. shotReadout() publishes four buckets —
+    // fired here, clean here, silent here but a pattern or a watch this session, and the tail
+    // that is silent both ways — and the strip's whole layout decision is taken off that order
+    // and that flag. A fixture in pack order would be asserting a payload the model does not
+    // produce.
     function reviewReadout() {
-        function cell(id, name, kind, state, val, band, tier) {
+        function cell(id, name, kind, state, val, band, tier, tail) {
             return { id: id, name: name, stateKind: kind, state: state,
                      valueText: val, corridorText: band,
                      reason: kind === "notAssessable" ? band : "",
-                     tierTag: tier, recurrence: "", ticks: [], selectedIndex: 8,
+                     tierTag: tier, tail: tail === true,
+                     recurrence: "", ticks: [], selectedIndex: 8,
                      firingsAfter: 0, firingsAfterText: "no firings after this shot" }
         }
         return {
             shotId: 9, shotIndex: 8, shotCount: 14, club: "7i",
-            firedCount: 7, cleanCount: 2, notAssessableCount: 2,
-            headline: "7 of 9 conditions fired on this swing · 4 of them patterns",
+            firedCount: 5, cleanCount: 2, notAssessableCount: 2,
+            measurableSetCount: 9,
+            // The denominator is the MEASURABLE SET — what the grid below actually draws.
+            headline: "5 of 9 conditions fired on this swing · 4 of them patterns",
             note: "2 measures not assessable on this capture",
+            tailCount: 1,
+            tailSummary: "1 more · clean all session, not measurable on this swing",
             conditions: [
+                // ── fired here ──
                 // The true minus (U+2212) is the model's, and it is what makes the reading
                 // line up with the corridor beside it. Nothing in the QML reformats it.
                 cell("casting", "Casting", "fired", "OUT",
                      "−4.4°", "pass −2.0 to +2.0°", "pattern"),
                 cell("rushed_transition", "Rushed transition", "fired", "OUT",
                      "18 ms", "pass 30 to 70 ms", "pattern"),
-                cell("shaft_lean", "Not enough shaft lean", "clean", "IN",
-                     "+6.2°", "pass +4.0 to +12.0°", "watching"),
                 cell("scooping", "Scooping", "fired", "OUT",
                      "12.4°", "pass 0.0 to 8.0°", "pattern"),
-                cell("face_roll", "Face roll through impact", "clean", "IN",
-                     "2.1°", "pass 0.0 to 4.0°", "clean all session"),
-                cell("sway", "Lateral sway", "fired", "OUT",
-                     "84 mm", "pass 20 to 55 mm", "watching"),
                 cell("path_out_to_in", "Path too far out-to-in", "fired", "OUT",
                      "−5.1°", "pass −2.0 to +2.0°", "pattern"),
-                cell("head_height", "Head height Δ", "notAssessable", "—",
-                     "not measurable", "shaft occluded at P6", "clean all session"),
+                cell("sway", "Lateral sway", "fired", "OUT",
+                     "84 mm", "pass 20 to 55 mm", "watching"),
+                // ── clean here ──
+                cell("shaft_lean", "Not enough shaft lean", "clean", "IN",
+                     "+6.2°", "pass +4.0 to +12.0°", "watching"),
+                cell("face_roll", "Face roll through impact", "clean", "IN",
+                     "2.1°", "pass 0.0 to 4.0°", "clean all session"),
+                // ── not assessable here, but a watch this session: still information ──
                 cell("x_factor", "X-factor", "notAssessable", "—",
-                     "not measurable", "ball not tracked", "watching")
+                     "not measurable", "ball not tracked", "watching"),
+                // ── the tail: silent here AND silent all session ──
+                cell("head_height", "Head height Δ", "notAssessable", "—",
+                     "not measurable", "shaft occluded at P6", "clean all session", true)
             ]
+        }
+    }
+
+    // ── the user's session, which is the one that found all this ─────────────
+    //
+    // A six-shot Wrist session that recorded FORMING — two patterns the model authors no edge
+    // between — reviewed at shot 6, so the panel displays CLOSING + REVIEWING over a ledger
+    // that never established. It is the shape every one of these three defects showed up on:
+    // a thirty-one condition measurable set with an eighteen-cell silent tail, a chain the
+    // model scaffolded but never authored, and a finished session with nothing to wait for.
+    function formingReviewSource() {
+        const s = formingSource(false)
+        s.stage = "closing"
+        s.closed = true
+        s.headerInfo.stage = "closing"
+        s.headerInfo.stageLabel = "CLOSING"
+        // The RECORDED stage is what it always was. The display froze; the session did not
+        // retroactively earn a chain by being looked at.
+        s.headerInfo.recordedStage = "forming"
+        s.headerInfo.reachedEstablished = false
+        s.headerInfo.shotLabel = "shot 6 of 6"
+        s.headerInfo.countLine = "2 patterns · counted over all 6 shots"
+        s.headerInfo.reviewBadge = "REVIEWING · shot 6 of 6"
+        s.headerInfo.reviewNote  = "final session state · this shot read inside the finished ledger"
+        s.headerInfo.reviewFootLine =
+            "The ledger stays at the finished session: counts under each node are the totals "
+            + "over all 6 shots, and this shot is the wide tick inside each run. Recurrence "
+            + "is not a rate at this n."
+        s.headerInfo.formingLine =
+            "No chain is drawn: the model authors no edge between these patterns."
+
+        // Six shots, six ticks, and shot 6 is the wide outlined one on both cards.
+        s.cards[0].name = "Too much shaft lean at impact"
+        s.cards[0].recurrence = "6 of 6 measurable shots"
+        s.cards[0].statePill = "FIRED HERE"
+        s.cards[0].thisShot = "fired"
+        s.cards[0].ticks = [tick("fired"), tick("fired"), tick("fired"),
+                            tick("fired"), tick("fired"), tick("fired")]
+        selectTickAt(s.cards[0], 5, "fired")
+        s.cards[1].name = "Head drifts toward the target going back"
+        s.cards[1].recurrence = "5 of 6 measurable shots"
+        s.cards[1].statePill = "FIRED HERE"
+        s.cards[1].thisShot = "fired"
+        s.cards[1].ticks = [tick("fired"), tick("clean"), tick("fired"),
+                            tick("fired"), tick("fired"), tick("fired")]
+        selectTickAt(s.cards[1], 5, "fired")
+
+        // THE CHAINS ARE STILL PUBLISHED. The model scaffolds the authored neighbourhood
+        // around every pattern whatever the stage, so this session has rails — ghosts and a
+        // screened root around two nodes it authors no edge between. They are exactly what the
+        // panel used to draw over the cards, and the fixture keeps them so the composition
+        // rule is tested against the payload that broke it rather than against an empty list.
+        s.chains = establishedSource(true).chains
+        s.unchainedLine =
+            "Too much shaft lean at impact, Head drifts toward the target going back are "
+            + "patterns the model authors no edge between this session — reported on their own."
+
+        // §B7: at the close the footer is definitive. explain() ranked no root because nothing
+        // here is joined by an authored edge, and the footer says so rather than waiting.
+        s.driver = { eligible: false, final: true,
+                     finalText: "No driver: this session's patterns share no authored cause." }
+        return s
+    }
+
+    // Thirty-one conditions, four of them fired, eighteen of them silent both ways — the
+    // measurable set of a real Wrist capture, and the reason the strip had grown to five rows.
+    function wideReadout() {
+        function cell(id, name, kind, state, val, band, tier, tail) {
+            return { id: id, name: name, stateKind: kind, state: state,
+                     valueText: val, corridorText: band,
+                     reason: kind === "notAssessable" ? band : "",
+                     tierTag: tier, tail: tail === true,
+                     recurrence: "", ticks: [], selectedIndex: 5,
+                     firingsAfter: 0, firingsAfterText: "no firings after this shot" }
+        }
+        const cs = [
+            cell("shaft_lean", "Too much shaft lean at impact", "fired", "OUT",
+                 "40.0°", "pass −4.0 to 6.0°", "pattern"),
+            cell("head_drift", "Head drifts toward the target going back", "fired", "OUT",
+                 "−41.6cm", "pass 1.0 to 7.0cm", "pattern"),
+            cell("stance_narrow", "Stance too narrow", "fired", "OUT",
+                 "0.1% shoulder width", "pass 1.0 to 2.0", "watching"),
+            cell("head_rise", "Head rises in the backswing", "fired", "OUT",
+                 "8.2cm", "pass −3.0 to 3.0cm", "watching"),
+            cell("stance_wide", "Stance too wide", "clean", "IN",
+                 "0.1% shoulder width", "pass 1.0 to 2.0", "watching"),
+            cell("head_drop", "Head drops in the backswing", "clean", "IN",
+                 "8.2cm", "pass −3.0 to 3.0cm", "watching")
+        ]
+        // Not assessable here, but each of them fired somewhere in the session: these are the
+        // ones review is FOR, and they are why the tail is defined by both silences and not
+        // just by "not measurable".
+        const watched = ["Shoulders open at address", "Ball too far back", "Flying trail elbow",
+                         "Reverse spine angle", "Sway", "Ball too far forward", "Trail hip hike"]
+        for (let w = 0; w < watched.length; ++w)
+            cs.push(cell("w" + w, watched[w], "notAssessable", "—",
+                         "not measurable", "metric not produced", "watching"))
+        // ...and the tail: silent on this swing and silent all session.
+        const quiet = ["Shoulders closed at address", "Flat shoulder plane", "Lead knee works in at the top",
+                       "Pelvis rises during the backswing", "Loss of width", "Out-of-order sequence",
+                       "Rushed transition", "Feet open", "Feet closed", "Hips open at address",
+                       "Hips closed at address", "Overswing", "Casting", "Early extension",
+                       "Chicken wing", "Reverse pivot", "Lateral slide", "Late release"]
+        for (let q = 0; q < quiet.length; ++q)
+            cs.push(cell("q" + q, quiet[q], "notAssessable", "—",
+                         "not measurable", "metric not produced", "clean all session", true))
+        return {
+            shotId: 6, shotIndex: 5, shotCount: 6, club: "Driver",
+            firedCount: 4, cleanCount: 2, notAssessableCount: 25,
+            measurableSetCount: cs.length,
+            headline: "4 of " + cs.length + " conditions fired on this swing · 2 of them patterns",
+            note: "25 measures not assessable on this capture",
+            tailCount: quiet.length,
+            tailSummary: quiet.length + " more · clean all session, not measurable on this swing",
+            conditions: cs
         }
     }
 
@@ -1007,12 +1141,22 @@ Item {
         function test_23_reviewShowsEveryConditionAndNeverABlankSlot() {
             setReview(reviewSource(), reviewReadout())
 
+            // CHANGED (defect 1): the denominator is the measurable set, not fired+clean. It
+            // has to be, because the grid underneath it draws the measurable set — a headline
+            // that counted a different population from the cells below it reads as a bug.
             compare(one(body, "sdReviewHeadline").text,
-                    "7 of 9 conditions fired on this swing · 4 of them patterns")
+                    "5 of 9 conditions fired on this swing · 4 of them patterns")
             // The not-assessable measures are stated SEPARATELY rather than folded into the
             // denominator, which would turn "we did not look" into "it was fine".
             compare(one(body, "sdReviewSubline").text,
                     "2 measures not assessable on this capture")
+
+            // CHANGED (defect 1): eight of the nine are on screen and the ninth — silent here
+            // AND silent all session — is behind the tail line, one press away. Everything is
+            // still published and nothing is a "+3 more"; opening it is what the next test is.
+            const strip = one(body, "sdReviewStrip")
+            strip.tailExpanded = true
+            wait(0)
 
             const cells = visibleAll(body, "sdReviewCell")
             compare(cells.length, 9, "every condition is drawn — nothing is a '+3 more'")
@@ -1049,6 +1193,138 @@ Item {
 
             // The design's cell width, at k = 1 on a 1168 panel: five to a row, two rows.
             compare(cells[0].width, 220)
+        }
+
+        // ── defect 1: the strip is a band, and the silence is folded, not hidden ─
+        //
+        // A REAL CAPTURE ANSWERS THIRTY-ONE CONDITIONS AND HAS NOTHING TO SAY ABOUT EIGHTEEN
+        // OF THEM. Drawn flat, in pack order, that is five rows and four fifths of the panel
+        // spent on "not measurable · clean all session" — the finding the golfer opened the
+        // shot to read ends up below the fold, under two dozen cells that say nothing twice.
+        // This is the whole of the fix asserted: order, bound, fold, and open.
+        function test_34_theStripOrdersByInformationAndFoldsTheSilentTail() {
+            setReview(formingReviewSource(), wideReadout())
+            laidOut()
+
+            const strip = one(body, "sdReviewStrip")
+
+            // ── it is ordered ────────────────────────────────────────────────
+            // Fired first, then clean, then the ones that could not be read here but fired
+            // somewhere this session. Nothing that fired is ever below something that did not.
+            const marks = visibleAll(body, "sdReviewCellMark").map(t => t.text)
+            compare(marks.slice(0, 4).join(""), "OUTOUTOUTOUT", "what fired comes first")
+            compare(marks.slice(4, 6).join(""), "ININ", "then what was read and passed")
+            verify(marks.indexOf("—") > marks.lastIndexOf("IN"),
+                   "and every unread cell is below every read one")
+
+            // ── it is bounded ────────────────────────────────────────────────
+            // Two rows at k = 1, plus the head and the tail line. The number that matters is
+            // not the constant, it is the share: the strip is a band and the panel below it
+            // is the panel.
+            verify(strip.height < probe.height * 0.30,
+                   "the strip is a band, not the panel: " + strip.height + " of " + probe.height)
+            const grid = one(body, "sdReviewGrid")
+            verify(grid.height <= 2 * strip._cellH + strip._gap + 1,
+                   "the grid is two rows tall")
+            // ...and what does not fit that is one flick away rather than gone.
+            verify(grid.contentHeight > grid.height, "the rest scrolls")
+
+            // ── the tail is folded, and it says what it folded ───────────────
+            const tail = one(body, "sdReviewTailSummary")
+            verify(shown(tail), "one dashed line stands in for the silent tail")
+            compare(tail.text, "18 more · clean all session, not measurable on this swing")
+            compare(one(body, "sdReviewTailToggle").text, "SHOW ▸")
+
+            const folded = visibleAll(body, "sdReviewCell").length
+            compare(folded, 13, "the 18 silent-both-ways cells are folded away, the 13 are not")
+        }
+
+        function test_35_theTailOpensInPlaceIntoTheSameCells() {
+            setReview(formingReviewSource(), wideReadout())
+            laidOut()
+
+            const before = one(body, "sdReviewStrip").height
+            mouseClick(one(body, "sdReviewTailRow"))
+            laidOut()
+
+            compare(one(body, "sdReviewStrip").tailExpanded, true)
+            compare(one(body, "sdReviewTailToggle").text, "HIDE ▾")
+            compare(visibleAll(body, "sdReviewCell").length, 31,
+                    "the same cells, in the same grid — nothing was withheld and nothing is a "
+                    + "different view (§8)")
+            // It OPENS: a press that only lengthened a scroll region would look like nothing
+            // happened at all.
+            verify(one(body, "sdReviewStrip").height > before, "and it opens in place")
+            // ...and it is still a band. Expanded is not "the strip takes the panel".
+            verify(one(body, "sdReviewStrip").height < probe.height * 0.45)
+
+            // Closing it puts them back behind the one line.
+            mouseClick(one(body, "sdReviewTailRow"))
+            laidOut()
+            compare(visibleAll(body, "sdReviewCell").length, 13)
+        }
+
+        // ── defect 2: a session that never established never gets a rail ─────
+        //
+        // The panel used to draw the rail whenever a Closing session had chains at all. It
+        // always has chains: extractChains() publishes the authored neighbourhood around every
+        // pattern, ghosts and screened roots included, whether or not the model authors an edge
+        // between the patterns themselves. So a Forming session — two patterns, no edge, the
+        // UNCHAINED line saying exactly that one row below — was closed, reviewed, and drawn as
+        // slim runless node rows over a chain that does not exist, in place of the two full
+        // cards whose tick runs are the entire reason for reading a shot inside a finished
+        // ledger. Design 12a: Forming is "flat cards, no chain".
+        function test_36_aFormingSessionKeepsItsCardsWhenItClosesAndIsReviewed() {
+            setReview(formingReviewSource(), wideReadout())
+            laidOut()
+
+            compare(body.reachedEstablished, false, "the recorded stage is Forming, not Closing")
+            verify(!!body.chains && body.chains.length > 0,
+                   "the chains are still published — unread in this composition, not withdrawn")
+
+            verify(shown(one(body, "sdCardsBody")), "the flat card row is the body")
+            verify(!shown(one(body, "sdEstablishedBody")), "and no rail is drawn over it")
+            compare(visibleAll(body, "sdChainRail").length, 0)
+
+            // FULL CARDS, WITH THE RUNS. This is what the rail displaced.
+            const cards = visibleAll(body, "sdPatternCard")
+            compare(cards.length, 2, "both patterns get a card of their own")
+            for (let c = 0; c < cards.length; ++c) {
+                const run = findAll(cards[c], "sdTick").filter(t => shown(t))
+                compare(run.length, 6, "card " + c + ": six shots, six ticks")
+                verify(run[0].height >= 6, "card " + c + ": the run is drawn at a readable size")
+                const sel = run.filter(t => t.selected)
+                compare(sel.length, 1, "card " + c + ": the reviewed shot is one wide tick")
+                verify(sel[0].width > run[0].width, "card " + c + ": and it is wider")
+                compare(sel[0].border.width, 1, "card " + c + ": and outlined")
+            }
+            // The review pill, which is the other half of "this shot, inside the session".
+            const pills = visibleAll(body, "sdStatePill").filter(p => shown(p))
+            compare(pills.length, 2)
+            for (let p = 0; p < pills.length; ++p)
+                compare(pills[p].children[0].text, "FIRED HERE",
+                        "pill " + p + " is in the review tense")
+
+            // ...and the sentence that stops the missing rail being read as a failure to find
+            // one. It survives the close, because the composition it explains does.
+            compare(one(body, "sdFormingNote").text,
+                    "No chain is drawn: the model authors no edge between these patterns.")
+        }
+
+        // ── defect 3: a finished session is not waiting for anything ─────────
+        function test_37_theDriverIsDefinitiveAtTheClose() {
+            setReview(formingReviewSource(), wideReadout())
+            laidOut()
+
+            verify(shown(one(body, "sdDriverFooter")), "the footer keeps its place")
+            verify(!shown(one(body, "sdDriverWaiting")),
+                   "and never says it is waiting for a shot that will not come")
+            const fin = one(body, "sdDriverFinal")
+            verify(shown(fin), "it states the outcome instead")
+            compare(fin.text, "No driver: this session's patterns share no authored cause.")
+            // No recommendation, so no screen column — an empty CTA box would be an offer the
+            // model did not make.
+            verify(!shown(one(body, "sdScreenCta")))
         }
 
         function test_24_theSelectedShotIsTheWideOutlinedTick() {
@@ -1345,11 +1621,12 @@ Item {
         function test_20_nothingOverhangsTheChrome() {
             const sizes = [[1168, 560], [396, 560], [820, 420]]
             const sources = [coldSource(probe.expectationRows), formingSource(false),
-                             closingSource(), establishedSource(true), reviewSource()]
+                             closingSource(), establishedSource(true), reviewSource(),
+                             formingReviewSource()]
             // The review arrangement is the only one with a second input; at 396 its cells
             // stack and the grid SCROLLS, which is what this test is checking has not turned
             // into a cell drawn outside the panel.
-            const readouts = [null, null, null, null, reviewReadout()]
+            const readouts = [null, null, null, null, reviewReadout(), wideReadout()]
 
             for (let s = 0; s < sources.length; ++s) {
                 setReview(sources[s], readouts[s])
@@ -1384,5 +1661,6 @@ Item {
                 }
             }
         }
+
     }
 }

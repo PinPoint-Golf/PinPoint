@@ -226,9 +226,17 @@ Item {
         anchors.rightMargin: root.px(10)
         // A live card fills top-down; the three that are one thought are centred, as the
         // mock centres them.
-        anchors.top: root.isLive ? parent.top : undefined
-        anchors.topMargin: root.isLive ? root.px(9) : 0
-        anchors.verticalCenter: root.isLive ? undefined : parent.verticalCenter
+        //
+        // ...UNTIL THE ROW IS SHORTER THAN THEY ARE, and then they fill top-down too. Centring
+        // content taller than its card puts the MIDDLE of the content in the visible slot: the
+        // clip takes the name off the top and the row reads as a band of orphaned prose sitting
+        // over its neighbours, which is exactly what a squeezed rail looked like. Clipping from
+        // the bottom is the mock's own overflow:hidden — it loses the tail of a sentence, and it
+        // keeps the one line every node must never lose, which is its name.
+        readonly property bool _fits: root.height >= root.contentHeight
+        anchors.top: (root.isLive || !_fits) ? parent.top : undefined
+        anchors.topMargin: (root.isLive || !_fits) ? root.px(9) : 0
+        anchors.verticalCenter: (root.isLive || !_fits) ? undefined : parent.verticalCenter
         visible: !root.slim
         spacing: root.px(4)
 
@@ -393,7 +401,14 @@ Item {
             id: evidence
             objectName: "sdChainNodeEvidence"
             width: wide.width
-            height: root.isLive
+            // The prose takes what is left after everything the card must not lose — and on a
+            // screened root what it must not lose is the CTA, which is the highest-value output
+            // the whole model has. Bounded whenever the column fills top-down, which is a live
+            // card always and any other kind whose row is shorter than it wants: unbounded there
+            // it would push RUN THE SCREEN off the bottom of the card and be cut mid-word on the
+            // way out. Bounded, it elides, and elision is the model's sentence ending visibly
+            // early rather than a claim that stops in the middle of a clause.
+            height: (root.isLive || !wide._fits)
                     ? Math.max(0, root.height - root.px(9) - y - (cta.visible ? cta.height + wide.spacing : 0))
                     : implicitHeight
             visible: !root.isGhost && text !== "" && height >= root.tzMicro

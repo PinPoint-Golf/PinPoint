@@ -414,6 +414,14 @@ private:
     // ── Lifecycle + intent ──────────────────────────────────────────────────────────
     QString m_sessionDir;
     pinpoint::analysis::Stage m_stage = pinpoint::analysis::Stage::Cold;
+    // DID THIS SESSION EVER ACTUALLY ESTABLISH? `m_stage` cannot answer it once the session is
+    // closed, because sessionStage() returns Closing outright for a closed session and the
+    // Forming/Established distinction is lost with it. The panel needs the distinction: the
+    // chain rail is the composition of a session that EARNED a chain, and a Forming session
+    // reviewed at its close must keep the flat pattern cards it had (design 12a: "Forming,
+    // flat cards, no chain because these two patterns share no authored edge"). Ratcheted the
+    // same way the stage is, and persisted with it so reloading a closed session agrees.
+    bool    m_reachedEstablished = false;
     bool    m_closed = false;
     bool    m_reviewing = false;
     int     m_selectedShotId = -1;

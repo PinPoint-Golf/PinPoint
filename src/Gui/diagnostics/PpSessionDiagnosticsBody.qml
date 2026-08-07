@@ -282,13 +282,32 @@ Rectangle {
                                         : Math.min(chains ? chains.length : 0, 2)
     readonly property int _chainsHidden: (chains ? chains.length : 0) - _chainsShown
 
-    // THE RAIL SURVIVES THE CLOSE. A session that earned a chain still has it once it is
-    // finished, and 13a draws the reviewed shot against that rail — losing it at the close
-    // would mean the one arrangement review is FOR could never be reached. A Closing session
-    // the model authored no chain for keeps the flat card row, because there is nothing else
-    // to draw; the composition follows the evidence, not the stage name.
+    // DID THE SESSION EVER ESTABLISH? Published by the model beside the displayed stage,
+    // because `stage` is frozen at Closing for anything closed or under review and cannot
+    // answer it. See buildHeader().
+    readonly property bool reachedEstablished:
+        isEstablished || (!!header && header.reachedEstablished === true)
+
+    // THE RAIL SURVIVES THE CLOSE — AND ONLY FOR A SESSION THAT EARNED ONE. A session that
+    // established still has its chain once it is finished, and 13a draws the reviewed shot
+    // against that rail; losing it at the close would mean the one arrangement review is FOR
+    // could never be reached.
+    //
+    // But `chains.length > 0` is NOT the test for having earned one. extractChains() publishes
+    // the authored neighbourhood around every pattern, so a Forming session with two unchained
+    // patterns still gets rails — ghosts, screened roots and unanchored links scaffolded around
+    // nodes that share no edge. Drawing those at the close replaces two full pattern cards,
+    // with the tick runs and the review pills that are the whole point of reading a shot inside
+    // the finished ledger, with slim node rows for a chain the model explicitly says it did not
+    // author (the UNCHAINED line, one row below, says so in words). Design 12a is unambiguous:
+    // Forming is "flat cards, no chain because these two patterns share no authored edge", and
+    // closing a Forming session does not turn it into an Established one.
+    //
+    // So the composition asks the RATCHET, which is the record of what the session achieved,
+    // and the chains stay published either way — unread in this arrangement, not withdrawn.
     readonly property bool _railBody:
-        isEstablished || (isClosing && !!chains && chains.length > 0)
+        reachedEstablished && (isEstablished
+                               || (isClosing && !!chains && chains.length > 0))
 
     // driver.screenConditionId / screenRef — the only place the published surface carries a
     // screen ref for the screened-root node the rail draws.
@@ -528,8 +547,10 @@ Rectangle {
             readout: root.readout
             fit:     root.k
             compact: root.compact
-            // At most a little under half the panel: past that the rail below it is not worth
-            // drawing, and the grid scrolls instead.
+            // The strip bounds ITSELF to the mock's two-row band and scrolls inside it, so this
+            // is a backstop rather than the working limit: whatever the strip asks for — a
+            // taller cell at a large font scale, the tail opened on a thirty-condition set — it
+            // never takes half the panel away from the body it is the preface to.
             maxHeight: Math.round(root.height * 0.45)
         }
 

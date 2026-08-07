@@ -414,6 +414,7 @@ void SessionDiagnosticsModel::activateSession(const QString &sessionDir)
     m_focusFromShot = -1;
     m_declaredMiss.clear();
     m_stage  = Stage::Cold;
+    m_reachedEstablished = false;
     m_closed = false;
     m_profile = QJsonObject();
     m_expectations.clear();
@@ -441,6 +442,8 @@ void SessionDiagnosticsModel::activateSession(const QString &sessionDir)
         const QJsonObject session = root.value(QStringLiteral("session")).toObject();
         m_closed = session.value(QStringLiteral("closed")).toBool(false);
         m_stage  = stageFromName(session.value(QStringLiteral("stage")).toString());
+        m_reachedEstablished =
+            session.value(QStringLiteral("reachedEstablished")).toBool(m_stage == Stage::Established);
         for (const QJsonValue &v : session.value(QStringLiteral("lmShots")).toArray())
             m_lmShots.insert(v.toInt());
         const QJsonObject dirs = session.value(QStringLiteral("swingDirs")).toObject();
@@ -590,6 +593,17 @@ void SessionDiagnosticsModel::rebuild()
     // DISPLAYED stage instead — effectiveStage() — which is the same picture and a reversible
     // fact.
     m_stage = sessionStage(m_stage, m_ledgers, m_links, m_closed, m_opt);
+
+    // ...and the one thing the ratchet CANNOT carry across a close. sessionStage() short-
+    // circuits to Closing for a closed session, so after the close `m_stage` no longer says
+    // whether the session ever earned a chain — and that is precisely the question the panel's
+    // composition turns on. Asked of the evidence directly (closed = false, previous = Cold),
+    // so a session loaded from disk in its closed state answers it as well as a live one, and
+    // latched, so a session that established and then thinned out keeps the answer the ratchet
+    // gave it.
+    if (m_stage == Stage::Established
+        || sessionStage(Stage::Cold, m_ledgers, m_links, false, m_opt) == Stage::Established)
+        m_reachedEstablished = true;
 
     refreshExplanation();
 
@@ -822,6 +836,7 @@ QJsonObject SessionDiagnosticsModel::envelope() const
     session[QStringLiteral("sessionId")]  = QFileInfo(m_sessionDir).fileName();
     session[QStringLiteral("closed")]     = m_closed;
     session[QStringLiteral("stage")]      = stageName(m_stage);
+    session[QStringLiteral("reachedEstablished")] = m_reachedEstablished;
     session[QStringLiteral("shotCount")]  = int(m_shots.size());
     session[QStringLiteral("gradePolicy")]= m_policyName;
     session[QStringLiteral("lmShots")]    = lm;
@@ -1064,6 +1079,16 @@ void SessionDiagnosticsModel::buildHeader()
     h[QStringLiteral("reviewing")]    = m_reviewing;
     h[QStringLiteral("closed")]       = m_closed;
 
+    // THE RECORDED STAGE, BESIDE THE DISPLAYED ONE. `stage` above is what the panel DRAWS —
+    // frozen at Closing while a session is closed or under review. That freeze is a fact about
+    // the tense and says nothing about what the session achieved, and a surface that read it
+    // as "Established, therefore draw the rail" would draw a chain rail over a session that
+    // never got past Forming. So the ratcheted stage is published in its own right, and with
+    // it the one bit the composition actually turns on.
+    h[QStringLiteral("recordedStage")]      = stageName(m_stage);
+    h[QStringLiteral("recordedStageLabel")] = stageName(m_stage).toUpper();
+    h[QStringLiteral("reachedEstablished")] = m_reachedEstablished;
+
     h[QStringLiteral("shotLabel")] =
         n == 0 ? QStringLiteral("no shots yet")
                : (m_reviewing && fi >= 0
@@ -1107,8 +1132,12 @@ void SessionDiagnosticsModel::buildHeader()
         st == Stage::Cold ? QStringLiteral("Too few swings to call a pattern.") : QString();
     // The Forming body line — the one that stops a reader assuming the model simply failed to
     // find a chain. It did not fail; it authors no edge between these two.
+    //
+    // It survives the close, because the composition it explains does. A session that never
+    // established keeps its flat card row when it is closed and when it is reviewed, and the
+    // sentence that says why there is no rail has to be there in every tense the card row is.
     h[QStringLiteral("formingLine")] =
-        st == Stage::Forming && patterns >= 2
+        (st == Stage::Forming || !m_reachedEstablished) && patterns >= 2
             ? QStringLiteral("No chain is drawn: the model authors no edge between these patterns.")
             : QString();
     h[QStringLiteral("closingLine")] =
@@ -1285,14 +1314,21 @@ void SessionDiagnosticsModel::buildCards()
         // that says so is fixed by the brief to the character.
         c[QStringLiteral("directionClaimed")] = l->directionClaimed;
         c[QStringLiteral("directionAgreement")] = l->directionAgreement;
+        // The consistent case is worded as a COUNT, never a percentage — the agreement
+        // percentage is disclosed only in the dispersion sentence, where the number is the
+        // finding. "92% of 6 firings" is exactly the small-n pseudo-precision rule 1 exists
+        // to keep off a card.
+        const int modalCount = int(std::lround(l->directionAgreement * l->fired));
+        const QString side = l->modalDirection > 0 ? QStringLiteral("The high side")
+                                                   : QStringLiteral("The low side");
         c[QStringLiteral("directionText")] =
             l->directionClaimed
                 ? (l->modalDirection == 0
                        ? QString()
-                       : QStringLiteral("Consistent direction: %1 on %2% of its firings.")
-                             .arg(l->modalDirection > 0 ? QStringLiteral("the high side")
-                                                        : QStringLiteral("the low side"))
-                             .arg(int(std::lround(l->directionAgreement * 100.0))))
+                       : (modalCount >= l->fired
+                              ? QStringLiteral("%1, every firing.").arg(side)
+                              : QStringLiteral("%1 on %2 of its %3 firings.")
+                                    .arg(side).arg(modalCount).arg(l->fired)))
                 : QStringLiteral("Direction agreement %1%, below the %2% gate: dispersion, not a direction.")
                       .arg(int(std::lround(l->directionAgreement * 100.0)))
                       .arg(int(std::lround(m_opt.directionAgreementGate * 100.0)));
@@ -1622,14 +1658,40 @@ void SessionDiagnosticsModel::buildDriver()
 {
     m_driver = QVariantMap();
 
-    // Debounced by pattern-set stability. Better absent than flickering (§B8) — and the
-    // eligibility test lives in the ledger header so the footer and a replay agree.
-    const bool eligible = driverFooterEligible(m_shots, m_opt);
+    // Debounced by pattern-set stability WHILE THE SESSION IS RUNNING. Better absent than
+    // flickering (§B8) — and the eligibility test lives in the ledger header so the footer and
+    // a replay agree.
+    //
+    // THE DEBOUNCE IS A LIVE-ONLY DEVICE, AND AT THE CLOSE IT IS BYPASSED. Its whole argument
+    // is that the pattern set may still move; on a finished session it cannot, and there is no
+    // later shot for the driver to appear on. "The driver appears once the pattern set has
+    // held still for 3 shots" printed under a closed session is a promise about a future that
+    // does not exist. §B7: at the close the footer is definitive — it names the driver, or it
+    // says in as many words that there is not one.
+    const bool finished = m_closed || m_reviewing;
+    const bool hasRoot  = !m_explanation.roots.empty();
+    const bool eligible = hasRoot && (finished || driverFooterEligible(m_shots, m_opt));
     m_driver[QStringLiteral("eligible")] = eligible;
-    if (!eligible || m_explanation.roots.empty()) {
-        m_driver[QStringLiteral("waitingText")] =
-            QStringLiteral("the driver appears once the pattern set has held still for %1 shots")
-                .arg(m_opt.driverDebounceShots);
+    m_driver[QStringLiteral("final")]    = finished;
+    if (!eligible) {
+        if (finished) {
+            // Worded from what explain() ACTUALLY returned, and no further. It ranked no root:
+            // that is either because there was nothing to rank, or because the patterns it had
+            // are not joined by any authored cause. Neither is "your swing is fine", and
+            // neither is dressed up as a finding.
+            const int patterns = patternCount();
+            m_driver[QStringLiteral("finalText")] =
+                patterns == 0
+                    ? QStringLiteral("No driver: this session found no pattern to explain.")
+                : patterns == 1
+                    ? QStringLiteral("No driver: this session's one pattern has no authored "
+                                     "cause above it.")
+                    : QStringLiteral("No driver: this session's patterns share no authored cause.");
+        } else {
+            m_driver[QStringLiteral("waitingText")] =
+                QStringLiteral("the driver appears once the pattern set has held still for %1 shots")
+                    .arg(m_opt.driverDebounceShots);
+        }
         return;
     }
 
@@ -1746,7 +1808,13 @@ QVariantMap SessionDiagnosticsModel::shotReadout(int shotId) const
     const ShotRecord &shot = m_shots[size_t(idx)];
 
     int fired = 0, clean = 0, na = 0, firedPatterns = 0;
-    QVariantList conditions;
+    // FOUR BUCKETS, ORDERED BY HOW MUCH THEY SAY ABOUT THIS SWING. On a real capture the
+    // measurable set runs to thirty-odd conditions, and published in pack order the four that
+    // fired arrive scattered among twenty-six cells reading "not measurable · clean all
+    // session" — two facts that, together, are the definition of nothing having happened. The
+    // information is not withheld (§8: nothing withheld, one tap away); it is SORTED, and the
+    // silent tail is marked so a surface can put it behind one line instead of five rows.
+    QVariantList firedCells, cleanCells, watchedCells, tailCells;
 
     // The POPULATION is the session's measurable set — conditions this capture answered at
     // least once. Listing all ~150 pack conditions would bury the nine that mean something
@@ -1812,8 +1880,26 @@ QVariantMap SessionDiagnosticsModel::shotReadout(int shotId) const
                        : QStringLiteral("%1 more %2 after this shot")
                              .arg(after).arg(after == 1 ? QStringLiteral("firing")
                                                         : QStringLiteral("firings"));
-        conditions.append(c);
+
+        // The tail is the conjunction of two silences: this capture could not answer it HERE,
+        // and it never fired anywhere in the session. Either one alone is worth a cell — a
+        // condition that fired on other swings but not this one is exactly what review is for
+        // — so it takes both to be tail.
+        const bool silentAllSession = (l->tier != Tier::Pattern && l->tier != Tier::Watching);
+        const bool isTail = (st == ShotState::NotAssessable) && silentAllSession;
+        c[QStringLiteral("tail")] = isTail;
+
+        if (st == ShotState::Fired)      firedCells.append(c);
+        else if (st == ShotState::Clean) cleanCells.append(c);
+        else if (!isTail)                watchedCells.append(c);
+        else                             tailCells.append(c);
     }
+
+    QVariantList conditions;
+    conditions += firedCells;
+    conditions += cleanCells;
+    conditions += watchedCells;
+    conditions += tailCells;
 
     QVariantMap out;
     out[QStringLiteral("shotId")]     = shotId;
@@ -1824,13 +1910,32 @@ QVariantMap SessionDiagnosticsModel::shotReadout(int shotId) const
     out[QStringLiteral("firedCount")] = fired;
     out[QStringLiteral("cleanCount")] = clean;
     out[QStringLiteral("notAssessableCount")] = na;
+    // ONE POPULATION, AND IT IS THE ONE THE GRID DRAWS. The denominator used to be fired+clean
+    // — the conditions this swing actually answered — while the grid below it showed every
+    // condition the SESSION can measure, so the headline said "4 of 6" over twenty-six visible
+    // cells. Two counts of the same thing that do not match read as a bug in the panel, not as
+    // a distinction; the measurable set is the honest denominator because it is what is on
+    // screen, and the not-assessable count is still stated separately underneath so "we did
+    // not look" is never folded into "it was fine".
+    const int measurableSet = int(conditions.size());
+    out[QStringLiteral("measurableSetCount")] = measurableSet;
     out[QStringLiteral("headline")] =
         QStringLiteral("%1 of %2 conditions fired on this swing · %3 of them %4")
-            .arg(fired).arg(fired + clean).arg(firedPatterns)
+            .arg(fired).arg(measurableSet).arg(firedPatterns)
             .arg(firedPatterns == 1 ? QStringLiteral("pattern") : QStringLiteral("patterns"));
     out[QStringLiteral("note")] =
         QStringLiteral("%1 %2 not assessable on this capture")
             .arg(na).arg(na == 1 ? QStringLiteral("measure") : QStringLiteral("measures"));
+
+    // The tail's own line, in the model's words rather than the strip's, so an export and the
+    // screen say the same thing about what was folded away. It names BOTH silences, because a
+    // reader deciding whether to open it is owed the reason it was closed.
+    const int tailN = int(tailCells.size());
+    out[QStringLiteral("tailCount")] = tailN;
+    out[QStringLiteral("tailSummary")] =
+        tailN == 0 ? QString()
+                   : QStringLiteral("%1 more · clean all session, not measurable on this swing")
+                         .arg(tailN);
     out[QStringLiteral("conditions")] = conditions;
     return out;
 }

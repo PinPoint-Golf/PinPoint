@@ -25,6 +25,17 @@
 // That is why the cells WRAP rather than being counted-and-truncated the way the pattern card
 // row is: a condition the reader asked about is not allowed to be a "+3 more".
 //
+// IT IS A BAND, NOT A PAGE. The mock's strip is two rows of nine cells at the top of the panel,
+// and the panel underneath it is the point of the panel. A real capture answers thirty-odd
+// conditions, most of them with the same two words twice — "not measurable" beside "clean all
+// session" — and drawn in pack order they take five rows and four fifths of a 560 px frame to
+// say that nothing happened. So the model SORTS by information (fired here, clean here, silent
+// here but a pattern or a watch this session) and MARKS the silent tail, this file bounds the
+// grid to the mock's two rows and scrolls inside it, and the tail collapses behind one dashed
+// line that expands IN PLACE into the same cells (§8: nothing withheld, one tap away). Nothing
+// is dropped and nothing is summarised away — the tail's line names both silences, and opening
+// it is one press.
+//
 // THE POPULATION IS ONE. The headline counts fired against fired+clean ("7 of 9 conditions
 // fired on this swing") and the not-assessable measures are stated SEPARATELY underneath,
 // because folding them into the denominator would quietly turn "we did not look" into
@@ -55,8 +66,23 @@ Item {
     // clipping cells away: at 1168 the nine cells are two rows and fit outright, at 396 they
     // stack and do not. 0 = take whatever is wanted.
     property real maxHeight: 0
+    // The mock's band, in rows. It is the strip's OWN ceiling rather than the panel's: a strip
+    // sized as a fraction of the panel grows with the panel and with the measurable set, and
+    // this one is meant to stay a band whatever is behind it.
+    property int maxRows: 2
+
+    // The tail — silent here AND silent all session — folded away by default and expanded in
+    // place. Panel-local, and the only state this file owns; see brief §8, which allows exactly
+    // two collapsed regions and requires both to open into the same content rather than a
+    // different view.
+    property bool tailExpanded: false
 
     objectName: "sdReviewStrip"
+
+    // A NEW SHOT IS A NEW QUESTION. The tail is opened against one swing's read; carrying it
+    // over to the next shot picked off the carousel would hand the reader a strip they never
+    // asked to expand, sized for a set they have not looked at yet.
+    onReadoutChanged: root.tailExpanded = false
 
     function px(n) { return Math.round(n * Theme.fontScale * root.fit) }
 
@@ -65,7 +91,17 @@ Item {
     readonly property int tzLabel:   Math.max(1, Math.round(Theme.fontSzLabel * fit))
     readonly property int tzBody:    Math.max(1, Math.round(Theme.fontSzBody2 * fit))
 
-    readonly property var conditions: (readout && readout.conditions) ? readout.conditions : []
+    readonly property var allConditions: (readout && readout.conditions) ? readout.conditions : []
+    // The model publishes the whole measurable set, in information order, with the tail marked.
+    // Which of it is on screen is this file's decision and the ONLY one it makes about the
+    // content: no reordering, no filtering by tier, no cadence.
+    readonly property var conditions:
+        (tailExpanded || tailCount === 0)
+        ? allConditions
+        : allConditions.filter(function (c) { return c.tail !== true })
+
+    readonly property int tailCount: (readout && readout.tailCount) ? readout.tailCount : 0
+    readonly property string tailSummary: readout ? (readout.tailSummary || "") : ""
 
     // The design's cell, at k = 1. Wide enough for a condition name beside its mark, and for
     // a reading beside the corridor it was tested against — the two facts the cell exists to
@@ -76,7 +112,37 @@ Item {
                                   ? Math.max(0, frame.width - 2 * px(10))
                                   : Math.min(px(baseCellW), Math.max(0, frame.width - 2 * px(10)))
 
-    readonly property int _wanted: 2 * px(8) + headRow.implicitHeight + px(6) + flow.implicitHeight
+    // One cell's height, computed rather than measured off a delegate: the grid's ceiling has
+    // to be known before the Flow has laid anything out, or the strip resizes itself on the
+    // frame after it appears. These are the two lines inside a cell and the padding around
+    // them, and the cell delegate below builds itself out of the same three numbers.
+    TextMetrics {
+        id: mName
+        font.family: Theme.fontBody; font.pixelSize: root.tzLabel
+        font.weight: Theme.fontBodyWeight
+        text: "Ag"
+    }
+    TextMetrics {
+        id: mValue
+        font.family: Theme.fontData; font.pixelSize: root.tzMicro
+        text: "Ag"
+    }
+    readonly property int _cellH:
+        Math.round(mName.height + px(2) + mValue.height + 2 * px(5))
+    // THE BAND. Two rows at k = 1, and a grid taller than that scrolls rather than pushing the
+    // rail off the panel — which is the failure this bound exists to prevent, not a nicety.
+    //
+    // Opening the tail lifts the ceiling as well as adding the cells, because an expansion that
+    // only lengthened a scroll region would look, at the moment of the press, like nothing
+    // happened. It lifts it to a bound and not to the content: the strip is still a band, the
+    // panel's own `maxHeight` is still above it, and the rest is still one flick away.
+    function _rowsH(n) { return Math.max(_cellH, n * _cellH + (n - 1) * _gap) }
+    readonly property int _gridMax: _rowsH(tailExpanded ? 2 * maxRows : maxRows)
+    readonly property int _gridH: Math.min(flow.implicitHeight, _gridMax)
+
+    readonly property int _tailH: tailRow.visible ? tailRow.implicitHeight + px(5) : 0
+    readonly property int _wanted:
+        2 * px(8) + headRow.implicitHeight + px(6) + _gridH + _tailH
     implicitHeight: maxHeight > 0 ? Math.min(_wanted, maxHeight) : _wanted
 
     Rectangle {
@@ -162,11 +228,11 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: headRow.bottom
-            anchors.bottom: parent.bottom
+            anchors.bottom: tailRow.visible ? tailRow.top : parent.bottom
             anchors.leftMargin:   root.px(10)
             anchors.rightMargin:  root.px(10)
             anchors.topMargin:    root.px(6)
-            anchors.bottomMargin: root.px(8)
+            anchors.bottomMargin: tailRow.visible ? root.px(5) : root.px(8)
             contentWidth: width
             contentHeight: flow.implicitHeight
             clip: true
@@ -322,6 +388,66 @@ Item {
                         }
                     }
                 }
+            }
+        }
+
+        // ── the silent tail, one line, opening in place ──────────────────────
+        // DASHED, for the same reason the not-assessable cells are: what is behind this line is
+        // a capture limit and a session-long silence, not a set of clean reads. It states both
+        // in the model's own words and it counts them, so a reader who never opens it still
+        // knows exactly what they are not looking at — which is the difference between folding
+        // and hiding.
+        Item {
+            id: tailRow
+            objectName: "sdReviewTailRow"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.leftMargin:   root.px(10)
+            anchors.rightMargin:  root.px(10)
+            anchors.bottomMargin: root.px(8)
+            visible: root.tailCount > 0
+            implicitHeight: tailText.implicitHeight + 2 * root.px(4)
+            height: implicitHeight
+
+            PpDashedFrame {
+                anchors.fill: parent
+                frameRadius: Math.max(1, root.px(4))
+                strokeColor: Theme.colorBorderMid
+                dashOn:  Math.max(1, root.px(3))
+                dashOff: Math.max(1, root.px(3))
+            }
+
+            Text {
+                id: tailText
+                objectName: "sdReviewTailSummary"
+                anchors.left: parent.left
+                anchors.right: tailToggle.left
+                anchors.leftMargin:  root.px(8)
+                anchors.rightMargin: root.px(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.tailSummary
+                elide: Text.ElideRight
+                font.family: Theme.fontData
+                font.pixelSize: root.tzCaption
+                color: Theme.colorText3
+            }
+            Text {
+                id: tailToggle
+                objectName: "sdReviewTailToggle"
+                anchors.right: parent.right
+                anchors.rightMargin: root.px(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.tailExpanded ? qsTr("HIDE ▾") : qsTr("SHOW ▸")
+                font.family: Theme.fontData
+                font.pixelSize: root.tzCaption
+                font.letterSpacing: Theme.trackingLabel
+                color: Theme.colorAccent
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.tailExpanded = !root.tailExpanded
             }
         }
     }

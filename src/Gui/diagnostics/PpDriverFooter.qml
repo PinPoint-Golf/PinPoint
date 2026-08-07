@@ -59,6 +59,11 @@ Rectangle {
     readonly property int tzBody:    Math.max(1, Math.round(Theme.fontSzBody2 * fit))
 
     readonly property bool eligible: driver ? driver.eligible === true : false
+    // THE FOOTER HAS TWO WAYS OF HAVING NO DRIVER, AND ONLY ONE OF THEM IS A WAIT. A live
+    // session is waiting for the pattern set to hold still; a finished one is not waiting for
+    // anything, and the model hands down a definitive sentence instead. Which of the two is on
+    // screen is the model's call — this reads its answer and never infers one.
+    readonly property bool finalNoDriver: !eligible && !!driver && driver.final === true
     readonly property var  rival:    driver ? driver.rival : null
     readonly property string screenRef: driver ? (driver.screenRef || "") : ""
     readonly property string screenConditionId: driver ? (driver.screenConditionId || "") : ""
@@ -90,14 +95,31 @@ Rectangle {
             font.letterSpacing: Theme.trackingMicro
             color: Theme.colorText2
         }
+        // The live tense: what the footer is waiting for. Absent on a finished session, where
+        // there is nothing left to wait for.
         Text {
             objectName: "sdDriverWaiting"
             width: parent.width
+            visible: !root.finalNoDriver
             text: root.driver ? (root.driver.waitingText || "") : ""
             wrapMode: Text.WordWrap
             font.family: Theme.fontData
             font.pixelSize: root.tzCaption
             color: Theme.colorText3
+        }
+        // ...and the finished tense: the model's own final sentence, in the body weight the
+        // driver's name would have had. It is an answer, not a placeholder, and it is set at
+        // the same size as one.
+        Text {
+            objectName: "sdDriverFinal"
+            width: parent.width
+            visible: root.finalNoDriver
+            text: root.driver ? (root.driver.finalText || "") : ""
+            wrapMode: Text.WordWrap
+            font.family: Theme.fontBody
+            font.pixelSize: root.compact ? root.tzMicro : root.tzLabel
+            font.weight: Theme.fontBodyWeight
+            color: Theme.colorText2
         }
     }
 

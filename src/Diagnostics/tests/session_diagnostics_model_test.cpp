@@ -291,6 +291,17 @@ int main(int argc, char **argv)
                   "…and says why, as a count of what it accounts for");
             std::printf("      driver: %s\n",
                         qPrintable(drv.value(QStringLiteral("whyText")).toString()));
+        } else if (drv.value(QStringLiteral("final")).toBool()) {
+            // CHANGED: a finished session's footer is DEFINITIVE (§B7). The debounce is a
+            // live-only device — its argument is that the pattern set may still move, and on a
+            // closed session it cannot. "The driver appears once the pattern set has held
+            // still for 3 shots" under a finished session is a promise about a shot that will
+            // never be taken.
+            check(drv.value(QStringLiteral("waitingText")).toString().isEmpty(),
+                  "a finished session's footer is never waiting for a shot that will not come");
+            check(drv.value(QStringLiteral("finalText")).toString()
+                      .startsWith(QLatin1String("No driver")),
+                  "…it says there is no driver, in as many words");
         } else {
             check(!drv.value(QStringLiteral("waitingText")).toString().isEmpty(),
                   "an ineligible driver footer says it is waiting, rather than showing nothing");
@@ -514,6 +525,84 @@ int main(int argc, char **argv)
               "the strip headline is one population");
         const QVariantList conds = ro.value(QStringLiteral("conditions")).toList();
         check(!conds.isEmpty(), "the strip lists this session's measurable conditions");
+
+        // ── CHANGED: the headline's denominator is the MEASURABLE SET ────────────────
+        // It used to be fired+clean — the conditions this swing answered — while the grid
+        // below it drew every condition the session can measure. Two counts of the same thing
+        // that do not agree read as a bug in the panel rather than as a distinction, and the
+        // measurable set is the honest one because it is what is on screen.
+        check(ro.value(QStringLiteral("measurableSetCount")).toInt() == int(conds.size()),
+              "the measurable set is the count of what the strip publishes");
+        check(ro.value(QStringLiteral("headline")).toString()
+                  .contains(QStringLiteral(" of %1 conditions").arg(int(conds.size()))),
+              "…and it is the headline's denominator, so headline and grid agree");
+
+        // ── The information order, and the silent tail ───────────────────────────────
+        // Fired here, then clean here, then not-readable here but a pattern or a watch this
+        // session, then the tail — silent both ways. On a real capture the tail is most of the
+        // set, and published in pack order it buries the handful of cells that mean something.
+        {
+            int phase = 0;              // 0 fired · 1 clean · 2 watched · 3 tail
+            bool orderOk = true, tailOk = true;
+            int tail = 0;
+            for (const QVariant &cv : conds) {
+                const QVariantMap c = cv.toMap();
+                const QString st = c.value(QStringLiteral("state")).toString();
+                const bool isTail = c.value(QStringLiteral("tail")).toBool();
+                const int want = isTail ? 3
+                               : st == QLatin1String("OUT") ? 0
+                               : st == QLatin1String("IN")  ? 1
+                                                            : 2;
+                if (want < phase) orderOk = false;
+                phase = want;
+                if (isTail) {
+                    ++tail;
+                    // The tail is the CONJUNCTION of two silences, and nothing else may be in
+                    // it: a condition that fired somewhere this session is what review is for.
+                    if (st != QStringLiteral("—")
+                        || c.value(QStringLiteral("tierTag")).toString()
+                               != QLatin1String("clean all session"))
+                        tailOk = false;
+                }
+            }
+            check(orderOk, "the strip is ordered by information: fired, clean, watched, tail");
+            check(tailOk, "…and the tail is only what was silent here AND all session");
+            check(ro.value(QStringLiteral("tailCount")).toInt() == tail,
+                  "the tail is counted for the one line that stands in for it");
+            check(tail == 0 || ro.value(QStringLiteral("tailSummary")).toString()
+                                   .contains(QLatin1String("clean all session")),
+                  "…and that line names both silences rather than just counting them");
+        }
+
+        // ── The recorded stage, published beside the displayed one ───────────────────
+        // `stage` is frozen at Closing under review and cannot say what the session achieved.
+        // The panel's composition turns on that difference: a rail is the arrangement of a
+        // session that EARNED a chain, and chains are published for every pattern regardless.
+        check(m->headerInfo().contains(QStringLiteral("reachedEstablished")),
+              "the header says whether the session ever established");
+        check(m->headerInfo().value(QStringLiteral("recordedStage")).toString()
+                  != QLatin1String("established")
+              || m->headerInfo().value(QStringLiteral("reachedEstablished")).toBool(),
+              "…and an Established recorded stage always answers yes");
+        std::printf("      recorded stage %s · reachedEstablished %s (displayed %s)\n",
+                    qPrintable(m->headerInfo().value(QStringLiteral("recordedStage")).toString()),
+                    m->headerInfo().value(QStringLiteral("reachedEstablished")).toBool()
+                        ? "true" : "false",
+                    qPrintable(m->stage()));
+
+        // ── §B7: the footer is definitive at the close ───────────────────────────────
+        {
+            const QVariantMap rdrv = m->driver();
+            check(rdrv.value(QStringLiteral("final")).toBool(),
+                  "a reviewed session's footer is in the finished tense");
+            check(rdrv.value(QStringLiteral("waitingText")).toString().isEmpty(),
+                  "…and never prints the live debounce's waiting line");
+            check(rdrv.value(QStringLiteral("eligible")).toBool()
+                      ? !rdrv.value(QStringLiteral("rootName")).toString().isEmpty()
+                      : rdrv.value(QStringLiteral("finalText")).toString()
+                            .startsWith(QLatin1String("No driver")),
+                  "…it either names the driver or says there is not one");
+        }
 
         bool shapeOk = true, minusOk = true, selectedOk = true;
         for (const QVariant &cv : conds) {
