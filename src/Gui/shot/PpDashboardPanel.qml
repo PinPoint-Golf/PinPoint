@@ -47,7 +47,8 @@ Item {
     // and a persistent desk window pass true.
     property bool interactive: false
 
-    // Cast zoom for viewing distance (PpDashboardWindow.contentScale), applied to
+    // Cast zoom for viewing distance (the same uniform-zoom device
+    // PpSessionDiagnosticsWindow.contentScale applies to the cast), applied to
     // the ZONE CONTENT ONLY — never to the header. The zoom exists so DATA can be
     // read across a room; the preset control is chrome, and chrome that grows with
     // the room stops being the control the user knows from the session toolbar.

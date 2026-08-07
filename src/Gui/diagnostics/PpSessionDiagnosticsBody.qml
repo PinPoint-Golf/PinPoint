@@ -64,9 +64,102 @@ Rectangle {
     // Panel-local, and per brief §8 the only state this panel owns beyond the carousel's
     // selection and the cadence setting. Two collapsed regions, both of which open into the
     // SAME content rather than a different view: Watching (n), and — in the 396 arrangement
-    // only — every chain after the first.
+    // only — every chain after the first. (The miss picker below is a third, and it is a
+    // transient rather than a state: it is open only while it is being answered.)
     property bool watchingExpanded: false
     property int  expandedChain: -1
+
+    // Off on the auto-closing cast, where every affordance on the panel is a trap: the
+    // surface is a glance and it is about to vanish under the pointer
+    // (PpSessionDiagnosticsWindow.interactive). Nothing about what the panel SAYS changes.
+    property bool interactive: true
+
+    // ── the two declarations the golfer can make (design §A6) ────────────────
+    //
+    // BOTH GO STRAIGHT TO THE MODEL AND NEITHER IS MIRRORED HERE. declareFocus, clearFocus and
+    // declareMiss are the model's, the read-back is the model's (`focused` on each card,
+    // `declaredMiss` on the surface), and this file holds no copy that could disagree with it.
+    // That is what makes a declined declaration — the model is reviewing, the id is not in the
+    // pack — leave the panel exactly as it was rather than showing a state the ledger is not in.
+    //
+    // GUARDED ON THE FUNCTION, not on the source being non-null: the offscreen test presses
+    // this body with a plain fixture object, and a fixture that wants to assert the tap
+    // arrived supplies a spy of the same name. A fixture that does not gets a no-op instead of
+    // a TypeError that would fail an unrelated assertion three tests later.
+    function _declareFocus(conditionId, on) {
+        if (!source) return
+        if (on && typeof source.declareFocus === "function")
+            source.declareFocus(conditionId)
+        else if (!on && typeof source.clearFocus === "function")
+            source.clearFocus()
+    }
+    function _declareMiss(missId) {
+        if (source && typeof source.declareMiss === "function")
+            source.declareMiss(missId)
+        missPicker.close()
+    }
+    function _missCandidates() {
+        if (source && typeof source.missCandidates === "function")
+            return source.missCandidates() || []
+        return []
+    }
+
+    // ── the after-shot pulse (§B3, §B8) ──────────────────────────────────────
+    //
+    // ONE CUE OBJECT, PUBLISHED DOWNWARD: { token, ids, focusId }. Single-property so a card
+    // can never see ids that belong to a different shot, and a token so the same set of ids
+    // firing twice in a row is still two events.
+    //
+    // CALLED, NOT BOUND. shotIngested is a SIGNAL on SessionDiagnosticsModel and this file has
+    // no model — the panel next door does, and it calls this when one lands, exactly as it
+    // calls shotReadout() and hands the result down. It is also the seam the offscreen test
+    // uses: a synthetic after-shot moment is a fixture plus this call, with no event loop and
+    // no ingest in it.
+    property var pulseCue: null
+    property int _pulseToken: 0
+
+    function pulseAfterShot() {
+        const d = source ? source.afterShotDelta : null
+        const fired = (d && d.fired) ? d.fired : []
+        if (fired.length === 0) { root.pulseCue = null; return }
+
+        const wanted = {}
+        for (let i = 0; i < fired.length; ++i) wanted[fired[i]] = true
+
+        // ORDER IS THE PANEL'S DRAWING ORDER, never the delta's. `fired` comes out in the
+        // shot's own row order; what the eye is following is the sweep down the arrangement in
+        // front of it, and a stagger that ran in some third order would read as a shuffle.
+        // So the body on screen decides: the rail's nodes when the rail is the body, the card
+        // row's cards when it is not, and whatever fired that the chosen body does not draw
+        // brings up the rear rather than being dropped — it still happened.
+        const ids = []
+        function take(id) {
+            if (id && wanted[id] && ids.indexOf(id) < 0) ids.push(id)
+        }
+        function takeCards() {
+            const cs = root.cards || []
+            for (let i = 0; i < cs.length; ++i) take(cs[i].id)
+        }
+        function takeRail() {
+            const chs = root.chains || []
+            for (let i = 0; i < chs.length; ++i) {
+                const ns = chs[i].nodes || []
+                for (let j = 0; j < ns.length; ++j) take(ns[j].id)
+            }
+        }
+        if (root._railBody) { takeRail(); takeCards() } else { takeCards(); takeRail() }
+        for (let i = 0; i < fired.length; ++i) take(fired[i])
+
+        // THE FOCUSED NODE LEADS. Under a focus contract its marker is the headline of the
+        // moment (§B3), and leading the stagger is how a sweep says so without a second mark:
+        // it is the one that moves first and the rest follow it.
+        const focusId = d.focusId || ""
+        const at = ids.indexOf(focusId)
+        if (at > 0) { ids.splice(at, 1); ids.unshift(focusId) }
+
+        root._pulseToken += 1
+        root.pulseCue = { token: root._pulseToken, ids: ids, focusId: focusId }
+    }
 
     // A screen was asked for, from the driver footer's CTA or from a screened root on the
     // rail. `screenRef` is the model's when it recommended that screen and empty when it did
@@ -127,8 +220,29 @@ Rectangle {
     readonly property var driver:       source ? source.driver        : null
 
     readonly property bool isCold:      stage === "cold"
+    readonly property bool isForming:   stage === "forming"
     readonly property bool isEstablished: stage === "established"
     readonly property bool isClosing:   stage === "closing"
+
+    // ── the declared miss ────────────────────────────────────────────────────
+    //
+    // DESIGN-REVIEW: minimal by intent. The chip asks and the picker answers, and neither
+    // says anything about what the declaration DID — `missChain` is published (everything
+    // authored upstream of the outcome, pre-armed) and nothing on this panel draws it yet,
+    // so the golfer declares a miss and sees the chip change and nothing else. There is also
+    // no verification tense: the model checks the declaration against launch-monitor data
+    // where the session has any, and the panel does not report the answer. Both want a
+    // design pass.
+    //
+    // The session's opening question — "what is the bad shot?" — and the panel ASKS it only
+    // while the answer can still shape the session: Cold and Forming, when there is not yet a
+    // picture to read. Past that the invitation stands down and the chip reports whatever was
+    // declared, because a declaration is a fact about the session and does not expire with the
+    // stage that took it.
+    readonly property string declaredMiss:     source ? (source.declaredMiss || "")     : ""
+    readonly property string declaredMissName: source ? (source.declaredMissName || "") : ""
+    readonly property bool _missInvited:
+        interactive && declaredMiss === "" && (isCold || isForming) && !reviewing
 
     // ── review (13a, brief §6) ───────────────────────────────────────────────
     // READ OFF THE PUBLISHED SURFACE, never off a controller: the model is the one that
@@ -299,6 +413,52 @@ Rectangle {
                         color: Theme.colorAccent
                     }
                 }
+                // ── the declared miss ────────────────────────────────────────
+                // A chip, in the header, beside the stage — because it is a statement about
+                // the SESSION and not about a pattern, and because it is the one thing on
+                // this panel the golfer supplies rather than the model. It is deliberately
+                // NOT tinted like a finding: intent shapes attention and pre-arms chains, and
+                // it is never evidence (§A6). The accent is the app's "you can act here"
+                // colour, which is exactly what it is.
+                Rectangle {
+                    id: missChip
+                    objectName: "sdMissChip"
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root._missInvited || root.declaredMiss !== ""
+                    width:  missText.implicitWidth + root.px(14)
+                    height: missText.implicitHeight + root.px(4)
+                    radius: Math.max(1, root.px(3))
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Qt.rgba(Theme.colorAccent.r, Theme.colorAccent.g,
+                                          Theme.colorAccent.b,
+                                          missHover.hovered ? 0.55 : 0.30)
+                    Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
+
+                    Text {
+                        id: missText
+                        anchors.centerIn: parent
+                        // The name once there is one, and the invitation until then. The
+                        // caret says it opens something; the middot says it is settled and
+                        // can still be changed.
+                        text: root.declaredMiss !== ""
+                              ? qsTr("MISS · %1").arg(root.declaredMissName || root.declaredMiss)
+                                + (root.interactive ? qsTr(" ▸") : "")
+                              : qsTr("DECLARE MISS ▸")
+                        font.family: Theme.fontData
+                        font.pixelSize: root.tzCaption
+                        font.letterSpacing: Theme.trackingMicro
+                        color: Theme.colorAccent
+                    }
+
+                    HoverHandler { id: missHover; enabled: root.interactive
+                                   cursorShape: Qt.PointingHandCursor }
+                    TapHandler {
+                        enabled: root.interactive
+                        onTapped: missPicker.openBelow(missChip)
+                    }
+                }
+
                 Text {
                     objectName: "sdReviewNote"
                     anchors.verticalCenter: parent.verticalCenter
@@ -683,6 +843,9 @@ Rectangle {
                             required property int index
                             card: root.cards[index]
                             fit: root.k
+                            interactive: root.interactive
+                            pulseCue: root.pulseCue
+                            onFocusToggled: (id, on) => root._declareFocus(id, on)
                             width: Math.max(0, (cardRow.width - (root._cardsShown - 1) * cardRow.spacing)
                                                / Math.max(1, root._cardsShown))
                             height: cardRow.height
@@ -722,9 +885,12 @@ Rectangle {
                             height: wideChains._railH
                             chain:  root.chains[index]
                             fit:    root.k
+                            interactive:       root.interactive
+                            pulseCue:          root.pulseCue
                             screenConditionId: root._screenConditionId
                             screenRef:         root._screenRef
                             onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                            onFocusToggled:    (id, on) => root._declareFocus(id, on)
                         }
                     }
 
@@ -772,9 +938,12 @@ Rectangle {
                             chain:  (root.chains && root.chains.length > 0) ? root.chains[0] : null
                             fit:    root.k
                             vertical: true
+                            interactive:       root.interactive
+                            pulseCue:          root.pulseCue
                             screenConditionId: root._screenConditionId
                             screenRef:         root._screenRef
                             onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                            onFocusToggled:    (id, on) => root._declareFocus(id, on)
                         }
 
                         Repeater {
@@ -885,9 +1054,12 @@ Rectangle {
                                     chain:  collapsedChain.chainData
                                     fit:    root.k
                                     vertical: true
+                                    interactive:       root.interactive
+                                    pulseCue:          root.pulseCue
                                     screenConditionId: root._screenConditionId
                                     screenRef:         root._screenRef
                                     onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                                    onFocusToggled:    (id, on) => root._declareFocus(id, on)
                                 }
                             }
                         }
@@ -989,6 +1161,177 @@ Rectangle {
             font.family: Theme.fontData
             font.pixelSize: root.tzCaption
             color: Theme.colorText3
+        }
+    }
+
+    // ── the miss picker ──────────────────────────────────────────────────────
+    //
+    // A LOCAL, PLAIN-QtQuick POPUP and deliberately not the model browser's ModelCausePicker,
+    // whose idiom this borrows: that one lives in a different module, carries a search field,
+    // a create-a-new-condition row and a legality contract, and importing it here would drag
+    // the whole authoring surface onto a panel that is not an editor. What is needed is a list
+    // of the outcomes the pack already authors, which is a list.
+    //
+    // THE CANDIDATES ARE THE MODEL'S — SessionDiagnosticsModel::missCandidates(), which asks
+    // the pack's ConditionKind and not this file's idea of what a miss looks like. A body that
+    // kept its own list of "slice, hook, thin, fat" would be authoring content in the QML, and
+    // it would go stale the first time the pack gained an outcome.
+    Item {
+        id: missPicker
+        objectName: "sdMissPicker"
+        anchors.fill: parent
+        visible: _open
+        z: 100
+
+        property bool _open: false
+        property var  _rows: []
+        property real _anchorX: 0
+        property real _anchorY: 0
+
+        function openBelow(item) {
+            _rows = root._missCandidates()
+            const p = item.mapToItem(missPicker, 0, item.height)
+            _anchorX = p.x
+            _anchorY = p.y + root.px(6)
+            _open = true
+        }
+        function close() { _open = false }
+
+        // Anywhere else is "not now". No modal veil: the panel behind it is still the answer
+        // to a different question and dimming it would say the picker had taken the surface
+        // over, which it has not.
+        //
+        // A MouseArea rather than a TapHandler, here and on the sheet below, and the reason is
+        // the dismiss: TapHandler's default gesture policy takes a PASSIVE grab, so a scrim
+        // handler and a row handler both fire on the same press and every click inside the
+        // sheet would also be a click outside it. MouseArea accepts the event and stops it.
+        MouseArea { anchors.fill: parent; onClicked: missPicker.close() }
+
+        Rectangle {
+            objectName: "sdMissPickerSheet"
+            // Kept inside the panel on both axes — the header chip can sit near the right-hand
+            // edge in the narrow arrangement, and a sheet half off the panel is clipped away
+            // by root's own `clip` rather than drawn outside it.
+            x: Math.max(root.px(6), Math.min(missPicker._anchorX,
+                                             missPicker.width - width - root.px(6)))
+            y: Math.max(root.px(6), Math.min(missPicker._anchorY,
+                                             missPicker.height - height - root.px(6)))
+            width: root.px(260)
+            // SIZED FROM THE ROW COUNT, not from the ListView's contentHeight: the list's own
+            // height comes from this one through the anchors, so reading contentHeight back
+            // would be a loop the engine breaks by leaving the sheet at whatever it had — a
+            // three-row list showing one row.
+            readonly property int _rowH: root.px(24)
+            height: Math.min(root.px(300),
+                             head.height
+                             + Math.max(1, missPicker._rows.length) * _rowH
+                             + (clearRow.visible ? clearRow.height : 0)
+                             + 2 * root.px(6))
+            color: Theme.colorSurface
+            radius: Theme.radius
+            border.width: 1
+            border.color: Theme.colorAccent
+            clip: true
+
+            // The sheet eats its own clicks, so a tap on its background is not also a tap on
+            // the scrim. FIRST child, so the rows above it get theirs first.
+            MouseArea { anchors.fill: parent }
+
+            Text {
+                id: head
+                objectName: "sdMissPickerLabel"
+                anchors { left: parent.left; right: parent.right; top: parent.top }
+                anchors.margins: root.px(9)
+                height: implicitHeight + root.px(6)
+                // WHAT THE DECLARATION IS FOR, said where it is made. It pre-arms the chains
+                // upstream of the outcome; it is not a filter and it is not evidence (§A6).
+                text: qsTr("WHAT IS THE BAD SHOT?")
+                font.family: Theme.fontData
+                font.pixelSize: root.tzCaption
+                font.letterSpacing: Theme.trackingMicro
+                color: Theme.colorText3
+            }
+
+            ListView {
+                id: list
+                objectName: "sdMissPickerList"
+                anchors { left: parent.left; right: parent.right; top: head.bottom
+                          bottom: clearRow.visible ? clearRow.top : parent.bottom }
+                anchors.leftMargin:  root.px(4)
+                anchors.rightMargin: root.px(4)
+                anchors.bottomMargin: root.px(4)
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: missPicker._rows
+
+                delegate: Rectangle {
+                    required property var modelData
+                    objectName: "sdMissCandidate"
+                    width: list.width
+                    height: list.parent._rowH
+                    radius: Theme.radius
+                    readonly property bool _isCurrent: modelData.id === root.declaredMiss
+                    color: _isCurrent ? Theme.colorAccentLight
+                                      : (rowMouse.containsMouse ? Theme.colorBg3 : "transparent")
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin:  root.px(7)
+                        anchors.rightMargin: root.px(7)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.name || modelData.id || ""
+                        elide: Text.ElideRight
+                        font.family: Theme.fontBody
+                        font.pixelSize: root.tzLabel
+                        font.weight: Theme.fontBodyWeight
+                        color: parent._isCurrent ? Theme.colorAccent : Theme.colorText
+                    }
+
+                    MouseArea {
+                        id: rowMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root._declareMiss(parent.modelData.id || "")
+                    }
+                }
+            }
+
+            // Withdrawing is declaring nothing, and it is the same call with an empty id — the
+            // model treats "" as a clear, so there is no second verb to keep in step.
+            Item {
+                id: clearRow
+                objectName: "sdMissClear"
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: visible ? root.px(26) : 0
+                visible: root.declaredMiss !== ""
+
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                    anchors.leftMargin:  root.px(9)
+                    anchors.rightMargin: root.px(9)
+                    height: 1
+                    color: Theme.colorBorderMid
+                }
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: root.px(11)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("NO DECLARED MISS")
+                    font.family: Theme.fontData
+                    font.pixelSize: root.tzCaption
+                    font.letterSpacing: Theme.trackingLabel
+                    color: clearMouse.containsMouse ? Theme.colorText : Theme.colorText3
+                }
+                MouseArea {
+                    id: clearMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root._declareMiss("")
+                }
+            }
         }
     }
 }

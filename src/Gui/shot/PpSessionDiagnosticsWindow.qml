@@ -16,12 +16,26 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-// PpDashboardWindow — the wall-cast surface for the post-shot dashboard. A top-level
-// window placed on the secondary display, hosting the SAME PpDashboardPanel as the
-// in-app stage (bound to the shared shotReplay + per-type preset store, so a header
-// edit updates both live). Kiosk = frameless full-screen; window = a centred overlay
-// the presenter auto-closes after the dwell. postShotMirror horizontally flips the
-// content for a coach standing opposite the athlete.
+// PpSessionDiagnosticsWindow — the wall-cast surface for the SESSION DIAGNOSTICS panel, and
+// the successor to PpDashboardWindow. A top-level window placed on the secondary display,
+// hosting PpSessionDiagnosticsPanel: what keeps happening this session and what the model
+// thinks is causing it, rather than the one-swing post-shot dashboard that used to sit here.
+//
+// EVERYTHING AROUND THE CONTENT IS UNCHANGED, deliberately. The target screen, the kiosk
+// map-then-fullscreen dance, the mirror transform, the pin, the dwell, the windowed geometry
+// and the viewing-distance scale are all working, user-kept behaviours and the swap is only
+// about what is drawn inside them. The one thing that went with the old panel is
+// `sessionType`: the diagnostics panel gates on available data and devices, never on the
+// session's type, so it has nothing to do with one.
+//
+// TWO MODELS, ON PURPOSE FOR NOW. PpSessionDiagnosticsPanel instantiates its own
+// SessionDiagnosticsModel and claims SessionMode.sessionDiagnostics on completion (last wins).
+// With an in-app panel AND this cast up there are therefore two models ingesting the same
+// shots independently — wasteful, and correct: both are wired to the same ShotProcessor
+// signal, both are idempotent per shot id, and both reduce the same rows to the same surface.
+// The seam the carousel pips read is simply whichever came up last. Sharing one model between
+// the two is a lifetime question (who owns it when the stage panel is torn down and the cast
+// is not) that is not worth answering before the wasted CPU is measurable.
 
 import QtQuick
 import QtQuick.Window
@@ -30,7 +44,6 @@ import PinPointStudio
 Window {
     id: win
 
-    property int  sessionType: sessionController.activeSessionType
     property bool mirror: false
     property bool kiosk: false
     property var  targetScreen: null      // Qt.application.screens[i] (Screen info) or null
@@ -54,7 +67,7 @@ Window {
     // monitor); `screen` + x/y are best-effort hints honoured on X11.
     screen: targetScreen ? targetScreen : null
     color: Theme.colorBg
-    title: qsTr("PinPoint — Post-shot")
+    title: qsTr("PinPoint — Session diagnostics")
     flags: kiosk ? (Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint) : Qt.Window
 
     // Windowed-mode geometry (kiosk fullscreen overrides these via showFullScreen()).
@@ -67,29 +80,31 @@ Window {
     // (postShotDisplayMode == "window"). Set by Main.qml at creation.
     property bool autoClose: false
 
-    // The interactive layer is off for exactly one case: an auto-closing cast. That
-    // surface is a glance — arming hover/seek on something about to vanish under the
-    // pointer is a trap. PANEL and KIOSK are PERSISTENT casts: they sit there for the
-    // whole session and are the surface a coach actually works against, so they get
-    // the full layer. (An earlier cut gated on `kiosk`, which silently disabled every
-    // affordance on the most-used configuration.)
+    // The interactive layer is off for exactly one case: an auto-closing cast. That surface is
+    // a glance — arming a focus tap or a declared-miss picker on something about to vanish
+    // under the pointer is a trap. PANEL and KIOSK are PERSISTENT casts: they sit there for
+    // the whole session and are the surface a coach actually works against, so they get the
+    // full layer.
     readonly property bool interactive: !autoClose
 
     // Held open while the presenter is reading (pointer over the panel) or has
     // pinned it. Main.qml's castDwellTimer re-arms instead of closing while true.
     property bool pinned: false
-    readonly property bool dwellHeld: pinned || dash.hovered
+    readonly property bool dwellHeld: pinned || panelHover.hovered
 
-    // Viewing-distance zoom. Rather than a second set of "big" dimensions (which
-    // would fork the component and break the one-render guardrail), the panel is
-    // laid out at 1/contentScale of the window and then scaled up: every token —
-    // type, tile, corridor, dot — grows together, so the proportions are identical
-    // at every setting. Text stays crisp through Qt's distance-field rasteriser.
+    // Viewing-distance zoom. Rather than a second set of "big" dimensions (which would fork
+    // the component and break the one-render guardrail), the panel is laid out at
+    // 1/contentScale of the window and then scaled up: every token — type, tick, corridor,
+    // card — grows together, so the proportions are identical at every setting. Text stays
+    // crisp through Qt's distance-field rasteriser.
     //
-    // The MAGNITUDE is a user preference, not a constant: a 13" laptop mirrored at
-    // arm's length and a 65" TV across a bay want very different type, and there is
-    // no correct answer to pick for them. appSettings.dashboardScale chooses.
-    // Kiosk (the true wall case) is stepped up relative to a framed desk window.
+    // THIS COMPOSES WITH THE PANEL'S OWN FIT rather than replacing it. The diagnostics panel
+    // already takes the largest k at which the whole design fits the box it is given
+    // (PpSessionDiagnosticsBody._fitFor, kMax 2.4), so a 1920 cast is already at ~2.1 with no
+    // help. Laying it out smaller therefore raises the effective type by exactly the factor
+    // asked for, and the MAGNITUDE is a user preference and not a constant: a 13" laptop
+    // mirrored at arm's length and a 65" TV across a bay want very different type, and there
+    // is no correct answer to pick for them. appSettings.dashboardScale chooses.
     readonly property real _scaleStep: appSettings.dashboardScale === "small"  ? 0.78
                                      : appSettings.dashboardScale === "large"  ? 1.35
                                      :                                           1.0
@@ -100,22 +115,21 @@ Window {
         anchors.fill: parent
         transform: Scale { origin.x: width / 2; xScale: win.mirror ? -1 : 1 }
 
-        // A dashboard should FILL its display — the old centred 720px column left
-        // most of a 2560-wide wall empty. The inset is now just enough to keep the
-        // card borders off the bezel.
-        //
-        // The panel itself is NOT transformed: it applies `uiScale` internally, to
-        // the zone content only. Its header — the preset pill and its popover —
-        // therefore renders at native size, identical to the session toolbar,
-        // while the data below zooms for the room.
-        PpDashboardPanel {
-            id: dash
+        // The panel FILLS its display: the inset is just enough to keep the card borders off
+        // the bezel. Laid out at 1/contentScale and drawn scaled — see the note above.
+        Item {
             x: Theme.sp(8); y: Theme.sp(8)
-            width:  parent.width  - Theme.sp(16)
-            height: parent.height - Theme.sp(16)
-            uiScale: win.contentScale
-            sessionType: win.sessionType
-            interactive: win.interactive
+            width:  Math.max(1, (parent.width  - 2 * Theme.sp(8)) / win.contentScale)
+            height: Math.max(1, (parent.height - 2 * Theme.sp(8)) / win.contentScale)
+            transform: Scale { xScale: win.contentScale; yScale: win.contentScale }
+
+            HoverHandler { id: panelHover }
+
+            PpSessionDiagnosticsPanel {
+                id: diag
+                anchors.fill: parent
+                interactive: win.interactive
+            }
         }
     }
 

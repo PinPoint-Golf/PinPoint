@@ -470,6 +470,20 @@ Item {
                 color: Theme.colorText3
             }
 
+            // WHAT the cast shows is no longer a choice, so it is stated once here rather
+            // than offered as a control with one working value. The rows below decide WHERE
+            // it goes, HOW it is surfaced, and how it is read at distance.
+            Text {
+                objectName: "setting_postShotContentNote"
+                Layout.fillWidth: true
+                text: qsTr("The secondary display shows the session diagnostics panel — what keeps "
+                           + "happening this session, and what the model thinks is causing it.")
+                wrapMode: Text.WordWrap
+                font.family:    Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorText3
+            }
+
             // Secondary display row
             RowLayout {
                 objectName: "setting_secondaryDisplay"
@@ -488,7 +502,7 @@ Item {
                         color:          Theme.colorText
                     }
                     Text {
-                        text:           qsTr("Golfer-facing screen shown after each swing")
+                        text:           qsTr("Golfer-facing screen the session diagnostics panel is cast to")
                         font.family:    Theme.fontData
                         font.pixelSize: Theme.fontSzMicro
                         color:          Theme.colorText3
@@ -516,51 +530,8 @@ Item {
                 }
             }
 
-            // Post-shot content row (dimmed when no secondary display)
-            RowLayout {
-                objectName: "setting_postShotContent"
-                Layout.fillWidth: true
-                spacing: Theme.sp(16)
-                property bool searchHighlight: false
-                Rectangle { x: -Theme.sp(6); y: -Theme.sp(6); width: parent.width + Theme.sp(12); height: parent.height + Theme.sp(12); color: Theme.colorAccentLight; radius: Theme.radius; opacity: parent.searchHighlight ? 1.0 : 0.0; z: -1 }
-                opacity: appSettings.secondaryDisplayMode === "none" ? 0.4 : 1.0
-                Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.sp(3)
-                    Text {
-                        text:           qsTr("Post-shot content")
-                        font.family:    Theme.fontBody
-                        font.pixelSize: Theme.fontSzBody
-                        color:          Theme.colorText
-                    }
-                    Text {
-                        text:           qsTr("What the golfer sees on the secondary display")
-                        font.family:    Theme.fontData
-                        font.pixelSize: Theme.fontSzMicro
-                        color:          Theme.colorText3
-                    }
-                }
-
-                PpChipGroup {
-                    options: [qsTr("Replay"), qsTr("Metrics"), qsTr("Replay + metrics")]
-                    selected: {
-                        if (appSettings.postShotContent === "replay")   return qsTr("Replay")
-                        if (appSettings.postShotContent === "metrics")  return qsTr("Metrics")
-                        return qsTr("Replay + metrics")
-                    }
-                    onSelectionChanged: (value) => {
-                        if (value === qsTr("Replay"))         appSettings.postShotContent = "replay"
-                        else if (value === qsTr("Metrics"))   appSettings.postShotContent = "metrics"
-                        else                                  appSettings.postShotContent = "replay+metrics"
-                    }
-                    Layout.alignment: Qt.AlignVCenter
-                }
-            }
-
-            // Post-shot display mode row — how the dashboard is surfaced on the target
-            // display (persistent panel / auto-closing window / full-screen kiosk).
+            // Post-shot display mode row — how the diagnostics panel is surfaced on the
+            // target display (persistent panel / auto-closing window / full-screen kiosk).
             RowLayout {
                 objectName: "setting_postShotDisplayMode"
                 Layout.fillWidth: true
@@ -580,7 +551,7 @@ Item {
                         color:          Theme.colorText
                     }
                     Text {
-                        text:           qsTr("Persistent panel, an auto-closing window, or a full-screen kiosk")
+                        text:           qsTr("A persistent window, one that pops after each swing and closes, or a full-screen kiosk")
                         font.family:    Theme.fontData
                         font.pixelSize: Theme.fontSzMicro
                         color:          Theme.colorText3
@@ -623,7 +594,7 @@ Item {
                         color:          Theme.colorText
                     }
                     Text {
-                        text:           qsTr("Pause before showing post-shot content")
+                        text:           qsTr("Pause after a swing before the cast window appears")
                         font.family:    Theme.fontData
                         font.pixelSize: Theme.fontSzMicro
                         color:          Theme.colorText3
@@ -671,7 +642,7 @@ Item {
                         color:          Theme.colorText
                     }
                     Text {
-                        text:           qsTr("How long the post-shot window stays before closing")
+                        text:           qsTr("How long the cast window stays before closing")
                         font.family:    Theme.fontData
                         font.pixelSize: Theme.fontSzMicro
                         color:          Theme.colorText3
@@ -717,7 +688,7 @@ Item {
                         color:          Theme.colorText
                     }
                     Text {
-                        text:           qsTr("Shows the full Pinpoint interface rather than the simplified post-shot view")
+                        text:           qsTr("Flips the cast horizontally, for a coach standing opposite the athlete")
                         font.family:    Theme.fontData
                         font.pixelSize: Theme.fontSzMicro
                         color:          Theme.colorText3

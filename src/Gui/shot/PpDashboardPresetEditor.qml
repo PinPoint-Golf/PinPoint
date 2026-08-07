@@ -248,12 +248,14 @@ Popup {
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.colorBorderMid; opacity: Theme.borderOpacityNormal }
 
         // ── cast scale ────────────────────────────────────────────────────────
-        // Lives HERE, with the rest of the dashboard's configuration, rather than
-        // in Settings → Displays: it is a property of how this dashboard is read,
-        // and it belongs next to the zones it resizes. Unlike the zone/metric
-        // config it is NOT per-session-type or part of a preset — it is a single
-        // global viewing-distance preference (appSettings.dashboardScale), so
-        // changing it does NOT fork the active preset to "Custom".
+        // The one control here that does NOT configure this dashboard: it sets the
+        // content size of the SECONDARY-DISPLAY CAST, which now shows the session
+        // diagnostics panel rather than these zones. It stays on this sheet because
+        // this is where a user goes to size what they are reading, and there is
+        // nowhere better until the cast earns configuration of its own. Unlike the
+        // zone/metric config it is NOT per-session-type or part of a preset — it is
+        // a single global viewing-distance preference (appSettings.dashboardScale),
+        // so changing it does NOT fork the active preset to "Custom".
         ColumnLayout {
             Layout.fillWidth: true
             spacing: Theme.sp(4)
@@ -264,7 +266,7 @@ Popup {
             }
             Text {
                 Layout.fillWidth: true
-                text: qsTr("Content size on the cast display — match it to how far away it is read.")
+                text: qsTr("Size of the session diagnostics panel on the cast display — match it to how far away it is read.")
                 wrapMode: Text.WordWrap
                 font.family: Theme.fontBody; font.pixelSize: Theme.fontSzBody2; color: Theme.colorText3
             }

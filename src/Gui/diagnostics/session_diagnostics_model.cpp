@@ -537,6 +537,22 @@ void SessionDiagnosticsModel::declareMiss(const QString &missId)
     persist();
 }
 
+QVariantList SessionDiagnosticsModel::missCandidates() const
+{
+    QVariantList out;
+    if (!m_packProv) return out;
+    // Pack order, never hash order — the picker must not reshuffle between launches, for the
+    // same reason buildGraph() walks the pack rather than a QSet.
+    for (const Condition &c : m_packProv->pack().conditions) {
+        if (c.kind != ConditionKind::Outcome) continue;
+        out.append(QVariantMap{
+            { QStringLiteral("id"),   c.id },
+            { QStringLiteral("name"), conditionName(c.id) },
+        });
+    }
+    return out;
+}
+
 void SessionDiagnosticsModel::recordScreenResult(const QString &conditionId, bool present)
 {
     if (conditionId.isEmpty()) return;

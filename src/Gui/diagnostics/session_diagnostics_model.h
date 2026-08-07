@@ -155,6 +155,9 @@ class SessionDiagnosticsModel : public QObject
     Q_PROPERTY(QString focusConditionId READ focusConditionId NOTIFY intentChanged)
     Q_PROPERTY(int focusFromShot READ focusFromShot NOTIFY intentChanged)
     Q_PROPERTY(QString declaredMiss READ declaredMiss NOTIFY intentChanged)
+    // The declared miss's authored label, so the panel's header chip can name it without
+    // resolving an id against a pack it does not have. Empty when nothing is declared.
+    Q_PROPERTY(QString declaredMissName READ declaredMissName NOTIFY intentChanged)
     // Everything authored upstream of the declared miss — the chains it pre-arms. Names and
     // ids, so the panel can badge a card as "on the way to your declared miss".
     Q_PROPERTY(QVariantList missChain READ missChain NOTIFY intentChanged)
@@ -204,6 +207,8 @@ public:
     QString focusConditionId() const { return m_focusConditionId; }
     int     focusFromShot() const { return m_focusFromShot; }
     QString declaredMiss() const { return m_declaredMiss; }
+    QString declaredMissName() const
+    { return m_declaredMiss.isEmpty() ? QString() : conditionName(m_declaredMiss); }
     QVariantList missChain() const { return m_missChain; }
 
     QVariantMap  headerInfo() const { return m_headerInfo; }
@@ -259,8 +264,21 @@ public:
 
     // The session's opening question — "what is the bad shot?". Pre-arms the chains upstream
     // of that outcome and marks it as the chain's outcome node. Verified against launch
-    // monitor data where the session has any.
+    // monitor data where the session has any. An EMPTY id clears the declaration.
     Q_INVOKABLE void declareMiss(const QString &missId);
+
+    // What the panel may offer as an answer to that question: every condition the pack
+    // authors as an OUTCOME, as {id, name}, in pack order.
+    //
+    // THE CLASSIFICATION IS THE PACK'S KIND, not this file's opinion and not the ball-flight
+    // GROUP. ConditionKind::Outcome is "what the ball did — where an explanation ENDS", it is
+    // intrinsic (it never moves when a producer lands), and it is the same field
+    // outcomeReachOf() asks when it counts what a condition reaches. The group is coextensive
+    // with it over shipped content and core_pack_test asserts that in both directions, but
+    // the group answers WHERE IN THE SWING and pressing it into this job is exactly the
+    // conflation the kind axis was added to end. A pack that authors no kinds yields no
+    // candidates, which is the honest answer: nothing there is marked as an outcome.
+    Q_INVOKABLE QVariantList missCandidates() const;
 
     // A physical screen answered at the range counts immediately (design §A5). Feeds
     // explain()'s knownScreenResults and NodeSpec::screenEntered — which is what lets a

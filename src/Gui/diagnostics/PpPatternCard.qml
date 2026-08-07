@@ -38,7 +38,43 @@ Rectangle {
     // The panel's fit scale. See PpSessionDiagnosticsBody._fitFor().
     property real fit: 1.0
 
-    objectName: "sdPatternCard"
+    // Off on the auto-closing cast, where arming a tap on something about to vanish under the
+    // pointer is a trap (PpSessionDiagnosticsWindow.interactive).
+    property bool interactive: true
+
+    // ── the focus contract (design §A6) ──────────────────────────────────────
+    //
+    // DESIGN-REVIEW: the affordance is MINIMAL by intent — a micro-label and a tap on the
+    // whole card. What has not been designed is the moment AFTER declaring: the split point
+    // is invisible on the run (the ticks before and after the declaration look identical),
+    // and there is no way to see what the contract has bought yet beyond a link quietly
+    // becoming Moved-together further down the rail. Both want a design pass before this is
+    // called finished.
+    //
+    // THE CARD ASKS AND THE MODEL DECIDES. Tapping publishes the request; declareFocus() /
+    // clearFocus() live on SessionDiagnosticsModel and this file cannot reach one. `focused`
+    // is read back off the model's own card map, so a tap that the model declined to honour
+    // leaves the card exactly as it was — which is the only arrangement in which the accent
+    // bar is a statement about the ledger rather than about a click.
+    //
+    // WHAT DECLARING FOCUS DOES, so the affordance is not mistaken for a filter: it records a
+    // split at the current shot count, which is what puts the Moved-together link grade on
+    // offer at all. It shapes ATTENTION and EXPERIMENT STRUCTURE. It is not an input to
+    // detection, to a corridor or to a tier, and the model is what enforces that.
+    readonly property bool focused: card ? card.focused === true : false
+    signal focusToggled(string conditionId, bool nowFocused)
+
+    // ── the after-shot pulse (§B3, §B8) ──────────────────────────────────────
+    //
+    // A CUE, not a channel: { token, ids, focusId }, republished by the body on every
+    // shotIngested. One property so the ids can never arrive after the token that is supposed
+    // to describe them. A card whose id is not in `ids` did not change on this swing and does
+    // not move.
+    property var pulseCue: null
+    // The animation's own answer, so a test can assert that reduceMotion left nothing running
+    // rather than assert on a duration constant.
+    readonly property bool pulsing: pulseSeq.running
+    property real _pulseT: 0.0
 
     // Design pixels through the app's type scale and the panel's fit — the panel's own
     // px(), repeated here so the card is usable on its own.
@@ -62,11 +98,87 @@ Rectangle {
                                        : card.trend === "improving" ? Theme.colorGood
                                                                     : Theme.colorText3
 
+    objectName: "sdPatternCard"
+
     color: Theme.colorSurface
     radius: Theme.radius
     border.width: 1
     border.color: Theme.colorBorderMid
     clip: true
+
+    // The accent border, drawn OVER the resting one rather than replacing it: a Rectangle has
+    // exactly one border and this card needs two states of it that cross-fade. Focused holds
+    // the accent; the pulse lifts it on a shot that fired this condition. The two share one
+    // channel on purpose — a focused card that fired is the headline of the moment (§B3) and
+    // should not need two marks to say so.
+    Rectangle {
+        objectName: "sdCardAccentBorder"
+        anchors.fill: parent
+        color: "transparent"
+        radius: parent.radius
+        border.width: 1
+        border.color: Theme.colorAccent
+        opacity: root.focused ? 0.45 + 0.55 * root._pulseT : root._pulseT
+        visible: opacity > 0
+    }
+
+    // ── the focus bar ────────────────────────────────────────────────────────
+    // A left edge, because it is a mark ON the card rather than a thing in it — and because
+    // the card's own content is already the full width of what it has to say.
+    Rectangle {
+        objectName: "sdCardFocusBar"
+        visible: root.focused
+        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+        anchors.margins: 1
+        width: Math.max(1, root.px(3))
+        radius: width / 2
+        color: Theme.colorAccent
+        opacity: 0.7 + 0.3 * root._pulseT
+    }
+
+    // ── the pulse ────────────────────────────────────────────────────────────
+    //
+    // ONE PASS, NOTHING MOVES. Opacity and border alpha only: no size, no position, and
+    // emphatically no reordering — the display order is hysteretic and model-side, and a card
+    // that slid to a new seat while it flashed would be reporting a rank change the ledger
+    // did not make.
+    //
+    // reduceMotion IS NOT A SHORTER PULSE, it is no pulse: the stagger goes too, so nothing
+    // is waiting to happen either. The card still redraws with its new pill, its new tick and
+    // its NEW tag — the state change was never carried by the animation.
+    SequentialAnimation {
+        id: pulseSeq
+        PauseAnimation { id: pulseWait; duration: 0 }
+        NumberAnimation { target: root; property: "_pulseT"; to: 1.0
+                          duration: Theme.durationFast; easing.type: Easing.OutQuad }
+        NumberAnimation { target: root; property: "_pulseT"; to: 0.0
+                          duration: Theme.durationSlow; easing.type: Easing.InQuad }
+    }
+
+    // A CARD CREATED AFTER THE SHOT MUST NOT REPLAY IT. The cue is a property, so a delegate
+    // built later — a resize that changed how many fit, a stage that swapped the body — binds
+    // to whatever cue is current and would flash for a swing it was not there for.
+    property bool _ready: false
+    Component.onCompleted: root._ready = true
+
+    onPulseCueChanged: {
+        if (!root._ready) return
+        // STOPPED FIRST, ALWAYS. A new shot has landed, so whatever this card was saying about
+        // the last one is over — including when this card is not in the new cue at all. A card
+        // left flashing from the previous swing would be pointing at the wrong ball.
+        pulseSeq.stop()
+        root._pulseT = 0.0
+        const cue = root.pulseCue
+        const id  = root.card ? (root.card.id || "") : ""
+        if (!cue || !cue.ids || id === "") return
+        const slot = cue.ids.indexOf(id)
+        if (slot < 0) return          // this condition did not change on this swing
+        if (Theme.reduceMotion) return
+        // Stagger in CARD ORDER, which is the model's order — the eye reads the change down
+        // the row the way the swing runs rather than all at once.
+        pulseWait.duration = slot * 70
+        pulseSeq.start()
+    }
 
     Column {
         id: col
@@ -170,13 +282,16 @@ Rectangle {
             fit: root.fit
         }
 
-        // ── trend + recency ──────────────────────────────────────────────────
-        Row {
+        // ── trend + recency, and the focus affordance ────────────────────────
+        Item {
             width: col.width
-            spacing: root.px(8)
+            height: Math.max(trendTxt.implicitHeight, focusTag.implicitHeight)
 
             Text {
+                id: trendTxt
                 objectName: "sdCardTrend"
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
                 text: root.card ? ((root.card.trendArrow || "") + (root.card.trendText || "")) : ""
                 font.family: Theme.fontData
                 font.pixelSize: root.tzMicro
@@ -189,11 +304,34 @@ Rectangle {
             // while reviewing or closed, so its presence IS the tense.
             Text {
                 objectName: "sdCardRecency"
+                anchors.left: trendTxt.right
+                anchors.leftMargin: root.px(8)
+                anchors.right: focusTag.visible ? focusTag.left : parent.right
+                anchors.rightMargin: focusTag.visible ? root.px(8) : 0
+                anchors.verticalCenter: parent.verticalCenter
                 text: root.card ? (root.card.firingsAfterText || root.card.recencyText || "") : ""
                 elide: Text.ElideRight
                 font.family: Theme.fontData
                 font.pixelSize: root.tzCaption
                 color: Theme.colorText3
+            }
+            // The affordance, in the house micro-label style — a caret invites, a middot
+            // reports. It is here rather than as a hover-only reveal because a contract the
+            // golfer cannot see is a contract they will never declare, and nothing else on
+            // this panel is discoverable by hovering.
+            Text {
+                id: focusTag
+                objectName: "sdCardFocusTag"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.interactive && !!root.card
+                text: root.focused ? qsTr("FOCUSED ·") : qsTr("FOCUS ▸")
+                font.family: Theme.fontData
+                font.pixelSize: root.tzCaption
+                font.letterSpacing: Theme.trackingLabel
+                color: root.focused ? Theme.colorAccent
+                                    : (focusHover.hovered ? Theme.colorAccent : Theme.colorText3)
+                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
             }
         }
 
@@ -215,5 +353,14 @@ Rectangle {
             font.weight: Theme.fontBodyWeight
             color: Theme.colorText2
         }
+    }
+
+    // THE WHOLE CARD IS THE TARGET, not the six characters of the tag: the tag says the card
+    // is tappable and the card is what the thumb lands on. Declared last so it sits over the
+    // content; nothing else on a pattern card takes a click.
+    HoverHandler { id: focusHover; enabled: root.interactive; cursorShape: Qt.PointingHandCursor }
+    TapHandler {
+        enabled: root.interactive && !!root.card
+        onTapped: root.focusToggled(root.card.id || "", !root.focused)
     }
 }

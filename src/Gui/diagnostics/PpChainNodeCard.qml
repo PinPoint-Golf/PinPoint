@@ -56,6 +56,27 @@ Item {
     // for this node exists in the published surface.
     property string screenRef: ""
 
+    // Off on the auto-closing cast (PpSessionDiagnosticsWindow.interactive).
+    property bool interactive: true
+
+    // ── the focus contract (design §A6) ──────────────────────────────────────
+    // Offered on LIVE nodes only, and that is not a layout decision: declaring focus splits
+    // the session at the current shot so a link can earn Moved-together, and a node this
+    // capture cannot measure has nothing to split. A ghost, a screened root and the declared
+    // outcome are all things the panel is reporting ABOUT rather than things a session can be
+    // run at. The read-back is the model's `focused`, exactly as on the pattern card.
+    readonly property bool focused: node ? node.focused === true : false
+    readonly property bool focusable: interactive && isLive && !!node
+    signal focusToggled(string conditionId, bool nowFocused)
+
+    // ── the after-shot pulse (§B3, §B8) ──────────────────────────────────────
+    // { token, ids, focusId }, republished by the body on every shotIngested. See the twin
+    // block on PpPatternCard — one mechanism, because the two cards are the same claim drawn
+    // in two arrangements and a rail that pulsed differently would read as a second event.
+    property var pulseCue: null
+    readonly property bool pulsing: pulseSeq.running
+    property real _pulseT: 0.0
+
     objectName: "sdChainNode"
 
     // The mock's node is `overflow:hidden` and so is this: a rail row shorter than the design
@@ -121,6 +142,41 @@ Item {
                                               : Math.round(wide.implicitHeight + 2 * px(9))
     implicitHeight: contentHeight
 
+    // ── the pulse ────────────────────────────────────────────────────────────
+    // One pass, opacity and border alpha only. reduceMotion is no pulse and no stagger, not a
+    // faster one — see PpPatternCard.
+    SequentialAnimation {
+        id: pulseSeq
+        PauseAnimation { id: pulseWait; duration: 0 }
+        NumberAnimation { target: root; property: "_pulseT"; to: 1.0
+                          duration: Theme.durationFast; easing.type: Easing.OutQuad }
+        NumberAnimation { target: root; property: "_pulseT"; to: 0.0
+                          duration: Theme.durationSlow; easing.type: Easing.InQuad }
+    }
+
+    // A CARD CREATED AFTER THE SHOT MUST NOT REPLAY IT. The cue is a property, so a delegate
+    // built later — a resize that changed how many fit, a stage that swapped the body — binds
+    // to whatever cue is current and would flash for a swing it was not there for.
+    property bool _ready: false
+    Component.onCompleted: root._ready = true
+
+    onPulseCueChanged: {
+        if (!root._ready) return
+        // STOPPED FIRST, ALWAYS. A new shot has landed, so whatever this card was saying about
+        // the last one is over — including when this card is not in the new cue at all. A card
+        // left flashing from the previous swing would be pointing at the wrong ball.
+        pulseSeq.stop()
+        root._pulseT = 0.0
+        const cue = root.pulseCue
+        const id  = root.node ? (root.node.id || "") : ""
+        if (!cue || !cue.ids || id === "") return
+        const slot = cue.ids.indexOf(id)
+        if (slot < 0) return          // this condition did not change on this swing
+        if (Theme.reduceMotion) return
+        pulseWait.duration = slot * 70
+        pulseSeq.start()
+    }
+
     // ── the frame ────────────────────────────────────────────────────────────
     Rectangle {
         anchors.fill: parent
@@ -128,7 +184,28 @@ Item {
         color: root._fill
         radius: Theme.radius
         border.width: 1
-        border.color: root._stroke
+        // The focused node's marker is the headline of the moment (§B3): the accent replaces
+        // the resting stroke while focus is declared, and the pulse lifts it on a shot that
+        // fired here. Unfocused nodes fade the accent in over their own stroke and back out.
+        border.color: root.focused
+                      ? Qt.rgba(Theme.colorAccent.r, Theme.colorAccent.g, Theme.colorAccent.b,
+                                0.45 + 0.55 * root._pulseT)
+                      : (root._pulseT > 0
+                         ? Qt.rgba(Theme.colorAccent.r, Theme.colorAccent.g,
+                                   Theme.colorAccent.b, root._pulseT)
+                         : root._stroke)
+    }
+
+    // ── the focus bar ────────────────────────────────────────────────────────
+    Rectangle {
+        objectName: "sdChainNodeFocusBar"
+        visible: root.focused
+        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+        anchors.margins: 1
+        width: Math.max(1, root.px(3))
+        radius: width / 2
+        color: Theme.colorAccent
+        opacity: 0.7 + 0.3 * root._pulseT
     }
     PpDashedFrame {
         objectName: "sdChainGhostFrame"
@@ -259,14 +336,17 @@ Item {
         // while reviewing or closed and not otherwise), and it is the sentence that makes the
         // wide tick above it mean something: "3 more firings after this shot" is the answer to
         // "was the swing I picked the end of it, or the middle".
-        Row {
+        Item {
             width: wide.width
-            visible: root.isLive && (trendText.text !== "" || firingsAfter.text !== "")
-            spacing: root.px(7)
+            height: root.isLive
+                    ? Math.max(trendText.implicitHeight, focusTag.implicitHeight) : 0
+            visible: root.isLive
 
             Text {
                 id: trendText
                 objectName: "sdChainNodeTrend"
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
                 visible: text !== ""
                 text: root.node ? ((root.node.trendArrow || "") + (root.node.trend || "")) : ""
                 font.family: Theme.fontData
@@ -276,13 +356,33 @@ Item {
             Text {
                 id: firingsAfter
                 objectName: "sdChainNodeRecency"
-                width: Math.max(0, parent.width - trendText.width - parent.spacing)
+                anchors.left: trendText.right
+                anchors.leftMargin: trendText.visible ? root.px(7) : 0
+                anchors.right: focusTag.visible ? focusTag.left : parent.right
+                anchors.rightMargin: focusTag.visible ? root.px(7) : 0
+                anchors.verticalCenter: parent.verticalCenter
                 visible: text !== ""
                 text: root.node ? (root.node.firingsAfterText || "") : ""
                 elide: Text.ElideRight
                 font.family: Theme.fontData
                 font.pixelSize: root.tzCaption
                 color: Theme.colorText3
+            }
+            // Same micro-label as the pattern card's, in the same words: the two surfaces are
+            // two arrangements of one contract and a reader must not have to learn it twice.
+            Text {
+                id: focusTag
+                objectName: "sdChainNodeFocusTag"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.focusable
+                text: root.focused ? qsTr("FOCUSED ·") : qsTr("FOCUS ▸")
+                font.family: Theme.fontData
+                font.pixelSize: root.tzCaption
+                font.letterSpacing: Theme.trackingLabel
+                color: root.focused ? Theme.colorAccent
+                                    : (focusHover.hovered ? Theme.colorAccent : Theme.colorText3)
+                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
             }
         }
 
@@ -386,5 +486,13 @@ Item {
         enabled: root.isScreen
         onClicked: root.screenRequested(root.screenRef,
                                         root.node ? (root.node.id || "") : "")
+    }
+
+    // The other kind of tap this node takes, and the two can never collide: a screened root
+    // is not live and a live node is not screened.
+    HoverHandler { id: focusHover; enabled: root.focusable; cursorShape: Qt.PointingHandCursor }
+    TapHandler {
+        enabled: root.focusable
+        onTapped: root.focusToggled(root.node.id || "", !root.focused)
     }
 }

@@ -55,6 +55,11 @@ Item {
     // file having to know.
     property alias source: body.source
 
+    // Off on the auto-closing post-shot pop, where the focus tap and the miss picker would be
+    // armed on a surface that is about to vanish under the pointer. See
+    // PpSessionDiagnosticsWindow.interactive; nothing about what the panel SAYS changes.
+    property alias interactive: body.interactive
+
     // A screen was asked for — the driver footer's CTA, or a screened root on the rail.
     //
     // DELIBERATELY UNCONNECTED. Running a screen is a thirty-second physical test with a
@@ -161,6 +166,18 @@ Item {
         function onSurfaceChanged()        { root._refreshReadout() }
         function onSelectedShotIdChanged() { root._refreshReadout() }
         function onReviewingChanged()      { root._refreshReadout() }
+
+        // THE AFTER-SHOT MOMENT, handed to the body the same way the readout is: shotIngested
+        // is a signal and the body has no model to connect to, so the one file with the
+        // model's signals in front of it does the connecting.
+        //
+        // GATED ON `surfaced`, which is cadence's answer and not a second one taken here.
+        // Bandwidth mode decided this shot was not worth interrupting for; pulsing the cards
+        // anyway would be the interruption it declined, arriving by a different route. That is
+        // the same rule as the quiet strip and it has to hold on both or on neither.
+        function onShotIngested(shotId, surfaced) {
+            if (surfaced) body.pulseAfterShot()
+        }
     }
 
     PpSessionDiagnosticsBody {

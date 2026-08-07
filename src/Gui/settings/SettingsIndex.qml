@@ -149,19 +149,23 @@ QtObject {
           itemId: "setting_fullScreen" },
 
         { panelIndex: 2, panelLabel: qsTr("Displays"),    groupLabel: qsTr("Post-shot display"),
-          label: qsTr("Secondary display"),                subtitle: qsTr("Golfer-facing screen shown after each swing"),
+          label: qsTr("Secondary display"),                subtitle: qsTr("Golfer-facing screen the session diagnostics panel is cast to"),
           itemId: "setting_secondaryDisplay" },
 
+        // NO "Post-shot content" ROW. The cast surface is the session diagnostics panel and
+        // there is no longer a content choice to index — see DisplaysPanel's group note. The
+        // AppSettings key survives for stored profiles; a search hit that led to a control
+        // that no longer exists would not.
         { panelIndex: 2, panelLabel: qsTr("Displays"),    groupLabel: qsTr("Post-shot display"),
-          label: qsTr("Post-shot content"),                subtitle: qsTr("What the golfer sees on the secondary display"),
-          itemId: "setting_postShotContent" },
+          label: qsTr("Post-shot display mode"),           subtitle: qsTr("A persistent window, one that pops after each swing, or a full-screen kiosk"),
+          itemId: "setting_postShotDisplayMode" },
 
         { panelIndex: 2, panelLabel: qsTr("Displays"),    groupLabel: qsTr("Post-shot display"),
-          label: qsTr("Display delay"),                    subtitle: qsTr("Pause before showing post-shot content"),
+          label: qsTr("Display delay"),                    subtitle: qsTr("Pause after a swing before the cast window appears"),
           itemId: "setting_postShotDelay" },
 
         { panelIndex: 2, panelLabel: qsTr("Displays"),    groupLabel: qsTr("Post-shot display"),
-          label: qsTr("Mirror main window"),               subtitle: qsTr("Shows the full Pinpoint interface on the secondary display"),
+          label: qsTr("Mirror main window"),               subtitle: qsTr("Flips the cast horizontally, for a coach standing opposite the athlete"),
           itemId: "setting_mirrorMain" },
 
         { panelIndex: 2, panelLabel: qsTr("Displays"),    groupLabel: qsTr("Rendering"),

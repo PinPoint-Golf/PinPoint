@@ -49,7 +49,13 @@ Item {
     property string screenConditionId: ""
     property string screenRef: ""
 
+    // Off on the auto-closing cast (PpSessionDiagnosticsWindow.interactive).
+    property bool interactive: true
+    // The body's after-shot cue, passed straight through. See PpChainNodeCard.
+    property var pulseCue: null
+
     signal screenRequested(string screenRef, string conditionId)
+    signal focusToggled(string conditionId, bool nowFocused)
 
     objectName: "sdChainRail"
 
@@ -125,9 +131,12 @@ Item {
                                 : parent.height
                         node: wideNode.modelData
                         fit:  root.fit
+                        interactive: root.interactive
+                        pulseCue: root.pulseCue
                         screenRef: (wideNode.modelData.id === root.screenConditionId)
                                    ? root.screenRef : ""
                         onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                        onFocusToggled: (id, on) => root.focusToggled(id, on)
                     }
                 }
 
@@ -168,9 +177,12 @@ Item {
                     slim: true
                     node: slimNode.modelData
                     fit:  root.fit
+                    interactive: root.interactive
+                    pulseCue: root.pulseCue
                     screenRef: (slimNode.modelData.id === root.screenConditionId)
                                ? root.screenRef : ""
                     onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+                    onFocusToggled: (id, on) => root.focusToggled(id, on)
                 }
 
                 PpChainLink {

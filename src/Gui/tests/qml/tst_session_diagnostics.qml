@@ -67,6 +67,35 @@ Item {
     // `source`. Null is "no shot selected", which is a state under test in its own right.
     property var readout: null
 
+    // ── the two declarations, spied ──────────────────────────────────────────
+    //
+    // declareFocus / clearFocus / declareMiss / missCandidates are INVOKABLES on the model, so
+    // the body reaches them through `source` exactly as it reads every string off it — which
+    // means a fixture can supply them and the test asserts what the panel ASKED FOR rather
+    // than what some model then did about it. That split is the point: this suite is about the
+    // affordance, and detection's indifference to both declarations is enforced and asserted
+    // in the C++ suite, where it belongs.
+    property int    focusCalls: 0
+    property string lastFocusId: ""
+    property int    clearFocusCalls: 0
+    property int    missCalls: 0
+    property string lastMissId: "\u0000"      // distinguishable from declareMiss("")
+
+    readonly property var missRows: [
+        { id: "slice",       name: "Slice" },
+        { id: "hook",        name: "Hook" },
+        { id: "thin_strike", name: "Thin strike" }
+    ]
+
+    // The pack's outcome layer, as the model's missCandidates() publishes it.
+    function spied(s) {
+        s.declareFocus   = function (id) { probe.focusCalls += 1; probe.lastFocusId = id }
+        s.clearFocus     = function ()   { probe.clearFocusCalls += 1 }
+        s.declareMiss    = function (id) { probe.missCalls += 1; probe.lastMissId = id }
+        s.missCandidates = function ()   { return probe.missRows }
+        return s
+    }
+
     // The carousel's half of 13a, pressed on its own. PpShotCard needs a dozen proxy-model
     // roles and a ListView to exist at all; the pip row needs a list of states, which is the
     // whole reason it was extracted rather than left inline on the card.
@@ -459,6 +488,16 @@ Item {
             wait(0)
         }
 
+        // BEFORE ANY CLICK. A Row positions its children on a POLISH, not on the binding that
+        // sized them, so a delegate read one wait(0) after its model changed is still at x = 0
+        // — and two cards stacked at the same x take the same click. wait(0) is enough to read
+        // a string off an item and is not enough to press one. (The same reason test_08 waits
+        // on the watching row's height with tryVerify rather than comparing it outright.)
+        function laidOut() {
+            waitForRendering(body)
+            wait(0)
+        }
+
         // Review is TWO inputs — the surface and the selected shot's readout — because
         // selection is what turns "the finished session" into "this shot inside it".
         function setReview(s, r) {
@@ -478,6 +517,13 @@ Item {
             probe.pipFired = 0
             probe.lastScreenRef = ""
             probe.lastScreenCondition = ""
+            probe.focusCalls = 0
+            probe.lastFocusId = ""
+            probe.clearFocusCalls = 0
+            probe.missCalls = 0
+            probe.lastMissId = "\u0000"
+            Theme.reduceMotion = false
+            body.pulseCue = null
             wait(0)
         }
 
@@ -1081,6 +1127,216 @@ Item {
             probe.pipFired = 0
             wait(0)
             compare(count.color, Theme.colorGood, "a swing that fired nothing says so in green")
+        }
+
+        // ── the focus contract (design §A6) ──────────────────────────────────
+
+        // The affordance has to be VISIBLE to be a contract anybody enters, and it has to say
+        // which of the two states it is in — a tag that read the same focused and unfocused
+        // would make the accent bar the only evidence, and the bar is easy to miss on a card
+        // that is already coloured by its state pill.
+        function test_27_aPatternCardOffersFocusAndSaysWhichStateItIsIn() {
+            setSource(spied(formingSource(false)))
+
+            const cards = visibleAll(body, "sdPatternCard")
+            compare(cards.length, 2)
+            compare(one(cards[0], "sdCardFocusTag").text, "FOCUS \u25B8")
+            compare(cards[0].focused, false)
+            verify(!shown(one(cards[0], "sdCardFocusBar")),
+                   "an unfocused card carries no accent bar")
+
+            // ...and the read-back is the MODEL'S `focused`, not a click this file remembers.
+            const s = spied(formingSource(false))
+            s.cards[0].focused = true
+            setSource(s)
+            const focusedCards = visibleAll(body, "sdPatternCard")
+            compare(focusedCards[0].focused, true)
+            compare(one(focusedCards[0], "sdCardFocusTag").text, "FOCUSED \u00B7")
+            verify(shown(one(focusedCards[0], "sdCardFocusBar")),
+                   "the focused card takes the accent bar")
+            verify(!shown(one(focusedCards[1], "sdCardFocusBar")),
+                   "and it is the only one that does")
+        }
+
+        // Tapping ASKS the model. Nothing in the panel is toggled here — declareFocus() records
+        // a split at the current shot count and only the model can do that, so a body that
+        // flipped its own flag would be showing a contract the ledger has not entered.
+        function test_28_tappingAPatternCardAsksTheModelToDeclareOrClearFocus() {
+            setSource(spied(formingSource(false)))
+
+            laidOut()
+            const cards = visibleAll(body, "sdPatternCard")
+            mouseClick(cards[0])
+            wait(0)
+            compare(probe.focusCalls, 1, "the tap reached declareFocus")
+            compare(probe.lastFocusId, "casting", "with the card's own condition id")
+            compare(probe.clearFocusCalls, 0)
+            // The card did not move on its own: `focused` is still what the fixture publishes.
+            compare(cards[0].focused, false,
+                    "the panel waits for the model rather than assuming")
+
+            // A card the model reports as focused clears instead — one affordance, two verbs,
+            // chosen by the state the model is in.
+            const s = spied(formingSource(false))
+            s.cards[0].focused = true
+            setSource(s)
+            laidOut()
+            mouseClick(visibleAll(body, "sdPatternCard")[0])
+            wait(0)
+            compare(probe.clearFocusCalls, 1, "the focused card clears")
+            compare(probe.focusCalls, 1, "and does not re-declare")
+        }
+
+        // The rail's live nodes carry the same contract in the same words. The three that are
+        // not live do not: a ghost, a screened root and the declared outcome are things the
+        // panel reports ABOUT, and a session cannot be run at one.
+        function test_29_onlyLiveChainNodesOfferTheFocusContract() {
+            setSource(spied(establishedSource(true)))
+            laidOut()
+
+            const live = nodeById("casting")
+            verify(shown(one(live, "sdChainNodeFocusTag")), "a live node offers focus")
+            mouseClick(live)
+            wait(0)
+            compare(probe.focusCalls, 1)
+            compare(probe.lastFocusId, "casting")
+
+            verify(!shown(one(nodeById("over_the_top"), "sdChainNodeFocusTag")),
+                   "a ghost does not")
+            verify(!shown(one(nodeById("slice"), "sdChainNodeFocusTag")),
+                   "and neither does the declared outcome")
+
+            // The screened root's tap is still its OWN — the two never collide because a
+            // screened root is not live.
+            probe.focusCalls = 0
+            mouseClick(nodeById("pelvic_disassociation"))
+            wait(0)
+            compare(probe.focusCalls, 0, "a screened root does not declare focus")
+            compare(probe.lastScreenCondition, "pelvic_disassociation",
+                    "it asks for its screen, as it always did")
+        }
+
+        // ── the declared miss (design §A6) ───────────────────────────────────
+
+        function test_30_theMissChipInvitesInColdAndFormingAndReportsOnceDeclared() {
+            setSource(spied(coldSource(probe.expectationRows)))
+            verify(shown(one(body, "sdMissChip")), "Cold asks the opening question")
+
+            setSource(spied(formingSource(false)))
+            verify(shown(one(body, "sdMissChip")), "so does Forming")
+            compare(one(body, "sdMissChip").children[0].text, "DECLARE MISS \u25B8")
+
+            // Past Forming the INVITATION stands down — there is a picture to read by then and
+            // the panel stops asking for one.
+            setSource(spied(establishedSource(true)))
+            verify(!shown(one(body, "sdMissChip")),
+                   "Established does not ask again")
+
+            // ...but a declaration is a fact about the session and does not expire with the
+            // stage that took it, so the chip reports it at any stage.
+            const s = spied(establishedSource(true))
+            s.declaredMiss = "slice"
+            s.declaredMissName = "Slice"
+            setSource(s)
+            verify(shown(one(body, "sdMissChip")), "a declared miss is always reported")
+            verify(one(body, "sdMissChip").children[0].text.indexOf("Slice") >= 0,
+                   "by name, not by id")
+        }
+
+        // The picker is the PACK'S outcome layer, fetched through the model. Nothing about
+        // "slice, hook, thin" is written in the QML, which is what stops the list going stale
+        // the first time the pack gains an outcome.
+        function test_31_theMissPickerListsTheModelsCandidatesAndDeclaresOne() {
+            setSource(spied(formingSource(false)))
+            laidOut()
+
+            verify(!shown(one(body, "sdMissPicker")), "closed until asked for")
+            mouseClick(one(body, "sdMissChip"))
+            laidOut()
+            verify(shown(one(body, "sdMissPicker")), "the chip opens it")
+
+            const rows = visibleAll(body, "sdMissCandidate")
+            compare(rows.length, 3, "one row per outcome the model offers")
+            verify(one(body, "sdMissPickerLabel").text.indexOf("BAD SHOT") >= 0,
+                   "and it states the question it is asking")
+
+            mouseClick(rows[1])
+            wait(0)
+            compare(probe.missCalls, 1)
+            compare(probe.lastMissId, "hook", "the row's own id, not its label")
+            verify(!shown(one(body, "sdMissPicker")), "answering closes it")
+
+            // Withdrawing is the same verb with an empty id — the model treats "" as a clear,
+            // so there is no second call to keep in step. Offered only once there is one.
+            const s = spied(formingSource(false))
+            s.declaredMiss = "hook"
+            s.declaredMissName = "Hook"
+            setSource(s)
+            laidOut()
+            mouseClick(one(body, "sdMissChip"))
+            laidOut()
+            const clear = one(body, "sdMissClear")
+            verify(shown(clear), "a declared miss can be withdrawn")
+            mouseClick(clear)
+            wait(0)
+            compare(probe.lastMissId, "", "declareMiss('') is the clear")
+        }
+
+        // ── the after-shot pulse (§B3, §B8) ──────────────────────────────────
+
+        function test_32_thePulseRunsOnWhatFiredAndLeadsWithTheFocusedNode() {
+            const s = spied(formingSource(false))
+            s.afterShotDelta.fired = ["face_roll", "casting"]
+            s.afterShotDelta.focusId = "casting"
+            s.cards[0].focused = true          // casting
+            setSource(s)
+
+            const cards = visibleAll(body, "sdPatternCard")
+            compare(cards[0].pulsing, false, "nothing is pulsing before a shot lands")
+
+            body.pulseAfterShot()
+            verify(!!body.pulseCue, "a cue was published")
+            // The focused node leads: its marker is the headline of the moment, and leading
+            // the stagger is how the sweep says so without a second mark.
+            compare(body.pulseCue.ids[0], "casting")
+            compare(body.pulseCue.ids.length, 2)
+            verify(cards[0].pulsing, "the leading card is already moving")
+
+            // ...and a condition that did NOT fire on this shot does not move at all.
+            const s2 = spied(formingSource(false))
+            s2.afterShotDelta.fired = ["casting"]
+            setSource(s2)
+            body.pulseAfterShot()
+            const only = visibleAll(body, "sdPatternCard")
+            verify(only[0].pulsing, "the one that fired pulses")
+            compare(only[1].pulsing, false, "the one that did not stays put")
+        }
+
+        // reduceMotion is NO pulse, not a shorter one — and no stagger either, so there is
+        // nothing queued to happen later. The card still redraws with its new pill, its new
+        // tick and its NEW tag: the state change was never carried by the animation.
+        function test_33_thePulseHonoursReduceMotion() {
+            const s = spied(formingSource(false))
+            s.afterShotDelta.fired = ["casting", "face_roll"]
+            setSource(s)
+
+            Theme.reduceMotion = true
+            wait(0)
+            body.pulseAfterShot()
+
+            const cards = visibleAll(body, "sdPatternCard")
+            for (let i = 0; i < cards.length; ++i) {
+                compare(cards[i].pulsing, false,
+                        "card " + i + ": no animation is running under reduceMotion")
+                compare(cards[i]._pulseT, 0.0, "card " + i + ": and nothing was displaced")
+            }
+            // Nothing was merely DEFERRED either: a stagger would show up here.
+            wait(50)
+            for (let i = 0; i < cards.length; ++i)
+                compare(cards[i].pulsing, false, "card " + i + ": nothing started late")
+
+            Theme.reduceMotion = false
+            wait(0)
         }
 
         // ── nothing escapes the panel ────────────────────────────────────────

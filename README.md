@@ -230,7 +230,7 @@ The Settings screen uses a sidebar navigation with full-text search (Ctrl/Cmd+F)
 |---|---|---|
 | **General** | Active | Language, measurement units, session behaviour (auto-detect swing, AI coaching), update and diagnostics preferences |
 | **Appearance** | Active | Theme selector (8 options), font scale, UI density, reduce motion, pose overlay opacity |
-| **Displays** | Active | Main display placement, window geometry memory, secondary display output, post-shot content and delay, UI frame-rate cap, hardware acceleration |
+| **Displays** | Active | Main display placement, window geometry memory, secondary display output, how the session diagnostics cast is surfaced (panel / auto-closing window / kiosk) with its delay, dwell and mirror, UI frame-rate cap, hardware acceleration |
 | **Cameras** | Active | Per-camera enable/disable, view assignment (Face-on / Down-the-line / Other), mirrored image toggle, frame-rate chips, trigger mode (Free-run / HW sync), ROI crop with live preview; global pre-roll buffer and camera-sync toggle |
 | **IMUs** | Active | Per-device enable/disable, body placement assignment (A–D), output rate chips, save-to-flash, live test panel with 3D viz and Euler angles; global auto-connect, auto-reconnect, save-calibration-to-flash, and orientation-fusion algorithm (Madgwick / ESKF) |
 | **Microphone** | Active | Single-active input-device selection; "use microphone for shot detection" toggle (acoustic modality only — voice/STT unaffected); live calibration view with a dB level trace, trigger-threshold line, per-detection markers + chime, and a sensitivity slider |
@@ -399,10 +399,10 @@ The app forces `QSettings::IniFormat` (see `src/Core/pp_settings.h`), so on Wind
 |---|---|---|---|
 | `display/mainDisplayMode` | `"primary"` | ✅ | Where to open the main window (`"primary"`, `"cursor"`, `"screen:<n>"`) |
 | `display/rememberWindowGeometry` | `true` | ✅ | Restore exact window position and size from previous session |
-| `display/secondaryDisplayMode` | `"none"` | 📋 | Secondary output for post-shot replay (`"none"` or `"screen:<n>"`) |
-| `display/postShotContent` | `"replay"` | 📋 | What to show on the secondary display after a shot |
-| `display/postShotDelay` | `0.5` | 📋 | Seconds before post-shot content is shown |
-| `display/postShotMirror` | `false` | 📋 | Mirror the post-shot image horizontally |
+| `display/secondaryDisplayMode` | `"none"` | 📋 | Secondary output the session diagnostics panel is cast to (`"none"` or `"screen:<n>"`) |
+| `display/postShotContent` | `"replay"` | 📋 | Legacy, unread — chose replay vs metrics when the cast was the per-shot dashboard; kept so stored profiles survive |
+| `display/postShotDelay` | `0.5` | 📋 | Seconds after a swing before the cast window appears |
+| `display/postShotMirror` | `false` | 📋 | Mirror the cast horizontally, for a coach standing opposite the athlete |
 | `display/uiFrameRateCap` | `"display"` | 📋 | UI render rate cap (`"display"` = match monitor refresh, or explicit Hz) |
 | `display/hardwareAcceleration` | `true` | 📋 | Use GPU-accelerated rendering |
 

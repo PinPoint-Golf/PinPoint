@@ -164,20 +164,27 @@ class AppSettings : public QObject
     Q_PROPERTY(QString mainDisplayMode             READ mainDisplayMode             WRITE setMainDisplayMode             NOTIFY mainDisplayModeChanged)
     Q_PROPERTY(bool    rememberWindowGeometry      READ rememberWindowGeometry      WRITE setRememberWindowGeometry      NOTIFY rememberWindowGeometryChanged)
     Q_PROPERTY(QString secondaryDisplayMode        READ secondaryDisplayMode        WRITE setSecondaryDisplayMode        NOTIFY secondaryDisplayModeChanged)
+    // LEGACY, AND KEPT ON PURPOSE. It chose between "replay", "metrics" and "replay+metrics"
+    // back when the cast surface was the per-shot dashboard. The secondary display now shows
+    // the session diagnostics panel, so there is no content choice left to make and nothing
+    // reads this — but a stored profile carries it, and dropping a key from QSettings to
+    // silence a UI is how a user's saved configuration goes missing. No code path switches on
+    // it; the Displays panel no longer offers it.
     Q_PROPERTY(QString postShotContent             READ postShotContent             WRITE setPostShotContent             NOTIFY postShotContentChanged)
     Q_PROPERTY(double  postShotDelay               READ postShotDelay               WRITE setPostShotDelay               NOTIFY postShotDelayChanged)
     Q_PROPERTY(bool    postShotMirror              READ postShotMirror              WRITE setPostShotMirror              NOTIFY postShotMirrorChanged)
-    // How the post-shot dashboard is surfaced on the target display: "panel"
-    // (persistent in-app stage panel), "window" (auto-closing overlay window on
-    // the secondary screen), or "kiosk" (persistent full-screen). Default "panel".
+    // How the post-shot cast — the session diagnostics panel — is surfaced on the
+    // target display: "panel" (persistent framed window on the secondary screen),
+    // "window" (auto-closing overlay after each shot), or "kiosk" (persistent
+    // full-screen). Default "panel".
     Q_PROPERTY(QString postShotDisplayMode         READ postShotDisplayMode         WRITE setPostShotDisplayMode         NOTIFY postShotDisplayModeChanged)
     // Seconds the post-shot WINDOW stays before auto-closing (only meaningful when
     // postShotDisplayMode == "window"). Distinct from postShotDelay (the pre-show delay).
     Q_PROPERTY(double  postShotDwell               READ postShotDwell               WRITE setPostShotDwell               NOTIFY postShotDwellChanged)
-    // Dashboard content scale on the cast surface: "small" | "medium" | "large".
-    // Purely a viewing-distance preference — a 13" laptop mirrored at arm's length
-    // and a 65" TV across a bay want very different type, and neither is "correct".
-    // The window turns this into a uniform zoom (PpDashboardWindow.contentScale), so
+    // Content scale on the cast surface: "small" | "medium" | "large". Purely a
+    // viewing-distance preference — a 13" laptop mirrored at arm's length and a 65"
+    // TV across a bay want very different type, and neither is "correct". The window
+    // turns this into a uniform zoom (PpSessionDiagnosticsWindow.contentScale), so
     // proportions are identical at every setting. Default "medium".
     Q_PROPERTY(QString dashboardScale              READ dashboardScale              WRITE setDashboardScale              NOTIFY dashboardScaleChanged)
     Q_PROPERTY(QString uiFrameRateCap              READ uiFrameRateCap              WRITE setUiFrameRateCap              NOTIFY uiFrameRateCapChanged)

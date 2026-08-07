@@ -452,7 +452,10 @@ qt_add_qml_module(PinPointStudio
         src/Gui/shot/PpDashboardMotionZone.qml
         src/Gui/shot/PpDashboardSequenceZone.qml
         src/Gui/shot/PpDashboardPresetEditor.qml
-        src/Gui/shot/PpDashboardWindow.qml
+        # The secondary-display cast. All the second-screen machinery the dashboard window
+        # had — target screen, kiosk, mirror, pin, dwell, viewing-distance scale — hosting
+        # the SESSION DIAGNOSTICS panel, which is what a wall is now for.
+        src/Gui/shot/PpSessionDiagnosticsWindow.qml
         # Dashboard paint primitives — every metric renders as one of these
         # (no bare numbers); each is Shape-painted and fed pre-reduced values.
         src/Gui/shot/PpBandRail.qml

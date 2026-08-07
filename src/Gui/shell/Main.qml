@@ -368,19 +368,28 @@ ApplicationWindow {
     readonly property bool sessionScreenActive: navController.currentIndex >= screenSwing
                                                 && navController.currentIndex <= screenCoach
 
-    // ── Post-shot dashboard secondary-display cast ───────────────────────────
-    // Surfaces the configurable dashboard on the secondary display, in one of three
-    // ways chosen by postShotDisplayMode — ALL of them on the target screen, and ALL
-    // of them ONLY while a session screen is on show (see sessionScreenActive):
-    //   • PANEL — a PERSISTENT windowed (framed, movable) dashboard, up for as long as
-    //     the session screen is (panel + a secondary screen). Persistent ⇒ dwell inert.
-    //   • KIOSK — a PERSISTENT full-screen dashboard, same lifetime.
+    // ── Post-shot secondary-display cast ─────────────────────────────────────
+    // Surfaces the SESSION DIAGNOSTICS panel on the secondary display, in one of three ways
+    // chosen by postShotDisplayMode — ALL of them on the target screen, and ALL of them ONLY
+    // while a session screen is on show (see sessionScreenActive):
+    //   • PANEL — a PERSISTENT windowed (framed, movable) cast, up for as long as the
+    //     session screen is (panel + a secondary screen). Persistent ⇒ dwell inert.
+    //   • KIOSK — a PERSISTENT full-screen cast, same lifetime.
     //   • WINDOW — a TEMPORARY windowed overlay that pops after a freshly captured shot
-    //     (postShotDelay) and auto-closes after the dwell; gated on post-shot content
-    //     including metrics.
-    // All three FOLLOW THE FOCUSED SHOT: selecting a carousel card focuses shotReplay
-    // (SessionMode.enterReplay), and the window binds the same shotReplay + per-type
-    // preset store as the in-app panel, so metrics update live on selection.
+    //     (postShotDelay) and auto-closes after the dwell.
+    //
+    // WHAT IS CAST CHANGED; THE PLUMBING DID NOT. The old surface was the per-shot dashboard
+    // and it followed the focused shot through shotReplay; the diagnostics panel is per
+    // SESSION and cumulative, and it follows the carousel through SessionMode.focusedShotId
+    // on its own. shotReplay is still started below on a fresh shot because the in-app stage
+    // reads it — the cast no longer depends on it.
+    //
+    // postShotContent IS NO LONGER READ HERE. It chose between "replay" and "metrics" for a
+    // surface that had both; the cast is now always the diagnostics panel, so the only thing
+    // the key could still do is suppress the window-mode pop entirely — which is what the
+    // display-mode chips are for, and what "replay" silently did. The AppSettings key stays
+    // (settings persist, and nothing gains from breaking a stored profile); no code path
+    // switches on it.
     QtObject {
         id: postShotCast
         function screenFor(mode) {
@@ -389,14 +398,12 @@ ApplicationWindow {
             var screens = Qt.application.screens
             return (idx >= 0 && idx < screens.length) ? screens[idx] : null
         }
-        readonly property bool metricsWanted: appSettings.postShotContent === "metrics"
-                                            || appSettings.postShotContent === "replay+metrics"
         readonly property var target: screenFor(appSettings.secondaryDisplayMode)
     }
 
     property var  _dashWin: null
     property bool _dashWinTemporary: false     // window-mode (auto-closes) vs persistent
-    Component { id: dashWinComp; PpDashboardWindow {} }
+    Component { id: dashWinComp; PpSessionDiagnosticsWindow {} }
 
     // Create the window HIDDEN with its target screen + geometry already set, then
     // show() — relocating a window across monitors after its first map is unreliable
@@ -409,7 +416,7 @@ ApplicationWindow {
             "kiosk":  kioskMode,
             "mirror": appSettings.postShotMirror,
             // Drives the window's interactive layer: only the auto-closing pop is
-            // inert (see PpDashboardWindow.interactive).
+            // inert (see PpSessionDiagnosticsWindow.interactive).
             "autoClose": temporary
         })
         _dashWinTemporary = temporary
@@ -504,12 +511,13 @@ ApplicationWindow {
                 return
             var mode = appSettings.postShotDisplayMode
             if (mode === "panel" || mode === "kiosk") {
-                // Persistent already up (or opened at config) — just focus the new shot
-                // so its metrics show, and ensure the surface exists.
+                // Persistent already up (or opened at config) — focus the new shot for the
+                // in-app stage and ensure the cast surface exists. The cast's own panel
+                // ingests the shot off the same shotProcessor signal.
                 if (shotReplay.swingDir !== swingDir)
                     shotReplay.start(shotId, swingDir)
                 root._syncPersistent()
-            } else if (mode === "window" && postShotCast.metricsWanted) {
+            } else if (mode === "window") {
                 if (shotReplay.swingDir !== swingDir)
                     shotReplay.start(shotId, swingDir)
                 castDwellTimer.stop()
