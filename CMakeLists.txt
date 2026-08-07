@@ -559,6 +559,14 @@ qt_add_qml_module(PinPointStudio
         src/Diagnostics/merged_norm_provider.cpp
         src/Gui/diagnostics/wrist_diagnostics_model.h
         src/Gui/diagnostics/wrist_diagnostics_model.cpp
+        # The session diagnostics panel's model — the QML façade over diagnostic_ledger.h and
+        # the characteristic pack. Instantiated by the panel, not registered in main.cpp: the
+        # panel is off by default (the user turns it on in View) and this model owns a pack, a
+        # norm provider and a worker thread that re-runs detection on every shot. Same
+        # reasoning as lm_session_model above, and the same reason its inputs (cadence, grade
+        # policy) are properties the panel binds rather than singletons it reaches for.
+        src/Gui/diagnostics/session_diagnostics_model.h
+        src/Gui/diagnostics/session_diagnostics_model.cpp
         src/Analysis/reference_bands.h
         src/Analysis/reference_bands.cpp
         src/Analysis/wrist_assessment_engine.h

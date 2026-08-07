@@ -80,6 +80,29 @@ class AppSettings : public QObject
     // comparable across athletes or across shared packs. The names, and the z thresholds behind
     // them, live in norm_model.cpp; this stores only which one is chosen.
     Q_PROPERTY(QString diagnosticsGradePolicy READ diagnosticsGradePolicy WRITE setDiagnosticsGradePolicy NOTIFY diagnosticsGradePolicyChanged)
+    // Session diagnostics feedback cadence (the session diagnostics panel), by NAME:
+    // "bandwidth" | "everyShot". Default "bandwidth".
+    //
+    // WHY THIS IS A PER-USER SETTING RATHER THAN A CONSTANT. Motor-learning research is
+    // consistent that feedback after EVERY trial impairs retention relative to reduced
+    // schedules — bandwidth feedback (say something only when performance leaves a
+    // tolerance band) and summary/faded knowledge-of-results both beat 100%-frequency
+    // augmented feedback, because a panel that speaks after every ball becomes the thing
+    // the golfer is guided by rather than their own felt sense. Bandwidth is therefore the
+    // DEFAULT and the honest one to ship (design §B4).
+    //
+    // It is nonetheless a setting, because the two modes serve genuinely different
+    // sessions: an assessment session, or one with a coach reading the panel over the
+    // golfer's shoulder, wants every shot — the person interpreting it is not the person
+    // swinging, so the retention argument does not apply to them. A build that hard-coded
+    // either mode would be wrong for half its users.
+    //
+    // WHAT IT MUST NEVER DO, and this is a contract SessionDiagnosticsModel enforces: it
+    // gates SURFACING ONLY. The ledger accumulates at full rate whatever this says, which
+    // is why diagnostic_ledger.h has no cadence parameter to pass — a quiet panel and a
+    // loud one hold the identical evidence, and the session's persisted rows are byte
+    // identical either way.
+    Q_PROPERTY(QString sessionDiagnosticsCadence READ sessionDiagnosticsCadence WRITE setSessionDiagnosticsCadence NOTIFY sessionDiagnosticsCadenceChanged)
     // Norm-set layers switched OFF, by norm-set id. Empty (the default) means every loaded set
     // takes part, which is what a fresh install has. Turning the user's own set off is how an
     // author sees what the shipped corridors say without deleting their overrides — so this is a
@@ -323,6 +346,8 @@ public:
         m_metricsHidePlanned = ppSettings().value(QStringLiteral("ui/metricsHidePlanned"), false).toBool();
         m_diagnosticsGradePolicy = ppSettings().value(QStringLiteral("ui/diagnosticsGradePolicy"),
                                                       QStringLiteral("standard")).toString();
+        m_sessionDiagnosticsCadence = ppSettings().value(QStringLiteral("ui/sessionDiagnosticsCadence"),
+                                                        QStringLiteral("bandwidth")).toString();
         m_diagnosticsNormSetsOff = ppSettings().value(QStringLiteral("ui/diagnosticsNormSetsOff"),
                                                       QStringList()).toStringList();
         m_diagnosticsBaseModelWarningAck =
@@ -466,6 +491,7 @@ public:
     bool    timelineSnapToPhases() const { return m_timelineSnapToPhases; }
     bool    metricsHidePlanned()  const { return m_metricsHidePlanned; }
     QString diagnosticsGradePolicy() const { return m_diagnosticsGradePolicy; }
+    QString sessionDiagnosticsCadence() const { return m_sessionDiagnosticsCadence; }
     QStringList diagnosticsNormSetsOff() const { return m_diagnosticsNormSetsOff; }
     bool    diagnosticsBaseModelWarningAck() const { return m_diagnosticsBaseModelWarningAck; }
     bool    settingsNavCollapsed() const { return m_settingsNavCollapsed; }
@@ -668,6 +694,21 @@ public:
         m_diagnosticsGradePolicy = v;
         ppSettings().setValue(QStringLiteral("ui/diagnosticsGradePolicy"), v);
         emit diagnosticsGradePolicyChanged();
+    }
+
+    void setSessionDiagnosticsCadence(const QString &v)
+    {
+        // Anything that is not "everyShot" is bandwidth. Same regime as setLmPanelMode(): the
+        // stored value is a preference, not a contract, so a hand-edited ini or a mode this
+        // build no longer has lands on the DEFAULT rather than on a panel that never speaks.
+        // Falling back to the quieter of the two is also the safe direction — a golfer who
+        // asked for every shot and silently got bandwidth notices; the reverse is a panel
+        // that has quietly started interrupting every ball.
+        const QString mode = (v == QStringLiteral("everyShot")) ? v : QStringLiteral("bandwidth");
+        if (m_sessionDiagnosticsCadence == mode) return;
+        m_sessionDiagnosticsCadence = mode;
+        ppSettings().setValue(QStringLiteral("ui/sessionDiagnosticsCadence"), mode);
+        emit sessionDiagnosticsCadenceChanged();
     }
 
     void setDiagnosticsNormSetsOff(const QStringList &v)
@@ -1430,6 +1471,7 @@ signals:
     void timelineSnapToPhasesChanged();
     void metricsHidePlannedChanged();
     void diagnosticsGradePolicyChanged();
+    void sessionDiagnosticsCadenceChanged();
     void diagnosticsNormSetsOffChanged();
     void diagnosticsBaseModelWarningAckChanged();
     void settingsNavCollapsedChanged();
@@ -1536,6 +1578,7 @@ private:
     bool    m_timelineSnapToPhases = false;
     bool    m_metricsHidePlanned = false;
     QString m_diagnosticsGradePolicy = QStringLiteral("standard");
+    QString m_sessionDiagnosticsCadence = QStringLiteral("bandwidth");
     QStringList m_diagnosticsNormSetsOff;
     bool        m_diagnosticsBaseModelWarningAck = false;
     bool        m_settingsNavCollapsed = false;

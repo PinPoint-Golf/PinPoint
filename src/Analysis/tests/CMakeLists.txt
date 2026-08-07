@@ -764,6 +764,41 @@ pp_add_test(live_measure_source_test
 set_tests_properties(live_measure_source_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${DIAGRES}/core.json;PINPOINT_CORE_NORMS=${DIAGRES}/norms.json;PINPOINT_CORE_CONTEXTS=${DIAGRES}/contexts.json")
 
+# THE ORCHESTRATION between the two tests above it: SessionDiagnosticsModel, the QML façade that
+# joins live detection to the session ledger. diagnostic_ledger_test proves the arithmetic and
+# live_measure_source_test proves the pack meets a real swing; neither can fail if the join is
+# wrong, and the join is where this panel's honesty lives — an idempotence hole counts one swing
+# twice, a cadence check in the ingest path withholds evidence, a fault profile that reaches a
+# reduction turns history into a finding. Every one of those produces a panel that looks entirely
+# healthy while lying about a golfer, so the assertions here are contracts rather than values.
+#
+# The façade is a QObject with Q_PROPERTY/Q_INVOKABLE and QML_ELEMENT, so this target needs
+# AUTOMOC and Qt6::Qml (for qqmlregistration.h — the macro is a Q_CLASSINFO, no QML RUNTIME is
+# involved and none may be: a model that could not be exercised from C++ could not be tested at
+# all). The off-thread ingest is a plain QThreadPool from Qt6::Core, so there is no Concurrent on
+# the line; the test drives it synchronously, which is the one concession the design makes to
+# being tested.
+#
+# Reuses live_measure_source_test's corpus fixtures, staged into <athlete>/<session>/swing_NNNN so
+# the fault profile lands in the athlete folder the way it will in the app.
+pp_add_test(session_diagnostics_model_test
+    SOURCES ${DIAG}/tests/session_diagnostics_model_test.cpp
+            ${SRC}/Gui/diagnostics/session_diagnostics_model.cpp
+            ${DIAG}/live_measure_source.cpp ${DIAG}/measure_sample.cpp
+            ${DIAG}/characteristic_engine.cpp ${DIAG}/relation_resolver.cpp
+            ${DIAG}/screen_pack.cpp
+            ${DIAG_NORM}
+            ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
+            ${DIAG}/merged_norm_provider.cpp
+            ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
+            ${DIAG}/merged_pack_provider.cpp
+    INCLUDE ${NORM_INC}
+    LINK    Qt6::Qml
+    AUTOMOC
+    COMPILE_OPTIONS -DPP_LIVE_SWINGS_DIR="${DIAG}/tests/data/live_swings")
+set_tests_properties(session_diagnostics_model_test PROPERTIES
+    ENVIRONMENT "PINPOINT_CORE_PACK=${DIAGRES}/core.json;PINPOINT_CORE_NORMS=${DIAGRES}/norms.json;PINPOINT_CORE_CONTEXTS=${DIAGRES}/contexts.json;PINPOINT_CORE_SCREENS=${DIAGRES}/screens.json;PINPOINT_CORE_DRILLS=${DIAGRES}/drills.json;PINPOINT_CORE_REFERENCES=${DIAGRES}/references.json")
+
 # Every corridor signal points the way its own condition claims. An inverted signal does not fail
 # loudly — it fires on the wrong swings with correct-sounding text attached — so the fixture states
 # the expected direction and the catalogue quote that decides it. A new signal with no fixture row
