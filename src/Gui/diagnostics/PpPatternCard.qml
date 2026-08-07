@@ -182,9 +182,14 @@ Rectangle {
                 font.pixelSize: root.tzMicro
                 color: root._trendColor
             }
+            // IN REVIEW THE RECENCY SLOT CHANGES TENSE, not position. "last fired 2 measurable
+            // shots ago" is a statement about now and means nothing on a finished session;
+            // what the reader is asking is where the swing they picked sits in the run, which
+            // is "3 more firings after this shot". The model publishes firingsAfterText only
+            // while reviewing or closed, so its presence IS the tense.
             Text {
                 objectName: "sdCardRecency"
-                text: root.card ? (root.card.recencyText || "") : ""
+                text: root.card ? (root.card.firingsAfterText || root.card.recencyText || "") : ""
                 elide: Text.ElideRight
                 font.family: Theme.fontData
                 font.pixelSize: root.tzCaption

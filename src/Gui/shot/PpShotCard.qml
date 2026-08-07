@@ -23,6 +23,13 @@
 // are auto-filled from the ShotFilterProxyModel roles; the carousel also
 // reads them back to feed the review panel, so all roles are declared even
 // where this card doesn't render them.
+//
+// ...and, when a session diagnostics panel is up, one more: a PIP ROW — one pip per tracked
+// condition for this swing, plus the count that fired (design 13a, brief §6.1). It is what
+// makes the carousel the way INTO the panel post-session rather than a strip of thumbnails
+// beside it: the row is that swing's whole diagnostic read at a glance, so a reader picks the
+// shot they want to open instead of stepping through them. It costs a null check when no
+// panel is up — see the Loader below.
 
 import QtQuick
 import QtQuick.Controls
@@ -146,7 +153,11 @@ Rectangle {
 
         Text {
             anchors { left: parent.left; bottom: parent.bottom
-                      leftMargin: Theme.sp(7); bottomMargin: Theme.sp(22) }
+                      leftMargin: Theme.sp(7)
+                      // Steps up out of the pip row's band when there is one. The provenance
+                      // label and the diagnostic read are both worth a line and neither is
+                      // worth covering the other, and this card has exactly one clear band.
+                      bottomMargin: pipBand.visible ? Theme.sp(38) : Theme.sp(22) }
             visible:        !card.hasVideo
             // "IMU ONLY" on a shot with no IMU would be a small lie in the one place a
             // reader looks to find out what produced it.
@@ -178,6 +189,69 @@ Rectangle {
     PpQualityPill {
         anchors { right: parent.right; top: parent.top; margins: Theme.sp(6) }
         score: card.score
+    }
+
+    // ── the swing's diagnostic read, when a session diagnostics panel is up ──
+    //
+    // ZERO COST WHEN IT IS NOT. `SessionMode.sessionDiagnostics` is null unless a panel has
+    // claimed the seam (the user turns the panel on in View), and every binding inside the
+    // Loader — pipsFor(), firedCountFor(), the Connections on surfaceChanged — lives in the
+    // component that null does not instantiate. A card in a session with no panel evaluates
+    // one null check and nothing else, which is the same trade the panel itself makes by not
+    // being a context property in main.cpp.
+    //
+    // ABOVE THE STAR SCRIM AND BELOW THE ORDINAL CHIP. The card's overlays occupy three
+    // corners already; the band immediately over the star scrim is the one clear strip across
+    // the full width, and the row needs the width — nine pips split across Theme.sp(139) is
+    // already the least it can be read at.
+    Rectangle {
+        id: pipBand
+        anchors { left: parent.left; right: parent.right
+                  bottom: parent.bottom; bottomMargin: Theme.sp(24) }
+        height: Theme.sp(14)
+        z: 2
+        visible: pipLoader.item && pipLoader.item.count > 0
+        // Over media, so the same always-dark scrim the other overlays use — and, on the
+        // selected card, the design's accent wash. The BORDER is already the card's
+        // selection treatment (below), so this is the only part of 13a's selected cell that
+        // is missing; painting the wash over the whole still would fight the thumbnail the
+        // card exists to show, and painting it here puts it exactly where the diagnostic
+        // read is.
+        color: card.selected ? Theme.colorAccentLight : card.scrimColor
+
+        Loader {
+            id: pipLoader
+            anchors { fill: parent
+                      leftMargin: Theme.sp(6); rightMargin: Theme.sp(6) }
+            active: SessionMode.sessionDiagnostics !== null
+            sourceComponent: pipComponent
+        }
+    }
+
+    Component {
+        id: pipComponent
+
+        PpShotPipRow {
+            id: pipRow
+
+            // Recomputed on every republication of the ledger: a shot's pips are its own row
+            // in a ledger that is re-reduced whenever another shot lands, and a row that went
+            // stale would show a condition as clean that the session has since learned was
+            // not assessable. `_rev` is the only thing the signal touches, and both reads
+            // depend on it — reading it inside the condition rather than as a bare statement,
+            // which the QML compiler drops.
+            property int _rev: 0
+
+            pips:       (SessionMode.sessionDiagnostics && pipRow._rev >= 0)
+                        ? SessionMode.sessionDiagnostics.pipsFor(card.shotId) : []
+            firedCount: (SessionMode.sessionDiagnostics && pipRow._rev >= 0)
+                        ? SessionMode.sessionDiagnostics.firedCountFor(card.shotId) : 0
+
+            Connections {
+                target: SessionMode.sessionDiagnostics
+                function onSurfaceChanged() { pipRow._rev = pipRow._rev + 1 }
+            }
+        }
     }
 
     Rectangle {   // bottom gradient scrim carrying the (clickable) stars

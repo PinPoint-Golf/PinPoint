@@ -25,6 +25,15 @@
 // §3.1, §5.2). So there is no branch in here that skips a tick, and there is no width at
 // which one disappears: a ledger longer than the card narrows the pitch until it fits.
 //
+// THE SELECTED TICK IS THE REVIEW PANEL'S ONLY POSITIONAL DEVICE (brief §6). Reviewing a
+// finished session, every count on the panel is a session total and the ONE thing that says
+// which swing is being read is this tick: 6 px wide against 2.5, 14 px tall against 11, and
+// outlined in colorText so it survives being drawn over a fired fill. It is deliberately not
+// a colour change — the tick's colour already means fired/clean/not-assessable, and a
+// selection that recoloured it would overwrite the fact it is pointing at. The model decides
+// WHICH tick is selected (ticksFor() carries `selected`), because a delegate comparing shot
+// ids would have to know the panel's selection to draw a run.
+//
 // Every tick's state comes from SessionDiagnosticsModel::ticksFor(). This file positions
 // and paints.
 
@@ -49,8 +58,19 @@ Item {
     readonly property real _gap:    2.0 * _unit
     readonly property int  _tallH:  Math.max(2, Math.round(11 * _unit))
     readonly property int  _shortH: Math.max(1, Math.round(5 * _unit))
+    // ...and the selected tick's, from the same table: 6 wide, 14 tall.
+    readonly property real _selW:   6.0 * _unit
+    readonly property int  _selH:   Math.max(3, Math.round(14 * _unit))
 
     readonly property int count: ticks ? ticks.length : 0
+    // The run reserves the SELECTED tick's height whenever it holds one, so a card's layout
+    // does not shift by 3 px as the reviewed shot moves along the carousel.
+    readonly property bool hasSelected: {
+        for (let i = 0; i < count; ++i)
+            if (ticks[i].selected === true) return true
+        return false
+    }
+    readonly property int _rowH: hasSelected ? _selH : _tallH
 
     // The pitch the run WANTS, and the pitch it can afford. Squeezing is preferred to
     // clipping for the reason in the header comment.
@@ -59,8 +79,13 @@ Item {
                                    ? Math.min(_wantPitch, width / count)
                                    : _wantPitch
     readonly property real _w: Math.max(1, _pitch - Math.min(_gap, _pitch * 0.4))
+    // The selected tick keeps its extra width even where the run has been squeezed — it is
+    // wider than its neighbours by DESIGN and a squeeze that equalised it would delete the
+    // only thing on the panel saying which shot is being read. It overlaps them instead,
+    // which is what the mock does at 14 ticks in a 220 px card.
+    readonly property real _selDrawW: Math.max(_w, Math.min(_selW, _pitch * 2))
 
-    implicitHeight: _tallH
+    implicitHeight: _rowH
     implicitWidth:  count * _pitch
 
     Repeater {
@@ -72,21 +97,31 @@ Item {
 
             readonly property bool notAssessable: modelData.state === "notAssessable"
             readonly property bool fired:         modelData.state === "fired"
+            readonly property bool selected:      modelData.selected === true
 
+            // ONE objectName for every tick, selected or not: the invariant this run exists
+            // to keep is "one tick per shot in the ledger and never a gap", and a test that
+            // counted them would stop being able to see that if the selected one renamed
+            // itself. What it is, is readable off `selected`.
             objectName: "sdTick"
 
             x: index * root._pitch
-            width:  root._w
-            height: notAssessable ? root._shortH : root._tallH
+            width:  selected ? root._selDrawW : root._w
+            height: selected ? root._selH
+                             : (notAssessable ? root._shortH : root._tallH)
             // Bottom-aligned, so the short tick sits on the run's baseline and reads as a
             // gap in the EVIDENCE rather than a gap in the sequence.
-            y: root._tallH - height
+            y: root._rowH - height
             radius: Math.max(1, Math.round(root._unit))
+            // Above its neighbours, since it is wider than its pitch when the run is tight.
+            z: selected ? 1 : 0
 
             color: notAssessable ? "transparent"
                                  : (fired ? Theme.colorError : Theme.colorGood)
-            border.width: notAssessable ? 1 : 0
-            border.color: Theme.colorText3
+            // Outlined in colorText when selected — over a fired fill, over a clean fill and
+            // over the not-assessable tick's own grey outline, all three read.
+            border.width: (selected || notAssessable) ? 1 : 0
+            border.color: selected ? Theme.colorText : Theme.colorText3
         }
     }
 }

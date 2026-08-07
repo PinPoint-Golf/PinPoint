@@ -55,11 +55,29 @@ Item {
         id: body
         anchors.fill: parent
         source: probe.src
+        readout: probe.readout
         onScreenRequested: (ref, cond) => {
             probe.lastScreenRef = ref
             probe.lastScreenCondition = cond
         }
     }
+
+    // shotReadout() is an invokable, so the panel fetches it and hands it down — which means
+    // the body takes it as a second input and a fixture supplies it the same way it supplies
+    // `source`. Null is "no shot selected", which is a state under test in its own right.
+    property var readout: null
+
+    // The carousel's half of 13a, pressed on its own. PpShotCard needs a dozen proxy-model
+    // roles and a ListView to exist at all; the pip row needs a list of states, which is the
+    // whole reason it was extracted rather than left inline on the card.
+    PpShotPipRow {
+        id: pipProbe
+        width: Theme.sp(127); height: Theme.sp(14)
+        pips: probe.pipFixture
+        firedCount: probe.pipFired
+    }
+    property var pipFixture: []
+    property int pipFired: 0
 
     // ── fixtures, in the shape the model publishes ───────────────────────────
 
@@ -296,6 +314,102 @@ Item {
         return s
     }
 
+    // ── review (13a, brief §6) ───────────────────────────────────────────────
+    //
+    // A FINISHED SESSION THAT STILL HAS ITS RAIL, because that is the arrangement review is
+    // for: session counts under every node, the reviewed shot as the one wide tick inside
+    // each run, and each node saying what happened to it AFTER that swing. The stage is
+    // Closing (the model freezes it there while reviewing) and the chains are the ones the
+    // Established fixture publishes — the panel does not rewind, so they are the same chains.
+
+    // The selected shot's tick, decided by the model and never by the delegate. `state` is
+    // what that shot did to this condition, so the run and the state pill beside it are the
+    // same fact — the model keeps those two in step and a fixture that did not would be
+    // asserting a panel the model cannot produce.
+    function selectTickAt(node, i, state) {
+        const ts = []
+        for (let j = 0; j < node.ticks.length; ++j)
+            ts.push({ state: j === i ? state : node.ticks[j].state,
+                      shotId: j, selected: j === i })
+        node.ticks = ts
+        return node
+    }
+
+    function reviewSource() {
+        const s = establishedSource(true)
+        s.stage = "closing"
+        s.closed = true
+        s.headerInfo.stage = "closing"
+        s.headerInfo.stageLabel = "CLOSING"
+        s.headerInfo.shotLabel = "shot 9 of 14"
+        s.headerInfo.countLine = "4 patterns · counted over all 14 shots"
+        s.headerInfo.closingLine = "Counts are session totals; this shot is the wide tick."
+        s.headerInfo.reviewBadge = "REVIEWING · shot 9 of 14"
+        s.headerInfo.reviewNote  = "final session state · this shot read inside the finished ledger"
+        s.headerInfo.reviewFootLine =
+            "The ledger stays at the finished session: counts under each node are the totals "
+            + "over all 14 shots, and this shot is the wide tick inside each run. Recurrence "
+            + "is not a rate at this n."
+
+        // The review tense on the nodes: the pill says what happened HERE, the recency line
+        // says what happened after, and the run carries the same answer as the wide tick.
+        // chain A is rushed transition → casting → shaft lean → scooping, and all three
+        // states appear across it so the pill is pressed at each of them.
+        const here = [
+            { pill: "FIRED HERE",   state: "fired",         after: "1 more firing after this shot" },
+            { pill: "FIRED HERE",   state: "fired",         after: "3 more firings after this shot" },
+            { pill: "CLEAN HERE",   state: "clean",         after: "no firings after this shot" },
+            { pill: "NOT MEASURED", state: "notAssessable", after: "no firings after this shot" }
+        ]
+        for (let i = 0; i < s.chains[0].nodes.length; ++i) {
+            s.chains[0].nodes[i].statePill        = here[i].pill
+            s.chains[0].nodes[i].firingsAfterText = here[i].after
+            selectTickAt(s.chains[0].nodes[i], 2, here[i].state)
+        }
+        return s
+    }
+
+    // The nine cells: fired, clean and the two the capture could not answer — which are the
+    // ones this fixture exists for. Their value slot reads "not measurable" and their corridor
+    // slot carries the REASON, and neither is ever blank.
+    function reviewReadout() {
+        function cell(id, name, kind, state, val, band, tier) {
+            return { id: id, name: name, stateKind: kind, state: state,
+                     valueText: val, corridorText: band,
+                     reason: kind === "notAssessable" ? band : "",
+                     tierTag: tier, recurrence: "", ticks: [], selectedIndex: 8,
+                     firingsAfter: 0, firingsAfterText: "no firings after this shot" }
+        }
+        return {
+            shotId: 9, shotIndex: 8, shotCount: 14, club: "7i",
+            firedCount: 7, cleanCount: 2, notAssessableCount: 2,
+            headline: "7 of 9 conditions fired on this swing · 4 of them patterns",
+            note: "2 measures not assessable on this capture",
+            conditions: [
+                // The true minus (U+2212) is the model's, and it is what makes the reading
+                // line up with the corridor beside it. Nothing in the QML reformats it.
+                cell("casting", "Casting", "fired", "OUT",
+                     "−4.4°", "pass −2.0 to +2.0°", "pattern"),
+                cell("rushed_transition", "Rushed transition", "fired", "OUT",
+                     "18 ms", "pass 30 to 70 ms", "pattern"),
+                cell("shaft_lean", "Not enough shaft lean", "clean", "IN",
+                     "+6.2°", "pass +4.0 to +12.0°", "watching"),
+                cell("scooping", "Scooping", "fired", "OUT",
+                     "12.4°", "pass 0.0 to 8.0°", "pattern"),
+                cell("face_roll", "Face roll through impact", "clean", "IN",
+                     "2.1°", "pass 0.0 to 4.0°", "clean all session"),
+                cell("sway", "Lateral sway", "fired", "OUT",
+                     "84 mm", "pass 20 to 55 mm", "watching"),
+                cell("path_out_to_in", "Path too far out-to-in", "fired", "OUT",
+                     "−5.1°", "pass −2.0 to +2.0°", "pattern"),
+                cell("head_height", "Head height Δ", "notAssessable", "—",
+                     "not measurable", "shaft occluded at P6", "clean all session"),
+                cell("x_factor", "X-factor", "notAssessable", "—",
+                     "not measurable", "ball not tracked", "watching")
+            ]
+        }
+    }
+
     TestCase {
         id: tc
         name: "SessionDiagnostics"
@@ -345,12 +459,23 @@ Item {
             wait(0)
         }
 
+        // Review is TWO inputs — the surface and the selected shot's readout — because
+        // selection is what turns "the finished session" into "this shot inside it".
+        function setReview(s, r) {
+            setSource(s)
+            probe.readout = r
+            wait(0)
+        }
+
         function init() {
             probe.width = 1168; probe.height = 560
             Theme.themeIndex = 5          // studio dark, the design's own frame
             Theme.fontScale = 1.0
             body.watchingExpanded = false
             body.expandedChain = -1
+            probe.readout = null
+            probe.pipFixture = []
+            probe.pipFired = 0
             probe.lastScreenRef = ""
             probe.lastScreenCondition = ""
             wait(0)
@@ -792,16 +917,186 @@ Item {
                     "and the coverage line is stated at the bottom instead")
         }
 
+        // ── review: 13a ──────────────────────────────────────────────────────
+
+        function test_21_reviewStatesItsTenseInTheHeader() {
+            setReview(reviewSource(), reviewReadout())
+
+            verify(shown(one(body, "sdReviewBadge")), "the REVIEWING badge is up")
+            compare(one(body, "sdReviewNote").text,
+                    "final session state · this shot read inside the finished ledger")
+            // The count line moves to the right-hand end and says what it counts over — it
+            // is a SESSION total, not this shot's, and the panel does not rewind.
+            compare(one(body, "sdCadenceNote").text, "4 patterns · counted over all 14 shots")
+            verify(!shown(one(body, "sdStageNote")),
+                   "so it is not also stated beside the stage chip")
+
+            // ...and the footer says the same thing in words, exactly once.
+            const foot = one(body, "sdTenseFooter")
+            verify(shown(foot), "the tense footer is up")
+            verify(foot.text.indexOf("wide tick") >= 0,
+                   "and it names the device the panel is using to point at the shot")
+            verify(foot.text.indexOf("not a rate at this n") >= 0)
+        }
+
+        function test_22_reviewWithNoShotSelectedIsStillTheFinishedSession() {
+            // Brief §6: the panel holds the FINAL state, and selection is what enters
+            // shot-reading. Reviewing without a pick is the session's own summary.
+            setReview(reviewSource(), null)
+
+            verify(shown(one(body, "sdReviewBadge")), "the tense is still stated")
+            verify(!shown(one(body, "sdReviewStrip")),
+                   "but there is no shot to read, so no shot strip")
+            verify(shown(one(body, "sdBookends")), "the session's bookends hold the slot")
+
+            // ...and picking one swaps that slot, and only that slot.
+            probe.readout = reviewReadout()
+            wait(0)
+            verify(shown(one(body, "sdReviewStrip")), "the reviewed shot takes the slot")
+            verify(!shown(one(body, "sdBookends")), "the bookends step aside for it")
+            verify(!shown(one(body, "sdThisShotStrip")),
+                   "and the live after-shot strip is not in review at all")
+        }
+
+        function test_23_reviewShowsEveryConditionAndNeverABlankSlot() {
+            setReview(reviewSource(), reviewReadout())
+
+            compare(one(body, "sdReviewHeadline").text,
+                    "7 of 9 conditions fired on this swing · 4 of them patterns")
+            // The not-assessable measures are stated SEPARATELY rather than folded into the
+            // denominator, which would turn "we did not look" into "it was fine".
+            compare(one(body, "sdReviewSubline").text,
+                    "2 measures not assessable on this capture")
+
+            const cells = visibleAll(body, "sdReviewCell")
+            compare(cells.length, 9, "every condition is drawn — nothing is a '+3 more'")
+
+            const marks  = visibleAll(body, "sdReviewCellMark").map(t => t.text)
+            const values = visibleAll(body, "sdReviewCellValue").map(t => t.text)
+            const bands  = visibleAll(body, "sdReviewCellCorridor").map(t => t.text)
+            const tiers  = visibleAll(body, "sdReviewCellTier").map(t => t.text)
+
+            compare(marks.filter(m => m === "OUT").length, 5)
+            compare(marks.filter(m => m === "IN").length, 2)
+            compare(marks.filter(m => m === "—").length, 2, "the third state has its own mark")
+
+            // Neither slot is EVER blank on a cell the capture could not answer: the value
+            // reads "not measurable" and the corridor slot carries the reason.
+            compare(values.filter(v => v === "not measurable").length, 2)
+            verify(bands.indexOf("shaft occluded at P6") >= 0, "the reason is in the band slot")
+            verify(bands.indexOf("ball not tracked") >= 0)
+            for (let i = 0; i < bands.length; ++i)
+                verify(bands[i] !== "", "cell " + i + " states what it was tested against")
+
+            // The true minus survives the trip: it is what makes the reading line up with
+            // the corridor beside it.
+            verify(values.indexOf("−4.4°") >= 0, "U+2212, not a hyphen")
+
+            // The session tier sits beside this shot's read, which is the comparison the
+            // cell exists to make: was this swing typical of the session or not.
+            verify(tiers.indexOf("pattern") >= 0)
+            verify(tiers.indexOf("watching") >= 0)
+            verify(tiers.indexOf("clean all session") >= 0)
+
+            // Dashed on the two, and only the two, the capture could not answer.
+            compare(visibleAll(body, "sdReviewCellDash").length, 2)
+
+            // The design's cell width, at k = 1 on a 1168 panel: five to a row, two rows.
+            compare(cells[0].width, 220)
+        }
+
+        function test_24_theSelectedShotIsTheWideOutlinedTick() {
+            setReview(reviewSource(), reviewReadout())
+
+            const node = nodeById("casting")
+            verify(node, "the reviewed session keeps its rail")
+            // The node carries a wide form and a 12c slim one, both instantiated; only the
+            // arrangement on screen is asked about.
+            const run = findAll(node, "sdTick").filter(t => shown(t))
+            compare(run.length, 6, "one tick per shot, and the selection adds none")
+
+            const sel = run.filter(t => t.selected)
+            compare(sel.length, 1, "exactly one selected tick")
+            const other = run.filter(t => !t.selected && !t.notAssessable)[0]
+
+            verify(sel[0].width > other.width, "wider than its neighbours")
+            verify(sel[0].height > other.height, "and taller")
+            compare(sel[0].border.width, 1, "outlined")
+            compare(sel[0].border.color, Theme.colorText,
+                    "in colorText, so it survives being drawn over a fired fill")
+            // ...and NOT recoloured: the tick's colour already means fired/clean, and a
+            // selection that overwrote it would delete the fact it is pointing at.
+            compare(sel[0].color, Theme.colorError)
+        }
+
+        function test_25_nodesSayWhatHappenedHereAndAfter() {
+            setReview(reviewSource(), reviewReadout())
+
+            const node = nodeById("casting")
+            compare(one(node, "sdChainNodePill").children[0].text, "FIRED HERE",
+                    "the pill is in the review tense")
+            compare(one(node, "sdChainNodeRecency").text, "3 more firings after this shot",
+                    "and the recency line answers 'was this the end of it, or the middle'")
+            // The session counts are untouched by the selection — the panel does not rewind.
+            compare(one(node, "sdChainNodeRecurrence").text, "4 of 6 measurable shots")
+
+            const clean = nodeById("shaft_lean")
+            compare(one(clean, "sdChainNodePill").children[0].text, "CLEAN HERE")
+            compare(one(clean, "sdChainNodeRecency").text, "no firings after this shot")
+        }
+
+        // ── the carousel's half (brief §6.1) ─────────────────────────────────
+
+        function test_26_thePipRowIsTheSwingsWholeReadAtCarouselSize() {
+            probe.pipFixture = [
+                { id: "a", state: "fired" }, { id: "b", state: "clean" },
+                { id: "c", state: "notAssessable" }, { id: "d", state: "fired" },
+                { id: "e", state: "clean" }, { id: "f", state: "fired" },
+                { id: "g", state: "clean" }, { id: "h", state: "notAssessable" },
+                { id: "i", state: "fired" }
+            ]
+            probe.pipFired = 4
+            wait(0)
+
+            const pips = findAll(pipProbe, "sdPip")
+            compare(pips.length, 9, "one pip per tracked condition, and never a gap")
+
+            const fired = pips.filter(p => p.fired)
+            const na    = pips.filter(p => p.notAssessable)
+            compare(fired.length, 4)
+            compare(na.length, 2)
+            compare(fired[0].color, Theme.colorError)
+            compare(pips[1].color, Theme.colorGood)
+
+            // Same third state as the tick run: shorter and outlined, never left out — two
+            // shots with different unmeasured sets must not read as the same swing.
+            verify(na[0].height < fired[0].height, "the unmeasured pip is shorter")
+            compare(na[0].border.width, 1, "and outlined rather than filled")
+
+            // The count is the severity, in the app's three grading colours.
+            const count = one(pipProbe, "sdPipCount")
+            compare(count.text, "4 fired")
+            compare(count.color, Theme.colorError)
+
+            probe.pipFired = 0
+            wait(0)
+            compare(count.color, Theme.colorGood, "a swing that fired nothing says so in green")
+        }
+
         // ── nothing escapes the panel ────────────────────────────────────────
         // The chrome is 1 px of border and a radius; a card or a strip that overhung it
         // would be clipped away rather than drawn, which is a finding gone missing.
         function test_20_nothingOverhangsTheChrome() {
             const sizes = [[1168, 560], [396, 560], [820, 420]]
             const sources = [coldSource(probe.expectationRows), formingSource(false),
-                             closingSource(), establishedSource(true)]
+                             closingSource(), establishedSource(true), reviewSource()]
+            // The review arrangement is the only one with a second input; at 396 its cells
+            // stack and the grid SCROLLS, which is what this test is checking has not turned
+            // into a cell drawn outside the panel.
+            const readouts = [null, null, null, null, reviewReadout()]
 
             for (let s = 0; s < sources.length; ++s) {
-                setSource(sources[s])
+                setReview(sources[s], readouts[s])
                 for (let i = 0; i < sizes.length; ++i) {
                     probe.width = sizes[i][0]; probe.height = sizes[i][1]
                     wait(0)
@@ -812,7 +1107,8 @@ Item {
                     // is one scroll away, not one gone missing.
                     const names = ["sdPatternCard", "sdExpectationCard", "sdThisShotStrip",
                                    "sdBookends", "sdColdBody", "sdCardsBody",
-                                   "sdChainsFlick", "sdDriverFooter"]
+                                   "sdChainsFlick", "sdDriverFooter",
+                                   "sdReviewStrip", "sdReviewGrid", "sdTenseFooter"]
                         .concat(body.compact ? []
                                              : ["sdChainRail", "sdChainNode", "sdChainLink"])
                     for (let n = 0; n < names.length; ++n) {

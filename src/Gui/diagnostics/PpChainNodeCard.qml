@@ -254,15 +254,36 @@ Item {
             fit: root.fit
         }
 
-        // ── trend ────────────────────────────────────────────────────────────
-        Text {
-            objectName: "sdChainNodeTrend"
+        // ── trend, and — in review — where the shot sits in the run ──────────
+        // The recency line is REVIEW-ONLY on a node (the model publishes firingsAfterText
+        // while reviewing or closed and not otherwise), and it is the sentence that makes the
+        // wide tick above it mean something: "3 more firings after this shot" is the answer to
+        // "was the swing I picked the end of it, or the middle".
+        Row {
             width: wide.width
-            visible: root.isLive && text !== ""
-            text: root.node ? ((root.node.trendArrow || "") + (root.node.trend || "")) : ""
-            font.family: Theme.fontData
-            font.pixelSize: root.tzMicro
-            color: root._trendColor
+            visible: root.isLive && (trendText.text !== "" || firingsAfter.text !== "")
+            spacing: root.px(7)
+
+            Text {
+                id: trendText
+                objectName: "sdChainNodeTrend"
+                visible: text !== ""
+                text: root.node ? ((root.node.trendArrow || "") + (root.node.trend || "")) : ""
+                font.family: Theme.fontData
+                font.pixelSize: root.tzMicro
+                color: root._trendColor
+            }
+            Text {
+                id: firingsAfter
+                objectName: "sdChainNodeRecency"
+                width: Math.max(0, parent.width - trendText.width - parent.spacing)
+                visible: text !== ""
+                text: root.node ? (root.node.firingsAfterText || "") : ""
+                elide: Text.ElideRight
+                font.family: Theme.fontData
+                font.pixelSize: root.tzCaption
+                color: Theme.colorText3
+            }
         }
 
         // ── one line of evidence prose ───────────────────────────────────────

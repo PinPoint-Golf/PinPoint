@@ -1072,6 +1072,19 @@ void SessionDiagnosticsModel::buildHeader()
                     : QString();
     h[QStringLiteral("cadenceNote")] = m_quiet ? QStringLiteral("BANDWIDTH · QUIET") : QString();
 
+    // THE PANEL'S TENSE, IN WORDS, ALONG THE BOTTOM (13a's footer). The devices above it —
+    // the wide tick, the session counts under every node — are only unambiguous to a reader
+    // who already knows the panel does not rewind. This sentence is what tells them, and it
+    // is the reason the deliberate non-rewind is a design decision rather than a surprise.
+    h[QStringLiteral("reviewFootLine")] =
+        m_reviewing
+            ? QStringLiteral("The ledger stays at the finished session: counts under each node "
+                             "are the totals over all %1 %2, and this shot is the wide tick "
+                             "inside each run. Recurrence is not a rate at this n.")
+                  .arg(n)
+                  .arg(n == 1 ? QStringLiteral("shot") : QStringLiteral("shots"))
+            : QString();
+
     // The Cold body line. One sentence, and it is the em-dash philosophy: say the n is too
     // small, do not fill the space with something that looks like a finding.
     h[QStringLiteral("coldLine")] =
@@ -1440,6 +1453,23 @@ void SessionDiagnosticsModel::buildChains()
                         : (hs == QLatin1String("fired") ? QStringLiteral("FIRED")
                          : hs == QLatin1String("clean") ? QStringLiteral("CLEAN")
                                                         : QStringLiteral("NOT MEASURED"));
+
+                // WHAT HAPPENED TO THIS NODE AFTER THE SELECTED SWING. The question review
+                // asks is whether the shot was typical, and typical is only defined against
+                // what came next — a condition that fired here and never again is a different
+                // fact from one that fired here and eight more times. Published on the same
+                // terms as the pattern cards' (buildCards), so the two rows agree.
+                if (m_reviewing || m_closed) {
+                    int after = 0;
+                    for (int i = fi + 1; i < int(l->run.size()); ++i)
+                        if (l->run[size_t(i)] == ShotState::Fired) ++after;
+                    n[QStringLiteral("firingsAfter")] = after;
+                    n[QStringLiteral("firingsAfterText")] =
+                        after == 0 ? QStringLiteral("no firings after this shot")
+                                   : QStringLiteral("%1 more %2 after this shot")
+                                         .arg(after).arg(after == 1 ? QStringLiteral("firing")
+                                                                    : QStringLiteral("firings"));
+                }
             } else {
                 // A node with no ledger was never assessed at all — no recurrence, no ticks,
                 // and the pill says so rather than showing an empty count.

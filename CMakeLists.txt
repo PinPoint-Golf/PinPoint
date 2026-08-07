@@ -385,6 +385,11 @@ qt_add_qml_module(PinPointStudio
         src/Gui/shot/PpShotActionBar.qml
         src/Gui/shot/PpExportOptionsSheet.qml
         src/Gui/shot/PpShotCard.qml
+        # The card's diagnostic read at carousel size. Extracted from PpShotCard because the
+        # card needs a dozen proxy-model roles to exist at all and the pip row needs a list of
+        # states — which is the difference between a component that can be pressed offscreen
+        # and one that can only be eyeballed.
+        src/Gui/shot/PpShotPipRow.qml
         src/Gui/session/PpSessionDrawer.qml
         src/Gui/shot/PpShotFilter.qml
         src/Gui/shot/PpSwingEditPanel.qml
@@ -398,6 +403,10 @@ qt_add_qml_module(PinPointStudio
         src/Gui/diagnostics/PpSessionDiagnosticsPanel.qml
         src/Gui/diagnostics/PpSessionDiagnosticsBody.qml
         src/Gui/diagnostics/PpThisShotStrip.qml
+        # ...and its review tense: the shot the carousel focused, read inside the finished
+        # ledger. Every condition, wrapping, nothing withheld — the live strip reports a
+        # moment and is cadence-gated, this one answers a question the reader asked.
+        src/Gui/diagnostics/PpReviewShotStrip.qml
         src/Gui/diagnostics/PpPatternCard.qml
         # The chain rail. PpChainNodeCard is the four things a node can be — live card, ghost,
         # screened root, declared outcome — and is NOT PpPatternCard in a compact mode because

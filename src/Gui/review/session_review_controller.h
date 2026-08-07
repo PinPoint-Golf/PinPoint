@@ -58,6 +58,12 @@ class SessionReviewController : public QObject
     // the launch monitor board took the live model unconditionally and so drew an empty
     // board over a loaded session that was full of readings.
     Q_PROPERTY(ShotListModel *activeShots READ activeShots NOTIFY reviewActiveChanged)
+    // THE SESSION ITSELF, not its labels: the absolute directory of the loaded session, empty
+    // while live. loadSession() takes the same string as `sessionId` — a session's id IS its
+    // directory path — so a panel that has to point something else at the reviewed session
+    // (the diagnostics ledger reads its swing_* dirs and diagnostics.json off disk) has one
+    // place to read it from instead of re-deriving it from a shot's swingDir.
+    Q_PROPERTY(QString  activeSessionId READ activeSessionId NOTIFY reviewActiveChanged)
     // Loaded-session header bits for the toolbar review strip + carousel chip.
     Q_PROPERTY(QString  activeDayLabel  READ activeDayLabel  NOTIFY reviewActiveChanged)
     Q_PROPERTY(QString  activeTimeLabel READ activeTimeLabel NOTIFY reviewActiveChanged)
@@ -74,6 +80,7 @@ public:
     QObject *sessionsModel()        { return &m_sessionsModel; }
     QObject *shots()                { return &m_reviewModel; }
     ShotListModel *activeShots()    { return m_reviewActive ? &m_reviewModel : m_liveModel; }
+    QString  activeSessionId() const { return m_loadedSessionDir; }
     QString  activeDayLabel()  const { return m_activeDayLabel; }
     QString  activeTimeLabel() const { return m_activeTimeLabel; }
     QString  activeClubMix()   const { return m_activeClubMix; }

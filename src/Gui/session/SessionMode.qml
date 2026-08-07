@@ -48,6 +48,11 @@ QtObject {
     property int    focusedShotId:   -1
     property string focusedSwingDir: ""
 
+    // The live session diagnostics ledger, if a panel is up — the carousel's shot cards read
+    // their pip row off it. NULLABLE AND NULL BY DEFAULT: the panel is off unless the user
+    // turns it on in View, and a card must cost nothing when it is (see PpShotCard).
+    property var    sessionDiagnostics: null
+
     // True only while the active Replay was auto-promoted from a just-captured shot
     // (post-shot instant playback). When that replay reaches its natural end the
     // host returns to Capture; EVERY other transition below clears it, so a

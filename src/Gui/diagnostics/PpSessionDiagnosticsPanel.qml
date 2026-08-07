@@ -77,26 +77,90 @@ Item {
         gradePolicy: appSettings.diagnosticsGradePolicy
 
         // Review FREEZES the ledger at Closing: a finished session's panel is its summary
-        // and must not re-open because it was looked at. Consuming the selection — the
-        // carousel's focused shot, the review this-shot strip — is a later phase; the
-        // property is set here so the model is already in the right tense when it lands.
+        // and must not re-open because it was looked at.
         reviewing:   sessionReviewController.reviewActive
+
+        // THE CAROUSEL OWNS THE SELECTION AND THE PANEL ONLY READS IT (brief §6.1, §8). The
+        // carousel is already at the foot of the stage and is post-session the ONLY way in;
+        // a second selection control on the panel would be a second answer to "which shot",
+        // and the two would disagree the moment either was used.
+        selectedShotId: SessionMode.focusedShotId
     }
 
-    // The live session's directory. activateSession() covers three situations that are the
-    // same problem — opening a finished session, resuming after a crash, and turning this
-    // panel on half way through a session — by reconciling diagnostics.json against the
-    // swing_* directories beside it and back-filling the difference.
-    readonly property string sessionDir: shotProcessor.activeSessionDir
+    // THE SESSION THE PANEL IS POINTED AT — the loaded one while reviewing, the live one
+    // otherwise. A session's id IS its directory, which is why one property answers both:
+    // SessionReviewController::loadSession() takes the same string and reads the same
+    // swing_* dirs out of it that activateSession() reconciles against.
+    //
+    // activateSession() covers three situations that are the same problem — opening a
+    // finished session, resuming after a crash, and turning this panel on half way through a
+    // session — by reconciling diagnostics.json against the swing_* directories beside it and
+    // back-filling the difference. Entering and leaving review is a fourth, and it is the
+    // same call for the same reason.
+    readonly property string sessionDir:
+        (sessionReviewController.reviewActive
+         && sessionReviewController.activeSessionId !== "")
+            ? sessionReviewController.activeSessionId
+            : shotProcessor.activeSessionDir
 
-    onSessionDirChanged: if (sessionDir !== "") diagModel.activateSession(sessionDir)
-    Component.onCompleted: if (sessionDir !== "") diagModel.activateSession(sessionDir)
+    // GUARDED ON THE MODEL'S OWN ANSWER, not on a remembered one. activateSession() is a disk
+    // scan and a back-fill, so it must not run again for a session already loaded — and
+    // asking the model what it holds is what makes leaving review correct: coming back to a
+    // live directory the panel was pointed at BEFORE the excursion still differs from the
+    // reviewed one the model is holding now, so the live ledger is rebuilt rather than the
+    // reviewed one being left on screen in the live tense. Empty is a real value here (a live
+    // session before its first export) and clears the model, for the same reason.
+    function _pointAtSession() {
+        if (sessionDir !== diagModel.sessionDir)
+            diagModel.activateSession(sessionDir)
+    }
+
+    // ORDER IS DELIBERATELY NOT PINNED between this and the `reviewing` binding above, which
+    // reviewActiveChanged also dirties: both republish the WHOLE surface, so whichever lands
+    // second publishes a state that has both facts in it, and the pair converges within the
+    // same event-loop turn either way. Pinning it would mean breaking the declarative binding
+    // on `reviewing` to set it by hand, which buys a transient nobody can observe.
+    onSessionDirChanged: _pointAtSession()
+    Component.onCompleted: {
+        _pointAtSession()
+        // THE CAROUSEL'S SEAM, CLAIMED UNCONDITIONALLY BY THE MOST RECENT PANEL. Both the
+        // session-mode and the wrist screens can host one of these, and the shot cards read
+        // their pips through the singleton — so the last panel to come up is the one whose
+        // ledger the cards draw. That is the right answer because it is the one the user is
+        // looking at, and it is the only answer that does not need a registry.
+        SessionMode.sessionDiagnostics = diagModel
+    }
+    // ...and released only if it is still OURS. A panel being torn down while a second one
+    // holds the seam must not null a pointer it no longer owns — which is exactly what
+    // happens when the user switches screens and the outgoing panel is destroyed after the
+    // incoming one has already claimed it.
+    Component.onDestruction:
+        if (SessionMode.sessionDiagnostics === diagModel)
+            SessionMode.sessionDiagnostics = null
 
     Connections {
         target: shotProcessor
         function onShotProcessed(shotId, swingDir) {
             diagModel.ingestShot(shotId, swingDir)
         }
+    }
+
+    // shotReadout() IS AN INVOKABLE, SO IT CANNOT BE BOUND — somebody has to call it, and
+    // this is the only file with the model's signals in front of it. Re-fetched on all three
+    // things that can change the answer: which shot is selected, whether the panel is in
+    // review at all, and any republication of the surface (a late back-fill landing changes
+    // the tiers the readout's cells carry).
+    function _refreshReadout() {
+        body.readout = (diagModel.reviewing && diagModel.selectedShotId >= 0)
+                       ? diagModel.shotReadout(diagModel.selectedShotId)
+                       : null
+    }
+
+    Connections {
+        target: diagModel
+        function onSurfaceChanged()        { root._refreshReadout() }
+        function onSelectedShotIdChanged() { root._refreshReadout() }
+        function onReviewingChanged()      { root._refreshReadout() }
     }
 
     PpSessionDiagnosticsBody {

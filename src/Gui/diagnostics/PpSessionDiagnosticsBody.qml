@@ -52,6 +52,15 @@ Rectangle {
     // Anything with SessionDiagnosticsModel's read surface. Null draws the empty chrome.
     property var source: null
 
+    // SessionDiagnosticsModel::shotReadout(selectedShotId), for the shot the carousel has
+    // focused — null when nothing is selected. THE ONE THING THIS BODY TAKES THAT IS NOT A
+    // PROPERTY OF `source`, and it is because shotReadout() is an INVOKABLE: it cannot be
+    // bound, so somebody has to call it and re-call it when the selection or the surface
+    // changes. That somebody is the panel, which is where the model's signals are (see
+    // PpSessionDiagnosticsPanel). A test hands a fixture map in directly, exactly as it hands
+    // `source` in — the body still computes nothing.
+    property var readout: null
+
     // Panel-local, and per brief §8 the only state this panel owns beyond the carousel's
     // selection and the cadence setting. Two collapsed regions, both of which open into the
     // SAME content rather than a different view: Watching (n), and — in the 396 arrangement
@@ -121,6 +130,19 @@ Rectangle {
     readonly property bool isEstablished: stage === "established"
     readonly property bool isClosing:   stage === "closing"
 
+    // ── review (13a, brief §6) ───────────────────────────────────────────────
+    // READ OFF THE PUBLISHED SURFACE, never off a controller: the model is the one that
+    // decides the panel is in review (it also freezes the stage at Closing when it is), and a
+    // body that asked something else could disagree with the counts it is drawing. The badge
+    // string is non-empty exactly when the model is reviewing a ledger with shots in it.
+    readonly property bool reviewing:
+        !!header && (header.reviewBadge || "") !== ""
+    // ...and a SHOT IS BEING READ only once the carousel has focused one. Review without a
+    // selection is the finished session's own summary — bookends and all — because the panel
+    // holds the final state and selection is what enters shot-reading (brief §6).
+    readonly property bool reviewingShot:
+        reviewing && !!readout && !!readout.conditions && readout.conditions.length > 0
+
     // ── how many cards fit, and how many are left over ───────────────────────
     // The MODEL decides which cards come first (hystereticOrder), so taking a prefix is a
     // decision about space and never about importance. What does not fit is COUNTED rather
@@ -145,6 +167,14 @@ Rectangle {
                                         ? (chains ? chains.length : 0)
                                         : Math.min(chains ? chains.length : 0, 2)
     readonly property int _chainsHidden: (chains ? chains.length : 0) - _chainsShown
+
+    // THE RAIL SURVIVES THE CLOSE. A session that earned a chain still has it once it is
+    // finished, and 13a draws the reviewed shot against that rail — losing it at the close
+    // would mean the one arrangement review is FOR could never be reached. A Closing session
+    // the model authored no chain for keeps the flat card row, because there is nothing else
+    // to draw; the composition follows the evidence, not the stage name.
+    readonly property bool _railBody:
+        isEstablished || (isClosing && !!chains && chains.length > 0)
 
     // driver.screenConditionId / screenRef — the only place the published surface carries a
     // screen ref for the screened-root node the rail draws.
@@ -242,10 +272,50 @@ Rectangle {
                         color: Theme.colorText
                     }
                 }
+                // ── the tense ────────────────────────────────────────────────
+                // REVIEWING · shot 9 of 14, framed in the accent at ~35% and lettered in it.
+                // It sits beside the stage chip rather than replacing it because they say
+                // different things — the stage is what the ledger matured to, the badge is
+                // which tense the panel is being read in.
+                Rectangle {
+                    objectName: "sdReviewBadge"
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: reviewBadgeText.text !== ""
+                    width:  reviewBadgeText.implicitWidth + root.px(14)
+                    height: reviewBadgeText.implicitHeight + root.px(4)
+                    radius: Math.max(1, root.px(3))
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Qt.rgba(Theme.colorAccent.r, Theme.colorAccent.g,
+                                          Theme.colorAccent.b, 0.35)
+
+                    Text {
+                        id: reviewBadgeText
+                        anchors.centerIn: parent
+                        text: root.header ? (root.header.reviewBadge || "") : ""
+                        font.family: Theme.fontData
+                        font.pixelSize: root.tzCaption
+                        font.letterSpacing: Theme.trackingMicro
+                        color: Theme.colorAccent
+                    }
+                }
+                Text {
+                    objectName: "sdReviewNote"
+                    anchors.verticalCenter: parent.verticalCenter
+                    // "final session state · this shot read inside the finished ledger" — the
+                    // sentence that stops the counts beside it being read as this shot's.
+                    visible: !root.compact && text !== ""
+                    text: root.header ? (root.header.reviewNote || "") : ""
+                    font.family: Theme.fontData
+                    font.pixelSize: root.tzMicro
+                    color: Theme.colorText2
+                }
                 Text {
                     objectName: "sdStageNote"
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: !root.compact && text !== ""
+                    // In review the count line moves to the right-hand end (13a), where it
+                    // reads as the session's total rather than as a note on the stage.
+                    visible: !root.compact && !root.reviewing && text !== ""
                     text: root.header ? (root.header.countLine || "") : ""
                     font.family: Theme.fontData
                     font.pixelSize: root.tzMicro
@@ -259,21 +329,31 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.rightMargin: root.px(2)
                 anchors.verticalCenter: parent.verticalCenter
+                // The right-hand end carries ONE of them, and never both: cadence is a live
+                // statement (there is no cadence gating in review, brief §6) and the count
+                // line is the reviewed session's total. So the slot changes tense with the
+                // panel instead of stacking two captions nobody asked to compare.
                 visible: !root.compact && text !== ""
-                text: root.header ? (root.header.cadenceNote || "") : ""
+                text: root.header
+                      ? (root.reviewing ? (root.header.countLine || "")
+                                        : (root.header.cadenceNote || ""))
+                      : ""
                 font.family: Theme.fontData
                 font.pixelSize: root.tzCaption
                 color: Theme.colorText3
             }
         }
 
-        // ── the after-shot strip, or the session's bookends ──────────────────
-        // A CLOSED session has no after-shot moment, so the strip that reported one is
-        // replaced rather than emptied.
+        // ── the after-shot strip, the bookends, or the reviewed shot ─────────
+        // ONE SLOT, THREE TENSES. A live session reports the moment after the swing; a closed
+        // one has no after-shot moment, so the strip that reported one is REPLACED rather than
+        // emptied; and a closed one with a shot picked off the carousel reports that shot,
+        // read inside the finished ledger. They are the same slot because they are the same
+        // question — "what does this panel have to say about a swing" — asked in three tenses.
         PpThisShotStrip {
             Layout.fillWidth: true
             Layout.preferredHeight: implicitHeight
-            visible: !root.isClosing
+            visible: !root.isClosing && !root.reviewingShot
             chips:   root.source ? root.source.thisShot : []
             delta:   root.source ? root.source.afterShotDelta : null
             quiet:   root.source ? root.source.quiet === true : false
@@ -281,11 +361,23 @@ Rectangle {
             compact: root.compact
         }
 
+        PpReviewShotStrip {
+            Layout.fillWidth: true
+            Layout.preferredHeight: implicitHeight
+            visible: root.reviewingShot
+            readout: root.readout
+            fit:     root.k
+            compact: root.compact
+            // At most a little under half the panel: past that the rail below it is not worth
+            // drawing, and the grid scrolls instead.
+            maxHeight: Math.round(root.height * 0.45)
+        }
+
         Rectangle {
             objectName: "sdBookends"
             Layout.fillWidth: true
             Layout.preferredHeight: root.px(56)
-            visible: root.isClosing
+            visible: root.isClosing && !root.reviewingShot
             color: Theme.colorSurface
             radius: Theme.radius
             border.width: 1
@@ -514,11 +606,11 @@ Rectangle {
                 }
             }
 
-            // ── Forming, and Closing until the rail lands ────────────────────
+            // ── Forming, and a Closing session the model drew no chain for ───
             Item {
                 objectName: "sdCardsBody"
                 anchors.fill: parent
-                visible: !root.isCold && !root.isEstablished
+                visible: !root.isCold && !root._railBody
 
                 Item {
                     id: pictureHeader
@@ -549,7 +641,13 @@ Rectangle {
                         // "no chain drawn: the model authors no edge between these two" —
                         // the model did not FAIL to find a chain, and this is what stops
                         // that being read into the flat card row.
-                        text: root.header ? (root.header.formingLine || root.header.closingLine || "") : ""
+                        // ...and in review the closing sentence is stated ONCE, along the
+                        // bottom, where 13a puts it — saying it here as well would be the
+                        // same disclosure at two weights.
+                        text: root.header
+                              ? (root.header.formingLine
+                                 || (root.reviewing ? "" : (root.header.closingLine || "")))
+                              : ""
                         elide: Text.ElideRight
                         font.family: Theme.fontData
                         font.pixelSize: root.tzMicro
@@ -593,11 +691,11 @@ Rectangle {
                 }
             }
 
-            // ── Established: the chain rail ──────────────────────────────────
+            // ── Established, and Closing when there is a rail to draw ────────
             Item {
                 objectName: "sdEstablishedBody"
                 anchors.fill: parent
-                visible: root.isEstablished
+                visible: root._railBody
 
                 // ── wide: chains stacked as rows ─────────────────────────────
                 Column {
@@ -873,6 +971,24 @@ Rectangle {
             fit: root.k
             compact: root.compact
             onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+        }
+
+        // ── the tense, stated in words ───────────────────────────────────────
+        // 13a's footer, and it is not a caption. Everything above it in review is a SESSION
+        // total with one wide tick in it, and that is only unambiguous to a reader who has
+        // been told the panel does not rewind to what it knew at the selected shot. It is
+        // model copy (headerInfo.reviewFootLine), because it names the shot count.
+        Text {
+            objectName: "sdTenseFooter"
+            Layout.fillWidth: true
+            Layout.leftMargin: root.px(4)
+            Layout.preferredHeight: visible ? implicitHeight : 0
+            visible: text !== ""
+            text: root.header ? (root.header.reviewFootLine || "") : ""
+            elide: Text.ElideRight
+            font.family: Theme.fontData
+            font.pixelSize: root.tzCaption
+            color: Theme.colorText3
         }
     }
 }
