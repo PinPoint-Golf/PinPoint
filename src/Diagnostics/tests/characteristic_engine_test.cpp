@@ -878,6 +878,112 @@ int main()
               "…and a numerator outside its own corridor does not fire a ratio whose quotient is fine");
     }
 
+    // ── A finding carries the number that graded it ────────────────────────
+    //
+    // The ledger asks a finding "what did you read, against what, and how far out was it" — of
+    // NotFired findings as much as Fired ones, because "the corridor was cleared by a hair on
+    // Tuesday and by a mile on Thursday" is a trend and a verdict alone cannot express it. What it
+    // must never get is a number for a finding nobody could assess.
+    std::printf("\nfinding evidence\n");
+    {
+        FakeSource src;
+        src.add(QStringLiteral("mSway"), 50.0, 0.0, 10.0);   // above the corridor => fires High
+        src.add(QStringLiteral("mSlide"), 5.0, 0.0, 10.0);   // dead centre => does not fire
+        const DetectionResult d = detect(pack, src);
+
+        const Finding *sway = d.find(QStringLiteral("sway"));
+        check(sway && sway->evidence.hasEvidence, "a fired finding carries evidence");
+        check(sway && sway->evidence.drivingMeasureId == QStringLiteral("mSway"),
+              "…naming the measure that drove it");
+        check(sway && sway->evidence.drivingSignalId == QStringLiteral("sigSway"),
+              "…and the signal that read it");
+        check(sway && sway->evidence.value > 49.9 && sway->evidence.value < 50.1,
+              "…with the value that fired");
+        check(sway && sway->evidence.hasCorridor && sway->evidence.corridorLo == 0.0
+                  && sway->evidence.corridorHi == 10.0,
+              "…and the corridor it was tested against");
+        // mid 5, half-width 5 => (50 - 5) / 5 = 9, positive because it is the HIGH tail.
+        check(sway && sway->evidence.z > 8.99 && sway->evidence.z < 9.01,
+              "…and a z of the right size and sign for a high-tail deviation");
+
+        const Finding *slide = d.find(QStringLiteral("slide"));
+        check(slide && slide->state == FindingState::NotFired, "the other condition did not fire");
+        check(slide && slide->evidence.hasEvidence,
+              "a NOT-fired finding carries evidence too — a cleared corridor is a measurement");
+        check(slide && slide->evidence.drivingMeasureId == QStringLiteral("mSlide")
+                  && slide->evidence.value > 4.9 && slide->evidence.value < 5.1,
+              "…the same measure, value and corridor as if it had fired");
+        check(slide && slide->evidence.z > -0.01 && slide->evidence.z < 0.01,
+              "…and z is 0 dead centre of the band");
+
+        // Never assessed, so never a number. This is the whole point of the flag.
+        const Finding *ghost = d.find(QStringLiteral("ghost"));
+        check(ghost && ghost->state == FindingState::Unavailable, "the unproducible measure is Unavailable");
+        check(ghost && !ghost->evidence.hasEvidence, "an Unavailable finding carries NO evidence");
+        check(ghost && ghost->evidence.drivingMeasureId.isEmpty() && ghost->evidence.z == 0.0,
+              "…and nothing is invented to fill the gap");
+    }
+
+    // The low tail is the same statement with the sign flipped, and the sign is what tells the
+    // ledger which way a trend is moving.
+    {
+        CharacteristicPack low = pack;
+        low.signalDefs.front().direction = Direction::Low;
+
+        FakeSource src;
+        src.add(QStringLiteral("mSway"), -40.0, 0.0, 10.0);
+        const DetectionResult d = detect(low, src);
+        const Finding        *s = d.find(QStringLiteral("sway"));
+        check(s && s->state == FindingState::Fired, "the low tail fires below the corridor");
+        // (-40 - 5) / 5 = -9: the mirror of the high-tail case above.
+        check(s && s->evidence.z < -8.99 && s->evidence.z > -9.01,
+              "a low-tail deviation carries a NEGATIVE z of the same size");
+    }
+
+    // ── An open-tailed corridor still yields a monotone z ──────────────────
+    //
+    // On a floor bandEdgesOf() collapses the high edge onto mu, so a midpoint-based z would put 0
+    // halfway between the aspiration and the fault edge — a point the measure says nothing about.
+    // Measured from mu instead, z is -1 at the graded edge and keeps climbing out into the open
+    // side, so two swings that both clear a floor are still orderable. normZ() would flatten every
+    // one of them to exactly 0.
+    {
+        const double samples[] = { 1.28, 1.38, 1.43, 1.48, 1.60, 2.20 };
+        double       last      = -1e9;
+        bool         monotone  = true;
+        bool         allHaveEvidence = true;
+
+        for (const double v : samples) {
+            FakeSource src;
+            src.addOneSided(QStringLiteral("mSway"), v, 1.48, 0.05, Shape::Floor);
+            const DetectionResult d = detect(pack, src);
+            const Finding        *f = d.find(QStringLiteral("sway"));
+            if (!f || !f->evidence.hasEvidence) { allHaveEvidence = false; break; }
+            if (!(f->evidence.z > last)) monotone = false;
+            last = f->evidence.z;
+        }
+        check(allHaveEvidence, "an open-tailed reading still produces evidence");
+        check(monotone, "z is monotone in the value across an open-tailed corridor");
+
+        // The graded edge is where |z| == 1, and the open flag travels with the numbers.
+        FakeSource edge;
+        edge.addOneSided(QStringLiteral("mSway"), 1.43, 1.48, 0.05, Shape::Floor);   // mu - 1 sigma
+        const DetectionResult de = detect(pack, edge);
+        const Finding        *fe = de.find(QStringLiteral("sway"));
+        check(fe && fe->evidence.highOpen && !fe->evidence.lowOpen,
+              "the evidence says which tail does not grade");
+        check(fe && fe->evidence.z > -1.001 && fe->evidence.z < -0.999,
+              "z is exactly -1 on the graded edge of a floor");
+
+        // Past the aspiration the sign turns over, which is what makes the two orderable at all.
+        FakeSource past;
+        past.addOneSided(QStringLiteral("mSway"), 1.58, 1.48, 0.05, Shape::Floor);
+        const DetectionResult dp = detect(pack, past);
+        const Finding        *fp = dp.find(QStringLiteral("sway"));
+        check(fp && fp->evidence.z > 1.99 && fp->evidence.z < 2.01,
+              "…and positive out on the open side, rather than flattened to zero");
+    }
+
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
 }

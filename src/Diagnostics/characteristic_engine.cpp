@@ -60,6 +60,12 @@ struct SignalVerdict {
     bool        fired     = false;
     float       confidence = 0.0f;
     QStringList missing;
+
+    // The reading this verdict was reached on, for the finding's evidence. Set only when the signal
+    // was actually evaluated — an unavailable verdict has no number to report and must not pretend
+    // otherwise.
+    std::optional<MeasureReading> driving;
+    QString                       drivingMeasureId;
 };
 
 SignalVerdict evaluate(const Signal &sig, const IMeasureSource &src)
@@ -241,7 +247,49 @@ SignalVerdict evaluate(const Signal &sig, const IMeasureSource &src)
     }
     }
 
+    // THE DRIVING READING IS measures[0], for every test kind — reached only on the paths that
+    // actually evaluated the signal, since every unavailable branch above returns early. The
+    // corridor and threshold tests read exactly one measure, so there is no choice to make; Order
+    // and Ratio name their subject first (the event expected to LEAD, the numerator), and the pack
+    // validator enforces that order. Its corridor may be absent — a threshold or ratio signal grades
+    // against an authored number — and MeasureEvidence handles that without inventing a band.
+    v.driving          = readings.front();
+    v.drivingMeasureId = sig.measures.value(0);
+
     return v;
+}
+
+// One signal's contribution to a finding's evidence, in c.detectedBy order.
+struct EvidenceCandidate {
+    QString        signalId;
+    QString        measureId;
+    MeasureReading reading;
+    float          confidence = 0.0f;
+    bool           fired      = false;
+};
+
+// WHICH READING SPEAKS FOR THE FINDING. The most confident signal, ties broken by pack order (the
+// order the author wrote c.detectedBy in), restricted to the signals that FIRED when the finding
+// fired and drawn from every assessed signal when it did not.
+//
+// The SAME rule in both states, deliberately. The alternative for NotFired — pick whichever measure
+// sat closest to its edge, the near-miss — reads better on one swing and ruins the ledger, because
+// the measure it names changes from swing to swing and a trend line would silently splice two
+// different quantities together. Confidence is a property of the CAPTURE, not of the swing, so it
+// picks the same measure every time a condition is assessed the same way, which is what makes
+// "this corridor is being cleared by less and less" a sentence about the golfer.
+//
+// Confidence here is the SIGNAL's — after the inferred-context demotion — not the raw reading's, so
+// a signal graded against a norm the shot never declared yields to a sibling judged on solid ground.
+MeasureEvidence pickEvidence(const std::vector<EvidenceCandidate> &candidates, bool firedOnly)
+{
+    const EvidenceCandidate *best = nullptr;
+    for (const EvidenceCandidate &c : candidates) {
+        if (firedOnly && !c.fired) continue;
+        if (best == nullptr || c.confidence > best->confidence) best = &c;
+    }
+    if (best == nullptr) return {};
+    return MeasureEvidence::fromReading(best->signalId, best->measureId, best->reading);
 }
 
 } // namespace
@@ -290,6 +338,8 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
         bool  anyUnavailable = false;
         float conf          = 1.0f;
 
+        std::vector<EvidenceCandidate> candidates;   // in c.detectedBy order — see pickEvidence()
+
         for (const QString &sid : c.detectedBy) {
             const Signal *sig = pack.signal(sid);
             if (!sig) { anyUnavailable = true; f.missingMeasures << sid; continue; }
@@ -306,6 +356,9 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
                 f.direction = sig->direction.value_or(Direction::High);
             }
             conf = std::min(conf, v.confidence);
+
+            if (v.driving) candidates.push_back({ sid, v.drivingMeasureId, *v.driving,
+                                                  v.confidence, v.fired });
         }
 
         // Precedence: a signal that fired is a positive observation and stands even if a sibling
@@ -315,12 +368,17 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
         if (anyFired) {
             f.state      = FindingState::Fired;
             f.confidence = conf;
+            f.evidence   = pickEvidence(candidates, /*firedOnly*/ true);
         } else if (anyUnavailable) {
             f.state      = FindingState::Unavailable;
             f.confidence = 0.0f;
+            // NO evidence, even when a sibling signal did read a number. The finding's verdict is
+            // "could not be assessed", and attaching a reading to it would invite a ledger row that
+            // reads as an assessment. See MeasureEvidence.
         } else {
             f.state      = FindingState::NotFired;
             f.confidence = conf;
+            f.evidence   = pickEvidence(candidates, /*firedOnly*/ false);
         }
 
         out.findings.push_back(std::move(f));

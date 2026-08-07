@@ -137,6 +137,91 @@ enum class FindingState {
     Unavailable,  // could NOT be assessed. Distinct from NotFired, and never merged with it.
 };
 
+// THE NUMBER BEHIND A FINDING. Which measure graded it, what it read, the corridor it was tested
+// against, and how far out it sat — carried for NotFired as well as Fired, because a ledger that
+// records only what fired cannot show that a corridor was cleared by a hair on Tuesday and by a
+// mile on Thursday. A verdict with no number behind it is an assertion; this is the receipt.
+//
+// hasEvidence is false for Unavailable findings and for those only. Nothing was read that graded
+// them, and inventing a zero here would put a value in the ledger that no measure ever produced —
+// the same false-bill-of-health mistake the FindingState enum exists to refuse.
+struct MeasureEvidence {
+    bool    hasEvidence = false;
+
+    QString drivingMeasureId;   // the measure whose reading decided it
+    QString drivingSignalId;    // and the signal that read it — Finding::direction is the LAST
+                                // firing signal's tail, so the two can name different signals when
+                                // several fire; this says which one the numbers below came from.
+
+    double  value = 0.0;
+
+    // The corridor as MeasureReading held it — the POLICY's Ideal band, not the norm's bare claim.
+    // hasCorridor is false for Threshold and Ratio signals, which grade against an authored number
+    // and legitimately have no band; value is still evidence, and z is left at 0 rather than being
+    // faked against a corridor that does not exist.
+    bool    hasCorridor = false;
+    double  corridorLo  = 0.0;
+    double  corridorHi  = 0.0;
+    bool    lowOpen     = false;
+    bool    highOpen    = false;
+
+    // ── z: signed, monotone, |z| == 1 at the graded edge ────────────────────────
+    //
+    // The ledger reads z ORDINALLY — trends across a session, the best and worst swings of a set —
+    // so MONOTONICITY IN `value` IS THE PROPERTY THAT MATTERS, and the scale is only there to make
+    // two swings of the same measure comparable. Every branch below is therefore affine and
+    // increasing in `value`; the branches differ only in where zero sits and what one unit means.
+    //
+    //   TWO-SIDED corridor:  z = (value - mid) / halfWidth,  mid = (lo+hi)/2, halfWidth = (hi-lo)/2
+    //       0 at the middle of the band, ±1 exactly on each edge, sign naming the tail.
+    //
+    //   ONE-SIDED corridor:  z = (value - mu) / (hi - lo)
+    //       On a floor bandEdgesOf() collapses the open (high) edge onto mu, so `hi` IS mu and the
+    //       formula reads "distance from the aspiration point, in ideal-band widths": -1 at the
+    //       graded low edge, positive out into the open side. A ceiling is the mirror, with `lo`
+    //       collapsed onto mu.
+    //
+    //       WHY NOT THE MIDPOINT HERE. A one-sided band's midpoint is halfway between the
+    //       aspiration and the fault edge — a point the measure says nothing about — so a z built
+    //       on it would put 0 where nothing happens and ±1 where nothing happens either.
+    //
+    //       WHY NOT normZ(), which is the same quantity divided by sigma rather than by the ideal
+    //       width. normZ() deliberately returns exactly 0 all along the open side of a one-sided
+    //       norm, so a floor cleared by a hair and a floor cleared by a mile are the same number.
+    //       That is right for scoring — overshooting an aspiration is not an achievement — and
+    //       wrong for a ledger, which needs those two swings to be orderable. So: this z is not
+    //       normZ and must not be substituted for it.
+    //
+    //   NO corridor, degenerate (zero-width) corridor, or a band open on both sides: z = 0. There
+    //   is no scale to normalise by, and 0 is the only answer that does not invent one.
+    double  z = 0.0;
+
+    static MeasureEvidence fromReading(const QString &signalId, const QString &measureId,
+                                       const MeasureReading &r)
+    {
+        MeasureEvidence e;
+        e.hasEvidence      = true;
+        e.drivingSignalId  = signalId;
+        e.drivingMeasureId = measureId;
+        e.value            = r.value;
+        e.hasCorridor      = r.hasCorridor;
+        if (!r.hasCorridor) return e;
+
+        e.corridorLo = r.greenLo;
+        e.corridorHi = r.greenHi;
+        e.lowOpen    = r.lowOpen;
+        e.highOpen   = r.highOpen;
+
+        const double width = r.greenHi - r.greenLo;
+        if (!(width > 0.0) || (r.lowOpen && r.highOpen)) return e;   // no scale to normalise by
+
+        if (r.lowOpen)        e.z = (r.value - r.greenLo) / width;             // ceiling: lo IS mu
+        else if (r.highOpen)  e.z = (r.value - r.greenHi) / width;             // floor:   hi IS mu
+        else                  e.z = (r.value - (r.greenLo + r.greenHi) / 2.0) / (width / 2.0);
+        return e;
+    }
+};
+
 struct Finding {
     QString      conditionId;
     FindingState state      = FindingState::Unavailable;
@@ -150,6 +235,10 @@ struct Finding {
     // reworded — it simply carries no weight when the explanation pass ranks root causes. See
     // ContextBinding::material, whose comment this implements.
     bool         material   = true;
+
+    // The reading that graded this finding. See MeasureEvidence: present for Fired and NotFired
+    // alike, absent for Unavailable.
+    MeasureEvidence evidence;
 };
 
 struct DetectionResult {
