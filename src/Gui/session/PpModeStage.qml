@@ -35,6 +35,7 @@ Item {
     property Component cameraDelegate:      null
     property Component chartsDelegate:      null
     property Component dashboardDelegate:   null
+    property Component sessionDiagnosticsDelegate: null
     property Component launchMonitorDelegate: null
     property Component wristMotionDelegate: null
     property Component tableDelegate:       null
@@ -46,6 +47,9 @@ Item {
     readonly property var _defs: [
         { key: "camera",      label: qsTr("Camera"),                comp: cameraDelegate },
         { key: "dashboard",   label: qsTr("Dashboard"),             comp: dashboardDelegate },
+        // Beside the dashboard on purpose: same evidence, different tense — one swing there,
+        // what keeps happening here.
+        { key: "sessionDiagnostics", label: qsTr("Session diagnostics"), comp: sessionDiagnosticsDelegate },
         { key: "launchMonitor", label: qsTr("Launch monitor"),      comp: launchMonitorDelegate },
         { key: "wristMotion", label: qsTr("Wrist motion analysis"), comp: wristMotionDelegate },
         { key: "charts",      label: qsTr("Charts"),                comp: chartsDelegate },

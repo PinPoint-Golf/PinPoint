@@ -143,6 +143,12 @@ Item {
                 // Broad-scope: available on every session screen (Verdict degrades to score +
                 // pattern where the analyzer is still a stub).
                 dashboardDelegate: Component { PpDashboardPanel { sessionType: root.sessionType; interactive: true } }
+                // Session diagnostics — the same evidence in the other tense: what KEEPS
+                // happening across this session's shots, and what the model authors as its
+                // cause. Gated on available data like everything else, never on sessionType;
+                // off until the user asks for it in View, because it owns a characteristic
+                // pack and a detection thread nobody who never opens it should pay for.
+                sessionDiagnosticsDelegate: Component { PpSessionDiagnosticsPanel {} }
                 // Launch monitor session board — per SESSION and neutral, where the
                 // dashboard above is per shot and opinionated. Gated on available data
                 // and devices, never on sessionType: a monitor is a monitor whatever

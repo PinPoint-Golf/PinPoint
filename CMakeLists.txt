@@ -389,6 +389,24 @@ qt_add_qml_module(PinPointStudio
         src/Gui/shot/PpShotFilter.qml
         src/Gui/shot/PpSwingEditPanel.qml
         src/Gui/shot/PpDashboardPanel.qml
+        # Session diagnostics — what KEEPS happening this session, where the dashboard above
+        # is one swing. PpSessionDiagnosticsPanel is the wiring only (it owns the model, the
+        # session directory and the ingest connection); PpSessionDiagnosticsBody is
+        # everything the panel looks like and takes a `source` it owns none of, which is what
+        # lets the offscreen QML test press its states with a fixture — the same split
+        # PpLaunchMonitorPanel makes with PpLmGraphicsBody.
+        src/Gui/diagnostics/PpSessionDiagnosticsPanel.qml
+        src/Gui/diagnostics/PpSessionDiagnosticsBody.qml
+        src/Gui/diagnostics/PpThisShotStrip.qml
+        src/Gui/diagnostics/PpPatternCard.qml
+        # One tick per shot, and never a gap: a not-assessable shot is drawn short and
+        # outlined, because a gap would read as "nothing happened on that swing".
+        src/Gui/diagnostics/PpTickRun.qml
+        src/Gui/diagnostics/PpWatchingRow.qml
+        src/Gui/diagnostics/PpCoverageLine.qml
+        # Rectangle's border cannot dash, and on this panel the dash is what separates an
+        # expectation from a finding.
+        src/Gui/diagnostics/PpDashedFrame.qml
         # Session board — every lm.* reading the connected monitor produced, banded.
         # Per SESSION and neutral, where the dashboard above is per shot and opinionated.
         src/Gui/session/PpLaunchMonitorPanel.qml
