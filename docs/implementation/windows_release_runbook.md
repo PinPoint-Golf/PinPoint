@@ -169,10 +169,31 @@ gh release create $TAG -R PinPoint-Golf/PinPointStudio `
 > CI won't re-draft your release or overwrite the signed installer — no need to cancel
 > the run by hand.
 
-### 7. Confirm it's live
+### 7. Build + upload the `-cuda` runtime (MANDATORY — every release)
+The app's GPU offer opens **`releases/latest`** and expects the user to find a
+`-cuda.exe` there (`src/Update/cuda_runtime_controller.cpp`). So the newest
+non-prerelease release must ALWAYS carry one, even when the CUDA payload itself hasn't
+changed — otherwise every user who accepts "Enable GPU acceleration" lands on a page
+with no GPU installer. (This was missed on v0.1-alpha11 and fixed after the fact.)
+
+**CI cannot build this** — the hosted runner has no CUDA toolkit or cuDNN, and the
+install rules are gated on `CUDAToolkit_FOUND` / the cuDNN glob, so a CI-built `cuda`
+component would be silently EMPTY. Build it on the dev box:
+```powershell
+pwsh -File packaging\build_installer.ps1 -Components cuda
+$cuda = (Get-ChildItem build\Release-Installer -Recurse -Filter 'PinPointStudioSetup-*-cuda.exe' |
+         Sort-Object LastWriteTime -Desc | Select-Object -First 1).FullName
+gh release upload $TAG -R PinPoint-Golf/PinPointStudio $cuda
+```
+It is **unsigned and not in the appcast** — it is a separate Inno product with its own
+`AppId` (design §4.3–4.4), fetched manually by the user, never by WinSparkle. Sanity-check
+the size against the previous release's `-cuda.exe` (~1 GB); a few-MB file means CMake
+didn't find CUDA/cuDNN and the component came out empty.
+
+### 8. Confirm it's live
 ```bash
 gh release view "$TAG" -R PinPoint-Golf/PinPointStudio --json assets \
-  --jq '.assets[].name'      # expect: PinPointStudioSetup-<ver>-core.exe AND appcast-win.xml
+  --jq '.assets[].name'      # expect: -core.exe, -cuda.exe AND appcast-win.xml
 ```
 On a machine running an **older installed** build: Settings → General → **Check for
 updates** (or wait for the launch check) → WinSparkle offers it, downloads the
@@ -189,6 +210,8 @@ installer, verifies the signature, and relaunches on the new version — no UAC 
 - [ ] `make_appcast.ps1` → signs + writes `appcast-win.xml`
 - [ ] `winsparkle-tool verify` the signature — stop if it fails
 - [ ] Upload `-core.exe` + `appcast-win.xml`; publish **non-draft, non-prerelease**
+- [ ] **Build + upload `-cuda.exe` (`build_installer.ps1 -Components cuda`) — every
+      release, local build only; `releases/latest` must always have one**
 - [ ] Confirm assets + test an update from an older build
 
 ---
@@ -201,9 +224,11 @@ installer, verifies the signature, and relaunches on the new version — no UAC 
   forget to bump it, installed apps see "no newer version".
 - **Never publish without `appcast-win.xml`.** No appcast → no feed item. A missing or
   mismatched signature → the installer is rejected and never runs.
-- **CUDA is separate (design §4.4).** The `-core` installer is the only thing in the
-  appcast. The CUDA/GPU runtime is offered and updated by the app itself based on the
-  hardware it detects — never put the `-cuda` installer in the appcast.
+- **CUDA is separate (design §4.4), but not optional (step 7).** The `-core` installer
+  is the only thing in the appcast, and the CUDA/GPU runtime is offered by the app
+  itself based on the hardware it detects — never put the `-cuda` installer in the
+  appcast. "Separate" does NOT mean "skippable": the offer links to `releases/latest`,
+  so the newest release still has to carry a `-cuda.exe` or the offer dead-ends.
 - **Mixed-platform releases are fine.** The same GitHub release can also carry the
   Linux `*.AppImage*` assets; WinSparkle only ever looks at `appcast-win.xml` and the
   Linux updater only looks at its own assets.
