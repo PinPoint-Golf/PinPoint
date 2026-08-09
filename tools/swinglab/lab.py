@@ -9,6 +9,7 @@
 #   lab.py plot    <run_dir>    <swing_dir>            contact sheet PNG
 #   lab.py report  <run_root>                          regenerate REPORT.md
 #   lab.py diff    <run_a> <run_b>                     regression diff
+#   lab.py coverage <run_root> [--pack core.json] [--out dir]  diagnostics-pack coverage (COVERAGE.md)
 #   lab.py sweep   <corpus_root> <runs_root> <space.json> [--trials N]
 #   lab.py label   <swing_dir> [--every N]             hand-label truth.json
 #
@@ -89,6 +90,14 @@ def main():
     p.add_argument("run_a")
     p.add_argument("run_b")
 
+    p = sub.add_parser("coverage")
+    p.add_argument("run_root")
+    p.add_argument("--pack", default=None,
+                   help="diagnostics pack json (default: src/Resources/diagnostics/core.json)")
+    p.add_argument("--out", default=None,
+                   help="dir to write COVERAGE.md into (default: run_root; use when run_root is "
+                        "read-only)")
+
     p = sub.add_parser("sweep")
     p.add_argument("corpus_root")
     p.add_argument("runs_root")
@@ -151,6 +160,9 @@ def main():
         report(a.run_root)
     elif a.cmd == "diff":
         sys.exit(1 if diff(a.run_a, a.run_b) else 0)
+    elif a.cmd == "coverage":
+        from swinglab.coverage import coverage
+        sys.exit(0 if coverage(a.run_root, pack=a.pack, out=a.out) else 1)
     elif a.cmd == "sweep":
         sweep(a.corpus_root, a.runs_root, a.space, trials=a.trials, seed=a.seed,
               baseline=a.baseline, partition=a.partition, method=a.method, freeze=a.freeze,

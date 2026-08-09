@@ -200,18 +200,26 @@ def truth_metrics(run: RunResult, swing: Swing):
         phases = {p["phase"]: p["t_us"] for p in run.analysis.get("phases", [])}
 
         # P-system event keys → analyzer Phase enum (swing_analysis.h):
-        #   p1→Address(0) p3→MidBackswing(8) p4→Top(2) p6→Delivery(9)
-        #   p7→Impact(5) p9→FollowThrough(11) p10→Finish(7).
-        # p2/p5/p8 (shaft/arm parallel) have no analyzer event — see the parallel
-        # check below. (key, enum, label, tol_s, severity)
+        #   p1→Address(0) p3→MidBackswing(8) p4→Top(2) p5→ArmParallelDown(13)
+        #   p6→Delivery(9) p7→Impact(5) p8→ShaftParallelThrough(14)
+        #   p9→FollowThrough(11) p10→Finish(7).
+        # p5/p8 got a real analyzer event once the segmenter started emitting
+        # ArmParallelDown/ShaftParallelThrough directly (previously proxied via
+        # Downswing(4)/Release(6), which were never truth-checked here). p2
+        # (ShaftParallelBack) still has none — see the parallel check below,
+        # which stays as the fallback for p2 and for any doc predating this
+        # segmenter change (p5/p8 event checks simply won't fire on those).
+        # (key, enum, label, tol_s, severity)
         P_CHECKS = [
-            ("p1",  0,  "p1_address",      0.05, "warn"),
-            ("p3",  8,  "p3_armpar_back",  0.06, "warn"),
-            ("p4",  2,  "p4_top",          0.03, "fail"),
-            ("p6",  9,  "p6_delivery",     0.04, "warn"),
-            ("p7",  5,  "p7_impact",       0.03, "warn"),  # impact is often an input, not output
-            ("p9",  11, "p9_armpar_fwd",   0.08, "warn"),
-            ("p10", 7,  "p10_finish",      0.12, "warn"),
+            ("p1",  0,  "p1_address",       0.05, "warn"),
+            ("p3",  8,  "p3_armpar_back",   0.06, "warn"),
+            ("p4",  2,  "p4_top",           0.03, "fail"),
+            ("p5",  13, "p5_armpar_down",   0.04, "warn"),
+            ("p6",  9,  "p6_delivery",      0.04, "warn"),
+            ("p7",  5,  "p7_impact",        0.03, "warn"),  # impact is often an input, not output
+            ("p8",  14, "p8_shaftpar_fwd",  0.05, "warn"),
+            ("p9",  11, "p9_armpar_fwd",    0.08, "warn"),
+            ("p10", 7,  "p10_finish",       0.12, "warn"),
         ]
         # Legacy vocabulary (pre-P fixtures); applied only if the P-key for that
         # enum was not present, so we never double-check one phase.
