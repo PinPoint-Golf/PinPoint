@@ -25,6 +25,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
+#include <QTimeZone>
 #include <algorithm>
 #include <cmath>
 
@@ -59,9 +60,8 @@ QJsonObject serializeScore(const analysis::ScoreBreakdown &s)
             { QStringLiteral("lo"),        s.interval.lo },
             { QStringLiteral("hi"),        s.interval.hi } };
     // Adherence contribution maps (§B.0). Additive and OMITTED WHEN EMPTY, so a
-    // resemblance score's doc is byte-identical to before this key existed. They back
-    // the dashboard Verdict donut's hover breakdown — a score the athlete can take
-    // apart is worth more than one they can only read.
+    // resemblance score's doc is byte-identical to before this key existed. A score
+    // the athlete can take apart is worth more than one they can only read.
     auto emitBuckets = [&o](const char *name, const QHash<QString,int> &h) {
         if (h.isEmpty()) return;
         QJsonObject b;
@@ -805,7 +805,7 @@ bool SwingDocWriter::writeDeviceOnlySwing(const QString &swingDir,
     }
 
     const QDateTime when = meta.wallclockMs > 0
-                               ? QDateTime::fromMSecsSinceEpoch(meta.wallclockMs, Qt::UTC)
+                               ? QDateTime::fromMSecsSinceEpoch(meta.wallclockMs, QTimeZone::UTC)
                                : QDateTime::currentDateTimeUtc();
 
     QJsonObject root;
