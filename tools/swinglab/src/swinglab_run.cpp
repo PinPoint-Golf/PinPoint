@@ -295,7 +295,13 @@ int main(int argc, char **argv)
     // never replace a document we could not read back.
     if (cli.isSet(optWriteBack)) {
         using namespace pinpoint::analysis;
-        const ReanalyzeResult r = reanalyzeSwingDir(swingDir, ReanalyzeOptions{});
+        ReanalyzeOptions ropts;
+        // An EXPLICIT --session-type becomes the override (the option's default "1"
+        // does not count) — the escape hatch for pre-reanalysis-era recordings that
+        // never noted their session type. Everything else stays production-default.
+        if (cli.isSet(optSession))
+            ropts.sessionTypeOverride = cli.value(optSession).toInt();
+        const ReanalyzeResult r = reanalyzeSwingDir(swingDir, ropts);
         if (!r.ok || !r.analysis.detail)
             return fail(QStringLiteral("re-analysis failed: ")
                         + (r.error.isEmpty() ? QStringLiteral("no analysis detail") : r.error));

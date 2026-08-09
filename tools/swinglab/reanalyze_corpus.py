@@ -30,6 +30,9 @@ def main():
     ap.add_argument("--bin", default=None, help="swinglab_run binary")
     ap.add_argument("--only", default=None,
                     help="only swing dirs whose path contains this substring")
+    ap.add_argument("--session-type", default=None,
+                    help="forwarded to swinglab_run for recordings that predate "
+                         "capture.sessionType (e.g. 1 for a Wrist session)")
     a = ap.parse_args()
 
     exe = a.bin or os.environ.get("SWINGLAB_BIN")
@@ -49,8 +52,10 @@ def main():
     failed = []
     t0 = time.time()
     for d in dirs:
-        r = subprocess.run([exe, str(d), "--write-back"],
-                           capture_output=True, text=True)
+        cmd = [exe, str(d), "--write-back"]
+        if a.session_type is not None:
+            cmd += ["--session-type", a.session_type]
+        r = subprocess.run(cmd, capture_output=True, text=True)
         tail = (r.stderr or r.stdout).strip().splitlines()
         tail = tail[-1] if tail else ""
         name = f"{d.parent.name}/{d.name}"
