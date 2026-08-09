@@ -90,52 +90,9 @@ public:
     // Used to tint a summary card's @end value by the swing's state at the window edge.
     Q_INVOKABLE QString bandAtNearest(const QVariantList &phaseSamples, qint64 us) const;
 
-    // Ordered kinematic-sequence nodes for the dashboard Sequence zone. `series` is
-    // analysisDetail.series ([{key,t_us,value,…}]); `keys` selects which series to
-    // include (e.g. ["handSpeed","clubheadSpeed"]). Returns one map per series that
-    // has data — { key, tPeakUs, peak, gapMs, order } — ordered by peak time, gapMs =
-    // ms since the previous node. Series absent from `series` (or empty) are dropped,
-    // so a partially-instrumented capture degrades to the measurable nodes only.
-    // The reduction itself is the pure kinematicSequenceNodes() (kinematic_sequence.h).
-    Q_INVOKABLE QVariantList sequenceNodes(const QVariantList &series,
-                                           const QStringList &keys) const;
-
-    // ── PpBandRail backing (dashboard_reductions.h) ─────────────────────────────
-    // These three keep the band rail's arithmetic out of QML: the component
-    // positions and paints, C++ decides every number it paints.
-
-    // Measured checkpoints joined to their normative corridors, ordered by time.
-    // `phaseSamples` is series.phaseSamples ([{phase,t_us,value,band}]); `corridors`
-    // is descriptor().normative.corridors ([{phase,greenLo,greenHi,amberLo,amberHi}]).
-    // Returns one map per MEASURED sample — { phase, tUs, value, band, hasCorridor,
-    // greenLo, greenHi, amberLo, amberHi } — with hasCorridor false where the
-    // catalogue has no corridor for that phase (the rail then draws a bare
-    // checkpoint). A corridor with no matching sample is dropped: a ribbon with no
-    // player dot would imply a measurement that was never taken.
-    Q_INVOKABLE QVariantList railCheckpoints(const QVariantList &phaseSamples,
-                                             const QVariantList &corridors) const;
-
-    // The rail's value→y domain over `points` (the railCheckpoints result):
-    //   { lo, hi, valid }
-    // Spans every dot, every corridor bound in play, and the 0 reference line the
-    // rail always draws, padded by 8%. valid=false for an empty rail.
-    //
-    // No one-sidedness parameter: a corridor's open edge is `mu`, the aspiration, which
-    // belongs in the domain rather than being dropped from it. Openness travels ON the
-    // points and changes only how the ribbon is painted. See railRange() in
-    // dashboard_reductions.h for why the old parameter existed and why it does not now.
-    Q_INVOKABLE QVariantMap railRange(const QVariantList &points) const;
-
-    // The curve's value at `us`, linearly interpolated between bracketing samples and
-    // clamped to the endpoints outside the sampled span (the playhead legitimately
-    // sits in the pre-roll / follow-through). Drives the "@ PLAYHEAD" headline.
-    // Returns NaN for an empty curve — QML's isNaN() then keeps the resting headline.
-    Q_INVOKABLE double valueAtUs(const QVariantList &tUs, const QVariantList &value,
-                                 qint64 us) const;
-
     // ── Corridor-bar backing (dashboard_reductions.h) ───────────────────────────
 
-    // The value→x domain of ONE corridor bar (NormativeBar, PpRangeBar):
+    // The value→x domain of ONE corridor bar (NormativeBar):
     //   { lo, hi, valid }
     // Two-sided: the amber band padded 12% each side, falling back to green then to
     // value±1. One-sided: the open side runs past the furthest of (aspiration, reading)
@@ -147,20 +104,6 @@ public:
                                       double amberLo, double amberHi,
                                       bool lowOpen, bool highOpen,
                                       double value, bool hasValue) const;
-
-    // Score contribution buckets (analysisDetail.perRegion / .perPhase — a
-    // {name → 0..100} map) as an ORDERED list for the Verdict donut's hover
-    // breakdown: [{ label, value }], weakest first, so the thing costing the most
-    // sits at the top where the athlete reads first. Empty list for an empty map
-    // (a resemblance score has no buckets) — the donut then renders without
-    // segments rather than showing an empty panel.
-    Q_INVOKABLE QVariantList scoreSegments(const QVariantMap &buckets) const;
-
-    // Categorical read of a signed alignment angle against its green corridor:
-    // "square" | "open" | "closed", or "" when the corridor is degenerate. Drives
-    // the Setup zone's PpOrientationGlyph; inside the corridor is always square,
-    // even when the corridor is deliberately not centred on zero.
-    Q_INVOKABLE QString orientationLabel(double value, double greenLo, double greenHi) const;
 
     // ── Chart metric presets ────────────────────────────────────────────────────
     //

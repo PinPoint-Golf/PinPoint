@@ -17,7 +17,7 @@
  */
 
 // Centre-stage arranger. Shows the enabled, host-wired stage panels (camera/charts/
-// dashboard/table) packed per ViewLayout.arrangementFor(SessionMode.mode): tabs | split |
+// table and kin) packed per ViewLayout.arrangementFor(SessionMode.mode): tabs | split |
 // stage. A panel a screen does not provide a delegate for is omitted (see `active`).
 //
 // Each arrangement's Loaders are gated on the active `arrangement` (not just the
@@ -34,7 +34,6 @@ Item {
 
     property Component cameraDelegate:      null
     property Component chartsDelegate:      null
-    property Component dashboardDelegate:   null
     property Component sessionDiagnosticsDelegate: null
     property Component launchMonitorDelegate: null
     property Component wristMotionDelegate: null
@@ -46,9 +45,6 @@ Item {
 
     readonly property var _defs: [
         { key: "camera",      label: qsTr("Camera"),                comp: cameraDelegate },
-        { key: "dashboard",   label: qsTr("Dashboard"),             comp: dashboardDelegate },
-        // Beside the dashboard on purpose: same evidence, different tense — one swing there,
-        // what keeps happening here.
         { key: "sessionDiagnostics", label: qsTr("Session diagnostics"), comp: sessionDiagnosticsDelegate },
         { key: "launchMonitor", label: qsTr("Launch monitor"),      comp: launchMonitorDelegate },
         { key: "wristMotion", label: qsTr("Wrist motion analysis"), comp: wristMotionDelegate },
@@ -57,8 +53,8 @@ Item {
         { key: "markup",      label: qsTr("Markup"),                comp: markupDelegate }
     ]
     // ordered; enabled AND actually wired by the host screen. A panel a screen does not provide a
-    // delegate for (e.g. "dashboard" on Swing/GRF/Coach, which only ScreenWrist wires today) is
-    // simply omitted rather than shown as an empty placeholder.
+    // delegate for (e.g. "wristMotion" on screens that never wire it) is simply omitted rather
+    // than shown as an empty placeholder.
     readonly property var active: _defs.filter(function(d) {
         return ViewLayout.isPanelOn(SessionMode.mode, d.key) && d.comp !== null
     })

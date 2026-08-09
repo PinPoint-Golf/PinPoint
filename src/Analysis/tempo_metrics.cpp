@@ -98,8 +98,7 @@ std::vector<MetricSeries> buildTempoSeries(const Segmentation &seg, const TempoC
     // Summary scalars use the same degenerate-MetricSeries shape as the
     // foot_metrics setup scalars (empty curve, one phaseSample) — see the
     // rationale in foot_metrics.h. The phase is IMPACT, not Address: these
-    // describe the whole swing, and the dashboard's Verdict tile samples
-    // tempoRatio at phase 5 (PpDashboardVerdictZone.qml).
+    // describe the whole swing, and readers sample tempoRatio at phase 5.
     const auto push = [&](const QString &key, const QString &label, const QString &unit,
                           double value, double sigma) {
         MetricSeries m;

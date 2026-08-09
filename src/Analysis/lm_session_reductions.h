@@ -96,7 +96,7 @@ struct LmFieldStats {
 // Session statistics for every field any scoped shot carried, in fieldDefs() order.
 //
 // `latestIndex` selects the shot whose value is the headline — the FOCUSED swing, so
-// the panel agrees with the video and the dashboard beside it. Out of range (nothing
+// the panel agrees with the video and the panels beside it. Out of range (nothing
 // focused, or the focused shot is not in this scope) leaves every hasLatest false: the
 // board still renders its means and spreads, and each tile prints an em dash where its
 // value would be. A shot the monitor missed is a fact, not an error.

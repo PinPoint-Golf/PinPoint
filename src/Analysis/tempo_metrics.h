@@ -108,8 +108,8 @@ TempoResult measureTempo(const Segmentation &seg, const TempoConfig &cfg = {});
 // Emit {tempoBackswing, tempoRatio} as Summary series — an EMPTY t_us/value curve
 // plus a single Impact phaseSample carrying the value, and MetricSeries::sigma
 // carrying the propagated 1σ. (The scalar-as-degenerate-MetricSeries convention
-// is documented at length in foot_metrics.h; the Impact anchor specifically is
-// what PpDashboardVerdictZone.qml reads — it samples tempoRatio at phase 5.)
+// is documented at length in foot_metrics.h; the Impact anchor is where readers
+// sample tempoRatio — phase 5.)
 // UNSCORED — these go to detail->series, never the scored local series. Empty
 // when measureTempo refuses.
 std::vector<MetricSeries> buildTempoSeries(const Segmentation &seg, const TempoConfig &cfg = {});

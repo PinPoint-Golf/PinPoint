@@ -313,8 +313,8 @@ Item {
     // trail is exactly what it says it is: what you walked SINCE you last chose where to stand.
     //
     // The test for which of the two applies is whether a RELATIONSHIP was followed. Table rows, deep
-    // links from the dashboard, a health finding's subject and a freshly created object all put you
-    // somewhere without one, so all of them begin a trail rather than extending one.
+    // links from elsewhere in the app, a health finding's subject and a freshly created object all
+    // put you somewhere without one, so all of them begin a trail rather than extending one.
     function selectFresh(type, id) {
         root._selectedType = type
         root._selectedId   = id
@@ -653,14 +653,14 @@ Item {
 
     // ── Deep links ────────────────────────────────────────────────────────────
     //
-    // The dashboard's metric tiles route here through MetricRoute. They used to land in Diagnostics;
-    // that panel is hidden now, so a link into it would open a page with no row selected in the
-    // sidenav — which reads as the app losing its place.
+    // Metric tiles elsewhere in the app route here through MetricRoute. They used to land in
+    // Diagnostics; that panel is hidden now, so a link into it would open a page with no row
+    // selected in the sidenav — which reads as the app losing its place.
     //
     // Each of these is "select this object", because that is all navigation in this panel IS: the
     // type rail follows the selection and the inspector follows it too.
     //
-    // They BEGIN a trail. Arriving from a dashboard tile is the start of a piece of work, and the
+    // They BEGIN a trail. Arriving from a metric tile is the start of a piece of work, and the
     // chain somebody walked in this panel an hour ago is not the route they took to get here.
     function showMetric(key) {
         root._search = ""

@@ -18,7 +18,7 @@
 
 // Wrist Motion screen (contentStack index 2). Hosts the persistent session
 // toolbar, then a View-driven layout: an optional timeline rail, the centre
-// stage (camera tiles today; charts/dashboard/table land later), and an
+// stage (camera tiles today; charts/table land later), and an
 // optional shot carousel. Which panels show, and how the stage packs them, is
 // owned by the toolbar's View control (ViewLayout, per session type). The
 // toolbar's device panels run calibration entirely in-panel, so this screen
@@ -138,19 +138,16 @@ Item {
                 sourceComponent: transitVertComp
             }
 
-            // Centre stage — camera tiles + the Replay charts trace + the Data table, plus the
-            // Wrist Motion diagnostics dashboard panel. Packing (tabs/split/stage) and which panels
-            // show is resolved by ViewLayout on the active mode; the View control toggles them.
+            // Centre stage — camera tiles + the Replay charts trace + the Data table.
+            // Packing (tabs/split/stage) and which panels show is resolved by ViewLayout
+            // on the active mode; the View control toggles them.
             PpModeStage {
                 Layout.fillWidth: true; Layout.fillHeight: true
                 cameraDelegate: Component {
                     PpCameraTiles { sessionType: SessionController.Wrist; showHittingArea: false }
                 }
                 chartsDelegate: Component { PpReplayCharts { sessionType: SessionController.Wrist } }
-                // Post-shot dashboard — the configurable, glanceable, wall-castable summary
-                // (Verdict/Setup/Motion/Sequence), broad-scope across session types.
-                dashboardDelegate: Component { PpDashboardPanel { sessionType: SessionController.Wrist; interactive: true } }
-                // Session diagnostics — the same evidence in the other tense: what KEEPS
+                // Session diagnostics — what KEEPS
                 // happening across this session's shots, and what the model authors as its
                 // cause. Takes no sessionType (analysis is gated on available data, never on
                 // what the screen was opened to do) and, unlike the Loaders above, needs no

@@ -324,9 +324,9 @@ QVariantMap WristDiagnosticsModel::findingMap(const PpWristFinding &f) const
     m[QStringLiteral("positions")] = tags;
 
     // Seek target = the primary (first) contributing checkpoint's timeline timestamp,
-    // and `phase` = that checkpoint's Phase enum — the vocabulary the dashboard's
-    // corridor lookup and TimelineLabels already speak, so a fix can be resolved to a
-    // phase without re-deriving it from seekUs. -1 when the finding has no position.
+    // and `phase` = that checkpoint's Phase enum — the vocabulary the corridor lookup
+    // and TimelineLabels already speak, so a fix can be resolved to a phase without
+    // re-deriving it from seekUs. -1 when the finding has no position.
     qint64 seek  = 0;
     int    phase = -1;
     if (!f.positions.empty()) {

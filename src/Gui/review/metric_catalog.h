@@ -50,8 +50,8 @@ class MetricCatalog : public QObject
 
     // The pack-wide grade policy, by NAME ("standard" | "strict" | "lenient") — the same property
     // NormModel exposes, for the same reason: a corridor's Watch edge is z-derived for any norm
-    // that states no monitor band (stance width and ball position, both drawn on the dashboard
-    // Setup zone), so a façade grading against the default while the user has chosen Strict would
+    // that states no monitor band (stance width and ball position, for example), so a façade
+    // grading against the default while the user has chosen Strict would
     // draw a corridor the app does not use. Bound to AppSettings by whichever page hosts this
     // object, so the façade itself stays free of the settings dependency.
     Q_PROPERTY(QString gradePolicy READ gradePolicy WRITE setGradePolicy NOTIFY gradePolicyChanged)

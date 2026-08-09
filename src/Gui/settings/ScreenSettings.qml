@@ -66,7 +66,7 @@ Item {
         })
     }
 
-    // Deep link straight to one metric (dashboard tile click-through, routed via
+    // Deep link straight to one metric (a metric tile click-through, routed via
     // MetricRoute). Same callLater shape as navigateToResult: the panel Loader must
     // have instantiated before we can address it.
     function showMetricDetail(key) {

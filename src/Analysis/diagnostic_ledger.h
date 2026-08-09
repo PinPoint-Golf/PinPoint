@@ -24,7 +24,7 @@
 // and nothing else. Sibling of lm_session_reductions.h and kept out of QML JS by the same
 // rule (analysis pipeline guide §6.2): QML positions and paints, C++ decides the numbers.
 //
-// The post-shot dashboard answers "what happened on that swing". This answers "what keeps
+// Per-shot surfaces answer "what happened on that swing". This answers "what keeps
 // happening, and what does the authored model think is causing it" — which is a far more
 // dangerous question, because a session is fourteen swings and the temptation to say more
 // than fourteen swings support is enormous. Most of what follows is that restraint made

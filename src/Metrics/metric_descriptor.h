@@ -310,7 +310,7 @@ struct MetricDescriptor {
     std::vector<MetricRoute> routes;
 
     // Reverse index of consumers — static, hand-authored in the manifest (design §13.2 decision).
-    // Powers the detail page's "Where it's used". e.g. {"dashboard:motion","score:wrist","fault:cuppedAtTop"}.
+    // Powers the detail page's "Where it's used". e.g. {"score:wrist","fault:cuppedAtTop"}.
     QStringList        usedBy;
 
     // ── Readings of the ladder ──────────────────────────────────────────────────────────────────

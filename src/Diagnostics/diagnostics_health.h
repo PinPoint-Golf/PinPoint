@@ -55,7 +55,7 @@
 //   ungradedTail           The exact mirror of signalOnOpenTail: a tail that DOES grade with no
 //                          signal watching it. A Target measure with a norm grades both sides —
 //                          sigmaHi defaults to sigmaLo — so a corridor authored with one condition
-//                          on it still puts a Watch or an Action on the dashboard for the other
+//                          on it still puts a Watch or an Action on the metric surfaces for the other
 //                          side, with no fault name, no consequence and no drill behind it. Three
 //                          correct answers, and picking the wrong one is the whole risk: author the
 //                          condition when the tail carries a real fault; set `shape` when the

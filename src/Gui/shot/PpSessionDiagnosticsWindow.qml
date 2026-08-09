@@ -16,17 +16,15 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-// PpSessionDiagnosticsWindow — the wall-cast surface for the SESSION DIAGNOSTICS panel, and
-// the successor to PpDashboardWindow. A top-level window placed on the secondary display,
-// hosting PpSessionDiagnosticsPanel: what keeps happening this session and what the model
-// thinks is causing it, rather than the one-swing post-shot dashboard that used to sit here.
+// PpSessionDiagnosticsWindow — the wall-cast surface for the SESSION DIAGNOSTICS panel.
+// A top-level window placed on the secondary display, hosting PpSessionDiagnosticsPanel:
+// what keeps happening this session and what the model thinks is causing it.
 //
-// EVERYTHING AROUND THE CONTENT IS UNCHANGED, deliberately. The target screen, the kiosk
-// map-then-fullscreen dance, the mirror transform, the pin, the dwell, the windowed geometry
-// and the viewing-distance scale are all working, user-kept behaviours and the swap is only
-// about what is drawn inside them. The one thing that went with the old panel is
-// `sessionType`: the diagnostics panel gates on available data and devices, never on the
-// session's type, so it has nothing to do with one.
+// The target screen, the kiosk map-then-fullscreen dance, the mirror transform, the pin,
+// the dwell, the windowed geometry and the viewing-distance scale are all user-kept
+// behaviours around the content. No `sessionType`: the diagnostics panel gates on
+// available data and devices, never on the session's type, so it has nothing to do
+// with one.
 //
 // TWO MODELS, ON PURPOSE FOR NOW. PpSessionDiagnosticsPanel instantiates its own
 // SessionDiagnosticsModel and claims SessionMode.sessionDiagnostics on completion (last wins).

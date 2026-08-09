@@ -674,8 +674,8 @@ struct FootMetricsStage : AnalysisStage {
             if (bp.valid && feet.setup.heelsValid) {
                 // Anchor instant: the Address event when we have one, else the
                 // first posed frame — the same "ultimate fallback" buildFootSeries
-                // uses for its own setup scalars, so all the address-time tiles
-                // on the dashboard agree about when address was.
+                // uses for its own setup scalars, so every address-time reading
+                // agrees about when address was.
                 const int64_t addrT = addressUs >= 0            ? addressUs
                                     : ctx.detail->pose2d.frames.empty()
                                         ? 0

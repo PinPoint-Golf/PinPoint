@@ -378,18 +378,15 @@ ApplicationWindow {
     //   • WINDOW — a TEMPORARY windowed overlay that pops after a freshly captured shot
     //     (postShotDelay) and auto-closes after the dwell.
     //
-    // WHAT IS CAST CHANGED; THE PLUMBING DID NOT. The old surface was the per-shot dashboard
-    // and it followed the focused shot through shotReplay; the diagnostics panel is per
-    // SESSION and cumulative, and it follows the carousel through SessionMode.focusedShotId
-    // on its own. shotReplay is still started below on a fresh shot because the in-app stage
-    // reads it — the cast no longer depends on it.
+    // The diagnostics panel is per SESSION and cumulative, and follows the carousel
+    // through SessionMode.focusedShotId on its own. shotReplay is still started below
+    // on a fresh shot because the in-app stage reads it — the cast does not depend on it.
     //
-    // postShotContent IS NO LONGER READ HERE. It chose between "replay" and "metrics" for a
-    // surface that had both; the cast is now always the diagnostics panel, so the only thing
-    // the key could still do is suppress the window-mode pop entirely — which is what the
-    // display-mode chips are for, and what "replay" silently did. The AppSettings key stays
-    // (settings persist, and nothing gains from breaking a stored profile); no code path
-    // switches on it.
+    // postShotContent IS NOT READ HERE. It chose between "replay" and "metrics" for a
+    // predecessor surface that had both; the cast is always the diagnostics panel, so the
+    // only thing the key could still do is suppress the window-mode pop entirely — which
+    // is what the display-mode chips are for. The AppSettings key stays (settings persist,
+    // and nothing gains from breaking a stored profile); no code path switches on it.
     QtObject {
         id: postShotCast
         function screenFor(mode) {
@@ -401,17 +398,17 @@ ApplicationWindow {
         readonly property var target: screenFor(appSettings.secondaryDisplayMode)
     }
 
-    property var  _dashWin: null
-    property bool _dashWinTemporary: false     // window-mode (auto-closes) vs persistent
-    Component { id: dashWinComp; PpSessionDiagnosticsWindow {} }
+    property var  _castWin: null
+    property bool _castWinTemporary: false     // window-mode (auto-closes) vs persistent
+    Component { id: castWinComp; PpSessionDiagnosticsWindow {} }
 
     // Create the window HIDDEN with its target screen + geometry already set, then
     // show() — relocating a window across monitors after its first map is unreliable
     // (compositor/DPI, see the main-window geometry note). So we recreate fresh on
     // each (re)open rather than moving a live window. Mirror-only changes go live.
     function _openCast(kioskMode, temporary) {
-        if (_dashWin) { _dashWin.destroy(); _dashWin = null }
-        _dashWin = dashWinComp.createObject(root, {
+        if (_castWin) { _castWin.destroy(); _castWin = null }
+        _castWin = castWinComp.createObject(root, {
             "targetScreen": postShotCast.target,
             "kiosk":  kioskMode,
             "mirror": appSettings.postShotMirror,
@@ -419,25 +416,25 @@ ApplicationWindow {
             // inert (see PpSessionDiagnosticsWindow.interactive).
             "autoClose": temporary
         })
-        _dashWinTemporary = temporary
-        if (!_dashWin) return
+        _castWinTemporary = temporary
+        if (!_castWin) return
         if (kioskMode) {
             // Map NORMAL first, then fullscreen AFTER the compositor has mapped it — a
             // first-map-fullscreen window has its output hint ignored by mutter, but
             // fullscreening an already-mapped window honours window.screen.
-            _dashWin.visible = true
+            _castWin.visible = true
             kioskFsTimer.restart()
         } else {
-            _dashWin.show()          // panel + window: a normal framed window
+            _castWin.show()          // panel + window: a normal framed window
         }
-        _dashWin.raise()
+        _castWin.raise()
     }
     Timer {
         id: kioskFsTimer
         interval: 200; repeat: false
-        onTriggered: if (root._dashWin && root._dashWin.kiosk) root._dashWin.showFullScreen()
+        onTriggered: if (root._castWin && root._castWin.kiosk) root._castWin.showFullScreen()
     }
-    function _closeCast() { if (_dashWin) { _dashWin.destroy(); _dashWin = null; _dashWinTemporary = false } }
+    function _closeCast() { if (_castWin) { _castWin.destroy(); _castWin = null; _castWinTemporary = false } }
 
     // Persistent modes (PANEL + KIOSK) — open whenever configured AND the user is on
     // a session screen, stay up, recreate if the target screen or windowed/fullscreen
@@ -449,12 +446,12 @@ ApplicationWindow {
                              && postShotCast.target !== null && root.sessionScreenActive
         if (wantPersistent) {
             var kioskMode = (m === "kiosk")
-            if (_dashWin && _dashWin.visible && !_dashWinTemporary
-                    && _dashWin.targetScreen === postShotCast.target
-                    && _dashWin.kiosk === kioskMode)
+            if (_castWin && _castWin.visible && !_castWinTemporary
+                    && _castWin.targetScreen === postShotCast.target
+                    && _castWin.kiosk === kioskMode)
                 return
             _openCast(kioskMode, false)
-        } else if (_dashWin && !_dashWinTemporary) {
+        } else if (_castWin && !_castWinTemporary) {
             _closeCast()             // left a persistent mode (→ window, or no screen)
         }
     }
@@ -463,7 +460,7 @@ ApplicationWindow {
         function onPostShotDisplayModeChanged()  { root._syncPersistent() }
         function onSecondaryDisplayModeChanged() { root._syncPersistent() }
         // Mirror is a content transform — apply it live, no re-map needed.
-        function onPostShotMirrorChanged()       { if (root._dashWin) root._dashWin.mirror = appSettings.postShotMirror }
+        function onPostShotMirrorChanged()       { if (root._castWin) root._castWin.mirror = appSettings.postShotMirror }
     }
     // The cast follows the user in and out of the session screens. Leaving one (Home,
     // Settings, Athletes, the wizard) takes the surface down whatever its mode — a
@@ -493,8 +490,8 @@ ApplicationWindow {
             // or one who pinned it holds the auto-close off. Re-arm rather than
             // cancel, so releasing the hover resumes a full dwell instead of closing
             // instantly on the next mouse-out.
-            if (root._dashWin && root._dashWin.dwellHeld) { restart(); return }
-            if (root._dashWin && root._dashWinTemporary) root._closeCast()
+            if (root._castWin && root._castWin.dwellHeld) { restart(); return }
+            if (root._castWin && root._castWinTemporary) root._closeCast()
         }
     }
     Timer {
@@ -728,9 +725,9 @@ ApplicationWindow {
                     id: settingsScreen
                     onResourceMonitorRequested: navController.navigate(root.screenSystem)
                 }
-                // Dashboard tile → its catalogue detail page. Navigation is owned
-                // here, so the tiles (several layers inside a stage delegate, and
-                // again inside the cast Window) just announce the key.
+                // Metric tile → its catalogue detail page. Navigation is owned
+                // here, so a tile (several layers inside a stage delegate, or
+                // inside the cast Window) just announces the key.
                 Connections {
                     target: MetricRoute
                     function onOpenRequested(key) {

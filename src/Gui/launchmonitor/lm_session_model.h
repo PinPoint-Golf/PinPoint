@@ -116,7 +116,7 @@ class LmSessionModel : public QAbstractListModel
     // for the same reason as the gates above: the panel has `appSettings` in scope. It is
     // the same property MetricCatalog exposes and it must be bound to the same setting —
     // a corridor graded against the default while the golfer has chosen Strict would put a
-    // different colour on this panel than on the dashboard for one reading.
+    // different colour on this panel than on the metric surfaces for one reading.
     Q_PROPERTY(QString gradePolicy READ gradePolicy WRITE setGradePolicy NOTIFY gradePolicyChanged)
 
     // The athlete's handedness, passed in for the same reason as `connected` and

@@ -393,9 +393,8 @@ qt_add_qml_module(PinPointStudio
         src/Gui/session/PpSessionDrawer.qml
         src/Gui/shot/PpShotFilter.qml
         src/Gui/shot/PpSwingEditPanel.qml
-        src/Gui/shot/PpDashboardPanel.qml
-        # Session diagnostics — what KEEPS happening this session, where the dashboard above
-        # is one swing. PpSessionDiagnosticsPanel is the wiring only (it owns the model, the
+        # Session diagnostics — what KEEPS happening this session, cumulative across swings.
+        # PpSessionDiagnosticsPanel is the wiring only (it owns the model, the
         # session directory and the ingest connection); PpSessionDiagnosticsBody is
         # everything the panel looks like and takes a `source` it owns none of, which is what
         # lets the offscreen QML test press its states with a fixture — the same split
@@ -433,7 +432,7 @@ qt_add_qml_module(PinPointStudio
         # expectation from a finding.
         src/Gui/diagnostics/PpDashedFrame.qml
         # Session board — every lm.* reading the connected monitor produced, banded.
-        # Per SESSION and neutral, where the dashboard above is per shot and opinionated.
+        # Per SESSION and neutral.
         src/Gui/session/PpLaunchMonitorPanel.qml
         # ...and its second mode: the same shot drawn on five schematics instead of
         # listed. PpLmGraphicsBody takes LmSessionModel's `graphics` map and nothing
@@ -452,23 +451,9 @@ qt_add_qml_module(PinPointStudio
         # reads as texture on a bay TV, lifted to the metric's band hue when the reader
         # hovers that metric's label. Never a corridor: no norm, no grade, no RAG.
         src/Gui/session/PpLmSpread.qml
-        src/Gui/shot/PpDashboardVerdictZone.qml
-        src/Gui/shot/PpDashboardSetupZone.qml
-        src/Gui/shot/PpDashboardMotionZone.qml
-        src/Gui/shot/PpDashboardSequenceZone.qml
-        src/Gui/shot/PpDashboardPresetEditor.qml
-        # The secondary-display cast. All the second-screen machinery the dashboard window
-        # had — target screen, kiosk, mirror, pin, dwell, viewing-distance scale — hosting
-        # the SESSION DIAGNOSTICS panel, which is what a wall is now for.
+        # The secondary-display cast — target screen, kiosk, mirror, pin, dwell,
+        # viewing-distance scale — hosting the SESSION DIAGNOSTICS panel.
         src/Gui/shot/PpSessionDiagnosticsWindow.qml
-        # Dashboard paint primitives — every metric renders as one of these
-        # (no bare numbers); each is Shape-painted and fed pre-reduced values.
-        src/Gui/shot/PpBandRail.qml
-        src/Gui/shot/PpDonutStat.qml
-        src/Gui/shot/PpRangeBar.qml
-        src/Gui/shot/PpSequenceStrip.qml
-        src/Gui/shot/PpStateChip.qml
-        src/Gui/shot/PpOrientationGlyph.qml
         src/Gui/components/PpQualityPill.qml
         src/Gui/components/PpStarRating.qml
         src/Gui/components/PpTrace.qml

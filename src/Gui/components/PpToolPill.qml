@@ -19,9 +19,9 @@
 // PpToolPill — THE standard toolbar item: a glyph tile, a micro label, the current
 // value and a ▾ affordance, with the shared hover/press motion. Was an inline
 // `component ViewPill` private to PpSessionToolbar; extracted here so surfaces
-// OUTSIDE the toolbar (the dashboard's preset control) present the same control
-// rather than a lookalike that drifts. Every toolbar pill — View, Motion, Club,
-// Cameras, IMUs — is this component.
+// OUTSIDE the toolbar can present the same control rather than a lookalike that
+// drifts. Every toolbar pill — View, Motion, Club, Cameras, IMUs — is this
+// component.
 //
 // Anchoring convention for the popup a pill owns (see PpSessionToolbar):
 //     parent: <pill>;  y: <pill>.height + Theme.sp(10);  x: <pill>.width - width

@@ -689,9 +689,9 @@ Item {
 
     // ── View pill — lighter sibling of DevicePill (no badge; shows the active
     // mode and a chevron; accent ring while its popup is open) ────────────────
-    // The View/Motion/Club/Cameras/IMUs pill is now the SHARED PpToolPill
-    // (src/Gui/components/PpToolPill.qml) — extracted so the dashboard preset
-    // control presents the same item instead of a lookalike that drifts.
+    // The View/Motion/Club/Cameras/IMUs pill is the SHARED PpToolPill
+    // (src/Gui/components/PpToolPill.qml), so any surface outside the toolbar
+    // can present the same item instead of a lookalike that drifts.
 
     // ── Inline pill component ───────────────────────────────────────────────
     component DevicePill: Rectangle {

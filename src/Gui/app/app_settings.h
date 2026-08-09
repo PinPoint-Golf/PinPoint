@@ -185,7 +185,9 @@ class AppSettings : public QObject
     // viewing-distance preference — a 13" laptop mirrored at arm's length and a 65"
     // TV across a bay want very different type, and neither is "correct". The window
     // turns this into a uniform zoom (PpSessionDiagnosticsWindow.contentScale), so
-    // proportions are identical at every setting. Default "medium".
+    // proportions are identical at every setting. Default "medium". NO UI SETS THIS
+    // at present (its control went with the removed dashboard preset editor); the
+    // persisted value still applies.
     Q_PROPERTY(QString dashboardScale              READ dashboardScale              WRITE setDashboardScale              NOTIFY dashboardScaleChanged)
     Q_PROPERTY(QString uiFrameRateCap              READ uiFrameRateCap              WRITE setUiFrameRateCap              NOTIFY uiFrameRateCapChanged)
     Q_PROPERTY(bool    hardwareAcceleration        READ hardwareAcceleration        WRITE setHardwareAcceleration        NOTIFY hardwareAccelerationChanged)
@@ -232,11 +234,6 @@ class AppSettings : public QObject
     // = String(typeInt)) so each mode remembers its default lens. Value is a region
     // name ("Axial"/"Lower"/"Upper"/"Delivery"/"Custom"). Read by PpDataViewer.
     Q_PROPERTY(QVariantMap dataRegionByType      READ dataRegionByType      WRITE setDataRegionByType      NOTIFY dataRegionByTypeChanged)
-    // Configurable post-shot dashboard presets, persisted per SessionController::Type
-    // (key = String(typeInt)). Value = { active:<presetId|"custom"|"<saved>">,
-    // zones:[zoneKey…], perZoneMetrics:{ zoneKey:[metricKey…] },
-    // saved:{ "<name>":{zones,perZoneMetrics} } }. Resolved by ViewLayout.qml.
-    Q_PROPERTY(QVariantMap dashboardPresetsByType READ dashboardPresetsByType WRITE setDashboardPresetsByType NOTIFY dashboardPresetsByTypeChanged)
     // Collapsed/expanded state of the data-table and chart collapsible sections,
     // persisted per screen+mode. Key = "<sessionTypeInt>:<modeInt>:<section>"
     // (e.g. "1:1:scope"), value = bool (true = collapsed). Read/written by
@@ -456,7 +453,6 @@ public:
         m_viewPresetByType      = ppSettings().value(QStringLiteral("view/presetByType"),      QVariantMap{}).toMap();
         m_viewLayoutByMode      = ppSettings().value(QStringLiteral("view/layoutByMode"),      QVariantMap{}).toMap();
         m_dataRegionByType      = ppSettings().value(QStringLiteral("view/dataRegionByType"),  QVariantMap{}).toMap();
-        m_dashboardPresetsByType = ppSettings().value(QStringLiteral("view/dashboardPresetsByType"), QVariantMap{}).toMap();
         m_sectionCollapse       = ppSettings().value(QStringLiteral("view/sectionCollapse"),   QVariantMap{}).toMap();
         m_chartPrefs            = ppSettings().value(QStringLiteral("view/chartPrefs"),         QVariantMap{}).toMap();
         m_lastSessionType    = ppSettings().value(QStringLiteral("session/lastType"), 0).toInt();
@@ -575,7 +571,6 @@ public:
     QVariantMap viewPresetByType()      const { return m_viewPresetByType; }
     QVariantMap viewLayoutByMode()      const { return m_viewLayoutByMode; }
     QVariantMap dataRegionByType()      const { return m_dataRegionByType; }
-    QVariantMap dashboardPresetsByType() const { return m_dashboardPresetsByType; }
     QVariantMap sectionCollapse()       const { return m_sectionCollapse; }
     QVariantMap chartPrefs()            const { return m_chartPrefs; }
     int         lastSessionType()    const { return m_lastSessionType; }
@@ -1297,14 +1292,6 @@ public:
         emit dataRegionByTypeChanged();
     }
 
-    void setDashboardPresetsByType(const QVariantMap &v)
-    {
-        if (m_dashboardPresetsByType == v) return;
-        m_dashboardPresetsByType = v;
-        ppSettings().setValue(QStringLiteral("view/dashboardPresetsByType"), v);
-        emit dashboardPresetsByTypeChanged();
-    }
-
     void setSectionCollapse(const QVariantMap &v)
     {
         if (m_sectionCollapse == v) return;
@@ -1551,7 +1538,6 @@ signals:
     void viewPresetByTypeChanged();
     void viewLayoutByModeChanged();
     void dataRegionByTypeChanged();
-    void dashboardPresetsByTypeChanged();
     void sectionCollapseChanged();
     void chartPrefsChanged();
     void lastSessionTypeChanged();
@@ -1663,7 +1649,6 @@ private:
     QVariantMap m_viewPresetByType;
     QVariantMap m_viewLayoutByMode;
     QVariantMap m_dataRegionByType;
-    QVariantMap m_dashboardPresetsByType;
     QVariantMap m_sectionCollapse;
     QVariantMap m_chartPrefs;
     int         m_lastSessionType = 0;

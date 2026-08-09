@@ -21,12 +21,13 @@
 // Kinematic-sequence reduction — pure, header-only, no Qt-GUI. Given a set of
 // speed series (hand / clubhead today; pelvis / thorax / lead-arm when the body-IMU
 // roles and the real Sequence producer land), returns the ordered peak-speed events
-// with the gaps between them. This is the degrade-gracefully backing for the
-// dashboard Sequence zone: it emphasises ORDER and GAPS, not curves, and lights up
-// the full proximal→distal chain automatically as more series become available.
+// with the gaps between them: it emphasises ORDER and GAPS, not curves, and lights
+// up the full proximal→distal chain automatically as more series become available.
 //
-// Kept out of QML JS by the "reductions live in C++" rule (analysis pipeline guide
-// §6.2 / dashboard build prompt §6); the QML façade is ChartMetrics::sequenceNodes.
+// CURRENTLY CONSUMER-LESS: its UI surface (the per-shot dashboard's Sequence zone)
+// was removed, and the reduction is kept, tested, for the sequence surface the model
+// anticipates. Kept out of QML JS by the "reductions live in C++" rule (analysis
+// pipeline guide §6.2).
 // Unit-tested standalone in src/Analysis/tests/kinematic_sequence_test.cpp.
 
 #include <QString>

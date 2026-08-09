@@ -354,10 +354,10 @@ QVariantMap MetricCatalog::descriptor(const QString &key, const QVariantMap &sho
     normative.insert(QStringLiteral("weakReason"), normWeakWhy);
     normative.insert(QStringLiteral("cohort"),      cohortToMap(normCohort));
     normative.insert(QStringLiteral("cohortLabel"), cohortLabel(normCohort));
-    // The metric-level answer a rail binds to. THE ONLY SOURCE of one-sidedness for any surface:
-    // `PpDashboardMotionZone` used to decide this by string-matching the unit, which is a
-    // presentation-layer heuristic standing in for a semantic property of the measure. Anything
-    // re-deriving it from a unit, a metric key or a label is a bug.
+    // The metric-level answer a corridor surface binds to. THE ONLY SOURCE of one-sidedness for
+    // any surface: it was once decided by string-matching the unit in QML, a presentation-layer
+    // heuristic standing in for a semantic property of the measure. Anything re-deriving it from
+    // a unit, a metric key or a label is a bug.
     normative.insert(QStringLiteral("shape"),      shapeName(railShape));
     normative.insert(QStringLiteral("oneSided"),   shapeIsOneSided(railShape));
     m.insert(QStringLiteral("normative"), normative);

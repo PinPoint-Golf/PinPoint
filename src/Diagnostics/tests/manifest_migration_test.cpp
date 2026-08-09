@@ -3,7 +3,7 @@
 // the way.
 //
 // `MetricCatalogue::corridor()` is gone, along with `MetricNormative` and the one inline corridor the
-// manifest carried. Everything MetricDetail, PpBandRail and the two dashboard zones render now
+// manifest carried. Everything the corridor surfaces (MetricDetail's NormativeBar and kin) render now
 // resolves (metric, phase) → measure → norm. That join can fail silently in a way no compiler
 // notices: a measure whose reducer names a phase the metric does not declare simply finds nothing,
 // the corridor vanishes, and the tile renders as though the metric never had a band. So the metrics

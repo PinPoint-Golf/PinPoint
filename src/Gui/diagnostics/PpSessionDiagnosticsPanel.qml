@@ -17,9 +17,8 @@
  */
 
 // The session diagnostics stage panel: what keeps happening this session, and what the
-// model thinks is causing it. The post-shot dashboard answers "what happened on that
-// swing"; this one is per session and cumulative, and most of its design is the restraint
-// that keeps it from ever saying more than the ledger supports.
+// model thinks is causing it. Per session and cumulative, and most of its design is the
+// restraint that keeps it from ever saying more than the ledger supports.
 //
 // THIS FILE IS THE WIRING AND NOTHING ELSE. Everything the panel LOOKS like is
 // PpSessionDiagnosticsBody, which takes a `source` and owns none of it. The split is the
@@ -75,9 +74,9 @@ Item {
         id: diagModel
 
         // Both passed in rather than reached for, so the model stays constructible in a
-        // test. gradePolicy must be the SAME policy the dashboard and the launch monitor
-        // board grade against, or one reading would sit outside its corridor on one panel
-        // and inside it on another.
+        // test. gradePolicy must be the SAME policy the other metric surfaces and the
+        // launch monitor board grade against, or one reading would sit outside its
+        // corridor on one panel and inside it on another.
         cadence:     appSettings.sessionDiagnosticsCadence
         gradePolicy: appSettings.diagnosticsGradePolicy
 

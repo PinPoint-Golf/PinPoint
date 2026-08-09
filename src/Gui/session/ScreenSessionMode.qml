@@ -19,7 +19,7 @@
 // Reusable session-mode screen (Swing, GRF and Coach rail screens; the Wrist
 // screen has its own ScreenWrist). Hosts the persistent session toolbar then a
 // View-driven layout — an optional timeline rail, the centre stage (camera tiles
-// today; charts/dashboard/table land later), and an optional shot carousel —
+// today; charts/table land later), and an optional shot carousel —
 // each gated by the toolbar's View control (ViewLayout, per session type).
 //
 // Replay and Analyse use the Transit timeline, in one of two orientations
@@ -130,8 +130,8 @@ Item {
                 sourceComponent: transitVertComp
             }
 
-            // Centre stage — camera tiles + the Replay charts trace; dashboard/table
-            // fall back to muted PpStagePanel placeholders until their producers land.
+            // Centre stage — camera tiles + the Replay charts trace; table falls back
+            // to a muted PpStagePanel placeholder until its producer lands.
             // Packing (tabs/split/stage) is resolved by ViewLayout on the active mode.
             PpModeStage {
                 Layout.fillWidth: true; Layout.fillHeight: true
@@ -139,20 +139,16 @@ Item {
                     PpCameraTiles { sessionType: root.sessionType }
                 }
                 chartsDelegate: Component { PpReplayCharts { sessionType: root.sessionType } }
-                // Post-shot dashboard — the configurable, glanceable, wall-castable summary.
-                // Broad-scope: available on every session screen (Verdict degrades to score +
-                // pattern where the analyzer is still a stub).
-                dashboardDelegate: Component { PpDashboardPanel { sessionType: root.sessionType; interactive: true } }
-                // Session diagnostics — the same evidence in the other tense: what KEEPS
-                // happening across this session's shots, and what the model authors as its
-                // cause. Gated on available data like everything else, never on sessionType;
-                // off until the user asks for it in View, because it owns a characteristic
-                // pack and a detection thread nobody who never opens it should pay for.
+                // Session diagnostics — what KEEPS happening across this session's shots,
+                // and what the model authors as its cause. Gated on available data like
+                // everything else, never on sessionType; off until the user asks for it in
+                // View, because it owns a characteristic pack and a detection thread nobody
+                // who never opens it should pay for.
                 sessionDiagnosticsDelegate: Component { PpSessionDiagnosticsPanel {} }
-                // Launch monitor session board — per SESSION and neutral, where the
-                // dashboard above is per shot and opinionated. Gated on available data
-                // and devices, never on sessionType: a monitor is a monitor whatever
-                // the screen was opened to do. Off until the user asks for it in View.
+                // Launch monitor session board — per SESSION and neutral. Gated on
+                // available data and devices, never on sessionType: a monitor is a
+                // monitor whatever the screen was opened to do. Off until the user
+                // asks for it in View.
                 launchMonitorDelegate: Component { PpLaunchMonitorPanel {} }
                 // Table panel — read-only inspector of the focused swing.json. The
                 // focused swing is the active replay, else the carousel's selection.

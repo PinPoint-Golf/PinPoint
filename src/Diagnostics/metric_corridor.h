@@ -32,7 +32,7 @@
 // comes from the norm set, resolved in the shot's own context, and from nowhere else.
 //
 // It is header-only and free-standing on purpose. Its callers are a QML façade
-// (`Gui/review/metric_catalog.cpp`, which feeds MetricDetail, PpBandRail and the dashboard zones)
+// (`Gui/review/metric_catalog.cpp`, which feeds MetricDetail's corridor surfaces)
 // and its test — and a rule that exists only inside a façade is a rule nothing can test.
 
 namespace pinpoint::analysis {
@@ -47,9 +47,8 @@ struct MetricCorridor {
 
     // Which way this corridor is open, from the MEASURE's shape. Threaded rather than re-derived,
     // and that is the whole point: one-sidedness was previously decided by string-matching the
-    // unit in `PpDashboardMotionZone._isOneSided()`, a presentation-layer heuristic standing in for
-    // a semantic property. Any surface that re-derives it from a unit, a metric key or a label is
-    // a bug.
+    // unit in QML, a presentation-layer heuristic standing in for a semantic property. Any
+    // surface that re-derives it from a unit, a metric key or a label is a bug.
     //
     // The numeric edge on an open side is `mu` — a defined, sane value, never a sentinel. See
     // NormBandEdges.

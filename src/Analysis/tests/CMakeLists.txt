@@ -92,14 +92,13 @@ endforeach()
 # --- Header-only math contracts ----------------------------------------------
 # Kinematic-sequence reduction (kinematic_sequence.h) — peak-of-largest-magnitude
 # selection, ordering by peak time + inter-node gaps, empty-series drop. The
-# degrade-gracefully backing for the dashboard Sequence zone (ChartMetrics::
-# sequenceNodes façade). Header-only, Qt-only (QString), no fixture.
+# backing for a future sequence surface (currently consumer-less; see the
+# header). Header-only, Qt-only (QString), no fixture.
 pp_add_test(kinematic_sequence_test SOURCES kinematic_sequence_test.cpp)
 
-# Dashboard band-rail reductions (dashboard_reductions.h) — phase-keyed sample↔
-# corridor join, the value→y domain (one-sided speeds + the always-present 0
-# line), and playhead interpolation with endpoint clamping. The backing for
-# PpBandRail (ChartMetrics::railCheckpoints/railRange/valueAtUs façade).
+# Corridor-bar reduction (dashboard_reductions.h) — the corridor bar's value→x
+# domain, two-sided and one-sided. The backing for the review corridor bar
+# (ChartMetrics::barDomain façade).
 pp_add_test(dashboard_reductions_test SOURCES dashboard_reductions_test.cpp)
 
 # Launch monitor session reductions (lm_session_reductions.h) — the n-1 spread, the

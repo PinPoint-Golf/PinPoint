@@ -119,9 +119,9 @@ class SessionDiagnosticsModel : public QObject
     // has `appSettings` in scope, and a model that read the singleton itself would couple
     // the panel to main.cpp and could not be constructed in a test. Bind `cadence` to
     // AppSettings::sessionDiagnosticsCadence and `gradePolicy` to
-    // AppSettings::diagnosticsGradePolicy — the latter must be the SAME policy the dashboard
-    // grades against, or one reading would sit outside its corridor on one panel and inside
-    // it on another.
+    // AppSettings::diagnosticsGradePolicy — the latter must be the SAME policy the other
+    // metric surfaces grade against, or one reading would sit outside its corridor on one
+    // panel and inside it on another.
     Q_PROPERTY(QString cadence READ cadence WRITE setCadence NOTIFY cadenceChanged)
     Q_PROPERTY(QString gradePolicy READ gradePolicy WRITE setGradePolicy NOTIFY gradePolicyChanged)
 

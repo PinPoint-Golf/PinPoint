@@ -17,7 +17,7 @@
  */
 
 // Muted placeholder for a stage panel whose producer hasn't landed yet
-// (Charts / Dashboard / Table). Replace with the real component when ready.
+// (Charts / Table). Replace with the real component when ready.
 
 import QtQuick
 import PinPointStudio

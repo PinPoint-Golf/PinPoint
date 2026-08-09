@@ -86,8 +86,8 @@ struct GradePolicy {
 // The policy PRESETS, by name. The name is what is persisted and what crosses into QML, because the
 // policy has to be one comparable thing across athletes and shared packs — see GradePolicy's own
 // comment. Here rather than in the panel that renders them, because more than one surface now needs
-// name → numbers (the measures view, the corridor editor and the metric detail / dashboard
-// corridors), and a second table would let two of them grade against different z's while showing
+// name → numbers (the measures view, the corridor editor and the metric detail corridors),
+// and a second table would let two of them grade against different z's while showing
 // the same word.
 struct GradePolicyPreset {
     const char *name;      // stable, persisted token
@@ -509,7 +509,7 @@ inline bool isDeviation(Grade g) { return g == Grade::Watch || g == Grade::Actio
 //
 // ONE definition, because three surfaces project a norm into a corridor to render it — the wrist
 // grid (NormBandProvider → Band → PpRagCell), the measures view (NormModel::normAt) and the metric
-// detail page / dashboard rails (metric_corridor.h) — and each of them must draw the edge that
+// detail page's corridors (metric_corridor.h) — and each of them must draw the edge that
 // grade() actually applies. A second copy is how a surface ends up showing a corridor the app does
 // not use: the Watch edge is `monitorLo/Hi` when the norm states them and z-derived when it does
 // not, and that precedence has to be stated once.

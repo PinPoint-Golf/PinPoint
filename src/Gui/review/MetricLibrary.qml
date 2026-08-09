@@ -60,7 +60,7 @@ Item {
         return true
     }
 
-    // Deep link from elsewhere in the app (a dashboard tile → MetricRoute → Main →
+    // Deep link from elsewhere in the app (a metric tile → MetricRoute → Main →
     // ScreenSettings). Opens the detail view directly on `key`; an unknown key is
     // ignored so a stale link lands on the directory rather than a blank page.
     function showMetric(key) {

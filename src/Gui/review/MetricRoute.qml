@@ -19,11 +19,15 @@
 pragma Singleton
 
 // MetricRoute — the one-line router that links a metric ANYWHERE in the app to its
-// catalogue detail page. A dashboard tile is instantiated several layers inside a
-// stage delegate (and again inside a top-level cast Window), so it has no path to
-// the settings screen that hosts MetricLibrary/MetricDetail. Rather than thread a
+// catalogue detail page. A metric tile is typically instantiated several layers
+// inside a stage delegate (or a top-level cast Window), so it has no path to the
+// settings screen that hosts MetricLibrary/MetricDetail. Rather than thread a
 // signal up through every host, tiles call MetricRoute.open(key) and Main.qml — the
 // one place that owns navigation — performs the jump.
+//
+// CURRENTLY NO PRODUCER: the per-shot dashboard's tiles were its only callers and
+// went with that surface. The receiving side (Main.qml → ScreenSettings) stays
+// wired for the next surface that wants a metric deep-link.
 //
 // Deliberately state-light: `requestedKey` is a record of the last request for a
 // late-attaching listener, not a queue. The signal is the contract.

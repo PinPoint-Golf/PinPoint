@@ -20,9 +20,9 @@
 // session, banded, each tile showing this shot's value, the session mean beside it and
 // the session SD as the ±, over a strip that puts the shot against its own spread.
 //
-// PER SESSION, which is what makes it a stage panel of its own rather than a dashboard
-// zone. PpDashboardPanel is per shot; this answers "what did the device measure, and how
-// repeatable was I", and that question is worth asking whether or not anything is wrong.
+// PER SESSION, which is what makes it a stage panel of its own. It answers "what did
+// the device measure, and how repeatable was I", and that question is worth asking
+// whether or not anything is wrong.
 // So the board's DEFAULT STATE IS SILENT: no comparison against our own optical estimates,
 // no reassurance, no green, and the only standing colour is band identity.
 //
@@ -105,7 +105,7 @@ Rectangle {
         deviceName:    launchMonitor.deviceName
         // The SAME setting MetricCatalog is bound to wherever it is hosted. A corridor
         // graded here against the default while the golfer has chosen Strict would put a
-        // different colour on this panel than on the dashboard for one reading.
+        // different colour on this panel than on the metric surfaces for one reading.
         gradePolicy:   appSettings.diagnosticsGradePolicy
         // Changes only how the two INFERRED reads are WORDED and which way the strike
         // face is drawn — never a reading. See lm_inferred_reads.h.
@@ -465,9 +465,9 @@ Rectangle {
                                 readonly property bool flagged:
                                     grade === "watch" || grade === "action"
                                 // The app's grading pair, not a pair of this panel's own.
-                                // A golfer meets these two colours on the dashboard, the
-                                // wrist grid and every range bar; a launch monitor tile is
-                                // not the place to teach them a third meaning for a hue.
+                                // A golfer meets these two colours on the wrist grid and
+                                // every corridor bar; a launch monitor tile is not the
+                                // place to teach them a third meaning for a hue.
                                 readonly property color flagColor:
                                     grade === "action" ? Theme.colorRagFault
                                                        : Theme.colorRagWatch
