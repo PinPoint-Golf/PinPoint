@@ -272,13 +272,48 @@ int main(int argc, char **argv)
     QCommandLineOption optRefuseBeta("refuse-beta",
         "Madgwick gain for re-fusion (default = production 0.05; perturb to confirm "
         "the tool detects a parameter change).", "float");
+    QCommandLineOption optWriteBack("write-back",
+        "Re-analyse the swing exactly as the in-app ReanalysisController does "
+        "(reanalyzeSwingDir, production defaults, no overrides) and write the fresh "
+        "analysis back into the SOURCE swing.json, preserving capture/streams/review. "
+        "Exclusive: every other option except the positional swing dir is ignored.");
     cli.addOptions({ optOut, optParams, optTrace, optSession, optFaceOn, optImpact, optPose,
-                     optBall, optRefuse, optRefuseBeta });
+                     optBall, optRefuse, optRefuseBeta, optWriteBack });
     cli.process(app);
 
-    if (cli.positionalArguments().isEmpty() || !cli.isSet(optOut))
-        return fail("usage: swinglab_run <swing_dir> --out <run_dir> [--params f] [--trace]");
+    if (cli.positionalArguments().isEmpty() || (!cli.isSet(optOut) && !cli.isSet(optWriteBack)))
+        return fail("usage: swinglab_run <swing_dir> --out <run_dir> [--params f] [--trace]\n"
+                    "       swinglab_run <swing_dir> --write-back");
     const QString swingDir = cli.positionalArguments().first();
+
+    // ── Write-back mode: the in-app re-analysis, headless ────────────────────
+    // Mirrors ReanalysisController::startNext()/onWorkerFinished() exactly:
+    // reanalyzeSwingDir with DEFAULT options (sessionType from the doc, span-bounded
+    // like a live shot, no tuning overrides), then a manifest-preserving
+    // writeSwingJson into the source dir — "analysis" is replaced, capture/streams/
+    // review ride through untouched. The empty-manifest guard is the controller's:
+    // never replace a document we could not read back.
+    if (cli.isSet(optWriteBack)) {
+        using namespace pinpoint::analysis;
+        const ReanalyzeResult r = reanalyzeSwingDir(swingDir, ReanalyzeOptions{});
+        if (!r.ok || !r.analysis.detail)
+            return fail(QStringLiteral("re-analysis failed: ")
+                        + (r.error.isEmpty() ? QStringLiteral("no analysis detail") : r.error));
+        QJsonObject manifest;
+        {
+            QFile f(swingDir + QStringLiteral("/swing.json"));
+            if (f.open(QIODevice::ReadOnly))
+                manifest = QJsonDocument::fromJson(f.readAll()).object();
+        }
+        if (manifest.isEmpty())
+            return fail("swing.json missing/unreadable — not overwriting");
+        QString werr;
+        if (!pinpoint::SwingDocWriter::writeSwingJson(swingDir, manifest,
+                                                      r.analysis.detail.get(), &werr))
+            return fail(QStringLiteral("write-back failed: ") + werr);
+        std::fprintf(stderr, "[swinglab] write-back ok — score %d\n", r.analysis.score);
+        return 0;
+    }
     const QString outDir   = cli.value(optOut);
     QDir().mkpath(outDir);
 
