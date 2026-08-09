@@ -1765,9 +1765,10 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
     // populate out.positions by SAMPLING the final emitted track at each P-time.
     // Report-only in B1: source = TrackSample, no milestone fit (that is B2), so
     // samples[]/coverage/length/θ are all untouched (positions ride alongside).
-    // NB PhaseEvent emission for P2/P5/P8 belongs to the analyzer layer and is
-    // DEFERRED — the enum values exist but nothing emits them here (keeps B1's
-    // blast radius to the club block only).
+    // NB PhaseEvent emission for P2/P3/P5/P6/P8 belongs to the analyzer layer —
+    // PositionsLadderStage (positions_ladder.h, refine.positionsLadder) promotes
+    // these positions into ladder events there; nothing emits them here (keeps
+    // B1's blast radius to the club block only).
     // Set to the located address-hold end while positions run; the trace
     // segmentation's Address event follows it (gated here so a positions-off run
     // keeps the legacy bs0 event byte-for-byte — the V soak contract).

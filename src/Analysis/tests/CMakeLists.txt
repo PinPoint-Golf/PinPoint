@@ -450,6 +450,12 @@ pp_add_test(club_length_fusion_test SOURCES club_length_fusion_test.cpp)
 # (no P8), NaN-φ (no P3/P5), noisy horizontal (fires once). Header-only, no fixture.
 pp_add_test(shaft_positions_test SOURCES shaft_positions_test.cpp)
 
+# Analyzer-layer P-position bridge (positions_ladder.h): p→Phase mapping,
+# insert-if-monotone/abstain-otherwise, duplicate-phase skip (IMU proxy wins),
+# version-4 bump vs byte-identical no-op, refine.positionsLadder dark default.
+# Header-only, Qt-only, no fixture.
+pp_add_test(positions_ladder_test SOURCES positions_ladder_test.cpp)
+
 # Phase-1 motion-overlay pose smoother (pose_smoother.{h,cpp}): offline non-causal
 # RTS smoother for the 17 COCO keypoints — a 3-state [p,v,a] white-jerk sibling of
 # the clubhead HeadKf1D + runHeadTemporal, with variable dt + pixel-domain +

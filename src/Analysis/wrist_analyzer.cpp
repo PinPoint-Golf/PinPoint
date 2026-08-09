@@ -45,6 +45,7 @@
 #include "metric_extractor.h"
 #include "kinematic_series.h"
 #include "phase_segmenter.h"
+#include "positions_ladder.h"
 #include "pose_runner.h"
 #include "pose_smoother.h"
 #include "pose_synthesis.h"
@@ -569,8 +570,8 @@ struct EventRefineStage : AnalysisStage {
         // Impact is NEVER refined (marker contract; all truth swings acoustic-
         // anchored). refine.impactResidual is log-only P6 telemetry (launch −
         // impact); the job.impactUs < 0 legitimate-refine path is out of scope for
-        // V1. P2/P6/P8 ladder promotion is DEFERRED (no truth marks) — a future
-        // refine.positionsLadder key.
+        // V1. P2/P3/P5/P6/P8 ladder promotion lives in PositionsLadderStage (10c)
+        // behind the refine.positionsLadder key.
         const EventRefineResult r = refineEvents(ctx.seg, ctx.detail->shaft, ctx.detail->ball,
                                                  ctx.job.impactUs, cfg);
         if (r.impactResidualValid)
@@ -581,6 +582,35 @@ struct EventRefineStage : AnalysisStage {
                      << (r.takeawayRefined ? "Takeaway" : "-") << (r.addressRefined ? "Address" : "-")
                      << (r.p1Synced ? "+P1" : "-") << "conf" << r.conf << "tier" << r.tier
                      << "L" << r.departFrame;
+    }
+};
+
+// 10c. PositionsLadder — promote the club track's located P-positions
+//     (detail->shaft.positions[], Layer B) into ctx.seg PhaseEvents
+//     (positions_ladder.h holds the mapping + insert-if-monotone contract).
+//     Slotted after EventRefine so candidates measure against the REFINED
+//     anchors, and before BindDetail so the appended events bind/persist with
+//     zero extra plumbing. canRun gates on available DATA only (positions
+//     present, a resolved ladder present) — never on session type or IMU
+//     presence: on an IMU ladder the pass simply skips phases the segmenter
+//     already emitted (duplicate ⇒ IMU proxy wins, no arbitration). The
+//     refine.positionsLadder gate lives in canRun (mirroring EventRefineStage):
+//     dark ⇒ the stage is SKIPPED, not a no-op run, so ctx.seg is
+//     code-path-identical when off.
+struct PositionsLadderStage : AnalysisStage {
+    QString name() const override { return QStringLiteral("PositionsLadder"); }
+    bool canRun(const AnalysisContext &ctx) const override
+    {
+        return PositionsLadderConfig::fromOverrides(ctx.job.tuningOverrides).enabled
+            && !ctx.detail->shaft.positions.empty() && !ctx.seg.events.empty();
+    }
+    void run(AnalysisContext &ctx) override
+    {
+        const PositionsLadderResult r =
+            emitPositionsLadder(ctx.seg, ctx.detail->shaft.positions);
+        ppInfo() << "[WristAnalysis] positionsLadder → version" << ctx.seg.version
+                 << "inserted" << r.inserted << "abstained" << r.abstained
+                 << "duplicate" << r.duplicate;
     }
 };
 
@@ -1090,6 +1120,7 @@ SessionProfile wristProfile()
     p.stages.push_back(std::make_unique<ShaftLeanStage>());
     p.stages.push_back(std::make_unique<RequireProductsStage>());
     p.stages.push_back(std::make_unique<EventRefineStage>());
+    p.stages.push_back(std::make_unique<PositionsLadderStage>());
     p.stages.push_back(std::make_unique<BindDetailStage>());
     appendBodyMetricStages(p);
     p.stages.push_back(std::make_unique<KinematicsStage>());
@@ -1161,6 +1192,10 @@ SessionProfile cameraKinematicsProfile()
     p.stages.push_back(std::make_unique<BallStage>());
     p.stages.push_back(std::make_unique<ShaftStage>());
     p.stages.push_back(std::make_unique<SegResolveStage>());
+    // PositionsLadder is data-gated (positions + ladder present), not
+    // session-gated, so it runs here too — the club P-events are a property of
+    // the camera, not of the session type.
+    p.stages.push_back(std::make_unique<PositionsLadderStage>());
     p.stages.push_back(std::make_unique<BindDetailStage>());
     // The same body-metric block the Wrist profile runs. It used to be absent here, which is what
     // made a face-on metric look like a property of the session rather than of the camera — see

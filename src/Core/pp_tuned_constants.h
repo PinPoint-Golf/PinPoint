@@ -501,6 +501,10 @@ inline constexpr double kMinConf           = 0.8;   // refine.minConf — apply 
                                                     //   (0.5 → 0.8 at the 2026-07-18 freeze: zero
                                                     //   regressions on the 17-swing truth A/B at 0.8)
 inline constexpr double kMaxShiftS         = 3.0;   // refine.maxShiftS — abstain if |t_refined − t_old| exceeds
+inline constexpr bool   kPositionsLadder   = false; // refine.positionsLadder — promote club P2/P3/P5/P6/P8
+                                                    //   positions into ladder PhaseEvents (positions_ladder.h,
+                                                    //   version 4). DARK for the corpus A/B soak; flip in a
+                                                    //   follow-up once the coverage gate is green.
 } // namespace refine
 
 // ── Kinematics display series (kinematic_series.*) ───────────────────────────

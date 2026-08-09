@@ -38,15 +38,17 @@ TOKEN_TO_PHASE = {
     "finish": 7, "maxspeed": 10,
 }
 
-# The emission-matrix columns (design ask, in swing order). ShaftParallelBack
-# (12), Downswing (4) and Release (6) are deliberately not columns: P2 has no
-# analyzer event (score.py's parallel_p2 check is the only truth for it), and
-# Downswing/Release were the pre-this-session proxies for p5/p8 that the
-# segmenter no longer emits directly — a starred column (P5*/P8*) marks the
-# two phases the segmenter change added.
+# The emission-matrix columns (design ask, in swing order). Downswing (4) and
+# Release (6) are deliberately not columns: they were the pre-this-session
+# proxies for p5/p8 that the segmenter no longer emits directly — a starred
+# column (P5*/P8*) marks the two phases the segmenter change added. P2
+# (ShaftParallelBack, 12) is emitted by the analyzer-layer positions ladder
+# (positions_ladder.h, behind refine.positionsLadder), which also feeds
+# P3/P5/P6/P8 from the club track's located positions.
 MATRIX_COLUMNS = [
-    (0, "P1"), (1, "TKW"), (8, "P3"), (3, "TRN"), (2, "P4"), (13, "P5*"),
-    (9, "P6"), (10, "MAX"), (5, "P7"), (14, "P8*"), (11, "P9"), (7, "FIN"),
+    (0, "P1"), (1, "TKW"), (12, "P2"), (8, "P3"), (3, "TRN"), (2, "P4"),
+    (13, "P5*"), (9, "P6"), (10, "MAX"), (5, "P7"), (14, "P8*"), (11, "P9"),
+    (7, "FIN"),
 ]
 
 DEFAULT_PACK = REPO_ROOT / "src" / "Resources" / "diagnostics" / "core.json"

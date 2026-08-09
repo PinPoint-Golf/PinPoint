@@ -139,7 +139,9 @@ struct Segmentation {
     int64_t swingStartUs = 0;              // Address − pad, clamped to coverage
     int64_t swingEndUs   = 0;              // Finish  + pad, clamped to coverage
     float   conf         = 0.0f;           // min over {Address, Top, Impact, Finish}
-    int     version      = 2;              // 3 once the shaft refinement ran
+    int     version      = 2;              // 3 = shaft refinement ran (event_refine.h);
+                                           // 4 = positions ladder emitted (positions_ladder.h
+                                           // inserted club P-events). Persisted and read back.
 
     const PhaseEvent *eventFor(Phase p) const {
         for (const PhaseEvent &e : events)
