@@ -177,16 +177,17 @@ int main()
         check(timeOrdered(seg), "ladder stays time-ordered around the survivor");
     }
 
-    // 7. Key mapping + dark default (the tuning_overrides_test contract, local
-    //    to this module): empty map ⇒ frozen dark; the dotted key flips it.
+    // 7. Key mapping + frozen-ON default (the tuning_overrides_test contract,
+    //    local to this module): empty map ⇒ ON (2026-08-09 gate); the override
+    //    direction is DARK-OUT — false restores the soak baseline.
     {
         std::printf("-- refine.positionsLadder key --\n");
-        check(PositionsLadderConfig::fromOverrides({}).enabled == false,
-              "empty map → dark default (A/B soak baseline)");
+        check(PositionsLadderConfig::fromOverrides({}).enabled == true,
+              "empty map → frozen ON default (2026-08-09 corpus gate)");
         QVariantMap ov;
-        ov["refine.positionsLadder"] = true;
-        check(PositionsLadderConfig::fromOverrides(ov).enabled == true,
-              "refine.positionsLadder=true enables");
+        ov["refine.positionsLadder"] = false;
+        check(PositionsLadderConfig::fromOverrides(ov).enabled == false,
+              "refine.positionsLadder=false darks the stage (soak baseline)");
     }
 
     std::printf("%s (%d failures)\n", g_fail ? "FAILED" : "OK", g_fail);

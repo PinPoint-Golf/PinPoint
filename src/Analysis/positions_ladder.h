@@ -72,9 +72,10 @@
 
 namespace pinpoint::analysis {
 
-// Gate only — dark by default for the A/B soak (tuned::refine::
-// kPositionsLadder); flip the default in a follow-up once the corpus gate is
-// green. SwingLab sweeps it via the "refine.positionsLadder" dotted key.
+// Gate only — ON by default since the 2026-08-09 corpus gate went green
+// (tuned::refine::kPositionsLadder); false darks the stage entirely, the
+// byte-identical soak baseline. SwingLab sweeps it via the
+// "refine.positionsLadder" dotted key.
 struct PositionsLadderConfig {
     bool enabled = tuned::refine::kPositionsLadder;   // refine.positionsLadder
 

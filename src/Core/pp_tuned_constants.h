@@ -501,10 +501,14 @@ inline constexpr double kMinConf           = 0.8;   // refine.minConf — apply 
                                                     //   (0.5 → 0.8 at the 2026-07-18 freeze: zero
                                                     //   regressions on the 17-swing truth A/B at 0.8)
 inline constexpr double kMaxShiftS         = 3.0;   // refine.maxShiftS — abstain if |t_refined − t_old| exceeds
-inline constexpr bool   kPositionsLadder   = false; // refine.positionsLadder — promote club P2/P3/P5/P6/P8
+inline constexpr bool   kPositionsLadder   = true;  // refine.positionsLadder — promote club P2/P3/P5/P6/P8
                                                     //   positions into ladder PhaseEvents (positions_ladder.h,
-                                                    //   version 4). DARK for the corpus A/B soak; flip in a
-                                                    //   follow-up once the coverage gate is green.
+                                                    //   version 4). ON since the 2026-08-09 corpus gate:
+                                                    //   61/61 byte-identity dark, +289 resolved rows, ladder
+                                                    //   order clean (P4<P5<P6<P7 on all 11 dual-carry swings);
+                                                    //   the club-track P6 crossing firing ~120 ms early vs
+                                                    //   truth is a DETECTOR finding, tracked separately.
+                                                    //   false darks the stage (the soak baseline).
 } // namespace refine
 
 // ── Kinematics display series (kinematic_series.*) ───────────────────────────
