@@ -2563,7 +2563,7 @@
       "id": "sig_launchLow",
       "test": "outsideCorridor",
       "measures": [
-        "m_launchAngle"
+        "m_lmLaunchAngle"
       ],
       "direction": "low"
     },
@@ -2571,7 +2571,7 @@
       "id": "sig_launchHigh",
       "test": "outsideCorridor",
       "measures": [
-        "m_launchAngle"
+        "m_lmLaunchAngle"
       ],
       "direction": "high"
     },

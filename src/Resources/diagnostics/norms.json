@@ -1744,6 +1744,39 @@
       "source": "heuristic"
     },
     {
+      "measure": "m_lmLaunchAngle",
+      "context": "any",
+      "mu": 15.0,
+      "sigmaLo": 5.0,
+      "unit": "°",
+      "source": "heuristic",
+      "citation": "Mirrors the m_launchAngle rows exactly — same corridors, same basis — because it grades the same quantity from a different instrument. It exists separately because sig_launchLow and sig_launchHigh were moved onto it: m_launchAngle reads the bare `launchAngle` key, which is our own planned optical route and resolves nothing, so the low and high launch outcomes could never fire from it. Should the optical producer ever land, the rows must be kept in step or the same shot will grade two ways depending on which instrument saw it."
+    },
+    {
+      "measure": "m_lmLaunchAngle",
+      "context": "driver",
+      "mu": 13.0,
+      "sigmaLo": 3.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_lmLaunchAngle",
+      "context": "iron",
+      "mu": 17.0,
+      "sigmaLo": 4.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
+      "measure": "m_lmLaunchAngle",
+      "context": "wedge",
+      "mu": 28.0,
+      "sigmaLo": 6.0,
+      "unit": "°",
+      "source": "heuristic"
+    },
+    {
       "measure": "m_spinAxis",
       "context": "any",
       "mu": 0.0,

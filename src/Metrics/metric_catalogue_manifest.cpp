@@ -2116,8 +2116,10 @@ void installMetricManifest(MetricCatalogue &cat)
                 QStringLiteral("needs a tracker that follows the ball after it leaves — the "
                                "detector we have locks the stationary ball and reports the "
                                "instant it vanishes"), PLANNED) },
-        .usedBy = { QStringLiteral("characteristic:launch_high"),
-                    QStringLiteral("characteristic:launch_low") },
+        // NO usedBy. The high- and low-launch characteristics read the MEASURED launch
+        // angle (`lm.launchAngle`), because this route is planned optical work and resolves
+        // nothing — a claim here would point two characteristics at a metric that never
+        // produces a value. It moves back if the optical producer ever lands.
     });
 
     cat.addDescriptor({
@@ -2325,6 +2327,8 @@ void installMetricManifest(MetricCatalogue &cat)
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
                 QStringLiteral("read from a launch monitor")) },
+        .usedBy = { QStringLiteral("characteristic:launch_high"),
+                    QStringLiteral("characteristic:launch_low") },
     });
 
     cat.addDescriptor({

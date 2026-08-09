@@ -145,13 +145,16 @@ int main()
 
     const QStringList want{
         QStringLiteral("lm.carryDistance"),   QStringLiteral("lm.clubPath"),
-        QStringLiteral("lm.faceToPath"),      QStringLiteral("lm.launchDirection"),
-        QStringLiteral("lm.smashFactor"),     QStringLiteral("lm.spinAxis"),
-        QStringLiteral("lm.spinRate"),        QStringLiteral("lm.strikeLocation"),
+        QStringLiteral("lm.faceToPath"),      QStringLiteral("lm.launchAngle"),
+        QStringLiteral("lm.launchDirection"), QStringLiteral("lm.smashFactor"),
+        QStringLiteral("lm.spinAxis"),        QStringLiteral("lm.spinRate"),
+        QStringLiteral("lm.strikeLocation"),
     };
     check(lmKeys.size() >= 25, "the pack still describes the launch monitor's readings");
+    // lm.launchAngle joined 2026-08-09: sig_launchLow/High moved onto m_lmLaunchAngle and its
+    // norm rows were mirrored from m_launchAngle, so the measured reading now grades.
     check(gradable == want,
-          "exactly the eight authored readings resolve a corridor; the rest stay silent");
+          "exactly the nine authored readings resolve a corridor; the rest stay silent");
     if (gradable != want)
         std::printf("       got: %s\n", gradable.join(QStringLiteral(", ")).toUtf8().constData());
 

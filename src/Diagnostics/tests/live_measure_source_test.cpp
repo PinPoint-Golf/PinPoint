@@ -352,7 +352,10 @@ int main(int argc, char **argv)
     check(cRich.assessable > 0 && cLm.assessable > 0, "the two rich captures assess something at all");
     check(cRich.assessable == 51, "rich_7iron: 51 of 152 conditions assessable (observed)");
     check(cRich.measures   == 38, "rich_7iron: 38 of 109 live measures resolved (observed)");
-    check(cLm.assessable   == 12, "lm_7iron: 12 of 152 conditions assessable (observed)");
+    // 12 → 14 on 2026-08-09: sig_launchLow/sig_launchHigh moved onto m_lmLaunchAngle (the
+    // measured key this fixture actually carries), so launch_low and launch_high became
+    // assessable on an LM-only capture.
+    check(cLm.assessable   == 14, "lm_7iron: 14 of 152 conditions assessable (observed)");
     check(cLm.measures     == 25, "lm_7iron: 25 of 109 live measures resolved (observed)");
     check(cSparse.assessable == 2, "sparse_noclub: 2 of 152 conditions assessable (observed)");
     check(cSparse.measures   == 1, "sparse_noclub: 1 of 109 live measures resolved (observed)");
