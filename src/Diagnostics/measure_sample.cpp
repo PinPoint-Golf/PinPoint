@@ -18,6 +18,8 @@
 
 #include "measure_sample.h"
 
+#include "../Core/club_vocabulary.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -460,12 +462,10 @@ SwingPhaseGrid readPhaseGrid(const QString &swingDir, bool writeSidecar, const P
         Qt::ISODateWithMs);
     grid.wallclockMs = wc.isValid() ? wc.toMSecsSinceEpoch() : 0;
 
-    // review.club is the user's correction of whatever the capture recorded; absent or empty, the
-    // same "DRIVER" stub the summary uses, so a per-club draw-from filter buckets the two paths
-    // identically instead of splitting one club into two.
-    const QString club = root.value(QStringLiteral("review")).toObject()
-                             .value(QStringLiteral("club")).toString();
-    grid.club = club.isEmpty() ? QStringLiteral("DRIVER") : club;
+    // THE shared resolver the summary uses (review.club, else capture.club.name, else the stub),
+    // so a per-club draw-from filter buckets the two paths identically instead of splitting one
+    // club into two.
+    grid.club = swingDocClub(root);
 
     // Best-effort: a library on read-only media still browses, it just re-parses each time.
     QSaveFile out(sidePath);

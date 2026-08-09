@@ -74,7 +74,11 @@ namespace pinpoint::analysis {
 
 // The schema this build writes. A sidecar declaring a HIGHER version is ignored and rebuilt rather
 // than partially read — it is a pure cache, so discarding it is always safe.
-inline constexpr int kPhaseGridSchemaVersion = 1;
+//
+// 2: `club` now resolves through swingDocClub() (review.club, else capture.club.name, else the
+//    stub). A v1 sidecar cached the review-or-stub answer and its size+mtime guard still matches,
+//    since the fix rewrote no swing.json — the version bump is what retires it.
+inline constexpr int kPhaseGridSchemaVersion = 2;
 
 struct PhaseGridConfig {
     int64_t windowHalfUs    = 15000;   // ±15 ms about the phase instant (tuned::sampler)

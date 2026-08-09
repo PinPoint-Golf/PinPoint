@@ -39,9 +39,20 @@ public:
     // analyzer's `analysis` (inline, additive "analysis" object) and write atomically
     // to <swingDir>/swing.json. Bumps schema to pinpoint.swing/2. analysis==nullptr →
     // raw only (no "analysis"). Returns false (and sets *error) on write failure.
+    //
+    // `club` is the session's active club at the instant of the shot; it seeds the review
+    // block, which updateReview() later replaces if the user corrects it. Empty writes no
+    // review block. WITHOUT IT a camera swing recorded its club nowhere a reader looked,
+    // and every shot the user never rated read back as the club_vocabulary.h stub.
+    //
+    // It sits AFTER `error` deliberately. Ahead of it, the existing
+    // writeSwingJson(dir, manifest, &analysis, nullptr) call sites would still compile —
+    // nullptr converts to QString through const char* — and silently mean "no club, drop
+    // the error" instead of failing loudly.
     static bool writeSwingJson(const QString &swingDir, const QJsonObject &rawManifest,
                                const analysis::SwingAnalysis *analysis,
-                               QString *error = nullptr);
+                               QString *error = nullptr,
+                               const QString &club = QString());
 
     // Write-through of the user's review (rating 0–5, free-text note, club) into
     // an existing <swingDir>/swing.json: reads the doc, replaces the additive

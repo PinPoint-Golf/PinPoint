@@ -546,7 +546,7 @@ int main()
         if (!f.open(QIODevice::ReadOnly)) return 1;
         const QJsonObject s = QJsonDocument::fromJson(f.readAll()).object();
         f.close();
-        check(s[QStringLiteral("schema")].toString() == QStringLiteral("pinpoint.swingsummary/1"),
+        check(s[QStringLiteral("schema")].toString() == QStringLiteral("pinpoint.swingsummary/2"),
               "sidecar schema tag");
         const QFileInfo srcInfo(dir + QStringLiteral("/swing.json"));
         const QJsonObject src = s[QStringLiteral("source")].toObject();
@@ -615,8 +615,9 @@ int main()
         check(!SwingDocReader::readSwingSummary(dir).fromSidecar, "wrong source.mtime_ms → stale");
         check(SwingDocReader::readSwingSummary(dir).fromSidecar,  "…and is rewritten correctly");
 
-        // An unknown schema is a miss, not an error — forward compatibility is free.
-        patchSidecar("schema", QJsonValue(QStringLiteral("pinpoint.swingsummary/2")));
+        // An unknown schema is a miss, not an error — forward compatibility is free. Must
+        // name a version this build does NOT write, or the case tests nothing.
+        patchSidecar("schema", QJsonValue(QStringLiteral("pinpoint.swingsummary/99")));
         check(!SwingDocReader::readSwingSummary(dir).fromSidecar, "unknown schema → miss, not error");
         check(SwingDocReader::readSwingSummary(dir).ok,           "…and still returns good data");
     }
@@ -665,6 +666,74 @@ int main()
               "no review block → DRIVER on both paths");
         check(lean.score == fat.score, "no analysis block → score parity");
         QDir(d2).removeRecursively();
+    }
+
+    std::printf("\n=== club: the capture-time pick survives a document round-trip ===\n");
+    {
+        // THE REGRESSION THIS SECTION EXISTS FOR. The camera path recorded the session's
+        // active club nowhere a reader looked: writeSwingJson wrote no review block, and
+        // summaryFromRoot defaulted to the stub, so every shot the user never rated read
+        // back as DRIVER however carefully they had picked a club. Both halves are checked
+        // — what the writer stores, and what each reader resolves.
+        const QString d5 = QStringLiteral("/tmp/swingdoc_test_club");
+        QDir().mkpath(d5);
+        QString werr;
+        check(SwingDocWriter::writeSwingJson(d5, manifest, nullptr, &werr,
+                                             QStringLiteral("7 IRON")),
+              "write with a capture club");
+
+        QFile cf(d5 + QStringLiteral("/swing.json"));
+        check(cf.open(QIODevice::ReadOnly), "reopen");
+        const QJsonObject croot = QJsonDocument::fromJson(cf.readAll()).object();
+        cf.close();
+        check(croot[QStringLiteral("review")].toObject()[QStringLiteral("club")].toString()
+                  == QStringLiteral("7 IRON"),
+              "capture club seeded into review.club");
+
+        const PersistedShot cfat  = SwingDocReader::readSwingJson(d5);
+        const SwingSummary  clean = SwingDocReader::readSwingSummary(d5);
+        check(clean.club == QStringLiteral("7 IRON") && cfat.club == clean.club,
+              "capture club on both read paths");
+        QDir(d5).removeRecursively();
+
+        // A pre-review document that carries only capture.club.name — every camera swing
+        // written between that field landing and this fix. The stub must not win.
+        const QString d6 = QStringLiteral("/tmp/swingdoc_test_capname");
+        QDir().mkpath(d6);
+        QJsonObject capManifest = manifest;
+        QJsonObject cap = capManifest[QStringLiteral("capture")].toObject();
+        cap[QStringLiteral("club")] = QJsonObject{
+            { QStringLiteral("name"),     QStringLiteral("GAP WEDGE") },
+            { QStringLiteral("lengthMm"), 890 } };
+        capManifest[QStringLiteral("capture")] = cap;
+        check(SwingDocWriter::writeSwingJson(d6, capManifest, nullptr, &werr), "write, no club arg");
+        check(SwingDocReader::readSwingSummary(d6).club == QStringLiteral("GAP WEDGE")
+                  && SwingDocReader::readSwingJson(d6).club == QStringLiteral("GAP WEDGE"),
+              "capture.club.name beats the stub on both paths");
+
+        // …and the user's own correction still outranks what capture recorded.
+        check(SwingDocWriter::updateReview(d6, 0, QString(), QStringLiteral("PUTTER"), nullptr),
+              "correct the club");
+        check(SwingDocReader::readSwingSummary(d6).club == QStringLiteral("PUTTER"),
+              "review.club beats capture.club.name");
+
+        // Re-analysis hands the WHOLE existing document back as the manifest. Seeding a
+        // club there must not cost the user the rating and note they already wrote.
+        check(SwingDocWriter::updateReview(d6, 5, QStringLiteral("keep me"),
+                                           QStringLiteral("PUTTER"), nullptr),
+              "rate and annotate it");
+        QFile rf(d6 + QStringLiteral("/swing.json"));
+        check(rf.open(QIODevice::ReadOnly), "reopen for re-analysis");
+        const QJsonObject reManifest = QJsonDocument::fromJson(rf.readAll()).object();
+        rf.close();
+        check(SwingDocWriter::writeSwingJson(d6, reManifest, nullptr, &werr,
+                                             QStringLiteral("3 WOOD")),
+              "re-write with a different capture club");
+        const PersistedShot kept = SwingDocReader::readSwingJson(d6);
+        check(kept.club == QStringLiteral("PUTTER"), "existing review.club is not overwritten");
+        check(kept.rating == 5 && kept.note == QStringLiteral("keep me"),
+              "…and the rating and note survive with it");
+        QDir(d6).removeRecursively();
     }
 
     std::printf("\n=== launch monitor: late reading folded into an analysed swing ===\n");

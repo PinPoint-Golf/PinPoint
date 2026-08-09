@@ -29,6 +29,8 @@
 // so an unedited shot's club maps to a picker row. Adding/renaming a club here
 // changes it everywhere at once.
 
+#include <QJsonObject>
+#include <QString>
 #include <QStringList>
 
 namespace pinpoint {
@@ -55,6 +57,45 @@ inline const QStringList &clubVocabulary()
         QStringLiteral("PUTTER"),
     };
     return kClubs;
+}
+
+// The last-resort club for a document that declares none anywhere. It is a LIE, and a
+// consequential one — context_tree resolves anything containing "DRIVER" to the driver
+// node, so a stubbed swing is graded against driver corridors, while an EMPTY club would
+// have resolved to the default context instead. It survives only because the carousel and
+// the picker have always shown a club for every row. swingDocClub() below exists to make
+// reaching this line rare: every document written since capture.club.name landed carries
+// the club that was actually selected.
+inline QString clubStub() { return QStringLiteral("DRIVER"); }
+
+// WHICH CLUB A SWING WAS HIT WITH, from its swing.json root. THE one resolver — the
+// session-picker summary (swing_doc.cpp) and the diagnostics phase grid
+// (measure_sample.cpp) both call it, so a per-club filter can never bucket the same swing
+// two ways.
+//
+// Precedence, most authoritative first:
+//   1. review.club     — the user's own pick or correction, made in the swing-edit
+//                        popover, and the only one of the three a human typed.
+//   2. capture.club.name — the session's active club at the instant of the shot
+//                        (Home CLUB chip → SessionController::activeClub → the export
+//                        job). Written by the camera path, which has no review block
+//                        until the shot is edited; without this step every unedited
+//                        camera swing read back as the stub.
+//   3. the stub        — nothing declared it. Pre-dates capture.club.name; unrecoverable.
+inline QString swingDocClub(const QJsonObject &root)
+{
+    const QString review = root.value(QStringLiteral("review")).toObject()
+                               .value(QStringLiteral("club")).toString().trimmed();
+    if (!review.isEmpty())
+        return review;
+
+    const QString captured = root.value(QStringLiteral("capture")).toObject()
+                                 .value(QStringLiteral("club")).toObject()
+                                 .value(QStringLiteral("name")).toString().trimmed();
+    if (!captured.isEmpty())
+        return captured;
+
+    return clubStub();
 }
 
 } // namespace pinpoint

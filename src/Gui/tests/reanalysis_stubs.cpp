@@ -39,7 +39,8 @@ ReanalyzeResult reanalyzeSwingDir(const QString & /*swingDir*/, const ReanalyzeO
 namespace pinpoint {
 
 bool SwingDocWriter::writeSwingJson(const QString & /*swingDir*/, const QJsonObject & /*rawManifest*/,
-                                    const analysis::SwingAnalysis * /*analysis*/, QString * /*error*/)
+                                    const analysis::SwingAnalysis * /*analysis*/, QString * /*error*/,
+                                    const QString & /*club*/)
 {
     return true;   // unreached: onWorkerFinished needs an event loop the test never runs
 }

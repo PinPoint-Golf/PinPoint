@@ -30,6 +30,7 @@
 
 #include "swing_paths.h"
 #include "../Analysis/swing_analysis.h"
+#include "../Core/club_vocabulary.h"
 
 namespace pinpoint {
 namespace {
@@ -459,7 +460,11 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
 // any out-of-band rewrite — re-analysis, corpus tooling — is detected and the sidecar
 // regenerated. It is pure cache: always safe to delete, always regenerable.
 
-constexpr auto kSummarySchema = "pinpoint.swingsummary/1";
+// /2: club is resolved through swingDocClub() — review.club, else capture.club.name, else
+// the stub. A /1 sidecar cached the review-or-stub answer, and its size+mtime guard still
+// matches (the fix changed no swing.json), so bumping the schema is the ONLY thing that
+// retires the stale "DRIVER" it holds for every camera swing that was never edited.
+constexpr auto kSummarySchema = "pinpoint.swingsummary/2";
 
 QString summaryPath(const QString &swingDir) { return swingDir + QStringLiteral("/swing_summary.json"); }
 QString sourcePath (const QString &swingDir) { return swingDir + QStringLiteral("/swing.json"); }
@@ -526,7 +531,8 @@ SwingSummary summaryFromRoot(const QJsonObject &root, const QString &swingDir)
         return s;
 
     s.ordinal = root[QStringLiteral("swing")].toObject()[QStringLiteral("index")].toInt();
-    s.club    = QStringLiteral("DRIVER");   // stub default; overridden by review.club below
+    // review.club, else the club selected at capture, else the stub — see swingDocClub().
+    s.club    = swingDocClub(root);
 
     const QString wc = root[QStringLiteral("clock")].toObject()[QStringLiteral("wallclock")].toString();
     const QDateTime dt = QDateTime::fromString(wc, Qt::ISODateWithMs);
@@ -547,13 +553,6 @@ SwingSummary summaryFromRoot(const QJsonObject &root, const QString &swingDir)
         s.score = scoreVal.isObject()
                       ? scoreVal.toObject()[QStringLiteral("overall")].toInt()
                       : scoreVal.toInt();
-    }
-
-    // Older review blocks predate club; keep the stub default when absent/empty.
-    if (root.contains(QStringLiteral("review"))) {
-        const QString club = root[QStringLiteral("review")].toObject()[QStringLiteral("club")].toString();
-        if (!club.isEmpty())
-            s.club = club;
     }
 
     s.ok = true;
@@ -623,10 +622,33 @@ bool writeSummaryFile(const SwingSummary &s, QString *error)
 } // namespace
 
 bool SwingDocWriter::writeSwingJson(const QString &swingDir, const QJsonObject &rawManifest,
-                                    const analysis::SwingAnalysis *analysis, QString *error)
+                                    const analysis::SwingAnalysis *analysis, QString *error,
+                                    const QString &club)
 {
     QJsonObject root = rawManifest;
     root[QStringLiteral("schema")] = QStringLiteral("pinpoint.swing/2");
+
+    // The club the session was on when the shot happened, seeded into the review block the
+    // same way writeDeviceOnlySwing() seeds it. capture.club.name already records it, and
+    // swingDocClub() falls back to that, so this is belt-and-braces rather than the only
+    // copy — but it puts the answer where updateReview() will later replace it, so a user
+    // correction and a capture-time pick live at one key instead of two that can disagree.
+    // Empty ⇒ no block at all: an absent review is honest, a review naming no club is not.
+    //
+    // SEEDS, never overwrites. `rawManifest` is a fresh capture manifest on the live path,
+    // but the re-analysis path hands back the whole existing document (reanalysis_controller)
+    // — replacing its review there would drop the user's rating and note along with their
+    // club. Only an absent or club-less review is filled in.
+    if (!club.isEmpty()) {
+        QJsonObject review = root.value(QStringLiteral("review")).toObject();
+        if (review.value(QStringLiteral("club")).toString().trimmed().isEmpty()) {
+            review[QStringLiteral("club")] = club;
+            if (!review.contains(QStringLiteral("rating"))) review[QStringLiteral("rating")] = 0;
+            if (!review.contains(QStringLiteral("note")))   review[QStringLiteral("note")]   = QString();
+            root[QStringLiteral("review")] = review;
+        }
+    }
+
     if (analysis) {
         // clock.t0_us = the absolute window start; serializeAnalysis uses it to
         // emit analysis t_us window-relative regardless of the source domain.

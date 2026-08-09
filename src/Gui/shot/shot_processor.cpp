@@ -34,6 +34,7 @@
 #include "../Analysis/phase_segmenter.h"
 #include "../Analysis/swing_analysis.h"
 #include "../Export/swing_doc.h"
+#include "../Core/club_vocabulary.h"
 #include "../Core/pp_debug.h"
 #include "../Core/pp_os_metrics.h"
 #include "pp_version.h"
@@ -1346,6 +1347,17 @@ void ShotProcessor::maybeJoin()
         }
     }
 
+    // The club this shot was hit with: the session's active club (Home CLUB chip →
+    // SessionController.activeClub, seeded from the athlete's preferred club), else the
+    // athlete's preferred club, else the stub. Resolved BEFORE the document is written —
+    // it goes into swing.json as well as onto the carousel row, and a club that reached
+    // only the row was lost the moment the session reloaded from disk.
+    QString shotClub = m_session ? m_session->activeClub() : QString();
+    if (shotClub.isEmpty() && m_athlete)
+        shotClub = m_athlete->effectivePrimaryClub(m_athlete->currentUuid());
+    if (shotClub.isEmpty())
+        shotClub = pinpoint::clubStub();
+
     // The ONE unified swing.json (raw manifest + inline "analysis"), written here on the
     // GUI thread now that both workers have finished — no parallel-write race (the workers
     // wrote only media + returned values). savedSwingDir is set only when a swing.json was
@@ -1357,7 +1369,7 @@ void ShotProcessor::maybeJoin()
         if (pinpoint::SwingDocWriter::writeSwingJson(
                 m_swingDir, m_exportManifest,
                 analysisOk && m_analysisResult.detail ? m_analysisResult.detail.get() : nullptr,
-                &werr)) {
+                &werr, shotClub)) {
             savedSwingDir = m_swingDir;
             ppInfo() << "[SwingDoc] wrote" << m_swingDir + QStringLiteral("/swing.json")
                      << (analysisOk ? "(with analysis)" : "(raw only)");
@@ -1372,7 +1384,7 @@ void ShotProcessor::maybeJoin()
         if (m_exportManifest.contains(QStringLiteral("imuIntegrity")))
             synthManifest[QStringLiteral("imuIntegrity")] = m_exportManifest[QStringLiteral("imuIntegrity")];
         if (pinpoint::SwingDocWriter::writeSwingJson(
-                m_swingDir, synthManifest, m_analysisResult.detail.get(), &werr)) {
+                m_swingDir, synthManifest, m_analysisResult.detail.get(), &werr, shotClub)) {
             savedSwingDir = m_swingDir;
             ppInfo() << "[SwingDoc] wrote analysis-only" << m_swingDir + QStringLiteral("/swing.json");
         } else {
@@ -1380,17 +1392,10 @@ void ShotProcessor::maybeJoin()
         }
     }
 
-    // The shot happened — it always lands on the carousel, with whatever the
-    // pipeline produced. Club is the session's active club (Home CLUB chip →
-    // SessionController.activeClub, seeded from the athlete's preferred club);
-    // the user can still change it per-shot via the swing-edit popover (persisted
-    // to review.club). Falls back to the athlete's preferred club, then "DRIVER".
-    QString shotClub = m_session ? m_session->activeClub() : QString();
-    if (shotClub.isEmpty() && m_athlete)
-        shotClub = m_athlete->effectivePrimaryClub(m_athlete->currentUuid());
-    if (shotClub.isEmpty())
-        shotClub = QStringLiteral("DRIVER");
-
+    // The shot happened — it always lands on the carousel, with whatever the pipeline
+    // produced, carrying the same shotClub the document above records. The user can still
+    // change it per-shot via the swing-edit popover (persisted to review.club).
+    //
     // Publish the analyzed detail of the shot about to replay (the ScreenWrist in-replay
     // graph binds to it) before addShot, so it's ready when REPLAYING begins.
     m_replayAnalysisDetail = (analysisOk && m_analysisResult.detail)

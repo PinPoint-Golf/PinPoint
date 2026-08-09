@@ -35,7 +35,12 @@ Item {
     // Session types not yet implemented: badged "coming soon" tiles that open
     // their placeholder screen instead of starting a session.
     readonly property var comingSoonTypes: [0, 2, 3]
-    property string selectedClub: "DRIVER"
+    // EMPTY, not a club. This is carried into SessionController.activeClub at session
+    // start, and start() only seeds from the athlete's preferred club when activeClub is
+    // empty — so a literal here becomes the session's club and silently outranks the
+    // preference whenever onAthMapChanged hasn't resolved one (no current athlete, or an
+    // empty bag, which also hides the CLUB row so it can't be corrected).
+    property string selectedClub: ""
 
     property var athMap: {
         if (!athleteController.hasCurrentAthlete) return {}
