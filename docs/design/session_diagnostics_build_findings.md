@@ -101,3 +101,36 @@ per the brief's own rule. These are the places that rule fired, plus what real d
 
 The mock script carries a "hindsight off" review mode (counts "as of this shot"). Brief §6
 rejects rewinding; only final-session-state review is implemented.
+
+## Coverage session addendum (2026-08-09) — what the studio corpus actually showed
+
+The P5/P8 relabel (`48aa1d6`), LM launch repoint (`fb04260`) and swinglab coverage report
+(`6ba8ae0`) were validated on GOLFSIMPC against the 61-swing Mark-Liversedge corpus,
+baseline `bcf03d8` vs candidate `6ba8ae0`, real pose, `params-refine-on`. Result: **zero
+regressions** — phase ladders, scores and metric sets byte-identical per swing
+(`C:\PinPointStudio\p5p8gate\{base2,cand2}`, COVERAGE.md in each). Findings that outlive
+the run:
+
+1. **No corpus swing has IMU bindings.** All 61 swings are `bindings: 0` — including
+   2026-07-10 Wrist_02/swing_0001, the `rich_7iron` fixture: its wrist metrics come from
+   POSE, not IMUs. The IMU segmenter (P3/Transition/P6/MaxSpeed/P9, and now P5/P8) has
+   therefore NEVER run on a real capture; the vision hands-only model supplies every real
+   ladder and emits only P1/(takeaway)/P4/P7/finish. The "phase ladder is the bottleneck"
+   coverage gap is a CAPTURE gap first (corpus_v1 §0.3's must-fix), a producer gap second.
+2. **The analyzer-layer P-position bridge is the real unlock, now quantified.** On
+   camera-only swings the club track already finds P2 on 20/20, P8 on 17/20, P6 on 8/20
+   (`analysis.club.positions[]`, refon-live sample); P5 (arm parallel) is derivable from
+   pose. Emitting these as PhaseEvents is exactly the deferral recorded in
+   shaft_track_assembly.cpp:1768 — doing it would light up the p5(360)/p6(232)/p8(61)/
+   p2(61) blocked-measure rows in COVERAGE.md without any new capture.
+3. **`--pose-dir` injection silently kills the shaft stage.** Every historical stagegate
+   run with injected pose (fidget*, offp*, onp1, final1, refinedark1) has `shaftMs: 0`,
+   no club block, no phases, score 0 — those A/B gates never compared phases at all.
+   Suspected mechanism: injected pose timestamps fall outside the window's timebase, so
+   ShaftTracker's "frames inside pose coverage" early-out fires; not root-caused. Until
+   fixed, corpus runs that need phases must run real pose (~7 s/swing on studio CUDA).
+4. **Seven swings write a non-monotone vision ladder** (Top==Finish timestamp, Impact
+   ~6.5 ms after Finish, flat 0.5 conf; six of seven in 07-05 Wrist_02). Present
+   identically in baseline and candidate — a latent vision-model degeneracy, not a
+   regression. Consumers that assume ladder order (alternating chart bands, segment
+   chips) will misdraw these swings.
