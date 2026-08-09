@@ -39,6 +39,11 @@ Item {
     property real fit: 1.0
 
     signal toggled()
+    // A watched condition opens too. It has a ledger like any other — a recurrence, a run, an
+    // authored ancestry — and the only thing below the pattern gate is the CLAIM, not the
+    // evidence. Cheap and consistent: the row a golfer is most likely to ask "why?" about is the
+    // one the panel is deliberately not asserting anything about yet.
+    signal itemActivated(string conditionId)
 
     objectName: "sdWatchingRow"
 
@@ -48,7 +53,13 @@ Item {
     readonly property int tzMicro:   Math.max(1, Math.round(Theme.fontSzMicro * fit))
     readonly property int count: items ? items.length : 0
 
-    visible: count > 0
+    // Held off screen while the panel is showing a condition detail. A `visible:` at the use site
+    // would REPLACE the count binding below rather than combining with it, and a watching row
+    // that reappeared empty once the detail closed would be a row asserting nothing about two
+    // conditions it no longer has.
+    property bool suppressed: false
+
+    visible: !suppressed && count > 0
     implicitHeight: visible ? (expanded ? body.implicitHeight : px(22)) : 0
 
     // The joined one-liner. The separator is the only thing this file contributes — every
@@ -59,6 +70,14 @@ Item {
         for (let i = 0; i < items.length; ++i)
             parts.push(items[i].name + " " + items[i].recurrence)
         return parts.join(" · ")
+    }
+
+    // COLLAPSE/EXPAND, declared FIRST so the expanded rows' own taps sit on top of it: in
+    // QtQuick declaration order is hit order, and a row that opened a condition must not also
+    // fold the region it is in. Collapsed there are no rows, so this is the whole surface.
+    MouseArea {
+        anchors.fill: parent
+        onClicked: root.toggled()
     }
 
     Column {
@@ -131,12 +150,14 @@ Item {
                     font.pixelSize: root.tzMicro
                     color: Theme.colorText3
                 }
+
+                MouseArea {
+                    objectName: "sdWatchingItemTap"
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.itemActivated(parent.modelData.id || "")
+                }
             }
         }
-    }
-
-    MouseArea {
-        anchors.fill: parent
-        onClicked: root.toggled()
     }
 }

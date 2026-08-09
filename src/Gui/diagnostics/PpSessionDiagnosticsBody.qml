@@ -104,6 +104,41 @@ Rectangle {
         return []
     }
 
+    // ── the condition detail (user request; brief §9 has no design for it) ───
+    //
+    // A BODY SWAP, NOT A LOADER AND NOT A STACK. The composition behind the detail is HIDDEN,
+    // never torn down, which is what makes BACK a restoration rather than a rebuild: the
+    // watching row comes back expanded if it was, chain B comes back open if it was, the cards
+    // come back in the order hystereticOrder() had them. A Loader would rebuild every delegate
+    // on the way back and quietly reset all three, and would also re-run the pulse machinery on
+    // cards that were not there for the shot (see PpPatternCard's `_ready`).
+    //
+    // ONE STEP BACK, ALWAYS. Opening a cause or an effect from inside the detail RE-TARGETS this
+    // page; BACK still returns to the panel. That is a deliberate simplification of the obvious
+    // alternative — a breadcrumb stack — because the panel is a glance between balls and a
+    // reader four levels deep with no way to see where they are is worse than a reader who has
+    // to tap the card again.
+    //
+    // GUARDED ON THE FUNCTION, exactly as the two declarations are: the offscreen test presses
+    // this body with a plain fixture, and a fixture that wants to assert the tap arrived supplies
+    // a spy of the same name. One that does not gets a no-op rather than a TypeError.
+    function _openDetail(conditionId) {
+        if (!conditionId) return
+        if (source && typeof source.openDetail === "function")
+            source.openDetail(conditionId)
+    }
+    function _closeDetail() {
+        if (source && typeof source.closeDetail === "function")
+            source.closeDetail()
+    }
+
+    // READ BACK OFF THE MODEL, never remembered here — the same rule as `focused` and
+    // `declaredMiss`. A request the model declined leaves the panel exactly as it was.
+    readonly property string detailConditionId:
+        source ? (source.detailConditionId || "") : ""
+    readonly property var detail: source ? source.detail : null
+    readonly property bool detailOpen: detailConditionId !== "" && !!detail && !!detail.header
+
     // ── the after-shot pulse (§B3, §B8) ──────────────────────────────────────
     //
     // ONE CUE OBJECT, PUBLISHED DOWNWARD: { token, ids, focusId }. Single-property so a card
@@ -365,6 +400,44 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: root.px(9)
 
+                // ── back, out of the condition detail ────────────────────────
+                // LEFT OF THE PANEL'S OWN NAME, in the house mono micro-chip: the panel is still
+                // the panel, and this is the one control that says the body under it is a
+                // detour. Drawn in the accent because it is the only thing on the header a tap
+                // does something with.
+                Rectangle {
+                    id: backChip
+                    objectName: "sdDetailBack"
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.detailOpen
+                    width:  backText.implicitWidth + root.px(12)
+                    height: backText.implicitHeight + root.px(4)
+                    radius: Math.max(1, root.px(3))
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Qt.rgba(Theme.colorAccent.r, Theme.colorAccent.g,
+                                          Theme.colorAccent.b, backMouse.containsMouse ? 0.55 : 0.30)
+                    Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
+
+                    Text {
+                        id: backText
+                        anchors.centerIn: parent
+                        text: qsTr("◂ BACK")
+                        font.family: Theme.fontData
+                        font.pixelSize: root.tzCaption
+                        font.letterSpacing: Theme.trackingMicro
+                        color: Theme.colorAccent
+                    }
+
+                    MouseArea {
+                        id: backMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root._closeDetail()
+                    }
+                }
+
                 Text {
                     objectName: "sdTitle"
                     anchors.verticalCenter: parent.verticalCenter
@@ -439,11 +512,29 @@ Rectangle {
                 // NOT tinted like a finding: intent shapes attention and pre-arms chains, and
                 // it is never evidence (§A6). The accent is the app's "you can act here"
                 // colour, which is exactly what it is.
+                // The condition the detail is open on, named in the header — because the body
+                // below it is one condition's page and the panel's own title no longer says
+                // what is on screen.
+                Text {
+                    objectName: "sdDetailTitle"
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.detailOpen
+                    text: root.detail ? (root.detail.name || "") : ""
+                    elide: Text.ElideRight
+                    font.family: Theme.fontBody
+                    font.pixelSize: root.tzLabel
+                    font.weight: Theme.fontBodyWeight
+                    color: Theme.colorText
+                }
+
                 Rectangle {
                     id: missChip
                     objectName: "sdMissChip"
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: root._missInvited || root.declaredMiss !== ""
+                    // The declaration is about the SESSION, and the detail is about one
+                    // condition. Asking "what is the bad shot?" over a page that is not the
+                    // session picture is an invitation with nowhere to land.
+                    visible: !root.detailOpen && (root._missInvited || root.declaredMiss !== "")
                     width:  missText.implicitWidth + root.px(14)
                     height: missText.implicitHeight + root.px(4)
                     radius: Math.max(1, root.px(3))
@@ -523,6 +614,28 @@ Rectangle {
             }
         }
 
+        // ── one condition, drilled into ──────────────────────────────────────
+        // Takes the whole body when it is open: the strips above it and the footers below it
+        // are the session picture's, and this page is one condition's. The composition is still
+        // there, hidden, and BACK is a visibility change.
+        PpConditionDetail {
+            objectName: "sdDetailBody"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.detailOpen
+            detail: root.detail
+            fit: root.k
+            compact: root.compact
+            interactive: root.interactive
+            screenConditionId: root._screenConditionId
+            screenRef:         root._screenRef
+            onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
+            onFocusToggled:    (id, on) => root._declareFocus(id, on)
+            // Re-targets the page in place; BACK still returns to the panel in one step.
+            onConditionActivated: (id) => root._openDetail(id)
+            onCloseRequested: root._closeDetail()
+        }
+
         // ── the after-shot strip, the bookends, or the reviewed shot ─────────
         // ONE SLOT, THREE TENSES. A live session reports the moment after the swing; a closed
         // one has no after-shot moment, so the strip that reported one is REPLACED rather than
@@ -532,7 +645,7 @@ Rectangle {
         PpThisShotStrip {
             Layout.fillWidth: true
             Layout.preferredHeight: implicitHeight
-            visible: !root.isClosing && !root.reviewingShot
+            visible: !root.detailOpen && !root.isClosing && !root.reviewingShot
             chips:   root.source ? root.source.thisShot : []
             delta:   root.source ? root.source.afterShotDelta : null
             quiet:   root.source ? root.source.quiet === true : false
@@ -543,7 +656,7 @@ Rectangle {
         PpReviewShotStrip {
             Layout.fillWidth: true
             Layout.preferredHeight: implicitHeight
-            visible: root.reviewingShot
+            visible: !root.detailOpen && root.reviewingShot
             readout: root.readout
             fit:     root.k
             compact: root.compact
@@ -558,7 +671,7 @@ Rectangle {
             objectName: "sdBookends"
             Layout.fillWidth: true
             Layout.preferredHeight: root.px(56)
-            visible: root.isClosing && !root.reviewingShot
+            visible: !root.detailOpen && root.isClosing && !root.reviewingShot
             color: Theme.colorSurface
             radius: Theme.radius
             border.width: 1
@@ -650,6 +763,8 @@ Rectangle {
             id: stageBody
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // THE SWAP. Hidden, never torn down — see root._openDetail().
+            visible: !root.detailOpen
 
             // ── Cold ─────────────────────────────────────────────────────────
             Rectangle {
@@ -867,6 +982,7 @@ Rectangle {
                             interactive: root.interactive
                             pulseCue: root.pulseCue
                             onFocusToggled: (id, on) => root._declareFocus(id, on)
+                            onDetailRequested: (id) => root._openDetail(id)
                             width: Math.max(0, (cardRow.width - (root._cardsShown - 1) * cardRow.spacing)
                                                / Math.max(1, root._cardsShown))
                             height: cardRow.height
@@ -912,6 +1028,7 @@ Rectangle {
                             screenRef:         root._screenRef
                             onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
                             onFocusToggled:    (id, on) => root._declareFocus(id, on)
+                            onDetailRequested: (id) => root._openDetail(id)
                         }
                     }
 
@@ -965,6 +1082,7 @@ Rectangle {
                             screenRef:         root._screenRef
                             onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
                             onFocusToggled:    (id, on) => root._declareFocus(id, on)
+                            onDetailRequested: (id) => root._openDetail(id)
                         }
 
                         Repeater {
@@ -1081,6 +1199,7 @@ Rectangle {
                                     screenRef:         root._screenRef
                                     onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
                                     onFocusToggled:    (id, on) => root._declareFocus(id, on)
+                                    onDetailRequested: (id) => root._openDetail(id)
                                 }
                             }
                         }
@@ -1096,7 +1215,7 @@ Rectangle {
             objectName: "sdUnchainedRow"
             Layout.fillWidth: true
             Layout.preferredHeight: root.px(26)
-            visible: unchainedText.text !== ""
+            visible: !root.detailOpen && unchainedText.text !== ""
             color: "transparent"
             radius: Theme.radius
             border.width: 1
@@ -1137,8 +1256,12 @@ Rectangle {
             Layout.preferredHeight: implicitHeight
             items: root.source ? root.source.watching : []
             expanded: root.watchingExpanded
+            suppressed: root.detailOpen
             fit: root.k
             onToggled: root.watchingExpanded = !root.watchingExpanded
+            // A watched condition has a ledger like any other; opening one is the same verb the
+            // cards and the rail nodes take.
+            onItemActivated: (id) => root._openDetail(id)
         }
 
         // STATED EXACTLY ONCE. In Established and Closing the driver footer carries the
@@ -1149,8 +1272,11 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? implicitHeight : 0
             Layout.leftMargin: root.px(4)
-            line: root._footerCarriesCoverage ? ""
-                                              : (root.source ? (root.source.coverageLine || "") : "")
+            // Stated on the session picture. The detail is one condition's page and the
+             // coverage line is a fact about the capture, which belongs to the panel behind it.
+            line: root.detailOpen ? ""
+                                  : (root._footerCarriesCoverage
+                                     ? "" : (root.source ? (root.source.coverageLine || "") : ""))
             fit: root.k
         }
 
@@ -1158,7 +1284,7 @@ Rectangle {
         PpDriverFooter {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? implicitHeight : 0
-            visible: root._hasDriverFooter
+            visible: !root.detailOpen && root._hasDriverFooter
             driver: root.driver
             coverageLine: root.source ? (root.source.coverageLine || "") : ""
             fit: root.k
@@ -1176,7 +1302,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: root.px(4)
             Layout.preferredHeight: visible ? implicitHeight : 0
-            visible: text !== ""
+            visible: !root.detailOpen && text !== ""
             text: root.header ? (root.header.reviewFootLine || "") : ""
             elide: Text.ElideRight
             font.family: Theme.fontData

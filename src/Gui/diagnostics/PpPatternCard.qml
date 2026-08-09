@@ -44,12 +44,15 @@ Rectangle {
 
     // ── the focus contract (design §A6) ──────────────────────────────────────
     //
-    // DESIGN-REVIEW: the affordance is MINIMAL by intent — a micro-label and a tap on the
-    // whole card. What has not been designed is the moment AFTER declaring: the split point
-    // is invisible on the run (the ticks before and after the declaration look identical),
-    // and there is no way to see what the contract has bought yet beyond a link quietly
-    // becoming Moved-together further down the rail. Both want a design pass before this is
-    // called finished.
+    // DESIGN-REVIEW: the affordance is MINIMAL by intent — a micro-label, and now the micro-label
+    // ALONE. It used to be the whole card, and the whole card is what a user asked to open the
+    // condition's causes and effects with; two verbs cannot share one hit target, so the six
+    // characters that already said "FOCUS ▸" became the focus target and the card became the
+    // drill-in. That is a reassignment of an existing affordance rather than a new one, and it
+    // wants a design pass with the rest of the drill-in. What has ALSO not been designed is the
+    // moment AFTER declaring: the split point is invisible on the run (the ticks before and after
+    // the declaration look identical), and there is no way to see what the contract has bought
+    // yet beyond a link quietly becoming Moved-together further down the rail.
     //
     // THE CARD ASKS AND THE MODEL DECIDES. Tapping publishes the request; declareFocus() /
     // clearFocus() live on SessionDiagnosticsModel and this file cannot reach one. `focused`
@@ -63,6 +66,13 @@ Rectangle {
     // detection, to a corridor or to a tier, and the model is what enforces that.
     readonly property bool focused: card ? card.focused === true : false
     signal focusToggled(string conditionId, bool nowFocused)
+
+    // ── the drill-in (user request; brief §9 has no design for it) ───────────
+    //
+    // THE WHOLE CARD OPENS THE CONDITION. Same rule as the focus tap it replaces: the card ASKS
+    // and the model decides — openDetail() lives on SessionDiagnosticsModel and this file cannot
+    // reach one, so a request the model declines leaves the panel exactly as it was.
+    signal detailRequested(string conditionId)
 
     // ── the after-shot pulse (§B3, §B8) ──────────────────────────────────────
     //
@@ -178,6 +188,22 @@ Rectangle {
         // the row the way the swing runs rather than all at once.
         pulseWait.duration = slot * 70
         pulseSeq.start()
+    }
+
+    // THE WHOLE CARD IS THE DRILL-IN'S TARGET, and it is declared HERE — before the content —
+    // rather than last, which is where the focus tap used to sit. Declaration order is hit order
+    // in QtQuick: the focus chip's own MouseArea lives inside the Column below and is therefore
+    // ON TOP of this one, so the six characters that toggle focus keep their clicks and the rest
+    // of the card opens the condition. A TapHandler could not do this — its default gesture
+    // policy takes a PASSIVE grab, so both would fire on one press and every tap on FOCUS would
+    // also open the page. (The miss picker next door documents the same lesson.)
+    MouseArea {
+        id: cardTap
+        objectName: "sdCardTap"
+        anchors.fill: parent
+        enabled: root.interactive && !!root.card
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.detailRequested(root.card.id || "")
     }
 
     Column {
@@ -346,8 +372,22 @@ Rectangle {
                 font.pixelSize: root.tzCaption
                 font.letterSpacing: Theme.trackingLabel
                 color: root.focused ? Theme.colorAccent
-                                    : (focusHover.hovered ? Theme.colorAccent : Theme.colorText3)
+                                    : (focusTap.containsMouse ? Theme.colorAccent : Theme.colorText3)
                 Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                // THE FOCUS TARGET, and the only one. Grown past the glyphs by a few pixels
+                // because six characters at 8 px is not a thumb target — but not by so much that
+                // it eats the recency line beside it, which is the card's, not the contract's.
+                MouseArea {
+                    id: focusTap
+                    objectName: "sdCardFocusTap"
+                    anchors.fill: parent
+                    anchors.margins: -root.px(5)
+                    enabled: root.interactive && !!root.card
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.focusToggled(root.card.id || "", !root.focused)
+                }
             }
         }
 
@@ -371,12 +411,4 @@ Rectangle {
         }
     }
 
-    // THE WHOLE CARD IS THE TARGET, not the six characters of the tag: the tag says the card
-    // is tappable and the card is what the thumb lands on. Declared last so it sits over the
-    // content; nothing else on a pattern card takes a click.
-    HoverHandler { id: focusHover; enabled: root.interactive; cursorShape: Qt.PointingHandCursor }
-    TapHandler {
-        enabled: root.interactive && !!root.card
-        onTapped: root.focusToggled(root.card.id || "", !root.focused)
-    }
 }

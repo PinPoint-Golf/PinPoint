@@ -667,6 +667,263 @@ int main(int argc, char **argv)
               "the fired count is offered per shot, and an unknown shot has no pips");
     }
 
+    // ── 8. The condition detail (user-requested drill-in) ────────────────────────────
+    //
+    // THE CLAIM UNDER TEST IS THAT IT IS A READ. conditionDetail() answers a question about a
+    // condition and must not be able to change the panel, the ledger or the file — a drill-in
+    // that quietly re-ranked a card or re-wrote diagnostics.json because somebody LOOKED at a
+    // condition would be the same class of defect as a cadence check in the ingest path.
+    //
+    // The rest is honesty: a headline that names a driver when there is one, says which cause is
+    // strongest when there is not, offers the screen when nothing is measurable, and says there
+    // is nothing when there is nothing. On a six-shot camera capture the last two are the common
+    // cases, which is exactly why they are asserted rather than the happy path alone.
+    std::printf("\ncondition detail\n");
+    {
+        const QString dir = makeSession(tmp, "athlete_h", "session_detail");
+        check(stageLayout(dir), "six swings staged");
+        auto m = freshModel();
+        m->activateSession(dir);
+
+        check(!m->cards().isEmpty(), "there is a pattern to drill into");
+        const QString id = m->cards().first().toMap().value(QStringLiteral("id")).toString();
+
+        const QVariantMap d = m->conditionDetail(id);
+        check(!d.isEmpty(), "conditionDetail returns a payload for a condition the pack authors");
+        check(m->conditionDetail(QStringLiteral("no_such_condition")).isEmpty(),
+              "…and nothing for one it does not");
+
+        // ── the header is the panel's own card, for this condition ───────────────────
+        const QVariantMap header = d.value(QStringLiteral("header")).toMap();
+        check(header.value(QStringLiteral("id")).toString() == id, "the header names the condition");
+        check(!header.value(QStringLiteral("name")).toString().isEmpty(), "…by name");
+        check(header.value(QStringLiteral("recurrence")).toString()
+                  .endsWith(QLatin1String("measurable shots")),
+              "…with the SAME recurrence wording the card carries");
+        check(header.value(QStringLiteral("ticks")).toList().size() == kShots,
+              "…and one tick per shot, never a gap");
+        check(!header.value(QStringLiteral("statePill")).toString().isEmpty(),
+              "…and a state pill rather than a blank");
+        {
+            // The card map is shared with buildCards(), and that is the point: the same
+            // condition drawn on the panel and on its own page must not be able to differ.
+            QVariantMap panelCard;
+            for (const QVariant &cv : m->cards())
+                if (cv.toMap().value(QStringLiteral("id")).toString() == id) panelCard = cv.toMap();
+            check(!panelCard.isEmpty(), "the same condition has a card on the panel");
+            check(panelCard.value(QStringLiteral("recurrence"))
+                      == header.value(QStringLiteral("recurrence"))
+                  && panelCard.value(QStringLiteral("directionText"))
+                         == header.value(QStringLiteral("directionText"))
+                  && panelCard.value(QStringLiteral("ticks"))
+                         == header.value(QStringLiteral("ticks")),
+                  "THE PAGE AND THE PANEL CANNOT WORD THE SAME CONDITION DIFFERENTLY");
+        }
+
+        // ── the rails: the chain rail's own node and link vocabulary ─────────────────
+        const QVariantList causes  = d.value(QStringLiteral("causes")).toList();
+        const QVariantList effects = d.value(QStringLiteral("effects")).toList();
+        std::printf("      %s: %lld cause paths, %lld effect paths\n",
+                    qPrintable(id), static_cast<long long>(causes.size()),
+                    static_cast<long long>(effects.size()));
+        check(!causes.isEmpty() || !effects.isEmpty(),
+              "a pattern-tier condition has an authored ancestry, a descent, or both");
+
+        bool railsOk = true, primaryOk = true, orderedOk = true;
+        int primaries = 0, lastLive = 1 << 30;
+        const QVariantList sides[2] = { causes, effects };
+        for (const QVariantList &side : sides) {
+            primaries = 0;
+            lastLive  = 1 << 30;
+            for (int i = 0; i < side.size(); ++i) {
+                const QVariantMap rail = side.at(i).toMap();
+                const QVariantList nodes = rail.value(QStringLiteral("nodes")).toList();
+                if (nodes.size() < 2) railsOk = false;
+                if (rail.value(QStringLiteral("primary")).toBool()) {
+                    ++primaries;
+                    // The primary is the FIRST, because the list is published in the order the
+                    // panel draws it — most-evidenced first, railBefore()'s rule.
+                    if (i != 0) primaryOk = false;
+                }
+                // Most-evidenced first: the live count never rises as the list goes on.
+                const int live = rail.value(QStringLiteral("liveCount")).toInt();
+                if (live > lastLive) orderedOk = false;
+                lastLive = live;
+
+                for (const QVariant &nv : nodes) {
+                    const QVariantMap n = nv.toMap();
+                    const QString kind = n.value(QStringLiteral("kind")).toString();
+                    if (kind != QLatin1String("live") && kind != QLatin1String("ghost")
+                        && kind != QLatin1String("screenedRoot") && kind != QLatin1String("outcome"))
+                        railsOk = false;
+                    // Every honesty device the rail carries, carried here: a node the capture
+                    // never measured SAYS SO, and every node has a pill rather than a blank.
+                    if (kind != QLatin1String("live")
+                        && n.value(QStringLiteral("mark")).toString().isEmpty()) railsOk = false;
+                    if (n.value(QStringLiteral("statePill")).toString().isEmpty()) railsOk = false;
+                }
+                for (const QVariant &lv : rail.value(QStringLiteral("links")).toList()) {
+                    const QVariantMap l = lv.toMap();
+                    if (l.value(QStringLiteral("word")).toString().isEmpty()
+                        || l.value(QStringLiteral("stroke")).toString().isEmpty()
+                        || l.value(QStringLiteral("note")).toString().isEmpty()) railsOk = false;
+                    const QString g = l.value(QStringLiteral("grade")).toString();
+                    if (l.value(QStringLiteral("arrow")).toBool()
+                        != (g == QLatin1String("movedTogether")
+                            || g == QLatin1String("conditionallyDependent"))) railsOk = false;
+                }
+            }
+            if (!side.isEmpty() && primaries != 1) primaryOk = false;
+        }
+        check(railsOk, "every detail node carries its kind, mark and pill; every link its word, "
+                       "stroke and note — the rail's vocabulary, unchanged");
+        check(primaryOk, "exactly one path per side is the primary, and it is the first");
+        check(orderedOk, "…and the paths are published most-evidenced first");
+
+        // ── the two headlines ────────────────────────────────────────────────────────
+        const QString causeLine   = d.value(QStringLiteral("causeHeadline")).toString();
+        const QString outcomeLine = d.value(QStringLiteral("outcomeHeadline")).toString();
+        std::printf("      cause:   %s\n", qPrintable(causeLine));
+        std::printf("      outcome: %s\n", qPrintable(outcomeLine));
+        check(!causeLine.isEmpty() && !outcomeLine.isEmpty(),
+              "both headlines are always said, never left blank");
+        check(causeLine.startsWith(QLatin1String("Likely driver:"))
+                  || causeLine.startsWith(QLatin1String("Strongest authored cause this session:"))
+                  || causeLine.contains(QLatin1String("would anchor this chain"))
+                  || causeLine == QLatin1String("No cause the capture can see today."),
+              "…and the cause headline is one of the four honest answers");
+        check(outcomeLine.startsWith(QLatin1String("Most likely outcome:"))
+                  || outcomeLine.startsWith(QLatin1String("No authored outcome"))
+                  || outcomeLine.startsWith(QLatin1String("This is the outcome")),
+              "…and the outcome headline is one of the three");
+        // NO PROBABILITY LANGUAGE, EVER. The only number either sentence may carry is a count,
+        // and "likely" is the ordering's claim rather than an estimate — brief §5.1's rule
+        // applied to the one place on this panel where a model output is closest to a forecast.
+        check(!outcomeLine.contains(QLatin1String("%"))
+                  && !outcomeLine.contains(QLatin1String("chance"))
+                  && !outcomeLine.contains(QLatin1String("probab")),
+              "…and neither invents a probability");
+        // The LM-anchored form is a count over shots, and it says which shots.
+        if (outcomeLine.startsWith(QLatin1String("Most likely outcome:")))
+            check(outcomeLine.contains(QLatin1String("measurable shots"))
+                      || outcomeLine.contains(QLatin1String("not measurable with this capture")),
+                  "…an anchored outcome quotes its count; an unanchored one says it has none");
+
+        // ── determinism ──────────────────────────────────────────────────────────────
+        // The walk chooses branches by grade, then authored strength, then id, exactly as the
+        // rail does. A page that reshuffled between two calls over one ledger would be a page
+        // nobody could quote back.
+        check(canon(d) == canon(m->conditionDetail(id)),
+              "the same condition over the same ledger yields a byte-identical page");
+
+        // ── the detail is a PURE READ ────────────────────────────────────────────────
+        const QByteArray surfaceBefore = surfaceOf(*m);
+        const QByteArray tiersBefore   = tiersOf(*m);
+        const QByteArray ledgerBefore  = ledgerBytesOf(dir);
+        const QString    stageBefore   = m->stage();
+
+        for (const QVariant &cv : m->cards())
+            m->conditionDetail(cv.toMap().value(QStringLiteral("id")).toString());
+        m->openDetail(id);
+        check(m->detailConditionId() == id, "openDetail publishes which condition is open");
+        check(!m->detail().isEmpty(), "…and the page with it");
+        m->openDetail(QStringLiteral("no_such_condition"));
+        check(m->detailConditionId() == id,
+              "…and declines a condition the pack does not author, silently");
+
+        check(surfaceOf(*m) == surfaceBefore, "OPENING A DETAIL MOVES NO ZONE OF THE PANEL");
+        check(tiersOf(*m) == tiersBefore,     "…no tier, no count, no corridor");
+        check(ledgerBytesOf(dir) == ledgerBefore, "…and writes nothing to disk");
+        check(m->stage() == stageBefore, "…and cannot move the stage ratchet");
+
+        m->closeDetail();
+        check(m->detailConditionId().isEmpty() && m->detail().isEmpty(),
+              "closeDetail puts the page away");
+        check(surfaceOf(*m) == surfaceBefore, "…and closing moves nothing either");
+
+        // ── live and review are the same page ────────────────────────────────────────
+        // The detail takes no cadence decision and holds no tense of its own; the only thing
+        // review changes is WHICH tick is the wide one, which is ticksFor()'s job and is shared.
+        m->openDetail(id);
+        const QVariantMap liveDetail = m->detail();
+        m->setCadence(QStringLiteral("bandwidth"));
+        check(canon(m->detail()) == canon(liveDetail), "cadence cannot reach the page");
+        m->setCadence(QStringLiteral("everyShot"));
+        m->closeSession();
+        m->setReviewing(true);
+        m->setSelectedShotId(3);
+        const QVariantMap reviewDetail = m->detail();
+        check(!reviewDetail.isEmpty(), "the page survives the close and the review");
+        {
+            // The one honest difference: the reviewed shot is the wide tick, here as everywhere.
+            const QVariantList ticks =
+                reviewDetail.value(QStringLiteral("header")).toMap()
+                            .value(QStringLiteral("ticks")).toList();
+            check(ticks.size() == kShots, "…with its run intact");
+            check(!ticks.isEmpty()
+                      && ticks.at(2).toMap().value(QStringLiteral("selected")).toBool(),
+                  "…and the reviewed shot marked in it, reusing ticksFor()");
+            const QVariantList liveTicks =
+                liveDetail.value(QStringLiteral("header")).toMap()
+                          .value(QStringLiteral("ticks")).toList();
+            bool anySelectedLive = false;
+            for (const QVariant &tv : liveTicks)
+                if (tv.toMap().value(QStringLiteral("selected")).toBool()) anySelectedLive = true;
+            check(!anySelectedLive, "…and a LIVE page selects no tick, because nothing is picked");
+        }
+    }
+
+    // ── 9. Honest when the capture can see nothing ───────────────────────────────────
+    std::printf("\ncondition detail on a sparse capture\n");
+    {
+        // ONE sparse swing: nothing reaches pattern tier, explain() has ranked nothing, and most
+        // of the pack is unmeasurable. This is the state the wording has to survive — the panel's
+        // whole discipline is that an absence is said out loud rather than filled in.
+        const QString dir = makeSession(tmp, "athlete_i", "session_sparse");
+        check(stageShot(dir, 1, "sparse_noclub"), "one sparse swing");
+        auto m = freshModel();
+        m->activateSession(dir);
+
+        // A condition the pack authors and this capture said nothing about. missCandidates() is
+        // the pack's own outcome layer, so its first entry is an authored condition by
+        // construction — and an outcome is the interesting case, because its page has no
+        // downstream at all.
+        const QVariantList outcomes = m->missCandidates();
+        check(!outcomes.isEmpty(), "the pack authors outcomes to drill into");
+        const QString outcomeId = outcomes.first().toMap().value(QStringLiteral("id")).toString();
+
+        const QVariantMap d = m->conditionDetail(outcomeId);
+        check(!d.isEmpty(), "a condition with no ledger still has a page");
+        const QVariantMap header = d.value(QStringLiteral("header")).toMap();
+        check(header.value(QStringLiteral("valueText")).toString()
+                  == QLatin1String("not measurable"),
+              "…whose card says it is not measurable rather than blanking");
+        check(header.value(QStringLiteral("statePill")).toString()
+                  == QLatin1String("NOT MEASURED"),
+              "…in the pill as well");
+        check(!header.value(QStringLiteral("mark")).toString().isEmpty(),
+              "…and carries the honesty mark for what KIND of node it is");
+
+        const QString causeLine   = d.value(QStringLiteral("causeHeadline")).toString();
+        const QString outcomeLine = d.value(QStringLiteral("outcomeHeadline")).toString();
+        std::printf("      cause:   %s\n", qPrintable(causeLine));
+        std::printf("      outcome: %s\n", qPrintable(outcomeLine));
+        // NOT "Likely driver": explain() ranked nothing over an empty pattern set, and a page
+        // that named one anyway would be inventing the model's one conclusion.
+        check(!causeLine.startsWith(QLatin1String("Likely driver:")),
+              "with no pattern set there is no ranked driver to name");
+        check(causeLine.contains(QLatin1String("would anchor this chain"))
+                  || causeLine == QLatin1String("No cause the capture can see today.")
+                  || causeLine.startsWith(QLatin1String("Strongest authored cause this session:")),
+              "…so the page offers the screen, or says there is nothing to see");
+        check(!outcomeLine.isEmpty(), "and the outcome line is still said");
+        check(!outcomeLine.contains(QLatin1String("of 0 measurable shots")),
+              "…never as a count over a population of nothing");
+
+        check(canon(d) == canon(m->conditionDetail(outcomeId)),
+              "…and it is deterministic on a sparse capture too");
+    }
+
     std::printf("\npatterns at close: %d\n", patternsAtClose);
     std::printf("\n%s\n", g_fail == 0 ? "OK" : "FAILURES");
     return g_fail == 0 ? 0 : 1;

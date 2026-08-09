@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <utility>
 
 using namespace pinpoint::analysis;
@@ -156,6 +157,39 @@ QString chainNodeKindName(ChainNodeKind k)
     }
     return QStringLiteral("outcome");
 }
+
+// MOST-EVIDENCED RAIL FIRST, and the ordering is decided in C++ rather than left to the panel.
+// A session's authored neighbourhood can yield more rails than a 1168 px panel can draw — this
+// one yields eighteen over six shots — so something has to choose, and a panel that took "the
+// first few" off an arbitrary order would be showing a different chain each launch. The key is
+// the count of LIVE cards (how much of this rail the session actually measured), then length,
+// then the first node's id so ties are stable.
+//
+// ONE RULE, TWO CALLERS. The chain rail sorts its chains with it and the condition detail sorts
+// its cause and effect paths with it, because "which of these is the one to draw first" is the
+// same question asked of the same kind of object, and two rules would let the panel and the
+// drill-in disagree about which path the session is most sure of.
+bool railBefore(const QVariantMap &x, const QVariantMap &y)
+{
+    const int lx = x.value(QStringLiteral("liveCount")).toInt();
+    const int ly = y.value(QStringLiteral("liveCount")).toInt();
+    if (lx != ly) return lx > ly;
+    const QVariantList nx = x.value(QStringLiteral("nodes")).toList();
+    const QVariantList ny = y.value(QStringLiteral("nodes")).toList();
+    if (nx.size() != ny.size()) return nx.size() > ny.size();
+    const QString ix = nx.isEmpty() ? QString() : nx.first().toMap().value(QStringLiteral("id")).toString();
+    const QString iy = ny.isEmpty() ? QString() : ny.first().toMap().value(QStringLiteral("id")).toString();
+    return ix < iy;
+}
+
+// HOW MANY PATHS THE DETAIL MAY PUBLISH PER SIDE, and how deep it walks. A pack condition can sit
+// under a fan of ancestors whose simple-path count is exponential in the fan; the panel draws one
+// path and collapses the rest to a line each, so publishing two hundred of them would cost a
+// scroll region nobody reads and a walk nobody wants between balls. What is cut is COUNTED
+// (`causesHidden` / `effectsHidden`) rather than dropped silently, exactly as the card row counts
+// what it could not draw.
+constexpr int kDetailMaxPaths = 8;
+constexpr int kDetailMaxDepth = 7;
 
 } // namespace
 
@@ -418,8 +452,14 @@ void SessionDiagnosticsModel::activateSession(const QString &sessionDir)
     m_closed = false;
     m_profile = QJsonObject();
     m_expectations.clear();
+    // A detail is a page being read, not a fact about a session. Pointing the panel at a
+    // different ledger closes it rather than re-answering it against evidence it was not opened
+    // over — and the id may not even exist in the new session's neighbourhood.
+    m_detailConditionId.clear();
+    m_detail = QVariantMap();
 
     emit sessionChanged();
+    emit detailChanged();
 
     if (sessionDir.isEmpty()) {
         rebuild();
@@ -624,8 +664,13 @@ void SessionDiagnosticsModel::rebuild()
     buildChains();
     buildDriver();
     buildBookends();
+    // LAST, because it reads the same reduction the zones do and there is no order in which it
+    // could be right first. A detail left open across a shot re-derives with everything else, so
+    // the page the golfer is reading accumulates evidence rather than going stale behind them.
+    buildDetail();
 
     emit surfaceChanged();
+    if (!m_detailConditionId.isEmpty()) emit detailChanged();
 }
 
 // WHICH CONDITIONS ARE MARSHALLED INTO THE GRAPH, and why it is not all of them.
@@ -686,6 +731,20 @@ void SessionDiagnosticsModel::buildGraph()
         }
     }
 
+    marshalGraph(keep, m_nodes, m_edges);
+}
+
+// buildGraph()'s second half, on any node set. See the header for why it is shared.
+void SessionDiagnosticsModel::marshalGraph(const QSet<QString> &keep,
+                                           std::vector<NodeSpec> &nodes,
+                                           std::vector<EdgeSpec> &edges) const
+{
+    nodes.clear();
+    edges.clear();
+    if (!m_packProv) return;
+
+    const CharacteristicPack &pack = m_packProv->pack();
+
     // Pack order, never hash order — the rail must not reshuffle between launches.
     for (const Condition &c : pack.conditions) {
         if (!keep.contains(c.id)) continue;
@@ -711,7 +770,7 @@ void SessionDiagnosticsModel::buildGraph()
         // ordering available until the detector timestamps a finding within a shot.
         const auto &groups = allConditionGroups();
         n.phaseOrder = int(std::find(groups.begin(), groups.end(), c.group) - groups.begin());
-        m_nodes.push_back(std::move(n));
+        nodes.push_back(std::move(n));
     }
 
     for (const Edge &e : pack.edges) {
@@ -725,7 +784,7 @@ void SessionDiagnosticsModel::buildGraph()
         // coherence on temporal order alone rather than on a sign nobody authored.
         s.type     = 0;
         s.strength = int(e.strength);
-        m_edges.push_back(std::move(s));
+        edges.push_back(std::move(s));
     }
 }
 
@@ -1288,75 +1347,105 @@ void SessionDiagnosticsModel::buildCards()
     for (const QString &id : std::as_const(ordered)) {
         const ConditionLedger *l = ledger(id);
         if (!l || l->tier != Tier::Pattern) continue;
+        m_cards.append(cardMap(*l, fi, selectedTick));
+    }
 
-        const QString unit = measureUnitOf(l->drivingMeasureId);
+    // The collapsed Watching row: seen, not yet evidence, never headlines.
+    for (const ConditionLedger &l : m_ledgers) {
+        if (l.tier != Tier::Watching) continue;
+        m_watching.append(QVariantMap{
+            { QStringLiteral("id"),         l.id },
+            { QStringLiteral("name"),       conditionName(l.id) },
+            { QStringLiteral("recurrence"), l.recurrence },
+        });
+    }
 
+    // The coverage line — the quietest and most load-bearing sentence on the panel.
+    if (m_coverage.total > 0) {
+        m_coverageLine = QStringLiteral("%1 of %2 characteristics measurable with current capture")
+                             .arg(m_coverage.measurable).arg(m_coverage.total);
+        // Named only when it actually contributed. "Launch monitor" on a camera-only session
+        // would be the panel claiming a device that is not there.
+        if (!m_lmShots.isEmpty())
+            m_coverageLine += QStringLiteral(" · launch monitor contributing on %1 of %2 shots")
+                                  .arg(m_lmShots.size()).arg(int(m_shots.size()));
+    }
+}
+
+// ONE PATTERN CARD. Every string on it, off the ledger and the pack and nothing else — which is
+// what lets the condition detail put the same card at the head of its own page without the two
+// surfaces being able to word a recurrence differently.
+QVariantMap SessionDiagnosticsModel::cardMap(const ConditionLedger &l, int fi, int selectedTick) const
+{
+    const QString id   = l.id;
+    const QString unit = measureUnitOf(l.drivingMeasureId);
+    {
         QVariantMap c;
         c[QStringLiteral("id")]          = id;
         c[QStringLiteral("name")]        = conditionName(id);
         c[QStringLiteral("consequence")] = consequenceOf(id);
-        c[QStringLiteral("tier")]        = tierTag(l->tier);
-        c[QStringLiteral("measureId")]   = l->drivingMeasureId;
-        c[QStringLiteral("measure")]     = measureLabelOf(l->drivingMeasureId);
-        c[QStringLiteral("phase")]       = measurePhaseOf(l->drivingMeasureId);
+        c[QStringLiteral("tier")]        = tierTag(l.tier);
+        c[QStringLiteral("measureId")]   = l.drivingMeasureId;
+        c[QStringLiteral("measure")]     = measureLabelOf(l.drivingMeasureId);
+        c[QStringLiteral("phase")]       = measurePhaseOf(l.drivingMeasureId);
         // ONE wording for recurrence, and it comes out of the ledger header so an export and
         // the screen cannot disagree about what recurrence looks like.
-        c[QStringLiteral("recurrence")]  = l->recurrence;
-        c[QStringLiteral("fired")]       = l->fired;
-        c[QStringLiteral("assessable")]  = l->assessable;
-        c[QStringLiteral("fresh")]       = l->freshThisShot;
-        c[QStringLiteral("resolving")]   = l->resolving;
+        c[QStringLiteral("recurrence")]  = l.recurrence;
+        c[QStringLiteral("fired")]       = l.fired;
+        c[QStringLiteral("assessable")]  = l.assessable;
+        c[QStringLiteral("fresh")]       = l.freshThisShot;
+        c[QStringLiteral("resolving")]   = l.resolving;
         c[QStringLiteral("focused")]     = id == m_focusConditionId;
-        c[QStringLiteral("ticks")]       = ticksFor(*l, selectedTick);
+        c[QStringLiteral("ticks")]       = ticksFor(l, selectedTick);
 
         // DIRECTION OR DISPERSION. Below the agreement gate the condition is still a pattern —
         // inconsistency is a finding — but the direction claim is suppressed, and the sentence
         // that says so is fixed by the brief to the character.
-        c[QStringLiteral("directionClaimed")] = l->directionClaimed;
-        c[QStringLiteral("directionAgreement")] = l->directionAgreement;
+        c[QStringLiteral("directionClaimed")] = l.directionClaimed;
+        c[QStringLiteral("directionAgreement")] = l.directionAgreement;
         // The consistent case is worded as a COUNT, never a percentage — the agreement
         // percentage is disclosed only in the dispersion sentence, where the number is the
         // finding. "92% of 6 firings" is exactly the small-n pseudo-precision rule 1 exists
         // to keep off a card.
-        const int modalCount = int(std::lround(l->directionAgreement * l->fired));
-        const QString side = l->modalDirection > 0 ? QStringLiteral("The high side")
+        const int modalCount = int(std::lround(l.directionAgreement * l.fired));
+        const QString side = l.modalDirection > 0 ? QStringLiteral("The high side")
                                                    : QStringLiteral("The low side");
         c[QStringLiteral("directionText")] =
-            l->directionClaimed
-                ? (l->modalDirection == 0
+            l.directionClaimed
+                ? (l.modalDirection == 0
                        ? QString()
-                       : (modalCount >= l->fired
+                       : (modalCount >= l.fired
                               ? QStringLiteral("%1, every firing.").arg(side)
                               : QStringLiteral("%1 on %2 of its %3 firings.")
-                                    .arg(side).arg(modalCount).arg(l->fired)))
+                                    .arg(side).arg(modalCount).arg(l.fired)))
                 : QStringLiteral("Direction agreement %1%, below the %2% gate: dispersion, not a direction.")
-                      .arg(int(std::lround(l->directionAgreement * 100.0)))
+                      .arg(int(std::lround(l.directionAgreement * 100.0)))
                       .arg(int(std::lround(m_opt.directionAgreementGate * 100.0)));
 
         // TREND + RECENCY. `resolving` wins over the plain recency line (brief §3.2).
-        c[QStringLiteral("trendKnown")] = l->trendKnown;
-        c[QStringLiteral("trend")]      = l->trendKnown ? (l->trend == Trend::Improving
+        c[QStringLiteral("trendKnown")] = l.trendKnown;
+        c[QStringLiteral("trend")]      = l.trendKnown ? (l.trend == Trend::Improving
                                                                ? QStringLiteral("improving")
                                                                : QStringLiteral("worsening"))
                                                         : QStringLiteral("stable");
-        c[QStringLiteral("trendArrow")] = l->trendKnown ? (l->trend == Trend::Improving
+        c[QStringLiteral("trendArrow")] = l.trendKnown ? (l.trend == Trend::Improving
                                                                ? QStringLiteral("↓")
                                                                : QStringLiteral("↑"))
                                                         : QString();
         c[QStringLiteral("trendText")] =
-            l->trendKnown ? (l->trend == Trend::Improving ? QStringLiteral("improving")
+            l.trendKnown ? (l.trend == Trend::Improving ? QStringLiteral("improving")
                                                           : QStringLiteral("worsening"))
-                          : (l->trendPoints < m_opt.minPointsForTrend
+                          : (l.trendPoints < m_opt.minPointsForTrend
                                  ? QStringLiteral("trend after %1 measurable shots").arg(m_opt.minPointsForTrend)
                                  : QStringLiteral("no clear trend"));
         c[QStringLiteral("recencyText")] =
-            l->resolving
-                ? QStringLiteral("resolving · none in the last %1").arg(l->sinceLastFiring)
-                : (l->sinceLastFiring < 0
+            l.resolving
+                ? QStringLiteral("resolving · none in the last %1").arg(l.sinceLastFiring)
+                : (l.sinceLastFiring < 0
                        ? QStringLiteral("not seen this session")
-                       : l->sinceLastFiring == 0
+                       : l.sinceLastFiring == 0
                              ? QStringLiteral("fired on the last measurable shot")
-                             : QStringLiteral("last fired %1 measurable shots ago").arg(l->sinceLastFiring));
+                             : QStringLiteral("last fired %1 measurable shots ago").arg(l.sinceLastFiring));
 
         // This shot's marker on the card, and the review extras.
         const ConditionRow *here = (fi >= 0) ? rowFor(m_shots[size_t(fi)], id) : nullptr;
@@ -1382,8 +1471,8 @@ void SessionDiagnosticsModel::buildCards()
         }
         if (m_reviewing || m_closed) {
             int after = 0;
-            for (int i = fi + 1; i < int(l->run.size()); ++i)
-                if (l->run[size_t(i)] == ShotState::Fired) ++after;
+            for (int i = fi + 1; i < int(l.run.size()); ++i)
+                if (l.run[size_t(i)] == ShotState::Fired) ++after;
             c[QStringLiteral("firingsAfter")] = after;
             c[QStringLiteral("firingsAfterText")] =
                 after == 0 ? QStringLiteral("no firings after this shot")
@@ -1392,44 +1481,32 @@ void SessionDiagnosticsModel::buildCards()
                                                             : QStringLiteral("firings"));
         }
 
-        // ONE LINE OF EVIDENCE PROSE (§4.2). The contingency sentence when an authored parent
-        // was actually tested — which is the design's own coach sentence — and the pack's
-        // consequence line otherwise. Never both, and never a manufactured one.
-        QString prose;
-        for (const LinkEvidence &e : m_links) {
-            if (e.to != id || !e.fisherTested) continue;
-            prose = QStringLiteral("%1 on %2 of the %3 swings where %4 fired — on %5 of the %6 where it did not.")
-                        .arg(conditionName(id))
-                        .arg(e.a).arg(e.a + e.b)
-                        .arg(conditionName(e.from))
-                        .arg(e.c).arg(e.c + e.d);
-            break;
-        }
-        c[QStringLiteral("evidence")] = prose.isEmpty() ? consequenceOf(id) : prose;
+        c[QStringLiteral("evidence")] = evidenceProse(id, m_links);
 
-        m_cards.append(c);
+        return c;
     }
+}
 
-    // The collapsed Watching row: seen, not yet evidence, never headlines.
-    for (const ConditionLedger &l : m_ledgers) {
-        if (l.tier != Tier::Watching) continue;
-        m_watching.append(QVariantMap{
-            { QStringLiteral("id"),         l.id },
-            { QStringLiteral("name"),       conditionName(l.id) },
-            { QStringLiteral("recurrence"), l.recurrence },
-        });
+// ONE LINE OF EVIDENCE PROSE (§4.2). The contingency sentence when an authored parent was
+// actually tested — which is the design's own coach sentence — and the pack's consequence line
+// otherwise. Never both, and never a manufactured one.
+//
+// The LINK SET IS A PARAMETER because the condition detail grades a different neighbourhood from
+// the panel's: a condition drawn on the detail's downstream may have a tested parent the session
+// graph never marshalled, and quoting the session's links there would print a sentence about an
+// edge that is not on the page.
+QString SessionDiagnosticsModel::evidenceProse(const QString &id,
+                                               const std::vector<LinkEvidence> &links) const
+{
+    for (const LinkEvidence &e : links) {
+        if (e.to != id || !e.fisherTested) continue;
+        return QStringLiteral("%1 on %2 of the %3 swings where %4 fired — on %5 of the %6 where it did not.")
+            .arg(conditionName(id))
+            .arg(e.a).arg(e.a + e.b)
+            .arg(conditionName(e.from))
+            .arg(e.c).arg(e.c + e.d);
     }
-
-    // The coverage line — the quietest and most load-bearing sentence on the panel.
-    if (m_coverage.total > 0) {
-        m_coverageLine = QStringLiteral("%1 of %2 characteristics measurable with current capture")
-                             .arg(m_coverage.measurable).arg(m_coverage.total);
-        // Named only when it actually contributed. "Launch monitor" on a camera-only session
-        // would be the panel claiming a device that is not there.
-        if (!m_lmShots.isEmpty())
-            m_coverageLine += QStringLiteral(" · launch monitor contributing on %1 of %2 shots")
-                                  .arg(m_lmShots.size()).arg(int(m_shots.size()));
-    }
+    return consequenceOf(id);
 }
 
 // ── Zone 2: the chain rail ──────────────────────────────────────────────────────────────
@@ -1447,155 +1524,8 @@ void SessionDiagnosticsModel::buildChains()
         QVariantList nodes, links;
         for (size_t k = 0; k < chain.nodes.size(); ++k) {
             const ChainNode &cn = chain.nodes[k];
-            const ConditionLedger *l = ledger(cn.id);
-            const NodeSpec *ns = nodeFor(m_nodes, cn.id);
-
-            QVariantMap n;
-            n[QStringLiteral("id")]      = cn.id;
-            n[QStringLiteral("name")]    = conditionName(cn.id);
-            n[QStringLiteral("kind")]    = chainNodeKindName(cn.kind);
-            n[QStringLiteral("measure")] = measureLabelOf(l ? l->drivingMeasureId : QString());
-            n[QStringLiteral("phase")]   = measurePhaseOf(l ? l->drivingMeasureId : QString());
-            n[QStringLiteral("focused")] = cn.id == m_focusConditionId;
-
-            // THE MARK IS THE HONESTY DEVICE. Each of the four says a different thing and
-            // they must not be blurred: a screened root is not a ghost, and a ghost the pack
-            // ASSERTS is not a ghost nobody has written a measure for.
-            switch (cn.kind) {
-            case ChainNodeKind::ScreenedRoot:
-                n[QStringLiteral("mark")] = ns && ns->screenEntered
-                                                ? QStringLiteral("screened root · screen entered")
-                                                : QStringLiteral("screened root · needs a physical screen");
-                break;
-            case ChainNodeKind::Ghost:
-                n[QStringLiteral("mark")] = (ns && ns->asserted)
-                                                ? QStringLiteral("ghost · authored as asserted, no measure")
-                                                : QStringLiteral("ghost · measure planned");
-                break;
-            case ChainNodeKind::Outcome:
-                n[QStringLiteral("mark")] = m_lmShots.isEmpty()
-                                                ? QStringLiteral("declared miss")
-                                                : QStringLiteral("declared miss · launch-monitor verified");
-                break;
-            case ChainNodeKind::LiveCard:
-                n[QStringLiteral("mark")] = QString();
-                break;
-            }
-
-            if (l) {
-                n[QStringLiteral("recurrence")] = l->recurrence;
-                n[QStringLiteral("ticks")]      = ticksFor(*l, selectedTick);
-                n[QStringLiteral("trend")]      = l->trendKnown
-                                                     ? (l->trend == Trend::Improving
-                                                            ? QStringLiteral("improving")
-                                                            : QStringLiteral("worsening"))
-                                                     : QStringLiteral("stable");
-                n[QStringLiteral("trendArrow")] = l->trendKnown
-                                                     ? (l->trend == Trend::Improving ? QStringLiteral("↓")
-                                                                                     : QStringLiteral("↑"))
-                                                     : QString();
-                const ConditionRow *here = (fi >= 0) ? rowFor(m_shots[size_t(fi)], cn.id) : nullptr;
-                const QString hs = here ? shotStateKind(here->state) : QStringLiteral("notAssessable");
-                n[QStringLiteral("state")] = hs;
-                n[QStringLiteral("statePill")] =
-                    (m_reviewing || m_closed)
-                        ? (hs == QLatin1String("fired") ? QStringLiteral("FIRED HERE")
-                         : hs == QLatin1String("clean") ? QStringLiteral("CLEAN HERE")
-                                                        : QStringLiteral("NOT MEASURED"))
-                        : (hs == QLatin1String("fired") ? QStringLiteral("FIRED")
-                         : hs == QLatin1String("clean") ? QStringLiteral("CLEAN")
-                                                        : QStringLiteral("NOT MEASURED"));
-
-                // WHAT HAPPENED TO THIS NODE AFTER THE SELECTED SWING. The question review
-                // asks is whether the shot was typical, and typical is only defined against
-                // what came next — a condition that fired here and never again is a different
-                // fact from one that fired here and eight more times. Published on the same
-                // terms as the pattern cards' (buildCards), so the two rows agree.
-                if (m_reviewing || m_closed) {
-                    int after = 0;
-                    for (int i = fi + 1; i < int(l->run.size()); ++i)
-                        if (l->run[size_t(i)] == ShotState::Fired) ++after;
-                    n[QStringLiteral("firingsAfter")] = after;
-                    n[QStringLiteral("firingsAfterText")] =
-                        after == 0 ? QStringLiteral("no firings after this shot")
-                                   : QStringLiteral("%1 more %2 after this shot")
-                                         .arg(after).arg(after == 1 ? QStringLiteral("firing")
-                                                                    : QStringLiteral("firings"));
-                }
-            } else {
-                // A node with no ledger was never assessed at all — no recurrence, no ticks,
-                // and the pill says so rather than showing an empty count.
-                n[QStringLiteral("recurrence")] = QString();
-                n[QStringLiteral("ticks")]      = QVariantList();
-                n[QStringLiteral("state")]      = QStringLiteral("notAssessable");
-                n[QStringLiteral("statePill")]  = QStringLiteral("NOT MEASURED");
-                n[QStringLiteral("trend")]      = QStringLiteral("stable");
-                n[QStringLiteral("trendArrow")] = QString();
-            }
-
-            QString prose;
-            for (const LinkEvidence &e : m_links) {
-                if (e.to != cn.id || !e.fisherTested) continue;
-                prose = QStringLiteral("%1 on %2 of the %3 swings where %4 fired — on %5 of the %6 where it did not.")
-                            .arg(conditionName(cn.id))
-                            .arg(e.a).arg(e.a + e.b)
-                            .arg(conditionName(e.from))
-                            .arg(e.c).arg(e.c + e.d);
-                break;
-            }
-            n[QStringLiteral("evidence")] = prose.isEmpty() ? consequenceOf(cn.id) : prose;
-            nodes.append(n);
-
-            if (!cn.hasLink) continue;
-            const LinkEvidence &e = cn.link;
-            const LinkStyle     st = styleOf(e.grade);
-
-            // THE NOTE UNDER THE LINK. The brief fixes four of these; the fifth (a Coherent
-            // link that is NOT range restricted) it does not, because in the mock every
-            // Coherent link happens to be range restricted. Saying "no variance to test"
-            // there would be a claim about the data that is simply untrue, so the honest
-            // answer is the count that stopped the test.
-            QString note;
-            switch (e.grade) {
-            case LinkGrade::MovedTogether:
-                note = QStringLiteral("baseline %1 · %2 since focus").arg(e.baselineN).arg(e.interventionN);
-                break;
-            case LinkGrade::ConditionallyDependent:
-                note = QStringLiteral("Fisher exact · %1 paired shots").arg(e.pairs);
-                break;
-            case LinkGrade::Coherent:
-                note = e.rangeRestricted
-                           ? QStringLiteral("no variance to test")
-                           : (e.pairs < m_opt.minPairsForDependence
-                                  ? QStringLiteral("%1 paired shots · too few to test").arg(e.pairs)
-                                  : QStringLiteral("tested · not dependent"));
-                break;
-            case LinkGrade::PresentTogether: {
-                const ConditionLedger *lf = ledger(e.from);
-                const ConditionLedger *lt = ledger(e.to);
-                const bool observedBoth = lf && lt && lf->assessable >= 1 && lt->assessable >= 1;
-                note = observedBoth ? QStringLiteral("no coherent order")
-                                    : QStringLiteral("neither measured");
-                break;
-            }
-            case LinkGrade::Unanchored:
-                note = e.screenOutstanding ? QStringLiteral("screen would confirm")
-                                           : QStringLiteral("not established");
-                break;
-            }
-
-            links.append(QVariantMap{
-                { QStringLiteral("from"),    e.from },
-                { QStringLiteral("to"),      e.to },
-                { QStringLiteral("grade"),   gradeName(e.grade) },
-                { QStringLiteral("word"),    QString::fromLatin1(st.word) },
-                { QStringLiteral("stroke"),  QString::fromLatin1(st.stroke) },
-                { QStringLiteral("width"),   st.width },
-                { QStringLiteral("arrow"),   st.arrow },
-                { QStringLiteral("opacity"), st.opacity },
-                { QStringLiteral("note"),    note },
-                { QStringLiteral("pairs"),   e.pairs },
-            });
+            nodes.append(nodeMap(cn.id, nodeFor(m_nodes, cn.id), cn.kind, m_links, fi, selectedTick));
+            if (cn.hasLink) links.append(linkMap(cn.link));
         }
 
         int live = 0;
@@ -1610,24 +1540,11 @@ void SessionDiagnosticsModel::buildChains()
         });
     }
 
-    // MOST-EVIDENCED RAIL FIRST, and the ordering is decided here rather than left to the
-    // panel. A session's authored neighbourhood can yield more rails than a 1168 px panel can
-    // draw — this one yields eighteen over six shots — so something has to choose, and a
-    // panel that took "the first few" off an arbitrary order would be showing a different
-    // chain each launch. The key is the count of LIVE cards (how much of this rail the
-    // session actually measured), then length, then the first node's id so ties are stable.
-    // How many to draw, and what the "more" affordance is, remains the panel's decision.
+    // Most-evidenced rail first. The rule is railBefore() at the top of this file, shared with
+    // the condition detail; how many to draw, and what the "more" affordance is, remains the
+    // panel's decision.
     std::sort(m_chains.begin(), m_chains.end(), [](const QVariant &a, const QVariant &b) {
-        const QVariantMap x = a.toMap(), y = b.toMap();
-        const int lx = x.value(QStringLiteral("liveCount")).toInt();
-        const int ly = y.value(QStringLiteral("liveCount")).toInt();
-        if (lx != ly) return lx > ly;
-        const QVariantList nx = x.value(QStringLiteral("nodes")).toList();
-        const QVariantList ny = y.value(QStringLiteral("nodes")).toList();
-        if (nx.size() != ny.size()) return nx.size() > ny.size();
-        const QString ix = nx.isEmpty() ? QString() : nx.first().toMap().value(QStringLiteral("id")).toString();
-        const QString iy = ny.isEmpty() ? QString() : ny.first().toMap().value(QStringLiteral("id")).toString();
-        return ix < iy;
+        return railBefore(a.toMap(), b.toMap());
     });
 
     // A pattern with no authored edge to any other pattern gets its OWN line — reported,
@@ -1650,6 +1567,172 @@ void SessionDiagnosticsModel::buildChains()
                 : QStringLiteral("%1 are patterns the model authors no edge between this session — "
                                  "reported on their own.").arg(names.join(QStringLiteral(", ")));
     }
+}
+
+// THE MARK IS THE HONESTY DEVICE. Each of the four says a different thing and they must not be
+// blurred: a screened root is not a ghost, and a ghost the pack ASSERTS is not a ghost nobody has
+// written a measure for.
+//
+// GENERALISED PAST THE DECLARED MISS. The rail only ever draws one outcome node — the miss the
+// golfer declared — but the condition detail's downstream ends at whatever outcomes the pack
+// authors, declared or not. So the outcome mark now names WHICH outcome it is: the declared miss
+// keeps its sub-label (it is the session's own question), and any other outcome says it is an
+// outcome. The launch-monitor clause is the same clause in both cases, because it is the same
+// fact — this session carried a monitor, so a ball-flight claim is verifiable rather than
+// authored. The recurrence line beside it carries the count ("N of M measurable shots").
+QString SessionDiagnosticsModel::markFor(const QString &id, ChainNodeKind kind,
+                                         const NodeSpec *ns) const
+{
+    switch (kind) {
+    case ChainNodeKind::ScreenedRoot:
+        return (ns && ns->screenEntered) ? QStringLiteral("screened root · screen entered")
+                                         : QStringLiteral("screened root · needs a physical screen");
+    case ChainNodeKind::Ghost:
+        return (ns && ns->asserted) ? QStringLiteral("ghost · authored as asserted, no measure")
+                                    : QStringLiteral("ghost · measure planned");
+    case ChainNodeKind::Outcome: {
+        const bool lm       = !m_lmShots.isEmpty();
+        const bool declared = !m_declaredMiss.isEmpty() && id == m_declaredMiss;
+        if (declared)
+            return lm ? QStringLiteral("declared miss · launch-monitor verified")
+                      : QStringLiteral("declared miss");
+        return lm ? QStringLiteral("outcome · launch-monitor verified")
+                  : QStringLiteral("outcome · authored");
+    }
+    case ChainNodeKind::LiveCard:
+        break;
+    }
+    return QString();
+}
+
+// ONE CHAIN NODE. Shared by the rail and by the condition detail's cause and effect rails, so a
+// node drawn on both surfaces is the same node — same mark, same recurrence, same run, same
+// review tense.
+QVariantMap SessionDiagnosticsModel::nodeMap(const QString &id, const NodeSpec *ns,
+                                             ChainNodeKind kind,
+                                             const std::vector<LinkEvidence> &links,
+                                             int fi, int selectedTick) const
+{
+    const ConditionLedger *l = ledger(id);
+
+    QVariantMap n;
+    n[QStringLiteral("id")]      = id;
+    n[QStringLiteral("name")]    = conditionName(id);
+    n[QStringLiteral("kind")]    = chainNodeKindName(kind);
+    n[QStringLiteral("measure")] = measureLabelOf(l ? l->drivingMeasureId : QString());
+    n[QStringLiteral("phase")]   = measurePhaseOf(l ? l->drivingMeasureId : QString());
+    n[QStringLiteral("focused")] = id == m_focusConditionId;
+    n[QStringLiteral("mark")]    = markFor(id, kind, ns);
+    // Whether this node's counts are a launch-monitor reading rather than a camera one. Read by
+    // the detail's outcome headline, which must not say "measurable shots" about a session that
+    // never carried a monitor.
+    n[QStringLiteral("lmAnchored")] = !m_lmShots.isEmpty() && l && l->assessable >= 1;
+
+    if (l) {
+        n[QStringLiteral("recurrence")] = l->recurrence;
+        n[QStringLiteral("ticks")]      = ticksFor(*l, selectedTick);
+        n[QStringLiteral("trend")]      = l->trendKnown
+                                             ? (l->trend == Trend::Improving
+                                                    ? QStringLiteral("improving")
+                                                    : QStringLiteral("worsening"))
+                                             : QStringLiteral("stable");
+        n[QStringLiteral("trendArrow")] = l->trendKnown
+                                             ? (l->trend == Trend::Improving ? QStringLiteral("↓")
+                                                                             : QStringLiteral("↑"))
+                                             : QString();
+        const ConditionRow *here = (fi >= 0) ? rowFor(m_shots[size_t(fi)], id) : nullptr;
+        const QString hs = here ? shotStateKind(here->state) : QStringLiteral("notAssessable");
+        n[QStringLiteral("state")] = hs;
+        n[QStringLiteral("statePill")] =
+            (m_reviewing || m_closed)
+                ? (hs == QLatin1String("fired") ? QStringLiteral("FIRED HERE")
+                 : hs == QLatin1String("clean") ? QStringLiteral("CLEAN HERE")
+                                                : QStringLiteral("NOT MEASURED"))
+                : (hs == QLatin1String("fired") ? QStringLiteral("FIRED")
+                 : hs == QLatin1String("clean") ? QStringLiteral("CLEAN")
+                                                : QStringLiteral("NOT MEASURED"));
+
+        // WHAT HAPPENED TO THIS NODE AFTER THE SELECTED SWING. The question review asks is
+        // whether the shot was typical, and typical is only defined against what came next — a
+        // condition that fired here and never again is a different fact from one that fired here
+        // and eight more times. Published on the same terms as the pattern cards' (cardMap), so
+        // the two rows agree.
+        if (m_reviewing || m_closed) {
+            int after = 0;
+            for (int i = fi + 1; i < int(l->run.size()); ++i)
+                if (l->run[size_t(i)] == ShotState::Fired) ++after;
+            n[QStringLiteral("firingsAfter")] = after;
+            n[QStringLiteral("firingsAfterText")] =
+                after == 0 ? QStringLiteral("no firings after this shot")
+                           : QStringLiteral("%1 more %2 after this shot")
+                                 .arg(after).arg(after == 1 ? QStringLiteral("firing")
+                                                            : QStringLiteral("firings"));
+        }
+    } else {
+        // A node with no ledger was never assessed at all — no recurrence, no ticks, and the
+        // pill says so rather than showing an empty count.
+        n[QStringLiteral("recurrence")] = QString();
+        n[QStringLiteral("ticks")]      = QVariantList();
+        n[QStringLiteral("state")]      = QStringLiteral("notAssessable");
+        n[QStringLiteral("statePill")]  = QStringLiteral("NOT MEASURED");
+        n[QStringLiteral("trend")]      = QStringLiteral("stable");
+        n[QStringLiteral("trendArrow")] = QString();
+    }
+
+    n[QStringLiteral("evidence")] = evidenceProse(id, links);
+    return n;
+}
+
+// ONE GRADED LINK — the word, the stroke and the note under it, off the one §4.1 table.
+QVariantMap SessionDiagnosticsModel::linkMap(const LinkEvidence &e) const
+{
+    const LinkStyle st = styleOf(e.grade);
+
+    // THE NOTE UNDER THE LINK. The brief fixes four of these; the fifth (a Coherent link that is
+    // NOT range restricted) it does not, because in the mock every Coherent link happens to be
+    // range restricted. Saying "no variance to test" there would be a claim about the data that
+    // is simply untrue, so the honest answer is the count that stopped the test.
+    QString note;
+    switch (e.grade) {
+    case LinkGrade::MovedTogether:
+        note = QStringLiteral("baseline %1 · %2 since focus").arg(e.baselineN).arg(e.interventionN);
+        break;
+    case LinkGrade::ConditionallyDependent:
+        note = QStringLiteral("Fisher exact · %1 paired shots").arg(e.pairs);
+        break;
+    case LinkGrade::Coherent:
+        note = e.rangeRestricted
+                   ? QStringLiteral("no variance to test")
+                   : (e.pairs < m_opt.minPairsForDependence
+                          ? QStringLiteral("%1 paired shots · too few to test").arg(e.pairs)
+                          : QStringLiteral("tested · not dependent"));
+        break;
+    case LinkGrade::PresentTogether: {
+        const ConditionLedger *lf = ledger(e.from);
+        const ConditionLedger *lt = ledger(e.to);
+        const bool observedBoth = lf && lt && lf->assessable >= 1 && lt->assessable >= 1;
+        note = observedBoth ? QStringLiteral("no coherent order")
+                            : QStringLiteral("neither measured");
+        break;
+    }
+    case LinkGrade::Unanchored:
+        note = e.screenOutstanding ? QStringLiteral("screen would confirm")
+                                   : QStringLiteral("not established");
+        break;
+    }
+
+    return QVariantMap{
+        { QStringLiteral("from"),    e.from },
+        { QStringLiteral("to"),      e.to },
+        { QStringLiteral("grade"),   gradeName(e.grade) },
+        { QStringLiteral("word"),    QString::fromLatin1(st.word) },
+        { QStringLiteral("stroke"),  QString::fromLatin1(st.stroke) },
+        { QStringLiteral("width"),   st.width },
+        { QStringLiteral("arrow"),   st.arrow },
+        { QStringLiteral("opacity"), st.opacity },
+        { QStringLiteral("note"),    note },
+        { QStringLiteral("pairs"),   e.pairs },
+    };
 }
 
 // ── Zone 3: the driver footer ───────────────────────────────────────────────────────────
@@ -1734,26 +1817,8 @@ void SessionDiagnosticsModel::buildDriver()
     // THE RIVAL-PARENT DISCLOSURE. Named, and explicitly NOT adjudicated when the rival is
     // unmeasurable or under-paired — the panel shows the most consistent chain and never
     // asserts uniqueness (§A4).
-    if (!m_rails.rivals.empty()) {
-        const RivalParent &rp = m_rails.rivals.front();
-        m_driver[QStringLiteral("rival")] = QVariantMap{
-            { QStringLiteral("childId"),        rp.childId },
-            { QStringLiteral("childName"),      conditionName(rp.childId) },
-            { QStringLiteral("chosenParentId"), rp.chosenParentId },
-            { QStringLiteral("chosenName"),     conditionName(rp.chosenParentId) },
-            { QStringLiteral("rivalParentId"),  rp.rivalParentId },
-            { QStringLiteral("rivalName"),      conditionName(rp.rivalParentId) },
-            { QStringLiteral("adjudicated"),    rp.adjudicated },
-            { QStringLiteral("text"),
-              rp.adjudicated
-                  ? QStringLiteral("%1 could also explain %2; this session's evidence favours %3.")
-                        .arg(conditionName(rp.rivalParentId), conditionName(rp.childId),
-                             conditionName(rp.chosenParentId))
-                  : QStringLiteral("%1 could also explain %2 — not adjudicated: it is not measurable "
-                                   "on this capture.")
-                        .arg(conditionName(rp.rivalParentId), conditionName(rp.childId)) },
-        };
-    }
+    if (!m_rails.rivals.empty())
+        m_driver[QStringLiteral("rival")] = rivalMap(m_rails.rivals.front());
 
     // Asserted causes are OFFERED and phrased as questions, never concluded (relation_resolver
     // rule 2). The question mark is not decoration — it is the whole epistemic status.
@@ -1768,6 +1833,30 @@ void SessionDiagnosticsModel::buildDriver()
         });
     }
     m_driver[QStringLiteral("offered")] = offered;
+}
+
+// ONE RIVAL DISCLOSURE. The footer prints the session's top one; the condition detail prints the
+// ones over the ancestry it is drawing. The same sentence either way, because it is the same
+// claim — and the same refusal to adjudicate, which is the part that must not drift.
+QVariantMap SessionDiagnosticsModel::rivalMap(const RivalParent &rp) const
+{
+    return QVariantMap{
+        { QStringLiteral("childId"),        rp.childId },
+        { QStringLiteral("childName"),      conditionName(rp.childId) },
+        { QStringLiteral("chosenParentId"), rp.chosenParentId },
+        { QStringLiteral("chosenName"),     conditionName(rp.chosenParentId) },
+        { QStringLiteral("rivalParentId"),  rp.rivalParentId },
+        { QStringLiteral("rivalName"),      conditionName(rp.rivalParentId) },
+        { QStringLiteral("adjudicated"),    rp.adjudicated },
+        { QStringLiteral("text"),
+          rp.adjudicated
+              ? QStringLiteral("%1 could also explain %2; this session's evidence favours %3.")
+                    .arg(conditionName(rp.rivalParentId), conditionName(rp.childId),
+                         conditionName(rp.chosenParentId))
+              : QStringLiteral("%1 could also explain %2 — not adjudicated: it is not measurable "
+                               "on this capture.")
+                    .arg(conditionName(rp.rivalParentId), conditionName(rp.childId)) },
+    };
 }
 
 // ── Closing: session bookends (§B7) ─────────────────────────────────────────────────────
@@ -1974,4 +2063,352 @@ int SessionDiagnosticsModel::firedCountFor(int shotId) const
     for (const ConditionRow &r : m_shots[size_t(idx)].rows)
         if (r.state == ShotState::Fired) ++n;
     return n;
+}
+
+// ── The condition detail (user-requested drill-in) ──────────────────────────────────────
+//
+// WHAT MIGHT HAVE CAUSED THIS, AND WHAT IT LEADS TO — one condition, its authored ancestry to the
+// roots and its authored descent to the outcomes, with this session's evidence on every link.
+//
+// THE NEIGHBOURHOOD IS THIS CONDITION'S, NOT THE SESSION'S, and that is the whole reason it is
+// marshalled again here rather than read off m_nodes/m_edges. buildGraph() keeps the session's
+// picture: every pattern, everything upstream of one, and the descent to the DECLARED MISS and no
+// further — which is right for a rail about the session and wrong for a page about a condition,
+// because the question "what does this lead to" has an answer whether or not the golfer declared
+// a miss, and a page that could only answer it after a declaration would answer it almost never.
+// So the detail computes its own `keep` and hands it to the SAME marshaller, is graded by the
+// SAME gradeLinks over the SAME rows, and draws the SAME node and link maps.
+//
+// PURE. It reads members and returns a map. No cadence, no ratchet, no persistence, no signal,
+// no mutation — which is what makes it identical in live and in review for one ledger, and what
+// makes openDetail() a panel action rather than a session event.
+QVariantMap SessionDiagnosticsModel::conditionDetail(const QString &conditionId) const
+{
+    QVariantMap out;
+    if (conditionId.isEmpty() || !m_packProv) return out;
+
+    const CharacteristicPack &pack = m_packProv->pack();
+    const Condition *self = pack.condition(conditionId);
+    if (!self) return out;                       // a condition the pack does not author
+
+    const int fi           = focusIndex();
+    // The reviewed shot is the wide tick, here exactly as on the cards and the rail. Same rule,
+    // same helper — a detail with its own idea of which tick is selected would point at a
+    // different swing from the panel behind it.
+    const int selectedTick = (m_reviewing || m_closed) ? fi : -1;
+
+    // ── the neighbourhood, marshalled and graded exactly as the rail's is ───────────
+    const QSet<QString> up   = causalClosure(pack, conditionId, /*downstream*/ false);
+    const QSet<QString> down = causalClosure(pack, conditionId, /*downstream*/ true);
+    QSet<QString> keep = up;
+    keep.unite(down);
+    keep.insert(conditionId);
+
+    std::vector<NodeSpec> nodes;
+    std::vector<EdgeSpec> edges;
+    marshalGraph(keep, nodes, edges);
+
+    FocusSplit focus;
+    focus.declared    = !m_focusConditionId.isEmpty() && m_focusFromShot >= 0;
+    focus.baselineEnd = m_focusFromShot - 1;
+    const std::vector<LinkEvidence> links = gradeLinks(nodes, edges, m_ledgers, focus, m_opt);
+
+    // The node's DRAWN kind. chainNodeKind()'s answer, with one addition the rail does not need:
+    // an outcome-kind condition is drawn as an outcome whether or not it is the declared miss.
+    // This is a DISPLAY statement only — NodeSpec::outcomeId is left alone, because nodePresent()
+    // treats an outcome as observed and setting it on an undeclared outcome would upgrade every
+    // link into it on a fact nobody established.
+    auto kindOf = [&](const QString &id) {
+        const Condition *c = pack.condition(id);
+        if (c && c->kind == ConditionKind::Outcome) return ChainNodeKind::Outcome;
+        const NodeSpec *ns = nodeFor(nodes, id);
+        return ns ? chainNodeKind(*ns, ledger(id)) : ChainNodeKind::Ghost;
+    };
+
+    // ── the header: the same pattern card the panel draws, for this condition ───────
+    const ConditionLedger *l = ledger(conditionId);
+    QVariantMap header;
+    if (l) {
+        header = cardMap(*l, fi, selectedTick);
+    } else {
+        // A condition this capture never assessed — a ghost or a screened root reached from the
+        // ancestry. The card DEGRADES rather than blanking: every slot the panel's card fills is
+        // filled here too, with the honest answer in it.
+        header[QStringLiteral("id")]               = conditionId;
+        header[QStringLiteral("name")]             = conditionName(conditionId);
+        header[QStringLiteral("consequence")]      = consequenceOf(conditionId);
+        header[QStringLiteral("tier")]             = QString();
+        header[QStringLiteral("recurrence")]       = QString();
+        header[QStringLiteral("fired")]            = 0;
+        header[QStringLiteral("assessable")]       = 0;
+        header[QStringLiteral("fresh")]            = false;
+        header[QStringLiteral("resolving")]        = false;
+        header[QStringLiteral("focused")]          = conditionId == m_focusConditionId;
+        header[QStringLiteral("ticks")]            = QVariantList();
+        header[QStringLiteral("directionClaimed")] = false;
+        header[QStringLiteral("directionText")]    = QString();
+        header[QStringLiteral("trendKnown")]       = false;
+        header[QStringLiteral("trend")]            = QStringLiteral("stable");
+        header[QStringLiteral("trendArrow")]       = QString();
+        header[QStringLiteral("trendText")]        = QString();
+        header[QStringLiteral("recencyText")]      = QStringLiteral("not measurable on this capture");
+        header[QStringLiteral("thisShot")]         = QStringLiteral("notAssessable");
+        header[QStringLiteral("statePill")]        = QStringLiteral("NOT MEASURED");
+        header[QStringLiteral("valueText")]        = QStringLiteral("not measurable");
+        header[QStringLiteral("corridorText")]     = QString();
+    }
+    const ChainNodeKind selfKind = kindOf(conditionId);
+    header[QStringLiteral("kind")] = chainNodeKindName(selfKind);
+    header[QStringLiteral("mark")] = markFor(conditionId, selfKind, nodeFor(nodes, conditionId));
+    // Off the DETAIL's links rather than the session's: a condition off the session's own graph
+    // has parents the panel never graded, and the sentence on this page must quote the edges the
+    // page is drawing.
+    header[QStringLiteral("evidence")] = evidenceProse(conditionId, links);
+
+    // ── path enumeration ───────────────────────────────────────────────────────────
+    //
+    // Every simple path from a ROOT down to this condition, and from this condition out to every
+    // SINK below it (which is where the outcomes are — the pack forbids an outcome that causes
+    // something, so an outcome is always a sink). Branch order is the rail's own: grade, then the
+    // authored strength, then id — so the walk is deterministic and the page does not reshuffle
+    // between launches, exactly as extractChains() promises for the rail.
+    auto neighbours = [&](const QString &id, bool upstream) {
+        std::vector<const EdgeSpec *> ns;
+        for (const EdgeSpec &e : edges) {
+            const QString other = upstream ? (e.to == id ? e.from : QString())
+                                           : (e.from == id ? e.to : QString());
+            if (other.isEmpty()) continue;
+            // Stay on the side of the condition we are walking. An ancestor's OTHER children are
+            // not on the way to this condition, and drawing them would answer a question nobody
+            // asked with a claim about a sibling.
+            if (upstream ? !up.contains(other) : !down.contains(other)) continue;
+            ns.push_back(&e);
+        }
+        std::stable_sort(ns.begin(), ns.end(), [&](const EdgeSpec *x, const EdgeSpec *y) {
+            const LinkEvidence *lx = linkFor(links, x->from, x->to);
+            const LinkEvidence *ly = linkFor(links, y->from, y->to);
+            const int gx = lx ? int(lx->grade) : 0;
+            const int gy = ly ? int(ly->grade) : 0;
+            if (gx != gy) return gx > gy;
+            if (x->strength != y->strength) return x->strength > y->strength;
+            return upstream ? x->from < y->from : x->to < y->to;
+        });
+        return ns;
+    };
+
+    std::vector<std::vector<QString>> upPaths, downPaths;
+    bool upCapped = false, downCapped = false;
+
+    std::function<void(const QString &, std::vector<QString> &, bool,
+                       std::vector<std::vector<QString>> &, bool &)> walk =
+        [&](const QString &cur, std::vector<QString> &path, bool upstream,
+            std::vector<std::vector<QString>> &sink, bool &capped) {
+            if (int(sink.size()) >= kDetailMaxPaths) { capped = true; return; }
+            bool advanced = false;
+            if (int(path.size()) < kDetailMaxDepth) {
+                for (const EdgeSpec *e : neighbours(cur, upstream)) {
+                    const QString next = upstream ? e->from : e->to;
+                    // The pack is a DAG, but a path may still re-reach a node through a diamond;
+                    // a node twice on one rail would draw the same card twice.
+                    if (std::find(path.begin(), path.end(), next) != path.end()) continue;
+                    advanced = true;
+                    path.push_back(next);
+                    walk(next, path, upstream, sink, capped);
+                    path.pop_back();
+                    if (int(sink.size()) >= kDetailMaxPaths) { capped = true; return; }
+                }
+            }
+            // A root (walking up) or a sink (walking down). A one-node "path" is not a path.
+            if (!advanced && path.size() >= 2) sink.push_back(path);
+        };
+
+    {
+        std::vector<QString> path{ conditionId };
+        walk(conditionId, path, /*upstream*/ true, upPaths, upCapped);
+    }
+    {
+        std::vector<QString> path{ conditionId };
+        walk(conditionId, path, /*upstream*/ false, downPaths, downCapped);
+    }
+    // Walked upward the path came out condition-first; a rail reads in the swing's own direction.
+    for (std::vector<QString> &p : upPaths) std::reverse(p.begin(), p.end());
+
+    auto railFor = [&](const std::vector<QString> &path) {
+        QVariantList ns, ls;
+        int live = 0;
+        for (size_t k = 0; k < path.size(); ++k) {
+            const ChainNodeKind kind = kindOf(path[k]);
+            if (kind == ChainNodeKind::LiveCard) ++live;
+            ns.append(nodeMap(path[k], nodeFor(nodes, path[k]), kind, links, fi, selectedTick));
+            if (k + 1 < path.size())
+                if (const LinkEvidence *le = linkFor(links, path[k], path[k + 1]))
+                    ls.append(linkMap(*le));
+        }
+        const QVariantMap last = ns.isEmpty() ? QVariantMap() : ns.last().toMap();
+        return QVariantMap{
+            { QStringLiteral("nodes"),     ns },
+            { QStringLiteral("links"),     ls },
+            { QStringLiteral("liveCount"), live },
+            { QStringLiteral("anyLive"),   live > 0 },
+            { QStringLiteral("primary"),   false },
+            // The end of the rail, hoisted so a headline does not have to walk the node list.
+            { QStringLiteral("endId"),         last.value(QStringLiteral("id")) },
+            { QStringLiteral("endName"),       last.value(QStringLiteral("name")) },
+            { QStringLiteral("endKind"),       last.value(QStringLiteral("kind")) },
+            { QStringLiteral("endRecurrence"), last.value(QStringLiteral("recurrence")) },
+            { QStringLiteral("endLmAnchored"), last.value(QStringLiteral("lmAnchored")) },
+        };
+    };
+
+    auto railsOf = [&](const std::vector<std::vector<QString>> &paths) {
+        QVariantList rails;
+        for (const std::vector<QString> &p : paths) rails.append(railFor(p));
+        // MOST-EVIDENCED FIRST, on the rail's own rule — see railBefore().
+        std::sort(rails.begin(), rails.end(), [](const QVariant &a, const QVariant &b) {
+            return railBefore(a.toMap(), b.toMap());
+        });
+        // The one the panel draws in full; the rest collapse to a line each. A flag rather than
+        // a truncation, because nothing here is withheld — brief §8.
+        if (!rails.isEmpty()) {
+            QVariantMap first = rails.first().toMap();
+            first[QStringLiteral("primary")] = true;
+            rails[0] = first;
+        }
+        return rails;
+    };
+
+    const QVariantList causes  = railsOf(upPaths);
+    const QVariantList effects = railsOf(downPaths);
+
+    // ── the cause headline ─────────────────────────────────────────────────────────
+    //
+    // Four answers in strict order, and the order is an order of EVIDENCE. The resolver's ranked
+    // root when it accounts for this condition; else the strongest authored parent this session
+    // actually tested; else the screen that would settle the question; else the absence of an
+    // answer, said out loud. Never forced: three of the four are refusals of a kind.
+    QString causeHeadline;
+    for (const RankedCause &r : m_explanation.roots) {
+        if (!r.explains.contains(conditionId)) continue;
+        causeHeadline = QStringLiteral("Likely driver: %1 — would explain %2 of your %3.")
+                            .arg(conditionName(r.conditionId))
+                            .arg(r.coverage)
+                            .arg(r.coverage == 1 ? QStringLiteral("pattern")
+                                                 : QStringLiteral("patterns"));
+        break;
+    }
+    if (causeHeadline.isEmpty()) {
+        // A DIRECT PARENT ONLY COUNTS FROM COHERENT UP. Present-together means neither end was
+        // measurable and Unanchored means the root was never screened — naming either as "the
+        // strongest cause this session" would dress the absence of evidence as a finding, and
+        // the screen CTA below is the honest thing to say in exactly those cases.
+        const LinkEvidence *best = nullptr;
+        for (const LinkEvidence &e : links) {
+            if (e.to != conditionId || e.grade < LinkGrade::Coherent) continue;
+            if (!best || e.grade > best->grade
+                || (e.grade == best->grade && e.strength > best->strength))
+                best = &e;
+        }
+        if (best) {
+            const QVariantMap lm = linkMap(*best);
+            causeHeadline = QStringLiteral("Strongest authored cause this session: %1 — %2, %3.")
+                                .arg(conditionName(best->from),
+                                     lm.value(QStringLiteral("word")).toString().toLower(),
+                                     lm.value(QStringLiteral("note")).toString());
+        }
+    }
+    if (causeHeadline.isEmpty()) {
+        for (const NodeSpec &n : nodes) {          // pack order, so the same root every launch
+            if (!up.contains(n.id) || !n.screened || n.screenEntered) continue;
+            const Condition *c = pack.condition(n.id);
+            const Screen *sc = c ? sharedScreenSet().screen(c->screenRef) : nullptr;
+            causeHeadline = QStringLiteral("%1 would anchor this chain — not yet screened.")
+                                .arg(sc ? sc->label : conditionName(n.id));
+            break;
+        }
+    }
+    if (causeHeadline.isEmpty())
+        causeHeadline = QStringLiteral("No cause the capture can see today.");
+
+    // ── the outcome headline ───────────────────────────────────────────────────────
+    //
+    // The outcome reached by the strongest-evidenced downstream path, and its evidence is a
+    // COUNT or it is nothing. There is deliberately no probability language anywhere in this
+    // sentence: "most likely" is the ordering's claim (this is the best-evidenced path the model
+    // authors), and the only number that follows it is the one the ledger counted.
+    QString outcomeHeadline;
+    for (const QVariant &rv : effects) {
+        const QVariantMap rail = rv.toMap();
+        if (rail.value(QStringLiteral("endKind")).toString() != QLatin1String("outcome")) continue;
+        const QString name = rail.value(QStringLiteral("endName")).toString();
+        const QString rec  = rail.value(QStringLiteral("endRecurrence")).toString();
+        outcomeHeadline =
+            (rail.value(QStringLiteral("endLmAnchored")).toBool() && !rec.isEmpty())
+                ? QStringLiteral("Most likely outcome: %1 — %2.").arg(name, rec)
+                : QStringLiteral("Most likely outcome: %1 — authored; not measurable with this "
+                                 "capture.").arg(name);
+        break;
+    }
+    if (outcomeHeadline.isEmpty()) {
+        outcomeHeadline =
+            selfKind == ChainNodeKind::Outcome
+                ? QStringLiteral("This is the outcome — the model authors nothing downstream of it.")
+                : QStringLiteral("No authored outcome downstream of this condition.");
+    }
+
+    // ── rivals: named, never adjudicated ───────────────────────────────────────────
+    // extractChains()' own rival pass over this neighbourhood, so the page discloses what the
+    // footer would have, on the same terms. Scoped to the ANCESTRY: a rival parent of something
+    // downstream is a fact about that condition's page, not this one's.
+    const ChainRails localRails = extractChains(nodes, edges, m_ledgers, links, m_opt);
+    QVariantList rivals;
+    for (const RivalParent &rp : localRails.rivals) {
+        if (rp.childId != conditionId && !up.contains(rp.childId)) continue;
+        rivals.append(rivalMap(rp));
+    }
+
+    out[QStringLiteral("id")]              = conditionId;
+    out[QStringLiteral("name")]            = conditionName(conditionId);
+    out[QStringLiteral("header")]          = header;
+    out[QStringLiteral("causeHeadline")]   = causeHeadline;
+    out[QStringLiteral("outcomeHeadline")] = outcomeHeadline;
+    out[QStringLiteral("causes")]          = causes;
+    out[QStringLiteral("effects")]         = effects;
+    out[QStringLiteral("causesCapped")]    = upCapped;
+    out[QStringLiteral("effectsCapped")]   = downCapped;
+    out[QStringLiteral("rivals")]          = rivals;
+    // The two absences, in words, so the panel never has to invent a sentence for an empty list.
+    out[QStringLiteral("noCausesLine")] =
+        causes.isEmpty() ? QStringLiteral("The model authors no cause above this condition.")
+                         : QString();
+    out[QStringLiteral("noEffectsLine")] =
+        effects.isEmpty() ? QStringLiteral("The model authors nothing downstream of this condition.")
+                          : QString();
+    return out;
+}
+
+void SessionDiagnosticsModel::buildDetail()
+{
+    m_detail = m_detailConditionId.isEmpty() ? QVariantMap()
+                                             : conditionDetail(m_detailConditionId);
+}
+
+void SessionDiagnosticsModel::openDetail(const QString &conditionId)
+{
+    if (conditionId.isEmpty()) { closeDetail(); return; }
+    // DECLINED SILENTLY for a condition the pack does not author, exactly as declareFocus() is
+    // for one it cannot honour: the panel reads the state back off this object, so a request the
+    // model does not accept leaves the surface as it was rather than opening an empty page.
+    if (!m_packProv || !m_packProv->pack().condition(conditionId)) return;
+    if (m_detailConditionId == conditionId) return;
+    m_detailConditionId = conditionId;
+    buildDetail();
+    emit detailChanged();
+}
+
+void SessionDiagnosticsModel::closeDetail()
+{
+    if (m_detailConditionId.isEmpty()) return;
+    m_detailConditionId.clear();
+    m_detail = QVariantMap();
+    emit detailChanged();
 }

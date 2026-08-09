@@ -87,12 +87,23 @@ Item {
         { id: "thin_strike", name: "Thin strike" }
     ]
 
+    // openDetail / closeDetail are invokables like the rest, so the same treatment: the panel
+    // ASKS and the model decides, and the test asserts the ask. The RENDER is asserted against a
+    // fixture that already carries `detailConditionId` + `detail`, because a plain JS object's
+    // properties are not bindable — a spy that mutated the fixture would change nothing on
+    // screen, which is exactly the mistake the read-back rule exists to prevent.
+    property int    detailCalls: 0
+    property string lastDetailId: ""
+    property int    closeDetailCalls: 0
+
     // The pack's outcome layer, as the model's missCandidates() publishes it.
     function spied(s) {
         s.declareFocus   = function (id) { probe.focusCalls += 1; probe.lastFocusId = id }
         s.clearFocus     = function ()   { probe.clearFocusCalls += 1 }
         s.declareMiss    = function (id) { probe.missCalls += 1; probe.lastMissId = id }
         s.missCandidates = function ()   { return probe.missRows }
+        s.openDetail     = function (id) { probe.detailCalls += 1; probe.lastDetailId = id }
+        s.closeDetail    = function ()   { probe.closeDetailCalls += 1 }
         return s
     }
 
@@ -329,6 +340,114 @@ Item {
             watching: [{ id: "sway", name: "Lateral sway", recurrence: "1 of 11 measurable shots" }],
             coverageLine: "23 of 140 characteristics measurable with current capture"
         }
+    }
+
+    // ── the condition detail ─────────────────────────────────────────────────
+    //
+    // SessionDiagnosticsModel::detail() for `casting`, in the published shape. The rails are the
+    // rails: same node maps, same link maps, same grades as the chain fixtures above, because
+    // the model builds them with the same marshallers. Two cause paths and two effect paths, so
+    // the primary/collapsed split is pressed on both sides, and the downstream ends at the
+    // declared miss so the outcome headline has something LM-anchored to quote.
+    function detailRail(nodes, links, primary, liveCount) {
+        const end = nodes[nodes.length - 1]
+        return {
+            nodes: nodes, links: links,
+            primary: primary === true, liveCount: liveCount, anyLive: liveCount > 0,
+            endId: end.id, endName: end.name, endKind: end.kind,
+            endRecurrence: end.recurrence || "",
+            endLmAnchored: end.lmAnchored === true
+        }
+    }
+
+    function detailPayload() {
+        const castingCard = {
+            id: "casting", name: "Casting", consequence: "", tier: "pattern",
+            kind: "live", mark: "",
+            recurrence: "4 of 6 measurable shots", fired: 4, assessable: 6,
+            fresh: false, resolving: false, focused: false,
+            thisShot: "fired", statePill: "FIRED",
+            directionClaimed: true, directionText: "The high side on 4 of its 4 firings.",
+            trend: "worsening", trendArrow: "↑", trendText: "worsening",
+            recencyText: "fired on the last measurable shot",
+            evidence: "Casting on 4 of the 5 swings where rushed transition fired — on 0 of the 1 where it did not.",
+            ticks: [tick("fired"), tick("notAssessable"), tick("fired"),
+                    tick("clean"), tick("fired"), tick("fired")]
+        }
+
+        const rushed = liveNode("rushed_transition", "Rushed transition", "transition",
+                                "transition tempo", "5 of 6 measurable shots", "fired", "FIRED",
+                                "worsening", "↑", "Rushed transition on 5 of the 6 swings measured.")
+        const casting = liveNode("casting", "Casting", "downswing", "wrist release rate",
+                                 "4 of 6 measurable shots", "fired", "FIRED", "worsening", "↑",
+                                 castingCard.evidence)
+        const shaftLean = liveNode("shaft_lean", "Not enough shaft lean", "impact",
+                                   "shaft lean at impact", "4 of 6 measurable shots", "clean",
+                                   "CLEAN", "stable", "", "Shaft lean sits behind the ball on 4 of 6.")
+        const scooping = liveNode("scooping", "Scooping", "impact", "lead wrist extension",
+                                  "3 of 6 measurable shots", "fired", "FIRED", "improving", "↓",
+                                  "Scooping on 3 of the 6 swings measured.")
+        const slice = chainNode("slice", "Slice", "outcome",
+                                "declared miss · launch-monitor verified",
+                                { recurrence: "5 of 6 measurable shots", state: "fired",
+                                  statePill: "FIRED", lmAnchored: true })
+        const pelvic = chainNode("pelvic_disassociation", "Poor pelvic disassociation",
+                                 "screenedRoot", "screened root · needs a physical screen", {})
+        const overTop = chainNode("over_the_top", "Over the top", "ghost",
+                                  "ghost · authored as asserted, no measure", {})
+
+        return {
+            id: "casting", name: "Casting",
+            header: castingCard,
+            causeHeadline: "Likely driver: Rushed transition — would explain 3 of your patterns.",
+            outcomeHeadline: "Most likely outcome: Slice — 5 of 6 measurable shots.",
+            causes: [
+                detailRail([rushed, casting],
+                           [chainLink("rushed_transition", "casting", "movedTogether",
+                                      "Moved together", "solidAccent", 2.0, true, 1.0,
+                                      "baseline 5 · 6 since focus")],
+                           true, 2),
+                detailRail([pelvic, overTop, casting],
+                           [chainLink("pelvic_disassociation", "over_the_top", "unanchored",
+                                      "Unanchored", "dottedFaint", 1.0, false, 0.5,
+                                      "screen would confirm"),
+                            chainLink("over_the_top", "casting", "presentTogether",
+                                      "Present together", "dotted", 1.0, false, 1.0,
+                                      "neither measured")],
+                           false, 1)
+            ],
+            effects: [
+                detailRail([casting, shaftLean, scooping, slice],
+                           [chainLink("casting", "shaft_lean", "conditionallyDependent",
+                                      "Conditionally dependent", "solid", 1.5, true, 1.0,
+                                      "Fisher exact · 12 paired shots"),
+                            chainLink("shaft_lean", "scooping", "coherent", "Coherent",
+                                      "dashed", 1.5, false, 1.0, "no variance to test"),
+                            chainLink("scooping", "slice", "conditionallyDependent",
+                                      "Conditionally dependent", "solid", 1.5, true, 1.0,
+                                      "Fisher exact · 6 paired shots")],
+                           true, 3),
+                detailRail([casting, scooping],
+                           [chainLink("casting", "scooping", "coherent", "Coherent",
+                                      "dashed", 1.5, false, 1.0, "no variance to test")],
+                           false, 2)
+            ],
+            causesCapped: false, effectsCapped: false,
+            rivals: [{ childId: "casting", childName: "Casting",
+                       chosenParentId: "rushed_transition", chosenName: "Rushed transition",
+                       rivalParentId: "grip_strength", rivalName: "Grip too strong",
+                       adjudicated: false,
+                       text: "Grip too strong could also explain Casting — not adjudicated: it is not measurable on this capture." }],
+            noCausesLine: "", noEffectsLine: ""
+        }
+    }
+
+    // The panel with a detail open on it — the model publishes both, and the body reads the pair.
+    function detailSource() {
+        const s = spied(establishedSource(true))
+        s.detailConditionId = "casting"
+        s.detail = probe.detailPayload()
+        return s
     }
 
     function closingSource() {
@@ -598,6 +717,14 @@ Item {
             return findAll(item, name).filter(function (i) { return i.visible })
         }
 
+        // ...and the same list narrowed to what is actually ON SCREEN. `visible` is an item's own
+        // flag and says nothing about its ancestors, which matters the moment the panel gained a
+        // second body: the composition behind a condition detail is hidden by ONE invisible
+        // parent, and every rail inside it is still visible: true.
+        function shownAll(item, name) {
+            return findAll(item, name).filter(function (i) { return shown(i) })
+        }
+
         function one(item, name) {
             const all = findAll(item, name)
             verify(all.length >= 1, "expected a '" + name + "', found none")
@@ -656,15 +783,39 @@ Item {
             probe.clearFocusCalls = 0
             probe.missCalls = 0
             probe.lastMissId = "\u0000"
+            probe.detailCalls = 0
+            probe.lastDetailId = ""
+            probe.closeDetailCalls = 0
             Theme.reduceMotion = false
             body.pulseCue = null
             wait(0)
         }
 
+        // Which of the panel's regions are on screen, as one comparable string. BACK must put
+        // every one of them back exactly as it found it — that is the whole claim of a
+        // visibility swap over a Loader, and it is not assertable one item at a time.
+        readonly property var compositionNames: [
+            "sdThisShotStrip", "sdBookends", "sdColdBody", "sdCardsBody",
+            "sdEstablishedBody", "sdUnchainedRow", "sdWatchingRow", "sdCoverageLine",
+            "sdDriverFooter", "sdTenseFooter", "sdChainsFlick", "sdPatternCard",
+            "sdChainRail", "sdChainNode"
+        ]
+        function compositionSnapshot() {
+            const out = []
+            for (let i = 0; i < compositionNames.length; ++i) {
+                const items = findAll(body, compositionNames[i])
+                const flags = []
+                for (let j = 0; j < items.length; ++j)
+                    flags.push(shown(items[j]) ? "1" : "0")
+                out.push(compositionNames[i] + ":" + flags.join(""))
+            }
+            return out.join(" | ")
+        }
+
         // ── rail helpers ─────────────────────────────────────────────────────
 
         function linkByGrade(grade) {
-            const all = visibleAll(body, "sdChainLink")
+            const all = shownAll(body, "sdChainLink")
             for (let i = 0; i < all.length; ++i)
                 if (all[i].grade === grade)
                     return all[i]
@@ -1437,12 +1588,15 @@ Item {
         // Tapping ASKS the model. Nothing in the panel is toggled here — declareFocus() records
         // a split at the current shot count and only the model can do that, so a body that
         // flipped its own flag would be showing a contract the ledger has not entered.
-        function test_28_tappingAPatternCardAsksTheModelToDeclareOrClearFocus() {
+        //
+        // CHANGED WITH THE DRILL-IN: the focus target is the CHIP and only the chip. The whole
+        // card now opens the condition (test_38), and two verbs cannot share one hit target.
+        function test_28_tappingAPatternCardsFocusChipAsksTheModelToDeclareOrClearFocus() {
             setSource(spied(formingSource(false)))
 
             laidOut()
             const cards = visibleAll(body, "sdPatternCard")
-            mouseClick(cards[0])
+            mouseClick(one(cards[0], "sdCardFocusTag"))
             wait(0)
             compare(probe.focusCalls, 1, "the tap reached declareFocus")
             compare(probe.lastFocusId, "casting", "with the card's own condition id")
@@ -1457,7 +1611,7 @@ Item {
             s.cards[0].focused = true
             setSource(s)
             laidOut()
-            mouseClick(visibleAll(body, "sdPatternCard")[0])
+            mouseClick(one(visibleAll(body, "sdPatternCard")[0], "sdCardFocusTag"))
             wait(0)
             compare(probe.clearFocusCalls, 1, "the focused card clears")
             compare(probe.focusCalls, 1, "and does not re-declare")
@@ -1472,7 +1626,8 @@ Item {
 
             const live = nodeById("casting")
             verify(shown(one(live, "sdChainNodeFocusTag")), "a live node offers focus")
-            mouseClick(live)
+            // The CHIP, and only the chip — the rest of the node opens the condition (test_38).
+            mouseClick(one(live, "sdChainNodeFocusTag"))
             wait(0)
             compare(probe.focusCalls, 1)
             compare(probe.lastFocusId, "casting")
@@ -1615,6 +1770,222 @@ Item {
             wait(0)
         }
 
+        // ── the condition detail (user request; brief §9 has no design) ──────
+        //
+        // THE TAP REASSIGNMENT IS THE PART THAT COULD SILENTLY BREAK. The card used to declare
+        // focus and now opens a page; the chip used to be decoration and is now the only focus
+        // target. Both halves are asserted here, and the second half is asserted NEGATIVELY —
+        // a focus tap that also opened the detail would look like a working panel and would
+        // make the contract undeclarable.
+        function test_38_theCardOpensTheConditionAndTheChipStillOnlyDeclaresFocus() {
+            setSource(spied(formingSource(false)))
+            laidOut()
+
+            const cards = visibleAll(body, "sdPatternCard")
+            mouseClick(cards[0])
+            wait(0)
+            compare(probe.detailCalls, 1, "the card asked for the condition's page")
+            compare(probe.lastDetailId, "casting", "with its own id")
+            compare(probe.focusCalls, 0, "and did not declare focus on the way")
+
+            // ...and the chip is the focus target, and ONLY the focus target.
+            mouseClick(one(cards[0], "sdCardFocusTag"))
+            wait(0)
+            compare(probe.focusCalls, 1, "the chip declares")
+            compare(probe.detailCalls, 1, "and opens nothing")
+
+            // A rail node carries the same pair, in the same order of precedence.
+            setSource(spied(establishedSource(true)))
+            laidOut()
+            probe.detailCalls = 0
+            probe.focusCalls = 0
+            mouseClick(nodeById("casting"))
+            wait(0)
+            compare(probe.detailCalls, 1, "a live rail node opens its condition too")
+            compare(probe.lastDetailId, "casting")
+            compare(probe.focusCalls, 0)
+
+            mouseClick(one(nodeById("casting"), "sdChainNodeFocusTag"))
+            wait(0)
+            compare(probe.focusCalls, 1)
+            compare(probe.detailCalls, 1)
+
+            // The screened root keeps its one verb: the CTA is the point of it being on the rail
+            // at all, and it is reached from a cause rail inside a detail anyway.
+            mouseClick(nodeById("pelvic_disassociation"))
+            wait(0)
+            compare(probe.detailCalls, 1, "a screened root asks for its screen, not for a page")
+            compare(probe.lastScreenCondition, "pelvic_disassociation")
+
+            // A watched condition has a ledger like any other, so it opens too.
+            setSource(spied(formingSource(false)))
+            body.watchingExpanded = true
+            laidOut()
+            const watched = shownAll(body, "sdWatchingItem")
+            compare(watched.length, 2)
+            mouseClick(watched[0])
+            wait(0)
+            compare(probe.lastDetailId, "sway", "the watching row opens its own condition")
+        }
+
+        // The page itself: the same cards, the same graded strokes, the same captions — the
+        // panel's vocabulary and nothing invented (brief §9 forbids inventing a design).
+        function test_39_theDetailDrawsCausesEffectsAndBothHeadlines() {
+            setSource(detailSource())
+            laidOut()
+
+            verify(shown(one(body, "sdDetailBody")), "the detail is the body")
+            verify(!shown(one(body, "sdEstablishedBody")), "and the rail composition stood down")
+            verify(!shown(one(body, "sdDriverFooter")), "so did the session's footer")
+            verify(!shown(one(body, "sdCoverageLine")), "and its coverage line")
+
+            // The chrome is the panel's, and the header says which condition this is.
+            verify(shown(one(body, "sdTitle")), "the panel is still the panel")
+            verify(shown(one(body, "sdDetailBack")), "with a way back")
+            compare(one(body, "sdDetailTitle").text, "Casting")
+            verify(!shown(one(body, "sdMissChip")),
+                   "the session's opening question stands down over one condition's page")
+
+            // The condition itself, as the card the golfer tapped.
+            const head = one(body, "sdDetailHeaderCard")
+            compare(one(head, "sdCardName").text, "Casting")
+            compare(one(head, "sdCardRecurrence").text, "4 of 6 measurable shots")
+            compare(findAll(one(head, "sdTickRun"), "sdTick").length, 6,
+                    "one tick per shot, here too")
+
+            // Both headlines, in the model's words — a count, never a probability.
+            compare(one(body, "sdDetailCauseHeadline").text,
+                    "Likely driver: Rushed transition — would explain 3 of your patterns.")
+            compare(one(body, "sdDetailOutcomeHeadline").text,
+                    "Most likely outcome: Slice — 5 of 6 measurable shots.")
+
+            // One rail open per side — the most-evidenced — and the rest behind one line each,
+            // exactly as 12c collapses chain B.
+            compare(shownAll(body, "sdDetailCauseRail").length, 1, "one cause path drawn in full")
+            compare(shownAll(body, "sdDetailEffectRail").length, 1, "and one effect path")
+            compare(shownAll(body, "sdChainRail").length, 0,
+                    "and the session's own rails are off screen, not destroyed")
+            const collapsed = shownAll(body, "sdDetailPathFrame")
+            compare(collapsed.length, 2, "one collapsed line per non-primary path")
+            compare(one(collapsed[0], "sdDetailPathToggle").text, "OPEN ▸")
+            verify(one(collapsed[0], "sdDetailPathSummary").text.indexOf("Over the top") >= 0,
+                   "and the summary names what the path runs through")
+            verify(one(collapsed[0], "sdDetailPathNote").text.indexOf("screened root") >= 0,
+                   "with the marks, so a collapsed path cannot hide what it is made of")
+
+            // The link grades survive the trip: the stroke IS the claim (§4.1), and the detail
+            // draws it off the same published fields the rail does.
+            const moved = linkByGrade("movedTogether")
+            verify(moved, "the cause rail's graded edge is on screen")
+            compare(moved.strokeColor, Theme.colorAccent)
+            compare(moved.hasArrow, true)
+            compare(one(moved, "sdChainLinkNote").text, "baseline 5 · 6 since focus")
+
+            const dep = linkByGrade("conditionallyDependent")
+            verify(dep, "and the effect rail's")
+            compare(dep.strokeStyle, "solid")
+            verify(one(dep, "sdChainLinkNote").text.indexOf("Fisher exact") >= 0)
+
+            // The outcome the downstream ends at, drawn as an outcome and not as a card.
+            const outcome = nodeById("slice")
+            verify(outcome, "the downstream reaches the outcome")
+            compare(outcome.kind, "outcome")
+            compare(one(outcome, "sdChainNodeRecurrence").text, "5 of 6 measurable shots")
+
+            // The rival, named and explicitly not adjudicated — the footer's disclosure, kept.
+            verify(one(body, "sdDetailRival").text.indexOf("not adjudicated") >= 0)
+
+            // Nothing overhangs the chrome: the page scrolls inside its own Flickable.
+            const page = one(body, "sdDetailBody")
+            const br = page.mapToItem(body, page.width, page.height)
+            verify(br.x <= body.width + 1 && br.y <= body.height + 1,
+                   "the page fits the panel it is drawn in")
+
+            // A collapsed path opens IN PLACE into the same rail, not into another view (§8).
+            mouseClick(collapsed[0])
+            laidOut()
+            compare(one(collapsed[0], "sdDetailPathToggle").text, "CLOSE ▴")
+            compare(shownAll(body, "sdDetailCauseRail").length, 2,
+                    "the second cause path opened where its summary was")
+        }
+
+        // BACK is a visibility change, and the panel it returns to is the panel that was left.
+        function test_40_backRestoresTheCompositionUntouched() {
+            setSource(spied(establishedSource(true)))
+            body.expandedChain = -1
+            body.watchingExpanded = true
+            laidOut()
+            const before = compositionSnapshot()
+
+            setSource(detailSource())
+            laidOut()
+            verify(shown(one(body, "sdDetailBody")), "the detail took the body")
+            verify(compositionSnapshot() !== before, "and the composition stood down")
+
+            mouseClick(one(body, "sdDetailBack"))
+            wait(0)
+            compare(probe.closeDetailCalls, 1, "BACK asked the model to close")
+
+            // The model answers by clearing detailConditionId; the panel reads it back.
+            setSource(spied(establishedSource(true)))
+            body.watchingExpanded = true
+            laidOut()
+            verify(!shown(one(body, "sdDetailBody")), "the page is gone")
+            compare(compositionSnapshot(), before,
+                    "and every region is exactly as it was left")
+            // ...including the panel-local state the detail never touched.
+            compare(body.watchingExpanded, true)
+        }
+
+        // 12c reaches the page too: the rails turn on their side rather than shrinking.
+        function test_41_theDetailGoesVerticalWhenCompact() {
+            setSource(detailSource())
+            probe.width = 396; probe.height = 560
+            laidOut()
+
+            compare(body.compact, true)
+            const rails = shownAll(body, "sdDetailCauseRail")
+                              .concat(shownAll(body, "sdDetailEffectRail"))
+            compare(rails.length, 2, "both primary rails are still drawn")
+            for (let i = 0; i < rails.length; ++i)
+                compare(rails[i].vertical, true, "rail " + i + " is the vertical form")
+
+            // One line per node, the mark carried by the dot — the rail's own 12c reduction.
+            compare(findAll(rails[0], "sdChainNodeDot").length, 2)
+            compare(findAll(rails[1], "sdChainNodeDot").length, 4)
+
+            // The grade survives the turn, because the grade is the stroke.
+            const moved = linkByGrade("movedTogether")
+            verify(moved)
+            compare(moved.vertical, true)
+            compare(moved.strokeColor, Theme.colorAccent)
+
+            // Still one way back, and still one condition named.
+            verify(shown(one(body, "sdDetailBack")))
+            compare(one(body, "sdDetailTitle").text, "Casting")
+
+            probe.width = 1168; probe.height = 560
+            wait(0)
+        }
+
+        // Tapping a cause or an effect RE-TARGETS the page. There is no stack: BACK still
+        // returns to the panel in one step, which is the simplification this build ships.
+        function test_42_openingAConditionFromTheDetailRetargetsInPlace() {
+            setSource(detailSource())
+            laidOut()
+
+            mouseClick(nodeById("rushed_transition"))
+            wait(0)
+            compare(probe.detailCalls, 1, "the cause node asked for its own page")
+            compare(probe.lastDetailId, "rushed_transition")
+            compare(probe.closeDetailCalls, 0, "without closing the one it is on")
+
+            // ...and BACK from anywhere is one step out of the detail, never one level up.
+            mouseClick(one(body, "sdDetailBack"))
+            wait(0)
+            compare(probe.closeDetailCalls, 1)
+        }
+
         // ── nothing escapes the panel ────────────────────────────────────────
         // The chrome is 1 px of border and a radius; a card or a strip that overhung it
         // would be clipped away rather than drawn, which is a finding gone missing.
@@ -1661,6 +2032,7 @@ Item {
                 }
             }
         }
+
 
     }
 }

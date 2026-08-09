@@ -416,6 +416,11 @@ qt_add_qml_module(PinPointStudio
         src/Gui/diagnostics/PpChainRail.qml
         src/Gui/diagnostics/PpChainNodeCard.qml
         src/Gui/diagnostics/PpChainLink.qml
+        # One condition drilled into: its authored ancestry and its downstream, with this
+        # session's evidence on every link. A BODY SWAP inside PpSessionDiagnosticsBody rather
+        # than a screen of its own, drawn with the pattern card and the chain rail above — brief
+        # §9 has no design for this, so it borrows the panel's vocabulary and invents none.
+        src/Gui/diagnostics/PpConditionDetail.qml
         # The panel's one conclusion, printed beside its own falsifier: the screen that would
         # confirm it and the rival parent this session could not adjudicate.
         src/Gui/diagnostics/PpDriverFooter.qml

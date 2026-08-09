@@ -69,6 +69,14 @@ Item {
     readonly property bool focusable: interactive && isLive && !!node
     signal focusToggled(string conditionId, bool nowFocused)
 
+    // ── the drill-in (user request; brief §9 has no design for it) ───────────
+    //
+    // THE WHOLE NODE OPENS THE CONDITION — every kind but the screened root, whose tap is already
+    // spoken for by the CTA that is the point of it being on the rail at all. A screened root is
+    // reached from a cause rail inside a detail anyway, so it loses nothing by keeping its one
+    // verb. The node ASKS and the model decides, exactly as with focus.
+    signal detailRequested(string conditionId)
+
     // ── the after-shot pulse (§B3, §B8) ──────────────────────────────────────
     // { token, ids, focusId }, republished by the body on every shotIngested. See the twin
     // block on PpPatternCard — one mechanism, because the two cards are the same claim drawn
@@ -215,6 +223,26 @@ Item {
         strokeColor: Theme.colorBorderMid
         dashOn:  Math.max(1, root.px(3))
         dashOff: Math.max(1, root.px(3))
+    }
+
+    // ── the node's own tap ───────────────────────────────────────────────────
+    //
+    // ONE MouseArea, TWO DESTINATIONS, chosen by kind — and they can never collide because a
+    // screened root is not live and a live node is not screened. Declared HERE, before the two
+    // arrangements, so the focus chip's own MouseArea inside the wide form sits ON TOP of it:
+    // declaration order is hit order, and the six characters that toggle focus must keep their
+    // clicks. (A TapHandler cannot do this — its default gesture policy takes a passive grab, so
+    // both would fire on one press.)
+    MouseArea {
+        objectName: "sdChainNodeTap"
+        anchors.fill: parent
+        enabled: root.interactive && !!root.node
+        cursorShape: Qt.PointingHandCursor
+        onClicked: {
+            const id = root.node ? (root.node.id || "") : ""
+            if (root.isScreen) root.screenRequested(root.screenRef, id)
+            else               root.detailRequested(id)
+        }
     }
 
     // ── the wide rail's node ─────────────────────────────────────────────────
@@ -389,8 +417,22 @@ Item {
                 font.pixelSize: root.tzCaption
                 font.letterSpacing: Theme.trackingLabel
                 color: root.focused ? Theme.colorAccent
-                                    : (focusHover.hovered ? Theme.colorAccent : Theme.colorText3)
+                                    : (focusTap.containsMouse ? Theme.colorAccent : Theme.colorText3)
                 Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                // The focus target, and the only one — the twin of the pattern card's, in the
+                // same words and with the same margin, because the two surfaces are two
+                // arrangements of one contract and a reader must not have to learn it twice.
+                MouseArea {
+                    id: focusTap
+                    objectName: "sdChainNodeFocusTap"
+                    anchors.fill: parent
+                    anchors.margins: -root.px(5)
+                    enabled: root.focusable
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.focusToggled(root.node.id || "", !root.focused)
+                }
             }
         }
 
@@ -496,18 +538,4 @@ Item {
         }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        enabled: root.isScreen
-        onClicked: root.screenRequested(root.screenRef,
-                                        root.node ? (root.node.id || "") : "")
-    }
-
-    // The other kind of tap this node takes, and the two can never collide: a screened root
-    // is not live and a live node is not screened.
-    HoverHandler { id: focusHover; enabled: root.focusable; cursorShape: Qt.PointingHandCursor }
-    TapHandler {
-        enabled: root.focusable
-        onTapped: root.focusToggled(root.node.id || "", !root.focused)
-    }
 }

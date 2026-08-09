@@ -184,6 +184,27 @@ class SessionDiagnosticsModel : public QObject
     // and the panel must keep saying so.
     Q_PROPERTY(QVariantList expectations READ expectations NOTIFY surfaceChanged)
 
+    // ── The condition detail (user-requested drill-in) ──────────────────────────────
+    //
+    // DESIGN-REVIEW: brief §9 lists "tapping a chain node through" as not designed. This is the
+    // minimum honest answer to the request and it wants a design pass — see
+    // docs/design/session_diagnostics_build_findings.md.
+    //
+    // A PROPERTY PAIR RATHER THAN AN INVOKABLE THE PANEL RE-CALLS, and the reason is the same one
+    // that made shotReadout() an invokable: shotReadout answers a question about a shot the
+    // CAROUSEL owns, so somebody outside this object has to say when to ask it again. The detail
+    // answers a question about a condition THIS object owns the answer to, and its answer changes
+    // on exactly the events the zones' answers change on — a shot lands, a screen is entered, the
+    // reviewed shot moves. Published as a property, the detail is live by construction and a panel
+    // that opened one mid-session watches it accumulate; published as an invokable it would need a
+    // second re-fetch path in the panel, and a detail one shot stale is a detail that is lying.
+    //
+    // ITS OWN SIGNAL, and not surfaceChanged, because it is a projection of ONE MORE INPUT — which
+    // condition is open — that no zone reads. Everything the zones share one signal for is one
+    // projection of one reduction; this is that reduction seen through a second question.
+    Q_PROPERTY(QString detailConditionId READ detailConditionId NOTIFY detailChanged)
+    Q_PROPERTY(QVariantMap detail READ detail NOTIFY detailChanged)
+
 public:
     explicit SessionDiagnosticsModel(QObject *parent = nullptr);
     ~SessionDiagnosticsModel() override;
@@ -224,6 +245,8 @@ public:
     QString      coverageLine() const { return m_coverageLine; }
     QVariantList bookends() const { return m_bookends; }
     QVariantList expectations() const { return m_expectations; }
+    QString      detailConditionId() const { return m_detailConditionId; }
+    QVariantMap  detail() const { return m_detail; }
 
     // ── Session lifecycle ───────────────────────────────────────────────────────────
 
@@ -296,6 +319,31 @@ public:
     // The count that sits beside the pips, in the state colour.
     Q_INVOKABLE int firedCountFor(int shotId) const;
 
+    // ── The condition detail ────────────────────────────────────────────────────────
+
+    // What might have caused this condition, and what it most likely leads to, with this
+    // session's evidence on every link. A PURE READ: it takes no lock on the panel's state,
+    // consults no cadence, moves no ratchet, writes nothing to disk, and returns the same map in
+    // live and in review for the same ledger. Empty for a condition the pack does not author.
+    //
+    // The map (every string authored here, exactly like the zones):
+    //   header          one pattern-card map for the condition itself, plus `mark`/`kindText`
+    //                   for a condition the capture never measured
+    //   causeHeadline   the top-ranked cause in one sentence, or the honest absence of one
+    //   outcomeHeadline the most likely outcome in one sentence, with its evidence
+    //   causes          rails, most-evidenced first, upstream to the roots. `primary` on the first
+    //   effects         rails, most-evidenced first, downstream to the outcomes
+    //   rivals          parents this session could not adjudicate between — named, never ranked
+    // Rails carry the SAME node and link maps the chain rail consumes, off the same helpers, so
+    // the detail speaks the panel's existing visual language rather than a second dialect.
+    Q_INVOKABLE QVariantMap conditionDetail(const QString &conditionId) const;
+
+    // Open/close the published `detail`. Opening a different condition from inside the detail
+    // RE-TARGETS it — there is no navigation stack, deliberately: one step back to the panel is
+    // the whole of the model, and a stack would be a second place for "where am I" to be wrong.
+    Q_INVOKABLE void openDetail(const QString &conditionId);
+    Q_INVOKABLE void closeDetail();
+
     // ── Test seam ───────────────────────────────────────────────────────────────────
     //
     // Detection off the GUI thread is the right production shape and the wrong test shape:
@@ -320,6 +368,8 @@ signals:
     // per zone would be a second chance for two regions of the same panel to disagree about
     // one shot.
     void surfaceChanged();
+    // Which condition the detail is open on, and the detail itself. See the property block.
+    void detailChanged();
     // One shot finished reducing. The panel's cue for the after-shot moment; carries whether
     // cadence decided to surface it, so the QML does not have to ask a second question.
     void shotIngested(int shotId, bool surfaced);
@@ -349,6 +399,14 @@ private:
     // See the .cpp for WHICH conditions are marshalled and why it is not all of them.
     void buildGraph();
 
+    // buildGraph()'s second half, on any node set: pack order in, NodeSpec/EdgeSpec out. Shared
+    // with conditionDetail(), which needs the SAME marshalling over a different neighbourhood —
+    // a detail's downstream reaches past the session's own graph, and a second marshaller would
+    // be a second answer to "is this node measurable on this capture".
+    void marshalGraph(const QSet<QString> &keep,
+                      std::vector<pinpoint::analysis::NodeSpec> &nodes,
+                      std::vector<pinpoint::analysis::EdgeSpec> &edges) const;
+
     // explain() over the pattern-tier set, run only when that set's membership changes.
     void refreshExplanation();
 
@@ -371,6 +429,32 @@ private:
     void buildChains();
     void buildDriver();
     void buildBookends();
+    void buildDetail();
+
+    // ── The card, node, link and rival maps — ONE marshaller each ───────────────────
+    //
+    // Extracted out of buildCards()/buildChains()/buildDriver() rather than copied into the
+    // detail: the detail draws the same pattern card, the same node cards and the same graded
+    // link strokes as the panel behind it, and two marshallers would be two chances for the same
+    // link to read "Coherent" on one surface and "Present together" on the other. Everything they
+    // publish is a function of (ledger, node spec, link evidence, focused shot) and nothing else.
+    QVariantMap cardMap(const pinpoint::analysis::ConditionLedger &l,
+                        int focusIdx, int selectedTick) const;
+    QVariantMap nodeMap(const QString &id, const pinpoint::analysis::NodeSpec *ns,
+                        pinpoint::analysis::ChainNodeKind kind,
+                        const std::vector<pinpoint::analysis::LinkEvidence> &links,
+                        int focusIdx, int selectedTick) const;
+    QVariantMap linkMap(const pinpoint::analysis::LinkEvidence &e) const;
+    QVariantMap rivalMap(const pinpoint::analysis::RivalParent &rp) const;
+    // The node's honesty mark, in the model's words. Generalised past the declared miss: ANY
+    // outcome-kind condition can be the end of a detail's downstream, and one whose rows the
+    // launch monitor verified says so on the same terms the declared miss always has.
+    QString markFor(const QString &id, pinpoint::analysis::ChainNodeKind kind,
+                    const pinpoint::analysis::NodeSpec *ns) const;
+    // One line of evidence prose: the contingency sentence where an authored parent was actually
+    // tested, the pack's consequence line otherwise. Never both, never manufactured.
+    QString evidenceProse(const QString &id,
+                          const std::vector<pinpoint::analysis::LinkEvidence> &links) const;
 
     // ── Small shared formatters, so an export and the screen cannot disagree ────────
     QString conditionName(const QString &id) const;
@@ -450,6 +534,11 @@ private:
     QVariantMap  m_driver;
     QString      m_coverageLine;
     QVariantList m_bookends;
+    // Which condition the drill-in is open on, and its map. Panel-local in every sense that
+    // matters — never persisted, never in the envelope, cleared on activation: which page was
+    // being read is not a fact about the session.
+    QString      m_detailConditionId;
+    QVariantMap  m_detail;
 
     // ── Threading ───────────────────────────────────────────────────────────────────
     QThreadPool m_pool;         // maxThreadCount 1: shots reduce in the order they were struck

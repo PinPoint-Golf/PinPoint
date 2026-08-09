@@ -56,6 +56,8 @@ Item {
 
     signal screenRequested(string screenRef, string conditionId)
     signal focusToggled(string conditionId, bool nowFocused)
+    // A node was tapped: open that condition's causes and effects. See PpChainNodeCard.
+    signal detailRequested(string conditionId)
 
     objectName: "sdChainRail"
 
@@ -137,6 +139,7 @@ Item {
                                    ? root.screenRef : ""
                         onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
                         onFocusToggled: (id, on) => root.focusToggled(id, on)
+                        onDetailRequested: (id) => root.detailRequested(id)
                     }
                 }
 
@@ -183,6 +186,7 @@ Item {
                                ? root.screenRef : ""
                     onScreenRequested: (ref, cond) => root.screenRequested(ref, cond)
                     onFocusToggled: (id, on) => root.focusToggled(id, on)
+                    onDetailRequested: (id) => root.detailRequested(id)
                 }
 
                 PpChainLink {

@@ -50,6 +50,32 @@ per the brief's own rule. These are the places that rule fired, plus what real d
     chip + small picker popup. Both need proper design.
 13. **Selected carousel cell**: the accent ~10% fill is painted on the pip band, not the whole
     cell — washing the thumbnail fought what the cell exists to show.
+18. **Condition detail — user-requested, shipped minimal, needs a design pass.** Brief §9 lists
+    "tapping a chain node through" as not designed; a user asked for it anyway, so it is built
+    from the panel's existing vocabulary and invents nothing — the same `PpPatternCard` at the
+    head, the same `PpChainRail` / `PpChainNodeCard` / `PpChainLink` for the ancestry and the
+    downstream, the same grade words, notes and marks. Four things want sign-off:
+    - **Body swap, not a screen.** `detailConditionId` non-empty hides the composition inside the
+      same chrome and shows the page; the composition is hidden, never torn down, so BACK
+      restores it untouched (asserted by an objectName-visibility snapshot).
+    - **One step back, no stack.** Opening a cause or an effect from inside the page re-targets it
+      in place; BACK always returns to the panel in one step. Deliberate simplification — a
+      breadcrumb four levels deep on a between-balls glance is worse than tapping the card again.
+    - **Tap reassignment.** The whole card / whole node used to declare focus; it now opens the
+      condition, and the `FOCUS ▸` chip that already rendered became the *only* focus target
+      (grown by 5 design px). Consequence to weigh: the 12c slim node draws no chip, so focus
+      cannot be declared from the narrow rail at all. The screened root keeps its single verb
+      (RUN THE SCREEN) and has no detail affordance.
+    - **Composition of the page itself.** Header card → `causeHeadline` + CAUSES rails → rival
+      disclosure → `outcomeHeadline` + EFFECTS rails, stacked in one scrolling column, horizontal
+      rails wide and vertical at 396. The mock has no frame for any of it; the above/left,
+      below/right arrangement the request sketched is not drawn.
+    Headlines are the model's and stay inside the panel's honesty rules: the cause line is the
+    resolver's ranked root, else the strongest *≥ Coherent* direct parent with its grade word and
+    note, else the screen CTA, else "No cause the capture can see today."; the outcome line is a
+    count or an explicit "authored; not measurable with this capture" and carries no probability
+    language. Outcome anchoring generalised past the declared miss — any outcome-kind condition
+    with rows gets its count, the declared miss keeps its own sub-label.
 
 ## Found on first real use (2026-08-07, fixed same day) — mock regeneration items
 
