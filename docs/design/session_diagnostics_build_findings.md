@@ -123,12 +123,22 @@ the run:
    pose. Emitting these as PhaseEvents is exactly the deferral recorded in
    shaft_track_assembly.cpp:1768 — doing it would light up the p5(360)/p6(232)/p8(61)/
    p2(61) blocked-measure rows in COVERAGE.md without any new capture.
-3. **`--pose-dir` injection silently kills the shaft stage.** Every historical stagegate
-   run with injected pose (fidget*, offp*, onp1, final1, refinedark1) has `shaftMs: 0`,
-   no club block, no phases, score 0 — those A/B gates never compared phases at all.
-   Suspected mechanism: injected pose timestamps fall outside the window's timebase, so
-   ShaftTracker's "frames inside pose coverage" early-out fires; not root-caused. Until
-   fixed, corpus runs that need phases must run real pose (~7 s/swing on studio CUDA).
+3. **`--pose-dir` injection silently killed the shaft stage — root-caused and FIXED
+   (2026-08-09).** Every historical stagegate run with injected pose (fidget*, offp*,
+   onp1, final1, refinedark1) has `shaftMs: 0`, no club block, no phases, score 0 —
+   those A/B gates never compared phases at all. Mechanism, proven by A/B on
+   0703/swing_0003 with the same binary: `extract_pose.py` rebased pose t_us into the
+   live-absolute domain (`+ clock.t0_us`), but result.json serializes window-relative
+   (swing_doc.cpp serializeAnalysis contract) and the reconstructed replay window is
+   window-relative too — so ShaftTracker's pose-coverage ∩ window was empty and its
+   "< 2 frames inside pose coverage" early-out fired in 0 ms, warning invisible in
+   runner.log. This is round three of the relative/absolute war (round one: legacy
+   absolute phases, swing_reanalyzer.cpp:570-586; round two: the "+t0" itself).
+   Fixed by copying t_us verbatim: injected-relative reproduces the real-pose run's
+   phase timestamps to the microsecond at poseMs 8. `stagegate/pose2/` holds
+   regenerated files (from the base2 run); `stagegate/pose/` is the broken set, kept
+   as evidence. Repo-side hardening still owed: swinglab_run should refuse loudly
+   when injected pose coverage ∩ window is empty.
 4. **Seven swings write a non-monotone vision ladder** (Top==Finish timestamp, Impact
    ~6.5 ms after Finish, flat 0.5 conf; six of seven in 07-05 Wrist_02). Present
    identically in baseline and candidate — a latent vision-model degeneracy, not a
