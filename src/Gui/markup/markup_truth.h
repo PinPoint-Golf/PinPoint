@@ -50,9 +50,10 @@ namespace pinpoint::markup {
 // The labellable positions, in ladder order — the golf P-system P1..P10. The
 // truth.json key is `<name>_s` (p1_s .. p10_s). score.py maps each to the
 // analyzer Phase enum where one exists: p1→Address(0), p3→MidBackswing(8),
-// p4→Top(2), p6→Delivery(9), p7→Impact(5), p9→FollowThrough(11), p10→Finish(7);
-// p2/p5/p8 are shaft-parallel/arm-parallel instants with no analyzer event
-// (they carry club-angle truth + the parallel cross-check). Legacy truth.json
+// p4→Top(2), p5→ArmParallelDown(13), p6→Delivery(9), p7→Impact(5),
+// p8→ShaftParallelThrough(14), p9→FollowThrough(11), p10→Finish(7); p2 is a
+// shaft-parallel instant with no analyzer event (it carries club-angle truth +
+// the parallel cross-check, as do p5/p8 alongside their events). Legacy truth.json
 // (address/takeaway/top/impact/release/finish) is still read via aliases below.
 inline QStringList eventNames()
 {

@@ -36,12 +36,12 @@ namespace pinpoint::analysis {
 // (swing_analysis.h Phase enum int), and the coaching note shown in the position meta line.
 struct WristCheckpoint {
     PpSwingPosition pos;
-    int             phase;   // Phase enum int (0 Address … 11 Follow-through)
+    int             phase;   // Phase enum int (0 Address … 14 Shaft-parallel-through)
     const char     *note;
 };
 
-// The kNumPos checkpoints in P1..P8 order. (P5 → Downswing and P6 → Delivery are the closest named
-// phases the segmenter emits; a checkpoint whose phase a swing didn't produce simply greys out.)
+// The kNumPos checkpoints in P1..P8 order, each on the phase the segmenter actually emits for that
+// position; a checkpoint whose phase a swing didn't produce simply greys out.
 inline const WristCheckpoint *wristCheckpoints()
 {
     static const WristCheckpoint k[kNumPos] = {
@@ -49,10 +49,10 @@ inline const WristCheckpoint *wristCheckpoints()
         { PpSwingPosition::P2, 1,  "early set" },                 // Takeaway
         { PpSwingPosition::P3, 8,  "set building" },              // Mid-backswing
         { PpSwingPosition::P4, 2,  "face checkpoint" },           // Top
-        { PpSwingPosition::P5, 4,  "lag retention begins" },      // Downswing
+        { PpSwingPosition::P5, 13, "lag retention begins" },      // Arm parallel down
         { PpSwingPosition::P6, 9,  "lag-retention checkpoint" },  // Delivery
         { PpSwingPosition::P7, 5,  "strike checkpoint" },         // Impact
-        { PpSwingPosition::P8, 11, "release complete" },          // Follow-through
+        { PpSwingPosition::P8, 14, "release complete" },          // Shaft parallel through
     };
     return k;
 }

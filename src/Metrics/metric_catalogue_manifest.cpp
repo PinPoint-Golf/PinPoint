@@ -523,7 +523,7 @@ void installMetricManifest(MetricCatalogue &cat)
             "arbitrary instant."),
         .signPositive = QStringLiteral("separation still growing after the top — the stretch"),
         .signNegative = QStringLiteral("separation already unwinding at the top"),
-        .phases = { P::Transition, P::Downswing },
+        .phases = { P::Transition, P::ArmParallelDown },
         .routes = {
             via("trunkImus", RM::Inertial, Direct, { .imuRoles = { R::Pelvis, R::Thorax } },
                 QStringLiteral("the measured separation, less its value at the Top")),
@@ -731,7 +731,7 @@ void installMetricManifest(MetricCatalogue &cat)
         // window: the downswing measure is the peak between P5 and P7 taken from address, so
         // a golfer who moves in going back and holds it scores as early extension without
         // having extended. See pelvis_thrust_backswing.
-        .phases = { P::Top, P::Downswing, P::Impact },
+        .phases = { P::Top, P::ArmParallelDown, P::Impact },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .faceOnCamera = true, .dtlCamera = true },
                 QStringLiteral("toward-and-away-from-the-ball travel lies along the face-on "
@@ -932,7 +932,7 @@ void installMetricManifest(MetricCatalogue &cat)
             "leave the face open. It needs both the face-on club track and the lead-forearm pose."),
         .signPositive = QStringLiteral("more lag retained — a tighter forearm-to-shaft angle"),
         .signNegative = QString(),
-        .phases = { P::Downswing, P::Impact },
+        .phases = { P::ArmParallelDown, P::Impact },
         .routes = {
             via("faceOnClub", RM::Projected, Direct, { .faceOnCamera = true, .clubTrack = true },
                 QStringLiteral("the lead forearm against the shaft, both read in the face-on "
@@ -990,7 +990,7 @@ void installMetricManifest(MetricCatalogue &cat)
             "a hand-path proxy that should be labelled as such. Planned: needs the club track."),
         .signPositive = QStringLiteral("a steeper plane"),
         .signNegative = QStringLiteral("a flatter plane"),
-        .phases = { P::Downswing },
+        .phases = { P::ArmParallelDown },
         .routes = {
             via("dtl", RM::Triangulated, Direct, { .dtlCamera = true, .clubTrack = true },
                 QStringLiteral("an SVD best-fit plane through the head path needs that path in "

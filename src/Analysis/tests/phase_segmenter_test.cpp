@@ -251,17 +251,19 @@ int main()
         CHECK_NEAR("MidBackswing (P3, forearm parallel up)",
                    evT(seg, Phase::MidBackswing),
                    timeWherePhi(-100.0 / 0.95, base.takeaway, base.top, base), 0.025);
-        CHECK_NEAR("Downswing (P5, forearm parallel down)",
-                   evT(seg, Phase::Downswing),
+        CHECK_NEAR("ArmParallelDown (P5, forearm parallel down)",
+                   evT(seg, Phase::ArmParallelDown),
                    timeWherePhi(-100.0 / 0.95, base.top, base.impact, base), 0.025);
         CHECK_NEAR("Delivery proxy (hand parallel down)",
                    evT(seg, Phase::Delivery),
                    timeWherePhi(-100.0, base.top, base.impact, base), 0.025);
         CHECK_TRUE("Delivery proxy conf capped <= 0.4",
                    evConf(seg, Phase::Delivery) <= 0.4f);
-        CHECK_NEAR("Release (P8, forearm parallel through)",
-                   evT(seg, Phase::Release),
+        CHECK_NEAR("ShaftParallelThrough (P8, forearm parallel through)",
+                   evT(seg, Phase::ShaftParallelThrough),
                    timeWherePhi(80.0 / 0.95, base.impact, base.followEnd, base), 0.025);
+        CHECK_TRUE("P8 forearm proxy conf capped <= 0.4",
+                   evConf(seg, Phase::ShaftParallelThrough) <= 0.4f);
 
         // Chain monotone; bounds wrap the swing; overall conf usable.
         for (size_t k = 1; k < seg.events.size(); ++k)
@@ -326,7 +328,7 @@ int main()
         CHECK_NEAR("hand-only Top", evT(handOnly, Phase::Top), base.top, 0.015);
         CHECK_TRUE("hand-only: forearm geometric events omitted",
                    handOnly.eventFor(Phase::MidBackswing) == nullptr
-                   && handOnly.eventFor(Phase::Release) == nullptr);
+                   && handOnly.eventFor(Phase::ShaftParallelThrough) == nullptr);
 
         const Segmentation foreOnly =
             PhaseSegmenter::segment(makeStreams(base, 5000, false, true, false), impactUs);

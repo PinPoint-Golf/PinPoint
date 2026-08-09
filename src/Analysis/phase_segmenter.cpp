@@ -331,7 +331,7 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
     }
 
     // ── 5. Geometric checkpoints — forearm/hand inclination crossings ───────
-    Cand midBack, downswing, release, followThrough, delivery;
+    Cand midBack, armParDown, shaftParThrough, followThrough, delivery;
     if (fore) {
         const std::vector<double> incl =
             ps::lowpassZeroPhase(ps::inclination(*fore), fsHz, cfg.fcEnvelopeHz);
@@ -341,17 +341,21 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
                 midBack = { true, refineCrossingUs(grid, incl, i, 0.0), 0.7f };
                 break;
             }
+        // P5 (ArmParallelDown) IS this crossing — lead arm parallel, downswing.
         for (int i = idxTop; i < idxImpact && i + 1 < int(N); ++i)           // P5: falling
             if (incl[size_t(i)] > 0.0 && incl[size_t(i) + 1] <= 0.0) {
-                downswing = { true, refineCrossingUs(grid, incl, i, 0.0), 0.7f };
+                armParDown = { true, refineCrossingUs(grid, incl, i, 0.0), 0.7f };
                 break;
             }
+        // P8 (ShaftParallelThrough) is defined shaft-parallel: the first rising
+        // crossing is a forearm PROXY, so it carries a capped confidence like
+        // the Delivery (P6) hand proxy. P9 (arm parallel) is exact — 0.65.
         int post = 0;                                                        // P8 / P9: rising
         for (int i = idxImpact; i + 1 < int(N); ++i)
             if (incl[size_t(i)] < 0.0 && incl[size_t(i) + 1] >= 0.0) {
-                const Cand c{ true, refineCrossingUs(grid, incl, i, 0.0), 0.65f };
-                if (++post == 1) release = c;
-                else { followThrough = c; break; }
+                const int64_t tUs = refineCrossingUs(grid, incl, i, 0.0);
+                if (++post == 1) shaftParThrough = { true, tUs, 0.35f };
+                else { followThrough = { true, tUs, 0.65f }; break; }
             }
     }
     if (hand) {
@@ -359,7 +363,7 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
         // labelled by its capped confidence (A.5.5, ≤ 0.4).
         const std::vector<double> incl =
             ps::lowpassZeroPhase(ps::inclination(*hand), fsHz, cfg.fcEnvelopeHz);
-        const int from = downswing.ok ? idxAtOrBelow(grid, downswing.tUs) : idxTop;
+        const int from = armParDown.ok ? idxAtOrBelow(grid, armParDown.tUs) : idxTop;
         for (int i = from; i < idxImpact && i + 1 < int(N); ++i)
             if (incl[size_t(i)] > 0.0 && incl[size_t(i) + 1] <= 0.0) {
                 delivery = { true, refineCrossingUs(grid, incl, i, 0.0), 0.35f };
@@ -409,18 +413,21 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
         if (c.ok)
             out.events.push_back({ ph, c.tUs, c.conf, prov });
     };
-    addEvent(Phase::Address,       address,       refRole);
-    addEvent(Phase::Takeaway,      takeaway,      refRole);
-    addEvent(Phase::MidBackswing,  midBack,       foreRole);
-    addEvent(Phase::Transition,    transition,    SegmentRole::Pelvis);
-    addEvent(Phase::Top,           top,           refRole);
-    addEvent(Phase::Downswing,     downswing,     foreRole);
-    addEvent(Phase::Delivery,      delivery,      SegmentRole::LeadHand);
-    addEvent(Phase::MaxSpeed,      maxSpeed,      refRole);
-    addEvent(Phase::Impact,        { true, clampedImpact, 1.0f }, SegmentRole::Unknown);
-    addEvent(Phase::Release,       release,       foreRole);
-    addEvent(Phase::FollowThrough, followThrough, foreRole);
-    addEvent(Phase::Finish,        finish,        refRole);
+    // P5/P8 go out under the names the diagnostics vocabulary uses —
+    // ArmParallelDown/ShaftParallelThrough, not the v1 Downswing/Release. They
+    // are the same instants, so only one name of each pair is ever emitted.
+    addEvent(Phase::Address,              address,         refRole);
+    addEvent(Phase::Takeaway,             takeaway,        refRole);
+    addEvent(Phase::MidBackswing,         midBack,         foreRole);
+    addEvent(Phase::Transition,           transition,      SegmentRole::Pelvis);
+    addEvent(Phase::Top,                  top,             refRole);
+    addEvent(Phase::ArmParallelDown,      armParDown,      foreRole);
+    addEvent(Phase::Delivery,             delivery,        SegmentRole::LeadHand);
+    addEvent(Phase::MaxSpeed,             maxSpeed,        refRole);
+    addEvent(Phase::Impact,               { true, clampedImpact, 1.0f }, SegmentRole::Unknown);
+    addEvent(Phase::ShaftParallelThrough, shaftParThrough, foreRole);
+    addEvent(Phase::FollowThrough,        followThrough,   foreRole);
+    addEvent(Phase::Finish,               finish,          refRole);
 
     // Monotone chain (A.2.5): a violating event is DROPPED — lower confidence
     // loses, Impact never loses — never reordered.

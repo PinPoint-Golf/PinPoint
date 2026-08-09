@@ -31,10 +31,12 @@ namespace {
 // (short tags) both read, replacing the lists that used to be duplicated in QML.
 const char *const kFullNames[] = {
     "Address", "Takeaway", "Top", "Transition", "Downswing", "Impact",
-    "Release", "Finish", "Mid-backswing", "Delivery", "Max speed", "Follow-through"
+    "Release", "Finish", "Mid-backswing", "Delivery", "Max speed", "Follow-through",
+    "Shaft-parallel back", "Arm-parallel down", "Shaft-parallel through"
 };
 const char *const kShortTags[] = {
-    "ADR", "TKW", "TOP", "TRN", "DWN", "IMP", "REL", "FIN", "MBK", "DLV", "SPD", "FLW"
+    "ADR", "TKW", "TOP", "TRN", "DWN", "IMP", "REL", "FIN", "MBK", "DLV", "SPD", "FLW",
+    "SPB", "APD", "SPT"
 };
 constexpr int kPhaseCount = int(sizeof(kFullNames) / sizeof(kFullNames[0]));
 

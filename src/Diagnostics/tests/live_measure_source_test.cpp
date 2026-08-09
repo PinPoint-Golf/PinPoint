@@ -310,6 +310,14 @@ int main(int argc, char **argv)
         // The metric IS here; the reducer wants P5 and P6, which this swing never segmented. This is
         // the reason that would otherwise be invisible — it looks identical to a missing producer
         // from outside, and it is the one a golfer can act on by re-recording.
+        //
+        // rich_ is a static copied swing.json fixture, so this stays a valid PhaseNotSegmented
+        // pin regardless of segmenter changes upstream. But note: as of the 2026-08-09 segmenter
+        // change, the segmenter DOES now emit P5 (ArmParallelDown) on forearm-bound swings — this
+        // fixture predates that and simply has no P5/P6 ticks recorded. When the fixture is
+        // regenerated from a current segmenter run, re-check whether it still lacks P5/P6 (and
+        // still exercises PhaseNotSegmented) or whether this assertion needs to flip to a
+        // different missing-measure fixture.
         checkMissing(rich_, "m_lagAngleDown", MissingKind::PhaseNotSegmented);
 
         // (c) Nothing that has no producer reports a number. Zero would be a value the golfer's

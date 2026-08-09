@@ -274,9 +274,13 @@ int main(int argc, char **argv)
         checkStr("full 0", t.phaseFullName(0), "Address");
         checkStr("full 5", t.phaseFullName(5), "Impact");
         checkStr("full 11", t.phaseFullName(11), "Follow-through");
-        checkStr("full oob", t.phaseFullName(12), "P12");
+        checkStr("full 12", t.phaseFullName(12), "Shaft-parallel back");
+        checkStr("full 13", t.phaseFullName(13), "Arm-parallel down");
+        checkStr("full 14", t.phaseFullName(14), "Shaft-parallel through");
+        checkStr("full oob", t.phaseFullName(15), "P15");
         checkStr("tag 5", t.phaseShortTag(5), "IMP");
         checkStr("tag 8", t.phaseShortTag(8), "MBK");
+        checkStr("tag 13", t.phaseShortTag(13), "APD");
         checkStr("tag oob", t.phaseShortTag(99), "P99");
     }
 

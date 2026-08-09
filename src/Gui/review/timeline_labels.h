@@ -98,7 +98,8 @@ public:
     Q_INVOKABLE qint64 snap(const QVariantList &phases, qint64 us, qint64 tolUs) const;
 
     // Single source of truth for phase names (indices match Analysis Phase enum:
-    // 0 Address … 7 Finish, 8 MidBackswing, 9 Delivery, 10 MaxSpeed, 11 FollowThrough).
-    Q_INVOKABLE QString phaseFullName(int phase) const;   // "Address" … "Follow-through"
-    Q_INVOKABLE QString phaseShortTag(int phase) const;   // "ADR" … "FLW"
+    // 0 Address … 7 Finish, 8 MidBackswing, 9 Delivery, 10 MaxSpeed, 11 FollowThrough,
+    // 12 ShaftParallelBack, 13 ArmParallelDown, 14 ShaftParallelThrough).
+    Q_INVOKABLE QString phaseFullName(int phase) const;   // "Address" … "Shaft-parallel through"
+    Q_INVOKABLE QString phaseShortTag(int phase) const;   // "ADR" … "SPT"
 };

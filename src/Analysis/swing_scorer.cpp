@@ -112,9 +112,13 @@ double phaseValue(const MetricSeries &m, Phase p)
 
 QString phaseName(Phase p)
 {
-    static const char *kN[] = { "address", "takeaway", "top", "transition",
-                                "downswing", "impact", "release", "finish" };
-    return QString::fromLatin1(kN[int(p)]);
+    static const char *kN[8] = { "address", "takeaway", "top", "transition",
+                                 "downswing", "impact", "release", "finish" };
+    // The Phase enum runs past this v1 table (MidBackswing = 8 upward); a band
+    // authored at one of those must not index off the end.
+    const int i = int(p);
+    if (i < 0 || i >= 8) return QStringLiteral("phase");
+    return QString::fromLatin1(kN[i]);
 }
 
 // Deadband + bounded falloff (design §B.1). |z|<=zIn → 100; ramps to ~0 at zOut; then 1.

@@ -55,6 +55,12 @@ QString phaseLabel(int p)
     case 6: return QStringLiteral("Release");
     case 7: return QStringLiteral("Finish");
     case 8: return QStringLiteral("Mid-BS");
+    case 9: return QStringLiteral("Delivery");
+    case 10: return QStringLiteral("Max Speed");
+    case 11: return QStringLiteral("Follow-Through");
+    case 12: return QStringLiteral("Shaft-Parallel Back");
+    case 13: return QStringLiteral("Arm-Parallel Down");
+    case 14: return QStringLiteral("Shaft-Parallel Through");
     default: return QString::number(p);
     }
 }
@@ -72,6 +78,12 @@ QString phaseAbbrev(const QString &label)
         { QStringLiteral("Release"),    QStringLiteral("REL") },
         { QStringLiteral("Finish"),     QStringLiteral("FIN") },
         { QStringLiteral("Mid-BS"),     QStringLiteral("MBS") },
+        { QStringLiteral("Delivery"),               QStringLiteral("DLV") },
+        { QStringLiteral("Max Speed"),               QStringLiteral("SPD") },
+        { QStringLiteral("Follow-Through"),          QStringLiteral("FLW") },
+        { QStringLiteral("Shaft-Parallel Back"),     QStringLiteral("SPB") },
+        { QStringLiteral("Arm-Parallel Down"),       QStringLiteral("APD") },
+        { QStringLiteral("Shaft-Parallel Through"),  QStringLiteral("SPT") },
     };
     return m.value(label, label.left(3).toUpper());
 }
