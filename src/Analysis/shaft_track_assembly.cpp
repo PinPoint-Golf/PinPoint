@@ -286,6 +286,9 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "shaft.coneHalf", c.coneHalf);
     apply(ov, "shaft.c1Tol", c.c1Tol);
     apply(ov, "shaft.rayEvMin", c.rayEvMin);
+    apply(ov, "shaft.evAbsFloor", c.evAbsFloor);
+    apply(ov, "shaft.evAbsFloorDif", c.evAbsFloorDif);
+    apply(ov, "shaft.raySupportMin", c.raySupportMin);
     apply(ov, "shaft.bandTol", c.bandTol);
     apply(ov, "shaft.armVetoDeg", c.armVetoDeg);
     apply(ov, "shaft.stillSpeed", c.stillSpeed);
@@ -1213,17 +1216,31 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
 
     std::vector<std::vector<float>> emis(nf, std::vector<float>(NS, float(cfg.wE2)));
     std::vector<std::vector<float>> EV(nf, std::vector<float>(NS, 0.f));
+    // Per-θ ridge support (max over the surviving evidence channels), the
+    // companion of EV. ridgeSweep has always returned it and the tracker has
+    // always thrown it away; the RAY tier now asks it whether the DP's winning
+    // direction is a continuous line rather than a percentile artefact.
+    std::vector<std::vector<float>> SUP(nf, std::vector<float>(NS, 0.f));
     std::vector<BandMatch> band(nf);
     std::vector<char> bandOk(nf, 0);
     // Per-frame evidence: each frame writes ONLY its own indexed slots (emis[i],
-    // EV[i], band[i], bandOk[i]) and everything ridgeSweep/frameBandMatch/
-    // frameEmission touches is a per-call local — so the loop is embarrassingly
-    // parallel over frames. The lone serial-loop accumulator (`heavy`) is replaced
-    // by a per-frame processed flag summed afterwards, keeping the count identical
-    // regardless of thread order. sceneMed / gridRad / gridDeg / polys / masks /
-    // phiS / pm are read-only. Runs parallel only when the owned frame cache is
-    // live (frameSrc never touches payloadOf under threads); else serial.
+    // EV[i], SUP[i], band[i], bandOk[i], trace->rawP97[i]/difP97[i]) and everything
+    // ridgeSweep/frameBandMatch/frameEmission touches is a per-call local — so the
+    // loop is embarrassingly parallel over frames. The lone serial-loop accumulator
+    // (`heavy`) is replaced by a per-frame processed flag summed afterwards, keeping
+    // the count identical regardless of thread order. sceneMed / gridRad / gridDeg /
+    // polys / masks / phiS / pm are read-only. Runs parallel only when the owned
+    // frame cache is live (frameSrc never touches payloadOf under threads);
+    // else serial.
     std::vector<char> heavyMark(size_t(nf), 0);
+    // S1 calibration channels: sized here so the parallel body only ever writes
+    // its own index (−1 = channel/frame never ran). supAtDp is filled later, in
+    // the tier loop, where the DP's θ exists.
+    if (trace) {
+        trace->rawP97.assign(size_t(nf), -1.0);
+        trace->difP97.assign(size_t(nf), -1.0);
+        trace->supAtDp.assign(size_t(nf), -1.0);
+    }
     const auto evidenceBody = [&](int i) {
         if (std::isnan(gx[i])) return;
         if (!(spanLo <= i && i <= spanHi)) return;
@@ -1232,15 +1249,35 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         heavyMark[size_t(i)] = 1;
         cv::Mat g32; g8.convertTo(g32, CV_32F);
         const RidgeResult sRaw = ridgeSweep(g32, gx[i], gy[i], gridRad, cfg.ridge, false);
-        std::vector<float> normRaw = normScores(sRaw.score);
+        // Raw (pre-normalisation) p97 of the channel: the ONLY absolute
+        // statement available about whether this frame contains a line at all —
+        // normScores() below rescales any row, noise included, to a full-strength
+        // [0,1] winner. A channel that misses the floor is drowned: zero scores
+        // AND zero support, so it can neither win the DP nor bless a RAY tier.
+        // The other channel still speaks for the frame.
+        const float rawP97 = percentile(sRaw.score, 97.0);
+        if (trace) trace->rawP97[size_t(i)] = double(rawP97);
+        const bool rawDrown = cfg.evAbsFloor > 0.0 && rawP97 < float(cfg.evAbsFloor);
+        std::vector<float> normRaw = rawDrown ? std::vector<float>(NS, 0.f) : normScores(sRaw.score);
+        std::vector<float> supMax  = rawDrown ? std::vector<float>(NS, 0.f) : sRaw.support;
         std::vector<float> evMax = normRaw;
         if (!sceneMed.empty() && sceneMed.size() == g32.size()) {
             cv::Mat diff; cv::absdiff(g32, sceneMed, diff);
             const RidgeResult sDif = ridgeSweep(diff, gx[i], gy[i], gridRad, cfg.ridge, true);
-            const std::vector<float> normDif = normScores(sDif.score);
+            // The dif channel is a different score population (scene-median
+            // residual, brightOnly), so it carries its own floor; < 0 means
+            // "no separate opinion", i.e. share evAbsFloor.
+            const float difP97 = percentile(sDif.score, 97.0);
+            if (trace) trace->difP97[size_t(i)] = double(difP97);
+            const double difFloor = cfg.evAbsFloorDif >= 0.0 ? cfg.evAbsFloorDif : cfg.evAbsFloor;
+            const bool difDrown = difFloor > 0.0 && difP97 < float(difFloor);
+            const std::vector<float> normDif = difDrown ? std::vector<float>(NS, 0.f) : normScores(sDif.score);
             for (int k = 0; k < NS; ++k) evMax[k] = std::max(normRaw[k], normDif[k]);
+            if (!difDrown)
+                for (int k = 0; k < NS; ++k) supMax[k] = std::max(supMax[k], sDif.support[k]);
         }
         EV[i] = evMax;
+        SUP[i] = std::move(supMax);
         BandMatch bm = frameBandMatch(g8, gx[i], gy[i], rmax, bandsMm, cfg.band);
         if (bm.ok && bm.r0 > 0.0f && bm.r0 <= 260.0f) { band[i] = bm; bandOk[i] = 1; }
         std::vector<float> em, inside;
@@ -1353,6 +1390,7 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         const int thi = dp.thstar[i];
         const double thDp = dp.thetaDeg[i];
         const double th = rec.thetaOut[i];
+        if (trace) trace->supAtDp[size_t(i)] = double(SUP[i][thi]);
         int tier = PRED; float conf = 0.30f;
         if (bandOk[i] && std::abs(circWrap(thDp - band[i].thetaDeg)) <= cfg.bandTol) {
             tier = BAND;
@@ -1370,7 +1408,12 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
             bool bandNear = false;
             for (int j = std::max(0, i - cfg.bandNear); j <= std::min(nf - 1, i + cfg.bandNear); ++j) if (bandOk[j]) { bandNear = true; break; }
             const bool verifiable = (pm.phase[i] == SwingPhase::Finish) ? bandNear : (!stat[i] || bandNear);
-            if (evs >= cfg.rayEvMin && evs > 1.15 * evrev && verifiable) { tier = RAY; conf = 0.55f; }
+            // The support gate is absolute, unlike evs: a blur frame can win the
+            // normalised comparison in both directions and still have no
+            // continuous line under the ray. Demoted frames fall to PRED (the
+            // honest label) — BAND is untouched, it has its own witness.
+            if (evs >= cfg.rayEvMin && evs > 1.15 * evrev && verifiable
+                && (cfg.raySupportMin <= 0.0 || SUP[i][thi] >= float(cfg.raySupportMin))) { tier = RAY; conf = 0.55f; }
         }
         if (rec.recon[i] && std::abs(circWrap(th - thDp)) > cfg.reconTol) { tier = RECON; conf = 0.40f; }
         tierOf[size_t(i)] = uint8_t(tier);

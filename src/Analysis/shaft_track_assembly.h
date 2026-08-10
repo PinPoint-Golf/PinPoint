@@ -114,6 +114,21 @@ struct ShaftV3Config {
     double  coneHalf = 150.0;  // C4 wide half-cone about φ (deg)
     double  c1Tol    = 0.45;   // reverse-ridge strength above which C1 bites
     double  rayEvMin = 0.45;   // normalised E2 evidence to call a frame 'ray'
+    // Evidence honesty (S1). normScores() rescales EVERY frame's ridge row into
+    // [0,1] against its own p50/p97, so a blur-flat frame with no line in it
+    // still mints a full-strength "winner" — the percentile normalisation cannot
+    // tell noise from a shaft. evAbsFloor is the absolute, pre-normalisation
+    // statement that a channel saw a line at all: a frame channel whose RAW
+    // ridge p97 misses the floor contributes zero normalised scores AND zero
+    // support for that frame (it can still be carried by the other channel).
+    // <= 0 disables the whole test (dark), collapsing to the pre-S1 expressions.
+    double  evAbsFloor = 0.0;     // raw-p97 floor per channel (score units); <=0 = off
+    double  evAbsFloorDif = -1.0; // dif-channel override; < 0 ⇒ use evAbsFloor
+    // Absolute RidgeResult.support (fraction of supported samples along the ray)
+    // required at the DP's θ before a frame may claim the RAY tier. Independent
+    // of evAbsFloor: the floor asks whether the channel saw anything, this asks
+    // whether the WINNING direction is actually a continuous line. <= 0 = off.
+    double  raySupportMin = 0.0;
     double  bandTol  = 6.0;    // |θ* − θ_band| (deg) to claim the band tier
     double  armVetoDeg = 12.0; // ARM_VETO_DEG: no lock within this of grip→arm
     // static-hold demotion
@@ -475,6 +490,13 @@ struct ShaftDecideTrace {
     int                 snapAppliedN      = -1;
     double              medianSnapOffsetPx = -1;
     double              medianLineConf     = -1;
+    // S1 calibration channels, per frame [0,nf) — the raw (PRE-floor, pre-
+    // normalisation) ridge p97 of each evidence channel and the ridge support at
+    // the DP's chosen θ. These are what evAbsFloor/raySupportMin get set from:
+    // histogram genuine-RAY backswing frames against mid-downswing blur frames
+    // and read the separation off. −1 = the channel/frame did not run. Empty
+    // unless a trace sink is present; diagnostics only, never read back.
+    std::vector<double> rawP97, difP97, supAtDp;
 };
 
 // Map the hands-only phase model to an app Segmentation with real timestamps:

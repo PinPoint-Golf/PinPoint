@@ -781,6 +781,130 @@ int main()
         check(samePos, "synth on/off ⇒ positions[] byte-identical");
     }
 
+    // ── S1 evidence honesty: keys-on demotion (shaft_wedge_p6_impl.md "Session 1
+    //    spec"). Sharp rendered shaft line through the backswing, PURE NOISE
+    //    (no painted line) through mid-downswing — the phantom-evidence shape
+    //    the floor/support gate exists to kill. Default (keys off) is the
+    //    fabricated-evidence baseline; evAbsFloor=20/raySupportMin=0.25 (the
+    //    doc's chosen values) must demote every noise-only downswing frame off
+    //    ShaftMeasured while the genuinely-evidenced backswing stays measured. ─
+    std::printf("=== decideTrack S1 evidence honesty: keys-on demotion ===\n");
+    {
+        const int nf = 170, W = 1000, H = 1000;
+        const double fps = 150.0;
+        std::vector<int64_t> tUs(nf);
+        std::vector<double> gx(nf), gy(nf), phiRaw(nf, 90.0);
+        std::vector<std::vector<cv::Point2d>> joints(nf, std::vector<cv::Point2d>(8));
+        double x = 500, y = 600;
+        for (int f = 0; f < nf; ++f) {
+            tUs[f] = int64_t(std::llround(f * 1e6 / fps));
+            if (f >= 40 && f < 70)       { x -= 4; y -= 9; }   // backswing (speed ≈ 9.8 > swSpd)
+            else if (f >= 77 && f < 109) { x += 3; y += 9; }   // downswing
+            gx[f] = x; gy[f] = y;
+            joints[f] = {{450, 300}, {550, 300}, {460, 600}, {540, 600},
+                         {465, 750}, {535, 750}, {470, 900}, {530, 900}};  // sh/hip/knee/ankle
+        }
+        // Backswing frames [40,70): a sharp bright shaft line through the grip
+        // (contrast 190, well past any credible floor). Downswing frames
+        // [77,109): pure per-frame Gaussian noise, NO painted line — nothing for
+        // an honest evidence engine to see. Everywhere else: flat background
+        // (address/top/finish — not asserted on).
+        const FrameSource render = [&](int f) -> cv::Mat {
+            if (f < 0 || f >= nf) return cv::Mat();
+            cv::Mat img(H, W, CV_8UC1, cv::Scalar(30));
+            if (f >= 40 && f < 70) {
+                const cv::Point g{int(gx[f]), int(gy[f])};
+                cv::line(img, g, cv::Point(g.x, std::min(H - 1, g.y + 300)), cv::Scalar(220), 3);
+            } else if (f >= 77 && f < 109) {
+                cv::RNG rng(uint64(1000 + f));            // deterministic per-frame
+                rng.fill(img, cv::RNG::NORMAL, 30, 5);
+            }
+            return img;
+        };
+
+        ShaftV3Config cfgOff;                        // defaults: evAbsFloor=0, raySupportMin=0 (dark)
+        ShaftV3Config cfgOn = cfgOff;
+        cfgOn.evAbsFloor = 20.0;
+        cfgOn.raySupportMin = 0.25;
+
+        const ShaftTrack2D off = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
+                                             {}, 1120.0, -1, cfgOff, nullptr, nullptr);
+        const ShaftTrack2D on  = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
+                                             {}, 1120.0, -1, cfgOn,  nullptr, nullptr);
+        const bool sizeOk = off.samples.size() == size_t(nf) && on.samples.size() == size_t(nf);
+        check(sizeOk, "full per-frame sample coverage (no NaN grip) both runs");
+
+        int measDownOff = 0, measDownOn = 0, measBackOn = 0, measTotalOff = 0, measTotalOn = 0;
+        for (int f = 0; sizeOk && f < nf; ++f) {
+            const bool measOff = (off.samples[size_t(f)].flags & ShaftMeasured) != 0;
+            const bool measOn  = (on.samples[size_t(f)].flags  & ShaftMeasured) != 0;
+            if (measOff) ++measTotalOff;
+            if (measOn)  ++measTotalOn;
+            if (f >= 77 && f < 109) {
+                if (measOff) ++measDownOff;
+                if (measOn)  ++measDownOn;
+            }
+            if (f >= 40 && f < 70 && measOn) ++measBackOn;
+        }
+        std::printf("  (measured: off-total=%d on-total=%d off-downswing=%d on-downswing=%d on-backswing=%d)\n",
+                    measTotalOff, measTotalOn, measDownOff, measDownOn, measBackOn);
+        check(measDownOn == 0, "keys on: no mid-downswing (noise-only) frame carries ShaftMeasured");
+        check(measBackOn > 0, "keys on: at least one backswing frame stays ShaftMeasured");
+        check(measTotalOn < measTotalOff, "keys on strictly drops the Measured-frame count vs default");
+    }
+
+    // ── S1 evidence honesty: keys-off byte-identity ──────────────────────────
+    // evAbsFloor<=0 / raySupportMin<=0 must collapse to the pre-S1 expressions
+    // exactly — an explicit dark config must match the implicit default,
+    // field-by-field, on every emitted sample.
+    std::printf("=== decideTrack S1 evidence honesty: keys-off byte-identity ===\n");
+    {
+        const int nf = 60, W = 1000, H = 1000;
+        const double fps = 100.0;
+        std::vector<int64_t> tUs(nf);
+        std::vector<double> gx(nf), gy(nf), phiRaw(nf, 90.0);
+        std::vector<std::vector<cv::Point2d>> joints(nf, std::vector<cv::Point2d>(8));
+        double x = 500, y = 600;
+        for (int f = 0; f < nf; ++f) {
+            tUs[f] = int64_t(f) * 10000;
+            if (f >= 40 && f < 53)      { x -= 4; y -= 9; }   // backswing
+            else if (f >= 53 && f < 60) { x += 4; y += 9; }   // downswing
+            gx[f] = x; gy[f] = y;
+            joints[f] = {{450, 300}, {550, 300}, {460, 600}, {540, 600},
+                         {465, 750}, {535, 750}, {470, 900}, {530, 900}};
+        }
+        const FrameSource render = [&](int f) -> cv::Mat {
+            if (f < 0 || f >= nf) return cv::Mat();
+            cv::Mat img(H, W, CV_8UC1, cv::Scalar(30));
+            const cv::Point g{int(gx[f]), int(gy[f])};
+            cv::line(img, g, cv::Point(g.x, std::min(H - 1, g.y + 150)), cv::Scalar(220), 3);
+            return img;
+        };
+
+        const ShaftV3Config cfgDefault;               // implicit defaults (keys dark)
+        ShaftV3Config cfgExplicitOff = cfgDefault;
+        cfgExplicitOff.evAbsFloor    = 0.0;
+        cfgExplicitOff.evAbsFloorDif = -1.0;
+        cfgExplicitOff.raySupportMin = 0.0;
+
+        const ShaftTrack2D a = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
+                                           {}, 1120.0, -1, cfgDefault,     nullptr, nullptr);
+        const ShaftTrack2D b = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
+                                           {}, 1120.0, -1, cfgExplicitOff, nullptr, nullptr);
+
+        bool sameCount = a.samples.size() == b.samples.size() && !a.samples.empty();
+        bool identical = sameCount;
+        for (size_t i = 0; sameCount && i < a.samples.size(); ++i) {
+            const ShaftSample2D &sa = a.samples[i], &sb = b.samples[i];
+            if (sa.t_us != sb.t_us || sa.gripPx != sb.gripPx || sa.thetaRad != sb.thetaRad
+                || sa.conf != sb.conf || sa.flags != sb.flags) identical = false;
+        }
+        check(sameCount, "same sample count keys off vs default");
+        check(identical, "samples[] field-by-field identical (t_us/gripPx/thetaRad/conf/flags)");
+        check(a.coverage == b.coverage, "coverage identical");
+        check(a.valid == b.valid, "track.valid identical");
+    }
+
     std::printf("\n%s (%d failures)\n", g_fail ? "FAIL" : "PASS", g_fail);
     return g_fail;
 }

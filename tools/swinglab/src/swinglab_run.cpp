@@ -509,6 +509,15 @@ int main(int argc, char **argv)
                 line.insert("head_r", trace.headR[size_t(f)]);
             if (f < int(trace.headZ.size()) && std::isfinite(trace.headZ[size_t(f)]))
                 line.insert("head_z", trace.headZ[size_t(f)]);
+            // S1 evidence-honesty calibration columns (raw pre-normalisation
+            // p97 per channel + absolute ridge support at the DP θ); −1 =
+            // channel/frame never ran, omitted like the head columns.
+            if (f < int(trace.rawP97.size()) && trace.rawP97[size_t(f)] >= 0.0)
+                line.insert("raw_p97", trace.rawP97[size_t(f)]);
+            if (f < int(trace.difP97.size()) && trace.difP97[size_t(f)] >= 0.0)
+                line.insert("dif_p97", trace.difP97[size_t(f)]);
+            if (f < int(trace.supAtDp.size()) && trace.supAtDp[size_t(f)] >= 0.0)
+                line.insert("sup_dp", trace.supAtDp[size_t(f)]);
             tf.write(QJsonDocument(line).toJson(QJsonDocument::Compact) + "\n");
         }
         QJsonObject summary{

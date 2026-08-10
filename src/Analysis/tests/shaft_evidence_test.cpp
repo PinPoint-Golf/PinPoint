@@ -44,6 +44,16 @@ static int argmaxIdx(const std::vector<float> &v)
 
 static double wrapDeg(double a) { a = std::fmod(a + 180.0, 360.0); if (a < 0) a += 360.0; return a - 180.0; }
 
+// np.percentile with linear interpolation — mirrors the private helper in
+// shaft_track_assembly.cpp (evAbsFloor is calibrated against exactly this).
+static float percentile(std::vector<float> v, double p)
+{
+    std::sort(v.begin(), v.end());
+    const double idx = p / 100.0 * (v.size() - 1);
+    const int lo = int(std::floor(idx)), hi = int(std::ceil(idx));
+    return float(v[lo] + (v[hi] - v[lo]) * (idx - lo));
+}
+
 int main()
 {
     const auto TR = thetaGrid();
@@ -113,6 +123,55 @@ int main()
         check(bm.ok, "locks on the 4-band pattern");
         check(bm.n >= 4, "n ≥ 4 matched");
         if (bm.ok) check(std::abs(wrapDeg(bm.thetaDeg - 30.0)) < 4.0, "θ within 4° of 30°");
+    }
+
+    // ── S1 evidence honesty: raw-unit pins (shaft_wedge_p6_impl.md "Session 1
+    //    spec"). These calibrate the UNITS evAbsFloor/raySupportMin are read in —
+    //    raw (pre-normalisation) ridgeSweep score/support, not normScores()'s
+    //    [0,1] rescale. ═══════════════════════════════════════════════════════
+    std::printf("=== S1 evidence honesty: raw-unit pins ===\n");
+    {
+        // 1) Noise-only frame: no line anywhere ⇒ raw p97 stays near the noise
+        // floor, well under any credible evAbsFloor setting (doc sweep grid
+        // starts at 10).
+        const int W = 512, H = 512;
+        cv::Mat noise8u(H, W, CV_8UC1);
+        cv::RNG rng(12345);                       // deterministic seed
+        rng.fill(noise8u, cv::RNG::NORMAL, 128, 5);
+        cv::Mat g32; noise8u.convertTo(g32, CV_32F);
+        const double gx = W / 2.0, gy = H / 2.0;   // grip at centre
+        const RidgeResult r = ridgeSweep(g32, gx, gy, TR, RidgeConfig{}, /*brightOnly=*/false);
+        check(percentile(r.score, 97.0) < 10.f, "noise-only raw p97 < 10 (evAbsFloor units)");
+    }
+    {
+        // 2) Painted 3px bright line, contrast +60, length 200px at θ=40°: a
+        // frame that genuinely contains a shaft must clear a generous floor with
+        // support to match — the RAY tier's SUP[i][θdp] ≥ raySupportMin gate.
+        const int W = 512, H = 512;
+        cv::Mat g8(H, W, CV_8UC1, cv::Scalar(128));
+        const double gx = 200, gy = 200, thTrue = 40.0 * kPi / 180.0;
+        const cv::Point p0{int(gx), int(gy)};
+        const cv::Point p1{int(gx + 200 * std::cos(thTrue)), int(gy + 200 * std::sin(thTrue))};
+        cv::line(g8, p0, p1, cv::Scalar(128 + 60), 3, cv::LINE_8);
+        cv::Mat g32; g8.convertTo(g32, CV_32F);
+        const RidgeResult r = ridgeSweep(g32, gx, gy, TR, RidgeConfig{}, /*brightOnly=*/false);
+        check(r.score[40] > 60.f, "painted +60 line: raw score at 40° > 60");
+        check(r.support[40] > 0.5f, "painted +60 line: support at 40° > 0.5");
+    }
+    {
+        // 3) Weak line, contrast +25, same geometry: genuinely-dim evidence (an
+        // address/backswing frame lit poorly, not blur) must still clear the
+        // chosen default floor (20, per the doc sweep grid's low end) — the S1
+        // floor must not punish real-but-faint shafts.
+        const int W = 512, H = 512;
+        cv::Mat g8(H, W, CV_8UC1, cv::Scalar(128));
+        const double gx = 200, gy = 200, thTrue = 40.0 * kPi / 180.0;
+        const cv::Point p0{int(gx), int(gy)};
+        const cv::Point p1{int(gx + 200 * std::cos(thTrue)), int(gy + 200 * std::sin(thTrue))};
+        cv::line(g8, p0, p1, cv::Scalar(128 + 25), 3, cv::LINE_8);
+        cv::Mat g32; g8.convertTo(g32, CV_32F);
+        const RidgeResult r = ridgeSweep(g32, gx, gy, TR, RidgeConfig{}, /*brightOnly=*/false);
+        check(r.score[40] >= 20.f, "weak +25 line: raw score at 40° clears the floor-20 default");
     }
 
     std::printf("\n%s (%d failures)\n", g_fail ? "FAIL" : "PASS", g_fail);
