@@ -25,11 +25,14 @@ static void check(bool c, const char *label)
     if (!c) ++g_fail;
 }
 
-// Timebase: 200 Hz (dt = 5000 µs), 101 frames. Window landmarks: top 40,
-// finish 90. Grip fixed at (100,100), ball at (200,200) ⇒ θ_ball = +45° at
-// every frame, so e(f) = θ(f) − 45 and crossings are hand-placeable on θ.
+// Timebase: 200 Hz (dt = 5000 µs), 101 frames. Search window [41, 90] (the
+// caller passes it explicitly — anchor±windowUs in production, top+1..fin0 on
+// the anchor-absent path). Grip fixed at (100,100), ball at (200,200) ⇒
+// θ_ball = +45° at every frame, so e(f) = θ(f) − 45 and crossings are
+// hand-placeable on θ.
 static constexpr int     kNf   = 101;
 static constexpr int     kTopF = 40, kFinF = 90;
+static constexpr int     kSrchLo = kTopF + 1;
 static constexpr int64_t kDt   = 5000;
 static constexpr double  kBx = 200.0, kBy = 200.0;
 
@@ -62,14 +65,14 @@ int main()
     {
         std::printf("(1) basic crossing\n");
         const ImpactGeomResult r = locateImpactGeom(t, ramp(60.0, 2.0), gx, gy,
-                                                    kBx, kBy, kTopF, kFinF, cfg);
+                                                    kBx, kBy, kSrchLo, kFinF, cfg);
         check(r.found, "found");
         check(std::llabs(r.tUs - 60 * kDt) <= kDt / 2, "sub-frame instant within half a frame of f60");
         check(r.frame == 60, "at-or-before frame is f60");
 
         // Mid-frame crossing: zero of e sits at f=60.5 exactly.
         const ImpactGeomResult h = locateImpactGeom(t, ramp(60.5, 2.0), gx, gy,
-                                                    kBx, kBy, kTopF, kFinF, cfg);
+                                                    kBx, kBy, kSrchLo, kFinF, cfg);
         check(h.found && std::llabs(h.tUs - int64_t(60.5 * kDt)) <= 500,
               "half-frame crossing interpolates to f60.5");
         check(h.frame == 60, "half-frame crossing's at-or-before frame is f60");
@@ -86,7 +89,7 @@ int main()
             const double tb = std::atan2(kBy - 100.0, kBx - mgx[f]) * 180.0 / 3.14159265358979323846;
             th[f] = tb + 2.0 * (double(f) - 60.0);
         }
-        const ImpactGeomResult r = locateImpactGeom(t, th, mgx, gy, kBx, kBy, kTopF, kFinF, cfg);
+        const ImpactGeomResult r = locateImpactGeom(t, th, mgx, gy, kBx, kBy, kSrchLo, kFinF, cfg);
         check(r.found, "found with a moving grip");
         check(std::llabs(r.tUs - 60 * kDt) <= kDt / 2, "instant still lands at f60");
     }
@@ -97,7 +100,7 @@ int main()
         std::vector<double> th(kNf);
         for (int f = 0; f < kNf; ++f)
             th[f] = 45.0 + 5.0 * std::sin(0.7 * f);   // |e| ≤ 5 < hystDeg 8
-        const ImpactGeomResult r = locateImpactGeom(t, th, gx, gy, kBx, kBy, kTopF, kFinF, cfg);
+        const ImpactGeomResult r = locateImpactGeom(t, th, gx, gy, kBx, kBy, kSrchLo, kFinF, cfg);
         check(!r.found, "sub-hysteresis wiggle is not a crossing");
     }
 
@@ -108,7 +111,7 @@ int main()
         // e runs −125 → +35 THROUGH the seam (−180 ≡ +180), never through 0.
         std::vector<double> th(kNf);
         for (int f = 0; f < kNf; ++f) th[f] = -80.0 - 200.0 * (double(f) - 41.0) / 49.0;
-        const ImpactGeomResult r = locateImpactGeom(t, th, gx, gy, kBx, kBy, kTopF, kFinF, cfg);
+        const ImpactGeomResult r = locateImpactGeom(t, th, gx, gy, kBx, kBy, kSrchLo, kFinF, cfg);
         check(!r.found, "a transit through theta_ball+180 (the seam) does not fire");
 
         // Genuine crossing on a profile that ALSO passes the seam first:
@@ -118,14 +121,14 @@ int main()
             if (f <= 65) th2[f] = 80.0 + 200.0 * (double(f) - 41.0) / 24.0;   // e +35 → +∼235 (wraps)
             else         th2[f] = 45.0 - 4.0 * (80.0 - double(f));            // e ramps −60 → 0 @80 → +40
         }
-        const ImpactGeomResult r2 = locateImpactGeom(t, th2, gx, gy, kBx, kBy, kTopF, kFinF, cfg);
+        const ImpactGeomResult r2 = locateImpactGeom(t, th2, gx, gy, kBx, kBy, kSrchLo, kFinF, cfg);
         check(r2.found && std::llabs(r2.tUs - 80 * kDt) <= kDt,
               "the genuine 0-transit after a seam pass is found at f80");
 
         // Representation independence: the long-path DP ending −270 ≡ +90.
         std::vector<double> th3 = ramp(60.0, 2.0);
         for (double &v : th3) v -= 360.0;
-        const ImpactGeomResult r3 = locateImpactGeom(t, th3, gx, gy, kBx, kBy, kTopF, kFinF, cfg);
+        const ImpactGeomResult r3 = locateImpactGeom(t, th3, gx, gy, kBx, kBy, kSrchLo, kFinF, cfg);
         check(r3.found && std::llabs(r3.tUs - 60 * kDt) <= kDt / 2,
               "theta − 360 gives the identical crossing");
     }
@@ -134,10 +137,10 @@ int main()
     {
         std::printf("(5) gate window\n");
         const ImpactGeomResult r = locateImpactGeom(t, ramp(30.0, 2.0), gx, gy,
-                                                    kBx, kBy, kTopF, kFinF, cfg);
+                                                    kBx, kBy, kSrchLo, kFinF, cfg);
         check(!r.found, "a crossing before top is outside the window");
         const ImpactGeomResult r2 = locateImpactGeom(t, ramp(96.0, 2.0), gx, gy,
-                                                     kBx, kBy, kTopF, kFinF, cfg);
+                                                     kBx, kBy, kSrchLo, kFinF, cfg);
         check(!r2.found, "a crossing after finish is outside the window");
     }
 
@@ -146,7 +149,7 @@ int main()
         std::printf("(6) NaN gap\n");
         std::vector<double> th = ramp(60.0, 2.0);
         for (int f = 55; f <= 65; ++f) th[f] = std::numeric_limits<double>::quiet_NaN();
-        const ImpactGeomResult r = locateImpactGeom(t, th, gx, gy, kBx, kBy, kTopF, kFinF, cfg);
+        const ImpactGeomResult r = locateImpactGeom(t, th, gx, gy, kBx, kBy, kSrchLo, kFinF, cfg);
         check(r.found, "found across an 11-frame NaN gap");
         check(std::llabs(r.tUs - 60 * kDt) <= kDt,
               "instant interpolates inside the gap, not at its far edge");
@@ -159,34 +162,35 @@ int main()
         geo.found = true; geo.tUs = 60 * kDt; geo.frame = 60;
 
         // Corroborating anchor (f62 = 10 ms away), retime off: kept verbatim.
-        ImpactDecision d = decideImpactFrame(true, 62, geo, t, kTopF, cfg);
+        ImpactDecision d = decideImpactFrame(true, 62, geo, t, cfg);
         check(d.applied == kImpactGeomKept && d.frame == 62 && d.tUs == 62 * kDt,
               "corroborated anchor kept (retime off)");
 
         // Retime on: frame (the window bound) stays, the instant moves.
         ImpactGeomConfig rcfg = cfg; rcfg.retime = true;
-        d = decideImpactFrame(true, 62, geo, t, kTopF, rcfg);
+        d = decideImpactFrame(true, 62, geo, t, rcfg);
         check(d.applied == kImpactGeomRetimed && d.frame == 62 && d.tUs == geo.tUs,
               "corroborated anchor retimed sub-frame, frame kept");
 
         // Implausible anchor (f85 = 125 ms away > overrideUs 100 ms): overridden.
-        d = decideImpactFrame(true, 85, geo, t, kTopF, cfg);
+        d = decideImpactFrame(true, 85, geo, t, cfg);
         check(d.applied == kImpactGeomOverride && d.frame == 60 && d.tUs == geo.tUs,
               "implausible anchor overridden with the geometry");
 
         // No anchor: adopted.
-        d = decideImpactFrame(false, -1, geo, t, kTopF, cfg);
+        d = decideImpactFrame(false, -1, geo, t, cfg);
         check(d.applied == kImpactGeomAdopted && d.frame == 60 && d.tUs == geo.tUs,
               "absent anchor adopts the geometry");
 
-        // No geometry: anchor stands, even an implausible-looking one.
-        d = decideImpactFrame(true, 85, ImpactGeomResult{}, t, kTopF, cfg);
+        // No geometry: anchor stands, even an implausible-looking one — and
+        // NO top-derived clamp is re-imposed (that clamp IS the failure the
+        // module catches; the caller owns window sanity).
+        d = decideImpactFrame(true, 85, ImpactGeomResult{}, t, cfg);
         check(d.applied == kImpactGeomKept && d.frame == 85, "no geometry ⇒ abstain, anchor kept");
 
-        // Clamp: a geometry frame at/below top clamps to top+1.
-        ImpactGeomResult early; early.found = true; early.tUs = kTopF * kDt; early.frame = kTopF;
-        d = decideImpactFrame(false, -1, early, t, kTopF, cfg);
-        check(d.frame == kTopF + 1, "adopted frame clamps to top+1");
+        // Bounds clamp only: an out-of-range anchor frame clamps to [0, n−1].
+        d = decideImpactFrame(true, kNf + 10, ImpactGeomResult{}, t, cfg);
+        check(d.frame == kNf - 1, "out-of-range anchor clamps to the last frame");
     }
 
     // ── (8) default pins (flip commit updates these) ─────────────────────────
@@ -195,7 +199,8 @@ int main()
         const ImpactGeomConfig def;
         check(def.enabled == false, "enabled defaults false (dark at merge)");
         check(def.retime == false, "retime defaults false (dark at merge)");
-        check(def.hystDeg == 8.0 && def.maxStepDeg == 120.0 && def.overrideUs == 100000,
+        check(def.hystDeg == 8.0 && def.maxStepDeg == 120.0 && def.overrideUs == 100000
+                  && def.windowUs == 600000,
               "tuning defaults pinned");
     }
 

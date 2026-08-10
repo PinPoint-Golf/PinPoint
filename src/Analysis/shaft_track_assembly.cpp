@@ -359,6 +359,7 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "shaft.impactGeom.hystDeg", c.impactGeom.hystDeg);
     apply(ov, "shaft.impactGeom.maxStepDeg", c.impactGeom.maxStepDeg);
     apply(ov, "shaft.impactGeom.overrideUs", c.impactGeom.overrideUs);
+    apply(ov, "shaft.impactGeom.windowUs", c.impactGeom.windowUs);
     // Layer A line re-registration («snap»): "shaft.snap.*" keys.
     apply(ov, "shaft.snap.enabled", c.snap.enabled);
     apply(ov, "shaft.snap.maxOffsetPx", c.snap.maxOffsetPx);
@@ -1976,26 +1977,43 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
     // The reconciled θ(t) crossing the grip→ball direction of the FIXED A1
     // address-ball cluster (the ball is stationary until launch, so this works
     // even when the detector never finds the ball near impact — 0703_0005).
-    // Arbitrates the anchor's frame MAPPING (a coverage gap around impact lands
-    // nearest-frame 234–362 ms late on 3 truth swings, poisoning the P6 window)
-    // and, under impactGeom.retime, the anchor's own 13–22 ms trigger bias.
-    // Gated on the address ball resolving — data, never sessionType. v1
-    // deliberately leaves the segmentPhases-internal consumers (A3 onset clamp,
-    // run candidacy, wedge swingProgress, blur band) on the original anchor —
+    // Arbitrates the anchor's clamped frame MAPPING — on the phase-model-
+    // collapse swings segmentPhases' clamp(impact, top+1, ·) drags impact
+    // +234..+362 ms past a ~250 ms-late top landmark while the RAW anchor is
+    // fine — and, under impactGeom.retime, the anchor's own uniform 13–22 ms
+    // trigger bias (measured ±15 ms geometric precision: it de-biases but
+    // scatters; kept dark unless the corpus says otherwise). The search
+    // window is anchor-centred (±windowUs) when an anchor exists BECAUSE
+    // pm.top/pm.fin0 are corrupt on exactly the swings needing rescue; the
+    // (top, fin0] window is the anchor-absent fallback only. Gated on the
+    // address ball resolving — data, never sessionType. v1 deliberately
+    // leaves the segmentPhases-internal consumers (A3 onset clamp, run
+    // candidacy, wedge swingProgress, blur band) on the original anchor —
     // they ran before this point; only the P5/P6/P8 windows and the P7/Impact
     // emissions below follow the decision.
     int     impactRefFrame = pm.impact;
     int64_t impactRefTUs   = tUs[size_t(pm.impact)];
     int     impactApplied  = kImpactGeomKept;
     if (cfg.impactGeom.enabled && haveAddrBall) {
+        int lo = pm.top + 1, hi = pm.fin0;
+        if (impactFrame >= 0) {
+            const int64_t tA = tUs[size_t(std::clamp(impactFrame, 0, nf - 1))];
+            lo = 0;  while (lo < nf - 1 && tUs[size_t(lo)] < tA - cfg.impactGeom.windowUs) ++lo;
+            hi = nf - 1; while (hi > 0 && tUs[size_t(hi)] > tA + cfg.impactGeom.windowUs) --hi;
+        }
         const ImpactGeomResult ig = locateImpactGeom(tUs, rec.thetaOut, gx, gy,
                                                      addrBallPx.x(), addrBallPx.y(),
-                                                     pm.top, pm.fin0, cfg.impactGeom);
-        const ImpactDecision id = decideImpactFrame(impactFrame >= 0, pm.impact, ig, tUs,
-                                                    pm.top, cfg.impactGeom);
-        impactRefFrame = id.frame;
-        impactRefTUs   = id.tUs;
-        impactApplied  = id.applied;
+                                                     lo, hi, cfg.impactGeom);
+        const ImpactDecision id = decideImpactFrame(impactFrame >= 0,
+                                                    impactFrame >= 0 ? impactFrame : pm.impact,
+                                                    ig, tUs, cfg.impactGeom);
+        // Abstain/kept must change NOTHING (the raw anchor frame the decision
+        // echoes back can differ from pm.impact on the collapse swings).
+        if (id.applied != kImpactGeomKept) {
+            impactRefFrame = id.frame;
+            impactRefTUs   = id.tUs;
+        }
+        impactApplied = id.applied;
         if (trace) {
             trace->impactGeomTUs     = ig.found ? ig.tUs : -1;
             trace->impactGeomFrame   = ig.frame;
@@ -2105,8 +2123,16 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                                                 clubQuietPtr, pm.onsetFloor);
         addressEventFrame = p1Frame;
 
+        // The corrected impact frame feeds the P6/P8 windows only while it
+        // respects locatePTimes' top < impact ordering; on the phase-model-
+        // collapse swings (top itself ~250 ms late) the corrected frame sits
+        // BEFORE the bogus top, the window is unsatisfiable either way, and
+        // positions keep the legacy bound — only the Impact EVENT is fixed
+        // there (below). The collapse repair is the successor lead, not this
+        // module's.
+        const int impLocate = impactRefFrame > pm.top ? impactRefFrame : pm.impact;
         std::vector<PTime> pts =
-            locatePTimes(tUs, rec.thetaOut, phiS, p1Frame, pm.top, impactRefFrame, pm.fin0, cfg.positions);
+            locatePTimes(tUs, rec.thetaOut, phiS, p1Frame, pm.top, impLocate, pm.fin0, cfg.positions);
         // The geometry decided the P7 instant sub-frame (override: the frame-
         // quantized at-or-before time can sit a whole coverage gap early;
         // retime: the corroborated anchor's trigger bias). Keep locatePTimes'
@@ -2323,28 +2349,28 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                 }
         }
         // Vision-only phase landmarks: real swing ⇒ vision-grade conf, else 0.
-        // The Impact event follows the impact-geometry decision: pmSeg carries
-        // the decided frame (== pm.impact when dark/abstained, so the dark
-        // path is value- and byte-identical), and a decided instant then
-        // retimes the event sub-frame, guarded to stay strictly inside its
-        // (Top, Finish) neighbours (the 7 known non-monotone vision ladders
-        // abstain here rather than worsen).
+        // A decided impact instant then retimes the Impact EVENT directly (the
+        // one consumer score/coverage/ladder read): sanity-bounded after the
+        // Address event, then the ladder is stable re-sorted so the persisted
+        // events stay time-ordered (seg.monotone, QML consumers). On the
+        // phase-model-collapse ladders the corrected Impact legitimately lands
+        // BEFORE the bogus Top/Finish — those anchors were already wrong and
+        // already fail tempo/truth checks; the impact instant at least is now
+        // true. Dark/abstain skips both edits — byte-identical.
         const bool swingDetected = std::any_of(pm.phase.begin(), pm.phase.end(),
                                                [](SwingPhase p) { return p != SwingPhase::Addr; });
-        PhaseModel pmSeg = pm;
-        pmSeg.impact = impactRefFrame;
-        trace->segmentation = phasesToSegmentation(pmSeg, tUs, swingDetected ? 0.5f : 0.0f,
+        trace->segmentation = phasesToSegmentation(pm, tUs, swingDetected ? 0.5f : 0.0f,
                                                    addressEventFrame, cfg.emitTakeaway);
         if (impactApplied != kImpactGeomKept) {
             Segmentation& seg = trace->segmentation;
-            const PhaseEvent* top = seg.eventFor(Phase::Top);
-            const PhaseEvent* fin = seg.eventFor(Phase::Finish);
+            const PhaseEvent* addr = seg.eventFor(Phase::Address);
             for (PhaseEvent& e : seg.events)
                 if (e.phase == Phase::Impact) {
-                    if ((!top || top->t_us < impactRefTUs) && (!fin || impactRefTUs < fin->t_us))
-                        e.t_us = impactRefTUs;
+                    if (!addr || addr->t_us < impactRefTUs) e.t_us = impactRefTUs;
                     break;
                 }
+            std::stable_sort(seg.events.begin(), seg.events.end(),
+                             [](const PhaseEvent& a, const PhaseEvent& b) { return a.t_us < b.t_us; });
         }
     }
     return out;

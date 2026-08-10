@@ -931,11 +931,12 @@ int main()
         ov.insert("shaft.impactGeom.hystDeg", 6.0);
         ov.insert("shaft.impactGeom.maxStepDeg", 90.0);
         ov.insert("shaft.impactGeom.overrideUs", 50000);
+        ov.insert("shaft.impactGeom.windowUs", 400000);
         const ShaftV3Config on = ShaftV3Config::fromOverrides(ov);
         check(on.impactGeom.enabled && on.impactGeom.retime, "enabled/retime keys applied");
         check(on.impactGeom.hystDeg == 6.0 && on.impactGeom.maxStepDeg == 90.0
-                  && on.impactGeom.overrideUs == 50000,
-              "hystDeg/maxStepDeg/overrideUs keys applied");
+                  && on.impactGeom.overrideUs == 50000 && on.impactGeom.windowUs == 400000,
+              "hystDeg/maxStepDeg/overrideUs/windowUs keys applied");
     }
 
     // ── S2 blur-wedge: the long-path fixture (shaft_wedge_p6_impl.md "Session 2

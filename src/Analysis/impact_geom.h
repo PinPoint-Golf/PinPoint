@@ -62,6 +62,8 @@ struct ImpactGeomConfig {
     double  hystDeg    = 8.0;      // hysteresis deadband each side of theta_ball (mirrors positions.hysteresisDeg)
     double  maxStepDeg = 120.0;    // adjacent-valid |d(theta-theta_ball)| beyond this = the ±180 seam passing, not a transit
     int64_t overrideUs = 100000;   // |t_geo - t_anchor| beyond this => anchor implausible => override
+    int64_t windowUs   = 600000;   // anchor-centred search half-window; generous vs the observed
+                                   // +362 ms worst clamp corruption, short of the address hold
 };
 
 struct ImpactGeomResult {
@@ -82,7 +84,10 @@ inline double wrap180(double d)
 } // namespace impact_geom_detail
 
 // FIRST hysteresis-confirmed crossing of theta(t) through theta_ball(t) over
-// (topFrame, finFrame]. theta_ball(f) = atan2(ballY - gy[f], ballX - gx[f]) -
+// the inclusive frame window [searchLo, searchHi] (caller-computed: anchor
+// ± windowUs when an anchor exists - the phase model's own top/fin0 collapse
+// on exactly the swings whose impact needs rescuing, so the window must NOT
+// lean on them there). theta_ball(f) = atan2(ballY - gy[f], ballX - gx[f]) -
 // the FIXED pre-swing ball against the MOVING per-frame grip (the ball is
 // stationary until launch, so this works even when the detector never finds
 // the ball near impact). e(f) = wrap180(theta[f] - theta_ball[f]) makes the
@@ -104,7 +109,7 @@ inline ImpactGeomResult locateImpactGeom(const std::vector<int64_t>& tUs,
                                          const std::vector<double>& gx,
                                          const std::vector<double>& gy,
                                          double ballXPx, double ballYPx,
-                                         int topFrame, int finFrame,
+                                         int searchLo, int searchHi,
                                          const ImpactGeomConfig& cfg)
 {
     using impact_geom_detail::wrap180;
@@ -114,8 +119,8 @@ inline ImpactGeomResult locateImpactGeom(const std::vector<int64_t>& tUs,
     const int n = int(thetaDeg.size());
     if (n == 0 || tUs.size() != size_t(n) || gx.size() != size_t(n) || gy.size() != size_t(n))
         return out;
-    const int i0 = std::max(0, topFrame + 1);
-    const int i1 = std::min(n - 1, finFrame);
+    const int i0 = std::max(0, searchLo);
+    const int i1 = std::min(n - 1, searchHi);
     if (i1 <= i0) return out;
 
     // Valid frames + the at-ball error series e(f).
@@ -201,32 +206,37 @@ struct ImpactDecision {
     int     applied = kImpactGeomKept;
 };
 
-// Pure decision over anchor vs geometry. The anchor time is tUs[anchorFrame] -
-// the frame the mapping actually produced, which is exactly what a coverage
-// gap corrupts, so comparing t_geo against IT (not the raw job.impactUs)
-// catches the mapping failure as well as a bad trigger. Policy:
+// Pure decision over anchor vs geometry. anchorFrame is the RAW nearest-
+// coverage-frame mapping of job.impactUs (shaft_tracker.cpp), NOT the phase
+// model's pm.impact: segmentPhases clamps its impact to top+1, and on the
+// phase-model-collapse swings (top landmark ~250 ms late, top==fin0) that
+// clamp is precisely the corruption - measured +234..+362 ms on 3 truth
+// swings while their raw anchor sat within 22 ms of video truth. Comparing
+// t_geo against the RAW anchor keeps the arbiter's reference honest. Policy:
 //   - geometry absent            => anchor unchanged (abstain - never degrade);
 //   - anchor absent              => adopt the geometry (live no-trigger path);
 //   - |t_geo - t_anchor| beyond
-//     cfg.overrideUs             => override: frame = at-or-before t_geo, time
-//                                   = t_geo (the gap swings: nearest-to-t_geo
-//                                   would land across the same gap, grossly
-//                                   EARLY - at-or-before is also the
-//                                   conservative right bound for the P6
-//                                   last-crossing window);
+//     cfg.overrideUs             => override: frame = at-or-before t_geo,
+//                                   time = t_geo (nearest-to-t_geo could land
+//                                   across a coverage gap; at-or-before is
+//                                   also the conservative right bound for the
+//                                   P6 last-crossing window);
 //   - within cfg.overrideUs      => the anchor is corroborated: with
 //     cfg.retime the P7/Impact TIME moves to the sub-frame t_geo while the
 //     window FRAME stays the anchor's (the corroborated swings' P5/P6/P8
 //     windows stay byte-identical); without it, anchor unchanged.
-// The frame is always clamped to [topFrame+1, n-1] (segmentPhases' own clamp).
+// Frames clamp to [0, n-1] only - re-imposing a top-derived clamp would
+// reproduce the failure this module exists to catch. The CALLER decides
+// whether the decided frame is usable as a positions window bound (it must
+// still satisfy locatePTimes' top < impact ordering on sane models).
 inline ImpactDecision decideImpactFrame(bool anchorPresent, int anchorFrame,
                                         const ImpactGeomResult& geo,
                                         const std::vector<int64_t>& tUs,
-                                        int topFrame, const ImpactGeomConfig& cfg)
+                                        const ImpactGeomConfig& cfg)
 {
     const int n = int(tUs.size());
     ImpactDecision d;
-    const auto clampFrame = [&](int f) { return std::clamp(f, std::min(topFrame + 1, n - 1), n - 1); };
+    const auto clampFrame = [&](int f) { return std::clamp(f, 0, n - 1); };
 
     d.frame = clampFrame(anchorFrame);
     d.tUs   = n > 0 ? tUs[size_t(d.frame)] : 0;
