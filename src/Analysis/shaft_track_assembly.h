@@ -240,6 +240,20 @@ struct ShaftV3Config {
     // coverage span — 0709_swing_0004 escalation). 0 disables; inert when no
     // impact frame is supplied (hands-derived impf must not filter its inputs).
     int64_t runMaxStartAfterImpactUs = 1000000;
+    // Top-collapse repair (dark at merge; false = byte-identical). On the
+    // phase-model-collapse swings (8/61 corpus) the two-longest ranking picks
+    // (downswing, follow-through) — or a single merged run whose grip apex is
+    // the finish hold — and top lands within ~7 ms of the impact anchor,
+    // ~250 ms late; clamp(impf, top+1, ·) then drags the emission past it.
+    // With a supplied anchor a real top can never sit within minDownswingUs of
+    // impact, so top is re-derived inside [impact − maxDownswingUs, impact −
+    // minDownswingUs]: grip apex localizes (the 1-run rule, anchor-bounded away
+    // from the finish hold), spdS argmin within a fixed 100 ms half-window
+    // refines (the 2-run gap rule). fin0/bs0/onset deliberately untouched.
+    // Inert when no anchor is supplied.
+    bool    topRepairEnabled        = false;
+    int64_t topRepairMinDownswingUs = 120000;   // collapse gate AND window near edge
+    int64_t topRepairMaxDownswingUs = 600000;   // window far edge
     // C2 body ROI
     double  bodyMargin = 34.0;       // px inflation of the body polygon
     double  bodyRLo    = 45.0;       // ray-sample radii for the inside-fraction test
@@ -338,6 +352,9 @@ struct PhaseModel {
     // (a floor above the walk-back start would be unreachable); when A3 pushes
     // it later, the boundary (the settle) still stands as the floor.
     int  onsetFloor = -1;
+    // Pre-repair top frame when the top-collapse repair fired (-1 = dark /
+    // not fired). Diagnostics only; rides into ShaftDecideTrace via phases.
+    int  topPreRepair = -1;
     std::vector<double> spdSmoothed;    // smoothed grip speed (px/frame)
 };
 

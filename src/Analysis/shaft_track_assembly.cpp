@@ -307,6 +307,9 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "shaft.onsetBridgeMinNetFrac", c.onsetBridgeMinNetFrac);
     apply(ov, "shaft.emitTakeaway", c.emitTakeaway);
     apply(ov, "shaft.runMaxStartAfterImpactUs", c.runMaxStartAfterImpactUs);
+    apply(ov, "shaft.topRepair.enabled", c.topRepairEnabled);
+    apply(ov, "shaft.topRepair.minDownswingUs", c.topRepairMinDownswingUs);
+    apply(ov, "shaft.topRepair.maxDownswingUs", c.topRepairMaxDownswingUs);
     apply(ov, "shaft.spanBound", c.spanBound);
     apply(ov, "shaft.bodyMargin", c.bodyMargin);
     apply(ov, "shaft.rasterC2", c.rasterC2);
@@ -553,6 +556,39 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
         int amax = bs0; for (int f = bs0; f <= big[0].second; ++f) if (-gy[f] > -gy[amax]) amax = f;
         top = amax;
         dsEnd = big[0].second;
+    }
+    // Top-collapse repair (dark: topRepairEnabled=false). The two-longest
+    // ranking picked (downswing, follow-through), or a single merged run whose
+    // grip apex is the finish hold, parking top at/after the impact anchor —
+    // a real top can never sit within minDownswingUs of a supplied anchor.
+    // Re-derive inside [impact − maxDs, impact − minDs]: grip apex localizes
+    // (the 1-run rule above, now anchor-bounded away from the finish hold),
+    // spdS argmin within a fixed 100 ms half-window refines (the 2-run gap
+    // rule). top' < bs0 is EXPECTED here (the backswing run lost the ranking;
+    // bs0 is the downswing-run start just after the real top) and harmless —
+    // the Stage A onset machinery below runs independently of top.
+    // fin0/dsEnd deliberately untouched: dsEnd is the motion-settle into the
+    // finish hold, a legitimate "finish begins"; it is top that invaded its
+    // neighborhood, not vice versa.
+    if (cfg.topRepairEnabled && impactFrame >= 0) {
+        const int minDs = int(std::lround(double(cfg.topRepairMinDownswingUs) * 1e-6 * fps));
+        const int maxDs = int(std::lround(double(cfg.topRepairMaxDownswingUs) * 1e-6 * fps));
+        if (impactFrame - top < minDs) {
+            const int lo = std::clamp(impactFrame - maxDs, 0, nf - 1);
+            const int hi = std::clamp(impactFrame - minDs, 0, nf - 1);
+            if (hi > lo) {
+                int apex = lo;
+                for (int f = lo; f <= hi; ++f) if (-gy[f] > -gy[apex]) apex = f;
+                // FIXED structural refine half-window (not a knob): the dwell
+                // instant sits within ~100 ms of the geometric apex.
+                const int K = std::max(1, int(std::lround(0.100 * fps)));
+                const int rLo = std::max(lo, apex - K), rHi = std::min(hi, apex + K);
+                int amin = rLo;
+                for (int f = rLo; f <= rHi; ++f) if (spdS[f] < spdS[amin]) amin = f;
+                m.topPreRepair = top;
+                top = amin;
+            }
+        }
     }
     // address grip height = median(gy[:max(bs0,1)])
     std::vector<double> head(gy.begin(), gy.begin() + std::max(bs0, 1));

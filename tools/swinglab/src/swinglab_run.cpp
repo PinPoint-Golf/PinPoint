@@ -559,7 +559,12 @@ int main(int argc, char **argv)
                 // claims read result.json's events, not `impact` above.
                 { "impactGeomTUs", double(trace.impactGeomTUs) },
                 { "impactGeomFrame", trace.impactGeomFrame },
-                { "impactGeomApplied", trace.impactGeomApplied } } },
+                { "impactGeomApplied", trace.impactGeomApplied },
+                // Top-collapse repair (shaft.topRepair.*): pre-repair top
+                // frame (-1 = dark / did not fire) and the emitted top.
+                { "topRepairApplied", trace.phases.topPreRepair >= 0 ? 1 : 0 },
+                { "topPreRepairFrame", trace.phases.topPreRepair },
+                { "topFrame", trace.phases.top } } },
             { "poseFrames", int(pose.frames.size()) },
             { "segConf", seg.conf } };
         tf.write(QJsonDocument(summary).toJson(QJsonDocument::Compact) + "\n");

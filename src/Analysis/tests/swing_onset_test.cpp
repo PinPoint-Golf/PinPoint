@@ -9,10 +9,13 @@
 //   ctest --test-dir build/analyzer-tests -R swing_onset --output-on-failure
 
 #include "../shaft_track_assembly.h"
+#include "../shaft_positions.h"
 
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <limits>
 #include <vector>
 
 using namespace pinpoint::analysis;
@@ -71,6 +74,58 @@ static Builder makeSwing()
     b.constSeg(140, 172, 14.0, +1);   // downswing down (returns through address)
     b.ramp(172, 178, 14.0, 0.0, +1);
     return b;
+}
+
+// Collapse shape A (phase-model collapse, 1-run branch): a single merged run —
+// the transition only dips to 9 px/f (above swSpd, so no run split) — with a
+// finish hold HIGHER than the real top. The 1-run grip-apex rule then parks
+// top at the run end (the finish), ~250 ms after the true dwell at f≈114, and
+// clamp(impf, top+1, ·) drags the supplied impact anchor past it.
+static Builder makeCollapseA()
+{
+    Builder b(300);
+    b.ramp(60, 78, 0.0, 12.0, -1);     // takeaway ramp up
+    b.constSeg(78, 108, 12.0, -1);     // backswing up
+    b.ramp(108, 115, 12.0, 9.0, -1);   // transition decel — stays above swSpd
+    b.ramp(115, 122, 9.0, 14.0, +1);   // downswing accel (true dwell f≈114)
+    b.constSeg(122, 155, 14.0, +1);    // downswing through address height
+    b.constSeg(155, 200, 13.0, -1);    // follow-through up PAST the top height
+    b.ramp(200, 206, 13.0, 0.0, -1);   // settle into the finish hold
+    return b;
+}
+
+// Collapse shape B (2-run branch): the backswing creeps at 7 px/f — under
+// swSpd, so it never qualifies as a run — and the two-longest ranking sees
+// (downswing, follow-through). The inter-run gap sits at/after the impact
+// anchor, so the gap's spdS argmin parks top there. Gap 12 quiet frames so
+// default bridging (10) does not merge the two runs.
+static Builder makeCollapseB()
+{
+    Builder b(300);
+    b.constSeg(50, 110, 7.0, -1);      // slow backswing under swSpd — no run
+    // top dwell [110,118): v = 0 (true dwell f≈114)
+    b.ramp(118, 126, 0.0, 14.0, +1);   // downswing accel
+    b.constSeg(126, 152, 14.0, +1);    // downswing through address height
+    // impact-region quiet [152,164): 12 frames — splits the two runs
+    b.ramp(164, 172, 0.0, 12.0, -1);   // follow-through up
+    b.constSeg(172, 200, 12.0, -1);
+    b.ramp(200, 206, 12.0, 0.0, -1);
+    return b;
+}
+
+// The synthetic "recorded impact" anchor: first downswing frame at which the
+// grip has returned to address height − 20 px (the hands-derived impf rule).
+static int anchorFrame(const std::vector<double> &gy, int from)
+{
+    for (int f = from; f < int(gy.size()); ++f) if (gy[f] >= gy[0] - 20.0) return f;
+    return -1;
+}
+
+static bool samePhaseModel(const PhaseModel &a, const PhaseModel &b)
+{
+    return a.bs0 == b.bs0 && a.top == b.top && a.impact == b.impact && a.fin0 == b.fin0
+        && a.onsetFloor == b.onsetFloor && a.topPreRepair == b.topPreRepair
+        && a.phase == b.phase && a.spdSmoothed == b.spdSmoothed;
 }
 
 int main()
@@ -291,6 +346,111 @@ int main()
         // impactUs supplied ⇒ nearest-frame clamp still yields a valid span.
         const SwingSpanEstimate estImp = estimateSwingSpanUs(gx, gy, tUs, 150.0, tUs[150], cfg);
         check(estImp.ok && estImp.startUs < estImp.endUs, "ok with an impact timestamp");
+    }
+
+    // ── top-collapse repair A: merged run, finish-high grip apex ──────────────
+    std::printf("=== top-collapse repair: merged run, finish-high apex ===\n");
+    {
+        const ShaftV3Config dark;                    // topRepairEnabled=false (default)
+        ShaftV3Config on = dark; on.topRepairEnabled = true;
+        std::vector<double> gx, gy; makeCollapseA().build(gx, gy);
+        const int nf = int(gx.size());
+        const int anchor = anchorFrame(gy, 122);
+        check(anchor > 130 && anchor < 170, "fixture: anchor lands in the downswing");
+
+        const PhaseModel pm = segmentPhases(gx, gy, nf, 150.0, anchor, dark);
+        check(pm.top >= anchor, "dark: finish-high grip apex parks top at/after the anchor");
+        check(pm.impact == pm.top + 1, "dark: clamp(impf, top+1, ·) drags the emission past top");
+        check(pm.topPreRepair == -1, "dark: topPreRepair stays -1");
+
+        const PhaseModel rp = segmentPhases(gx, gy, nf, 150.0, anchor, on);
+        check(rp.topPreRepair == pm.top, "repair records the pre-repair top");
+        check(std::abs(rp.top - 114) <= 3, "repaired top lands at the true dwell (f=114 +/- 3)");
+        check(rp.impact == anchor, "clamp inert: the emission is the anchor again");
+        check(rp.fin0 == pm.fin0, "fin0 untouched by the repair");
+        check(rp.bs0 < rp.top && rp.top < rp.impact,
+              "tempo precondition restored: bs0 < top < impact");
+    }
+
+    // ── top-collapse repair B: (downswing, follow-through) two-run mis-pick ───
+    std::printf("=== top-collapse repair: downswing/follow-through mis-pick ===\n");
+    {
+        const ShaftV3Config dark;
+        ShaftV3Config on = dark; on.topRepairEnabled = true;
+        std::vector<double> gx, gy; makeCollapseB().build(gx, gy);
+        const int nf = int(gx.size());
+        const int anchor = anchorFrame(gy, 126);
+        check(anchor > 140 && anchor < 160, "fixture: anchor lands in the downswing");
+
+        const PhaseModel pm = segmentPhases(gx, gy, nf, 150.0, anchor, dark);
+        check(pm.top >= anchor, "dark: the inter-run gap argmin parks top at/after the anchor");
+        check(pm.impact == pm.top + 1, "dark: clamp(impf, top+1, ·) drags the emission past top");
+
+        const PhaseModel rp = segmentPhases(gx, gy, nf, 150.0, anchor, on);
+        check(rp.topPreRepair == pm.top, "repair records the pre-repair top");
+        check(std::abs(rp.top - 114) <= 3, "repaired top lands at the true dwell (f=114 +/- 3)");
+        check(rp.impact == anchor, "clamp inert: the emission is the anchor again");
+        check(rp.fin0 == pm.fin0, "fin0 untouched by the repair");
+        check(rp.bs0 < rp.top && rp.top < rp.impact,
+              "tempo precondition restored: bs0 < top < impact");
+    }
+
+    // ── top-collapse repair: no-fire guards ───────────────────────────────────
+    std::printf("=== top-collapse repair: no-fire guards ===\n");
+    {
+        const ShaftV3Config dark;
+        ShaftV3Config on = dark; on.topRepairEnabled = true;
+        // Healthy swing + anchor: top sits well before the anchor — gate quiet.
+        std::vector<double> gx, gy; makeSwing().build(gx, gy);
+        const int nf = int(gx.size());
+        const int anchor = anchorFrame(gy, 140);
+        const PhaseModel hd = segmentPhases(gx, gy, nf, 150.0, anchor, dark);
+        const PhaseModel ho = segmentPhases(gx, gy, nf, 150.0, anchor, on);
+        check(anchor - hd.top >= 18, "fixture: healthy top well before the anchor (non-vacuous)");
+        check(samePhaseModel(hd, ho), "healthy swing: repair ON identical to dark");
+        // Collapse shape with NO anchor: the repair is inert by construction.
+        std::vector<double> cx, cy; makeCollapseA().build(cx, cy);
+        const int cn = int(cx.size());
+        const PhaseModel cd = segmentPhases(cx, cy, cn, 150.0, -1, dark);
+        const PhaseModel co = segmentPhases(cx, cy, cn, 150.0, -1, on);
+        check(samePhaseModel(cd, co), "no anchor: repair ON identical to dark");
+        check(co.topPreRepair == -1, "no anchor: topPreRepair stays -1");
+    }
+
+    // ── top-collapse repair: locatePTimes P6 knock-on ─────────────────────────
+    // The collapsed (top, impact) window is one frame wide, deep in the
+    // post-transit plateau — no P6; the repaired window brackets the transit.
+    std::printf("=== top-collapse repair: locatePTimes P6 knock-on ===\n");
+    {
+        const ShaftV3Config dark;
+        ShaftV3Config on = dark; on.topRepairEnabled = true;
+        Builder b = makeCollapseA();
+        std::vector<double> gx, gy; b.build(gx, gy);
+        const int nf = int(gx.size());
+        const auto tUs = b.times();
+        const int anchor = anchorFrame(gy, 122);
+        const PhaseModel pm = segmentPhases(gx, gy, nf, 150.0, anchor, dark);
+        const PhaseModel rp = segmentPhases(gx, gy, nf, 150.0, anchor, on);
+
+        // Synthetic θ: parked at −80°, one downswing sweep through horizontal
+        // midway between the repaired top and the anchor, +80° after.
+        const int c0 = rp.top + 5, c1 = rp.impact - 5, mid = (c0 + c1) / 2;
+        std::vector<double> th(nf, -80.0);
+        std::vector<double> ph(nf, std::numeric_limits<double>::quiet_NaN());
+        for (int f = c0; f < c1; ++f) th[f] = -80.0 + 160.0 * double(f - c0) / double(c1 - c0);
+        for (int f = c1; f < nf; ++f) th[f] = 80.0;
+
+        PositionsConfig pcfg;
+        const std::vector<PTime> coll =
+            locatePTimes(tUs, th, ph, pm.bs0, pm.top, pm.impact, pm.fin0, pcfg);
+        const std::vector<PTime> reps =
+            locatePTimes(tUs, th, ph, rp.bs0, rp.top, rp.impact, rp.fin0, pcfg);
+        const PTime *p6c = nullptr, *p6r = nullptr;
+        for (const PTime &p : coll) if (p.p == 6) p6c = &p;
+        for (const PTime &p : reps) if (p.p == 6) p6r = &p;
+        check(!p6c, "collapsed model: the (top, impact) window yields no P6");
+        check(p6r && std::llabs(p6r->tUs - tUs[mid]) <= 2 * (tUs[1] - tUs[0]),
+              "repaired model: P6 found at the delivery transit");
     }
 
     std::printf("\n%s (%d failures)\n", g_fail ? "FAIL" : "PASS", g_fail);
