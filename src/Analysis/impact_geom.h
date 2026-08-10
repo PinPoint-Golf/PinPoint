@@ -206,30 +206,33 @@ struct ImpactDecision {
     int     applied = kImpactGeomKept;
 };
 
-// Pure decision over anchor vs geometry. anchorFrame is the RAW nearest-
-// coverage-frame mapping of job.impactUs (shaft_tracker.cpp), NOT the phase
-// model's pm.impact: segmentPhases clamps its impact to top+1, and on the
-// phase-model-collapse swings (top landmark ~250 ms late, top==fin0) that
-// clamp is precisely the corruption - measured +234..+362 ms on 3 truth
-// swings while their raw anchor sat within 22 ms of video truth. Comparing
-// t_geo against the RAW anchor keeps the arbiter's reference honest. Policy:
-//   - geometry absent            => anchor unchanged (abstain - never degrade);
+// Pure decision: the geometry arbitrates the EMISSION. emitFrame is the
+// phase model's pm.impact - the value every downstream consumer receives.
+// The raw job.impactUs anchor does NOT appear here: its role is to CENTRE
+// the caller's search window (anchor ± windowUs), which already constrains
+// any found crossing to be anchor-plausible. On the phase-model-collapse
+// swings segmentPhases' clamp(impact, top+1, ·) drags the EMISSION
+// +234..+362 ms past a ~250 ms-late top landmark while the raw anchor (and
+// the geometry, measured -10 ms) sit at truth - so a decision that compares
+// t_geo to the raw anchor "corroborates" and misses the corruption;
+// comparing to the emission catches it. Policy:
+//   - geometry absent            => emission unchanged (abstain - never degrade);
 //   - anchor absent              => adopt the geometry (live no-trigger path);
-//   - |t_geo - t_anchor| beyond
+//   - |t_geo - t_emit| beyond
 //     cfg.overrideUs             => override: frame = at-or-before t_geo,
 //                                   time = t_geo (nearest-to-t_geo could land
 //                                   across a coverage gap; at-or-before is
 //                                   also the conservative right bound for the
 //                                   P6 last-crossing window);
-//   - within cfg.overrideUs      => the anchor is corroborated: with
+//   - within cfg.overrideUs      => the emission is corroborated: with
 //     cfg.retime the P7/Impact TIME moves to the sub-frame t_geo while the
-//     window FRAME stays the anchor's (the corroborated swings' P5/P6/P8
-//     windows stay byte-identical); without it, anchor unchanged.
+//     window FRAME stays the emission's (the corroborated swings' P5/P6/P8
+//     windows stay byte-identical); without it, unchanged.
 // Frames clamp to [0, n-1] only - re-imposing a top-derived clamp would
 // reproduce the failure this module exists to catch. The CALLER decides
 // whether the decided frame is usable as a positions window bound (it must
 // still satisfy locatePTimes' top < impact ordering on sane models).
-inline ImpactDecision decideImpactFrame(bool anchorPresent, int anchorFrame,
+inline ImpactDecision decideImpactFrame(bool anchorPresent, int emitFrame,
                                         const ImpactGeomResult& geo,
                                         const std::vector<int64_t>& tUs,
                                         const ImpactGeomConfig& cfg)
@@ -238,9 +241,9 @@ inline ImpactDecision decideImpactFrame(bool anchorPresent, int anchorFrame,
     ImpactDecision d;
     const auto clampFrame = [&](int f) { return std::clamp(f, 0, n - 1); };
 
-    d.frame = clampFrame(anchorFrame);
+    d.frame = clampFrame(emitFrame);
     d.tUs   = n > 0 ? tUs[size_t(d.frame)] : 0;
-    if (!geo.found) return d;   // abstain - anchor (or its fallback) stands
+    if (!geo.found) return d;   // abstain - the emission stands
 
     if (!anchorPresent) {
         d.frame   = clampFrame(geo.frame);
@@ -248,15 +251,15 @@ inline ImpactDecision decideImpactFrame(bool anchorPresent, int anchorFrame,
         d.applied = kImpactGeomAdopted;
         return d;
     }
-    const int64_t tAnchor = tUs[size_t(clampFrame(anchorFrame))];
-    if (std::llabs(geo.tUs - tAnchor) > cfg.overrideUs) {
+    const int64_t tEmit = tUs[size_t(clampFrame(emitFrame))];
+    if (std::llabs(geo.tUs - tEmit) > cfg.overrideUs) {
         d.frame   = clampFrame(geo.frame);
         d.tUs     = geo.tUs;
         d.applied = kImpactGeomOverride;
         return d;
     }
     if (cfg.retime) {
-        d.tUs     = geo.tUs;   // frame (the window bound) stays the anchor's
+        d.tUs     = geo.tUs;   // frame (the window bound) stays the emission's
         d.applied = kImpactGeomRetimed;
     }
     return d;

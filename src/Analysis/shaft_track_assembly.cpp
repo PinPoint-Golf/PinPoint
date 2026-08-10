@@ -2004,11 +2004,9 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         const ImpactGeomResult ig = locateImpactGeom(tUs, rec.thetaOut, gx, gy,
                                                      addrBallPx.x(), addrBallPx.y(),
                                                      lo, hi, cfg.impactGeom);
-        const ImpactDecision id = decideImpactFrame(impactFrame >= 0,
-                                                    impactFrame >= 0 ? impactFrame : pm.impact,
+        const ImpactDecision id = decideImpactFrame(impactFrame >= 0, pm.impact,
                                                     ig, tUs, cfg.impactGeom);
-        // Abstain/kept must change NOTHING (the raw anchor frame the decision
-        // echoes back can differ from pm.impact on the collapse swings).
+        // Abstain/kept must change NOTHING (belt on the decision's echo).
         if (id.applied != kImpactGeomKept) {
             impactRefFrame = id.frame;
             impactRefTUs   = id.tUs;
