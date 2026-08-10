@@ -2020,13 +2020,13 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
     // trigger bias (measured ±15 ms geometric precision: it de-biases but
     // scatters; kept dark unless the corpus says otherwise). The search
     // window is anchor-centred (±windowUs) when an anchor exists BECAUSE
-    // pm.top/pm.fin0 are corrupt on exactly the swings needing rescue; the
-    // (top, fin0] window is the anchor-absent fallback only. Gated on the
-    // address ball resolving — data, never sessionType. v1 deliberately
-    // leaves the segmentPhases-internal consumers (A3 onset clamp, run
-    // candidacy, wedge swingProgress, blur band) on the original anchor —
-    // they ran before this point; only the P5/P6/P8 windows and the P7/Impact
-    // emissions below follow the decision.
+    // pm.top/pm.fin0 are corrupt on exactly the swings needing rescue when the
+    // top-collapse repair cannot fire (no anchor — with one, topRepairEnabled
+    // heals pm.top at the source); the (top, fin0] window is the anchor-absent
+    // fallback only. Gated on the address ball resolving — data, never
+    // sessionType. Only the P5/P6/P8 windows and the P7/Impact emissions below
+    // follow the decision; the mid-pipeline consumers (wedge swingProgress,
+    // blur band, tier windows) ran before this point on pm as segmented.
     int     impactRefFrame = pm.impact;
     int64_t impactRefTUs   = tUs[size_t(pm.impact)];
     int     impactApplied  = kImpactGeomKept;
@@ -2158,12 +2158,13 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         addressEventFrame = p1Frame;
 
         // The corrected impact frame feeds the P6/P8 windows only while it
-        // respects locatePTimes' top < impact ordering; on the phase-model-
-        // collapse swings (top itself ~250 ms late) the corrected frame sits
-        // BEFORE the bogus top, the window is unsatisfiable either way, and
-        // positions keep the legacy bound — only the Impact EVENT is fixed
-        // there (below). The collapse repair is the successor lead, not this
-        // module's.
+        // respects locatePTimes' top < impact ordering. With topRepairEnabled
+        // (ON since 2026-08-10) an anchored collapse heals pm.top inside
+        // segmentPhases, so this guard is now the backstop for the ANCHORLESS
+        // collapse only (repair inert, geometry adopts an impact that can sit
+        // before the bogus top — the window is unsatisfiable either way and
+        // positions keep the legacy bound; only the Impact EVENT is fixed
+        // below).
         const int impLocate = impactRefFrame > pm.top ? impactRefFrame : pm.impact;
         std::vector<PTime> pts =
             locatePTimes(tUs, rec.thetaOut, phiS, p1Frame, pm.top, impLocate, pm.fin0, cfg.positions);

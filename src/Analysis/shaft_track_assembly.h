@@ -240,18 +240,24 @@ struct ShaftV3Config {
     // coverage span — 0709_swing_0004 escalation). 0 disables; inert when no
     // impact frame is supplied (hands-derived impf must not filter its inputs).
     int64_t runMaxStartAfterImpactUs = 1000000;
-    // Top-collapse repair (dark at merge; false = byte-identical). On the
-    // phase-model-collapse swings (8/61 corpus) the two-longest ranking picks
-    // (downswing, follow-through) — or a single merged run whose grip apex is
-    // the finish hold — and top lands within ~7 ms of the impact anchor,
-    // ~250 ms late; clamp(impf, top+1, ·) then drags the emission past it.
-    // With a supplied anchor a real top can never sit within minDownswingUs of
-    // impact, so top is re-derived inside [impact − maxDownswingUs, impact −
-    // minDownswingUs]: grip apex localizes (the 1-run rule, anchor-bounded away
-    // from the finish hold), spdS argmin within a fixed 100 ms half-window
-    // refines (the 2-run gap rule). fin0/bs0/onset deliberately untouched.
-    // Inert when no anchor is supplied.
-    bool    topRepairEnabled        = false;
+    // Top-collapse repair (FROZEN ON 2026-08-10; false = byte-identical, the
+    // dark idiom). On the phase-model-collapse swings the two-longest ranking
+    // picks (downswing, follow-through) — or a single merged run whose grip
+    // apex is the finish hold — and top lands within ~7 ms of the impact
+    // anchor, ~250 ms late; clamp(impf, top+1, ·) then drags the emission past
+    // it. With a supplied anchor a real top can never sit within
+    // minDownswingUs of impact, so top is re-derived inside [impact −
+    // maxDownswingUs, impact − minDownswingUs]: grip apex localizes (the 1-run
+    // rule, anchor-bounded away from the finish hold), spdS argmin within a
+    // fixed 100 ms half-window refines (the 2-run gap rule). fin0/bs0/onset
+    // deliberately untouched. Inert when no anchor is supplied.
+    // Freeze evidence (61-swing pose2 corpus, p7geo\trdark|tron): dark 61/61
+    // byte-identical; ON repaired 15 swings (top −495..−1038 ms, every one a
+    // physically-implausible top<120 ms-pre-anchor), P6 recall 46→59, P5
+    // 46→59, nonmono 0, coverage RESOLVED 2751→2900 / BLOCKED_PHASE 131→40;
+    // the 46 sane swings and all 12 recorded-truth P7s untouched; fabricated
+    // tempo ratios (86/103) became sane (1.0–1.2).
+    bool    topRepairEnabled        = true;
     int64_t topRepairMinDownswingUs = 120000;   // collapse gate AND window near edge
     int64_t topRepairMaxDownswingUs = 600000;   // window far edge
     // C2 body ROI

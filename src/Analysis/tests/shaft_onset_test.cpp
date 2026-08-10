@@ -36,7 +36,9 @@ static void check(bool c, const char *label)
 }
 
 // The 2026-07-17 freeze turned the veto/bridging/Takeaway defaults ON (17-swing
-// truth: Address-error median 0.564 → 0.060 s). These fixtures pin the OFF-vs-ON
+// truth: Address-error median 0.564 → 0.060 s), and 2026-08-10 froze the
+// top-collapse repair ON (it heals the two-longest mis-pick's `top` observable
+// that the bridging fixtures document). These fixtures pin the OFF-vs-ON
 // mechanics, so the dark (legacy) baseline is constructed explicitly.
 static ShaftV3Config darkV3()
 {
@@ -45,6 +47,7 @@ static ShaftV3Config darkV3()
     c.onsetRunBridgeFrames  = 0;
     c.onsetBridgeMinNetFrac = 0.0;
     c.emitTakeaway          = false;
+    c.topRepairEnabled      = false;
     return c;
 }
 

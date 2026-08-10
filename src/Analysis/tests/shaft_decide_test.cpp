@@ -943,21 +943,23 @@ int main()
               "hystDeg/maxStepDeg/overrideUs/windowUs keys applied");
     }
 
-    // ── top-collapse repair: shaft.topRepair.* key plumbing + dark default ───
+    // ── top-collapse repair: shaft.topRepair.* key plumbing + default pins ───
     // (swing_onset_test covers the repair itself; this pins the fromOverrides
-    // route the params files use, and the dark-at-merge default.)
+    // route the params files use, and the frozen-ON default.)
     std::printf("=== topRepair key plumbing ===\n");
     {
         const ShaftV3Config def = ShaftV3Config::fromOverrides(QVariantMap{});
-        check(!def.topRepairEnabled, "topRepair.enabled dark by default (dark at merge)");
+        check(def.topRepairEnabled, "topRepair.enabled ON by default (FROZEN ON 2026-08-10)");
         check(def.topRepairMinDownswingUs == 120000 && def.topRepairMaxDownswingUs == 600000,
               "minDownswingUs/maxDownswingUs defaults pinned");
+        QVariantMap dk;
+        dk.insert("shaft.topRepair.enabled", 0);
+        check(!ShaftV3Config::fromOverrides(dk).topRepairEnabled,
+              "the key darks the repair (soak baseline route)");
         QVariantMap ov;
-        ov.insert("shaft.topRepair.enabled", 1);
         ov.insert("shaft.topRepair.minDownswingUs", 150000);
         ov.insert("shaft.topRepair.maxDownswingUs", 500000);
         const ShaftV3Config on = ShaftV3Config::fromOverrides(ov);
-        check(on.topRepairEnabled, "enabled key applied");
         check(on.topRepairMinDownswingUs == 150000 && on.topRepairMaxDownswingUs == 500000,
               "minDownswingUs/maxDownswingUs keys applied");
     }
