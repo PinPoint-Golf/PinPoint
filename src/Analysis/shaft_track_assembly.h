@@ -260,6 +260,20 @@ struct ShaftV3Config {
     bool    topRepairEnabled        = true;
     int64_t topRepairMinDownswingUs = 120000;   // collapse gate AND window near edge
     int64_t topRepairMaxDownswingUs = 600000;   // window far edge
+    // Onset reseed after a fired repair (dark; false = the shipped v1 repair,
+    // byte-identical). The v1 repair fixes top but leaves bs0 at the collapsed
+    // ranking's run start — in collapse mode that is the DOWNSWING run start,
+    // AFTER the repaired top, so the A1/A2 walk-back parks at the top dwell and
+    // the A3 clamp manufactures an Address at the near edge (impact − bsMin:
+    // the exact-0.549 s pin, B = top − addr 0.17–0.25 s vs real ≈ 0.75 s
+    // backswings, tempo ratio 0.5–0.8 on the 5 repaired corpus swings). With
+    // this on, a fired repair whose bs0 sits after the repaired top re-derives
+    // bs0 as the last sub-swLow → rising boundary before top' (the takeaway-run
+    // start the two-longest ranking lost); Stage A (A1/A2, the no-return veto
+    // with its bs0 scan horizon, the A3 rail) then runs unchanged from the
+    // reseeded start. bs0 < top' (merged-run collapse) keeps the ranking's bs0
+    // — the walk-back already starts from pre-top motion there.
+    bool    topRepairOnsetReseed    = false;
     // C2 body ROI
     double  bodyMargin = 34.0;       // px inflation of the body polygon
     double  bodyRLo    = 45.0;       // ray-sample radii for the inside-fraction test

@@ -310,6 +310,7 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "shaft.topRepair.enabled", c.topRepairEnabled);
     apply(ov, "shaft.topRepair.minDownswingUs", c.topRepairMinDownswingUs);
     apply(ov, "shaft.topRepair.maxDownswingUs", c.topRepairMaxDownswingUs);
+    apply(ov, "shaft.topRepair.onsetReseed", c.topRepairOnsetReseed);
     apply(ov, "shaft.spanBound", c.spanBound);
     apply(ov, "shaft.bodyMargin", c.bodyMargin);
     apply(ov, "shaft.rasterC2", c.rasterC2);
@@ -543,7 +544,7 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
     std::vector<std::pair<int, int>> big(runs.begin(), runs.begin() + std::min<size_t>(2, runs.size()));
     std::stable_sort(big.begin(), big.end(),
                      [](const std::pair<int, int>& a, const std::pair<int, int>& b) { return a.first < b.first; });
-    const int bs0 = big[0].first;
+    int bs0 = big[0].first;   // non-const: a fired top repair may reseed it (below)
     int top, dsEnd;
     if (big.size() >= 2) {
         const int gapLo = big[0].second, gapHi = big[1].first;
@@ -565,8 +566,11 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
     // (the 1-run rule above, now anchor-bounded away from the finish hold),
     // spdS argmin within a fixed 100 ms half-window refines (the 2-run gap
     // rule). top' < bs0 is EXPECTED here (the backswing run lost the ranking;
-    // bs0 is the downswing-run start just after the real top) and harmless —
-    // the Stage A onset machinery below runs independently of top.
+    // bs0 is the downswing-run start just after the real top) — and exactly
+    // why the onset reseed inside the block re-derives bs0 when enabled: the
+    // Stage A walk-back starts at bs0, so a post-top' bs0 parks the onset at
+    // the top dwell and hands A3 a manufactured Address (the impact − bsMin
+    // pin). Dark reseed = the shipped v1 repair, bs0/onset untouched.
     // fin0/dsEnd deliberately untouched: dsEnd is the motion-settle into the
     // finish hold, a legitimate "finish begins"; it is top that invaded its
     // neighborhood, not vice versa.
@@ -587,6 +591,23 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
                 for (int f = rLo; f <= rHi; ++f) if (spdS[f] < spdS[amin]) amin = f;
                 m.topPreRepair = top;
                 top = amin;
+                // Onset reseed (dark: topRepair.onsetReseed). In collapse mode
+                // bs0 is the mis-picked DOWNSWING run start, after the repaired
+                // top — the A1/A2 walk-back below parks at the top dwell and A3
+                // manufactures an Address at the near edge (impact − bsMin, the
+                // 0.549 s pin). Re-derive bs0 from top': skip back over the top
+                // dwell (spdS < swLow), then through the backswing (>= swLow)
+                // to the last sub-swLow → rising boundary — the takeaway-run
+                // start the two-longest ranking lost. Stage A (A1/A2, veto with
+                // its bs0 horizon, the A3 rail) then runs unchanged from the
+                // reseeded start. bs0 < top' (merged-run collapse) keeps the
+                // ranking's bs0: the walk-back already starts pre-top there.
+                if (cfg.topRepairOnsetReseed && cfg.swLow > 0.0 && bs0 > top) {
+                    int b = top;
+                    while (b > 0 && spdS[b] <  cfg.swLow) --b;
+                    while (b > 0 && spdS[b] >= cfg.swLow) --b;
+                    bs0 = b;
+                }
             }
         }
     }

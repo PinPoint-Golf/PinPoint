@@ -395,6 +395,42 @@ int main()
               "tempo precondition restored: bs0 < top < impact");
     }
 
+    // ── top-collapse repair: onset reseed off the A3 pin ──────────────────────
+    // The v1 repair fixes top but leaves bs0 at the mis-picked downswing run
+    // start (after top') — the A1 walk-back stalls at the top dwell and A3
+    // manufactures an Address at the near edge (impact − bsMin, the corpus
+    // 0.549 s pin). The reseed re-derives bs0 as the last sub-swLow → rising
+    // boundary before the repaired top: the slow-creep takeaway (f≈50).
+    std::printf("=== top-collapse repair: onset reseed ===\n");
+    {
+        ShaftV3Config v1c; v1c.topRepairOnsetReseed = false;   // shipped v1 repair
+        ShaftV3Config rsc; rsc.topRepairOnsetReseed = true;
+        std::vector<double> gx, gy; makeCollapseB().build(gx, gy);
+        const int nf = int(gx.size());
+        const int anchor = anchorFrame(gy, 126);
+
+        const PhaseModel v1 = segmentPhases(gx, gy, nf, 150.0, anchor, v1c);
+        const int hiEdge = anchor - int(std::lround(double(v1c.bsMinBeforeImpactUs) * 1e-6 * 150.0));
+        check(v1.topPreRepair >= 0, "fixture: the repair fired");
+        check(v1.bs0 == hiEdge, "v1: onset manufactured at the A3 near edge (the 0.549 pin)");
+
+        const PhaseModel re = segmentPhases(gx, gy, nf, 150.0, anchor, rsc);
+        check(re.top == v1.top && re.impact == v1.impact && re.fin0 == v1.fin0
+                  && re.topPreRepair == v1.topPreRepair,
+              "reseed: top/impact/fin0/topPreRepair unchanged");
+        check(re.bs0 < hiEdge, "reseed: onset off the A3 pin");
+        check(std::abs(re.bs0 - 50) <= 4, "reseed: onset lands at the slow-creep takeaway (f=50 +/- 4)");
+        check(re.bs0 < re.top && re.top < re.impact, "reseed: bs0 < top < impact preserved");
+
+        // Merged-run collapse (bs0 already before top'): the reseed is inert.
+        std::vector<double> ax, ay; makeCollapseA().build(ax, ay);
+        const int an = int(ax.size());
+        const int aanchor = anchorFrame(ay, 122);
+        const PhaseModel am = segmentPhases(ax, ay, an, 150.0, aanchor, v1c);
+        const PhaseModel ar = segmentPhases(ax, ay, an, 150.0, aanchor, rsc);
+        check(samePhaseModel(am, ar), "merged-run collapse: reseed inert (bs0 already pre-top)");
+    }
+
     // ── top-collapse repair: no-fire guards ───────────────────────────────────
     std::printf("=== top-collapse repair: no-fire guards ===\n");
     {
