@@ -202,6 +202,21 @@ int main()
         const std::vector<AnklePx> noPose(static_cast<size_t>(nf));   // all ok=false
         const double m2 = medianGripBallLenPx(high, gx, gy, tUs, W, H, nf, nf, &still, &noPose, &reason);
         check(near(m2, 350.0, 1e-6) && reason == 0, "no-pose window skips the gate (accepted)");
+
+        // clusterBallPx out-param (second consumer, P7 impact geometry):
+        // filled with the cluster centre on the accept path, untouched on
+        // abstain; the length result is identical with or without it.
+        QPointF cb(-1.0, -1.0);
+        const double m3 = medianGripBallLenPx(low, gx, gy, tUs, W, H, nf, nf, &still, &ankles,
+                                              &reason, &cb);
+        check(near(m3, m, 1e-9), "length identical with the out-param supplied");
+        check(near(cb.x(), 500.0, 1e-6) && near(cb.y(), 950.0, 1e-6),
+              "accepted cluster centre filled (500,950)");
+        cb = QPointF(-1.0, -1.0);
+        check(medianGripBallLenPx(high, gx, gy, tUs, W, H, nf, nf, &still, &ankles,
+                                  &reason, &cb) < 0
+                  && cb == QPointF(-1.0, -1.0),
+              "abstain leaves the out-param untouched");
     }
 
     // ── medianGripBallLenPx: shape / empty no-ops ────────────────────────────

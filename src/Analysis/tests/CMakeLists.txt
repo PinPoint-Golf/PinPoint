@@ -462,6 +462,13 @@ pp_add_test(shaft_kinematics_test SOURCES shaft_kinematics_test.cpp NO_QT)
 # header — no Qt, no OpenCV, no fixture.
 pp_add_test(shaft_wedge_test SOURCES shaft_wedge_test.cpp NO_QT)
 
+# P7 club-at-ball impact geometry (impact_geom.h): θ==θ_ball crossing detector
+# (sub-frame, moving grip, hysteresis, ±180 seam guard, NaN-gap interpolation,
+# representation independence), the anchor-vs-geometry decision matrix
+# (kept/override/adopt/retime + clamps), dark default pins, and the P6-window
+# knock-on through locatePTimes. Header-only, no fixture. NO_QT.
+pp_add_test(impact_geom_test SOURCES impact_geom_test.cpp NO_QT)
+
 # Analyzer-layer P-position bridge (positions_ladder.h): p→Phase mapping,
 # insert-if-monotone/abstain-otherwise, duplicate-phase skip (IMU proxy wins),
 # version-4 bump vs byte-identical no-op, refine.positionsLadder dark default.

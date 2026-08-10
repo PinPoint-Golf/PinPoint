@@ -101,6 +101,12 @@ ThetaBallSeries buildThetaBallSeries(const BallTrack2D &ball,
 // measurement abstains (-1; `rejectReason` set 1 = ankle line, 2 = feet
 // corridor, 0 = accepted/not gated) and the ladder degrades honestly to rung
 // 3. Null / sparse ankles skip the gate (pose-free callers keep working).
+//
+// `clusterBallPx` (second consumer, P7 impact geometry): filled with the
+// pass-1 cluster-median ball centre (px) ONLY on the accept path (return
+// > 0), i.e. it inherits the cluster gate, kMinLenSamples, and the golf-prior
+// gates for free — exactly the "reliable pre-swing ball XY" the impact
+// crossing wants. Left untouched on abstain; nullptr callers byte-identical.
 struct AnklePx {
     double lx = 0, ly = 0;   // left ankle (px)
     double rx = 0, ry = 0;   // right ankle (px)
@@ -111,7 +117,8 @@ double medianGripBallLenPx(const BallTrack2D &ball,
                            const std::vector<int64_t> &tUs, int frameW, int frameH,
                            int bs0, int collar, const std::vector<char> *still = nullptr,
                            const std::vector<AnklePx> *ankles = nullptr,
-                           int *rejectReason = nullptr);
+                           int *rejectReason = nullptr,
+                           QPointF *clusterBallPx = nullptr);
 
 void applyBallAnchor(ShaftTrack2D &out, const BallTrack2D &ball,
                      const std::vector<double> &gx, const std::vector<double> &gy,

@@ -353,6 +353,12 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "shaft.wedge.dpTolDeg", c.wedge.dpTolDeg);
     apply(ov, "shaft.wedge.kinCone", c.wedge.kinCone);
     apply(ov, "shaft.wedge.wKinCone", c.wedge.wKinCone);
+    // P7 impact geometry: "shaft.impactGeom.*" keys (impact_geom.h).
+    apply(ov, "shaft.impactGeom.enabled", c.impactGeom.enabled);
+    apply(ov, "shaft.impactGeom.retime", c.impactGeom.retime);
+    apply(ov, "shaft.impactGeom.hystDeg", c.impactGeom.hystDeg);
+    apply(ov, "shaft.impactGeom.maxStepDeg", c.impactGeom.maxStepDeg);
+    apply(ov, "shaft.impactGeom.overrideUs", c.impactGeom.overrideUs);
     // Layer A line re-registration («snap»): "shaft.snap.*" keys.
     apply(ov, "shaft.snap.enabled", c.snap.enabled);
     apply(ov, "shaft.snap.maxOffsetPx", c.snap.maxOffsetPx);
@@ -1217,6 +1223,10 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
     // kBodyJoints order 6/7 = L/R ankles). Read-only wrt the θ path
     // (applyBallAnchor no longer recomputes this — it only reads
     // out.measuredClubLenPx now).
+    // The accepted cluster centre doubles as the P7 impact geometry's fixed
+    // pre-swing ball anchor (only filled when lpx accepts — see ball_anchor.h).
+    QPointF addrBallPx;
+    bool    haveAddrBall = false;
     if (ball && !ball->frames.empty()) {
         std::vector<AnklePx> ankles(static_cast<size_t>(nf));
         for (int i = 0; i < nf; ++i) {
@@ -1226,8 +1236,9 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         }
         int lpxReject = 0;
         const double lpx = medianGripBallLenPx(*ball, gx, gy, tUs, frameW, frameH,
-                                               pm.bs0, addressCollar, &stat, &ankles, &lpxReject);
-        if (lpx > 0.0) out.measuredClubLenPx = float(lpx);
+                                               pm.bs0, addressCollar, &stat, &ankles, &lpxReject,
+                                               &addrBallPx);
+        if (lpx > 0.0) { out.measuredClubLenPx = float(lpx); haveAddrBall = true; }
         if (trace) trace->lPxRejected = lpxReject;
     }
 
@@ -1961,6 +1972,37 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         }
     }
 
+    // ── P7 impact from club-at-ball geometry (dark: shaft.impactGeom.enabled) ──
+    // The reconciled θ(t) crossing the grip→ball direction of the FIXED A1
+    // address-ball cluster (the ball is stationary until launch, so this works
+    // even when the detector never finds the ball near impact — 0703_0005).
+    // Arbitrates the anchor's frame MAPPING (a coverage gap around impact lands
+    // nearest-frame 234–362 ms late on 3 truth swings, poisoning the P6 window)
+    // and, under impactGeom.retime, the anchor's own 13–22 ms trigger bias.
+    // Gated on the address ball resolving — data, never sessionType. v1
+    // deliberately leaves the segmentPhases-internal consumers (A3 onset clamp,
+    // run candidacy, wedge swingProgress, blur band) on the original anchor —
+    // they ran before this point; only the P5/P6/P8 windows and the P7/Impact
+    // emissions below follow the decision.
+    int     impactRefFrame = pm.impact;
+    int64_t impactRefTUs   = tUs[size_t(pm.impact)];
+    int     impactApplied  = kImpactGeomKept;
+    if (cfg.impactGeom.enabled && haveAddrBall) {
+        const ImpactGeomResult ig = locateImpactGeom(tUs, rec.thetaOut, gx, gy,
+                                                     addrBallPx.x(), addrBallPx.y(),
+                                                     pm.top, pm.fin0, cfg.impactGeom);
+        const ImpactDecision id = decideImpactFrame(impactFrame >= 0, pm.impact, ig, tUs,
+                                                    pm.top, cfg.impactGeom);
+        impactRefFrame = id.frame;
+        impactRefTUs   = id.tUs;
+        impactApplied  = id.applied;
+        if (trace) {
+            trace->impactGeomTUs     = ig.found ? ig.tUs : -1;
+            trace->impactGeomFrame   = ig.frame;
+            trace->impactGeomApplied = id.applied;
+        }
+    }
+
     // ── Layer B: P-position extraction (shaft_position_first §2 Layer B) ────────
     // Dark by default. Locate P1–P8 from the reconciled θ(t) (deg) + smoothed
     // lead-arm φ(t) (deg) and the tracker's own address/top/impact landmarks
@@ -2063,8 +2105,22 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                                                 clubQuietPtr, pm.onsetFloor);
         addressEventFrame = p1Frame;
 
-        const std::vector<PTime> pts =
-            locatePTimes(tUs, rec.thetaOut, phiS, p1Frame, pm.top, pm.impact, pm.fin0, cfg.positions);
+        std::vector<PTime> pts =
+            locatePTimes(tUs, rec.thetaOut, phiS, p1Frame, pm.top, impactRefFrame, pm.fin0, cfg.positions);
+        // The geometry decided the P7 instant sub-frame (override: the frame-
+        // quantized at-or-before time can sit a whole coverage gap early;
+        // retime: the corroborated anchor's trigger bias). Keep locatePTimes'
+        // strictly-ascending contract: abstain if the instant would cross a
+        // neighbouring located P.
+        if (impactApplied != kImpactGeomKept) {
+            for (size_t i = 0; i < pts.size(); ++i) {
+                if (pts[i].p != 7) continue;
+                const bool loOk = i == 0 || pts[i - 1].tUs < impactRefTUs;
+                const bool hiOk = i + 1 >= pts.size() || impactRefTUs < pts[i + 1].tUs;
+                if (loOk && hiOk) pts[i].tUs = impactRefTUs;
+                break;
+            }
+        }
         out.positions.reserve(pts.size());
         for (const PTime& pt : pts) {
             ShaftPosition pos;
@@ -2267,10 +2323,29 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                 }
         }
         // Vision-only phase landmarks: real swing ⇒ vision-grade conf, else 0.
+        // The Impact event follows the impact-geometry decision: pmSeg carries
+        // the decided frame (== pm.impact when dark/abstained, so the dark
+        // path is value- and byte-identical), and a decided instant then
+        // retimes the event sub-frame, guarded to stay strictly inside its
+        // (Top, Finish) neighbours (the 7 known non-monotone vision ladders
+        // abstain here rather than worsen).
         const bool swingDetected = std::any_of(pm.phase.begin(), pm.phase.end(),
                                                [](SwingPhase p) { return p != SwingPhase::Addr; });
-        trace->segmentation = phasesToSegmentation(pm, tUs, swingDetected ? 0.5f : 0.0f,
+        PhaseModel pmSeg = pm;
+        pmSeg.impact = impactRefFrame;
+        trace->segmentation = phasesToSegmentation(pmSeg, tUs, swingDetected ? 0.5f : 0.0f,
                                                    addressEventFrame, cfg.emitTakeaway);
+        if (impactApplied != kImpactGeomKept) {
+            Segmentation& seg = trace->segmentation;
+            const PhaseEvent* top = seg.eventFor(Phase::Top);
+            const PhaseEvent* fin = seg.eventFor(Phase::Finish);
+            for (PhaseEvent& e : seg.events)
+                if (e.phase == Phase::Impact) {
+                    if ((!top || top->t_us < impactRefTUs) && (!fin || impactRefTUs < fin->t_us))
+                        e.t_us = impactRefTUs;
+                    break;
+                }
+        }
     }
     return out;
 }

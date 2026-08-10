@@ -141,7 +141,8 @@ double medianGripBallLenPx(const BallTrack2D &ball,
                            const std::vector<double> &gx, const std::vector<double> &gy,
                            const std::vector<int64_t> &tUs, int frameW, int frameH,
                            int bs0, int collar, const std::vector<char> *still,
-                           const std::vector<AnklePx> *ankles, int *rejectReason)
+                           const std::vector<AnklePx> *ankles, int *rejectReason,
+                           QPointF *clusterBallPx)
 {
     if (rejectReason) *rejectReason = 0;
     const int nf = int(tUs.size());
@@ -236,6 +237,9 @@ double medianGripBallLenPx(const BallTrack2D &ball,
         lenSamples.push_back(std::hypot(bx - gx[size_t(i)], by - gy[size_t(i)]));
     }
     if (int(lenSamples.size()) < kMinLenSamples) return -1.0;
+    // Accept path only: the gated cluster centre doubles as the pre-swing ball
+    // anchor for the P7 impact geometry (see header contract).
+    if (clusterBallPx) *clusterBallPx = QPointF(medX, medY);
     return median(lenSamples);
 }
 

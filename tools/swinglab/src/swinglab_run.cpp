@@ -551,7 +551,15 @@ int main(int argc, char **argv)
                 // 0 accepted/not gated, 1 ankle line, 2 feet corridor.
                 { "lPxRejected", trace.lPxRejected },
                 // S2 wedge: calibrated exposure estimate (s; −1 = wedge dark).
-                { "wedgeTExpS", trace.wedgeTExpS } } },
+                { "wedgeTExpS", trace.wedgeTExpS },
+                // P7 impact geometry (shaft.impactGeom.*): the located
+                // θ==θ_ball crossing and what the decision did (0 kept, 1
+                // override, 2 no-anchor adopt, 3 sub-frame retime). NB this
+                // trace comes from a SECOND tracker run — for anchor-derived
+                // claims read result.json's events, not `impact` above.
+                { "impactGeomTUs", double(trace.impactGeomTUs) },
+                { "impactGeomFrame", trace.impactGeomFrame },
+                { "impactGeomApplied", trace.impactGeomApplied } } },
             { "poseFrames", int(pose.frames.size()) },
             { "segConf", seg.conf } };
         tf.write(QJsonDocument(summary).toJson(QJsonDocument::Compact) + "\n");

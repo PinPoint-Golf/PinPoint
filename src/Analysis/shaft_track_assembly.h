@@ -34,6 +34,7 @@
 #include "shaft_positions.h"       // PositionsConfig / PTime / locatePTimes (Layer B B-time location)
 #include "shaft_synthesis.h"       // SynthConfig / synthesizeBetweenAnchors (Layer C synthesis)
 #include "shaft_wedge.h"           // WedgeConfig / measureWedge (R8-T1 blur-wedge, S2)
+#include "impact_geom.h"           // ImpactGeomConfig / locateImpactGeom (P7 club-at-ball)
 
 // Shaft-tracker v3.0-r1 DECIDING HALF — the physics/statistics that turn
 // per-frame evidence into one globally-consistent shaft-angle track. Faithful
@@ -308,6 +309,14 @@ struct ShaftV3Config {
     // populates it. The wedge threshold scales from evAbsFloor (S1) — with the
     // floor unset the wedge measures nothing (never fabricate).
     WedgeConfig     wedge;
+    // P7 impact from club-at-ball geometry (impact_geom.h) — "shaft.impactGeom.*"
+    // keys. enabled=false by default (dark); when on, the theta==theta_ball
+    // crossing arbitrates the acoustic anchor's frame mapping (a coverage gap
+    // around impact lands the nearest-frame mapping 234-362 ms late on 3 truth
+    // swings and poisons the P6 window), and (impactGeom.retime) retimes the
+    // corroborated P7/Impact instant sub-frame. fromOverrides populates it.
+    // Gated on the A1 address-ball cluster resolving — data, never sessionType.
+    ImpactGeomConfig impactGeom;
 
     static ShaftV3Config fromOverrides(const QVariantMap& ov);
 };
@@ -518,6 +527,14 @@ struct ShaftDecideTrace {
     // dark). Empty unless a trace sink is present AND cfg.wedge.enabled.
     std::vector<double> wedgeOmegaDegS, wedgeCentroidDeg, wedgeWidthDeg;
     double              wedgeTExpS = -1.0;
+    // P7 impact-geometry diagnostics (shaft.impactGeom.*): the located
+    // theta==theta_ball crossing (-1 = dark / no address ball / not found),
+    // its at-or-before frame, and what the decision did (impact_geom.h codes:
+    // 0 kept-anchor/abstain, 1 override, 2 no-anchor adopt, 3 sub-frame
+    // retime). Diagnostics only, never read back.
+    int64_t             impactGeomTUs     = -1;
+    int                 impactGeomFrame   = -1;
+    int                 impactGeomApplied = 0;
 };
 
 // Map the hands-only phase model to an app Segmentation with real timestamps:

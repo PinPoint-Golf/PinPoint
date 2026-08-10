@@ -917,6 +917,27 @@ int main()
         check(a.valid == b.valid, "track.valid identical");
     }
 
+    // ── P7 impact geometry: shaft.impactGeom.* key plumbing + dark default ───
+    // (impact_geom_test covers the detector/decision math; this pins the
+    // fromOverrides route the params files use, and the dark-at-merge default.)
+    std::printf("=== impactGeom key plumbing ===\n");
+    {
+        const ShaftV3Config def = ShaftV3Config::fromOverrides(QVariantMap{});
+        check(!def.impactGeom.enabled, "impactGeom.enabled dark by default");
+        check(!def.impactGeom.retime, "impactGeom.retime dark by default");
+        QVariantMap ov;
+        ov.insert("shaft.impactGeom.enabled", 1);
+        ov.insert("shaft.impactGeom.retime", 1);
+        ov.insert("shaft.impactGeom.hystDeg", 6.0);
+        ov.insert("shaft.impactGeom.maxStepDeg", 90.0);
+        ov.insert("shaft.impactGeom.overrideUs", 50000);
+        const ShaftV3Config on = ShaftV3Config::fromOverrides(ov);
+        check(on.impactGeom.enabled && on.impactGeom.retime, "enabled/retime keys applied");
+        check(on.impactGeom.hystDeg == 6.0 && on.impactGeom.maxStepDeg == 90.0
+                  && on.impactGeom.overrideUs == 50000,
+              "hystDeg/maxStepDeg/overrideUs keys applied");
+    }
+
     // ── S2 blur-wedge: the long-path fixture (shaft_wedge_p6_impl.md "Session 2
     //    spec"). Sharp rotating shaft line through the backswing; a painted
     //    semi-transparent FAN (5° sector, proximal r ≤ 80 px — too short for the
