@@ -260,8 +260,15 @@ struct ShaftV3Config {
     bool    topRepairEnabled        = true;
     int64_t topRepairMinDownswingUs = 120000;   // collapse gate AND window near edge
     int64_t topRepairMaxDownswingUs = 600000;   // window far edge
-    // Onset reseed after a fired repair (dark; false = the shipped v1 repair,
-    // byte-identical). The v1 repair fixes top but leaves bs0 at the collapsed
+    // Onset reseed after a fired repair (FROZEN ON 2026-08-10; false = the
+    // shipped v1 repair, byte-identical — the dark idiom). Freeze evidence
+    // (61-swing pose2 corpus, p7geo\rsdark3|rson3): dark 61/61 byte-identical;
+    // ON converts exactly the 11 near-edge-pinned swings — 6 clean (Takeaway
+    // 0.84–1.03 s pre-impact, tempo 2.0–3.1), 5 honest far-edge clamps (the
+    // 0705/0703 pre-takeaway creep frontier — no veto-visible settle) — the
+    // 4 dark-sane repaired swings and all 46 untouched swings byte-identical;
+    // tempo 1–6 band census 56 → 60/61; Top/Impact/P6 emissions unchanged.
+    // The v1 repair fixes top but leaves bs0 at the collapsed
     // ranking's run start — in collapse mode that is the DOWNSWING run start,
     // AFTER the repaired top, so the A1/A2 walk-back parks at the top dwell and
     // the A3 clamp manufactures an Address at the near edge (impact − bsMin:
@@ -277,7 +284,7 @@ struct ShaftV3Config {
     // (the deep pre-fidget walk-back the veto exists to stop, minus the
     // veto's downswing revisit horizon). bs0 < top' (merged-run collapse)
     // never reseeds — the walk-back already starts from pre-top motion.
-    bool    topRepairOnsetReseed    = false;
+    bool    topRepairOnsetReseed    = true;
     // C2 body ROI
     double  bodyMargin = 34.0;       // px inflation of the body polygon
     double  bodyRLo    = 45.0;       // ray-sample radii for the inside-fraction test

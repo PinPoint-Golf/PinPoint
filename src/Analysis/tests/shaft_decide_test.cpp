@@ -962,11 +962,11 @@ int main()
         const ShaftV3Config on = ShaftV3Config::fromOverrides(ov);
         check(on.topRepairMinDownswingUs == 150000 && on.topRepairMaxDownswingUs == 500000,
               "minDownswingUs/maxDownswingUs keys applied");
-        check(!def.topRepairOnsetReseed, "topRepair.onsetReseed dark by default");
+        check(def.topRepairOnsetReseed, "topRepair.onsetReseed ON by default (FROZEN ON 2026-08-10)");
         QVariantMap rs;
-        rs.insert("shaft.topRepair.onsetReseed", 1);
-        check(ShaftV3Config::fromOverrides(rs).topRepairOnsetReseed,
-              "the onsetReseed key lights the reseed (gate-arm route)");
+        rs.insert("shaft.topRepair.onsetReseed", 0);
+        check(!ShaftV3Config::fromOverrides(rs).topRepairOnsetReseed,
+              "the onsetReseed key darks the reseed (soak baseline route)");
     }
 
     // ── S2 blur-wedge: the long-path fixture (shaft_wedge_p6_impl.md "Session 2
