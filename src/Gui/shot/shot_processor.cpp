@@ -994,6 +994,7 @@ pinpoint::SwingExportJob ShotProcessor::buildSwingExportJob()
     job.priorClubLenN     = m_analysisJob.priorClubLenN;
     job.imuBleLatencyUs      = ImuInstance::kImuBleLatencyUs;
     job.audioDeviceLatencyUs = s->audioDeviceLatencyUs();
+    job.micTravelUs          = s->micTravelUs();
     job.host.appVersion = QStringLiteral(PP_APP_VERSION);
     job.host.gitSha     = QStringLiteral(PP_GIT_SHA);
     job.host.hostname   = QSysInfo::machineHostName();

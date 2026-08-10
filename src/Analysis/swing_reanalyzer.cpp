@@ -580,6 +580,28 @@ LoadedSwing SwingDiskLoader::load(const QString& swingDir, const SwingLoadOption
     qint64 impact = -1;
     if (captureIn.contains(QStringLiteral("impactUs")))
         impact = qint64(captureIn[QStringLiteral("impactUs")].toDouble(-1));
+
+    // Legacy acoustic-anchor de-bias. Captures before the mic-distance split
+    // back-dated the anchor by a flat latencyUs.audioDevice (20 ms), which the
+    // 2026-08-10 truth corpus measured as a uniform 13-22 ms EARLY vs video
+    // impact (mean -17.1 ms, sd 3.3 — the acoustic travel is real, the device
+    // latency was ~0). New captures subtract residual + travel at the source
+    // and record latencyUs.micTravel; its ABSENCE identifies a legacy anchor,
+    // which is corrected here to what the new capture chain would have
+    // produced: add the recorded over-subtraction back, remove the travel for
+    // the DEFAULT 1 m mic distance. The constant (not AppSettings) keeps
+    // re-analysis deterministic and cross-host, like motionCaptureQuality and
+    // the club prior above. Gated on shotSource 4 (ShotController Acoustic —
+    // Gui enum, compared as the persisted int): IMU/launch-monitor anchors
+    // never carried the audio back-date. Corpus effect measured offline:
+    // truth-swing anchor error -17.1 ms mean -> -0.0 ms, max |err| 5.1 ms.
+    const QJsonObject latencyIn = captureIn[QStringLiteral("latencyUs")].toObject();
+    if (impact > 0 && captureIn[QStringLiteral("shotSource")].toInt(-1) == 4
+        && !latencyIn.contains(QStringLiteral("micTravel"))) {
+        constexpr qint64 kDefaultMicTravelUs = 2915;   // 1 m at 343 m/s
+        impact += qint64(latencyIn[QStringLiteral("audioDevice")].toDouble(0))
+                - kDefaultMicTravelUs;
+    }
     if (impact <= 0) {
         for (const QJsonValue& pv : analysisIn[QStringLiteral("phases")].toArray())
             if (pv.toObject()[QStringLiteral("phase")].toInt() == int(Phase::Impact))

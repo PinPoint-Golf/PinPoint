@@ -268,6 +268,11 @@ QtObject {
           actions: "mic select default usb webcam rescan",
           itemId: "" },
 
+        { panelIndex: 5, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Position"),
+          label: qsTr("Distance to hitting strip"),       subtitle: qsTr("Sound travel over this distance is subtracted when timing impact"),
+          actions: "mic distance meters latency delay travel speed of sound impact timing",
+          itemId: "setting_micDistance" },
+
         { panelIndex: 5, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Calibration"),
           label: qsTr("Microphone sensitivity"),          subtitle: qsTr("Tune the acoustic detection threshold so every shot is detected"),
           actions: "calibrate sensitivity threshold level meter tune",

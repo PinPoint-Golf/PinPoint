@@ -422,10 +422,20 @@ int main(int argc, char *argv[])
     // arbiter like the IMU path). TranscriptionController::impactDetected is
     // emitted on the AUDIO thread with est_t* already computed; the
     // &shotController context makes this a queued hop onto the GUI thread.
-    controller.setAcousticLatencyUs(appSettings.audioDeviceLatencyUs());
+    // Total back-date = residual device latency + mic-distance acoustic travel
+    // (both physical; the old single 20 ms fudge over-corrected by 13-22 ms on
+    // the truth corpus — see AppSettings::micDistanceM).
+    const auto acousticBackdateUs = [&appSettings] {
+        return appSettings.audioDeviceLatencyUs() + appSettings.micTravelUs();
+    };
+    controller.setAcousticLatencyUs(acousticBackdateUs());
     QObject::connect(&appSettings, &AppSettings::audioDeviceLatencyUsChanged,
-                     &controller, [&controller, &appSettings] {
-        controller.setAcousticLatencyUs(appSettings.audioDeviceLatencyUs());
+                     &controller, [&controller, acousticBackdateUs] {
+        controller.setAcousticLatencyUs(acousticBackdateUs());
+    });
+    QObject::connect(&appSettings, &AppSettings::micDistanceMChanged,
+                     &controller, [&controller, acousticBackdateUs] {
+        controller.setAcousticLatencyUs(acousticBackdateUs());
     });
     // Microphone selection + acoustic sensitivity — pushed at startup and kept
     // live. setInputDevice before the first capture so the saved device is used.

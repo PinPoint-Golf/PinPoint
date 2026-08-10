@@ -43,10 +43,12 @@ class AcousticShotDetector : public QObject
 public:
     explicit AcousticShotDetector(QObject *parent = nullptr);
 
-    // Fixed capture-chain delay between a sound reaching the microphone and
-    // its buffer arriving here (device + driver period). Atomic — set from
-    // the GUI thread (AppSettings) while onAudioData reads it on the audio
-    // thread. A measured-ish constant until P4 auto-calibration.
+    // Total back-date between the IMPACT and its buffer arriving here: residual
+    // device latency (~0 for a wired mic — the sample-counting reconstruction
+    // already removes buffer-period latency) plus the hitting-strip -> mic
+    // acoustic travel (AppSettings::micTravelUs; main.cpp wires the sum).
+    // Atomic — set from the GUI thread while onAudioData reads it on the
+    // audio thread.
     void setDeviceLatencyUs(qint64 us) { m_deviceLatencyUs.store(us, std::memory_order_relaxed); }
 
     // Candidate trigger threshold = factor × noise floor; higher = less
@@ -79,7 +81,7 @@ signals:
 private:
     pinpoint::OnsetDetector m_detector;
     QAudioFormat            m_format;       // last-seen; reset() on change
-    std::atomic<qint64>     m_deviceLatencyUs { 20'000 };
+    std::atomic<qint64>     m_deviceLatencyUs { 0 };
     std::atomic<float>      m_thresholdFactor { 8.0f };
     std::atomic<float>      m_minLevel        { 0.0f };
 };

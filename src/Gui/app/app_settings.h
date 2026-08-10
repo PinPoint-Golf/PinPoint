@@ -29,6 +29,7 @@
 #include <QUrl>
 #include <QRegularExpression>
 #include <atomic>
+#include <cmath>
 #include <memory>
 #include "pp_settings.h"
 #include "version.h"
@@ -148,6 +149,7 @@ class AppSettings : public QObject
     Q_PROPERTY(QString swingDetectionSensitivity   READ swingDetectionSensitivity   WRITE setSwingDetectionSensitivity   NOTIFY swingDetectionSensitivityChanged)
     Q_PROPERTY(QString motionCaptureQuality        READ motionCaptureQuality        WRITE setMotionCaptureQuality        NOTIFY motionCaptureQualityChanged)
     Q_PROPERTY(int     audioDeviceLatencyUs        READ audioDeviceLatencyUs        WRITE setAudioDeviceLatencyUs        NOTIFY audioDeviceLatencyUsChanged)
+    Q_PROPERTY(double  micDistanceM                READ micDistanceM                WRITE setMicDistanceM                NOTIFY micDistanceMChanged)
     Q_PROPERTY(QString audioInputDevice            READ audioInputDevice            WRITE setAudioInputDevice            NOTIFY audioInputDeviceChanged)
     Q_PROPERTY(bool    acousticShotDetectionEnabled READ acousticShotDetectionEnabled WRITE setAcousticShotDetectionEnabled NOTIFY acousticShotDetectionEnabledChanged)
     Q_PROPERTY(double  acousticSensitivity         READ acousticSensitivity         WRITE setAcousticSensitivity         NOTIFY acousticSensitivityChanged)
@@ -396,9 +398,19 @@ public:
             m_motionCaptureQuality = QStringLiteral("Medium");
             ppSettings().setValue(QStringLiteral("General/motionCaptureQuality"), m_motionCaptureQuality);
         }
-        // Mic capture-chain delay used to back-date acoustic shot onsets
-        // (shot detection P2); a fixed estimate until P4 auto-calibration.
-        m_audioDeviceLatencyUs      = ppSettings().value(QStringLiteral("General/audioDeviceLatencyUs"),      20000).toInt();
+        // Acoustic back-dating split into its two physical parts (the old single
+        // "General/audioDeviceLatencyUs" fudge measured 13-22 ms of over-
+        // correction on the 2026-08-10 truth corpus — its stored value is
+        // deliberately ignored via the new key):
+        //   - residual device latency between a sample being captured and its
+        //     buffer arriving (the sample-counting reconstruction in
+        //     onset_detector.h already removes buffer-period latency, so this
+        //     is ~0 for a WIRED microphone — Bluetooth codec pipelines are
+        //     unsupported for shot detection);
+        //   - acoustic travel from the hitting strip to the microphone,
+        //     derived from micDistanceM at the speed of sound (micTravelUs()).
+        m_audioDeviceLatencyUs      = ppSettings().value(QStringLiteral("General/audioResidualLatencyUs"),    0).toInt();
+        m_micDistanceM              = ppSettings().value(QStringLiteral("General/micDistanceM"),              1.0).toDouble();
         m_audioInputDevice          = ppSettings().value(QStringLiteral("General/audioInputDevice"),          QStringLiteral("")).toString();
         m_acousticShotDetectionEnabled = ppSettings().value(QStringLiteral("General/acousticShotDetectionEnabled"), true).toBool();
         m_acousticSensitivity       = ppSettings().value(QStringLiteral("General/acousticSensitivity"),       0.5).toDouble();
@@ -530,6 +542,11 @@ public:
     QString swingDetectionSensitivity() const { return m_swingDetectionSensitivity; }
     QString motionCaptureQuality()      const { return m_motionCaptureQuality; }
     int     audioDeviceLatencyUs()      const { return m_audioDeviceLatencyUs; }
+    double  micDistanceM()              const { return m_micDistanceM; }
+    // Acoustic travel time hitting-strip -> microphone at ~343 m/s (room
+    // temperature; +/-10 degC moves this ~0.1 ms at studio distances). The
+    // capture-side back-date and swing.json's latencyUs.micTravel both use it.
+    qint64  micTravelUs()               const { return qint64(std::llround(m_micDistanceM / 343.0 * 1e6)); }
     QString audioInputDevice()          const { return m_audioInputDevice; }
     bool    acousticShotDetectionEnabled() const { return m_acousticShotDetectionEnabled; }
     double  acousticSensitivity()       const { return m_acousticSensitivity; }
@@ -886,8 +903,16 @@ public:
     {
         if (m_audioDeviceLatencyUs == v) return;
         m_audioDeviceLatencyUs = v;
-        ppSettings().setValue(QStringLiteral("General/audioDeviceLatencyUs"), v);
+        ppSettings().setValue(QStringLiteral("General/audioResidualLatencyUs"), v);
         emit audioDeviceLatencyUsChanged();
+    }
+
+    void setMicDistanceM(double v)
+    {
+        if (qFuzzyCompare(m_micDistanceM, v)) return;
+        m_micDistanceM = v;
+        ppSettings().setValue(QStringLiteral("General/micDistanceM"), v);
+        emit micDistanceMChanged();
     }
 
     void setAudioInputDevice(const QString &v)
@@ -1488,6 +1513,7 @@ signals:
     void swingDetectionSensitivityChanged();
     void motionCaptureQualityChanged();
     void audioDeviceLatencyUsChanged();
+    void micDistanceMChanged();
     void audioInputDeviceChanged();
     void acousticShotDetectionEnabledChanged();
     void acousticSensitivityChanged();
@@ -1594,7 +1620,8 @@ private:
     bool    m_autoDetectSwing           = true;    // ON since the P3 arbiter
     QString m_swingDetectionSensitivity = QStringLiteral("Medium");
     QString m_motionCaptureQuality      = QStringLiteral("Medium");
-    int     m_audioDeviceLatencyUs      = 20000;
+    int     m_audioDeviceLatencyUs      = 0;
+    double  m_micDistanceM              = 1.0;
     QString m_audioInputDevice;
     bool    m_acousticShotDetectionEnabled = true;
     double  m_acousticSensitivity       = 0.5;   // 0 = least sensitive, 1 = most

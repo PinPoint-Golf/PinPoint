@@ -264,7 +264,7 @@ Item {
                 text: qsTr("Microphone")
             }
             Text {
-                text: qsTr("Select the audio input used for acoustic shot detection, then calibrate its sensitivity so every struck ball registers. Voice control uses the same microphone and is unaffected by the toggle below.")
+                text: qsTr("Select the audio input used for acoustic shot detection, then calibrate its sensitivity so every struck ball registers. Use a wired microphone — Bluetooth audio buffering delays the strike sound unpredictably and degrades impact timing. Voice control uses the same microphone and is unaffected by the toggle below.")
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzBody2
                 font.weight:    Theme.fontBodyWeight
@@ -368,6 +368,82 @@ Item {
                     font.italic:    true
                     color:          Theme.colorText3
                     Layout.fillWidth: true
+                }
+            }
+
+            PpDivider { orientation: Qt.Horizontal; Layout.fillWidth: true }
+
+            // ── Microphone distance ────────────────────────────────────────
+            // Impact is timed by back-dating the strike sound; the sound takes
+            // ~2.9 ms/m to reach the microphone, so the distance to the hitting
+            // strip is part of the timing model (AppSettings::micTravelUs).
+            ColumnLayout {
+                objectName: "setting_micDistance"
+                Layout.fillWidth: true
+                spacing: Theme.sp(4)
+                property bool searchHighlight: false
+                Rectangle { x: -Theme.sp(6); y: -Theme.sp(6); width: parent.width + Theme.sp(12); height: parent.height + Theme.sp(12); color: Theme.colorAccentLight; radius: Theme.radius; opacity: parent.searchHighlight ? 1.0 : 0.0; z: -1; Behavior on opacity { NumberAnimation { duration: Theme.durationFast } } }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.sp(3)
+                        Text {
+                            text:           qsTr("Distance to hitting strip")
+                            font.family:    Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody
+                            color:          Theme.colorText
+                        }
+                        Text {
+                            text:           qsTr("Sound travel over this distance is subtracted when timing impact — a rough measure is fine (±0.5 m is ±1.5 ms)")
+                            font.family:    Theme.fontData
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                            wrapMode:       Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Text {
+                        text:           appSettings.micDistanceM.toFixed(1) + qsTr(" m")
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                        Layout.alignment: Qt.AlignVCenter
+                    }
+                }
+
+                Slider {
+                    id: distSlider
+                    Layout.fillWidth: true
+                    from: 0.0; to: 3.0; stepSize: 0.1
+                    value: appSettings.micDistanceM
+                    onMoved: appSettings.micDistanceM = value
+
+                    background: Rectangle {
+                        x: distSlider.leftPadding
+                        y: distSlider.topPadding + distSlider.availableHeight / 2 - height / 2
+                        width:  distSlider.availableWidth
+                        height: Theme.sp(3)
+                        radius: Theme.sp(2)
+                        color:  Theme.colorBg3
+                        Rectangle {
+                            width:  distSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: parent.radius
+                            color:  Theme.colorAccent
+                        }
+                    }
+                    handle: Rectangle {
+                        x: distSlider.leftPadding + distSlider.visualPosition * (distSlider.availableWidth - width)
+                        y: distSlider.topPadding + distSlider.availableHeight / 2 - height / 2
+                        width:  Theme.sp(14)
+                        height: Theme.sp(14)
+                        radius: Theme.sp(7)
+                        color:  Theme.colorAccent
+                        border.width: 1
+                        border.color: Theme.colorBorderStrong
+                    }
                 }
             }
 

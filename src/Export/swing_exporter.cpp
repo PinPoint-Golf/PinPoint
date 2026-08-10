@@ -776,6 +776,8 @@ QJsonObject SwingExporter::captureBlock(const SwingExportJob& job)
         {QStringLiteral("latencyUs"), QJsonObject{
             {QStringLiteral("imuBle"),      static_cast<qint64>(job.imuBleLatencyUs)},
             {QStringLiteral("audioDevice"), job.audioDeviceLatencyUs},
+            // Presence marks a travel-corrected anchor (see SwingExportJob).
+            {QStringLiteral("micTravel"),   static_cast<qint64>(job.micTravelUs)},
         }},
         {QStringLiteral("host"), QJsonObject{
             {QStringLiteral("app"),         QStringLiteral("PinPointStudio")},

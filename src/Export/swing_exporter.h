@@ -164,7 +164,12 @@ struct SwingExportJob {
     QString swingDetectionSensitivity;   // "Low"/"Medium"/"High"
     QString motionCaptureQuality;        // "Medium"/"High" — offline pose model tier
     qint64  imuBleLatencyUs     = 0;     // detector back-dating constants at capture
-    int     audioDeviceLatencyUs = 0;
+    int     audioDeviceLatencyUs = 0;    // residual device latency (post mic-distance split)
+    // Acoustic travel hitting-strip -> mic subtracted from the anchor at capture
+    // (AppSettings::micTravelUs). Persisted as latencyUs.micTravel; its PRESENCE
+    // tells SwingReanalyzer the anchor is already travel-corrected — absent =
+    // legacy capture whose anchor carries the old 20 ms over-correction.
+    qint64  micTravelUs         = 0;
     SwingHostInfo host;
 
     QString codec = QStringLiteral("h264");  // AppSettings videoCodec -> factory key
