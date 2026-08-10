@@ -574,6 +574,7 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
     // fin0/dsEnd deliberately untouched: dsEnd is the motion-settle into the
     // finish hold, a legitimate "finish begins"; it is top that invaded its
     // neighborhood, not vice versa.
+    int reseedBs0 = -1;   // pin-gated onset-reseed candidate (a fired repair may set it)
     if (cfg.topRepairEnabled && impactFrame >= 0) {
         const int minDs = int(std::lround(double(cfg.topRepairMinDownswingUs) * 1e-6 * fps));
         const int maxDs = int(std::lround(double(cfg.topRepairMaxDownswingUs) * 1e-6 * fps));
@@ -591,36 +592,34 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
                 for (int f = rLo; f <= rHi; ++f) if (spdS[f] < spdS[amin]) amin = f;
                 m.topPreRepair = top;
                 top = amin;
-                // Onset reseed (dark: topRepair.onsetReseed). In collapse mode
-                // bs0 is the mis-picked DOWNSWING run start, after the repaired
-                // top — the A1/A2 walk-back below parks at the top dwell and A3
-                // manufactures an Address at the near edge (impact − bsMin, the
-                // 0.549 s pin). Reseed bs0 to the backswing run the two-longest
-                // ranking lost: the latest-starting (post-bridge, post-gate)
-                // run at/before top'. Stage A (A1/A2, the no-return veto, the
-                // A3 rail) then runs unchanged from a TRUE run start, keeping
-                // the veto's [onset, bs0 − gap] horizon non-degenerate.
-                // Reseeding straight to the sub-swLow boundary instead leaves
-                // the veto windowless (onset == bs0), and on real capture the
-                // lerped-pose speed floor (2–4 px/f through every fidget
-                // settle) walks past the takeaway into deep stillness — the
-                // near-edge pin just trades for the far-edge one (measured:
-                // 8/15 repaired swings at exactly impact − 1.6 s). The signal
-                // boundary stays as the fallback for a sub-swSpd creep
-                // backswing that never formed a run. bs0 < top' (merged-run
-                // collapse) keeps the ranking's bs0: the walk-back already
-                // starts from pre-top motion there.
+                // Onset-reseed CANDIDATE (dark: topRepair.onsetReseed). In
+                // collapse mode bs0 is the mis-picked DOWNSWING run start,
+                // after the repaired top — the Stage A walk-back below parks
+                // at the top dwell and A3 manufactures an Address at the near
+                // edge (impact − bsMin, the 0.549 s pin). The candidate is the
+                // backswing run the two-longest ranking lost: the
+                // latest-starting (post-bridge, post-gate) run at/before top';
+                // fallback for a sub-swSpd creep backswing that never formed a
+                // run is the last sub-swLow → rising boundary before top'.
+                // Stage A only SWITCHES to the candidate when the walk-back
+                // from the ranking's bs0 actually violates the A3 near edge
+                // (pin-gated, below) — a repaired swing whose onset the frozen
+                // A2/veto machinery already resolved is never touched
+                // (measured: an unconditional reseed regressed 2 dark-sane
+                // swings onto the FAR edge). bs0 < top' (merged-run collapse)
+                // never yields a candidate: the walk-back already starts from
+                // pre-top motion there.
                 if (cfg.topRepairOnsetReseed && cfg.swLow > 0.0 && bs0 > top) {
                     int runStart = -1;
                     for (const auto& r : runs)
                         if (r.first <= top && r.first > runStart) runStart = r.first;
                     if (runStart >= 0) {
-                        bs0 = runStart;
+                        reseedBs0 = runStart;
                     } else {
                         int b = top;
                         while (b > 0 && spdS[b] <  cfg.swLow) --b;
                         while (b > 0 && spdS[b] >= cfg.swLow) --b;
-                        bs0 = b;
+                        reseedBs0 = b;
                     }
                 }
             }
@@ -650,21 +649,26 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
     // onset stays at bs0, reproducing the pre-Stage-A boundary bit-for-bit.
     int onset = bs0;
     if (cfg.swLow > 0.0) {
-        // A1: walk bs0 back to the first smoothed-speed frame below swLow.
-        int onsetSpd = bs0;
+        // The walk-back runs as a function of its start so the pin-gated
+        // reseed below can re-run it from the recovered backswing run: A1 +
+        // A2 + the no-return veto, everything except the A3 rail. Returns
+        // {onset, noReturnBoundary}.
+        auto walkBack = [&](int b0) -> std::pair<int, int> {
+        // A1: walk b0 back to the first smoothed-speed frame below swLow.
+        int onsetSpd = b0;
         while (onsetSpd > 0 && spdS[onsetSpd] >= cfg.swLow) --onsetSpd;
-        onset = onsetSpd;
+        int o = onsetSpd;
         // A2: φ-onset witness — the lead forearm rotates before the grip moves.
         // Smooth wrap-aware |Δφ| the same way as speed (median5 + gauss2) and
-        // walk back from the ORIGINAL bs0 while it stays above threshold.
+        // walk back from the ORIGINAL b0 while it stays above threshold.
         if (phiSmoothed && cfg.phiOnsetDegPerFrame > 0.0 && int(phiSmoothed->size()) == nf) {
             const std::vector<double>& phi = *phiSmoothed;
             std::vector<double> dphi(nf, 0.0);
             for (int f = 1; f < nf; ++f) dphi[f] = std::abs(circWrap(phi[f] - phi[f - 1]));
             const std::vector<double> dphiS = gaussianFilter1d(medianFilter1d(dphi, 5), 2.0);
-            int onsetPhi = bs0;
+            int onsetPhi = b0;
             while (onsetPhi > 0 && dphiS[onsetPhi] > cfg.phiOnsetDegPerFrame) --onsetPhi;
-            onset = std::min(onset, onsetPhi);
+            o = std::min(o, onsetPhi);
         }
         // No-return veto (fidget-proofing). A1/A2 walk back through ANY
         // sub-threshold motion — and on real capture the lerped-pose grip keeps
@@ -679,7 +683,7 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
         // settles into an address DISPLACED from the pre-fidget stance, and true
         // grip rest never happens on the lerped signal (both premises of the
         // retired anchor-box veto were unsatisfiable on the 17-swing truth set).
-        // The scan horizon is bs0 — the selected (post-bridging) run start, the
+        // The scan horizon is b0 — the selected (post-bridging) run start, the
         // takeaway-run candidate — so the revisit test never sees the top dwell
         // (which revisits itself); onsetRunBridgeFrames is what makes bs0 the
         // true takeaway run on fragmented backswings, and the A3 clamp below is
@@ -688,21 +692,25 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
         int noReturnBoundary = -1;   // → m.onsetFloor (the last settle) when the scan fires
         if (cfg.onsetReturnBoxPx > 0.0) {
             const int gap = std::max(1, cfg.onsetReturnGapFrames);
-            if (bs0 - gap > onset) {
+            if (b0 - gap > o) {
                 // Smoothed grip position (gauss(median5), the spd/joint convention).
                 const std::vector<double> gxS = gaussianFilter1d(medianFilter1d(gx, 5), 2.0);
                 const std::vector<double> gyS = gaussianFilter1d(medianFilter1d(gy, 5), 2.0);
                 int boundary = -1;
-                for (int r = onset; r <= bs0 - gap; ++r) {
+                for (int r = o; r <= b0 - gap; ++r) {
                     double mn = std::numeric_limits<double>::infinity();
-                    for (int f = r + gap; f <= bs0; ++f)
+                    for (int f = r + gap; f <= b0; ++f)
                         mn = std::min(mn, std::hypot(gxS[f] - gxS[r], gyS[f] - gyS[r]));
                     if (mn < cfg.onsetReturnBoxPx) boundary = r;
                 }
                 noReturnBoundary = boundary;
-                if (boundary > onset) onset = boundary;
+                if (boundary > o) o = boundary;
             }
         }
+        return {o, noReturnBoundary};
+        };
+        auto wb = walkBack(bs0);
+        onset = wb.first;
         // A3: impact-anchored clamp (the safety rail). Only when a real impact
         // frame was supplied — a hands-derived impf must not clamp its own
         // onset. Violations pin to the violated edge.
@@ -711,6 +719,16 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
             const int framesMax = int(std::lround(double(cfg.bsMaxBeforeImpactUs) * 1e-6 * fps));
             const int loEdge = std::max(0, impf - framesMax);
             const int hiEdge = std::max(0, impf - framesMin);
+            // Pin-gated onset reseed: the walk-back from the collapsed
+            // ranking's bs0 stalled at the top dwell and would clamp DOWN to
+            // the near edge — the manufactured-Address signature (Address ==
+            // Takeaway at exactly impact − bsMin). Only then re-run from the
+            // recovered backswing start; a repaired swing the A2/veto
+            // machinery already resolved below the edge keeps its onset.
+            if (reseedBs0 >= 0 && onset > hiEdge) {
+                wb = walkBack(reseedBs0);
+                onset = wb.first;
+            }
             onset = std::clamp(onset, loEdge, hiEdge);
         }
         // Publish the no-return boundary as the address-walk-back floor
@@ -718,7 +736,7 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
         // pushed the onset EARLIER than the boundary the floor follows the
         // onset (a floor above the walk-back start would be unreachable);
         // when A3 pushed it later, the boundary — the last settle — stands.
-        if (noReturnBoundary >= 0) m.onsetFloor = std::min(noReturnBoundary, onset);
+        if (wb.second >= 0) m.onsetFloor = std::min(wb.second, onset);
     }
 
     m.phase.resize(nf);

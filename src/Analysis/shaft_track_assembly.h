@@ -266,16 +266,17 @@ struct ShaftV3Config {
     // AFTER the repaired top, so the A1/A2 walk-back parks at the top dwell and
     // the A3 clamp manufactures an Address at the near edge (impact − bsMin:
     // the exact-0.549 s pin, B = top − addr 0.17–0.25 s vs real ≈ 0.75 s
-    // backswings, tempo ratio 0.5–0.8 on the 5 repaired corpus swings). With
-    // this on, a fired repair whose bs0 sits after the repaired top reseeds
-    // bs0 to the latest-starting run at/before top' — the backswing run the
-    // two-longest ranking lost — so Stage A (A1/A2, the no-return veto with
-    // its bs0 scan horizon, the A3 rail) runs unchanged from a true run start
-    // (the veto needs bs0 − onset > gap to fire; a run start preserves that).
-    // Fallback for a sub-swSpd creep backswing that never formed a run: the
-    // last sub-swLow → rising boundary before top'. bs0 < top' (merged-run
-    // collapse) keeps the ranking's bs0 — the walk-back already starts from
-    // pre-top motion there.
+    // backswings, tempo ratio 0.5–0.8 on the repaired corpus swings). With
+    // this on and a fired repair whose bs0 sits after the repaired top, Stage
+    // A re-runs the walk-back from the backswing run the two-longest ranking
+    // lost (latest-starting run at/before top'; signal-boundary fallback for a
+    // sub-swSpd creep backswing) — but ONLY when the walk-back from the
+    // ranking's bs0 violates the A3 near edge (the manufactured-Address
+    // signature). Pin-gating is what makes the reseed safe: an unconditional
+    // reseed measurably regressed dark-sane repaired swings onto the FAR edge
+    // (the deep pre-fidget walk-back the veto exists to stop, minus the
+    // veto's downswing revisit horizon). bs0 < top' (merged-run collapse)
+    // never reseeds — the walk-back already starts from pre-top motion.
     bool    topRepairOnsetReseed    = false;
     // C2 body ROI
     double  bodyMargin = 34.0;       // px inflation of the body polygon
