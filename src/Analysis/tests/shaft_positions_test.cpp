@@ -291,6 +291,46 @@ int main()
               "active mask + floor: two-tier fallback still lands on the floor");
     }
 
+    std::printf("=== p6LastCrossing: fold dip after a shallow top ===\n");
+    {
+        // The 0703_0008/0009 shape: the top-of-swing shaft sits just above the
+        // elevation fold, dips through horizontal shortly after P4 (the FIRST
+        // transit), then the true delivery parallel arrives near impact (the
+        // LAST). Elevation profile over the downswing window [60, 110]:
+        // +20° at top → −60° by f=80 (first transit ≈ f=65) → back up through
+        // 0 at f=95 (the delivery transit) → +40° at impact.
+        const std::vector<int64_t> t = times();
+        std::vector<double> th(kNf, 80.0);
+        for (int f = 0; f < kNf; ++f) {
+            if (f < kTopF) th[f] = 80.0 - 60.0 * double(f) / double(kTopF);   // settle to +20 at top
+            else if (f <= 80)  th[f] = 20.0 - 80.0 * double(f - 60) / 20.0;   // dip: 0-transit at f=65
+            else if (f <= 110) th[f] = -60.0 + 100.0 * double(f - 80) / 30.0; // rise: 0-transit at f=98
+        }
+        PositionsConfig cfg;                       // default: first-crossing (dark)
+        const std::vector<PTime> first =
+            locatePTimes(t, th, {}, kAF, kTopF, kImpF, kFinF, cfg);
+        cfg.p6LastCrossing = true;
+        const std::vector<PTime> last =
+            locatePTimes(t, th, {}, kAF, kTopF, kImpF, kFinF, cfg);
+        auto p6Of = [](const std::vector<PTime>& v) -> int64_t {
+            for (const PTime& p : v) if (p.p == 6) return p.tUs;
+            return -1;
+        };
+        const int64_t tFirst = p6Of(first), tLast = p6Of(last);
+        check(tFirst >= 0 && std::llabs(tFirst - 65 * kDt) <= kDt,
+              "default keeps the legacy first transit (~f65) — dark contract");
+        check(tLast >= 0 && std::llabs(tLast - 98 * kDt) <= kDt,
+              "p6LastCrossing picks the delivery transit (~f98)");
+
+        // Single-crossing window: the two policies must return the identical
+        // instant (the standard full-swing profile crosses once in (P4,P7)).
+        const std::vector<double> mono = buildTheta(true);
+        PositionsConfig cOff, cOn; cOn.p6LastCrossing = true;
+        const int64_t a = p6Of(locatePTimes(t, mono, {}, kAF, kTopF, kImpF, kFinF, cOff));
+        const int64_t b = p6Of(locatePTimes(t, mono, {}, kAF, kTopF, kImpF, kFinF, cOn));
+        check(a >= 0 && a == b, "single transit: last == first, byte-identical P6");
+    }
+
     std::printf("\n%s (%d failures)\n", g_fail ? "FAIL" : "PASS", g_fail);
     return g_fail;
 }

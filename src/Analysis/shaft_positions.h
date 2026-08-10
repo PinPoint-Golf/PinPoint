@@ -133,6 +133,18 @@ struct PositionsConfig {
     // activityQuietSigma, event_refine.h) — the two-consumer contract widened when
     // EventRefine landed (swing_analysis.h BallSample2D.clubActivity).
     double p1ClubQuietSigma = tuned::positions::kP1ClubQuietSigma;
+    // P6 = the LAST horizontal crossing in (P4, P7), not the first. The
+    // elevation fold treats θ=0 and θ=180 as the same "parallel", and on swings
+    // whose top-of-swing shaft sits just above the fold (θ(top) ≈ 20°) the
+    // shaft dips through θ≈0 a dozen frames after P4 — the first crossing —
+    // while the true delivery parallel (θ=180, ~4 frames before impact) is the
+    // last. "Delivery" is definitionally the final parallel before impact, so
+    // last-crossing is the physical reading; a single-crossing window is
+    // unchanged (last == first). Dark until the S2 default-flip commit
+    // (2026-08-10 gate: the wedge-corrected long path exposed the first-pick
+    // on 0703 swings 0008/0009, −140 ms; p2/p8 windows keep first-crossing —
+    // correct for their geometry).
+    bool   p6LastCrossing = false;
     PositionFitConfig fit;          // B2 milestone fit (dark until fit.fitEnabled flips)
 };
 
@@ -200,6 +212,67 @@ inline Crossing findHorizontalCrossing(const std::vector<int64_t>& tUs,
     // Steepest zero-straddling consecutive-valid pair within [fromA, toA] — the
     // genuine transit through horizontal (noise crossings are shallower), then
     // interpolate the zero sub-frame.
+    double  bestSlope = -1.0;
+    int64_t bestT     = 0;
+    bool    have      = false;
+    for (int a = fromA; a < toA; ++a) {
+        const double ea = elevationDeg(angleDeg[vi[a]]);
+        const double eb = elevationDeg(angleDeg[vi[a + 1]]);
+        const bool straddle = (ea >= 0.0 && eb < 0.0) || (ea <= 0.0 && eb > 0.0);
+        if (!straddle) continue;
+        const double slope = std::abs(ea - eb);
+        if (slope <= bestSlope) continue;
+        bestSlope = slope;
+        const double frac = (ea == eb) ? 0.0 : ea / (ea - eb);   // ∈ [0,1]
+        const int64_t ta = tUs[vi[a]], tb = tUs[vi[a + 1]];
+        bestT = ta + int64_t(std::llround(frac * double(tb - ta)));
+        have = true;
+    }
+    if (!have) { out.found = true; out.tUs = tUs[vi[toA]]; return out; }   // numerical fallback
+    out.found = true;
+    out.tUs   = bestT;
+    return out;
+}
+
+// The LAST hysteresis-confirmed horizontal crossing over [i0, i1] — the same
+// state machine as findHorizontalCrossing, but it re-arms and keeps scanning
+// after each transition instead of stopping at the first, then refines the
+// final transition's span. On a single-crossing window the two functions
+// return the identical instant. Self-contained sibling (the first-crossing
+// body above is frozen under its unit pins — deliberately not refactored).
+inline Crossing findLastHorizontalCrossing(const std::vector<int64_t>& tUs,
+                                           const std::vector<double>& angleDeg,
+                                           int i0, int i1, double hystDeg)
+{
+    Crossing out;
+    const int n = int(angleDeg.size());
+    i0 = std::max(0, i0);
+    i1 = std::min(n - 1, i1);
+    if (i1 <= i0) return out;
+
+    std::vector<int> vi;
+    for (int i = i0; i <= i1; ++i)
+        if (!std::isnan(angleDeg[i])) vi.push_back(i);
+    if (int(vi.size()) < 2) return out;
+
+    // Hysteresis state machine, run to the END of the window: every armed
+    // +→− / −→+ transition overwrites (fromA, toA), so the survivor is the
+    // last genuine transit through horizontal.
+    int armedSign = 0, armA = -1, fromA = -1, toA = -1;
+    for (int a = 0; a < int(vi.size()); ++a) {
+        const double e = elevationDeg(angleDeg[vi[a]]);
+        if (e > hystDeg) {
+            if (armedSign < 0) { fromA = armA; toA = a; }
+            armedSign = 1; armA = a;
+        } else if (e < -hystDeg) {
+            if (armedSign > 0) { fromA = armA; toA = a; }
+            armedSign = -1; armA = a;
+        }
+    }
+    if (fromA < 0) return out;   // never armed both sides ⇒ no genuine crossing
+
+    // Steepest zero-straddling pair within the final transition, interpolated
+    // sub-frame — identical refinement to the first-crossing sibling.
     double  bestSlope = -1.0;
     int64_t bestT     = 0;
     bool    have      = false;
@@ -409,9 +482,13 @@ inline std::vector<PTime> locatePTimes(const std::vector<int64_t>& tUs,
     if (inRange(topFrame)) out.push_back({4, tUs[topFrame]});
 
     // P6 — shaft parallel in (P4, P7). Located before P5 (bounds its window).
+    // p6LastCrossing picks the LAST transit (delivery = the final parallel
+    // before impact; the fold's θ≈0 dip just after a shallow top is the first).
     Crossing p6;
     if (inRange(topFrame) && inRange(impactFrame) && impactFrame > topFrame)
-        p6 = findHorizontalCrossing(tUs, thetaDeg, topFrame, impactFrame, hyst);
+        p6 = cfg.p6LastCrossing
+                 ? findLastHorizontalCrossing(tUs, thetaDeg, topFrame, impactFrame, hyst)
+                 : findHorizontalCrossing(tUs, thetaDeg, topFrame, impactFrame, hyst);
 
     // P5 — lead arm parallel in (P4, P6). Needs P6 and a φ signal. Pushed BEFORE
     // P6 so the result stays ordered by p.

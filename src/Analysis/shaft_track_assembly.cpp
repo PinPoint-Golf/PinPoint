@@ -366,6 +366,7 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "positions.p1StillSpeedPx", c.positions.p1StillSpeedPx);
     apply(ov, "positions.p1StillWindow", c.positions.p1StillWindow);
     apply(ov, "positions.p1ClubQuietSigma", c.positions.p1ClubQuietSigma);   // W3 club-quiet gate
+    apply(ov, "positions.p6LastCrossing", c.positions.p6LastCrossing);       // P6 = last transit pre-impact
     // Layer B milestone fit (B2): "positions.*" keys → PositionsConfig::fit.
     apply(ov, "positions.fitEnabled", c.positions.fit.fitEnabled);
     apply(ov, "positions.skipMeasuredConf", c.positions.fit.skipMeasuredConf);
