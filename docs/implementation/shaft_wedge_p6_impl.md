@@ -288,6 +288,49 @@ truth-visible P6s the arm reads 7/11 with every hit ≤4 ms, and both residual
 classes are now isolated, reproducible, and independently fixable. Flip
 decision + the two follow-up defects left to Mark's review.
 
+### Re-validation with the P6 last-crossing fix (2026-08-10, sha f447b03, runs `p6s2\{dark2,armwk2}`)
+
+Mark approved fixing the crossing pick. `positions.p6LastCrossing` (dark, new
+sibling `findLastHorizontalCrossing` — the first-crossing body untouched under
+its pins) makes P6 the LAST horizontal transit in (P4, P7): delivery is
+definitionally the final parallel before impact, and the fold's θ≈0 dip after
+a shallow top is the first. Unit-pinned: legacy-first under the dark default,
+delivery-transit under the key, last==first on single-transit windows.
+
+**armwk2 = armwk params + the key. Result: every truth-labelled P6 lands ≤5 ms.**
+
+| Metric | armwk | **armwk2** |
+|---|---|---|
+| P6 truth check | 7/11 | **11/11 within 0.04 s — errs 0.000–0.005 s** |
+| The original seven phantoms | 3/7 | **7/7** (0703 0003/5/7/8/9/10/11 all ≤5 ms) |
+| Corpus P6 / P5 emissions | 46 / 42 | 46 / **46** |
+| P6 truth-shaft elevation, median | 1.4° | 1.6° (n=11) |
+| P2 / P8 / track.valid / WEDGE stamps | 11/14, 11/11, 58, 172 | identical (positions-only change) |
+| Dark run (`dark2`, pose2-pinned) vs p6s1 dark | — | **61/61 identical** (sans `analysis.timings`) |
+
+**Correction to the Session 2 residual analysis:** all four holdouts were
+fold-picks; the "tracker-internal phase-model collapse" claimed for 0703
+0010/0011 was a misdiagnosis from the trace-side anchors. `swinglab_run` runs
+`ShaftTracker::track` a SECOND time purely to write `trace.jsonl` (after the
+analyzer produced result.json), and that separate invocation re-runs the ball
+pass and can diverge from the shipping run on jitter-sensitive swings — its
+degenerate top/impact (1 frame apart) belonged to the trace re-run, not the
+analyzer's. Proof from the shipping A/B: Top/Impact events byte-identical
+armwk↔armwk2 while P6 moved +140 ms onto truth, and the promoted P5 sits 12
+frames inside what the trace summary calls a 1-frame window. (Trace-vs-run
+anchor divergence is a swinglab diagnostics caveat worth remembering — the
+per-frame θ/tier/wedge columns remain faithful to the code, but anchor-derived
+claims need the RESULT's events, not the trace summary.)
+
+**Gate verdict: PASSED, including the literal criterion** — the original seven
+read 7/7 within 0.04 s, none grossly out; recall 19→46 with 1.6° median
+geometry; P2/P8/validity clean; dark path byte-stable across both new commits.
+Remaining honest gap: 3 of 14 truth swings emit no P6 at all (0611_0009,
+0703_0002, 0705_0001 — recall, not phantoms). Ready for the ONE default-flip
+commit: `evAbsFloor 100`, `raySupportMin 0.4`, `wedge.enabled`,
+`wedge.kinCone`, `positions.p6LastCrossing` together, then the `lab.py
+coverage` re-run for the corrected P6/P5 blocking rows.
+
 ## Traps (each has bitten before)
 
 - **V1 evidence freeze (2026-07-18):** never retune `rayEvMin`, `wE2`,
