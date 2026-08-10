@@ -905,6 +905,174 @@ int main()
         check(a.valid == b.valid, "track.valid identical");
     }
 
+    // ── S2 blur-wedge: the long-path fixture (shaft_wedge_p6_impl.md "Session 2
+    //    spec"). Sharp rotating shaft line through the backswing; a painted
+    //    semi-transparent FAN (5° sector, proximal r ≤ 80 px — too short for the
+    //    frozen 90 px main-sweep line gate, exactly the R5/R8 blur shape) sweeping
+    //    the LONG way 240° → 57° through the downswing. With the wedge dark the
+    //    fan frames are fabricated ShaftMeasured (percentile normalisation);
+    //    with S1 honesty + the wedge, they demote off Measured, the WEDGE tier
+    //    claims them, the DP funds the long path, and locatePTimes pins P6 at
+    //    the single horizontal crossing near truth. ─────────────────────────────
+    std::printf("=== decideTrack S2 blur-wedge: long path + WEDGE tier + P6 ===\n");
+    {
+        const int nf = 170, W = 1000, H = 1000;
+        const double fps = 150.0;
+        const int bs0N = 40, topN = 70, dsN = 77, impN = 109;   // nominal (paint) anchors
+        std::vector<int64_t> tUs(nf);
+        std::vector<double> gx(nf), gy(nf), phiRaw(nf);
+        std::vector<std::vector<cv::Point2d>> joints(nf, std::vector<cv::Point2d>(8));
+        double x = 500, y = 600;
+        // Lead-arm truth: 90° at address, ramp to 160° over the backswing
+        // (chir = +1), hold, ramp to 50° through the downswing (−515°/s — a
+        // realistic delivery arm rate, which the R6 predictor turns into a
+        // >720°/s club rate mid-downswing via the wrist-cock release slope).
+        auto phiOf = [&](int f) -> double {
+            if (f < bs0N) return 90.0;
+            if (f < topN) return 90.0 + 70.0 * double(f - bs0N) / double(topN - bs0N);
+            if (f < dsN)  return 160.0;
+            if (f < impN) return 160.0 - 110.0 * double(f - dsN) / double(impN - dsN);
+            return 50.0;
+        };
+        for (int f = 0; f < nf; ++f) {
+            tUs[f] = int64_t(std::llround(f * 1e6 / fps));
+            if (f >= bs0N && f < topN)     { x -= 4; y -= 9; }   // backswing
+            else if (f >= dsN && f < impN) { x += 3.75; y += 8.44; }  // downswing (returns to start)
+            gx[f] = x; gy[f] = y;
+            phiRaw[f] = phiOf(f);
+            joints[f] = {{450, 300}, {550, 300}, {460, 600}, {540, 600},
+                         {465, 750}, {535, 750}, {470, 900}, {530, 900}};
+        }
+        // Painted club truth: backswing line rotates 98° → 240° (the DP's
+        // backswing sign allows only increase); hold at 240°; downswing fan
+        // sweeps 240° → 57° the LONG way (monotone decreasing — the DP's
+        // downswing sign) with a single horizontal (elevation-zero) transit.
+        auto thetaPaint = [&](int f) -> double {
+            if (f < topN) return 98.0 + 142.0 * double(f - bs0N) / double(topN - bs0N);
+            if (f < dsN)  return 240.0;
+            return 240.0 - 183.0 * double(f - dsN) / double(impN - dsN);
+        };
+        const FrameSource render = [&](int f) -> cv::Mat {
+            if (f < 0 || f >= nf) return cv::Mat();
+            cv::Mat img(H, W, CV_8UC1, cv::Scalar(30));
+            const cv::Point2d g{gx[f], gy[f]};
+            const double th = thetaPaint(f) * kPi / 180.0;
+            if (f >= bs0N && f < dsN) {
+                // sharp bright line, 300 px — a genuine thin-ridge measurement
+                cv::line(img, cv::Point(int(g.x), int(g.y)),
+                         cv::Point(int(g.x + 300 * std::cos(th)), int(g.y + 300 * std::sin(th))),
+                         cv::Scalar(220), 3);
+            } else if (f >= dsN && f < impN) {
+                // semi-transparent fan: 5° sector about θ, proximal only (r ≤ 85)
+                const double h = 2.5 * kPi / 180.0;
+                const std::vector<cv::Point> tri = {
+                    cv::Point(int(g.x), int(g.y)),
+                    cv::Point(int(g.x + 85 * std::cos(th - h)), int(g.y + 85 * std::sin(th - h))),
+                    cv::Point(int(g.x + 85 * std::cos(th + h)), int(g.y + 85 * std::sin(th + h)))};
+                cv::fillConvexPoly(img, tri, cv::Scalar(55));
+            }
+            return img;
+        };
+
+        ShaftV3Config cfgDark;                       // everything at defaults (all keys off)
+        ShaftV3Config cfgS2 = cfgDark;               // S1 honesty + S2 wedge + kinCone arm
+        cfgS2.evAbsFloor    = 20.0;
+        cfgS2.raySupportMin = 0.25;
+        cfgS2.wedge.enabled = true;
+        cfgS2.wedge.kinCone = true;
+
+        ShaftDecideTrace trace;
+        const ShaftTrack2D dark = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
+                                              {}, 1120.0, -1, cfgDark, nullptr, nullptr);
+        const ShaftTrack2D s2   = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
+                                              {}, 1120.0, -1, cfgS2, &trace, nullptr);
+        const bool sizeOk = dark.samples.size() == size_t(nf) && s2.samples.size() == size_t(nf);
+        check(sizeOk, "full per-frame sample coverage both runs");
+
+        const int top = trace.phases.top, impact = trace.phases.impact;
+        auto elev = [&](double thDeg) {
+            const double r = thDeg * kPi / 180.0;
+            return std::atan2(std::sin(r), std::abs(std::cos(r))) * 180.0 / kPi;
+        };
+
+        int nWedge = 0, nWedgeAndMeas = 0, nDarkWedge = 0;
+        int measDownDark = 0, measDownS2 = 0, measBackS2 = 0;
+        for (int f = 0; sizeOk && f < nf; ++f) {
+            const uint16_t fd = dark.samples[size_t(f)].flags, fs = s2.samples[size_t(f)].flags;
+            if (fd & ShaftWedge) ++nDarkWedge;
+            if (fs & ShaftWedge) { ++nWedge; if (fs & ShaftMeasured) ++nWedgeAndMeas; }
+            // fan-painted frames only — the hold line [70,77) is a genuine sharp
+            // measurement and legitimately stays RAY in both arms
+            if (f >= dsN && f < impN) {
+                if (fd & ShaftMeasured) ++measDownDark;
+                if (fs & ShaftMeasured) ++measDownS2;
+            }
+            if (f >= bs0N && f < topN && (fs & ShaftMeasured)) ++measBackS2;
+        }
+        int tier4 = 0;
+        for (size_t i = 0; i < trace.tier.size(); ++i) if (trace.tier[i] == 4) ++tier4;
+        std::printf("  (dark: downswing-meas=%d; s2: wedge=%d tier4=%d downswing-meas=%d "
+                    "backswing-meas=%d tExp=%.4fs top=%d impact=%d)\n",
+                    measDownDark, nWedge, tier4, measDownS2, measBackS2,
+                    trace.wedgeTExpS, top, impact);
+        check(nDarkWedge == 0, "wedge dark ⇒ no ShaftWedge flag anywhere");
+        check(measDownDark > 0, "wedge dark ⇒ fan frames fabricate ShaftMeasured (the defect)");
+        check(nWedge >= 5, "S2: the WEDGE tier claims ≥5 fan frames");
+        check(nWedgeAndMeas == 0, "S2: wedge frames carry ShaftWedge, deliberately NOT ShaftMeasured");
+        check(tier4 == nWedge, "S2: trace tier 4 count matches the emitted flag count");
+        check(measDownS2 == 0, "S2: no mid-downswing frame fabricates ShaftMeasured");
+        check(measBackS2 > 0, "S2: the sharp backswing line stays genuinely Measured");
+        check(trace.wedgeTExpS >= kTExpLoS && trace.wedgeTExpS <= kTExpHiS,
+              "t_exp calibrated from the fan widths, inside the plausibility clamp");
+
+        // Long path: the emitted θ sweeps ≥150° DOWN between top and impact and
+        // transits horizontal exactly once (the wrapped-grid degeneracy broken).
+        double sweep = 0.0; int crossings = 0;
+        for (int f = top + 1; sizeOk && f <= impact; ++f) {
+            const double a = s2.samples[size_t(f - 1)].thetaRad * 180.0 / kPi;
+            const double b = s2.samples[size_t(f)].thetaRad * 180.0 / kPi;
+            double d = std::fmod(b - a + 180.0, 360.0); if (d < 0) d += 360.0; d -= 180.0;
+            sweep += d;
+            if (f > top + 1 && elev(a) < 0.0 && elev(b) >= 0.0) ++crossings;
+            if (f > top + 1 && elev(a) > 0.0 && elev(b) <= 0.0) ++crossings;
+        }
+        std::printf("  (downswing sweep %.0f°, horizontal crossings %d)\n", sweep, crossings);
+        // ≥120°, not the painted 183°: the fan's final ~30° points down THROUGH
+        // the synthetic body box, where the C2 veto (wC2 13/frame) outprices the
+        // wedge well (wWell 6) and the DP holds short — the impact-zone θ there
+        // is reconcilePsi's job (arm witness), not the wedge's. The load-bearing
+        // proofs are the single horizontal transit and the P6 pin below, both of
+        // which live ~90° before that sector. (The dark defect's short path
+        // sweeps ~100° the WRONG way with no transit at all.)
+        check(sweep <= -120.0, "S2: DP takes the long path (≥120° downswing sweep)");
+        check(crossings == 1, "S2: exactly one horizontal transit in (top, impact)");
+
+        // P6 from locatePTimes lands within 40 ms of the painted truth crossing.
+        const double fCross = dsN + (240.0 - 180.0) / 183.0 * double(impN - dsN);
+        const int64_t tTruth = int64_t(std::llround(fCross * 1e6 / fps));
+        bool p6Found = false; int64_t p6Err = -1;
+        for (const ShaftPosition& p : s2.positions)
+            if (p.p == 6) { p6Found = true; p6Err = std::llabs(p.t_us - tTruth); }
+        std::printf("  (P6 err %.1f ms)\n", p6Found ? double(p6Err) * 1e-3 : -1.0);
+        check(p6Found, "S2: locatePTimes pins a P6 in (P4, P7)");
+        check(p6Found && p6Err <= 40000, "S2: P6 within 0.04 s of the painted truth crossing");
+
+        // Never-fabricate: wedge ENABLED but with no absolute floor reference
+        // (evAbsFloor = 0) measures nothing — output field-identical to dark.
+        ShaftV3Config cfgNoFloor = cfgDark;
+        cfgNoFloor.wedge.enabled = true;
+        const ShaftTrack2D nofl = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
+                                              {}, 1120.0, -1, cfgNoFloor, nullptr, nullptr);
+        bool identical = nofl.samples.size() == dark.samples.size() && !dark.samples.empty();
+        for (size_t i = 0; identical && i < dark.samples.size(); ++i) {
+            const ShaftSample2D &sa = dark.samples[i], &sb = nofl.samples[i];
+            if (sa.t_us != sb.t_us || sa.gripPx != sb.gripPx || sa.thetaRad != sb.thetaRad
+                || sa.conf != sb.conf || sa.flags != sb.flags) identical = false;
+        }
+        check(identical && nofl.coverage == dark.coverage && nofl.valid == dark.valid,
+              "wedge on WITHOUT evAbsFloor ⇒ no candidate can exist ⇒ identical to dark");
+    }
+
     std::printf("\n%s (%d failures)\n", g_fail ? "FAIL" : "PASS", g_fail);
     return g_fail;
 }

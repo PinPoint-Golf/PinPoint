@@ -450,6 +450,18 @@ pp_add_test(club_length_fusion_test SOURCES club_length_fusion_test.cpp)
 # (no P8), NaN-φ (no P3/P5), noisy horizontal (fires once). Header-only, no fixture.
 pp_add_test(shaft_positions_test SOURCES shaft_positions_test.cpp)
 
+# S2 R6 minimal double-pendulum club predictor (shaft_kinematics.h): wrist-cock
+# knot pins + interpolation, release sign flip, swingProgress anchors/clamps,
+# branch/chirality, envelope-contains-truth under φ noise, wrap-aware ω̂, and
+# the >720°/s trigger sanity. Pure std header — no Qt, no OpenCV, no fixture.
+pp_add_test(shaft_kinematics_test SOURCES shaft_kinematics_test.cpp NO_QT)
+
+# S2 R8-T1 blur-wedge plateau measure (shaft_wedge.h): centroid ±1.5° +
+# energy weighting, width, flat/no-floor/sub-span ⇒ none (never fabricate),
+# arm-smear veto, dif-only rescue, best-run selection, 0/360 wrap. Pure std
+# header — no Qt, no OpenCV, no fixture.
+pp_add_test(shaft_wedge_test SOURCES shaft_wedge_test.cpp NO_QT)
+
 # Analyzer-layer P-position bridge (positions_ladder.h): p→Phase mapping,
 # insert-if-monotone/abstain-otherwise, duplicate-phase skip (IMU proxy wins),
 # version-4 bump vs byte-identical no-op, refine.positionsLadder dark default.

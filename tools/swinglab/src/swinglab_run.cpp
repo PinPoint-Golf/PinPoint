@@ -481,8 +481,8 @@ int main(int argc, char **argv)
             return result.ok ? 0 : 2;
         }
         // v3.0-r1 per-emitted-frame diagnostics: DP θ, reconciled θ, ψ residual,
-        // tier (0 pred/1 ray/2 band/3 recon), phase.
-        static const char *kTierName[] = { "pred", "ray", "band", "recon" };
+        // tier (0 pred/1 ray/2 band/3 recon/4 wedge), phase.
+        static const char *kTierName[] = { "pred", "ray", "band", "recon", "wedge" };
         // Stage-2 head tiers (clubhead_track HeadTier): off/pred/meas.
         static const char *kHeadTierName[] = { "off", "pred", "meas" };
         for (size_t i = 0; i < trace.frameIdx.size(); ++i) {
@@ -492,7 +492,7 @@ int main(int argc, char **argv)
             QJsonObject line{
                 { "frame", f },
                 { "phase", int(trace.phases.phase[size_t(f)]) },
-                { "tier", (trace.tier[i] >= 0 && trace.tier[i] < 4) ? kTierName[trace.tier[i]] : "?" },
+                { "tier", (trace.tier[i] >= 0 && trace.tier[i] < 5) ? kTierName[trace.tier[i]] : "?" },
                 { "theta_dp", trace.dp.thetaDeg[size_t(f)] },
                 { "theta_out", trace.thetaDeg[i] },
                 { "conf", trace.conf[i] },
@@ -518,6 +518,16 @@ int main(int argc, char **argv)
                 line.insert("dif_p97", trace.difP97[size_t(f)]);
             if (f < int(trace.supAtDp.size()) && trace.supAtDp[size_t(f)] >= 0.0)
                 line.insert("sup_dp", trace.supAtDp[size_t(f)]);
+            // S2 wedge columns (empty unless shaft.wedge.enabled): the R6
+            // predicted club rate, and the measured fan centroid/width where a
+            // candidate was found.
+            if (f < int(trace.wedgeOmegaDegS.size()))
+                line.insert("omega_pred", trace.wedgeOmegaDegS[size_t(f)]);
+            if (f < int(trace.wedgeCentroidDeg.size())
+                && std::isfinite(trace.wedgeCentroidDeg[size_t(f)])) {
+                line.insert("wedge_cen", trace.wedgeCentroidDeg[size_t(f)]);
+                line.insert("wedge_w",   trace.wedgeWidthDeg[size_t(f)]);
+            }
             tf.write(QJsonDocument(line).toJson(QJsonDocument::Compact) + "\n");
         }
         QJsonObject summary{
@@ -539,7 +549,9 @@ int main(int argc, char **argv)
                 { "projLenPx", trace.projLenPx },
                 // A1 golf-prior gate on the ball length measurement:
                 // 0 accepted/not gated, 1 ankle line, 2 feet corridor.
-                { "lPxRejected", trace.lPxRejected } } },
+                { "lPxRejected", trace.lPxRejected },
+                // S2 wedge: calibrated exposure estimate (s; −1 = wedge dark).
+                { "wedgeTExpS", trace.wedgeTExpS } } },
             { "poseFrames", int(pose.frames.size()) },
             { "segConf", seg.conf } };
         tf.write(QJsonDocument(summary).toJson(QJsonDocument::Compact) + "\n");

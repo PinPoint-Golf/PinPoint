@@ -26,6 +26,7 @@
 
 #include "analysis_tuning.h"       // pinpoint::analysis::tuning::apply
 #include "ball_anchor.h"           // medianGripBallLenPx (A1 — L_px before head placement)
+#include "shaft_kinematics.h"      // R6 predictor (swingProgress/phiClubPred/envelope, S2 wedge)
 #include "shaft_position_fit.h"    // sampleClamp/med4/ridgeLineIntegral (shared) + fitPosition (Layer B B-fit)
 
 #include <QElapsedTimer>           // Stage-2 head-pass wall-clock (trace->headMs)
@@ -337,6 +338,21 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     c.head = ClubheadConfig::fromOverrides(ov);
     // Multi-estimator club-length fusion: "fusion.*" keys (club_length_fusion.h).
     c.fusion = LengthFusionConfig::fromOverrides(ov);
+    // R8-T1 blur-wedge (S2): "shaft.wedge.*" keys (shaft_wedge.h).
+    apply(ov, "shaft.wedge.enabled", c.wedge.enabled);
+    apply(ov, "shaft.wedge.omegaMinDegS", c.wedge.omegaMinDegS);
+    apply(ov, "shaft.wedge.tExpBootstrapS", c.wedge.tExpBootstrapS);
+    apply(ov, "shaft.wedge.calOmegaLoDegS", c.wedge.calOmegaLoDegS);
+    apply(ov, "shaft.wedge.kSigma", c.wedge.kSigma);
+    apply(ov, "shaft.wedge.threshScale", c.wedge.threshScale);
+    apply(ov, "shaft.wedge.minSpanDeg", c.wedge.minSpanDeg);
+    apply(ov, "shaft.wedge.proximalRHiFrac", c.wedge.proximalRHiFrac);
+    apply(ov, "shaft.wedge.proximalMinLenPx", c.wedge.proximalMinLenPx);
+    apply(ov, "shaft.wedge.wWell", c.wedge.wWell);
+    apply(ov, "shaft.wedge.conf", c.wedge.conf);
+    apply(ov, "shaft.wedge.dpTolDeg", c.wedge.dpTolDeg);
+    apply(ov, "shaft.wedge.kinCone", c.wedge.kinCone);
+    apply(ov, "shaft.wedge.wKinCone", c.wedge.wKinCone);
     // Layer A line re-registration («snap»): "shaft.snap.*" keys.
     apply(ov, "shaft.snap.enabled", c.snap.enabled);
     apply(ov, "shaft.snap.maxOffsetPx", c.snap.maxOffsetPx);
@@ -1241,6 +1257,36 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         trace->difP97.assign(size_t(nf), -1.0);
         trace->supAtDp.assign(size_t(nf), -1.0);
     }
+    // ── R8 wedge pre-pass (S2): R6 predictor → per-frame trigger + envelope ──
+    // ω̂ and the envelope come from the MEASURED arm + the stereotyped
+    // wrist-cock table only, never from the DP: the trigger must not chase the
+    // tracker's own (possibly wrong) path, and t_exp calibration needs a rate
+    // that exists before the DP runs. Data-gated on |ω̂| (never sessionType,
+    // never phase-only). All of this is inert — and every downstream byte
+    // identical — when cfg.wedge.enabled is false.
+    std::vector<char>           wedgeTrig(size_t(nf), 0);
+    std::vector<double>         omegaPred(size_t(nf), 0.0);
+    std::vector<double>         envCenter(size_t(nf), 0.0), envHalf(size_t(nf), 0.0);
+    std::vector<WedgeCandidate> wedgeCand(static_cast<size_t>(nf));
+    if (cfg.wedge.enabled) {
+        std::vector<double> phiPred(size_t(nf), 0.0);
+        for (int i = 0; i < nf; ++i) {
+            const double s = swingProgress(i, pm.bs0, pm.top, pm.impact, pm.fin0);
+            phiPred[size_t(i)] = phiClubPredDeg(phiS[i], s, chir);
+            const KinEnvelope e = envelope(s, phiS[i], chir, cfg.wedge.kSigma);
+            envCenter[size_t(i)] = e.centerDeg;
+            envHalf[size_t(i)]   = e.halfDeg;
+        }
+        for (int i = 0; i < nf; ++i) {
+            const int a = std::max(0, i - 1), b = std::min(nf - 1, i + 1);
+            const double dt = double(tUs[b] - tUs[a]) * 1e-6;
+            omegaPred[size_t(i)] = omegaPredDegPerS(phiPred[size_t(a)], phiPred[size_t(b)], dt);
+            // Confined to the evidence span: outside it no sweep runs, so no
+            // well can exist and the kinCone must not shape the coast path.
+            wedgeTrig[size_t(i)] = spanLo <= i && i <= spanHi && !std::isnan(gx[i])
+                                   && std::abs(omegaPred[size_t(i)]) >= cfg.wedge.omegaMinDegS;
+        }
+    }
     const auto evidenceBody = [&](int i) {
         if (std::isnan(gx[i])) return;
         if (!(spanLo <= i && i <= spanHi)) return;
@@ -1261,8 +1307,9 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         std::vector<float> normRaw = rawDrown ? std::vector<float>(NS, 0.f) : normScores(sRaw.score);
         std::vector<float> supMax  = rawDrown ? std::vector<float>(NS, 0.f) : sRaw.support;
         std::vector<float> evMax = normRaw;
+        cv::Mat diff;   // scene-median residual, shared with the wedge sweep below
         if (!sceneMed.empty() && sceneMed.size() == g32.size()) {
-            cv::Mat diff; cv::absdiff(g32, sceneMed, diff);
+            cv::absdiff(g32, sceneMed, diff);
             const RidgeResult sDif = ridgeSweep(diff, gx[i], gy[i], gridRad, cfg.ridge, true);
             // The dif channel is a different score population (scene-median
             // residual, brightOnly), so it carries its own floor; < 0 means
@@ -1278,6 +1325,37 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         }
         EV[i] = evMax;
         SUP[i] = std::move(supMax);
+        // R8 wedge: a second, PROXIMAL ridge sweep (raw + dif) restricted to
+        // the R6 envelope's θ bins. Image velocity ∝ ρ, so the innermost shaft
+        // barely blurs — the R5 relaxation (short rHi, short minLenPx) lives in
+        // a DERIVED RidgeConfig; the main sweep above is untouched (frozen).
+        // The fan plateau is measured against the ABSOLUTE evAbsFloor anchor —
+        // both channels drown ⇒ no candidate (never fabricate). Writes only
+        // this frame's wedgeCand slot (parallel-safe).
+        if (wedgeTrig[size_t(i)]) {
+            const int cBin     = int(std::lround(envCenter[size_t(i)] / cfg.grid));
+            const int halfBins = std::min(NS / 2 - 1,
+                                          int(std::lround(envHalf[size_t(i)] / cfg.grid)));
+            std::vector<float> proxRad, proxDeg;
+            proxRad.reserve(size_t(2 * halfBins + 1));
+            proxDeg.reserve(size_t(2 * halfBins + 1));
+            for (int d = -halfBins; d <= halfBins; ++d) {
+                const int k = ((cBin + d) % NS + NS) % NS;
+                proxRad.push_back(gridRad[k]);
+                proxDeg.push_back(gridDeg[k]);
+            }
+            RidgeConfig prox = cfg.ridge;
+            prox.rHi      = float(cfg.wedge.proximalRHiFrac * rmax);
+            prox.minLenPx = float(cfg.wedge.proximalMinLenPx);
+            const RidgeResult pRaw = ridgeSweep(g32, gx[i], gy[i], proxRad, prox, false);
+            std::vector<float> pDif;
+            if (!diff.empty()) {
+                const RidgeResult pd = ridgeSweep(diff, gx[i], gy[i], proxRad, prox, true);
+                pDif = pd.score;
+            }
+            wedgeCand[size_t(i)] = measureWedge(pRaw.score, pDif, proxDeg, phiS[i],
+                                                cfg.armVetoDeg, cfg.evAbsFloor, cfg.wedge);
+        }
         BandMatch bm = frameBandMatch(g8, gx[i], gy[i], rmax, bandsMm, cfg.band);
         if (bm.ok && bm.r0 > 0.0f && bm.r0 <= 260.0f) { band[i] = bm; bandOk[i] = 1; }
         std::vector<float> em, inside;
@@ -1297,6 +1375,64 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         for (int i = 0; i < nf; ++i) evidenceBody(i);
     int heavy = 0;
     for (int i = 0; i < nf; ++i) heavy += heavyMark[size_t(i)];
+
+    // ── R8 wedge injection (serial, pre-DP): t_exp calibration + centroid well
+    //    + kinCone. The frozen frameEmission/viterbiDP/normScores bodies are
+    //    untouched — the wedge only EDITS the already-built emission rows of
+    //    triggered frames, exactly as the band well edits its bin. ───────────
+    double              wedgeTExp = -1.0;
+    std::vector<double> wedgeSigmaDeg(size_t(nf), 0.0);
+    if (cfg.wedge.enabled) {
+        // Exposure from the fan widths themselves: width ≈ ω̂·t_exp, so the
+        // median of width/|ω̂| over confidently-rotating candidate frames is
+        // t_exp — clamped to plausibility, bootstrapped when nothing qualifies.
+        std::vector<double> texps;
+        for (int i = 0; i < nf; ++i)
+            if (wedgeTrig[size_t(i)] && wedgeCand[size_t(i)].ok
+                && std::abs(omegaPred[size_t(i)]) >= cfg.wedge.calOmegaLoDegS)
+                texps.push_back(wedgeCand[size_t(i)].widthDeg / std::abs(omegaPred[size_t(i)]));
+        if (!texps.empty()) {
+            std::nth_element(texps.begin(), texps.begin() + texps.size() / 2, texps.end());
+            wedgeTExp = std::clamp(texps[texps.size() / 2], kTExpLoS, kTExpHiS);
+        } else {
+            wedgeTExp = std::clamp(cfg.wedge.tExpBootstrapS, kTExpLoS, kTExpHiS);
+        }
+        for (int i = 0; i < nf; ++i) {
+            if (!wedgeTrig[size_t(i)]) continue;
+            if (wedgeCand[size_t(i)].ok) {
+                // σ_θ: at least the measured half-width, at least the expected
+                // half-sweep — a narrow plateau under a fast prediction is not
+                // allowed to claim delta-function precision.
+                const double sig = std::max(wedgeCand[size_t(i)].widthDeg * 0.5,
+                                            std::abs(omegaPred[size_t(i)]) * wedgeTExp * 0.5);
+                wedgeSigmaDeg[size_t(i)] = sig;
+                const double cen = wedgeCand[size_t(i)].centroidDeg;
+                for (int k = 0; k < NS; ++k) {
+                    const double d = std::abs(circWrap(gridDeg[k] - cen));
+                    if (d > 3.0 * sig) continue;
+                    const double well = cfg.wedge.wWell * std::exp(-0.5 * (d / sig) * (d / sig));
+                    // Clamped at −wBand: a band lock always outranks a wedge.
+                    emis[i][k] = std::max(float(emis[i][k] - well), float(-cfg.wBand));
+                }
+            }
+            // kinCone (expected arm, S1 finding): the wrong downswing path sits
+            // on genuinely strong OFF-shaft structure that evidence-level
+            // honesty cannot demote — so on triggered frames the states outside
+            // the kinematic envelope pay a soft prior penalty (the C4-cone
+            // idiom), defunding structure-backed short paths. NEVER a tier.
+            if (cfg.wedge.kinCone) {
+                for (int k = 0; k < NS; ++k)
+                    if (std::abs(circWrap(gridDeg[k] - envCenter[size_t(i)])) > envHalf[size_t(i)])
+                        emis[i][k] += float(cfg.wedge.wKinCone);
+                // Re-assert the band well after the cone (band always outranks).
+                if (bandOk[i]) {
+                    int bi = int(std::lround(band[i].thetaDeg / cfg.grid)) % NS;
+                    if (bi < 0) bi += NS;
+                    emis[i][bi] = float(-cfg.wBand);
+                }
+            }
+        }
+    }
 
     const DPResult dp = viterbiDP(emis, pm.phase, cfg);
     std::vector<double> evAt(nf, 0.0);
@@ -1373,7 +1509,7 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                                        armFloorMedPx, clubLenMm, frameH, cfg, projLenRung);
     if (trace) { trace->projLenRung = projLenRung; trace->projLenPx = projLenPx; }
 
-    enum Tier { PRED = 0, RAY = 1, BAND = 2, RECON = 3 };
+    enum Tier { PRED = 0, RAY = 1, BAND = 2, RECON = 3, WEDGE = 4 };
 
     // ── PASS 1: tier decision, HOISTED out of the placement loop ─────────────
     // Precompute the per-frame tier + confidence (Phase B needs s1IsMeas[i] = the
@@ -1414,6 +1550,15 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
             // honest label) — BAND is untouched, it has its own witness.
             if (evs >= cfg.rayEvMin && evs > 1.15 * evrev && verifiable
                 && (cfg.raySupportMin <= 0.0 || SUP[i][thi] >= float(cfg.raySupportMin))) { tier = RAY; conf = 0.55f; }
+        }
+        // WEDGE tier (chain BAND > RAY > WEDGE): the DP settled inside the
+        // measured fan — the frame is evidenced by integration, not a thin
+        // line, so it earns the wedge blessing (and spanMeas coverage) at
+        // wedge.conf, deliberately below RAY's 0.55.
+        if (tier == PRED && wedgeTrig[size_t(i)] && wedgeCand[size_t(i)].ok
+            && std::abs(circWrap(thDp - wedgeCand[size_t(i)].centroidDeg))
+                   <= wedgeSigmaDeg[size_t(i)] + cfg.wedge.dpTolDeg) {
+            tier = WEDGE; conf = float(cfg.wedge.conf);
         }
         if (rec.recon[i] && std::abs(circWrap(th - thDp)) > cfg.reconTol) { tier = RECON; conf = 0.40f; }
         tierOf[size_t(i)] = uint8_t(tier);
@@ -1644,6 +1789,14 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         s.thetaRad = th * kPi / 180.0;
         s.conf = conf;
 
+        // Stage-1 vision flag for the projected-head paths below: RAY ⇒
+        // Measured, WEDGE ⇒ the blur-wedge flag (deliberately NOT Measured —
+        // its consumers, snap + the B2 fit skip-guard, already accept 0x08),
+        // else Coasted.
+        const uint16_t s1Flag = (tier == RAY)   ? ShaftMeasured
+                              : (tier == WEDGE) ? ShaftWedge
+                                                : ShaftCoasted;
+
         bool placed = false;
         // BAND geometry is a DIRECT measurement of the head (butt-anchored via the
         // retro-band centres) — the Stage-2 head pass must NOT overwrite it. We
@@ -1684,7 +1837,7 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                 // (0x80 rides on 0x10, so the projected-dim style already applies).
                 const double re = rayEdgeRadius(gx[i], gy[i], th, frameW, frameH);
                 s.headPx = QPointF(gx[i] + re * ux, gy[i] + re * uy);
-                s.flags = uint16_t((tier == RAY ? ShaftMeasured : ShaftCoasted)
+                s.flags = uint16_t(s1Flag
                                    | ShaftHeadProjected | ShaftHeadOffFrame);
                 s.visibleLenPx = re;
                 s.headConf = hConf; s.headSigmaPx = hSig;
@@ -1694,7 +1847,7 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                 // kinematic guess the emitted head can't beat) — place at the
                 // smoothed rOut but KEEP ShaftHeadProjected (headConf ≤ reinitCap).
                 s.headPx = QPointF(gx[i] + hr.rOut * ux, gy[i] + hr.rOut * uy);
-                s.flags = uint16_t((tier == RAY ? ShaftMeasured : ShaftCoasted) | ShaftHeadProjected);
+                s.flags = uint16_t(s1Flag | ShaftHeadProjected);
                 s.visibleLenPx = hr.rOut;
                 s.headConf = hConf; s.headSigmaPx = hSig;
                 placed = true;
@@ -1706,14 +1859,20 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
             // Phase-A projected head (bit-identical to the pre-Phase-B path when
             // the head pass is off).
             s.headPx = QPointF(gx[i] + projLenPx * ux, gy[i] + projLenPx * uy);
-            s.flags = uint16_t((tier == RAY ? ShaftMeasured : ShaftCoasted) | ShaftHeadProjected);
+            s.flags = uint16_t(s1Flag | ShaftHeadProjected);
         }
 
         out.samples.push_back(s);
         sampleFrame.push_back(i);
         if (trace) { trace->frameIdx.push_back(i); trace->tier.push_back(tier);
                      trace->thetaDeg.push_back(th); trace->conf.push_back(conf); }
-        if (i >= pm.bs0 && i <= pm.fin0) { ++spanFrames; if (tier == BAND || tier == RAY) ++spanMeas; }
+        if (i >= pm.bs0 && i <= pm.fin0) {
+            ++spanFrames;
+            // WEDGE counts as measured coverage: it is a vision measurement
+            // (integrated, not per-pixel) and restores the spanMeas the S1
+            // demotions took away (the coverage-coupling trap).
+            if (tier == BAND || tier == RAY || tier == WEDGE) ++spanMeas;
+        }
     }
 
     for (size_t i = 0; i < out.samples.size(); ++i) {
@@ -2092,6 +2251,20 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         trace->phases = pm; trace->phiSmoothed = phiS; trace->chir = chir;
         trace->spanLo = spanLo; trace->spanHi = spanHi; trace->heavyFrames = heavy;
         trace->dp = dp; trace->recon = rec;
+        // S2 wedge diagnostics — the predicted rate, and the measured fan where
+        // one was found (NaN elsewhere). Empty when the wedge is dark.
+        if (cfg.wedge.enabled) {
+            const double kWNaN = std::numeric_limits<double>::quiet_NaN();
+            trace->wedgeTExpS = wedgeTExp;
+            trace->wedgeOmegaDegS = omegaPred;
+            trace->wedgeCentroidDeg.assign(size_t(nf), kWNaN);
+            trace->wedgeWidthDeg.assign(size_t(nf), kWNaN);
+            for (int i = 0; i < nf; ++i)
+                if (wedgeCand[size_t(i)].ok) {
+                    trace->wedgeCentroidDeg[size_t(i)] = wedgeCand[size_t(i)].centroidDeg;
+                    trace->wedgeWidthDeg[size_t(i)]    = wedgeCand[size_t(i)].widthDeg;
+                }
+        }
         // Vision-only phase landmarks: real swing ⇒ vision-grade conf, else 0.
         const bool swingDetected = std::any_of(pm.phase.begin(), pm.phase.end(),
                                                [](SwingPhase p) { return p != SwingPhase::Addr; });

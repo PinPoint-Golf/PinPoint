@@ -33,6 +33,7 @@
 #include "club_length_fusion.h"    // LengthFusionConfig / LengthPriorState / fuseClubLength
 #include "shaft_positions.h"       // PositionsConfig / PTime / locatePTimes (Layer B B-time location)
 #include "shaft_synthesis.h"       // SynthConfig / synthesizeBetweenAnchors (Layer C synthesis)
+#include "shaft_wedge.h"           // WedgeConfig / measureWedge (R8-T1 blur-wedge, S2)
 
 // Shaft-tracker v3.0-r1 DECIDING HALF — the physics/statistics that turn
 // per-frame evidence into one globally-consistent shaft-angle track. Faithful
@@ -293,6 +294,14 @@ struct ShaftV3Config {
     // default (dark); when on, the per-frame hand-axis direction penalises the DP
     // states far from it near the grip. fromOverrides populates it.
     HandAxisPriorConfig handAxisPrior;
+    // R8-T1 blur-wedge (S2, shaft_wedge.h) — "shaft.wedge.*" keys. enabled=false
+    // by default (dark); when on, frames whose R6-predicted club rate clears
+    // wedge.omegaMinDegS get a proximal fan sweep inside the kinematic envelope,
+    // an emission well at the measured centroid (pre-DP, clamped at −wBand), the
+    // WEDGE tier, and (wedge.kinCone) an off-envelope penalty. fromOverrides
+    // populates it. The wedge threshold scales from evAbsFloor (S1) — with the
+    // floor unset the wedge measures nothing (never fabricate).
+    WedgeConfig     wedge;
 
     static ShaftV3Config fromOverrides(const QVariantMap& ov);
 };
@@ -436,7 +445,7 @@ struct ShaftDecideTrace {
     DPResult            dp;
     ReconResult         recon;
     std::vector<int>    frameIdx;   // one entry per emitted (anchored) frame
-    std::vector<int>    tier;       // 0 pred / 1 ray / 2 band / 3 recon
+    std::vector<int>    tier;       // 0 pred / 1 ray / 2 band / 3 recon / 4 wedge
     std::vector<double> thetaDeg;   // reconciled θ (deg)
     std::vector<float>  conf;
     // Vision-only phase landmarks (hands-only C3 model → app Segmentation),
@@ -497,6 +506,12 @@ struct ShaftDecideTrace {
     // and read the separation off. −1 = the channel/frame did not run. Empty
     // unless a trace sink is present; diagnostics only, never read back.
     std::vector<double> rawP97, difP97, supAtDp;
+    // S2 wedge diagnostics, per frame [0,nf): the R6-predicted club rate, and
+    // the measured fan centroid/width (NaN = frame not triggered / no
+    // candidate). wedgeTExpS = the calibrated exposure estimate (s; −1 = wedge
+    // dark). Empty unless a trace sink is present AND cfg.wedge.enabled.
+    std::vector<double> wedgeOmegaDegS, wedgeCentroidDeg, wedgeWidthDeg;
+    double              wedgeTExpS = -1.0;
 };
 
 // Map the hands-only phase model to an app Segmentation with real timestamps:
