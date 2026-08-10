@@ -224,6 +224,70 @@ Then ONE follow-up commit flips `evAbsFloor`/`raySupportMin`/`wedge.enabled`
 defaults together, and `lab.py coverage` re-runs record the corrected P6/P5
 blocking rows (P-position bridge follow-through).
 
+### Session 2 results (gate run 2026-08-10, sha db42c6f, runs `C:\PinPointStudio\p6s2\`)
+
+**The wedge carries the path-correction load it was built for.** On every swing
+where the DP had glided the short angular path, the wedge+kinCone arm now funds
+the long sweep (measured −230..−246° top→impact on the previously-phantom 0703
+swings), the emitted P6s are geometrically real (median truth-shaft elevation at
+the claimed P6: **1.4°** off horizontal), and the truth hits land at **1–4 ms**.
+Unit tests: `shaft_kinematics_test` 33/33, `shaft_wedge_test` 13/13,
+`shaft_decide_test` green including the long-path fixture (painted 5° proximal
+fan ⇒ WEDGE tier, single horizontal transit, P6 pinned 0.1 ms from truth, and
+wedge-without-evAbsFloor ⇒ identical-to-dark never-fabricate pin).
+
+| Metric | Baseline (p6s1 arma) | armw (wedge) | **armwk (wedge+kinCone)** |
+|---|---|---|---|
+| Corpus P6 emissions | 19/61 (all phantom) | 41/61 | **46/61** |
+| P6 truth check (all truth swings emitting) | 0/7 | 4/8 (hits ≤4 ms) | **7/11 (hits ≤4 ms)** |
+| P6 truth-shaft elevation, median | — (phantoms) | 2.2° | **1.4°** |
+| Corpus P5 emissions (P5⊂P6 unlock) | 11 | 37 | **42** |
+| P2 / P8 truth | 11/14, 11/11 | 11/14, 11/11 | 11/14, 11/11 (unchanged) |
+| track.valid | 55 (S1 report; armA 52) | **59** | **58** (both ≥ S1 and ≥ baseline) |
+| WEDGE stamps (down+impact, 61 traced) | — | 134 | 172 |
+| Dark run vs p6s1 dark, pose2-pinned | — | — | **61/61 identical** (modulo `analysis.timings` wall-clock) |
+
+t_exp calibration pinned at the 8 ms clamp ceiling corpus-wide — measured
+plateau widths overstate ω·t_exp (lateral ridge pickup widens the fan by
+~±2°); behaviourally benign (σ_θ floors at the width), tighten later if σ ever
+matters.
+
+**Residual 4 truth misses (0703 swings 0008–0011, −140..−160 ms) are NOT wedge
+failures — two pre-existing downstream defect classes, now precisely
+characterized from the armwk traces:**
+
+1. **locatePTimes first-fold-crossing pick (0008, 0009).** The corrected long
+   path is present (sweeps −246°/−235°, wedge candidates tracking the DP within
+   a few degrees) and transits true horizontal (θ=180) ~4 frames before impact.
+   But these swings' top-of-swing shaft sits just above the elevation fold
+   (θ(top) ≈ 21–24°, elevation +21°), dips through θ≈0/360 a dozen frames
+   after top, and `findHorizontalCrossing` — folding θ=0 and θ=180 together —
+   fires on that FIRST crossing. Contrast fixed swing 0005: θ(top)=349 (already
+   past the fold), one crossing, −4 ms. Fix belongs in the P6 consumer
+   (`shaft_positions.h`), e.g. prefer the LAST crossing before impact in the
+   P6 window, or disambiguate the fold by sweep phase — explicitly out of this
+   session's scope per the traps list.
+2. **Tracker-internal phase-model collapse (0010, 0011).** The hands-only pm
+   places top/impact 1 frame apart (~140 ms early vs truth); the app-level
+   segmentation for the same swings is sane (top→impact 248/234 ms) and
+   byte-identical dark-vs-arm, so this is the tracker's private `segmentPhases`
+   landing early on these two swings — pre-existing, unchanged by the wedge,
+   and it shifts the whole P6 window early regardless of path quality.
+
+Notes: the down+impact Measured(ray|band) fraction reads 89–92% on the arm
+traces vs S1's 74–76% — different cohort (all-61 traced, arm params, and a now-
+CORRECT path legitimately claiming RAY along real structure), not a demotion
+regression. armwk vs armw: kinCone converts 3 more truth swings (0703
+0003/0006/0007) by defunding the structure-backed short path exactly as the S1
+finding predicted, at the cost of 1 track.valid (59→58, still above gate).
+
+**Recommendation:** flip with **wedge + kinCone** (the S2 expected arm). The
+gate's literal "≥5/7 on the original seven" reads 3/7 — but the other four are
+the two downstream defects above, not path fabrications; against all
+truth-visible P6s the arm reads 7/11 with every hit ≤4 ms, and both residual
+classes are now isolated, reproducible, and independently fixable. Flip
+decision + the two follow-up defects left to Mark's review.
+
 ## Traps (each has bitten before)
 
 - **V1 evidence freeze (2026-07-18):** never retune `rayEvMin`, `wE2`,
