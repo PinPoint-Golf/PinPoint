@@ -1,12 +1,15 @@
 # Physics-Constrained Detection of a Golf Club from Fixed-Environment Video: Honest Measurement Tiers, Instrumented Truth Generation, and an Exposure-Arc Reading of Motion Blur
 
 *PinPoint shaftlab programme — research report, 2026-07-05 (ψ-monotonicity
-addendum 2026-07-06), covering the programme from inception. Empirical basis: hand-labelled swings 0008/0009,
+addendum 2026-07-06; resolution addenda 2026-07-09, 2026-07-13, and
+2026-08-10), covering the programme from inception. Empirical basis: hand-labelled swings 0008/0009,
 the c1 multi-club corpus (100 head labels), the tape_20260704 pilot and
-tape_20260705 instrumented corpora; tooling `tools/shaftlab/`; records in
+tape_20260705 instrumented corpora, and the 61-swing five-session production
+corpus of §5.5b; tooling `tools/shaftlab/`, `tools/swinglab/`; records in
 `docs/design/shaft_detection_*`, `clubhead_detection_design.md`,
-`stripe_fusion_design.md`, `club_tracking_v3_design.md`, and lab
-`tape_20260705/RESULTS.md`.*
+`stripe_fusion_design.md`, `club_tracking_v3_design.md`, lab
+`tape_20260705/RESULTS.md`, and the session records in
+`docs/implementation/{shaft_wedge_p6,p7_impact_geom,top_collapse_repair,address_a3_pin}_impl.md`.*
 
 ## Abstract
 
@@ -61,7 +64,11 @@ stage's honesty failure (7 of 10 swings) into a precise, per-frame tuning
 target. *[As of 2026-07-09 that target has been met in the production C++:
 the ball-anchored far end of §5.5 was built, corpus-tuned against this same
 dense truth, and now passes the honesty clause on 9 of 10 swings — see the
-resolution addendum, §5.5a.]*
+resolution addendum, §5.5a. As of 2026-08-10 the anchor's other half — the
+ball read as a *direction* rather than a length — was built too, as an
+arbiter of the impact instant; using it as a probe opened a measurement axis
+this report had never graded, the named swing positions **at which** θ is
+reported, and found three separate defects there. See §5.5b.]*
 
 ## 1. Introduction
 
@@ -800,7 +807,11 @@ the lag), so a sustained |Δφ| onset walked back from the same anchor takes
 the earlier of the two. Third, an *impact-anchored clamp*: the trigger's
 impact estimate (corroborated to ±75 ms by the recorded ball launch) bounds
 the onset into [impact − 1.6 s, impact − 0.55 s], pinning any walk-back
-failure to a physiologically-wide prior. The corrected boundary folds into
+failure to a physiologically-wide prior. *[That last clause proved to be the
+weak one: on the larger 2026-08-10 corpus the clamp was not a rarely-touched
+backstop but a load-bearing surface — eleven swings sat at its near edge to
+the microsecond, which is a fabricated Address wearing a plausible number.
+See §5.5b.]* The corrected boundary folds into
 the backswing label (`bs0 := onset`) rather than a distinct takeaway phase;
 the ψ-monotonicity rail of §3.8a already carries the near-still early
 takeaway, and the corpus gate (§4.10) shows the wider backswing transition
@@ -924,6 +935,15 @@ Two footnotes complete the picture:
   becoming visible for the first time. *[As of 2026-07-09: resolved in the
   production C++ — the ball-anchored rebuild passes the clause on 9 of 10
   swings with meas-tier medians of 0.8–2.4 px; §5.5a.]*
+- **Both tables grade θ per frame, and that is not the whole of what the
+  product reports.** The coaching metrics of §1 are read at *named instants*
+  — address, delivery, impact — and a frame-perfect θ delivered at the wrong
+  instant is exactly the confident error these grades are built to forbid,
+  yet no row above can see it, because the per-frame statistics average over
+  precisely the axis at fault. The first grading of the instants themselves
+  (2026-08-10, 61 production swings) found three independent defects there
+  and is reported in §5.5b; the θ tables were unaffected by every one of
+  them.
 
 ### 4.1 Passive stage 1, graded against hand labels
 
@@ -1564,7 +1584,13 @@ referee, and the leg-shadow case proves that referee is itself imperfect,
 so "zero errors" formally means zero *adjudicated* errors under a
 visually-verified but fallible referee. And the label-selection bias of
 §4.3 stands as a standing warning: a validation regime can pass its own
-clauses simply because its labels avoid the hard frames.
+clauses simply because its labels avoid the hard frames. The 2026-08-10
+results (§5.5b) add its sharper form — a validation regime can also pass its
+own clauses because its labels are the wrong *kind* of object. Every clause
+in this report scores θ per frame; the product reports θ at named instants;
+and three defects lived undisturbed for the whole programme in the gap
+between those two sentences, invisible to statistics that are bit-identical
+across all of them.
 
 ### 5.2 Honesty by abstention versus honesty by discrimination
 
@@ -1829,6 +1855,20 @@ miscalibration. And determinism is verified per-machine; cross-platform
 bit-equality — the oracle we intend to use for the C++ port — is still
 untested.
 
+The event-timing results added in §5.5b carry their own, narrower limits.
+The instant-level truth is thin — 13–14 hand-marked swings against 61
+analysed — so the corpus-wide emission counts are coverage statistics, not
+accuracy ones, and only the labelled subset speaks to accuracy. The
+geometric impact arbiter inherits every failure mode of the address-ball
+cluster it reads, and abstains rather than degrades when that cluster is
+absent (which it was on two swings). The acoustic de-bias is calibrated
+against video marks made by one person on one rig, and its legacy correction
+assumes the default microphone distance for captures that never recorded
+one. And the byte-identity gating that underwrites "the θ path did not move"
+holds only under pinned pose: with live pose the inference jitter alone can
+move an event by tens of milliseconds, so the guarantee is about the code,
+not about a re-run.
+
 ### 5.5 Future research
 
 In gate order — because each stage has to clear its gate before the next
@@ -1880,12 +1920,59 @@ begins:
   recording the ball as a (deliberately dull, constant-plus-a-step) stream in
   the swing document — and is deferred, by choice, until the current release is
   in users' hands; it is the natural next development, and the metric-grounding
-  scale below is its corollary. *[Since built — the length half of this
-  proposal shipped in production C++ on 2026-07-09 and its gate results are
-  recorded in the resolution addendum, §5.5a below.]*
+  scale below is its corollary. *[Since built, in both halves. The **length**
+  half shipped in production C++ on 2026-07-09 and its gate results are
+  recorded in the resolution addendum, §5.5a below. The **angle** half —
+  "the real shaft points at the ball" — shipped on 2026-08-10 (§5.5b),
+  though not in the phase this bullet proposed it for: read at address it
+  remains future work, while read at *impact* it became the arbiter of when
+  impact happened at all, and the probe that exposed three defects in the
+  event ladder. The prediction that the anchor "fixes the phase model's
+  address/takeaway boundary at its root" is thereby half-graded — the
+  boundary was indeed the defect, but the repair that landed came from
+  re-seeding the grip-speed machinery, not from the ball.]*
 - **The F11 redesign** in the passive tracker — cluster the still-run
   measurements, or split runs at confident θ jumps — corpus-gated against
   the v7h fixtures.
+- **The per-sample evidence estimator, for the under-lit studio.** The
+  frontier §5.5b arrives at is a session shot under low light, where the
+  downswing yields too few θ samples to place a position at all. It is worth
+  being precise about where that headroom can and cannot come from, because
+  the obvious answers are mostly already spent. The detector's
+  signal-to-noise does not come from per-pixel enhancement; it comes from
+  integrating along a ray whose position is *known* from the grip anchor —
+  150-odd samples, so of order √150 on independent noise — and the angular
+  search is already an anchored Radon transform evaluated at every candidate
+  θ, with the blur fan already read as a plateau in that same space (§3.10,
+  and the wedge of §5.5b). A directional filter bank, a vesselness score, or
+  a structure tensor would each *replace* a fine-grained oriented matched
+  filter with a coarser one, and each is a dense multi-scale per-pixel
+  operation of exactly the kind §5.6 spent its optimisation effort removing.
+  There is a subtler objection that we would want any such experiment to
+  measure rather than assume: those filters smooth *along* the structure, so
+  their output feeds the line integral samples that are no longer
+  independent — per-pixel contrast rises while the effective N falls, and the
+  net can be negative. What is genuinely untested is smaller and more local.
+  The per-sample estimator is currently ad hoc — a three-sample mean on the
+  ray against a four-sample median at ±9/±12 px — where a matched kernel
+  across the ray normal at the shaft's known half-width is the one change
+  that raises per-sample contrast without correlating anything along the
+  direction of integration. Two cheaper refinements sit beside it: weighting
+  the blur plateau's bins by an explicit transparency estimate, which the
+  fixed studio background and the existing scene-median channel make nearly
+  free, and — should overlapping fans ever prove ambiguous — deconvolution
+  performed in *polar* coordinates about the grip, where a rotational blur is
+  to first order a shift-invariant one-dimensional blur along θ, rather than
+  in the image plane, where a single linear point-spread function is correct
+  at exactly one radius. Its gate is the dark session's own two swings
+  converting to a placed P6 with the sane sessions byte-identical. But the
+  precondition comes first, and it is a measurement, not a build: establish
+  the per-sample contrast-to-noise on the under-lit session against a
+  well-lit one, and settle whether the loss is photometric at all. §5.5b's
+  own lesson applies with some force here — the last defect in that chain
+  was fixed by a metre of air and a discarded constant, and for a session
+  that is dark because the lights were down, gain and exposure at capture may
+  simply dominate anything the estimator can recover afterwards.
 - **IMU conditioning** (§3.11): cheap, uses data we already capture but
   currently discard, and is the only vision-independent witness we have.
 - **Stage-2 re-calibration** against the dense truth, and then **conformal
@@ -1981,6 +2068,190 @@ own calibration but **stage-1 θ quality in the fast phases**: the surviving
 residuals ride ray errors of 8–11.5°, beyond the ±5° wedge budget the design
 allots stage 2 (design §2.2). The far end is now, in the truest sense,
 waiting on the near end.
+
+### 5.5b Resolution addendum (2026-08-10): the angle half of the far-end anchor, and the event ladder it exposed
+
+The ball-anchor proposal of §5.5 had two halves. §5.5a reported the length
+half. This addendum reports the **angle** half — "a line from the grip to the
+ball centre is the shaft direction" — which shipped in the production C++ on
+2026-08-10, and which turned out to be far more useful as a *probe* than as a
+measurement. Pointed at impact rather than at address, it exposed the axis
+this report had never graded: not θ, but the **instants at which θ is
+reported**. Five changes landed in one day's chain, each one found by the
+previous one's residual: `d0c9ff2` (the delivery position's crossing rule,
+with four evidence defaults), `02cf2b0` (the ball-geometry impact arbiter),
+`fda2677` (the phase-model collapse repair), `2247116` (the onset reseed),
+and `6b5e886` (the acoustic anchor's calibration). The as-built records are
+the four session documents in `docs/implementation/`.
+
+**Why the instants are a separate measurement, and why every table above
+missed them.** The coaching metrics of §1 are not read from θ(t) as a
+continuous curve. They are read at named positions — P1 address, P4 top, P6
+delivery (the last time the shaft is parallel to the ground before impact),
+P7 impact — and the number the golfer is shown is θ *sampled at* one of them.
+It follows that a frame-perfect θ delivered at the wrong instant is precisely
+the confidently-wrong output §4.0 forbids, and equally that the per-frame
+statistics of §4.0–4.5 are structurally incapable of detecting it: they
+average over the very axis at fault, and stay bit-identical while the
+reported positions move by a quarter of a second. That is not hypothetical.
+Across the five changes below the θ path never moved — every step was gated
+on 61-of-61 byte-identity in its dark arm — while the event ladder moved on
+a third of the corpus. The empirical basis is a 61-swing production corpus
+across five sessions (2026-06-11 through 2026-07-10, live app capture,
+pose-pinned so that byte-identity claims are meaningful), of which 13–14
+swings carry hand-marked video truth for impact and the shaft-parallel
+positions.
+
+**A definitional defect, found first.** The delivery position P6 was located
+as the *first* horizontal transit of θ in the window (P4, P7). On swings with
+a shallow top, the elevation fold's θ≈0 dip immediately after the top is that
+first transit, so P6 was being reported roughly 140 ms early — a phantom
+delivery, at a plausible-looking angle, on seven of the labelled swings.
+Delivery is *definitionally* the final parallel before impact, so the fix was
+a definition, not a threshold: take the last crossing. With it (and four
+evidence defaults promoted in the same commit — an absolute floor under the
+percentile blur evidence, a ray-support minimum, and the blur-wedge reader
+with its kinematic cone), **every labelled P6 lands within 5 ms of truth,
+11 of 11**, at a median truth-shaft elevation of 1.6°, and P6 emission across
+the corpus rises from 19 swings to 46. The phantoms were never a detection
+failure; the detector had been right and the question wrong.
+
+**The ball as the arbiter of impact.** `impact_geom.h` locates the sub-frame
+instant at which the reconciled θ(t) crosses the grip→ball direction of the
+address ball cluster — a hysteresis-confirmed zero crossing of
+e(f) = wrap180(θ(f) − atan2(ball − grip(f))), interpolated between valid
+frames so coverage gaps cannot fake one, with a raw-step guard so the ±180°
+seam (which steps ~340°) can never be mistaken for a transit. It then
+*arbitrates* rather than replaces: abstain with no geometry, adopt with no
+anchor, override when the two disagree by more than 100 ms, and — behind a
+key that measurement left dark — retime to the sub-frame instant when they
+corroborate. Two design corrections were forced mid-session, and both are
+general. The search window had to be **anchor-centred (±600 ms), never the
+phase model's (top, impact] bounds**, because the model's bounds are corrupt
+in exactly the swings where rescue is needed. And the arbiter had to compare
+the geometry against the **emitted** impact rather than the raw anchor — the
+raw anchor corroborated happily while the emitted value, dragged by a
+downstream clamp, sat 234 ms away. *A corroborating reference can be the
+wrong reference; arbitrate the value the consumers actually receive.*
+
+**What the arbiter proved was not the problem.** The lead that motivated the
+geometry held that three truth swings lacked P6 because their impact anchor
+was bad. Both halves of that were measured false: the anchor was sound to
+within a constant (below), and fixing the impact instant did *not* recover
+their P6. What the probe
+actually found was a **collapse of the phase model itself**: on 15 of 61
+swings the two-longest-run derivation put the top of the backswing within
+120 ms of impact — often within 7 ms of it — which is not a marginal call but
+a physical impossibility, and a `clamp(impact, top+1, ·)` downstream then
+dragged the emitted impact 234–362 ms past the bogus top. The repair is
+gated on that impossibility (fire iff impact − top < 120 ms; healthy tops sit
+≥ ~200 ms before impact, so the separation is structural rather than tuned)
+and re-derives the top inside [impact − 600 ms, impact − 120 ms] using the
+model's own existing rules — grip apex to localise, smoothed-speed argmin to
+pin the dwell — now bounded away from the finish hold. Repairing at the
+*source* rather than at the consumer is what made it cheap: the clamp becomes
+inert automatically, and every mid-pipeline consumer the impact fix had been
+forced to skip — the per-frame phase labels feeding the DP, chirality, the
+wedge's swing progress, the blur band, the tier windows, the ψ
+reconciliation, the event ladder, tempo, and the position windows — is healed
+without being touched.
+
+**A prior that had quietly become a pin.** With the top and impact sane, five
+repaired swings reported a backswing-to-downswing tempo ratio below 1.0 —
+physically impossible for a golf swing, and previously invisible because the
+number had been either absent or absurd (85.8, 103.5). The cause was §3.13's
+impact-anchored clamp: eleven swings sat at its near edge, at impact − 0.549 s
+*to the microsecond*, which is not a measurement but a manufactured Address
+wearing a plausible number. The repair re-seeds the onset walk-back from the
+backswing run the two-longest ranking had lost — and it is gated on the
+pin itself, which is the load-bearing detail. Two earlier iterations were
+measured and rejected: an unconditional reseed traded the near-edge pin for
+the far-edge one on eight swings, and even with a correct candidate it
+*regressed* two swings whose dark onsets were already sane, because the
+mis-picked horizon those swings inherited was accidentally load-bearing (the
+grip's address position is revisited at impact, and only a downswing-inclusive
+veto window sees that revisit). *Gate a repair on the pathology's signature,
+not on its precondition.* Six swings converted cleanly (Takeaway 0.84–1.03 s
+before impact, tempo 2.0–3.1); five rail honestly at the far edge with
+plausible-high ratios of 4.1–6.1, replacing fabricated 0.2 s backswings.
+
+**The last defect was in the instrument that supplies the anchor.** The
+impact anchor the tracker consumes is an acoustic timestamp, and the geometry
+was precise enough to grade it. Sweeping every truth swing carrying both an
+anchor and a video mark: **13 of 13 early, mean −17.1 ms, sd 3.3 ms** — a
+constant, not a scatter, and one that moves the reported impact frame by two
+to three frames at 150 fps. The cause was a fixed 20 ms back-date standing in
+for a device latency that the detector's own sample-counting reconstruction
+already removes, while the one delay that is physically real — the travel of
+sound from the hitting strip to the microphone — was not modelled at all. The
+fudge was replaced by those two quantities measured separately, the travel
+derived from the microphone distance at 343 m/s (2.9 ms at the default metre),
+and captures predating the split are corrected deterministically on load. The
+standard deviation is the load-bearing number: because the bias is constant to
+±3.3 ms while the geometric crossing scatters ±15 ms, the correct use of the
+geometry here is as a *detector* of the bias, not as a replacement for the
+instrument — which is why the sub-frame retime path stays dark, and would only
+re-audition behind a crossing model good to about ±5 ms.
+
+***Table 8.** The positions the tracker can honestly report, across the five
+changes — 61-swing production corpus, pose-pinned. The θ path is
+byte-identical in every column; only the reported instants move. P5 and P6
+are the shaft-parallel positions in the downswing; the tempo ratio (backswing
+duration over downswing duration) is included because it is the most direct
+readout of whether the Address, Top and Impact instants are mutually
+consistent, and 1–6 is the physiologically plausible band.*
+
+| after | P6 emitted | P5 emitted | tempo ratio in the 1–6 band |
+|---|---|---|---|
+| baseline (`f056e1e`) | 19/61 | 11/61 | — (mostly absent, or absurd: 85.8, 103.5) |
+| delivery crossing + wedge (`d0c9ff2`) | 46/61 | 46/61 | — |
+| impact geometry (`02cf2b0`) | 46/61 | 46/61 | — (nine fabricated ratios withdrawn) |
+| phase-model repair (`fda2677`) | **59/61** | **59/61** | 56/61 |
+| onset reseed (`2247116`) | 59/61 | 59/61 | **60/61** |
+
+*A note on the third row. Nine swings **lost** a tempo figure at the impact
+step, and that is the result rather than a regression: those nine had been
+computed from the bogus impact, with dark ratios near 116. Withdrawing a
+fabrication reads, in any coverage statistic, exactly like losing coverage —
+which is why an emission count is only meaningful read next to a truth
+column.*
+
+***Table 9.** The same chain against hand-marked video truth. The last row is
+the capture instrument rather than the tracker.*
+
+| truth check | before | after |
+|---|---|---|
+| labelled P6 within 5 ms | 7/11 | **11/11** (errors 0.000–0.005 s) |
+| P7 on the three gross swings | +234, +248, +362 ms | **−10.2, −13.4, −6.7 ms** |
+| P7 on the eleven sane swings | — | untouched (arbiter resolves "kept") |
+| acoustic anchor vs video truth | 13/13 early, mean −17.1 ms | mean −0.0 ms, max \|err\| 5.1 ms |
+| emitted Impact vs marked frame | — | **≤ 6.8 ms (one frame) on 12/13**, 8 exactly on it |
+
+*The thirteenth swing is an isolated ladder failure on one capture, shown by a
+four-point sweep of the anchor value to be independent of the anchor and so
+outside what this calibration can address.*
+
+**How the claim that θ did not move is supported.** Every change in the chain
+landed dark behind a key and was gated identically: a byte-identity run of the
+dark arm against the pre-change binary (61 of 61 in every case), then a live
+A/B, then a separate default-flip commit whose pure-defaults run had to
+reproduce the gated arm exactly (again 61 of 61). This is §3.1's "prove it on
+the exemplar first" carried into production with the corpus in the exemplar's
+place, and it is what makes "the θ results above are unaffected" a
+measurement rather than an assurance.
+
+**What now binds.** Two residuals, both of them signal rather than logic. Two
+swings still emit no P6 despite an otherwise sane ladder, because there is no
+horizontal θ crossing to find in the correct window — downswing θ sparsity on
+the dark-lighting session, the same frontier that starves the address-ball
+cluster there. And five swings rail honestly at the onset clamp's far edge:
+their pre-takeaway creep never dips below the low threshold and never revisits
+the address position inside the veto window, so no walk-back start yields a
+resolvable settle, and the clamp reports a plausible-high tempo instead of a
+fabricated one. Both are the same statement in different phases — the
+boundary is now correct wherever the image contains the evidence to place it,
+and where it does not, the system says so. That is the condition §5.2 argues
+for, arrived at from the event side.
 
 ### 5.6 Compute cost and the path to real time
 
@@ -2148,3 +2419,19 @@ admitted only where perception genuinely runs out — is specified with
 falsifiable gates. Its central hypothesis is risky in exactly the right
 way, and for the first time the instruments needed to test it actually
 exist.
+
+One coda, from the 2026-08-10 results (§5.5b), because it extends the same
+argument one level outward. Having spent the programme establishing that
+elementary swing physics discriminates where generic vision cannot, we found
+the identical pattern in the layer *above* the tracker: a delivery position
+located by the wrong crossing, a top of the backswing placed 7 ms before
+impact, an address manufactured at a clamp's edge, and an impact back-dated
+by a latency that no longer existed — four confident numbers, none of which
+survives contact with a physical fact as elementary as "the downswing takes
+longer than a hundredth of a second." The pattern held right down to the
+microphone: the fix there was not an algorithm but a metre of air, measured.
+And it held for the method too, since the layer stayed broken for as long as
+it did only because our whole validation apparatus graded θ per frame and
+nothing graded *when*. Physics-first is not a property a detector acquires
+once. It is a question to be asked again at every layer that consumes the
+one below.
