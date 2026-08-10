@@ -123,13 +123,19 @@ struct ShaftV3Config {
     // ridge p97 misses the floor contributes zero normalised scores AND zero
     // support for that frame (it can still be carried by the other channel).
     // <= 0 disables the whole test (dark), collapsing to the pre-S1 expressions.
-    double  evAbsFloor = 0.0;     // raw-p97 floor per channel (score units); <=0 = off
+    // FLIPPED ON 2026-08-10 (S2 gate, brief §"Re-validation": 11/11 truth P6
+    // ≤5 ms, dark path proven byte-identical): 100 is the deep-blur/low-light
+    // safety net from the S1 calibration — inert on the blessed corpus (real
+    // frames' raw p97 sits 210+), it only drowns a channel that saw nothing.
+    double  evAbsFloor = 100.0;   // raw-p97 floor per channel (score units); <=0 = off
     double  evAbsFloorDif = -1.0; // dif-channel override; < 0 ⇒ use evAbsFloor
     // Absolute RidgeResult.support (fraction of supported samples along the ray)
     // required at the DP's θ before a frame may claim the RAY tier. Independent
     // of evAbsFloor: the floor asks whether the channel saw anything, this asks
     // whether the WINNING direction is actually a continuous line. <= 0 = off.
-    double  raySupportMin = 0.0;
+    // FLIPPED ON 2026-08-10 at the S1 arm-A value (0.5 demoted 2 more tracks
+    // invalid and silenced a P2-truth swing — rejected).
+    double  raySupportMin = 0.4;
     double  bandTol  = 6.0;    // |θ* − θ_band| (deg) to claim the band tier
     double  armVetoDeg = 12.0; // ARM_VETO_DEG: no lock within this of grip→arm
     // static-hold demotion

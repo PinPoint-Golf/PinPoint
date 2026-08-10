@@ -45,7 +45,10 @@ namespace pinpoint::analysis {
 // "shaft.wedge.*" keys via ShaftV3Config::fromOverrides. enabled=false ⇒ the
 // tracker never triggers, sweeps, injects, or tiers — byte-identical output.
 struct WedgeConfig {
-    bool   enabled          = false;   // master gate — dark until the S2 corpus gate flips it
+    // FLIPPED ON 2026-08-10 (S2 corpus gate + re-validation, shaft_wedge_p6_impl.md:
+    // P6 emissions 19→46/61, every truth-labelled P6 within 5 ms, track.valid
+    // 58 ≥ baseline 55, P2/P8 unchanged).
+    bool   enabled          = true;    // master gate; false = the pre-S2 tracker byte-for-byte
     double omegaMinDegS     = 720.0;   // |ω̂| trigger: below this the thin-line machinery is trusted
     double tExpBootstrapS   = 0.003;   // exposure bootstrap when no calibration frame exists (s)
     double calOmegaLoDegS   = 286.0;   // |ω̂| floor (≈5 rad/s) for a frame to enter the t_exp median
@@ -57,7 +60,10 @@ struct WedgeConfig {
     double wWell            = 6.0;     // emission well depth at the centroid (DP cost units)
     double conf             = 0.45;    // emitted sample confidence for the WEDGE tier
     double dpTolDeg         = 4.0;     // DP θ within σ_θ + this of the centroid ⇒ WEDGE tier
-    bool   kinCone          = false;   // off-envelope penalty on triggered frames (S2 expected arm)
+    // FLIPPED ON 2026-08-10 with enabled (the gate's deciding arm: kinCone
+    // converted 3 further truth swings by defunding structure-backed short
+    // paths — the S1 finding's lever — at the cost of 1 track.valid, 59→58).
+    bool   kinCone          = true;    // off-envelope penalty on triggered frames
     double wKinCone         = 4.0;     // its weight (cf. cfg.wCone) — prior-as-constraint, never a tier
 };
 

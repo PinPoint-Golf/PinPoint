@@ -306,7 +306,9 @@ int main()
             else if (f <= 80)  th[f] = 20.0 - 80.0 * double(f - 60) / 20.0;   // dip: 0-transit at f=65
             else if (f <= 110) th[f] = -60.0 + 100.0 * double(f - 80) / 30.0; // rise: 0-transit at f=98
         }
-        PositionsConfig cfg;                       // default: first-crossing (dark)
+        check(PositionsConfig().p6LastCrossing, "default is last-crossing (FLIPPED ON 2026-08-10)");
+        PositionsConfig cfg;
+        cfg.p6LastCrossing = false;                // the legacy first-crossing pick, pinned
         const std::vector<PTime> first =
             locatePTimes(t, th, {}, kAF, kTopF, kImpF, kFinF, cfg);
         cfg.p6LastCrossing = true;
@@ -318,7 +320,7 @@ int main()
         };
         const int64_t tFirst = p6Of(first), tLast = p6Of(last);
         check(tFirst >= 0 && std::llabs(tFirst - 65 * kDt) <= kDt,
-              "default keeps the legacy first transit (~f65) — dark contract");
+              "explicit first-crossing keeps the legacy transit (~f65)");
         check(tLast >= 0 && std::llabs(tLast - 98 * kDt) <= kDt,
               "p6LastCrossing picks the delivery transit (~f98)");
 

@@ -140,11 +140,11 @@ struct PositionsConfig {
     // while the true delivery parallel (θ=180, ~4 frames before impact) is the
     // last. "Delivery" is definitionally the final parallel before impact, so
     // last-crossing is the physical reading; a single-crossing window is
-    // unchanged (last == first). Dark until the S2 default-flip commit
-    // (2026-08-10 gate: the wedge-corrected long path exposed the first-pick
-    // on 0703 swings 0008/0009, −140 ms; p2/p8 windows keep first-crossing —
+    // unchanged (last == first). FLIPPED ON 2026-08-10 with the S2 wedge keys
+    // (re-validation: the four fold-pick swings landed 0–5 ms; every
+    // truth-labelled P6 within 5 ms; p2/p8 windows keep first-crossing —
     // correct for their geometry).
-    bool   p6LastCrossing = false;
+    bool   p6LastCrossing = true;
     PositionFitConfig fit;          // B2 milestone fit (dark until fit.fitEnabled flips)
 };
 

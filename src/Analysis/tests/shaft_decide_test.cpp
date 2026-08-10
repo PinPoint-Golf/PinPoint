@@ -822,7 +822,10 @@ int main()
             return img;
         };
 
-        ShaftV3Config cfgOff;                        // defaults: evAbsFloor=0, raySupportMin=0 (dark)
+        // Post-flip (2026-08-10) the defaults carry the S1/S2 keys ON, so the
+        // legacy fabricating tracker is now the EXPLICITLY-zeroed config.
+        ShaftV3Config cfgOff;
+        cfgOff.evAbsFloor = 0.0; cfgOff.raySupportMin = 0.0; cfgOff.wedge.enabled = false;
         ShaftV3Config cfgOn = cfgOff;
         cfgOn.evAbsFloor = 20.0;
         cfgOn.raySupportMin = 0.25;
@@ -855,8 +858,11 @@ int main()
 
     // ── S1 evidence honesty: keys-off byte-identity ──────────────────────────
     // evAbsFloor<=0 / raySupportMin<=0 must collapse to the pre-S1 expressions
-    // exactly — an explicit dark config must match the implicit default,
-    // field-by-field, on every emitted sample.
+    // exactly. Post-flip the implicit default is no longer dark, so the pin is
+    // now: a directly-assigned dark config and a fromOverrides-built dark
+    // config (the tuning-key route the params files use) must match
+    // field-by-field on every emitted sample — the dark idiom AND the override
+    // plumbing, in one contract.
     std::printf("=== decideTrack S1 evidence honesty: keys-off byte-identity ===\n");
     {
         const int nf = 60, W = 1000, H = 1000;
@@ -881,14 +887,20 @@ int main()
             return img;
         };
 
-        const ShaftV3Config cfgDefault;               // implicit defaults (keys dark)
-        ShaftV3Config cfgExplicitOff = cfgDefault;
-        cfgExplicitOff.evAbsFloor    = 0.0;
-        cfgExplicitOff.evAbsFloorDif = -1.0;
-        cfgExplicitOff.raySupportMin = 0.0;
+        ShaftV3Config cfgDirectOff;                   // dark by direct field assignment
+        cfgDirectOff.evAbsFloor    = 0.0;
+        cfgDirectOff.evAbsFloorDif = -1.0;
+        cfgDirectOff.raySupportMin = 0.0;
+        cfgDirectOff.wedge.enabled = false;
+        QVariantMap darkKeys;                         // dark via the tuning-key route
+        darkKeys.insert("shaft.evAbsFloor", 0.0);
+        darkKeys.insert("shaft.evAbsFloorDif", -1.0);
+        darkKeys.insert("shaft.raySupportMin", 0.0);
+        darkKeys.insert("shaft.wedge.enabled", 0);
+        const ShaftV3Config cfgExplicitOff = ShaftV3Config::fromOverrides(darkKeys);
 
         const ShaftTrack2D a = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
-                                           {}, 1120.0, -1, cfgDefault,     nullptr, nullptr);
+                                           {}, 1120.0, -1, cfgDirectOff,   nullptr, nullptr);
         const ShaftTrack2D b = decideTrack(render, tUs, gx, gy, phiRaw, joints, W, H, fps,
                                            {}, 1120.0, -1, cfgExplicitOff, nullptr, nullptr);
 
@@ -974,7 +986,10 @@ int main()
             return img;
         };
 
-        ShaftV3Config cfgDark;                       // everything at defaults (all keys off)
+        // Post-flip the defaults are the S2 arm, so the fabricating "dark"
+        // baseline is reconstructed by explicitly zeroing the flipped keys.
+        ShaftV3Config cfgDark;
+        cfgDark.evAbsFloor = 0.0; cfgDark.raySupportMin = 0.0; cfgDark.wedge.enabled = false;
         ShaftV3Config cfgS2 = cfgDark;               // S1 honesty + S2 wedge + kinCone arm
         cfgS2.evAbsFloor    = 20.0;
         cfgS2.raySupportMin = 0.25;
