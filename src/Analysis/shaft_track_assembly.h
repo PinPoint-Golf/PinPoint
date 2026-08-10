@@ -267,12 +267,15 @@ struct ShaftV3Config {
     // the A3 clamp manufactures an Address at the near edge (impact − bsMin:
     // the exact-0.549 s pin, B = top − addr 0.17–0.25 s vs real ≈ 0.75 s
     // backswings, tempo ratio 0.5–0.8 on the 5 repaired corpus swings). With
-    // this on, a fired repair whose bs0 sits after the repaired top re-derives
-    // bs0 as the last sub-swLow → rising boundary before top' (the takeaway-run
-    // start the two-longest ranking lost); Stage A (A1/A2, the no-return veto
-    // with its bs0 scan horizon, the A3 rail) then runs unchanged from the
-    // reseeded start. bs0 < top' (merged-run collapse) keeps the ranking's bs0
-    // — the walk-back already starts from pre-top motion there.
+    // this on, a fired repair whose bs0 sits after the repaired top reseeds
+    // bs0 to the latest-starting run at/before top' — the backswing run the
+    // two-longest ranking lost — so Stage A (A1/A2, the no-return veto with
+    // its bs0 scan horizon, the A3 rail) runs unchanged from a true run start
+    // (the veto needs bs0 − onset > gap to fire; a run start preserves that).
+    // Fallback for a sub-swSpd creep backswing that never formed a run: the
+    // last sub-swLow → rising boundary before top'. bs0 < top' (merged-run
+    // collapse) keeps the ranking's bs0 — the walk-back already starts from
+    // pre-top motion there.
     bool    topRepairOnsetReseed    = false;
     // C2 body ROI
     double  bodyMargin = 34.0;       // px inflation of the body polygon

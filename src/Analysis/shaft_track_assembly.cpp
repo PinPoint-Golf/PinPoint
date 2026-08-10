@@ -595,18 +595,33 @@ PhaseModel segmentPhases(const std::vector<double>& gx, const std::vector<double
                 // bs0 is the mis-picked DOWNSWING run start, after the repaired
                 // top — the A1/A2 walk-back below parks at the top dwell and A3
                 // manufactures an Address at the near edge (impact − bsMin, the
-                // 0.549 s pin). Re-derive bs0 from top': skip back over the top
-                // dwell (spdS < swLow), then through the backswing (>= swLow)
-                // to the last sub-swLow → rising boundary — the takeaway-run
-                // start the two-longest ranking lost. Stage A (A1/A2, veto with
-                // its bs0 horizon, the A3 rail) then runs unchanged from the
-                // reseeded start. bs0 < top' (merged-run collapse) keeps the
-                // ranking's bs0: the walk-back already starts pre-top there.
+                // 0.549 s pin). Reseed bs0 to the backswing run the two-longest
+                // ranking lost: the latest-starting (post-bridge, post-gate)
+                // run at/before top'. Stage A (A1/A2, the no-return veto, the
+                // A3 rail) then runs unchanged from a TRUE run start, keeping
+                // the veto's [onset, bs0 − gap] horizon non-degenerate.
+                // Reseeding straight to the sub-swLow boundary instead leaves
+                // the veto windowless (onset == bs0), and on real capture the
+                // lerped-pose speed floor (2–4 px/f through every fidget
+                // settle) walks past the takeaway into deep stillness — the
+                // near-edge pin just trades for the far-edge one (measured:
+                // 8/15 repaired swings at exactly impact − 1.6 s). The signal
+                // boundary stays as the fallback for a sub-swSpd creep
+                // backswing that never formed a run. bs0 < top' (merged-run
+                // collapse) keeps the ranking's bs0: the walk-back already
+                // starts from pre-top motion there.
                 if (cfg.topRepairOnsetReseed && cfg.swLow > 0.0 && bs0 > top) {
-                    int b = top;
-                    while (b > 0 && spdS[b] <  cfg.swLow) --b;
-                    while (b > 0 && spdS[b] >= cfg.swLow) --b;
-                    bs0 = b;
+                    int runStart = -1;
+                    for (const auto& r : runs)
+                        if (r.first <= top && r.first > runStart) runStart = r.first;
+                    if (runStart >= 0) {
+                        bs0 = runStart;
+                    } else {
+                        int b = top;
+                        while (b > 0 && spdS[b] <  cfg.swLow) --b;
+                        while (b > 0 && spdS[b] >= cfg.swLow) --b;
+                        bs0 = b;
+                    }
                 }
             }
         }

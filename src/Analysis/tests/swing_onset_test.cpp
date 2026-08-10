@@ -113,6 +113,30 @@ static Builder makeCollapseB()
     return b;
 }
 
+// Collapse shape C (2-run branch, run-recoverable backswing): the backswing
+// DID form a run — two 12 px/f bursts joined by a slow 3 px/f creep (the real
+// lerped-pose floor between fragments) — but it loses the two-longest race to
+// (downswing, follow-through). The 14-frame top dwell keeps it separate from
+// the downswing; the onset reseed hands Stage A its start (f≈60) back and the
+// A1 walk-back crosses the creep (>= swLow) to the true takeaway.
+static Builder makeCollapseC()
+{
+    Builder b(300);
+    b.ramp(58, 62, 0.0, 12.0, -1);     // takeaway ramp up
+    b.constSeg(62, 78, 12.0, -1);      // backswing burst 1
+    b.constSeg(78, 86, 3.0, -1);       // slow creep between bursts (the real
+                                       // lerped-pose floor: sub-swSpd, above swLow)
+    b.constSeg(86, 104, 12.0, -1);     // backswing burst 2 (run [58,104), len 46)
+    // top dwell [104,118): v = 0, 14 frames — NOT bridged (true dwell f≈111)
+    b.ramp(118, 126, 0.0, 14.0, +1);   // downswing accel
+    b.constSeg(126, 168, 14.0, +1);    // downswing through address height (len 50)
+    // impact-region quiet [168,180): 12 frames — splits the runs
+    b.ramp(180, 188, 0.0, 12.0, -1);   // follow-through up
+    b.constSeg(188, 240, 12.0, -1);    // (len 60 — wins the ranking)
+    b.ramp(240, 246, 12.0, 0.0, -1);
+    return b;
+}
+
 // The synthetic "recorded impact" anchor: first downswing frame at which the
 // grip has returned to address height − 20 px (the hands-derived impf rule).
 static int anchorFrame(const std::vector<double> &gy, int from)
@@ -421,6 +445,24 @@ int main()
         check(re.bs0 < hiEdge, "reseed: onset off the A3 pin");
         check(std::abs(re.bs0 - 50) <= 4, "reseed: onset lands at the slow-creep takeaway (f=50 +/- 4)");
         check(re.bs0 < re.top && re.top < re.impact, "reseed: bs0 < top < impact preserved");
+
+        // Run-recovery branch: the backswing formed a (bridged) run that lost
+        // the ranking — the reseed hands Stage A its start back instead of the
+        // signal boundary, so the A1 walk-back starts from a true run start.
+        std::vector<double> cx, cy; makeCollapseC().build(cx, cy);
+        const int cn = int(cx.size());
+        const int canchor = anchorFrame(cy, 126);
+        check(canchor > 140 && canchor < 160, "fixture C: anchor lands in the downswing");
+        const PhaseModel cv = segmentPhases(cx, cy, cn, 150.0, canchor, v1c);
+        const int cHiEdge = canchor - int(std::lround(double(v1c.bsMinBeforeImpactUs) * 1e-6 * 150.0));
+        check(cv.topPreRepair >= 0, "fixture C: the repair fired");
+        check(std::abs(cv.top - 110) <= 4, "fixture C: repaired top at the true dwell (f=110 +/- 4)");
+        check(cv.bs0 == cHiEdge, "fixture C v1: onset manufactured at the A3 near edge");
+        const PhaseModel cr = segmentPhases(cx, cy, cn, 150.0, canchor, rsc);
+        check(cr.top == cv.top && cr.impact == cv.impact && cr.fin0 == cv.fin0,
+              "fixture C reseed: top/impact/fin0 unchanged");
+        check(std::abs(cr.bs0 - 58) <= 4,
+              "fixture C reseed: onset walks back from the recovered run start (f=58 +/- 4)");
 
         // Merged-run collapse (bs0 already before top'): the reseed is inert.
         std::vector<double> ax, ay; makeCollapseA().build(ax, ay);
