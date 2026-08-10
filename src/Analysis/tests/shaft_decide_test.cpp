@@ -923,8 +923,12 @@ int main()
     std::printf("=== impactGeom key plumbing ===\n");
     {
         const ShaftV3Config def = ShaftV3Config::fromOverrides(QVariantMap{});
-        check(!def.impactGeom.enabled, "impactGeom.enabled dark by default");
+        check(def.impactGeom.enabled, "impactGeom.enabled ON by default (flipped 2026-08-10)");
         check(!def.impactGeom.retime, "impactGeom.retime dark by default");
+        QVariantMap dk;
+        dk.insert("shaft.impactGeom.enabled", 0);
+        check(!ShaftV3Config::fromOverrides(dk).impactGeom.enabled,
+              "the key darks the geometry (soak baseline route)");
         QVariantMap ov;
         ov.insert("shaft.impactGeom.enabled", 1);
         ov.insert("shaft.impactGeom.retime", 1);

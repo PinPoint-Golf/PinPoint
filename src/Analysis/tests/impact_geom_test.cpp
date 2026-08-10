@@ -193,12 +193,12 @@ int main()
         check(d.frame == kNf - 1, "out-of-range anchor clamps to the last frame");
     }
 
-    // ── (8) default pins (flip commit updates these) ─────────────────────────
+    // ── (8) default pins ─────────────────────────────────────────────────────
     {
         std::printf("(8) default pins\n");
         const ImpactGeomConfig def;
-        check(def.enabled == false, "enabled defaults false (dark at merge)");
-        check(def.retime == false, "retime defaults false (dark at merge)");
+        check(def.enabled == true, "enabled defaults true (FLIPPED ON 2026-08-10, p7geo gate)");
+        check(def.retime == false, "retime defaults false (measured not green — stays dark)");
         check(def.hystDeg == 8.0 && def.maxStepDeg == 120.0 && def.overrideUs == 100000
                   && def.windowUs == 600000,
               "tuning defaults pinned");

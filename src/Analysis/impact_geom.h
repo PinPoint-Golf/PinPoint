@@ -57,8 +57,21 @@ namespace pinpoint::analysis {
 // decideTrack never computes or consults the geometry - byte- AND
 // code-path-identical output.
 struct ImpactGeomConfig {
-    bool    enabled    = false;    // master gate: locate the crossing, override implausible anchors (dark at merge)
-    bool    retime     = false;    // sub-frame P7/Impact retime when the geometry corroborates the anchor (dark at merge)
+    // FLIPPED ON 2026-08-10 (p7geo gate, 61-swing corpus at 2009f68): dark run
+    // byte-identical to the pre-change binary 61/61 twice; override corrected
+    // 8 clamp-corrupted Impact emissions (truth swing 0703_0002 +234.3 ms ->
+    // -10.2 ms; the 7 others share the Top~~fin0 collapse signature and moved
+    // -250..-360 ms), 11 sane truth swings untouched, P5/P6/P8 emission and
+    // seg.monotone identical, coverage shift -9 RESOLVED / +9 BLOCKED_METRIC =
+    // tempo rows previously fabricated from the bogus impact. The two
+    // remaining gross truth swings (0611_0009, 0705_0001) abstain honestly -
+    // no accepted A1 address-ball cluster (mis-lock / dark lighting).
+    bool    enabled    = true;     // master gate; false = pre-geometry emission byte-for-byte
+    // Measured NOT convincingly green (same gate): fires on 6/11 corroborated
+    // truth swings, de-biases the mean (|err| 18.3 -> 15.9 ms) but scatters
+    // individuals (-20..+19 ms); the crossing's own precision is ~±15 ms.
+    // Stays dark until the geometry earns the extra ~15 ms.
+    bool    retime     = false;    // sub-frame P7/Impact retime when the geometry corroborates the emission
     double  hystDeg    = 8.0;      // hysteresis deadband each side of theta_ball (mirrors positions.hysteresisDeg)
     double  maxStepDeg = 120.0;    // adjacent-valid |d(theta-theta_ball)| beyond this = the ±180 seam passing, not a transit
     int64_t overrideUs = 100000;   // |t_geo - t_anchor| beyond this => anchor implausible => override
