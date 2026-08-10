@@ -86,7 +86,12 @@ Item {
     readonly property real _selDrawW: Math.max(_w, Math.min(_selW, _pitch * 2))
 
     implicitHeight: _rowH
-    implicitWidth:  count * _pitch
+    // The WANTED width, not the squeezed one: _pitch reads `width`, so an implicit
+    // width derived from it depends on the width it is meant to inform, and any
+    // parent that sizes from its content closes that into a binding loop (the wide
+    // rail's Column did). What a caller asks for here is "how wide is the whole run
+    // unconstrained" — the squeeze in _pitch is the answer to being given less.
+    implicitWidth:  count * _wantPitch
 
     Repeater {
         model: root.ticks
