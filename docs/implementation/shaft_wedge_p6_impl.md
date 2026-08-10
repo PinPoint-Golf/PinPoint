@@ -322,6 +322,24 @@ anchor divergence is a swinglab diagnostics caveat worth remembering — the
 per-frame θ/tier/wedge columns remain faithful to the code, but anchor-derived
 claims need the RESULT's events, not the trace summary.)
 
+### Flip + coverage close-out (2026-08-10, sha d0c9ff2, run `p6s2\flip`)
+
+The five defaults flipped together (`evAbsFloor 100`, `raySupportMin 0.4`,
+`wedge.enabled`, `wedge.kinCone`, `positions.p6LastCrossing`); the dark-pinning
+unit tests now pin the flip instead (the fabricating baseline is reconstructed
+by explicitly zeroing the keys; the keys-off byte-identity contract became
+direct-assignment vs fromOverrides dark-route equivalence). All suites green
+incl. `analysis_stage_test` + `pipeline_test`. A pure-defaults corpus run
+(params = refine-on only) reproduces the gated arm exactly: P6 46/61, 11/11
+truth ≤5 ms, P2 61/61, P8 49/61, elevation median 1.6°.
+
+`lab.py coverage` (core.json, 129 measures × 61 swings), pre (p2bridge\on) →
+post (flip): **P5 emission 11→46, P6 19→46, P3 58→61, P2 60→61**;
+phase-blocked measures 431→131 (P5 294→82, P6 156→44, P3/P2 →0); resolved
+measures 2463→2759. The P-position-bridge blocking rows this plan set out to
+clear are cleared; P5/P6 remain the largest residual blockers purely through
+the 15 swings with no P6 emission (recall, not phantoms).
+
 **Gate verdict: PASSED, including the literal criterion** — the original seven
 read 7/7 within 0.04 s, none grossly out; recall 19→46 with 1.6° median
 geometry; P2/P8/validity clean; dark path byte-stable across both new commits.
