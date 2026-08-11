@@ -111,6 +111,27 @@ QJsonObject fixtureAnalysis()
     return an;
 }
 
+// A DEGENERATE metric: no curve at all, just one labelled scalar. This is the
+// representation every point-in-time producer uses (foot_metrics.h, tempo_metrics.cpp,
+// and shaft_plane's ShaftPlaneStage), and it reduces by a different code path from a
+// sampled curve — buildPhaseGrid's `labelled` fallback rather than a windowed median.
+QJsonObject metricScalar(const QString &key, const QString &unit,
+                         Phase phase, qint64 tUs, double value)
+{
+    QJsonObject ps;
+    ps.insert(QStringLiteral("phase"), int(phase));
+    ps.insert(QStringLiteral("t_us"),  tUs);
+    ps.insert(QStringLiteral("value"), value);
+
+    QJsonObject o;
+    o.insert(QStringLiteral("key"),          key);
+    o.insert(QStringLiteral("unit"),         unit);
+    o.insert(QStringLiteral("t_us"),         QJsonArray{});
+    o.insert(QStringLiteral("value"),        QJsonArray{});
+    o.insert(QStringLiteral("phaseSamples"), QJsonArray{ ps });
+    return o;
+}
+
 Reducer at(Phase p)
 {
     Reducer r;
@@ -176,6 +197,30 @@ int main()
           "at an UNSEGMENTED phase is unavailable, not a nearest-sample guess");
     check(!reduceOverGrid(grid, QStringLiteral("nope"), at(Phase::Address)).has_value(),
           "at on a metric the swing does not carry is unavailable");
+
+    // ── A labelled scalar at a phase the LADDER does not carry ──────────────
+    // m_transitionPlaneDelta reduces `at` the `transition` anchor, and real swings
+    // do not reliably emit a Transition event — the observed ladder on a corpus
+    // swing runs Address/Takeaway/ShaftParallelBack/MidBackswing/Top/… with no
+    // Transition at all. What binds the reducer is therefore the PHASE LABEL the
+    // producer stamps on its own phaseSample, not anything the segmenter found.
+    // Pin both halves: the label resolves, and the timestamp alone does not.
+    // Stamping Phase::Top here (the same instant) would silently resolve nothing.
+    {
+        QJsonObject an = fixtureAnalysis();
+        QJsonArray metrics = an.value(QStringLiteral("metrics")).toArray();
+        metrics.append(metricScalar(QStringLiteral("transitionPlaneDelta"),
+                                    QStringLiteral("°"), Phase::Transition, 400'000, 13.76));
+        an.insert(QStringLiteral("metrics"), metrics);
+        const SwingPhaseGrid g = buildPhaseGrid(an);
+
+        near(reduceOverGrid(g, QStringLiteral("transitionPlaneDelta"),
+                            at(Phase::Transition)).value_or(-999), 13.76,
+             "a labelled scalar resolves `at` its own phase, with no ladder event there");
+        check(!reduceOverGrid(g, QStringLiteral("transitionPlaneDelta"),
+                              at(Phase::Top)).has_value(),
+              "...and NOT at the segmented phase sharing its timestamp — the label binds");
+    }
 
     // ── Delta and Rate ──────────────────────────────────────────────────────
     std::printf("\ndelta / rate\n");

@@ -4,7 +4,10 @@
 `tools/swinglab/wrist_cock_fit.py`, with the instrumented truth join in
 `tools/swinglab/fusion_truth.py` and the projection layer in
 `tools/shaftlab/plane_probe.py`. Implements the v2 table in
-`src/Analysis/shaft_kinematics.h`, dark behind `shaft.wedge.kinModelV2`.
+`src/Analysis/shaft_kinematics.h`, dark behind `shaft.wedge.kinModelV2`, and
+§9's projection layer in `src/Analysis/shaft_plane.h` (shipped 2026-08-11 —
+see §9's payoff and §13; the producer carries one deliberate departure from
+`plane_probe.py`, recorded in both places).
 Supporting data in [`data/wrist_cock_model/`](data/wrist_cock_model/); every
 number reproduces from the commands in §14. Companion to the programme report,
 `club_detection_from_video.md`, whose Phase 6 sets out the physical law this
@@ -458,6 +461,32 @@ measurements made the same way on the same swing, so common calibration bias
 cancels. The over-the-top diagnostic needs the delta, not the absolute plane, and
 the delta is the part that is already solid.
 
+**A third axis, found on implementation: validity, which precision cannot
+stand in for.** The two bullets above are the distinction this section was built
+on, and they are not enough. A conic fitted to an arc too short or too sparse to
+constrain its second axis still returns an ellipse — an arbitrarily elongated one
+threaded through the points — and ι = arccos(minor/major) then runs toward 90°
+and drags the delta with it. Three of the 33 corpus fits are exactly that, with
+axis ratios of 0.14, 0.12 and **0.017** (a straight line to within 2%), reporting
+deltas of −58.5°, +46.6° and +56.7°. No golf swing changes plane by 58°.
+
+What makes this worth a paragraph rather than a footnote is that **the split-half
+above cannot see it**. Odd and even frames of a degenerate arc collapse to the
+*same* elongated fit, so they agree closely: the ι = 89.03° needle scored a
+split-half of **0.00°**, the best value obtainable. Split-half measures
+repeatability, and a bad number can be perfectly repeatable. It is evidence about
+precision only, and never on its own evidence that a fit means anything —
+including in Figure 2's caption below, which uses it to mark quality.
+
+The shipped producer therefore refuses a window whose axis ratio falls below
+**0.26** (ι = 75°). The threshold sits at the gap the corpus shows: of 66 window
+fits, 53 lie below ι 45°, six between 45° and 60°, four between 60° and 75°, and
+then the three needles. It is an empirical cut from one golfer and a floor on
+conditioning, not a claim about golf — the absolute ι is uncalibrated either way.
+`plane_probe.py` has **no** such floor, so every number and figure in this note
+still includes the three artifacts; the difference is deliberate and recorded
+rather than reconciled.
+
 ### The independent checks
 
 - **Club length closes.** `lenPx / s_px_mm + r0_mm` must equal the catalogue
@@ -488,6 +517,15 @@ The test: the plane implied by the residual must agree with the plane measured
 here, and must be stable within a golfer across sessions and clubs while moving
 when the swing genuinely changes. If it agrees, the model has earned a coaching
 output. If not, the residual is noise wearing a physical name.
+
+**What shipped, 2026-08-11.** The delta itself is now a producer —
+`src/Analysis/shaft_plane.h`, a standalone port of `fit_ellipse` and
+`head_path_plane` — reaching the diagnostic model as `m_transitionPlaneDelta` on
+the `transition_plane` axis §13 describes. It is graded against this note's own
+corpus file by a regression test that reproduces every column: ι, δ and node
+within **0.005°**, sample counts exactly, split-halves to 1e-12. So the estimator
+below is not a proposal any more; the *interpretation* of its output still is,
+and the list that follows is unchanged by shipping it.
 
 **Open before the delta becomes a coaching output:**
 
@@ -584,6 +622,13 @@ The table is **dark**, behind `shaft.wedge.kinModelV2`, and on the evidence belo
 `shaft_kinematics_test`, confirmed 61/61 on the corpus); the key-on path
 regresses the tracker, and a more accurate model that makes the tracker worse is
 not a model the tracker should use.
+
+*This verdict is about the table only.* §9's projection layer is a separate
+result with a separate fate: it shipped **on** (`shaft_plane.h`,
+`shaftPlane.enabled`, 2026-08-11) because it feeds a measure rather than the
+tracker, so the failure mode that keeps the table dark — a model steering the
+detector that produced it — does not arise. The two decisions share a note, not
+a rationale.
 
 ### The corpus A/B, and why it failed
 
@@ -715,7 +760,13 @@ swings whose downswing fit repeats to better than 5° split-half; open circles
 are worse; the black tick is the session median. Right: the two phase
 inclinations against each other; a swing below the diagonal steepened. Only
 33 of 61 swings yield both conic fits, so the figure is also a picture of the
-coverage gate.*
+coverage gate. **Two cautions on reading it, both established after it was
+drawn.** The filled/open split is by split-half, which §9 now shows is a
+precision measure blind to a degenerate fit — one of the filled dots is the
+ι = 89.03° needle, which scored 0.00°. And three of these 33 points are those
+needles (δ −58.5°, +46.6°, +56.7°, all 2026-07-04); the shipped producer
+refuses them, so its yield is 30, not 33. The figure is drawn by
+`plane_probe.py`, which has no conditioning floor, and is left as-is.*
 
 First, coverage gates this measure like everything else in this note: 28 of
 61 swings yield no delta at all, almost always because the blur-thinned
@@ -741,6 +792,34 @@ What genuinely stands between the delta and the diagnostic model is the
 corpus problem this whole note shares — one golfer — and the falsifier above
 doubles as the fix: the first sessions from a second golfer, ideally one who
 shallows, test the sign, the spread, and the between-golfer story at once.
+
+**What was built on this, and what the build sent back.** The measure shipped on
+2026-08-11 as `m_transitionPlaneDelta`, carrying the `transition_plane` axis with
+`over_the_top` on its high tail and `shallowing` on its low one. The paragraph
+above got its wish literally: the emission carries both inclinations, both
+split-halves, both sample counts, both node lines, the axis ratios, and a channel
+tag, so a consumer gates on quality rather than assuming every swing yields a
+number. The measure is live but its corridor is a deliberate placeholder — mu 0,
+sigma 25°, a surfacing edge of 50° against a largest well-conditioned corpus
+delta of 45.6° — so it accumulates without grading anybody. Norms wait for the
+second golfer, exactly as this section and §13's closing warning require.
+
+Implementing it returned three findings to this note, two of which are
+corrections rather than confirmations:
+
+- **The conditioning floor.** Three of the 33 fits above are degenerate — §9's
+  new third bullet has the numbers — and the split-half this section leans on
+  cannot detect them. The producer's yield is therefore 30, not 33, and the
+  honest maximum delta in this corpus is **+45.6°**, not −58.5°. Any future
+  quotation of the spread should use the smaller figure.
+- **The coverage caution held, and got worse.** With the needles gone the
+  producer emits on 50 of 61 swings — 30 measured plus 20 where only the
+  synthesized tier fits — leaving **11 silent**. An earlier estimate that the
+  synthesized channel would make coverage near-total was wrong: carrying a
+  synth series is not the same as that series yielding two conics.
+- **The node line is still unanalysed**, and is now recorded on every swing in
+  production rather than only in this corpus, so the material for that analysis
+  accumulates without further work.
 
 ### Why "fits the population" is not "reads a swing"
 
@@ -946,6 +1025,23 @@ establish, so that nobody reaches for it later. The anchor's contribution
 was similarly honest: one point, taken at the uncertainty its producer
 actually supplies, moves δ by 0.4 ms.
 
+*The mirror does not transfer between quantities.* When the §9 plane delta
+shipped as a producer (2026-08-11), it took this same measurement on itself,
+and the answer is not δ's. Across the 30 corpus swings where both channels fit
+both windows, the synthesized plane and the measured plane disagree by a median
+of **13.4°** at a rank correlation of **+0.377** — against a signal whose median
+magnitude is 17°. Where δ's synth channel was a mirror, the plane's is closer to
+noise with a weak trend in it.
+
+The reading that survives both results is narrower than "synth mirrors
+measured", and it is the useful one: interpolation re-tells what the anchors
+said, so how faithfully it reproduces a measured quantity depends entirely on
+how much of that quantity the anchors encode. **Release timing is nearly all
+anchor; a conic's axis ratio is mostly the samples between them.** That is why
+one came back +0.98 and the other +0.38, and why neither figure predicts the
+next quantity somebody tries this on. `shaft_plane_corpus_test` prints these on
+every run and deliberately asserts none of them.
+
 With one parameter as small as ambition gets, the per-swing story ends here
 until the observation itself changes.
 
@@ -979,6 +1075,13 @@ python3 tools/shaftlab/plane_probe.py planes --out <dir>      # §9 the plane
 python3 tools/shaftlab/plane_probe.py corpus \
     --out docs/research/data/wrist_cock_model \
     --fig docs/research/figures/transition_plane_corpus.png   # §13 Figure 2
+
+# §9 payoff / §13 shipping record — the SHIPPED estimator over the same corpus.
+# Reads the existing result.json per swing (no re-analysis, nothing written back),
+# diffs the corpus file above, and prints the yields, the conditioning-floor
+# refusals by name, and the measured-vs-synth mirror stat.
+cmake --build build/analyzer-tests --target shaft_plane_corpus_test
+ctest --test-dir build/analyzer-tests -R shaft_plane_corpus --output-on-failure
 
 python3 tools/swinglab/wrist_cock_fit.py /mnt/swingdata/stagegate/corpm3-off \
     --corpus /mnt/swingdata/Mark-Liversedge \

@@ -1897,22 +1897,18 @@
       "highMeans": "a deeper hip turn at the top, and more room to unwind into"
     },
     {
-      "id": "m_transitionPlaneShift",
+      "id": "m_transitionPlaneDelta",
       "kind": "provided",
-      "metricKey": "swingPlane",
+      "metricKey": "transitionPlaneDelta",
       "reducer": {
-        "kind": "delta",
-        "anchor": "p4",
-        "window": [
-          "p4",
-          "p5"
-        ]
+        "kind": "at",
+        "anchor": "transition"
       },
-      "status": "planned",
-      "label": "Plane shift, top to early downswing",
+      "status": "live",
+      "label": "Transition plane delta (experimental)",
       "unit": "°",
-      "highMeans": "the shaft moved OUTSIDE the plane it was on at the top — the club is working out toward the ball line rather than down",
-      "viewNeeded": "downTheLine"
+      "highMeans": "the club steepened between backswing and downswing — the over-the-top direction",
+      "viewNeeded": "faceOn"
     },
     {
       "id": "m_pelvisThrustBack",
@@ -2907,7 +2903,7 @@
       "id": "sig_overTheTop",
       "test": "outsideCorridor",
       "measures": [
-        "m_transitionPlaneShift"
+        "m_transitionPlaneDelta"
       ],
       "direction": "high"
     },
@@ -2915,7 +2911,7 @@
       "id": "sig_shallowing",
       "test": "outsideCorridor",
       "measures": [
-        "m_transitionPlaneShift"
+        "m_transitionPlaneDelta"
       ],
       "direction": "low"
     },

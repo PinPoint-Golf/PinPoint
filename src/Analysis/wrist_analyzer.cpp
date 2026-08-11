@@ -49,6 +49,7 @@
 #include "pose_runner.h"
 #include "pose_smoother.h"
 #include "pose_synthesis.h"
+#include "shaft_plane.h"
 #include "shaft_tracker.h"
 #include "tempo_metrics.h"
 #include "wrist_resemblance.h"
@@ -970,6 +971,169 @@ struct KinematicsStage : AnalysisStage {
     }
 };
 
+// Dark-flag config for the swing-plane stage, mirroring KinematicSeriesConfig.
+// Master gate only — the conic gates themselves are NOT tunable: relaxing them is
+// a measured mistake (brief §9), not a knob.
+struct ShaftPlaneConfig {
+    bool enabled = pinpoint::tuned::shaftPlane::kEnabled;   // shaftPlane.enabled — master gate (dark)
+
+    static ShaftPlaneConfig fromOverrides(const QVariantMap &ov)
+    {
+        using namespace tuning;
+        ShaftPlaneConfig c;
+        apply(ov, "shaftPlane.enabled", c.enabled);
+        return c;
+    }
+};
+
+// 13c. Face-on swing plane — the transition delta the over_the_top axis has been
+//      waiting for (shaft_plane.h; transition_plane_producer_brief.md). Fits a conic
+//      to the SHAFT VECTOR (headPx − gripPx) over takeaway→top and top→impact and
+//      reports the change in plane inclination between them. EXPERIMENTAL and
+//      normless: the measure it feeds is `planned` with no norm row, so it cannot
+//      fire a fault — which is exactly what licenses fitting the synth tier as a
+//      second channel. Both channels are fitted and tagged on every swing; measured
+//      is the headline whenever both its windows fit, synth is the fallback, and a
+//      synth-tagged emission carries the measured channel's per-window reject codes
+//      so the coverage gap is visible instead of silent.
+//
+//      GATED ON AVAILABLE DATA, NEVER ON SESSION TYPE (standing convention): a valid
+//      shaft track with a frame size, plus takeaway/top/impact on the ladder. Absent
+//      any of those it emits nothing and skipReason names WHICH input was missing.
+struct ShaftPlaneStage : AnalysisStage {
+    QString name() const override { return QStringLiteral("ShaftPlane"); }
+    bool canRun(const AnalysisContext &ctx) const override
+    {
+        if (!ShaftPlaneConfig::fromOverrides(ctx.job.tuningOverrides).enabled) return false;
+        const ShaftTrack2D &s = ctx.detail->shaft;
+        return s.valid && s.frameWidth > 0 && s.frameHeight > 0 && !s.samples.empty()
+            && ctx.seg.eventFor(Phase::Takeaway) && ctx.seg.eventFor(Phase::Top)
+            && ctx.seg.eventFor(Phase::Impact);
+    }
+    QString skipReason(const AnalysisContext &ctx) const override
+    {
+        if (!ShaftPlaneConfig::fromOverrides(ctx.job.tuningOverrides).enabled)
+            return QStringLiteral("shaft plane disabled (dark)");
+        const ShaftTrack2D &s = ctx.detail->shaft;
+        if (!s.valid)                              return QStringLiteral("no valid shaft track");
+        if (s.frameWidth <= 0 || s.frameHeight <= 0) return QStringLiteral("no camera frame size");
+        if (s.samples.empty())                     return QStringLiteral("no shaft samples");
+        return QStringLiteral("no takeaway/top/impact ladder");
+    }
+    void run(AnalysisContext &ctx) override
+    {
+        const ShaftTrack2D &track = ctx.detail->shaft;
+
+        ShaftPlaneInput in;
+        // The honest channel: measured heads only. ShaftSynthesized never appears
+        // in samples[] by construction, but the flag test is kept as explicit
+        // parity with plane_probe.load_run — the selection this is graded against.
+        for (const ShaftSample2D &s : track.samples) {
+            if (!(s.headConf > 0.f)) continue;
+            if (s.flags & ShaftSynthesized) continue;
+            in.measured.push_back({ s.t_us, s.headPx.x() - s.gripPx.x(),
+                                            s.headPx.y() - s.gripPx.y() });
+        }
+        // The synth tier carries a decayed conf rather than a head measurement,
+        // so no headConf filter applies to it.
+        for (const ShaftSample2D &s : track.synth)
+            in.synth.push_back({ s.t_us, s.headPx.x() - s.gripPx.x(),
+                                         s.headPx.y() - s.gripPx.y() });
+        for (const ShaftPosition &p : track.positions)
+            in.anchors.push_back({ p.t_us, p.conf });
+
+        const PhaseEvent *tw = ctx.seg.eventFor(Phase::Takeaway);
+        const PhaseEvent *tp = ctx.seg.eventFor(Phase::Top);
+        const PhaseEvent *im = ctx.seg.eventFor(Phase::Impact);
+        in.takeawayUs  = tw->t_us;
+        in.topUs       = tp->t_us;
+        in.impactUs    = im->t_us;
+        in.haveWindows = true;
+
+        const ShaftPlaneResult r = fitShaftPlane(in);
+
+        auto record = [](ShaftPlaneChannel &dst, const PlaneChannelFit &src, bool isSynth) {
+            dst.fitted         = src.fitted;
+            dst.iotaBackDeg    = src.back.fit.iotaDeg;
+            dst.iotaDownDeg    = src.down.fit.iotaDeg;
+            dst.deltaDeg       = src.deltaDeg;
+            dst.nodeBackDeg    = src.back.fit.nodeDeg;
+            dst.nodeDownDeg    = src.down.fit.nodeDeg;
+            dst.nBack          = src.back.fit.n;
+            dst.nDown          = src.down.fit.n;
+            dst.conicResidBack = src.back.fit.conicResid;
+            dst.conicResidDown = src.down.fit.conicResid;
+            dst.ratioBack      = src.back.fit.ok ? src.back.fit.ratioMinorMajor : -1.0;
+            dst.ratioDown      = src.down.fit.ok ? src.down.fit.ratioMinorMajor : -1.0;
+            dst.rejectBack     = int(src.back.fit.reject);
+            dst.rejectDown     = int(src.down.fit.reject);
+            // Channel-appropriate quality only — see ShaftPlaneChannel's comment.
+            if (isSynth) {
+                dst.anchorsBack   = src.back.anchors;
+                dst.anchorsDown   = src.down.anchors;
+                dst.anchorConfMin = src.anchorConfMin;
+            } else {
+                dst.splitHalfBackDeg = src.back.splitHalfDeg;
+                dst.splitHalfDownDeg = src.down.splitHalfDeg;
+            }
+        };
+        ShaftPlaneEstimate est;
+        est.valid   = r.valid;
+        est.channel = int(r.channel);
+        record(est.measured, r.measured, false);
+        record(est.synth,    r.synth,    true);
+        ctx.detail->shaft.plane = est;
+
+        if (!r.valid) {
+            ppInfo() << "[WristAnalysis] shaft plane: no channel fitted — measured back/down"
+                     << conicRejectName(r.measured.back.fit.reject)
+                     << conicRejectName(r.measured.down.fit.reject) << "synth back/down"
+                     << conicRejectName(r.synth.back.fit.reject)
+                     << conicRejectName(r.synth.down.fit.reject);
+            return;
+        }
+
+        // Single-sample scalars: empty curve + exactly one phaseSample, the shape
+        // every setup metric already uses (foot_metrics.h §"degenerate series").
+        //
+        // The PHASE LABEL on the delta is load-bearing, not cosmetic. The measure
+        // m_transitionPlaneDelta reduces `at` the `transition` anchor, and
+        // measure_sample.cpp's At reducer looks up a PhaseGridValue whose .phase ==
+        // Phase::Transition; for an empty-curve metric every value comes from the
+        // labelled fallback in buildPhaseGrid, which keys on this label. Stamp it
+        // anything else and the measure silently resolves nothing. The TIME is
+        // free, and top-of-backswing is the honest instant — it is where the two
+        // windows meet.
+        auto push = [&ctx](const QString &key, const QString &label,
+                           Phase phase, int64_t tUs, double value) {
+            MetricSeries m;
+            m.key   = key;
+            m.label = label;
+            m.unit  = QStringLiteral("°");
+            m.phaseSamples.push_back({ phase, tUs, value, QString() });
+            ctx.detail->series.push_back(std::move(m));
+        };
+        push(QStringLiteral("transitionPlaneDelta"),
+             QStringLiteral("Transition plane delta"), Phase::Transition, tp->t_us, r.deltaDeg);
+        // The absolute inclinations are NOT calibrated (brief §9 bounds a 64° body-depth
+        // bias) — carried for the trace and the node-line research, never as a coaching
+        // output, which is why neither has a measure or a catalogue descriptor.
+        push(QStringLiteral("swingPlaneIotaBack"),
+             QStringLiteral("Swing plane inclination, backswing"), Phase::Top, tp->t_us, r.iotaBackDeg);
+        push(QStringLiteral("swingPlaneIotaDown"),
+             QStringLiteral("Swing plane inclination, downswing"), Phase::Impact, im->t_us, r.iotaDownDeg);
+
+        ppInfo() << "[WristAnalysis] shaft plane:" << planeChannelName(r.channel)
+                 << "delta" << r.deltaDeg << "deg (back" << r.iotaBackDeg
+                 << "down" << r.iotaDownDeg << ")"
+                 << (r.channel == PlaneChannel::Synth
+                         ? QStringLiteral("— measured fell back: back=%1 down=%2")
+                               .arg(QString::fromLatin1(conicRejectName(r.measured.back.fit.reject)),
+                                    QString::fromLatin1(conicRejectName(r.measured.down.fit.reject)))
+                         : QString());
+    }
+};
+
 // 14. IMU calibration bindings — one BindingRecord per bound
 //     device, keyed by the stable device serial.
 struct BindingsStage : AnalysisStage {
@@ -1124,6 +1288,7 @@ SessionProfile wristProfile()
     p.stages.push_back(std::make_unique<BindDetailStage>());
     appendBodyMetricStages(p);
     p.stages.push_back(std::make_unique<KinematicsStage>());
+    p.stages.push_back(std::make_unique<ShaftPlaneStage>());
     p.stages.push_back(std::make_unique<BindingsStage>());
     p.stages.push_back(std::make_unique<ResemblanceStage>());
     p.stages.push_back(std::make_unique<AssessmentStage>());
@@ -1205,6 +1370,7 @@ SessionProfile cameraKinematicsProfile()
     // slightly noisier reference, not a wrong one.
     appendBodyMetricStages(p);
     p.stages.push_back(std::make_unique<KinematicsStage>());
+    p.stages.push_back(std::make_unique<ShaftPlaneStage>());
     return p;
 }
 } // namespace pinpoint::analysis

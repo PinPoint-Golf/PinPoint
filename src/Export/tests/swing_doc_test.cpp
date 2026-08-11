@@ -284,6 +284,24 @@ int main()
               "predicted flag ShaftKinematicPredicted");
         check(qFuzzyCompare(cp.at(0).toObject()[QStringLiteral("grip")].toArray().at(0).toDouble(),
                             960.0 / 1920.0), "predicted grip normalized by frame width");
+
+        // Face-on swing plane (shaft_plane.h). This fixture's shaft track never ran
+        // the producer, and the block must still be written: a reader has to be able
+        // to tell "the producer ran and nothing fitted" from "this file predates it",
+        // and only an always-present block with valid=false can say the first.
+        check(cb.contains(QStringLiteral("plane")), "club.plane present even with no fit");
+        const QJsonObject pl = cb[QStringLiteral("plane")].toObject();
+        check(!pl[QStringLiteral("valid")].toBool(), "club.plane.valid false when nothing fitted");
+        check(pl[QStringLiteral("channel")].toInt() == -1, "club.plane.channel -1 = no channel");
+        check(pl.contains(QStringLiteral("measured")) && pl.contains(QStringLiteral("synth")),
+              "club.plane carries BOTH channels, never merged");
+        // The split-half trap, pinned at the serialization boundary: the synth
+        // channel's split-half fields must stay absent (-1) whatever it carries,
+        // because odd/even samples of a Hermite would fake excellent quality.
+        const QJsonObject sy = pl[QStringLiteral("synth")].toObject();
+        check(sy[QStringLiteral("splitHalfBackDeg")].toDouble() == -1.0
+              && sy[QStringLiteral("splitHalfDownDeg")].toDouble() == -1.0,
+              "club.plane.synth carries no split-half");
     }
 
     std::printf("\n=== ball block (v3.4) ===\n");

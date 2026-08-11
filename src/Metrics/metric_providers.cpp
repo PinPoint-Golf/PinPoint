@@ -121,6 +121,13 @@ std::vector<QString> ShaftLeanProvider::provides() const
     return { QStringLiteral("impactShaftLean") };
 }
 
+// ------------------------------------------------------------------------------ ShaftPlaneProvider
+
+std::vector<QString> ShaftPlaneProvider::provides() const
+{
+    return { QStringLiteral("transitionPlaneDelta") };
+}
+
 // ---------------------------------------------------------------------------------- ScoreProvider
 
 std::vector<QString> ScoreProvider::provides() const

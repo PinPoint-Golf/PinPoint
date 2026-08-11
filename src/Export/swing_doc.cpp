@@ -403,6 +403,40 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
                 { QStringLiteral("sigmaLenPx"),    double(p.sigmaLenPx) },
                 { QStringLiteral("stackN"), p.stackN },
                 { QStringLiteral("source"), int(p.source) } });
+        // Face-on swing-plane transition delta (shaft_plane.h). Written ALWAYS,
+        // even when nothing fitted, so a reader can tell "the producer ran and
+        // found nothing" (valid false, channel -1, per-window reject codes set)
+        // from "this file predates the producer" (the key is absent). Quality is
+        // per channel and must not be compared across them: splitHalf* is the
+        // measured tier's error bar and is meaningless on a Hermite; anchors*/
+        // anchorConfMin are the synth tier's only honest quality.
+        auto planeChan = [](const analysis::ShaftPlaneChannel &c) {
+            return QJsonObject{
+                { QStringLiteral("fitted"),           c.fitted },
+                { QStringLiteral("iotaBackDeg"),      c.iotaBackDeg },
+                { QStringLiteral("iotaDownDeg"),      c.iotaDownDeg },
+                { QStringLiteral("deltaDeg"),         c.deltaDeg },
+                { QStringLiteral("nodeBackDeg"),      c.nodeBackDeg },
+                { QStringLiteral("nodeDownDeg"),      c.nodeDownDeg },
+                { QStringLiteral("nBack"),            c.nBack },
+                { QStringLiteral("nDown"),            c.nDown },
+                { QStringLiteral("conicResidBack"),   c.conicResidBack },
+                { QStringLiteral("conicResidDown"),   c.conicResidDown },
+                { QStringLiteral("ratioBack"),        c.ratioBack },
+                { QStringLiteral("ratioDown"),        c.ratioDown },
+                { QStringLiteral("splitHalfBackDeg"), c.splitHalfBackDeg },
+                { QStringLiteral("splitHalfDownDeg"), c.splitHalfDownDeg },
+                { QStringLiteral("anchorsBack"),      c.anchorsBack },
+                { QStringLiteral("anchorsDown"),      c.anchorsDown },
+                { QStringLiteral("anchorConfMin"),    double(c.anchorConfMin) },
+                { QStringLiteral("rejectBack"),       c.rejectBack },
+                { QStringLiteral("rejectDown"),       c.rejectDown } };
+        };
+        const QJsonObject plane{
+            { QStringLiteral("valid"),    a.shaft.plane.valid },
+            { QStringLiteral("channel"),  a.shaft.plane.channel },
+            { QStringLiteral("measured"), planeChan(a.shaft.plane.measured) },
+            { QStringLiteral("synth"),    planeChan(a.shaft.plane.synth) } };
         QJsonObject clubObj{
             { QStringLiteral("camera"),        int(a.shaft.camera) },
             { QStringLiteral("valid"),         a.shaft.valid },
@@ -415,6 +449,7 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
             { QStringLiteral("frameWidth"),    a.shaft.frameWidth },
             { QStringLiteral("frameHeight"),   a.shaft.frameHeight },
             { QStringLiteral("lengths"),       lengths },
+            { QStringLiteral("plane"),         plane },
             { QStringLiteral("samples"),       samples },
             { QStringLiteral("predicted"),     predicted } };
         if (!positions.isEmpty()) clubObj.insert(QStringLiteral("positions"), positions);

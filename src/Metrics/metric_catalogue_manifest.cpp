@@ -998,12 +998,47 @@ void installMetricManifest(MetricCatalogue &cat)
         .usedBy = { QStringLiteral("characteristic:flat_backswing_plane"),
                     QStringLiteral("characteristic:steep_backswing_plane"),
                     QStringLiteral("characteristic:steep_downswing_shaft"),
-                    QStringLiteral("characteristic:under_plane_stuck"),
-                    // The P4→P5 pair. Over the top is the plane SHIFT out of the top, which is a
-                    // different reading of this series from the P6 absolute two rows up: a golfer
-                    // can be steep at delivery off a steep backswing without ever re-routing the
-                    // club outward in transition.
-                    QStringLiteral("characteristic:over_the_top"),
+                    QStringLiteral("characteristic:under_plane_stuck") },
+        // over_the_top and shallowing USED to hang here, as a planned P4→P5 delta of
+        // this down-the-line series. They moved to transitionPlaneDelta below, which
+        // is the same idea measured a way the face-on camera can actually deliver.
+    });
+
+    // The transition delta, and the reason it is a separate key from swingPlane
+    // above: this is not a plane ANGLE, it is the CHANGE in one between two windows,
+    // and it comes off the face-on camera rather than down-the-line. Over the top is
+    // not the same event as steep_downswing_shaft — a golfer can be steep at P6 off a
+    // steep backswing without ever re-routing the club outward in transition — so it
+    // wants its own measure, which is what this is.
+    cat.addDescriptor({
+        .key = QStringLiteral("transitionPlaneDelta"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Transition plane delta"),
+        .shortLabel = QStringLiteral("Plane Δ"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Club delivery"),
+        .description = QStringLiteral(
+            "How much the swing plane changes between the backswing and the downswing, in degrees. "
+            "The shaft vector sweeps a circle on the swing plane, and a circle on a plane images as "
+            "an ellipse whose axis ratio gives that plane's inclination — so fitting one ellipse "
+            "over takeaway-to-top and another over top-to-impact, then subtracting, measures the "
+            "re-route out of the top without needing depth or a second camera."),
+        .howToRead = QStringLiteral(
+            "EXPERIMENTAL. Its corridor is a placeholder, set deliberately wider than anything yet "
+            "observed so that the measure records and accumulates without grading anyone, because "
+            "the characterisation behind it comes from a single golfer. "
+            "Positive means the club STEEPENED between backswing and downswing, the over-the-top "
+            "direction; negative means it shallowed, which good players often do on purpose. Read "
+            "only the change — the underlying absolute plane angles are not calibrated and carry a "
+            "large body-depth bias, so they are not a coaching number on their own."),
+        .signPositive = QStringLiteral("the club steepened in transition — the over-the-top direction"),
+        .signNegative = QStringLiteral("the club shallowed in transition"),
+        .phases = { P::Transition },
+        .routes = {
+            via("faceOnClub", RM::Projected, Direct, { .faceOnCamera = true, .clubTrack = true },
+                QStringLiteral("the shaft vector's own ellipse over each window, from the face-on "
+                               "shaft track — no depth and no foreshortening model needed")) },
+        .usedBy = { QStringLiteral("characteristic:over_the_top"),
                     QStringLiteral("characteristic:shallowing") },
     });
 

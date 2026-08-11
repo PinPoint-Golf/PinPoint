@@ -425,6 +425,58 @@ struct ClubLengthEstimate {
     int    headMeasN        = 0;     // # post-top Meas frames that fed E-head
 };
 
+// One sample tier's face-on swing-plane record (shaft_plane.h; the transition_plane
+// producer brief §5). Quality travels WITH the value so consumers gate instead of
+// trusting. Default-constructed = "this channel did not fit", which is distinct
+// from "the producer never ran" (see ShaftPlaneEstimate::valid).
+//
+// The two channels carry DIFFERENT quality and must never be compared on it.
+// splitHalf* is the measured tier's honest per-swing error bar and is meaningless
+// on synth — odd and even synth samples lie on the same Hermite, so a refit there
+// reads near zero and would fake excellent quality. anchors*/anchorConfMin are the
+// synth tier's only honest quality, because the located P-anchors are all the
+// information it has. Each is written by one path and left at its default by the
+// other, so the trap is unreachable rather than merely documented.
+struct ShaftPlaneChannel {
+    bool   fitted           = false;  // BOTH windows produced an ellipse
+    double iotaBackDeg      = 0.0;    // arccos(minor/major); larger = flatter
+    double iotaDownDeg      = 0.0;
+    double deltaDeg         = 0.0;    // ι_back − ι_down; positive = STEEPENED in transition
+    double nodeBackDeg      = 0.0;    // major-axis bearing — the plane's lean; recorded, not interpreted
+    double nodeDownDeg      = 0.0;
+    int    nBack            = 0;      // samples in each conic
+    int    nDown            = 0;
+    double conicResidBack   = -1.0;   // median conic residual; < 0 = no fit
+    double conicResidDown   = -1.0;
+    // Axis ratio (minor/major) per window — the CONDITIONING of each fit, and the
+    // one quality the split-half below provably cannot supply: a needle fits both
+    // halves equally well and so reads as perfectly repeatable. < 0 = no fit
+    // attempted. Below shaft_plane.h's kMinAxisRatio the window is refused outright
+    // (rejectBack/Down = IllConditioned), so a recorded ratio is above the floor.
+    double ratioBack        = -1.0;
+    double ratioDown        = -1.0;
+    double splitHalfBackDeg = -1.0;   // MEASURED only; < 0 = not computed (n < 24 / a sub-fit failed)
+    double splitHalfDownDeg = -1.0;
+    int    anchorsBack      = 0;      // SYNTH only: P-anchors spanning each window
+    int    anchorsDown      = 0;
+    float  anchorConfMin    = -1.f;   // SYNTH only: the weakest anchor over both windows
+    int    rejectBack       = 0;      // ConicReject as int — WHY a window failed
+    int    rejectDown       = 0;
+};
+
+// The face-on swing-plane transition delta, recorded per swing. EXPERIMENTAL and
+// normless by design: it observes and accumulates but cannot fire a fault, which
+// is what licenses the dual-channel sourcing. `channel` names which tier the
+// emitted value came from — never omitted, never merged. BOTH channels are kept
+// even when only one is emitted: that accumulating measured-vs-synth pair is the
+// experiment (brief §8.3), and a synth-tagged emission with the measured channel's
+// reject codes beside it IS the record of what the tracker could not see.
+struct ShaftPlaneEstimate {
+    bool valid   = false;   // some channel fitted both windows
+    int  channel = -1;      // PlaneChannel: -1 none, 0 measured, 1 synth
+    ShaftPlaneChannel measured, synth;
+};
+
 // How a ShaftPosition's geometry was resolved (shaft_position_first §2 Layer B).
 // TrackSample = sampled from the final emitted samples[] at the P-time (B1,
 // report-only). MilestoneFit = the ±k-frame shift-and-stack joint (grip,θ,L) fit
@@ -486,6 +538,11 @@ struct ShaftTrack2D {
     // its confidence, and every component estimator. Default = no fusion recorded
     // (all absent) — set by decideTrack's post-pass when cfg.fusion.enabled.
     ClubLengthEstimate lengths;
+    // Face-on swing-plane transition delta (shaft_plane.h), filled by
+    // ShaftPlaneStage after the track is assembled. Default = the producer did
+    // not run (dark / no ladder / no frame size); valid == false with a channel
+    // populated = it ran and no channel fitted.
+    ShaftPlaneEstimate plane;
     // Coaching P-positions P1–P8 (shaft_position_first §2 Layer B). Empty =
     // extraction off (cfg.positions.enabled == false) / pre-v3.5 swing — readers
     // treat empty as "no position data" (same contract as `lengths`).

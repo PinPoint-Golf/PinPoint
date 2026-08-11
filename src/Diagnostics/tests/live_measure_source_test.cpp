@@ -334,7 +334,13 @@ int main(int argc, char **argv)
             }
         }
         std::printf("  %d measures are not live on the richest capture in the corpus\n", planned);
-        check(planned == 20, "20 shipped measures have no producer yet");
+        // 20 -> 19: m_transitionPlaneShift (planned, `swingPlane` delta p4->p5, down-the-line) was
+        // retired unbuilt and replaced by m_transitionPlaneDelta, which is LIVE — it has a producer
+        // (shaft_plane.h via ShaftPlaneStage). Worth knowing WHY that one is live rather than
+        // planned, because it reads oddly next to a measure that is deliberately normless: this
+        // check equates "not live" with "nothing produces it", and a measure that DOES produce a
+        // number while awaiting real norms would break that equation if it were parked as planned.
+        check(planned == 19, "19 shipped measures have no producer yet");
         check(wrong == 0, "…and not one of them produced a value");
     }
 

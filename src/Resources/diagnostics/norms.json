@@ -1599,12 +1599,14 @@
       "source": "heuristic"
     },
     {
-      "measure": "m_transitionPlaneShift",
+      "measure": "m_transitionPlaneDelta",
       "context": "any",
       "mu": 0.0,
-      "sigmaLo": 3.0,
+      "sigmaLo": 25.0,
+      "sigmaHi": 25.0,
       "unit": "°",
-      "source": "heuristic"
+      "source": "heuristic",
+      "citation": "PLACEHOLDER, DELIBERATELY UNREACHABLE - this row exists so the measure can be live and accumulate, NOT so it can grade anybody, and it is not derived from the corpus. The characterisation behind the measure is ONE golfer (docs/research/wrist_cock_model.md §9), and §7 of docs/implementation/transition_plane_producer_brief.md forbids norms cut from it: a data-derived sigma would be about 16 and would install one man's transition as everyone's standard. Sigma 25 puts the surfacing edge (goodMaxZ = 2, i.e. 50 deg) at 1.10x the largest well-conditioned delta the corpus contains (+45.56, a healthy 2026-07-05 swing with axis ratios 0.49/0.97 and split-halves 1.04/0.26), so nothing observed reaches it. Both tails matter: the low tail is `shallowing`, which ontology §8 is explicit is a move good players make on purpose and not a fault, so a band that reaches it is worse than no band. NOTE the history, because it is the reason this number is not larger: this row first shipped at sigma 30, sized against a -58.46 deg reading that turned out to be a DEGENERATE CONIC - an arc too sparse to constrain the second axis, fitted as a needle of axis ratio 0.14. shaft_plane.h's kMinAxisRatio floor now refuses those, and the corpus maximum fell to 45.56. Do not re-widen this without checking that whatever justifies it is a fit and not an artifact; the split-half CANNOT tell you (one needle scored 0.00). REPLACE, do not tighten - real bands wait for more golfers, and the first shallower player is simultaneously the sign falsifier, the norm seed and the between-golfer test. Promotion is gated separately (brief §9) on the synth channel earning its place, which on first measurement it has NOT: median |delta| gap 13.4 deg at Spearman rho +0.38."
     },
     {
       "measure": "m_lowPointAhead",

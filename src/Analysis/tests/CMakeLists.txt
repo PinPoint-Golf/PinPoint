@@ -456,6 +456,31 @@ pp_add_test(shaft_positions_test SOURCES shaft_positions_test.cpp)
 # the >720°/s trigger sanity. Pure std header — no Qt, no OpenCV, no fixture.
 pp_add_test(shaft_kinematics_test SOURCES shaft_kinematics_test.cpp NO_QT)
 
+# Face-on swing-plane transition delta (shaft_plane.h): the direct conic fit
+# ported from tools/shaftlab/plane_probe.py — exact ι on synthetic ellipses, the
+# folded-modulo node line, the deterministic rejections (short arc, hyperbola,
+# parabola, NaN), the ISOTROPIC-normalisation pin that keeps the 40° failure mode
+# dead, the inclusive window bounds, the split-half contract including the trap
+# that must never let the synth tier compute one, and the two-channel selection.
+# Carries a DᵀD eigendecomposition as an oracle for the shipped one-sided Jacobi.
+# Pure std header — no Qt, no OpenCV, no fixture.
+pp_add_test(shaft_plane_test SOURCES shaft_plane_test.cpp NO_QT)
+
+# GOLDEN CROSS-CHECK for shaft_plane.h against the corpus reference the research
+# note published (transition_plane_corpus.csv, from `plane_probe.py corpus`).
+# Reads the EXISTING result.json at each swing dir — no pipeline re-run, no
+# decode, nothing written under the corpus root — replicates plane_probe.load_run's
+# sample selection, and diffs every column: the 33-swing fitted SET, ι/δ/node to
+# 0.1°, sample counts exactly, residuals to the file's 4-dp rounding, split-halves
+# at full precision, and the skip census by reason. Also prints the §8.3 synth-vs-
+# measured mirror stat, which is deliberately NOT asserted. Needs Qt for JSON, so
+# no NO_QT. SKIPs (77) when the corpus share is not mounted.
+pp_add_test(shaft_plane_corpus_test
+    SOURCES shaft_plane_corpus_test.cpp
+    COMPILE_OPTIONS -DPP_PLANE_CORPUS_ROOT="/mnt/swingdata/stagegate/corpm3-off"
+                    -DPP_PLANE_GOLDEN_CSV="${PP_REPO_ROOT}/docs/research/data/wrist_cock_model/transition_plane_corpus.csv")
+set_tests_properties(shaft_plane_corpus_test PROPERTIES SKIP_RETURN_CODE 77)
+
 # S2 R8-T1 blur-wedge plateau measure (shaft_wedge.h): centroid ±1.5° +
 # energy weighting, width, flat/no-floor/sub-span ⇒ none (never fabricate),
 # arm-smear veto, dif-only rescue, best-run selection, 0/360 wrap. Pure std

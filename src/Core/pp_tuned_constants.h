@@ -535,4 +535,13 @@ namespace kinematics {
 inline constexpr bool kEnabled = true;   // kinematics.enabled — master gate (ON 2026-07-18, display-only)
 } // namespace kinematics
 
+// Face-on swing-plane transition delta (shaft_plane.h / ShaftPlaneStage). Ships ON:
+// the measure it feeds is EXPERIMENTAL and normless — status `planned`, no norm row —
+// so it cannot fire a fault however the numbers come out. What the stage buys while
+// it is on is the accumulating measured-vs-synth pair the promotion gate will need
+// (transition_plane_producer_brief.md §8.3, §9). Set false to dark it.
+namespace shaftPlane {
+inline constexpr bool kEnabled = true;   // shaftPlane.enabled — master gate (ON 2026-08-11)
+} // namespace shaftPlane
+
 } // namespace pinpoint::tuned

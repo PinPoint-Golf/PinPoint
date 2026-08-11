@@ -129,6 +129,16 @@ public:
     std::vector<QString> provides() const override;
 };
 
+// wrist_analyzer.cpp ShaftPlaneStage (shaft_plane.h) — transitionPlaneDelta needs the
+// face-on club track plus a takeaway/top/impact ladder. The two absolute inclinations
+// the same stage emits (swingPlaneIotaBack/Down) are deliberately NOT claimed: they
+// carry no measure and no descriptor, because an uncalibrated absolute plane angle is
+// not a coaching output (transition_plane_producer_brief.md §9).
+class ShaftPlaneProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+};
+
 // tempo_metrics.cpp — needs NO devices beyond whatever produced a confident phase ladder: an
 // IMU-only swing and a camera-only swing both qualify, which no single requirement can express. Both
 // metrics therefore carry one `Derived` route with an empty requirement, and the claim it makes is

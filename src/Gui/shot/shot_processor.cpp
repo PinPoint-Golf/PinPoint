@@ -119,6 +119,47 @@ QVariantMap toLengthsDetail(const pinpoint::analysis::ClubLengthEstimate &l)
     };
 }
 
+// Face-on swing-plane transition delta (shaft_plane.h), nested as "plane" under
+// the "club" detail block — identical shape in both parity writers, like
+// toLengthsDetail above. Always written, even when nothing fitted: valid=false
+// with the per-window reject codes set says "the producer ran and found nothing",
+// which a reader must be able to tell from an older file that has no key at all.
+// The two channels' quality fields are NOT interchangeable — see ShaftPlaneChannel.
+QVariantMap toPlaneChannelDetail(const pinpoint::analysis::ShaftPlaneChannel &c)
+{
+    return QVariantMap{
+        { QStringLiteral("fitted"),           c.fitted },
+        { QStringLiteral("iotaBackDeg"),      c.iotaBackDeg },
+        { QStringLiteral("iotaDownDeg"),      c.iotaDownDeg },
+        { QStringLiteral("deltaDeg"),         c.deltaDeg },
+        { QStringLiteral("nodeBackDeg"),      c.nodeBackDeg },
+        { QStringLiteral("nodeDownDeg"),      c.nodeDownDeg },
+        { QStringLiteral("nBack"),            c.nBack },
+        { QStringLiteral("nDown"),            c.nDown },
+        { QStringLiteral("conicResidBack"),   c.conicResidBack },
+        { QStringLiteral("conicResidDown"),   c.conicResidDown },
+        { QStringLiteral("ratioBack"),        c.ratioBack },
+        { QStringLiteral("ratioDown"),        c.ratioDown },
+        { QStringLiteral("splitHalfBackDeg"), c.splitHalfBackDeg },
+        { QStringLiteral("splitHalfDownDeg"), c.splitHalfDownDeg },
+        { QStringLiteral("anchorsBack"),      c.anchorsBack },
+        { QStringLiteral("anchorsDown"),      c.anchorsDown },
+        { QStringLiteral("anchorConfMin"),    double(c.anchorConfMin) },
+        { QStringLiteral("rejectBack"),       c.rejectBack },
+        { QStringLiteral("rejectDown"),       c.rejectDown },
+    };
+}
+
+QVariantMap toPlaneDetail(const pinpoint::analysis::ShaftPlaneEstimate &p)
+{
+    return QVariantMap{
+        { QStringLiteral("valid"),    p.valid },
+        { QStringLiteral("channel"),  p.channel },
+        { QStringLiteral("measured"), toPlaneChannelDetail(p.measured) },
+        { QStringLiteral("synth"),    toPlaneChannelDetail(p.synth) },
+    };
+}
+
 // Convert the analyzer's rich SwingAnalysis into QML-friendly data for the shot's
 // analysisDetail role (the future scrubbable metric graph reads series + phases).
 QVariantMap toAnalysisDetail(const pinpoint::analysis::SwingAnalysis &a)
@@ -347,6 +388,9 @@ QVariantMap toAnalysisDetail(const pinpoint::analysis::SwingAnalysis &a)
             // Multi-estimator length fusion (club_length_fusion.h) — see
             // toLengthsDetail(); mirrors swing_doc.cpp's analysis.club.lengths.
             { QStringLiteral("lengths"),       toLengthsDetail(a.shaft.lengths) },
+            // Face-on swing plane (shaft_plane.h) — see toPlaneDetail(); mirrors
+            // swing_doc.cpp's analysis.club.plane.
+            { QStringLiteral("plane"),         toPlaneDetail(a.shaft.plane) },
             { QStringLiteral("samples"),       samples },
             { QStringLiteral("predicted"),     predicted } };
         if (!positions.isEmpty()) clubMap.insert(QStringLiteral("positions"), positions);

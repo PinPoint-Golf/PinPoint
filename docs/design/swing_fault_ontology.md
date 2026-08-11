@@ -362,6 +362,28 @@ wrongly by a schema that had no cell for it.** Almost nothing moves; things get 
 
 ## 8. The over-the-top repair, specifically
 
+> **DONE, both steps (2026-08-11).** Step 1 shipped earlier and went further than
+> this section asked — `over_the_top` is `observable`/`measured`, not
+> `observable`/`asserted`. Step 2 shipped with the transition_plane producer
+> (`docs/implementation/transition_plane_producer_brief.md`), but **the measure is
+> not the one sketched below**. What landed is `m_transitionPlaneDelta`: a
+> **face-on** reading, reducer `at` the `transition` anchor, measuring the change
+> in swing-plane *inclination* between the backswing and downswing windows from
+> the shaft vector's own ellipse. The `swingPlane`-based `delta p4→p5` row this
+> section specified was retired unbuilt — it needed depth from a down-the-line
+> camera that nothing produces, so it could never have fired. Both tails are
+> wired as described (`sig_overTheTop` high, `sig_shallowing` low), and the
+> `kind: delivery` treatment of the shallowing trap below is exactly what was
+> authored. The measure ships `status: live` with a **provisional placeholder
+> corridor** (mu 0, sigma 25°) set deliberately wider than anything the corpus
+> contains — its surfacing edge is 50° against a widest well-conditioned swing
+> of 45.6°.
+> So both tails are genuinely assessable rather than permanently Unavailable
+> (corpus coverage 51 → 53 conditions), while nothing real reaches the band. The
+> characterisation behind it is still one golfer, so that corridor is to be
+> **replaced, not tightened**; see the brief's §7 and §9, and the norm row's own
+> citation, which records why sigma 30 rather than the ~16 the data would imply.
+
 Two steps, and the first needs no schema change at all.
 
 **Step 1 — today, no code.** Retag `over_the_top` from `latent`/`asserted` to `observable`/`asserted`

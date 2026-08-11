@@ -67,7 +67,7 @@ int main()
         // 87 -> 88 with balanceHeelToe, the depth-axis partner to comOverLeadFoot. Balance was
         // measured along the stance line only, so a golfer sat on their heels — which is one of
         // the setup causes of early extension — had no metric to be sat on their heels IN.
-        checkEqI(static_cast<int>(cat.all().size()), 88, "descriptor count == 88");   // 71 + 26 lm. - 9 renamed
+        checkEqI(static_cast<int>(cat.all().size()), 89, "descriptor count == 89");   // 71 + 26 lm. - 9 renamed, + transitionPlaneDelta
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -83,7 +83,9 @@ int main()
                                "leadHandWidth",   "leadUpperArmToChest", "leadArmToTorso",
                                "pelvisRotation",  "thoraxRotation", "xFactor", "xFactorStretch",
                                "shaftAngleVsHorizontal", "attackAngle", "lowPointAhead",
-                               "trailWristFlexExt" };
+                               "trailWristFlexExt",
+                               // The face-on swing-plane transition delta (shaft_plane.h).
+                               "transitionPlaneDelta" };
         bool allPresent = true;
         for (const char *k : live)
             if (!cat.descriptor(QString::fromLatin1(k))) { allPresent = false;
@@ -99,7 +101,7 @@ int main()
         checkEqI(countType(cat, MetricType::TimeSeries),  39, "TimeSeries count");   // +balanceHeelToe
         // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
         // as duplicates of a series the catalogue already carries.
-        checkEqI(countType(cat, MetricType::PointInTime), 43, "PointInTime count");   // +17: a monitor reports one number per shot
+        checkEqI(countType(cat, MetricType::PointInTime), 44, "PointInTime count");   // +17: a monitor reports one number per shot; +transitionPlaneDelta
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
@@ -477,7 +479,11 @@ int main()
         for (const MetricDescriptor *d : cat.all())
             if (d->stereoGain() == SG::Refines) ++refines;
         std::printf("    %d metrics carry projection error a calibrated pair would refine\n", refines);
-        checkEqI(refines, 27, "27 projected readings taken past Address");
+        // 28 with transitionPlaneDelta: it reads a plane INCLINATION off a single
+        // face-on view, so the depth component is exactly what a calibrated pair
+        // would recover — the reason the brief ships only the delta and leaves the
+        // absolute angle uncalibrated.
+        checkEqI(refines, 28, "28 projected readings taken past Address");
     }
 
     // 3d-quater. The upgrade hint — what more kit would buy, on a real shot.
