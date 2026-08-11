@@ -166,7 +166,7 @@ def load_swing(run_dir, corpus_root, args):
     beta_track = chir * wrap180(theta - phi)
 
     # Truth, when this swing has hand-placed shaft labels.
-    truth_t = truth_beta = None
+    truth_t = truth_beta = truth_lab = None
     name = Path(run_dir).name
     if "__" in name:
         session, swing = name.split("__", 1)
@@ -185,8 +185,9 @@ def load_swing(run_dir, corpus_root, args):
                 if ok.sum() >= args.min_truth:
                     truth_t = tt[ok]
                     truth_beta = chir * wrap180(th[ok] - ph[ok])
+                    truth_lab = [l for l, k in zip(lab, ok) if k]
 
-    return {
+    rec = {
         "name": name,
         "session": name.split("__")[0] if "__" in name else name,
         "events": events, "chir": chir,
@@ -194,7 +195,80 @@ def load_swing(run_dir, corpus_root, args):
         "measured": measured, "vision": vision,
         "truth_t": truth_t, "truth_beta": truth_beta,
         "truth_phi": phi_at(truth_t) if truth_t is not None else None,
-    }, None
+        "truth_src": None,
+        "ftruth_t": None, "ftruth_beta": None, "ftruth_phi": None, "ftruth_tier": None,
+    }
+
+    # The instrumented fusion truth, when this swing has a lab clip. Additive:
+    # without --lab-root nothing below runs and the record is unchanged.
+    if getattr(args, "lab_root", None):
+        _attach_fusion(rec, name, args, phi_at, chir, t)
+    return rec, None
+
+
+def _attach_fusion(rec, name, args, phi_at, chir, sample_t):
+    """Join the instrumented stripe-fusion truth onto this swing.
+
+    Two things come out of it, and the second matters as much as the first:
+
+      * ftruth_* -- the fusion rows as a gradable channel, tiered band vs ray.
+        The RAY tier is the genuinely new material; the band tier is largely
+        already in truth.json.
+      * truth_src -- provenance for each EXISTING corpus label. For the
+        2026-07-05 session truth.json IS the band tier verbatim, so grading
+        "hand labels" against "fusion band" without this would be comparing a
+        set with itself and calling the agreement a result.
+    """
+    try:
+        from fusion_truth import discover, fusion_labels
+    except Exception as e:                                  # pragma: no cover
+        print(f"[fit] --lab-root given but fusion_truth unavailable ({e})", file=sys.stderr)
+        return
+    lab_dirs = _lab_index(args)
+    lab_dir = lab_dirs.get(name)
+    if lab_dir is None:
+        return
+    try:
+        fl = fusion_labels(lab_dir, sample_t)
+    except Exception as e:
+        print(f"[fit] {name}: fusion truth unreadable ({e})", file=sys.stderr)
+        return
+
+    want = set((args.fusion_tiers or "band,ray").split(","))
+    keep = np.array([tr in want for tr in fl["tier"]], dtype=bool)
+    keep &= np.isfinite(fl["theta_deg"])
+    if args.truth_phi == "anchors":
+        ph = np.where(fl["phi_anchor_ok"], fl["phi_anchor"], np.nan)
+    else:
+        ph = phi_at(fl["t_us"])
+    keep &= np.isfinite(ph)
+    if keep.sum():
+        rec["ftruth_t"] = fl["t_us"][keep].astype(np.int64)
+        rec["ftruth_phi"] = ph[keep]
+        rec["ftruth_beta"] = chir * wrap180(fl["theta_deg"][keep] - ph[keep])
+        rec["ftruth_tier"] = fl["tier"][keep]
+
+    # Provenance of the corpus labels: a band row within 2 ms and 1 px is the
+    # same observation, not an independent one.
+    if rec["truth_t"] is not None:
+        band = (fl["tier"] == "band") & np.isfinite(fl["head_x"])
+        bt = fl["t_us"][band].astype(float)
+        src = []
+        for tt in rec["truth_t"].astype(float):
+            src.append("instrumented-band"
+                       if bt.size and np.min(np.abs(bt - tt)) <= 2000.0 else "hand")
+        rec["truth_src"] = np.asarray(src)
+
+
+_LAB_INDEX = {}
+
+
+def _lab_index(args):
+    key = str(args.lab_root)
+    if key not in _LAB_INDEX:
+        from fusion_truth import discover
+        _LAB_INDEX[key] = discover(args.lab_root)
+    return _LAB_INDEX[key]
 
 
 # ---------------------------------------------------------------------------
@@ -554,6 +628,42 @@ def stats(resid, sigma=None):
     return out
 
 
+def scoring_channels(te):
+    """The label sources a held-out swing can be graded against.
+
+    'track' and 'truth' are the originals and keep their exact meaning, so the
+    decision gate is unchanged. The rest exist because the 2026-07-05 session's
+    truth.json IS the instrumented band tier: without splitting hand from
+    instrumented, and band from ray, a "new truth vs old truth" comparison is
+    largely a set compared with itself.
+    """
+    out = [("track", te["t"][te["vision"]], te["beta"][te["vision"]], te["phi"][te["vision"]]),
+           ("truth", te["truth_t"], te["truth_beta"], te["truth_phi"])]
+
+    src = te.get("truth_src")
+    if src is not None and te["truth_t"] is not None:
+        for name, m in (("truth_hand", src == "hand"),
+                        # The SAME observations as fuse_band, but routed through
+                        # truth.json (radians, corpus loader) instead of the
+                        # fusion CSV (degrees, frame index). The two must agree
+                        # to rounding; a gap means the timebase join is wrong,
+                        # and that is a far sharper check than comparing against
+                        # a different swing set.
+                        ("truth_band", src == "instrumented-band")):
+            if m.any():
+                out.append((name, te["truth_t"][m], te["truth_beta"][m], te["truth_phi"][m]))
+
+    ft, fb, fp, tier = (te.get("ftruth_t"), te.get("ftruth_beta"),
+                        te.get("ftruth_phi"), te.get("ftruth_tier"))
+    if ft is not None and len(ft):
+        out.append(("fuse_all", ft, fb, fp))
+        for name in ("band", "ray"):
+            m = tier == name
+            if m.any():
+                out.append((f"fuse_{name}", ft[m], fb[m], fp[m]))
+    return out
+
+
 def evaluate(forms, swings, args):
     """Leave-one-swing-out. Each held-out swing is scored against a table fitted
     without it -- on the tracker's measured tier (broad) and, where the swing has
@@ -561,10 +671,20 @@ def evaluate(forms, swings, args):
     results = {f.key: {"form": f, "track": [], "truth": [], "track_sig": [],
                        "truth_sig": [], "seg": {}, "sess": {}} for f in forms}
     fitted_tables = {f.key: [] for f in forms}
+    channels_seen = []
 
     for held in range(len(swings)):
-        train = [s for i, s in enumerate(swings) if i != held]
         te = swings[held]
+        # Leave-one-SWING-out by default. With ten consecutive swings of one
+        # session carrying the fusion truth, that leaks session structure into
+        # every fold; --holdout session withholds the whole session and the gap
+        # between the two IS the leak.
+        if getattr(args, "holdout", "swing") == "session":
+            train = [s for s in swings if s["session"] != te["session"]]
+        else:
+            train = [s for i, s in enumerate(swings) if i != held]
+        if not train:
+            continue
         for f in forms:
             if f.key == "F0":
                 mdl = f                                    # nothing to fit
@@ -582,6 +702,11 @@ def evaluate(forms, swings, args):
                 if not X:
                     continue
                 mdl = f.clone()
+                # Constructing a base Form here instead of cloning by type fits a
+                # parametric candidate as a two-knot straight line, which reads as
+                # catastrophic model failure rather than a harness bug. It has
+                # bitten once; pin it.
+                assert type(mdl) is type(f), f"{f.key}: clone() changed type"
                 mdl.fit(np.concatenate(X), np.concatenate(B), np.concatenate(P),
                         args.halfwidth if f.axis == "t" else args.halfwidth_s)
                 fitted_tables[f.key].append((mdl.centre.copy(), mdl.sigma.copy()))
@@ -593,13 +718,13 @@ def evaluate(forms, swings, args):
                     results[f.key].setdefault("params", []).append(np.array(mdl.params))
 
             # score on the held-out swing
-            for src, tsel, bsel, psel in (
-                ("track", te["t"][te["vision"]], te["beta"][te["vision"]],
-                 te["phi"][te["vision"]]),
-                ("truth", te["truth_t"], te["truth_beta"], te["truth_phi"]),
-            ):
+            for src, tsel, bsel, psel in scoring_channels(te):
+                if src not in channels_seen:
+                    channels_seen.append(src)
                 if tsel is None or len(tsel) == 0:
                     continue
+                results[f.key].setdefault(src, [])
+                results[f.key].setdefault(src + "_sig", [])
                 if args.domain == "to-impact":
                     keep = np.asarray(tsel) <= te["events"][PH_IMPACT]
                     tsel, bsel, psel = np.asarray(tsel)[keep], np.asarray(bsel)[keep], np.asarray(psel)[keep]
@@ -610,7 +735,7 @@ def evaluate(forms, swings, args):
                 r = wrap180(np.asarray(bsel) - bh)
                 results[f.key][src].append(r)
                 results[f.key][src + "_sig"].append(sg)
-                if src == "truth":
+                if src != "track":
                     continue
                 s_prog = swing_progress(tsel, te["events"])
                 # Under the to-impact domain the model makes no claim past
@@ -627,10 +752,11 @@ def evaluate(forms, swings, args):
                 results[f.key]["sess"].setdefault(te["session"], []).append(r)
 
     for k, res in results.items():
-        for src in ("track", "truth"):
+        for src in channels_seen or ("track", "truth"):
             res[src + "_stats"] = stats(np.concatenate(res[src]),
                                         np.concatenate(res[src + "_sig"])) \
-                if res[src] else None
+                if res.get(src) else None
+        res["channels"] = list(channels_seen)
         res["seg_stats"] = {lbl: stats(np.concatenate(v)) for lbl, v in res["seg"].items()}
         res["sess_stats"] = {lbl: stats(np.concatenate(v)) for lbl, v in res["sess"].items()}
         if res.get("params"):
@@ -692,6 +818,53 @@ def gate(res_base, res_cand):
 # ---------------------------------------------------------------------------
 # Artefacts
 
+def _provenance_section(results, order, swings, args):
+    """Grading by label provenance -- only when --lab-root supplied.
+
+    THE FRAME-AVERAGED PARTNER IS NOT OPTIONAL. Where the labels sit changes the
+    ranking: refitting the progress axis looked worthless scored against hand
+    labels (75.6 vs 74.3) and was a 22 deg gain frame-wide, because the labels
+    cluster where a human can see the shaft. The rule "always report
+    frame-averaged beside truth" was written after that, and is enforced here in
+    code rather than left to whoever next writes the table.
+    """
+    chans = [c for c in (results[order[0]].get("channels") or [])
+             if c not in ("track", "truth")]
+    if not chans:
+        return []
+
+    if "track" not in (results[order[0]].get("channels") or []):
+        raise RuntimeError("refusing to emit a truth table with no frame-averaged "
+                           "partner -- see docs/research/wrist_cock_model.md")
+
+    n_hand = n_band = 0
+    for s in swings:
+        src = s.get("truth_src")
+        if src is None:
+            continue
+        n_hand += int((src == "hand").sum())
+        n_band += int((src == "instrumented-band").sum())
+
+    lines = ["", "## Grading by label provenance", "",
+             f"- fusion phi source: `{args.truth_phi}` · tiers `{args.fusion_tiers}` "
+             f"· holdout `{args.holdout}`",
+             f"- of the corpus labels on lab-covered swings, **{n_band} are the "
+             f"instrumented band tier verbatim** and {n_hand} are genuinely hand-placed",
+             "- `fuse_ray` is the material the corpus never had: the fast frames a "
+             "human cannot label",
+             "- every truth column is printed beside `track` (frame-averaged), never alone",
+             "",
+             "| form | " + " | ".join(["track (frame-avg)"] + chans) + " |",
+             "|---|" + "---|" * (len(chans) + 1)]
+    for k in order:
+        cells = []
+        for c in ["track"] + chans:
+            st = results[k].get(c + "_stats")
+            cells.append(f"{st['p10_p90']:.1f}° (n={st['n']})" if st else "—")
+        lines.append(f"| {k} | " + " | ".join(cells) + " |")
+    return lines
+
+
 def write_report(path, results, order, swings, args):
     lines = ["# Wrist-cock model fit", "",
              f"- run root `{args.run_root}` · sha `{git_sha()}` · domain `{args.domain}`",
@@ -725,6 +898,7 @@ def write_report(path, results, order, swings, args):
         lines.append(f"| {f.key} {f.label} | {st['n']} | {st['median']:+.1f}° | "
                      f"{st['p10_p90']:.1f}° | {st['bad30']*100:.1f}% | "
                      f"{('%.0f%%' % (w*100)) if w else '—'} |")
+    lines += _provenance_section(results, order, swings, args)
     lines += ["", "## By phase segment (tracker tier, p10–p90)", "",
               "| form | backswing | downswing | through |", "|---|---|---|---|"]
     for k in order:
@@ -860,6 +1034,20 @@ def main(argv=None):
                          "golfers it has never seen. 2.5 is not a guess -- it is the "
                          "factor at which the 3-sigma envelope covers as much true beta "
                          "as the shipped table does, while still searching a narrower arc")
+    ap.add_argument("--lab-root", default=None,
+                    help="instrumented stripe-fusion lab root (tape_20260705). "
+                         "Omit and the run is byte-identical to the pre-fusion harness.")
+    ap.add_argument("--truth-phi", choices=("harness", "anchors"), default="harness",
+                    help="phi source for the fusion channel. Default harness: "
+                         "anchors.csv is interpolated and reads 0.1 deg jitter in the "
+                         "backswing while degrading to 3.5 deg in the downswing, "
+                         "against production's 1.8 deg (fusion_truth.py --audit).")
+    ap.add_argument("--fusion-tiers", default="band,ray",
+                    help="which instrumented tiers to grade (band ~0.3 deg, ray ~1.7 deg)")
+    ap.add_argument("--holdout", choices=("swing", "session"), default="swing",
+                    help="leave-one-swing-out (default) or leave-one-session-out")
+    ap.add_argument("--exclude-swings", default="",
+                    help="comma list of run-dir names to drop")
     ap.add_argument("--doc-figure", help="write a single-panel figure to this path")
     ap.add_argument("--emit-header", action="store_true",
                     help="print the winning table as the C++ literal")
@@ -869,9 +1057,13 @@ def main(argv=None):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
+    drop = {x.strip() for x in (args.exclude_swings or "").split(",") if x.strip()}
     swings, rejected = [], []
     for d in sorted(Path(args.run_root).iterdir()):
         if not (d / "result.json").exists():
+            continue
+        if d.name in drop:
+            rejected.append((d.name, "excluded by --exclude-swings"))
             continue
         s, why = load_swing(d, args.corpus, args)
         if s is None:
