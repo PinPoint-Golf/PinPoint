@@ -5,8 +5,10 @@
 `tools/swinglab/fusion_truth.py` and the projection layer in
 `tools/shaftlab/plane_probe.py`. Implements the v2 table in
 `src/Analysis/shaft_kinematics.h`, dark behind `shaft.wedge.kinModelV2`.
-Companion to the programme report, `club_detection_from_video.md`, whose Phase 6
-sets out the physical law this model puts numbers on.*
+Supporting data in [`data/wrist_cock_model/`](data/wrist_cock_model/); every
+number reproduces from the commands in §13. Companion to the programme report,
+`club_detection_from_video.md`, whose Phase 6 sets out the physical law this
+model puts numbers on.*
 
 ---
 
@@ -15,20 +17,18 @@ sets out the physical law this model puts numbers on.*
 The shaft tracker would like to know roughly where the club is before it looks
 for it. It cannot measure θ in advance — that is the thing being solved — but it
 *can* measure the lead arm from pose on every frame, including the frames where
-the club is a blur. If the wrist angle between arm and club were predictable,
-the arm would locate the club for free:
+the club is a blur. If the wrist angle between arm and club is predictable, the
+arm locates the club for free:
 
     θ̂(f) = φ(f) + chir · β̂(x(f))
 
-That prediction already exists in the tracker. It centres the blur-wedge search
-envelope, sets the `kinCone` off-envelope penalty, and supplies the predicted
-angular rate that triggers the wedge at all.
+That prediction centres the blur-wedge search envelope, sets the `kinCone`
+off-envelope penalty, and supplies the predicted angular rate that triggers the
+wedge at all.
 
-What it had never had is data. The original table was authored by hand from the
-design's expectations. This note grades it, fits a replacement, reports what the
-fit turned out to depend on — which was not what we expected — and then goes one
-layer deeper, to the swing plane that the whole image-plane picture is a shadow
-of.
+This note defines the model, fits it, grades it against instrumented truth, and
+then goes one layer deeper — to the swing plane that the whole image-plane
+picture is a shadow of.
 
 ---
 
@@ -46,8 +46,9 @@ The direction of the **lead forearm**: elbow → grip.
   centroids. Which side leads is decided per swing from the pose, on the grip
   ordering over the address hold — never from metadata.
 - Physically: where the lead arm points. **An input, never predicted.**
-- Quality: 1.79° self-jitter in the downswing, measured about a local quadratic
-  (§6).
+- Quality: **1.79°** self-jitter in the downswing, measured about a local
+  quadratic — well inside the ~20° residual the model is explaining, so the model
+  is not φ-limited.
 
 ### θ (theta) — the club angle. **This is what the model predicts.**
 
@@ -134,14 +135,11 @@ all. Everything below is fitted and graded over address → impact only.
 
 ## 4. The clock: seconds before impact
 
-Two changes are available — fit the curve to data, and change the variable it is
-indexed by. Both help, and separating them matters, because our first reading got
-the split badly wrong.
+    x = (t − t_impact) / 10⁶     seconds, negative through the swing, 0 at impact
 
-**The axes, measured directly.** Before fitting anything, ask how much each
-candidate clock can possibly support: the spread of β about its own conditional
-median on that axis, leave-one-swing-out. This is the floor no model on that axis
-can beat.
+The floor each candidate clock can support — the spread of β about its own
+conditional median on that axis, leave-one-swing-out — settles the choice before
+any curve is fitted. No model on an axis can beat its floor.
 
 | axis | frame-averaged | at the instants truth labels sit |
 |---|---|---|
@@ -150,8 +148,6 @@ can beat.
 | top → impact, linear | 25.6° | — |
 | **seconds before impact** | **16.1°** | **15.4°** |
 
-    x = (t − t_impact) / 10⁶     seconds, negative through the swing, 0 at impact
-
 Seconds-before-impact wins on both readings, and the reason is physical: **wrist
 release is not a fixed fraction of the swing but an event at a roughly fixed time
 before impact.** Two swings reaching the top at the same fraction but taking
@@ -159,13 +155,15 @@ different times release at the same number of milliseconds before impact and at
 quite different fractions, so a progress index smears every swing's release
 across every other's.
 
-**But look at the two columns.** The progress axis is twice as bad at truth-label
-instants as frame-averaged; the time axis is not. Truth labels cluster at
-s ≈ 0.30–0.57 — the transition, where a human can see the shaft — and
-`swingProgress` is anchored on the **top**, the noisiest event in the ladder.
-Small top-placement errors blow β up precisely where labels are densest.
-
-This is settled and should not be re-litigated.
+The two columns also differ in a way that matters for how anything here is read.
+The progress axis is twice as bad at truth-label instants as frame-averaged; the
+time axis is not. Truth labels cluster at s ≈ 0.30–0.57 — the transition, where a
+human can see the shaft — and `swingProgress` is anchored on the **top**, the
+noisiest event in the ladder, so small top-placement errors blow β up precisely
+where labels are densest. **A comparison scored only where truth exists is a
+statement about the labels as much as the model.** Frame-averaged and truth
+columns are therefore reported side by side throughout, and the report generator
+refuses to emit one without the other.
 
 Two representation details also mattered:
 
@@ -183,38 +181,28 @@ Two representation details also mattered:
 ## 5. How it is graded
 
 **Anti-circularity.** Fitting uses measured-tier samples only — the tier graded
-at 0.6% bad against dense truth — while the *decision* rests on labels that owe
-the tracker nothing. Every number is leave-one-swing-out.
+at 0.6% bad against dense truth. The decision rests on labels that owe the
+tracker nothing. Every number is leave-one-swing-out.
 
-**Report frame-averaged and truth side by side, always.** Where the labels sit
-changes the ranking, and §10 records the case where reading the truth column
-alone inverted a conclusion. The report generator now *refuses* to emit a truth
-column without its frame-averaged partner.
+**Name the run root.** Numbers downstream of a run root are not portable between
+roots, so every figure here is quoted against `stagegate/corpm3-off` (59/61
+swings usable) and any comparison must name its own. Some roots are unusable
+rather than merely different: `stagegate/final1` carries no `club` block, and
+`corpoff-live`, `off1`, `off2`, `on1` are missing the takeaway phase and lose all
+61 swings.
 
-**Name the run root.** Numbers downstream of a run root are not portable. At
-`stagegate/corpm3-off` (59/61 swings usable) the previously published figures do
-not reproduce:
+### Label provenance
 
-| form | as previously published | at `corpm3-off` |
-|---|---|---|
-| F0 shipped table | 74.3° | **77.6°** |
-| F2 refit on seconds-before-impact | 20.9° | **26.8°** |
+The 2026-07-05 session carries instrumented stripe-fusion truth, and the
+provenance of those labels has to be stated because it changes what a comparison
+means: `truth.json` for that session **is the fusion band tier verbatim** — 9 of
+10 swings match row-for-row, head positions to 0.000 px, θ to a pooled median
+0.0063°. Of the corpus labels on those swings, **565 are instrumented band rows
+and 61 are genuinely hand-placed.** Grading "hand labels" against "fusion band"
+without splitting them compares a set with itself.
 
-Same 805 labels, 471 scored residuals against the earlier 463. The earlier
-figures were computed at an unnamed root. Other roots are worse than merely
-different: `stagegate/final1` carries no `club` block at all, and `corpoff-live`,
-`off1`, `off2`, `on1` are missing the takeaway phase and lose all 61 swings.
-
-### Label provenance — most of the "instrumented truth" was already in use
-
-The 2026-07-05 session has instrumented stripe-fusion truth. It is *not* new
-material: `truth.json` for that session **is the fusion band tier verbatim** —
-9 of 10 swings match row-for-row, head positions to 0.000 px, θ to a pooled
-median 0.0063°. Of the corpus labels on those swings, **565 are instrumented band
-rows and only 61 are genuinely hand-placed.**
-
-What *is* new is the **ray tier**: 468 rows, 283 of them pre-impact — the fast
-frames a human cannot label at all.
+What is genuinely new is the **ray tier**: 468 rows, 283 of them pre-impact — the
+fast frames a human cannot label at all.
 
 | form | track (frame-avg) | truth_hand | truth_band | fuse_band | fuse_ray |
 |---|---|---|---|---|---|
@@ -241,46 +229,44 @@ a statement about the model, in precisely the region it most needs to serve.
 | F2 | 12.2° → 12.9° | **0.7°** |
 | F3 | 16.1° → 21.0° | **4.9°** |
 
-F2 barely notices; the φ-term leaks seven times as much. §10 rejected F3 for
-absorbing between-swing variation it could not predict — that was an inference
-from envelope collapse, and this is the direct measurement.
+F2 barely notices; the φ-term leaks seven times as much (§10).
 
----
+### The φ source
 
-## 6. φ provenance: an alarming disagreement that dissolves
-
-The lab's `anchors.csv` carries a φ derived from an older pose run. It disagrees
-with production φ by a downswing p90 of **51.9°** pooled — which, taken at face
-value, would exceed the entire residual the model is trying to explain and would
-mean every number here was φ-limited.
-
-It is not. Three hypotheses were tested and killed:
-
-- **Interpolation across a sparse pose?** No — the disagreement is *largest* at
-  the smallest gaps (median 20.3° at 0–3 ms, falling to 11° at 10–20 ms), which
-  is backwards. The pose is not sparse: 215 frames at 6.9 ms spacing is near
-  per-frame over the swing window.
-- **`smooth_angle`'s moving average?** No — raw and smoothed agree to 0.2°.
-- **A timebase offset?** No — the best per-swing shift scatters −9 to +40 ms and
-  improves the median only 13.7° → 12.2°.
-
-The disagreement is real: two pose extractions of the same video differ that
-much. **But a disagreement never says which side is wrong.** Each channel's own
-jitter does, measured about a local quadratic on its own samples:
+Two φ channels exist: the production pose, and the lab's `anchors.csv` from an
+earlier pose run. They disagree substantially, and a disagreement alone cannot
+say which is wrong — each channel's own jitter does, measured about a local
+quadratic on its own samples:
 
 | φ source | backswing | downswing |
 |---|---|---|
 | production pose (raw, unsmoothed) | 3.13° | **1.79°** |
-| `anchors.csv` | **0.12°** | 3.51° |
+| `anchors.csv` | 0.12° | 3.51° |
 
 `anchors.csv` reading 0.12° in the backswing is too smooth to be a measurement —
 the signature of interpolation between sparser samples — and where the swing is
-fast it cannot hide, degrading to 3.51°. **Production φ stays, and at 1.79°
-jitter the model's ~20° residual is not φ-limited.**
+fast it cannot hide, degrading to 3.51°. **Production φ is the source
+(`--truth-phi harness`)**, and at 1.79° jitter the model's residual is not
+φ-limited.
 
-*(A note on method: the first version of this comparison scored production's
-smoothed φ against anchors' unsmoothed and reported 0.23°. Smoothing suppresses
-exactly the quantity being measured. The table above uses raw φ on both sides.)*
+---
+
+## 6. The shipped table's performance
+
+| | against truth |
+|---|---|
+| median residual | **−12.2°** |
+| p10–p90 | **77.6°** |
+| \|error\| > 30° | **37.4%** |
+| within 1σ of its own envelope | 50% |
+
+It is biased and wide, and the bias alternates sign by segment, so no constant
+correction fixes it. More than a third of the frames where the tracker consults
+the prediction are consulting something more than 30° wrong.
+
+Fitting the curve and changing the clock together take that to **26.8°** (F2).
+Split between the two: fitting is worth about 22°, changing the clock about
+another 12°.
 
 ---
 
@@ -288,12 +274,10 @@ exactly the quantity being measured. The table above uses raw φ on both sides.)
 
 Everything above fits a **lookup table**: fifteen knots and linear interpolation.
 That is an empirical curve, not a model — as many free numbers as knots, none
-meaning anything alone, free to wiggle wherever data is thin. Calling it a model
-would flatter it.
+meaning anything alone, free to wiggle wherever data is thin.
 
-So: can the curve be written down? The physics says it has a shape — a wrist that
-cocks once, holds, and releases — and two logistic transitions express exactly
-that:
+The physics says the curve has a shape — a wrist that cocks once, holds, and
+releases — and two logistic transitions express exactly that:
 
     β(t) = b₀ + A · L((t − t_c)/w_c) · (1 − r · L((t − t_r)/w_r))
 
@@ -301,7 +285,7 @@ with `L(z) = 1/(1 + e^(−z))`. Read the structure before the parameters: it is 
 **product of two events** — the first logistic turns the lag on (cocking), the
 second takes it away (the release), and `b₀` is where it starts.
 
-Fitted under a robust loss, leave-one-swing-out, at `stagegate/corpm3-off`:
+Fitted under a robust loss, leave-one-swing-out:
 
 | symbol | name | value | fold spread | what it *is* |
 |---|---|---|---|---|
@@ -313,12 +297,8 @@ Fitted under a robust loss, leave-one-swing-out, at `stagegate/corpm3-off`:
 | **`w_r`** | **release width** | **0.011 s** | ±0.001 | *how fast* — **≈8× faster than the cock** |
 | `r` | release completeness | **0.741** | ±0.017 | how much lag is spent; ~¼ still held at impact |
 
-*(An earlier run at an unnamed root gave b₀ −4.3°, A 90.7°, t_c −0.690 s,
-w_c 0.079 s, t_r −0.038 s, w_r 0.014 s, r 0.846. The shapes agree; the levels are
-run-root dependent, which is why the root is now always named.)*
-
-The stability is the striking part: drop any swing and the release timing moves
-by less than a millisecond.
+The stability is the striking part: drop any swing from the fit and the release
+timing moves by less than a millisecond.
 
 ### What a coach would read off this
 
@@ -333,31 +313,31 @@ these seven numbers can be compared between swings, sessions and golfers.
 
 ### But the table is more accurate, and we ship the table
 
-| | median | p10–p90 | \|err\|>30° | 3σ envelope covers |
-|---|---|---|---|---|
-| empirical table (15 knots) | +0.1° | **20.9°** | 6.7% | 97.0% |
-| parametric (7 params) | −1.3° | 32.6° | 7.8% | 98.3% |
-| shipped, hand-authored | −9.1° | 74.3° | 26.3% | 96.8% |
+| | median | p10–p90 | \|err\|>30° | 3σ half-width | envelope covers |
+|---|---|---|---|---|---|
+| empirical table (15 knots) | −2.5° | **26.8°** | 9.6% | 25.0° | 89.8% |
+| parametric (7 params) | −3.3° | 38.2° | 10.0% | 25.2° | 89.8% |
+| shipped, hand-authored | −12.2° | 77.6° | 37.4% | 62.5° | 93.8% |
 
-The parametric form is unbiased and beats the shipped table better than two to
-one, but gives up ~12° to the lookup table. The reason is visible in Figure 1:
-the real curve does not hold a flat plateau. It dips around 0.36 s before impact
-and rises to a distinct peak at 0.14 s, and a product of two logistics cannot
-express that shape. Whether that structure is real mechanics — a re-cock as the
-arm changes direction at transition — or one golfer's artefact is not settled,
+The parametric form beats the shipped table better than two to one but gives up
+~11° to the lookup table. The reason is visible in Figure 1: the real curve does
+not hold a flat plateau. It dips around 0.36 s before impact and rises to a
+distinct peak at 0.14 s, and a product of two logistics cannot express that
+shape. Whether that structure is real mechanics — a re-cock as the arm changes
+direction at transition — or one golfer's artefact is not settled by this data,
 and it is the first thing a second athlete would tell us.
 
 **One form is not a modelling exercise, and this section is not one.** The
-logistic product was chosen by looking at the empirical curve and picking a shape
-that resembled it. It fits because the curve is sigmoid-ish, and would have
-fitted about as well had the mechanism been something else. No alternative
-families were fitted, nothing was derived from the two-link dynamics this note
-keeps invoking, and no model selection was performed. A proper pass would derive
-a family from the double pendulum with a wrist torque — where the release is
-largely passive once the arm decelerates, which *predicts* a functional form
-rather than borrowing one — fit several families, and judge them on out-of-domain
-prediction (fit the backswing, predict the release) rather than in-domain
-residual. Until then the seven parameters are a compact description, not physics.
+logistic product was chosen because it resembles the empirical curve. It fits
+because the curve is sigmoid-ish, and would have fitted about as well had the
+mechanism been something else. No alternative families were fitted, nothing was
+derived from the two-link dynamics this note keeps invoking, and no model
+selection was performed. A proper pass would derive a family from the double
+pendulum with a wrist torque — where the release is largely passive once the arm
+decelerates, which *predicts* a functional form rather than borrowing one — fit
+several families, and judge them on out-of-domain prediction (fit the backswing,
+predict the release) rather than in-domain residual. Until then the seven
+parameters are a compact description, not physics.
 
 So: **the shipped artefact is an empirical curve, and the parametric fit is what
 it means.** Both come from the same harness, are reported together, and neither
@@ -382,16 +362,16 @@ arc actually searched.
 
 | | median half-width | true β inside |
 |---|---|---|
-| shipped table | 62.5° | 96.8% |
-| fitted, σ as fitted | 17.7° | 90.1% |
-| **fitted, σ × 2.5** | **44°** | **97.0%** |
+| shipped table | 62.5° | 93.8% |
+| fitted, σ as fitted | 25.0° | 89.8% |
+| **fitted, σ × 2.5** | **62.5°** | **96.4%** |
 
 The fitted σ is honest about this corpus and too confident about the world: at
 face value the envelope would miss the true club on one frame in ten. The shipped
-table covers 96.8% by being wide enough to be nearly uninformative.
+table achieves its coverage by being wide enough to be nearly uninformative.
 
-The table ships at **σ × 2.5**, the factor at which the new envelope covers as
-much true wrist cock as the old while searching a narrower arc. That is the whole
+The table ships at **σ × 2.5**, the factor at which the new envelope covers *more*
+true wrist cock than the old one at the same search width. That is the whole
 claim: *the search is no less forgiving than it was, and it now points in the
 right place.* The inflation is the explicit price of a corpus with one athlete in
 it — the fitted centre is a measurement, the fitted spread is one golfer's
@@ -401,8 +381,8 @@ repeatability, and only the first generalises.
 
 ## 9. The projection layer: the swing plane behind the shadow
 
-Everything above lives in the image plane, and that is a problem the model has
-not yet accounted for.
+Everything above lives in the image plane, and the model does not yet account for
+that.
 
 **The swing does not happen in the image plane.** It happens on a plane inclined
 to it, and the camera sees a flattened shadow. Under projection, a vector at
@@ -439,12 +419,12 @@ by direct conic fit. **This uses no foreshortening model and no per-frame length
 only the shape traced.** And a plane fixes which side of the node line each
 direction sits on, so there is no per-frame sign ambiguity to resolve.
 
-Two implementation points, both learned the hard way:
+Two requirements on the fit, both load-bearing:
 
 - **Fit `head − grip`, not the absolute head path.** The absolute path is grip
   translation *plus* club rotation, so it is not a planar closed curve about a
-  fixed centre and a conic fitted to it is badly conditioned. Split-half
-  repeatability improves from 9.2° to **0.6°** in the downswing.
+  fixed centre and a conic fitted to it is badly conditioned — split-half
+  repeatability 9.2° in the downswing against 0.6° for the shaft vector.
 - **Normalise isotropically.** Scaling x and y by their separate standard
   deviations is an anisotropic map that changes both the axis ratio and the
   orientation — the two quantities being measured.
@@ -464,9 +444,9 @@ backswing and downswing**, and a negative delta means it shallows.
 
 ### Precision versus accuracy — the distinction that makes this usable
 
-- **Precision is excellent.** Split-half repeatability (fit odd frames, fit even
-  frames, compare) is **0.6–0.7° in both phases**. Against a 17° delta and a 53°
-  between-swing range, the signal is far above the noise floor.
+- **Precision is excellent.** Split-half repeatability — fit the odd frames, fit
+  the even frames, compare — is **0.6–0.7° in both phases**. Against a 17° delta
+  and a 53° between-swing range, the signal is far above the noise floor.
 - **Absolute accuracy is unconfirmed.** The independent foreshortening estimate
   agrees to 7.8° median in the backswing (8/10 within 10°) but 14.9° in the
   downswing (4/10), and reads systematically *higher* — consistent with the known
@@ -483,14 +463,13 @@ the delta is the part that is already solid.
 - **Club length closes.** `lenPx / s_px_mm + r0_mm` must equal the catalogue
   940 mm, and does: pooled median **946 mm** (0.6% off), p10–p90 828–987. This is
   the only test here that checks the *data* rather than a model. But n=36 is the
-  entire overlap — the instrumented tier covers frames the tape is legible in,
-  while `lenPx` lives in the slow phases.
+  entire overlap — the instrumented tier covers the frames the tape is legible
+  in, while `lenPx` lives in the slow phases.
 - **The single-fixed-plane control is unavailable, not passed.** A single plane
-  was supposed to fail, reproducing `length_model`'s documented ~2× symmetry
-  violation. It does not (5.0% median relative error against a per-phase model's
-  4.4%) — but only because the instrumented tier lacks the antiparallel shaft
-  directions that produced the original violation. This channel cannot acquit or
-  convict it.
+  should fail, reproducing `length_model`'s documented ~2× symmetry violation. It
+  does not (5.0% median relative error against a per-phase model's 4.4%) — but
+  only because the instrumented tier lacks the antiparallel shaft directions that
+  produced the original violation. This channel can neither acquit nor convict it.
 - **The orthographic assumption is bounded, not corrected.** `rho_plane` assumes
   orthographic projection while `s_px_mm` and `lenPx` both fold in the pinhole
   depth scale, identically. Shoulder width bounds it: its excursion implies up to
@@ -510,9 +489,9 @@ here, and must be stable within a golfer across sessions and clubs while moving
 when the swing genuinely changes. If it agrees, the model has earned a coaching
 output. If not, the residual is noise wearing a physical name.
 
-**Not yet established**, and needed before the delta becomes a coaching output:
+**Open before the delta becomes a coaching output:**
 
-- **The sign convention is unvalidated.** The reasoning says larger ι = flatter,
+- **The sign convention needs validating.** The geometry says larger ι = flatter,
   but that mapping has not been confirmed against a known-plane swing or a second
   camera. One down-the-line cross-check settles it.
 - **The axis ratio alone cannot tell which way the plane leans** — two planes
@@ -526,57 +505,42 @@ output. If not, the residual is noise wearing a physical name.
 
 ## 10. What did not work
 
-The negative results are the valuable part of this note.
-
-**Reading the axis comparison against truth alone** — an error of ours, not the
-model's. It made refitting the progress axis look worthless (75.6° against 74.3°)
-when frame-averaged it is a 22° gain. Both numbers were sitting on that axis's
-floor *at the instants our labels occupy*, and we mistook a property of the label
-distribution for a property of the axis. The lesson generalises: when a comparison
-is scored only where truth exists, check what the truth distribution is doing
-before believing the ranking.
-
-**Adding a linear term in φ** (F3). More accurate on paper — 17.4° against F2's
-20.9° — but it fails on three counts. It carries a +6.5° bias against truth while
-showing only +0.3° against the tracker's own tier, the signature of a term fitted
-to tracker quirks rather than mechanics. Its envelope collapses to 35% within 1σ.
-And on instrumented truth it is simply worse than F2 (16.1° against 12.1° band,
-23.9° against 20.5° ray) while leaking 4.9° under session holdout against F2's
-0.7°. Against hand labels it had looked *better*; the label distribution was
-flattering it. More accurate and less honest is not a trade this programme makes.
+**Adding a linear term in φ** (F3). More accurate against hand labels than F2,
+but it fails on three counts. It carries a +6.5° bias against truth while showing
+only +0.3° against the tracker's own tier, the signature of a term fitted to
+tracker quirks rather than mechanics. Its envelope collapses to 35% within 1σ.
+And on instrumented truth it is simply worse than F2 — 16.1° against 12.1° band,
+23.9° against 20.5° ray — while leaking 4.9° under session holdout against F2's
+0.7°, which is the extra regressor absorbing between-swing variation it cannot
+predict out of sample. Against hand labels it looked *better*; the label
+distribution was flattering it. More accurate and less honest is not a trade this
+programme makes.
 
 **Shape constraints** (F4). Imposing the one-reversal law and the in-line-at-
 impact anchor changed nothing material and inherited F3's problems. The reason is
-the interesting part: **the unconstrained fit already satisfies the constraints**,
-rising monotonically to a single maximum and releasing monotonically to a small
-positive value at impact without being told to. The physics is in the data — a
-null result that is mild evidence the law is real rather than imposed.
+the interesting part: **the unconstrained fit already satisfies the
+constraints**, rising monotonically to a single maximum and releasing
+monotonically to a small positive value at impact without being told to. The
+physics is in the data — a null result that is mild evidence the law is real
+rather than imposed.
 
-**Per-swing calibration.** Fitting a per-swing offset on the backswing and
-carrying it into the downswing *hurts*: residual in the last 250 ms rises from
-22.8° to 26.6°. A golfer's backswing wrist offset does not predict their release.
-The model stays a population model.
+**Per-swing calibration.** Fitting a per-swing offset on the backswing, where θ is
+well measured, and carrying it into the downswing *hurts*: residual in the last
+250 ms rises from 22.8° to 26.6°. A golfer's backswing wrist offset does not
+predict their release. The model stays a population model, and the per-shot
+auto-calibration that works for the IMU's mounting vector has no analogue here.
 
-**The truth upgrade, as conceived.** Two-thirds of the "new, unused" instrumented
-truth was already being graded on, copied into `truth.json` without provenance.
-The real gain is the ray tier and tier separation, not volume.
+**The instrumented truth upgrade, as conceived.** Two-thirds of the "new, unused"
+instrumented truth was already being graded on, copied into `truth.json` without
+provenance. The real gain is the ray tier and tier separation, not volume.
 
-**`anchors.csv` as a better φ.** Interpolated, artificially smooth where the swing
-is slow, and worse than production where it is fast.
+**`anchors.csv` as a φ source.** Interpolated, artificially smooth where the
+swing is slow, and worse than the production pose where it is fast.
 
-**Three explanations for the φ disagreement** — interpolation gaps, smoothing, a
-timebase offset — each tested and killed before self-jitter settled it.
-
-**Two of our own errors in the projection layer, recorded because the numbers
-looked plausible.** First, the clubhead route was ruled out entirely on the
-argument that `head = grip + lenPx·u(θ)` so the path "carries no new
-information" — which confuses *provenance* with *structure*, since whether the
-3-D path is planar is a claim the algebra does not grant. Then the conic was
-fitted to the *absolute head path* in *anisotropically normalised* coordinates,
-giving ι = 58.5°/39.1°, a 19.4° shift and a 4.3° agreement with foreshortening
-that read as clean corroboration. **All of those were artefacts.** What caught it
-was a split-half test that costs almost nothing — worth running on any new plane
-estimate before trusting it.
+**The clubhead-path ellipse as a check on foreshortening.** The two routes to the
+plane are correlated but not interchangeable: foreshortening reads systematically
+high and disagrees by 14.9° median in the downswing. The ellipse is the
+estimator; foreshortening is weak corroboration at best.
 
 ---
 
@@ -653,30 +617,37 @@ what was measured: the *centre* improved and the *rate* did not.
 
 **One athlete.** Every number is one golfer, five sessions, one club type. The
 fitted centre may encode his release timing; σ inflation is what stands between
-that and an unseen golfer. The honest reading is that the *shape* is likely
-general and the *timing* may not be.
+that and an unseen golfer. The honest reading is that the *shape* of the curve is
+likely general and its *timing* may not be.
 
-**The truth is thin at the ends.** Hand labels concentrate where a human could
-see the shaft, so the impact blur — the region the model most wants to serve — is
+**Truth is thin at the ends.** Hand labels concentrate where a human could see
+the shaft, so the impact blur — the region the model most wants to serve — is
 where truth is sparsest. The instrumented ray tier partly fixes this, and shows
 the model is 1.7× worse there.
 
-**The residual is not Gaussian.** 6.7% of samples remain worse than 30°, so the
-model is usually good and occasionally quite wrong. Anything consuming it must
-treat it as a soft prior with tails, never a measurement — which is why it enters
-as an emission weight and an envelope, never a veto.
+**The residual is not Gaussian.** Around 10% of samples remain worse than 30°, so
+the model is usually good and occasionally quite wrong. Anything consuming it
+must treat it as a soft prior with tails, never a measurement — which is why it
+enters as an emission weight and an envelope, and never as a veto.
 
-**The projection layer is one session.** Ten swings, one golfer, one club.
+**Two sessions are pathological at this run root.** Tracker-tier spreads on
+2026-06-11 and 2026-07-04 run to 247° and 139° for F2, against 15.7° on the
+instrumented session. That is a property of those runs, not of the model, and it
+is why the instrumented channel carries the weight here.
+
+**The projection layer is one session** — ten swings, one golfer, one club.
 
 ---
 
 ## 13. Reproducing every number here
 
+Supporting data is in [`data/wrist_cock_model/`](data/wrist_cock_model/).
+
 ```
 python3 tools/swinglab/fusion_truth.py --audit \
     --lab-root /mnt/swingdata/shaftlab/lab/tape_20260705 \
     --run-root /mnt/swingdata/stagegate/corpm3-off \
-    --corpus   /mnt/swingdata/Mark-Liversedge --out <dir>     # §5 provenance, §6 phi
+    --corpus   /mnt/swingdata/Mark-Liversedge --out <dir>     # §5 provenance, phi
 
 python3 tools/swinglab/wrist_cock_fit.py /mnt/swingdata/stagegate/corpm3-off \
     --corpus /mnt/swingdata/Mark-Liversedge --out <dir> --knots 15 \
@@ -688,5 +659,5 @@ python3 tools/shaftlab/plane_probe.py planes --out <dir>      # §9 the plane
 
 `--knots 15` is load-bearing: the CLI default is 13, the shipped table used 15,
 and a run at the default is not comparable to any number here. Without
-`--lab-root`, `wrist_cock_fit.py` is byte-identical to its pre-instrumented
-behaviour.
+`--lab-root`, `wrist_cock_fit.py` grades exactly as it did before the
+instrumented channel existed.

@@ -4,14 +4,13 @@
 failed, is in [`docs/research/wrist_cock_model.md`](../research/wrist_cock_model.md);
 the harness is `tools/swinglab/wrist_cock_fit.py`.*
 
-> ## AMENDMENT 2026-08-11 — five of this brief's premises are false
+> ## AMENDMENT 2026-08-11 — four of this brief's premises are false
 >
-> Task 0 and the projection layer have now been executed; results and the commands
-> that produce them are in
+> Task 0 and the projection layer have been executed. Results, the model
+> definition and the commands that reproduce every number are in
 > [`docs/research/wrist_cock_model.md`](../research/wrist_cock_model.md).
-> Five load-bearing claims below did not survive contact with the data. They are
-> left in place, because the reasoning around them is still worth reading, but do
-> not act on them:
+> Four load-bearing claims below did not survive contact with the data. The
+> reasoning around them is still worth reading, but do not act on them:
 >
 > 1. **"Better truth already exists, unused" (Task 0) is ~2/3 wrong.** For the
 >    2026-07-05 session `truth.json` **is** the fusion band tier verbatim — 9 of 10
@@ -19,44 +18,40 @@ the harness is `tools/swinglab/wrist_cock_fit.py`.*
 >    corpus labels on those swings are instrumented band rows; only 61 are hand
 >    placed. The genuinely new material is the **ray tier** (283 pre-impact rows)
 >    and tier/provenance separation, not volume.
-> 2. **"Derive φ from `skeleton.csv`" is impossible, and the motivation for it is
->    wrong.** That file holds 8 body joints because it is a clutter mask. The
->    production pose is **133-point COCO-WholeBody (ViTPose)** with elbows, wrists
->    and 21 landmarks per hand. Separately, `anchors.csv` is *not* the better φ: it
->    is interpolated (0.12° backswing jitter — too smooth to be a measurement) and
->    degrades to 3.51° in the downswing against production's 1.79°. Production φ
->    stays. Prior numbers are **not** φ-limited.
-> 3. ~~The clubhead-path ellipse is not an independent observable.~~ **WITHDRAWN —
->    this was my error, not the brief's.** The head path IS planar and the ellipse
->    DOES recover the plane — from the SHAFT VECTOR (head − grip), not the absolute
->    head path: ι = 40.0° median in the backswing, 20.0° in the downswing, a
->    **+17.3° shift**, at 0.6–0.7° split-half repeatability. Foreshortening
->    corroborates in the backswing (7.8° median) but not the downswing (14.9°),
->    and reads systematically high. The mistake was
->    confusing provenance (`head = grip + lenPx·u(θ)`) with structure (whether the
->    3-D path is planar — a real claim the algebra does not grant).
-> 4. **"`lenPx` runs 189→414 px, 2.2×" does not reproduce.** At `stagegate/corpm3-off`
->    the ratio is 1.58–2.08 (median 1.77), so "approaching 60°" survives but the
->    figures do not. Worse, the absolute level moves **36% between swings of one
->    session with one club** — stage-2 drift no plane can explain.
-> 5. **"Forearm roll cannot be seen at all"** is sound for the shaft but overstated
->    in general — the hand is not axially symmetric. It is not pursued, because the
->    hand keypoints are unreliable, but treat it as unproven rather than settled.
+> 2. **"Derive φ from `skeleton.csv`" is impossible, and its motivation is wrong.**
+>    That file holds 8 body joints because it is a clutter mask. The production
+>    pose is **133-point COCO-WholeBody (ViTPose)** with elbows, wrists and 21
+>    landmarks per hand. Separately, `anchors.csv` is *not* the better φ: it is
+>    interpolated (0.12° backswing jitter, too smooth to be a measurement) and
+>    degrades to 3.51° in the downswing against the production pose's 1.79°.
+>    Production φ stays, and prior numbers are **not** φ-limited.
+> 3. **"`lenPx` runs 189→414 px, 2.2×" does not reproduce.** At
+>    `stagegate/corpm3-off` the ratio is 1.58–2.08 (median 1.77), so "approaching
+>    60°" survives but the figures do not. The absolute level also moves **36%
+>    between swings of one session with one club** — stage-2 drift no plane
+>    explains.
+> 4. **"Forearm roll cannot be seen at all"** is sound for the shaft but
+>    overstated in general — the hand is not axially symmetric. Not pursued,
+>    because the hand keypoints are unreliable, but treat it as unproven rather
+>    than settled.
 >
-> **Two additions this brief did not have.** The lead **forearm's** projected length
-> is a fourth observable, free and already captured, foreshortening *harder* than the
-> shaft (2.07–2.51× vs 1.58–2.08). With it the wrist becomes a 2-DOF relationship
-> between two 3-D lines — ψ₃ (bend magnitude) and χ (bend direction) — identifiable
-> rather than free. And `tools/shaftlab/length_model.py` already implements this
-> brief's projection geometry (`rho_plane`, families M0–M4); start from M2/M3.
+> **Where the plane actually comes from.** The clubhead path is planar, and the
+> ellipse recovers the plane — but fitted to the **shaft vector** (head − grip),
+> not the absolute head path, which is grip translation plus club rotation and so
+> not a planar closed curve. That gives ι = 40.0° median in the backswing, 20.0°
+> in the downswing, a **+17.3° shift**, at 0.6–0.7° split-half repeatability.
+> Foreshortening corroborates in the backswing (7.8° median) but not the downswing
+> (14.9°) and reads systematically high, so it is weak corroboration, not the route.
+>
+> **One addition this brief did not have:** `tools/shaftlab/length_model.py`
+> already implements the projection geometry it asks for (`rho_plane`, families
+> M0–M4); start from the per-phase plane or the cone, not a single fixed plane.
 >
 > **Status: the plane is measurable and the back-to-down DELTA is the prize.**
-> Precision 0.6–0.7°, delta +17.3° median, 8/10 swings steepening — signal far above
-> the noise floor. Absolute calibration is NOT yet confirmed and the sign convention
-> (larger ι = flatter) needs one down-the-line cross-check before it becomes a
-> coaching output. The full model definition is in
-> [`docs/research/wrist_cock_model.md`](../research/wrist_cock_model.md) §2 and §9.
-> θ, the shaft angle, is what the whole layer exists to explain.
+> Precision 0.6–0.7°, delta +17.3° median, 8/10 swings steepening — far above the
+> noise floor. Absolute calibration is not yet confirmed, and the sign convention
+> (larger ι = flatter) needs one down-the-line cross-check before the delta becomes
+> a coaching output. θ, the shaft angle, is what the whole layer exists to explain.
 
 ## What this is
 
