@@ -8,7 +8,10 @@ harness is `tools/swinglab/wrist_cock_fit.py`.*
 ## What this is
 
 Build a model of the wrist angle ψ = θ − φ — the angle between the club shaft and
-the lead forearm — through a golf swing.
+the lead forearm — through a golf swing. Two layers, kept separate: the
+**mechanics** of what the wrist does on its own plane, and the **projection**
+that a single face-on camera imposes on it. The previous attempt collapsed the
+two and fitted a shape to the shadow.
 
 **The objective is to EXPLAIN the swing, while fitting closely to the data we
 have.** That ordering is deliberate and it decides the work. A lookup table
@@ -34,7 +37,10 @@ modelling exercise*:
 - it fits because the curve is sigmoid-ish, and would fit about as well whatever
   the underlying mechanism;
 - no alternative families were fitted, nothing was derived from the two-link
-  dynamics, and no model selection was performed.
+  dynamics, and no model selection was performed;
+- and it was fitted to image-plane angles as though they were mechanics, with no
+  projection layer at all — see "The hidden state" below, which is the reason
+  this brief exists rather than a note saying "try more shapes".
 
 It reached 32.6° against truth versus the table's 20.9°, with seven parameters
 that are stable to under a millisecond across leave-one-out folds. Treat it as a
@@ -82,12 +88,95 @@ Work required, and none of it is assumed to be trivial:
 Grade band-tier and ray-tier separately. Band tier is roughly 0.3° and is the
 closest thing to ground truth the programme has.
 
+## The hidden state: we measure projections, not mechanics
+
+**This is the structural point the previous attempt missed entirely, and it
+changes what the model has to be.**
+
+θ and φ are image-plane angles from a single face-on camera. The swing does not
+happen in the image plane — it happens on a plane inclined to it, and the club
+sweeps around that plane while we watch its shadow. Under orthographic
+projection, a vector at in-plane angle α on a plane inclined by τ images at
+
+    tan θ_img = tan α · cos τ
+
+so **uniform rotation in the swing plane images as non-uniform angular motion**,
+running fast near one axis of the ellipse and slow near the other. The observed
+β(t) is therefore a warp of the true wrist mechanics, and the warp is large: the
+production `lenPx` runs 189→414 px within a single swing, a 2.2× foreshortening
+range, which is out-of-plane excursion approaching 60°. This is a first-order
+effect, not a correction.
+
+Three consequences, each of which undermines the naive model:
+
+- **β_observed conflates wrist mechanics with projection geometry.** Two golfers
+  with identical wrists and different swing planes produce different curves, and
+  the same golfer's plane is not even constant within a swing — backswing and
+  downswing planes differ, which is the classic shift a coach looks for.
+- **ψ = θ − φ is not a projection of the anatomical wrist angle.** The club
+  sweeps a plane about the grip; the lead arm sweeps a different, shoulder-centred
+  plane. The two are warped *differently*, so their image-plane difference is not
+  the projection of any single 3-D angle.
+- **Some of what we want is invisible.** Forearm roll about the shaft's long axis
+  cannot be seen at all — the shaft is axially symmetric, so rolling it does not
+  move the line. The out-of-plane component *can* be recovered. Be precise about
+  which is which and do not claim the first.
+
+### The hidden state is over-determined, which is what makes it tractable
+
+The saving grace is that the same τ which warps the angle also sets the projected
+length:
+
+    L_img = L · √(cos²α + sin²α · cos²τ)
+
+So **foreshortening and angular warp are two readings of one hidden variable**.
+That turns the plane from a free parameter into a constrained one, and we already
+measure it three independent ways:
+
+| observable | where | what it constrains |
+|---|---|---|
+| projected shaft length | `lenPx` in production samples (310/745 per swing); `s_px_mm` in the fusion truth (60 band rows/swing) | out-of-plane angle directly |
+| clubhead path ellipse | `head_x, head_y` in the fusion truth, and the production head track | plane inclination from the axis ratio |
+| arm-vs-club warp difference | φ and θ together | the two planes' relative orientation |
+
+### The discipline this demands
+
+Latent state always improves fit. That is exactly how the previous attempt's
+φ-term failed — it absorbed between-swing variation in training and could not
+predict out of sample. So the rule here is firm: **the recovered plane must be
+checked against the independent observables above, not merely fitted.** A model
+whose hidden plane disagrees with the head-path ellipse and the foreshortening is
+absorbing something else, and its improved residual is worthless.
+
+### The payoff: the error becomes the measurement
+
+If the model carries an explicit plane, then fitting a *nominal* plane and
+looking at what is left over turns the residual into a diagnostic: a structured
+departure measures how that golfer's plane differs from the reference. Swing
+plane is already one of the headline quantities the shot analyzer wants to
+report, and this would derive it from the wrist model's error term rather than
+from a separate estimator.
+
+Treat that as a hypothesis with a test attached, not a promise. The test: the
+plane implied by the residual must agree with the plane measured from the head
+ellipse and from foreshortening, and must be stable within a golfer across
+sessions and clubs while moving when the swing genuinely changes. If it agrees,
+the model has earned a coaching output. If it does not, the residual is noise
+wearing a physical name.
+
 ## Task 1 — derive candidate families from the dynamics
 
 Do not pick shapes that look right. Start from the two-link system the whole
 programme keeps invoking — lead arm and club, coupled at the wrist — and derive
 what ψ(t) *must* look like under different assumptions about the wrist torque.
-Families worth deriving and comparing:
+
+**Derive the mechanics in 3-D and project them, in that order.** The model has
+two layers and they must stay separate: a mechanics layer that says what the
+wrist does on its plane, and a projection layer that says what a face-on camera
+then sees. Fitting a shape straight to image-plane β — which is what has been
+done so far — bakes one golfer's swing plane into what is supposed to be a
+statement about wrists. Families worth deriving and comparing, all at the
+mechanics layer:
 
 - **Passive release.** The wrist holds a fixed angle until the arm decelerates,
   after which the club swings free under centrifugal load. This is the textbook
@@ -104,6 +193,13 @@ For each: state the assumptions, derive the form, and say in advance what would
 falsify it. A family that cannot be falsified by this data should be marked as
 such rather than fitted and reported.
 
+The projection layer is common to all of them, so it can be built and validated
+**once, before any mechanics family is fitted** — and it should be, because it is
+independently testable. Recover the plane from the head-path ellipse and from
+foreshortening on each swing, check the two against each other, and only then ask
+what mechanics explain the de-projected curve. If the two plane estimates
+disagree, stop and find out why: everything downstream inherits it.
+
 ## Task 2 — fit, and select on the right criterion
 
 Fit every family on the same samples with the same robust loss, leave-one-swing-
@@ -112,18 +208,30 @@ out throughout. Then select on criteria that match the objective:
 1. **Out-of-domain prediction.** Fit on the backswing, predict the release. A
    curve-fit will fail this and a physical model should not. This is the sharpest
    available test and the prior work never ran it.
-2. **Parameter meaning.** Do the parameters move sensibly between sessions? Does
+2. **Hidden state agreeing with independent measurement.** The plane the model
+   recovers must match the plane from the head-path ellipse and from
+   foreshortening. This is the check that separates a physical latent variable
+   from a regressor that merely soaks up variance, and it is the difference
+   between this attempt and the last one.
+3. **Parameter meaning.** Do the parameters move sensibly between sessions? Does
    the release instant track anything else we measure? A parameter that varies
    randomly between swings of the same golfer is a fitting artefact.
-3. **Accuracy, as a constraint.** Within reach of the empirical table's
-   frame-averaged 17.4° / truth 20.9° — re-baselined per Task 0.
-4. **Parameter count**, as a tiebreak only.
+4. **Accuracy, as a constraint.** Within reach of the empirical table's
+   frame-averaged 17.4° / truth 20.9° — re-baselined per Task 0. Note that the
+   empirical table has the projection baked into it, so a mechanics model plus an
+   honest projection should be able to *beat* it once the plane is carried
+   explicitly; if it cannot, that is informative about which layer the error
+   really lives in.
+5. **Parameter count**, as a tiebreak only.
 
 ## Task 3 — write it up
 
 Extend `docs/research/wrist_cock_model.md` (or supersede it) with the derivation,
 the families that lost and why, the falsification tests, and the parameters with
-their physical reading. The negative results are the valuable part; the existing
+their physical reading — mechanics and projection reported separately, so a
+reader can see which layer each number belongs to. If the residual-as-plane-
+diagnostic hypothesis survives its test, it is a result in its own right and
+belongs in the programme report as well. The negative results are the valuable part; the existing
 document's "what did not work" section is the model for how to record them.
 
 ## Constraints and standing decisions
