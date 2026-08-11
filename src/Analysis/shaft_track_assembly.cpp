@@ -356,6 +356,7 @@ ShaftV3Config ShaftV3Config::fromOverrides(const QVariantMap& ov)
     apply(ov, "shaft.wedge.conf", c.wedge.conf);
     apply(ov, "shaft.wedge.dpTolDeg", c.wedge.dpTolDeg);
     apply(ov, "shaft.wedge.kinCone", c.wedge.kinCone);
+    apply(ov, "shaft.wedge.kinModelV2", c.wedge.kinModelV2);
     apply(ov, "shaft.wedge.wKinCone", c.wedge.wKinCone);
     // P7 impact geometry: "shaft.impactGeom.*" keys (impact_geom.h).
     apply(ov, "shaft.impactGeom.enabled", c.impactGeom.enabled);
@@ -1373,12 +1374,25 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
     std::vector<WedgeCandidate> wedgeCand(static_cast<size_t>(nf));
     if (cfg.wedge.enabled) {
         std::vector<double> phiPred(size_t(nf), 0.0);
+        // The v2 model reads seconds-before-impact instead of swing progress —
+        // release is an event at a roughly fixed time before impact, not at a
+        // fixed fraction of the swing. It needs a usable impact anchor; without
+        // one the axis is meaningless, so the v1 table stands.
+        const bool useV2 = cfg.wedge.kinModelV2 && pm.impact >= 0 && pm.impact < nf;
         for (int i = 0; i < nf; ++i) {
-            const double s = swingProgress(i, pm.bs0, pm.top, pm.impact, pm.fin0);
-            phiPred[size_t(i)] = phiClubPredDeg(phiS[i], s, chir);
-            const KinEnvelope e = envelope(s, phiS[i], chir, cfg.wedge.kSigma);
-            envCenter[size_t(i)] = e.centerDeg;
-            envHalf[size_t(i)]   = e.halfDeg;
+            if (useV2) {
+                const double x = timeToImpactS(tUs[i], tUs[pm.impact]);
+                phiPred[size_t(i)] = phiClubPredV2Deg(phiS[i], x, chir);
+                const KinEnvelope e = envelopeV2(x, phiS[i], chir, cfg.wedge.kSigma);
+                envCenter[size_t(i)] = e.centerDeg;
+                envHalf[size_t(i)]   = e.halfDeg;
+            } else {
+                const double s = swingProgress(i, pm.bs0, pm.top, pm.impact, pm.fin0);
+                phiPred[size_t(i)] = phiClubPredDeg(phiS[i], s, chir);
+                const KinEnvelope e = envelope(s, phiS[i], chir, cfg.wedge.kSigma);
+                envCenter[size_t(i)] = e.centerDeg;
+                envHalf[size_t(i)]   = e.halfDeg;
+            }
         }
         for (int i = 0; i < nf; ++i) {
             const int a = std::max(0, i - 1), b = std::min(nf - 1, i + 1);

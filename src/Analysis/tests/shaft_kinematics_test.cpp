@@ -134,6 +134,66 @@ int main()
         check(peak >= 720.0, "peak |ω̂| clears the 720°/s wedge trigger");
     }
 
+    // ── v2: the fitted table on the seconds-before-impact axis ──────────────
+    // The v2 model is DARK; these pin its shape and its domain so a future
+    // retune cannot quietly change what the envelope means.
+    std::printf("=== v2 fitted table ===\n");
+    {
+        // The axis is plain arithmetic, negative before impact and 0 at it.
+        check(std::abs(timeToImpactS(1'000'000, 1'000'000)) < 1e-12,
+              "t-to-impact is 0 at impact");
+        check(std::abs(timeToImpactS(900'000, 1'000'000) + 0.1) < 1e-9,
+              "t-to-impact is -0.1 s a tenth of a second out");
+
+        // Clamped to the table's own domain: no extrapolation off either end
+        // into a line that was never fitted.
+        check(betaHatV2Deg(-5.0) == betaHatV2Deg(-1.1), "v2 clamps below its domain");
+        check(betaHatV2Deg(+5.0) == betaHatV2Deg(0.0), "v2 clamps above its domain");
+        check(sigmaBetaV2Deg(-5.0) == sigmaBetaV2Deg(-1.1), "v2 sigma clamps too");
+
+        // The physics the fit recovered: the wrist is near-neutral at address,
+        // holds a big lag through the downswing, and has released most of it by
+        // impact. These are properties of a golf swing, not of a fit.
+        check(std::abs(betaHatV2Deg(-1.1)) <= 20.0, "v2 near-neutral a second out");
+        check(betaHatV2Deg(-0.30) >= 60.0, "v2 holds lag mid-downswing");
+        check(betaHatV2Deg(-0.14) >= betaHatV2Deg(-0.02), "v2 releases toward impact");
+        check(betaHatV2Deg(0.0) <= 30.0, "v2 is nearly in line at impact");
+
+        // Every sigma is positive and none is so wide the envelope degenerates.
+        bool sane = true;
+        for (const WristCockKnot& k : kWristCockKnotsV2)
+            sane = sane && k.sigmaDeg > 0.0 && k.sigmaDeg < 60.0;
+        check(sane, "v2 sigma is positive and bounded at every knot");
+
+        // The envelope must still be an arc, not "everywhere".
+        const KinEnvelope e = envelopeV2(-0.14, 100.0, +1, 3.0);
+        check(e.halfDeg > 0.0 && e.halfDeg <= 175.0, "v2 envelope stays a bounded arc");
+        check(std::abs(kin_detail::wrapDeg(e.centerDeg - (100.0 + betaHatV2Deg(-0.14))))
+              < 1e-9, "v2 envelope centres on the predicted club");
+
+        // Chirality flips the side, exactly as v1 does.
+        check(std::abs(kin_detail::wrapDeg(phiClubPredV2Deg(100.0, -0.3, +1)
+                                           - phiClubPredV2Deg(100.0, -0.3, -1))
+                       - 2.0 * betaHatV2Deg(-0.3)) < 1e-9,
+              "v2 chirality mirrors the offset");
+    }
+
+    // ── v1 is untouched by the v2 addition ──────────────────────────────────
+    // The refactor routed v1 through a shared interpolator; these pin that the
+    // old table still reads exactly as its knots say, so the dark path is
+    // byte-identical.
+    std::printf("=== v1 unchanged ===\n");
+    {
+        bool exact = true;
+        for (const WristCockKnot& k : kWristCockKnots) {
+            exact = exact && betaHatDeg(k.s) == k.betaDeg;
+            exact = exact && sigmaBetaDeg(k.s) == k.sigmaDeg;
+        }
+        check(exact, "v1 reads its own knots exactly");
+        check(betaHatDeg(-1.0) == betaHatDeg(0.0), "v1 still clamps below 0");
+        check(betaHatDeg(2.0) == betaHatDeg(1.0), "v1 still clamps above 1");
+    }
+
     std::printf("\n%s (%d failures)\n", g_fail ? "FAIL" : "PASS", g_fail);
     return g_fail;
 }

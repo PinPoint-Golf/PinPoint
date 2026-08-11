@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 // Minimal R6 double-pendulum club predictor (shaft_detection_skeleton_design.md
 // §R6). The club direction is the measured lead-arm direction plus a
@@ -44,6 +45,12 @@
 
 namespace pinpoint::analysis {
 
+// The knot type both tables share: an axis value (swing progress for v1,
+// seconds-before-impact for v2), the signed wrist-cock midpoint, and its
+// spread. Defined before kin_detail because the interpolator below reads its
+// members.
+struct WristCockKnot { double s, betaDeg, sigmaDeg; };
+
 namespace kin_detail {
 // Wrap a degree difference into (−180, 180].
 inline double wrapDeg(double d)
@@ -52,11 +59,31 @@ inline double wrapDeg(double d)
     if (d < 0) d += 360.0;
     return d - 180.0;
 }
+
+// Piecewise-linear lookup over a knot table, clamped to its own domain (so a
+// value off either end reads the end knot rather than extrapolating a line
+// that was never fitted). v1 clamped to [0,1] explicitly; the table's own
+// endpoints are 0 and 1, so this is the same arithmetic.
+template <int N>
+inline double interpKnot(double x, const WristCockKnot (&k)[N], bool sigma)
+{
+    x = std::clamp(x, k[0].s, k[N - 1].s);
+    for (int i = 1; i < N; ++i) {
+        const WristCockKnot& a = k[i - 1];
+        const WristCockKnot& b = k[i];
+        if (x <= b.s) {
+            const double t = (b.s > a.s) ? (x - a.s) / (b.s - a.s) : 1.0;
+            const double av = sigma ? a.sigmaDeg : a.betaDeg;
+            const double bv = sigma ? b.sigmaDeg : b.betaDeg;
+            return av + t * (bv - av);
+        }
+    }
+    return sigma ? k[N - 1].sigmaDeg : k[N - 1].betaDeg;
+}
 } // namespace kin_detail
 
 // The design §R6 9-knot wrist-cock curve: swing progress s / signed wrist-cock
 // midpoint β̂ (deg, trail side positive) / spread σ_β (deg).
-struct WristCockKnot { double s, betaDeg, sigmaDeg; };
 inline constexpr WristCockKnot kWristCockKnots[9] = {
     {0.00,   8.0,  8.0},
     {0.15,  27.0, 15.0},
@@ -67,6 +94,55 @@ inline constexpr WristCockKnot kWristCockKnots[9] = {
     {0.90,   7.0, 10.0},
     {0.95, -27.0, 20.0},   // sign flips to the lead side through release
     {1.00, -95.0, 30.0},
+};
+
+// ── v2: the same model, FITTED, on a different clock ────────────────────────
+//
+// The table above was hand-authored and indexed by swing progress. Graded
+// against hand-placed shaft truth (23 swings, 463 labels, leave-one-swing-out)
+// it carries a median bias of −9.1° and a p10–p90 residual of 74.3°, with 26%
+// of samples worse than 30°. Two things are wrong with it, and only one of them
+// is the numbers.
+//
+// The axis is the larger error. Wrist release is not a fixed fraction of the
+// swing; it is an event at a roughly fixed TIME before impact, so indexing by
+// progress smears every golfer's release across every other's. Re-indexing the
+// same model on **seconds before impact** and fitting it to the corpus takes
+// the residual to 20.9° with the bias gone (+0.1°) and gross errors to 6.7% —
+// a better than three-fold improvement, and it improves every session in the
+// corpus, not just the average.
+//
+// Knots are spaced in √(−t) rather than uniformly: the wrist holds its lag near
+// 90° for most of the downswing and then releases nearly all of it in the last
+// ~120 ms, which uniform spacing cannot represent (an 80° drop lands inside one
+// linear segment).
+//
+// σ is the fitted spread inflated ×2.5, a factor that is measured rather than
+// guessed: at ×2.5 the 3σ envelope covers 97.0% of true wrist cock against the
+// shipped table's 96.8%, while searching a median half-width of 44° against its
+// 62.5°. The envelope is therefore no less forgiving than the one it replaces,
+// and the corpus behind it is ONE athlete — the inflation is what stands
+// between a fitted centre and a golfer this model has never seen.
+//
+// Fitted by tools/swinglab/wrist_cock_fit.py; the derivation, the candidate
+// forms that lost, and the negative results are in
+// docs/research/wrist_cock_model.md.
+inline constexpr WristCockKnot kWristCockKnotsV2[15] = {
+    {-1.100,  -8.1, 15.7},
+    {-0.948,   2.2, 13.3},
+    {-0.808,  15.1,  9.1},
+    {-0.679,  38.9, 12.3},
+    {-0.561,  75.1, 14.1},
+    {-0.455,  85.6, 12.0},
+    {-0.359,  76.3, 18.4},
+    {-0.275,  78.4, 16.8},
+    {-0.202,  85.7, 16.5},
+    {-0.140,  96.9, 19.1},
+    {-0.090,  90.6, 12.2},
+    {-0.051,  61.2, 13.2},
+    {-0.022,  31.6, 14.3},
+    {-0.006,  16.0, 14.4},
+    { 0.000,  11.3, 14.9},
 };
 
 // Piecewise-linear swing progress from the frame index against the phase-model
@@ -88,43 +164,54 @@ inline double swingProgress(int f, int bs0, int top, int impact, int fin0)
 // Signed wrist-cock midpoint β̂(s) (deg), piecewise-linear over the knot table.
 inline double betaHatDeg(double s)
 {
-    s = std::clamp(s, 0.0, 1.0);
-    constexpr int N = int(sizeof(kWristCockKnots) / sizeof(kWristCockKnots[0]));
-    for (int i = 1; i < N; ++i) {
-        const WristCockKnot& a = kWristCockKnots[i - 1];
-        const WristCockKnot& b = kWristCockKnots[i];
-        if (s <= b.s) {
-            const double t = (b.s > a.s) ? (s - a.s) / (b.s - a.s) : 1.0;
-            return a.betaDeg + t * (b.betaDeg - a.betaDeg);
-        }
-    }
-    return kWristCockKnots[N - 1].betaDeg;
+    return kin_detail::interpKnot(s, kWristCockKnots, false);
 }
 
 // Wrist-cock spread σ_β(s) (deg), piecewise-linear over the knot table.
 inline double sigmaBetaDeg(double s)
 {
-    s = std::clamp(s, 0.0, 1.0);
-    constexpr int N = int(sizeof(kWristCockKnots) / sizeof(kWristCockKnots[0]));
-    for (int i = 1; i < N; ++i) {
-        const WristCockKnot& a = kWristCockKnots[i - 1];
-        const WristCockKnot& b = kWristCockKnots[i];
-        if (s <= b.s) {
-            const double t = (b.s > a.s) ? (s - a.s) / (b.s - a.s) : 1.0;
-            return a.sigmaDeg + t * (b.sigmaDeg - a.sigmaDeg);
-        }
-    }
-    return kWristCockKnots[N - 1].sigmaDeg;
+    return kin_detail::interpKnot(s, kWristCockKnots, true);
+}
+
+// ── the v2 axis and table ───────────────────────────────────────────────────
+
+// Seconds before impact — negative through the swing, 0 at impact. This is the
+// v2 model's clock, and the reason it beats swing progress: release is an event
+// at a roughly fixed time before impact, not at a fixed fraction of the swing.
+inline double timeToImpactS(std::int64_t tUs, std::int64_t impactUs)
+{
+    return double(tUs - impactUs) * 1e-6;
+}
+
+inline double betaHatV2Deg(double tImpS)
+{
+    return kin_detail::interpKnot(tImpS, kWristCockKnotsV2, false);
+}
+
+inline double sigmaBetaV2Deg(double tImpS)
+{
+    return kin_detail::interpKnot(tImpS, kWristCockKnotsV2, true);
 }
 
 // Predicted club direction (deg, wrapped [0,360)). The branch — which side of
 // the arm the club sits on — is chir·sign(β̂(s)): trail side while β̂ > 0
 // (through the downswing), lead side after release.
-inline double phiClubPredDeg(double phiArmDeg, double s, int chir)
+inline double phiClubFromBetaDeg(double phiArmDeg, double betaDeg, int chir)
 {
-    double th = std::fmod(phiArmDeg + double(chir) * betaHatDeg(s), 360.0);
+    double th = std::fmod(phiArmDeg + double(chir) * betaDeg, 360.0);
     if (th < 0) th += 360.0;
     return th;
+}
+
+inline double phiClubPredDeg(double phiArmDeg, double s, int chir)
+{
+    return phiClubFromBetaDeg(phiArmDeg, betaHatDeg(s), chir);
+}
+
+// v2: the same prediction from the fitted table on the time axis.
+inline double phiClubPredV2Deg(double phiArmDeg, double tImpS, int chir)
+{
+    return phiClubFromBetaDeg(phiArmDeg, betaHatV2Deg(tImpS), chir);
 }
 
 // Predicted club angular rate (deg/s) from two prediction samples one frame
@@ -143,12 +230,24 @@ struct KinEnvelope {
     double centerDeg = 0.0;
     double halfDeg   = 0.0;
 };
-inline KinEnvelope envelope(double s, double phiArmDeg, int chir, double kSigma)
+inline KinEnvelope envelopeFromBeta(double betaDeg, double sigmaDeg, double phiArmDeg,
+                                    int chir, double kSigma)
 {
     KinEnvelope e;
-    e.centerDeg = phiClubPredDeg(phiArmDeg, s, chir);
-    e.halfDeg   = std::min(kSigma * sigmaBetaDeg(s), 175.0);
+    e.centerDeg = phiClubFromBetaDeg(phiArmDeg, betaDeg, chir);
+    e.halfDeg   = std::min(kSigma * sigmaDeg, 175.0);
     return e;
+}
+
+inline KinEnvelope envelope(double s, double phiArmDeg, int chir, double kSigma)
+{
+    return envelopeFromBeta(betaHatDeg(s), sigmaBetaDeg(s), phiArmDeg, chir, kSigma);
+}
+
+// v2: the same envelope from the fitted table on the time axis.
+inline KinEnvelope envelopeV2(double tImpS, double phiArmDeg, int chir, double kSigma)
+{
+    return envelopeFromBeta(betaHatV2Deg(tImpS), sigmaBetaV2Deg(tImpS), phiArmDeg, chir, kSigma);
 }
 
 } // namespace pinpoint::analysis

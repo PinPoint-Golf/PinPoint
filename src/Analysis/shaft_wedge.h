@@ -65,6 +65,13 @@ struct WedgeConfig {
     // paths — the S1 finding's lever — at the cost of 1 track.valid, 59→58).
     bool   kinCone          = true;    // off-envelope penalty on triggered frames
     double wKinCone         = 4.0;     // its weight (cf. cfg.wCone) — prior-as-constraint, never a tier
+    // DARK. Swap the hand-authored wrist-cock table (indexed by swing progress)
+    // for the corpus-fitted one indexed by seconds-before-impact
+    // (shaft_kinematics.h kWristCockKnotsV2). Graded against hand-placed shaft
+    // truth the fitted model cuts the p10–p90 residual 74.3° → 20.9° and removes
+    // a −9.1° bias; the envelope is inflated so it stays as forgiving as the one
+    // it replaces. false ⇒ the v1 table, byte-for-byte.
+    bool   kinModelV2       = false;
 };
 
 // t_exp plausibility clamp (s): global-shutter golf capture sits within
