@@ -6,7 +6,7 @@
 `tools/shaftlab/plane_probe.py`. Implements the v2 table in
 `src/Analysis/shaft_kinematics.h`, dark behind `shaft.wedge.kinModelV2`.
 Supporting data in [`data/wrist_cock_model/`](data/wrist_cock_model/); every
-number reproduces from the commands in §13. Companion to the programme report,
+number reproduces from the commands in §14. Companion to the programme report,
 `club_detection_from_video.md`, whose Phase 6 sets out the physical law this
 model puts numbers on.*
 
@@ -639,7 +639,269 @@ is why the instrumented channel carries the weight here.
 
 ---
 
-## 13. Reproducing every number here
+## 13. Discussion: what this earns in swing assessment
+
+Everything above was written for the tracker. This section is written for
+anyone who wants to turn the model into coaching, and it tells the story of
+testing that ambition — a story with a negative ending that is worth
+*understanding* rather than merely knowing, because the way it fails teaches
+more about per-swing measurement than a success would have.
+
+The note delivers three artefacts in three different states. The fitted table
+is accurate and stays dark, for the tracker reasons of §12. The swing-plane
+delta is precise, one validation short of useful, and wanted by name
+elsewhere in the codebase. And the seven parameters are a coaching vocabulary
+whose central claim — that they can be read off a single swing — is tested
+below, and fails in an instructive way.
+
+### The plane delta: the shortest path into the diagnostic model
+
+Over the top — among the commonest faults in amateur golf — is a downswing
+that comes down *steeper and more outside* than the backswing went up: the
+club changes plane at the top, in the wrong direction. The fault ontology
+(`docs/design/swing_fault_ontology.md`) knows the fault well, calls it the
+most visible one in the library, and admits it cannot detect it, because no
+producer measures the one thing that defines it. It even names the measure it
+is waiting for: a `transition_plane` axis — how much the plane changes
+between backswing and downswing — whose high tail would fire the fault.
+
+§9's delta is that measure. The reason it is usable *now*, while the absolute
+plane angle is not, is a distinction worth internalising: a difference can be
+trustworthy when neither of its ingredients is. A bathroom scale that reads
+two kilograms heavy is useless for your weight and perfect for your weight
+*change* — the error rides along with both readings and subtracts out. The
+ellipse fit is in exactly that position. Its absolute inclination carries a
+calibration bias we cannot yet confirm (§9 bounds it but does not correct
+it), but the backswing and downswing planes are measured the same way, by the
+same fit, on the same swing, so the shared bias cancels in their difference.
+What remains is precision, and the precision is excellent: refit the plane on
+half the frames and the delta moves 0.6–0.7°, against a 17° median signal.
+
+Two things stand between the delta and that role, both already on §9's open
+list. The sign convention — larger inclination means flatter — has never been
+checked against a swing whose plane is independently known; one down-the-line
+recording settles it. And the projection layer is ten swings of one golfer.
+The first is an afternoon; the second is the corpus problem this whole note
+shares.
+
+### Why "fits the population" is not "reads a swing"
+
+§7's parameters make coaching sense — `A` is how much lag you build, `t_r`
+when you release it, `w_r` how violently, `r` how much you are still holding
+at impact — and the ontology gives them somewhere to land: `casting` owns
+`lag_retention`, which is `A` and `t_r`; `scooping` owns
+`lead_wrist_impact`, and `r` above one is precisely the flip. The genuinely
+new content is `t_r` and `w_r`, the *when* and *how hard* of the release,
+which no current producer measures.
+
+But every fit in this note is a population fit: fifty-nine swings pooled
+into one curve. The striking stability of §7 — drop any swing from the pool
+and the release timing moves by less than a millisecond — is a property of
+the *pool*, and it is easy to over-read. The average height of a crowd can
+be known to a millimetre while every individual measurement is centimetres
+wrong; the stability of an average says nothing about whether one swing's
+samples can produce that swing's own numbers. And a coach has no use for
+the population's release timing. A coach wants *this* swing's, compared to
+the last one.
+
+There were reasons to doubt that in advance, and the note already held all
+three. The release parameters live in the final 140 ms, exactly where the
+model is 1.7× worse (§5) and where θ comes from the tracker through impact
+blur — a per-swing fit spends the tracker's worst output on its hardest
+question. The one per-swing idea already tried — calibrating each swing's
+offset on its own backswing — made things worse (§10). And β mixes wrist
+mechanics with camera geometry (§9), so even a perfect per-swing estimate
+would confound two golfers' wrists with their planes.
+
+Doubt is not a verdict, though. The claim deserved a test.
+
+### Three gates: how to ask whether a fitted number is real
+
+The test has a shape worth keeping, because it applies to any per-swing
+number this programme will ever propose. Three questions, in rising order of
+severity — and each can pass while the next fails, which is why all three
+are needed:
+
+**Can the swing's own data pin the number down at all?** Refit under
+bootstrap resampling of the swing's frames and read off a confidence
+interval, then compare that interval to how much swings actually differ
+from one another. If the uncertainty on one swing is as wide as the
+differences between swings, the estimate cannot tell one swing from another
+and the number is decoration. This is *identifiability*.
+
+**Does it come back the same when nothing has changed?** Ten swings from
+the same golfer in the same hour should read nearly alike. If the number
+scatters as much within a session as it does between sessions, it is noise
+wearing a coaching name. This is *repeatability*.
+
+**Is it measuring the swing, or the instrument?** A number can be tight and
+repeatable and still be reading the camera, the lighting, the tracker's
+habits — anything but the wrist. Precision is not accuracy, and the only
+cure is agreement with an independent instrument, here the stripe-fusion
+truth of 2026-07-05. This is *truthfulness*, and it is the gate that
+decides.
+
+The experiment fitted the parametric form per swing at three levels of
+ambition — all seven parameters free; the cock-side shape (`b₀`, `t_c`,
+`w_c`) frozen at population values with `A`, `t_r`, `w_r`, `r` free; and
+`A` frozen too, release only — on two channels: the tracker's measured
+tier, which is what production would have, and the instrumented truth,
+which grades it.
+
+**The answer is no, and the mechanism is worth walking through.** (207 fits,
+100 bootstrap reps throughout; data in `data/wrist_cock_model/per_swing/`,
+command in §14; every headline number below was independently recomputed
+from the CSV by a second pass. The population fit reproduces §7 to three
+decimals, and the harness aborts if it does not.)
+
+Start with the one observation that explains everything else. At 150 fps the
+last 100 ms before impact — where the release happens — contains fifteen
+frames. The frames exist; they are simply unreadable. The shaft is a blur
+streak, so the measured tier keeps a median of six of them, and the
+instrumented tape, whose stripes must be legible to be decoded, keeps none
+at all:
+
+| channel | median samples, last 250 ms | last 100 ms | swings with none in last 100 ms |
+|---|---|---|---|
+| tracker | 26 | 6 | 5 of 59 |
+| truth | 15 | **0** | **8 of 10** |
+
+The parameters that make the model interesting live precisely in the window
+neither channel can see. Everything that follows is a consequence of that
+table.
+
+**The first consequence was a trap, and it is the most transferable lesson
+here.** When a swing has no samples inside the release window, moving `t_r`
+changes nothing the data can see — the loss surface is *exactly* flat in
+that direction. An optimizer walked onto a flat surface stops where it
+stands: at its initialisation, which here is the population values, returned
+to six significant figures and indistinguishable from a confident
+measurement. Without a probe that checks whether the loss actually varies
+along each parameter, the harness would have reported roughly 35 fabricated
+per-swing "estimates" per parametrisation. The lesson generalises well
+beyond wrists: an optimizer answers every question you ask it; whether the
+*data* answered is a separate question, and checking it is your job, not the
+optimizer's.
+
+**The gates, in order.** Identifiability splits along the same line as the
+coverage. The cock side of the curve — slow, unblurred, well-sampled —
+identifies cleanly per swing: `b₀`, `A`, `t_c` and `w_c` all pass, with
+`A`'s confidence interval a third of the between-swing spread. The release
+side, living in the blind window, is marginal throughout.
+
+Repeatability looked better than it was, and the way it deceived is worth
+spelling out. The release parameters differed between sessions far more than
+within them — exactly the signature of a real, stable, personal number. But
+correlate those between-session differences with each session's sample
+count and the illusion collapses: sessions with two readable frames in the
+last 100 ms read `w_r` ≈ 2 ms and `t_r` ≈ 0, sessions with fourteen read
+~15 ms and −35 ms. The "golfer's release" that varied between sessions was
+the lighting and blur varying between sessions. When an estimate correlates
+with how much data produced it, it is measuring the data supply.
+
+Truthfulness ends the argument: **no parameter clears it.** `A` — how much
+lag — is the sole marginal survivor: tracker and truth agree to a 5.5°
+median gap, rank-correlate at +0.49, and put a swing on the same side of the
+population value eight times in ten. And `w_r` supplies the parable that
+justifies the whole three-gate design: it is the most tightly identified
+parameter per swing (interval at 0.17 of the spread) and its estimates are
+*uncorrelated with truth* (ρ = +0.02). A confidence interval measures how
+sure the fit is of itself — never whether it is measuring the right thing.
+That is why identifiability alone must never promote a parameter.
+
+**What survives.** `A` has a plausible per-swing life, marginal today. The
+verdict on the rest is carefully worded: not that per-swing release
+structure does not exist, but that neither channel observes the release well
+enough to say. And since the frames are there and unreadable, the constraint
+is legibility per frame, not frame count. Shorter exposure attacks it (blur
+is bought by shutter time, not by frame rate, and shutter is bought with
+light — studio lighting is cheap next to high-speed cameras). Reading the
+blur wedge itself as a *rate* measurement attacks it (a smear's angular
+extent is the integral of θ̇ across the exposure — a measurement wearing the
+costume of a failure). An IMU on the grip or a release-legible truth fixture
+attacks it. A faster camera does not. Until one of those exists, the seven
+parameters remain what §7 called them: a compact description of the
+population curve, with no per-swing reading.
+
+### The retreat to one parameter, and what it settled
+
+There was one move left on the fitting side, and it was taken deliberately
+as the last one: collapse the ambition to a single number. Freeze the entire
+population curve and fit only δ, a per-swing time-shift of the release —
+"this swing released 8 ms later than the population" — so that every sample
+in the release region votes on one question instead of dividing itself among
+three. If any per-swing release number can be estimated from this data, it
+is this one.
+
+Two new channels joined the measured tier, each carrying its own question.
+The P7 *anchor* — the located impact position — entered as a single
+trustworthy point at t = 0, to ask whether one good sample can stabilise
+many poor ones. And the synthesized track entered to answer something this
+programme needed settled anyway. `club.synth` is the display tier: a smooth
+curve threaded through the located P-positions at 240 Hz so that replay
+scrubs smoothly. It is coherent, it is dense, and it is explicitly excluded
+from every production measurement, because it is an *inference* — between
+anchors it contains exactly what the interpolation put there. Using it here
+is a deliberate research exception, made to test a tempting idea head-on:
+does a dense, coherent, inferred track know things the sparse measured one
+does not?
+
+One more idea makes the results readable: *leverage*. A sample constrains δ
+only if the model's prediction at that sample moves when δ moves. Samples on
+the long lag plateau are blind to release timing — the curve there is flat
+regardless of when the release fires — so what matters is never the raw
+count of samples near impact but the count with leverage on the question
+being asked. (The fit itself is a deterministic grid sweep, so nothing below
+is an optimizer artefact; data in `data/wrist_cock_model/per_swing/p1_*`,
+command in §14, every number independently recomputed.)
+
+The retreat worked exactly as far as the arithmetic said it should, and no
+further. δ became the first per-swing quantity in this line of work to pass
+identifiability — pinned to 2–3 ms on a single swing, against 8–10 ms of
+between-swing spread. Three findings then close the door anyway.
+
+*The pass only covers swings that show a release.* Nineteen to twenty-one of
+fifty-nine converge; the rest pin at the search bound, which is the fit's
+way of saying *there is no release in this channel's data*. Convergence is
+purely a session property — 10/10 and 6/6 on the two well-covered sessions,
+0–2 everywhere else.
+
+*Even the surviving δ partly reads the camera.* Across the healthy sessions
+(the ones §12 does not flag as pathological) it correlates +0.64 with the
+swing's sample count in the last 250 ms — the same
+contamination that fooled the repeatability gate above, now visible inside a
+single parameter.
+
+*And truth cannot grade it.* The instrumented rows all sit on the plateau:
+their median count of samples with leverage on δ is zero. The truthfulness
+gate is not failed but *unusable* — not a disagreement with truth, the
+absence of one.
+
+The synthesized channel answered its question cleanly along the way. It
+reproduces the measured channel almost exactly — rank correlation +0.98,
+median gap 1.3 ms — and converges on precisely the same swings, despite
+carrying eighteen leverage samples on every one. Density created no
+information, because the interpolation can only re-tell what the anchors
+already said; the anchors came from the same tracker whose gaps we were
+trying to fill. **A mirror, not a window** — worth one experiment to
+establish, so that nobody reaches for it later. The anchor's contribution
+was similarly honest: one point, taken at the uncertainty its producer
+actually supplies, moves δ by 0.4 ms.
+
+With one parameter as small as ambition gets, the per-swing story ends here
+until the observation itself changes.
+
+### What this section must not be used for
+
+Norms. Every number here is one athlete, and diagnostic bands built from
+`t_r = −32 ms` would install one golfer's release timing as everyone's
+standard. The shape of the curve may be general; the timing is his. And
+nothing here reopens the tracker key: the diagnostic uses and the tracker
+use are separable, and on the evidence of §12 only the first is live.
+
+---
+
+## 14. Reproducing every number here
 
 Supporting data is in [`data/wrist_cock_model/`](data/wrist_cock_model/).
 
@@ -655,6 +917,18 @@ python3 tools/swinglab/wrist_cock_fit.py /mnt/swingdata/stagegate/corpm3-off \
 
 python3 tools/shaftlab/plane_probe.py census --out <dir>      # §9 foreshortening
 python3 tools/shaftlab/plane_probe.py planes --out <dir>      # §9 the plane
+
+python3 tools/swinglab/wrist_cock_fit.py /mnt/swingdata/stagegate/corpm3-off \
+    --corpus /mnt/swingdata/Mark-Liversedge \
+    --lab-root /mnt/swingdata/shaftlab/lab/tape_20260705 --knots 15 \
+    --out docs/research/data/wrist_cock_model/per_swing \
+    --per-swing --per-swing-boot 100 --per-swing-boot-p7 100  # §13 per-swing
+
+python3 tools/swinglab/wrist_cock_fit.py /mnt/swingdata/stagegate/corpm3-off \
+    --corpus /mnt/swingdata/Mark-Liversedge \
+    --lab-root /mnt/swingdata/shaftlab/lab/tape_20260705 --knots 15 \
+    --out docs/research/data/wrist_cock_model/per_swing \
+    --p1 --p1-boot 100                                        # §13 the coda
 ```
 
 `--knots 15` is load-bearing: the CLI default is 13, the shipped table used 15,

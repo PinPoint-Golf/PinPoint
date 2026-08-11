@@ -1006,6 +1006,1381 @@ def emit_header(res, form, sigma_inflate=1.0):
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------
+# Per-swing parametric fits (--per-swing): can the seven numbers be read off ONE
+# swing?
+#
+# Everything above fits a POPULATION curve. §7 of the model note then reads A,
+# tr, wr and r as coaching numbers "comparable between swings", which is a claim
+# about a per-swing estimate that no fit in this harness has ever produced. The
+# +-1 ms fold stability of tr is a property of a 59-swing estimate and says
+# nothing about one swing.
+#
+# So: fit the same parametric form, on one swing at a time, under three
+# parametrisations of falling ambition (P7 all free, P4 release side plus
+# amplitude, P3 release only), on two channels (the tracker's measured tier,
+# which is what production would have, and the instrumented fusion truth, which
+# grades it), and put the estimates through three gates -- identifiability,
+# repeatability, truthfulness.
+#
+# Nothing here touches the fitting or grading paths above: --per-swing is a
+# separate exit from main(), and without the flag not one line below runs.
+
+PS_PARAM_NAMES = ("b0", "A", "tc", "wc", "tr", "wr", "r")
+PS_PARAM_LABEL = {"b0": "b0 address offset (deg)", "A": "A peak lag (deg)",
+                  "tc": "tc cock centre (s)", "wc": "wc cock width (s)",
+                  "tr": "tr release centre (s)", "wr": "wr release width (s)",
+                  "r": "r release completeness"}
+# Physically generous bounds. They exist to catch a fit that has run away, not
+# to shape one: a fit that lands ON a bound is reported as non-converged rather
+# than quietly clamped into a plausible-looking number.
+PS_BOUNDS = ((-90.0, 90.0),      # b0
+             (0.0, 300.0),       # A
+             (-1.50, -0.05),     # tc
+             (0.002, 0.50),      # wc
+             (-0.20, 0.02),      # tr
+             (0.001, 0.10),      # wr
+             (0.0, 1.5))         # r
+PS_STEP = (5.0, 20.0, 0.10, 0.05, 0.02, 0.005, 0.10)
+PS_FREE = {"P7": (0, 1, 2, 3, 4, 5, 6),      # everything
+           "P4": (1, 4, 5, 6),               # cock side frozen: A, tr, wr, r
+           "P3": (4, 5, 6)}                  # release only: tr, wr, r
+PS_HUBER_D = 15.0                            # the same Huber knee ParamForm uses
+# Two sessions are pathological AT THIS RUN ROOT (tracker-tier beta spreads of
+# 247 deg and 139 deg, model note §12). They are fitted, but never pooled into a
+# headline number -- a spread that large is a property of those runs.
+PS_PATHOLOGICAL = ("2026-06-11", "2026-07-04")
+PS_MIN_SAMPLES = 20
+
+
+def _ps_project(p, free):
+    """Clamp the free parameters into their bounds, returning the clamped point
+    and a penalty proportional to how far outside it was -- so the simplex feels
+    the wall rather than walking through it."""
+    q = np.array(p, dtype=float)
+    pen = 0.0
+    for i in free:
+        lo, hi = PS_BOUNDS[i]
+        v = min(max(float(q[i]), lo), hi)
+        if v != q[i]:
+            pen += 1e3 * ((q[i] - v) / (hi - lo)) ** 2
+        q[i] = v
+    return q, pen
+
+
+def _ps_on_bound(p, free, tol=1e-3):
+    for i in free:
+        lo, hi = PS_BOUNDS[i]
+        span = hi - lo
+        if (p[i] - lo) <= tol * span or (hi - p[i]) <= tol * span:
+            return True
+    return False
+
+
+def _ps_loss_value(x, b, p):
+    """The same robust loss ParamForm.fit minimises, Huber knee 15°."""
+    r = b - beta_param(x, p)
+    a = np.abs(r)
+    d = PS_HUBER_D
+    return float(np.mean(np.where(a <= d, 0.5 * r * r, d * (a - 0.5 * d))))
+
+
+def _ps_fit(x, b, base, free, init=None, iters=2000, step_scale=1.0):
+    """Fit the free subset of the parametric form to one swing's samples under
+    the same robust loss ParamForm uses, with the rest held at `base`."""
+    base = np.array(base, dtype=float)
+    p_init = np.array(init if init is not None else base, dtype=float)
+    free = list(free)
+
+    def loss(v):
+        p = np.array(base, dtype=float)
+        p[free] = v
+        p, pen = _ps_project(p, free)
+        return _ps_loss_value(x, b, p) + pen
+
+    st = np.array([PS_STEP[i] for i in free], dtype=float) * step_scale
+    best, val = _nelder_mead(loss, p_init[free], st, iters=iters)
+    p = np.array(base, dtype=float)
+    p[free] = best
+    p, _ = _ps_project(p, free)
+    return p, float(val)
+
+
+def _ps_bound_names(p, free, tol=1e-3):
+    out = []
+    for i in free:
+        lo, hi = PS_BOUNDS[i]
+        span = hi - lo
+        if (p[i] - lo) <= tol * span or (hi - p[i]) <= tol * span:
+            out.append(PS_PARAM_NAMES[i])
+    return out
+
+
+def _ps_flat(x, b, p, free):
+    """The free parameters this swing's samples cannot see at all.
+
+    beta(t) depends on tr, wr and r only through a logistic that is numerically
+    zero well before the release, so a swing whose samples all sit earlier than
+    that leaves the loss EXACTLY constant in those three. Nelder-Mead then stops
+    wherever its own simplex happened to shrink -- at a number determined by the
+    initialisation and nothing else, identical across swings, wearing the
+    appearance of an estimate. It showed up immediately on the truth channel.
+    Detect it and refuse to call the fit converged."""
+    base = _ps_loss_value(x, b, p)
+    out = []
+    for i in free:
+        d = 0.0
+        for f in (0.1, 0.5, 1.0):
+            for sgn in (+1.0, -1.0):
+                q = np.array(p, dtype=float)
+                q[i] += sgn * f * PS_STEP[i]
+                q, _ = _ps_project(q, [i])
+                d = max(d, abs(_ps_loss_value(x, b, q) - base))
+        if d <= 1e-6 * max(abs(base), 1e-12):
+            out.append(PS_PARAM_NAMES[i])
+    return out
+
+
+def _ps_resid_stats(x, b, p):
+    r = b - beta_param(x, p)
+    return {"resid_robust_deg": float(0.7413 * (np.percentile(r, 75) - np.percentile(r, 25))),
+            "resid_med_abs_deg": float(np.median(np.abs(r)))}
+
+
+def _ps_channels(s, args):
+    """The two channels a per-swing fit can see, on the model's valid domain.
+
+    tracker -- the measured tier, the samples the population fit uses and the
+               only thing production would have.
+    truth   -- the instrumented stripe-fusion rows (band + ray) joined by
+               _attach_fusion, which exist for the ten swings of 2026-07-05.
+    """
+    out = []
+    imp = s["events"][PH_IMPACT]
+    m = s["measured"] & np.isfinite(s["beta"]) & (s["t"] <= imp)
+    x = time_to_impact(s["t"][m], s["events"])
+    keep = (x >= -1.3) & (x <= 0.05)
+    out.append(("tracker", x[keep], s["beta"][m][keep]))
+
+    ft, fb = s.get("ftruth_t"), s.get("ftruth_beta")
+    if ft is not None and len(ft):
+        k = np.asarray(ft) <= imp
+        xt = time_to_impact(np.asarray(ft)[k], s["events"])
+        bt = np.asarray(fb)[k]
+        kk = (xt >= -1.3) & (xt <= 0.05) & np.isfinite(bt)
+        if kk.sum():
+            out.append(("truth", xt[kk], bt[kk]))
+    return out
+
+
+def _ps_estimate(x, b, pop, free):
+    """The estimator, in one place: fit from the population value, restart from
+    the answer, keep the better. The bootstrap re-runs THIS, initialisation
+    included, so the interval measures the procedure and not a warm start."""
+    p1, l1 = _ps_fit(x, b, pop, free)
+    p2, l2 = _ps_fit(x, b, pop, free, init=p1, step_scale=0.15)
+    p, val = (p2, l2) if l2 <= l1 else (p1, l1)
+    # A restart from the answer that finds materially better ground means the
+    # first simplex had not converged; 1% of the loss is the line.
+    ok_simplex = ((l1 - l2) / max(abs(l1), 1e-12)) <= 0.01
+    return p, val, ok_simplex
+
+
+def _ps_one(x, b, pop, free, rng, n_boot):
+    """One swing x channel x parametrisation: the point estimate, its bootstrap
+    CI, and an honest convergence flag."""
+    p, val, ok_simplex = _ps_estimate(x, b, pop, free)
+    bound = _ps_bound_names(p, free)
+    flat = _ps_flat(x, b, p, free)
+
+    n = len(x)
+    reps, boot_ok = [], 0
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, n)
+        pb, _lb, _ok = _ps_estimate(x[idx], b[idx], pop, free)
+        reps.append(pb)
+        if not _ps_on_bound(pb, free):
+            boot_ok += 1
+    ci = np.full(len(PS_PARAM_NAMES), np.nan)
+    if reps:
+        R = np.array(reps)
+        ci = 0.5 * (np.percentile(R, 95, axis=0) - np.percentile(R, 5, axis=0))
+    rec = {"params": p, "ci": ci, "loss": val,
+           "converged": bool(ok_simplex and not bound and not flat),
+           "on_bound": bool(bound), "bound_params": "|".join(bound),
+           "flat": bool(flat), "flat_params": "|".join(flat),
+           "simplex_ok": bool(ok_simplex),
+           "boot_ok_frac": (boot_ok / n_boot) if n_boot else float("nan")}
+    rec.update(_ps_resid_stats(x, b, p))
+    return rec
+
+
+# -- small robust statistics, numpy only ------------------------------------
+
+def _ps_mad(v):
+    v = np.asarray(v, dtype=float)
+    v = v[np.isfinite(v)]
+    if len(v) < 2:
+        return float("nan")
+    return float(np.median(np.abs(v - np.median(v))))
+
+
+def _ps_sigma(v):
+    """MAD rescaled to a Gaussian sigma, so a spread and a CI half-width can be
+    put in the same units."""
+    return 1.4826 * _ps_mad(v)
+
+
+def _ps_rank(v):
+    v = np.asarray(v, dtype=float)
+    order = np.argsort(v, kind="mergesort")
+    ranks = np.empty(len(v), dtype=float)
+    ranks[order] = np.arange(1, len(v) + 1, dtype=float)
+    # average ties
+    sv = v[order]
+    i = 0
+    while i < len(sv):
+        j = i
+        while j + 1 < len(sv) and sv[j + 1] == sv[i]:
+            j += 1
+        if j > i:
+            ranks[order[i:j + 1]] = np.mean(ranks[order[i:j + 1]])
+        i = j + 1
+    return ranks
+
+
+def _ps_spearman(a, b):
+    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    m = np.isfinite(a) & np.isfinite(b)
+    if m.sum() < 4:
+        return float("nan")
+    ra, rb = _ps_rank(a[m]), _ps_rank(b[m])
+    ra = ra - ra.mean()
+    rb = rb - rb.mean()
+    den = math.sqrt(float(ra @ ra) * float(rb @ rb))
+    return float(ra @ rb / den) if den > 0 else float("nan")
+
+
+def _ps_ok(row, nm):
+    """Is THIS parameter usable on this swing?
+
+    Whole-fit convergence is too blunt to read a gate with: a fit whose `r` is
+    flat may still pin `t_r` perfectly well (conditional on `r` sitting at its
+    population value, which is exactly what P3 does on purpose). So each gate
+    asks per parameter -- the simplex converged, and this parameter is neither
+    flat nor pressed against a bound."""
+    return (row["simplex_ok"]
+            and nm not in (row["flat_params"].split("|") if row["flat_params"] else [])
+            and nm not in (row["bound_params"].split("|") if row["bound_params"] else []))
+
+
+def _ps_sel(rows, **kw):
+    return [r for r in rows if all(r.get(k) == v for k, v in kw.items())]
+
+
+def _ps_vals(rows, key):
+    return np.array([r[key] for r in rows], dtype=float)
+
+
+def _ps_fmt(v, fmt="{:.4g}"):
+    return fmt.format(v) if np.isfinite(v) else "—"
+
+
+def _ps_verdict(ratio, good, marginal, invert=False):
+    if not np.isfinite(ratio):
+        return "degenerate"
+    ok = (ratio >= good) if invert else (ratio <= good)
+    mid = (ratio >= marginal) if invert else (ratio <= marginal)
+    return "PASS" if ok else ("marginal" if mid else "FAIL")
+
+
+def run_per_swing(swings, rejected, args):
+    """The experiment of model note §13: fit the parametric form per swing and
+    put the estimates through the three gates."""
+    import time as _time
+    t_start = _time.time()
+    out = Path(args.out)
+
+    # 1. The population fit, in-run: the freeze values and the initialisation.
+    X, B, P = [], [], []
+    for s in swings:
+        m = s["measured"] & np.isfinite(s["beta"]) & np.isfinite(s["phi"])
+        m &= s["t"] <= s["events"][PH_IMPACT]
+        if m.sum() == 0:
+            continue
+        X.append(time_to_impact(s["t"][m], s["events"]))
+        B.append(s["beta"][m])
+        P.append(s["phi"][m])
+    pop_form = ParamForm("F5", "population").fit(np.concatenate(X), np.concatenate(B),
+                                                 np.concatenate(P), args.halfwidth)
+    pop = np.asarray(pop_form.params, dtype=float)
+    note = {"b0": -10.4, "A": 98.7, "tc": -0.702, "wc": 0.089,
+            "tr": -0.032, "wr": 0.011, "r": 0.741}
+    tol = {"b0": 1.0, "A": 3.0, "tc": 0.02, "wc": 0.005,
+           "tr": 0.005, "wr": 0.003, "r": 0.05}
+    pop_check = []
+    for nm, v in zip(PS_PARAM_NAMES, pop):
+        d = float(v) - note[nm]
+        pop_check.append((nm, float(v), note[nm], d, abs(d) <= tol[nm]))
+    print("[per-swing] population fit vs model note §7:")
+    for nm, v, ref, d, ok in pop_check:
+        print(f"[per-swing]   {nm:3s} {v:9.4f}  note {ref:8.3f}  delta {d:+8.4f}  "
+              f"{'ok' if ok else 'MISMATCH'}")
+    if not all(c[-1] for c in pop_check):
+        raise SystemExit("[per-swing] population fit disagrees with the model note — "
+                         "investigate before reading any per-swing number")
+
+    # 2. Every swing x channel x parametrisation. Seeds are deterministic in the
+    #    (sorted) iteration order, and recorded per row.
+    rows, drops = [], []
+    fit_i = 0
+    for s in sorted(swings, key=lambda z: z["name"]):
+        chans = _ps_channels(s, args)
+        have = {c[0] for c in chans}
+        if "truth" not in have and s.get("ftruth_t") is not None:
+            drops.append((s["name"], "truth", "fusion rows present but none pre-impact"))
+        for chan, x, b in chans:
+            n = len(x)
+            n250 = int((x >= -0.25).sum())
+            n100 = int((x >= -0.10).sum())     # where the release parameters live
+            if n < PS_MIN_SAMPLES:
+                drops.append((s["name"], chan, f"only {n} samples on address→impact"))
+                continue
+            for par in ("P7", "P4", "P3"):
+                fit_i += 1
+                seed = int(args.per_swing_seed) + fit_i
+                rng = np.random.default_rng(seed)
+                nb = args.per_swing_boot_p7 if par == "P7" else args.per_swing_boot
+                rec = _ps_one(x, b, pop, PS_FREE[par], rng, nb)
+                row = {"swing": s["name"], "session": s["session"], "channel": chan,
+                       "parametrisation": par, "n_samples": n,
+                       "n_samples_last_250ms": n250,
+                       "n_samples_last_100ms": n100,
+                       "converged": int(rec["converged"]),
+                       "on_bound": int(rec["on_bound"]),
+                       "bound_params": rec["bound_params"],
+                       "flat": int(rec["flat"]), "flat_params": rec["flat_params"],
+                       "simplex_ok": int(rec["simplex_ok"]),
+                       "boot_reps": nb, "boot_ok_frac": rec["boot_ok_frac"],
+                       "seed": seed,
+                       "pathological": int(s["session"].startswith(PS_PATHOLOGICAL)),
+                       "loss": rec["loss"],
+                       "resid_robust_deg": rec["resid_robust_deg"],
+                       "resid_med_abs_deg": rec["resid_med_abs_deg"]}
+                for j, nm in enumerate(PS_PARAM_NAMES):
+                    row[nm] = float(rec["params"][j])
+                    row["ci_" + nm] = (float(rec["ci"][j]) if j in PS_FREE[par]
+                                       else float("nan"))
+                rows.append(row)
+        print(f"[per-swing] {s['name']}: " +
+              ", ".join(f"{c[0]} n={len(c[1])}" for c in chans))
+
+    # 3. The CSV.
+    cols = (["swing", "session", "channel", "parametrisation", "n_samples",
+             "n_samples_last_250ms", "n_samples_last_100ms", "converged",
+             "on_bound", "bound_params", "flat", "flat_params", "simplex_ok",
+             "boot_reps", "boot_ok_frac", "seed", "pathological"]
+            + list(PS_PARAM_NAMES) + ["ci_" + n for n in PS_PARAM_NAMES]
+            + ["resid_robust_deg", "resid_med_abs_deg", "loss"])
+    with open(out / "per_swing_params.csv", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: (f"{r[k]:.6g}" if isinstance(r[k], float) else r[k])
+                        for k in cols})
+
+    _ps_write_summary(out / "per_swing_summary.md", rows, pop, pop_check, swings,
+                      rejected, drops, args, _time.time() - t_start)
+    print(f"[per-swing] {len(rows)} fits in {(_time.time()-t_start)/60:.1f} min → "
+          f"{out/'per_swing_params.csv'}, {out/'per_swing_summary.md'}")
+    return 0
+
+
+def _ps_write_summary(path, rows, pop, pop_check, swings, rejected, drops, args, secs):
+    healthy = [r for r in rows if not r["pathological"]]
+    V1, V2, V3 = {}, {}, {}          # gate verdicts, for the synthesis at the end
+    L = ["# Per-swing wrist-cock parameters: identifiability, repeatability, truthfulness",
+         "",
+         f"*Generated by `wrist_cock_fit.py --per-swing`, sha `{git_sha()}`, "
+         f"run root `{args.run_root}`, {secs/60:.1f} min.*", "",
+         "The model note fits the seven parameters as a **population** curve over 59 "
+         "swings and then reads `A`, `t_r`, `w_r`, `r` as coaching numbers "
+         "\"comparable between swings\". That is a claim about a **per-swing** "
+         "estimate. This is the test of it.", "",
+         "## Method", "",
+         "- same parametric form, same robust (Huber, knee 15°) loss, same "
+         "Nelder–Mead, same address→impact domain on the seconds-before-impact axis;",
+         "- three parametrisations of falling ambition: **P7** all seven free, "
+         "**P4** `b₀,t_c,w_c` frozen at the population fit (`A,t_r,w_r,r` free), "
+         "**P3** `A` frozen too (release only);",
+         "- two channels: **tracker** = the measured tier, what production would "
+         "have; **truth** = the instrumented stripe-fusion rows (band+ray) of "
+         "2026-07-05, joined by the harness's existing `_attach_fusion`;",
+         f"- confidence intervals by resampling frames within the swing with "
+         f"replacement ({args.per_swing_boot} reps for P3/P4, "
+         f"{args.per_swing_boot_p7} for P7), fixed seeds recorded per row; the "
+         "half-width quoted is **half the central-90% interval**;",
+         "- a fit is **converged** only if a restart from its own answer finds no "
+         "more than 1% of the loss, no free parameter sits on a bound, and no "
+         "free parameter is flat — see Convergence below;",
+         "- seeds are fixed, so the command at the foot of this page reproduces "
+         "every number in it.", "",
+         "## The population fit (freeze and initialisation values)", "",
+         "| parameter | this run | model note §7 | Δ |", "|---|---|---|---|"]
+    for nm, v, ref, d, ok in pop_check:
+        L.append(f"| `{nm}` | {v:.4f} | {ref:.3f} | {d:+.4f} {'' if ok else '**MISMATCH**'} |")
+    L += ["", "It reproduces the note to within rounding on all seven, so the freeze "
+          "values are the note's values.", ""]
+
+    # inventory
+    n_tr = len({r["swing"] for r in rows if r["channel"] == "tracker"})
+    n_th = len({r["swing"] for r in rows if r["channel"] == "truth"})
+    L += ["## Swings in and out", "",
+          f"- {len(swings)} swings loaded from the run root; **{n_tr}** carry a "
+          f"tracker channel and **{n_th}** carry the instrumented truth channel.",
+          f"- dropped before loading ({len(rejected)}):"]
+    for nm, why in rejected:
+        L.append(f"  - `{nm}` — {why}")
+    if drops:
+        L.append(f"- dropped per channel ({len(drops)}):")
+        for nm, ch, why in drops:
+            L.append(f"  - `{nm}` / {ch} — {why}")
+    else:
+        L.append("- no swing×channel dropped after loading.")
+    L += ["- sessions 2026-06-11 and 2026-07-04 are **pathological at this run root** "
+          "(tracker-tier β spreads of 247°/139°, note §12). They are fitted and "
+          "carried in the CSV, but every headline number below is healthy-sessions "
+          "only; their table is separate.", ""]
+
+    # Where the release parameters live, and whether the data is there at all.
+    L += ["## Data coverage where the release lives", "",
+          "`t_r ≈ −32 ms` with `w_r ≈ 11 ms`: the release transition occupies "
+          "roughly the last 60 ms before impact. The population fit sees every "
+          "swing's samples at once; a per-swing fit sees only its own.", "",
+          "| channel | swings | median samples, last 250 ms | median samples, last "
+          "100 ms | swings with **0** in the last 100 ms | pooled samples, last 100 ms |",
+          "|---|---|---|---|---|---|"]
+    for ch in ("tracker", "truth"):
+        sel = _ps_sel(rows, parametrisation="P3", channel=ch)
+        if not sel:
+            continue
+        v250 = _ps_vals(sel, "n_samples_last_250ms")
+        v100 = _ps_vals(sel, "n_samples_last_100ms")
+        L.append(f"| {ch} | {len(sel)} | {np.median(v250):.0f} | {np.median(v100):.0f} | "
+                 f"{int((v100 == 0).sum())} | {int(v100.sum())} |")
+    L += ["", "That is the mechanism behind everything below: the release fires in "
+          "the frames the tracker is least able to measure and the tape is least "
+          "legible, so a single swing often carries a handful of samples there — "
+          "and sometimes none at all, in which case the loss is **exactly flat** in "
+          "`t_r`, `w_r` and `r` and the fit returns its initialisation.", ""]
+
+    # Convergence by session, tracker channel: where the usable fits actually are.
+    L += ["### convergence by session (tracker channel)", "",
+          "| session | swings | median n last 100 ms | P7 | P4 | P3 |",
+          "|---|---|---|---|---|---|"]
+    for ss in sorted({r["session"] for r in rows}):
+        sel = _ps_sel(rows, session=ss, channel="tracker", parametrisation="P3")
+        if not sel:
+            continue
+        cells = []
+        for par in ("P7", "P4", "P3"):
+            q = _ps_sel(rows, session=ss, channel="tracker", parametrisation=par)
+            cells.append(f"{sum(r['converged'] for r in q)}/{len(q)}")
+        flag = " *(pathological)*" if sel[0]["pathological"] else ""
+        L.append(f"| `{ss}`{flag} | {len(sel)} | "
+                 f"{np.median(_ps_vals(sel,'n_samples_last_100ms')):.0f} | "
+                 + " | ".join(cells) + " |")
+    L.append("")
+
+    # convergence
+    L += ["## Convergence", "",
+          "A fit counts as converged only if the restart finds ≤1% more loss, no "
+          "free parameter sits on a bound, and no free parameter is **flat** — "
+          "invisible to that swing's samples, so that the number returned is a "
+          "property of the initialisation rather than of the swing.", "",
+          "| parametrisation | channel | swings | converged | on a bound | flat | "
+          "restart moved | median robust residual |",
+          "|---|---|---|---|---|---|---|---|"]
+    for par in ("P7", "P4", "P3"):
+        for ch in ("tracker", "truth"):
+            sel = _ps_sel(rows, parametrisation=par, channel=ch)
+            if not sel:
+                continue
+            n = len(sel)
+            L.append(f"| {par} | {ch} | {n} | **{sum(r['converged'] for r in sel)}/{n}** | "
+                     f"{sum(r['on_bound'] for r in sel)} | "
+                     f"{sum(r['flat'] for r in sel)} | "
+                     f"{sum(1 for r in sel if not r['simplex_ok'])} | "
+                     f"{np.median(_ps_vals(sel,'resid_robust_deg')):.1f}° |")
+    L.append("")
+    tallies = []
+    for par in ("P7", "P4", "P3"):
+        for ch in ("tracker", "truth"):
+            cnt = {}
+            for r in _ps_sel(rows, parametrisation=par, channel=ch):
+                for nm in (r["bound_params"].split("|") if r["bound_params"] else []):
+                    cnt["`%s` on bound" % nm] = cnt.get("`%s` on bound" % nm, 0) + 1
+                for nm in (r["flat_params"].split("|") if r["flat_params"] else []):
+                    cnt["`%s` flat" % nm] = cnt.get("`%s` flat" % nm, 0) + 1
+            if cnt:
+                top = sorted(cnt.items(), key=lambda kv: -kv[1])
+                tallies.append(f"- {par}/{ch}: " +
+                               ", ".join(f"{k} ×{v}" for k, v in top))
+    if tallies:
+        L += ["Which parameters fail, and how:", ""] + tallies + [""]
+
+    # ---- Gate 1
+    L += ["## Gate 1 — identifiability", "",
+          "*A parameter is identifiable per swing only if one swing's own "
+          "confidence interval is clearly narrower than the spread between "
+          "swings; otherwise the estimate carries no information about which "
+          "swing it came from.* Between-swing spread is the MAD across converged "
+          "healthy-session swings, rescaled to a Gaussian σ and then to a "
+          "central-90% half-width (×1.645) so it is in the same units as the CI. "
+          "**PASS** = ratio ≤ 0.5, **marginal** ≤ 1.0, **FAIL** above.", "",
+          "Each row counts only the swings on which **that parameter** is "
+          "estimable — the simplex converged and the parameter is neither flat "
+          "nor on a bound — so the trailing fraction is itself a result: a "
+          "parameter estimable on a third of swings is not a coaching readout "
+          "whatever its ratio says.", ""]
+    for ch in ("tracker", "truth"):
+        L += [f"### channel: {ch}", "",
+              "| parametrisation | parameter | median CI half-width | between-swing "
+              "half-width | ratio | verdict |", "|---|---|---|---|---|---|"]
+        # (`ratio` is the per-swing interval divided by the between-swing spread;
+        #  a parameter only says something about a swing when it is well below 1)
+        for par in ("P7", "P4", "P3"):
+            pool = _ps_sel(healthy, parametrisation=par, channel=ch)
+            for j, nm in enumerate(PS_PARAM_NAMES):
+                if j not in PS_FREE[par]:
+                    continue
+                sel = [r for r in pool if _ps_ok(r, nm)]
+                frac = f"{len(sel)}/{len(pool)}"
+                if len(sel) < 4:
+                    V1[(par, ch, nm)] = ("unusable", frac)
+                    L.append(f"| {par} | `{nm}` | — | — | — | **unusable** "
+                             f"({frac} swings estimable) |")
+                    continue
+                ci = float(np.median(_ps_vals(sel, "ci_" + nm)))
+                hw = 1.645 * _ps_sigma(_ps_vals(sel, nm))
+                ratio = ci / hw if hw > 0 else float("nan")
+                v = _ps_verdict(ratio, 0.5, 1.0)
+                V1[(par, ch, nm)] = (v, frac)
+                L.append(f"| {par} | `{nm}` | {_ps_fmt(ci)} | {_ps_fmt(hw)} | "
+                         f"{_ps_fmt(ratio, '{:.2f}')} | **{v}** ({frac} swings) |")
+        L.append("")
+
+    # ---- Gate 2
+    L += ["## Gate 2 — repeatability", "",
+          "*Within-session spread against between-session spread. If a golfer's "
+          "ten swings in one session scatter as widely as his session medians "
+          "differ, the number is repeatability noise wearing a coaching name.* "
+          "Both are robust σ (1.4826·MAD); within-session is the median over "
+          "healthy sessions with ≥4 converged swings, between-session is the σ of "
+          "the session medians. **PASS** = between/within ≥ 1.5, **marginal** ≥ "
+          "0.5.", ""]
+    for ch in ("tracker", "truth"):
+        sel_all = _ps_sel(healthy, channel=ch)
+        sess = sorted({r["session"] for r in sel_all})
+        if len(sess) < 2:
+            L += [f"### channel: {ch}", "",
+                  f"Only {len(sess)} healthy session(s) carry this channel — the "
+                  "between-session term does not exist, so this gate cannot be "
+                  "read here.", ""]
+            continue
+        L += [f"### channel: {ch}", "",
+              "| parametrisation | parameter | within-session σ (median) | "
+              "between-session σ of medians | ratio | verdict |",
+              "|---|---|---|---|---|---|"]
+        for par in ("P7", "P4", "P3"):
+            for j, nm in enumerate(PS_PARAM_NAMES):
+                if j not in PS_FREE[par]:
+                    continue
+                within, meds = [], []
+                for ss in sess:
+                    v = _ps_vals([r for r in sel_all
+                                  if r["parametrisation"] == par and r["session"] == ss
+                                  and _ps_ok(r, nm)], nm)
+                    if len(v) >= 4:
+                        within.append(_ps_sigma(v))
+                        meds.append(float(np.median(v)))
+                if len(meds) < 2:
+                    continue
+                w = float(np.median(within))
+                bs = _ps_sigma(np.array(meds))
+                ratio = bs / w if w > 0 else float("nan")
+                v = _ps_verdict(ratio, 1.5, 0.5, invert=True)
+                V2[(par, ch, nm)] = (v, f"{len(meds)} sess")
+                L.append(f"| {par} | `{nm}` | {_ps_fmt(w)} | {_ps_fmt(bs)} | "
+                         f"{_ps_fmt(ratio, '{:.2f}')} | **{v}** "
+                         f"({len(meds)} sessions) |")
+        L.append("")
+
+    # The confound this gate cannot escape on its own: a between-session
+    # difference that tracks how many samples the session HAS near impact is a
+    # measurement property, not a property of the golfer's release.
+    L += ["### session medians beside the coverage that produced them", "",
+          "Read this table against the per-session `n last 100 ms` above. Where a "
+          "session's release samples are absent its `w_r` collapses toward the "
+          "lower bound and its `t_r` drifts to impact — so a between-session "
+          "difference in the release parameters can be a difference in **coverage** "
+          "rather than in the golfer.", "",
+          "| session | n last 100 ms | " +
+          " | ".join(f"P4 `{n}`" for n in ("A", "tr", "wr", "r")) + " |",
+          "|---|---|---|---|---|---|"]
+    for ss in sorted({r["session"] for r in rows}):
+        pool = _ps_sel(rows, session=ss, channel="tracker", parametrisation="P4")
+        if not pool:
+            continue
+        cells = []
+        for nm in ("A", "tr", "wr", "r"):
+            v = _ps_vals([r for r in pool if _ps_ok(r, nm)], nm)
+            cells.append(f"{np.median(v):.4g} (n={len(v)})" if len(v) >= 2 else "—")
+        flag = " *(path.)*" if pool[0]["pathological"] else ""
+        L.append(f"| `{ss}`{flag} | "
+                 f"{np.median(_ps_vals(pool,'n_samples_last_100ms')):.0f} | "
+                 + " | ".join(cells) + " |")
+    L.append("")
+
+    # pathological sessions, separately
+    L += ["### the two pathological sessions, separately", "",
+          "| parametrisation | parameter | 2026-06-11 median (σ) | "
+          "2026-07-04 median (σ) | healthy median (σ) |", "|---|---|---|---|---|"]
+    for par in ("P7", "P4", "P3"):
+        for j, nm in enumerate(PS_PARAM_NAMES):
+            if j not in PS_FREE[par]:
+                continue
+            cells = []
+            for pref in PS_PATHOLOGICAL:
+                v = _ps_vals([r for r in rows if r["parametrisation"] == par
+                              and r["channel"] == "tracker" and _ps_ok(r, nm)
+                              and r["session"].startswith(pref)], nm)
+                cells.append(f"{np.median(v):.4g} ({_ps_sigma(v):.3g})" if len(v) >= 3 else "—")
+            v = _ps_vals([r for r in _ps_sel(healthy, parametrisation=par,
+                                             channel="tracker") if _ps_ok(r, nm)], nm)
+            cells.append(f"{np.median(v):.4g} ({_ps_sigma(v):.3g})" if len(v) >= 3 else "—")
+            L.append(f"| {par} | `{nm}` | " + " | ".join(cells) + " |")
+    L.append("")
+
+    # ---- Gate 3
+    L += ["## Gate 3 — truthfulness (the decisive one)", "",
+          "*On the ten instrumented swings of 2026-07-05, does the estimate a "
+          "production tracker would produce agree with the estimate the "
+          "instrumented truth produces on the same swing? If tracker-based `t_r` "
+          "does not track truth-based `t_r`, the parameter is real but "
+          "unmeasurable in production.* Sign agreement is the fraction of swings "
+          "whose deviation from the population value has the same sign in both "
+          "channels (chance = 50%). **PASS** = ρ ≥ 0.6 and sign ≥ 0.8 and "
+          "median|Δ| ≤ half the between-swing truth spread.", ""]
+    L += ["| parametrisation | parameter | pairs used | median \\|Δ\\| | "
+          "between-swing σ (truth) | \\|Δ\\|/σ | Spearman ρ | sign agreement | verdict |",
+          "|---|---|---|---|---|---|---|---|---|"]
+    for par in ("P7", "P4", "P3"):
+        tr = {r["swing"]: r for r in _ps_sel(rows, parametrisation=par, channel="tracker")}
+        th = {r["swing"]: r for r in _ps_sel(rows, parametrisation=par, channel="truth")}
+        pairs = sorted(set(tr) & set(th))
+        for j, nm in enumerate(PS_PARAM_NAMES):
+            if j not in PS_FREE[par]:
+                continue
+            both = [s for s in pairs if _ps_ok(tr[s], nm) and _ps_ok(th[s], nm)]
+            if len(both) < 4:
+                V3[(par, nm)] = ("unusable", f"{len(both)}/{len(pairs)}")
+                L.append(f"| {par} | `{nm}` | {len(both)}/{len(pairs)} | — | — | — | "
+                         "— | — | **unusable** (too few estimable pairs) |")
+                continue
+            a = np.array([tr[s][nm] for s in both], dtype=float)
+            b = np.array([th[s][nm] for s in both], dtype=float)
+            md = float(np.median(np.abs(a - b)))
+            sig = _ps_sigma(b)
+            rho = _ps_spearman(a, b)
+            sgn = float(np.mean(np.sign(a - pop[j]) == np.sign(b - pop[j])))
+            ratio = md / sig if sig > 0 else float("nan")
+            ok = (np.isfinite(rho) and rho >= 0.6 and sgn >= 0.8
+                  and np.isfinite(ratio) and ratio <= 0.5)
+            mid = (np.isfinite(rho) and rho >= 0.3 and sgn >= 0.6)
+            v = "PASS" if ok else ("marginal" if mid else "FAIL")
+            V3[(par, nm)] = (v, f"{len(both)}/{len(pairs)}")
+            L.append(f"| {par} | `{nm}` | {len(both)}/{len(pairs)} | {_ps_fmt(md)} | "
+                     f"{_ps_fmt(sig)} | {_ps_fmt(ratio, '{:.2f}')} | "
+                     f"{_ps_fmt(rho, '{:+.2f}')} | {sgn*100:.0f}% | **{v}** |")
+
+    # -- the three gates on one page, for the four parameters §7 sells ---------
+    L += ["", "## The three gates together, for the four coaching parameters", "",
+          "`A` how much lag, `t_r` when it is released, `w_r` how violently, `r` "
+          "whether any is still held at impact. Gate 1 and Gate 2 are the tracker "
+          "channel (healthy sessions); Gate 3 is tracker vs instrumented truth. "
+          "The fraction after each verdict is how many swings (or pairs) the "
+          "parameter was estimable on at all.", "",
+          "| parametrisation | parameter | Gate 1 identifiable | Gate 2 repeatable "
+          "| Gate 3 truthful |", "|---|---|---|---|---|"]
+    for par in ("P7", "P4", "P3"):
+        for j, nm in enumerate(PS_PARAM_NAMES):
+            if j not in PS_FREE[par] or nm not in ("A", "tr", "wr", "r"):
+                continue
+            g1 = V1.get((par, "tracker", nm), ("no data", "—"))
+            g2 = V2.get((par, "tracker", nm), ("no data", "—"))
+            g3 = V3.get((par, nm), ("no data", "—"))
+            L.append(f"| {par} | `{nm}` | {g1[0]} ({g1[1]}) | {g2[0]} ({g2[1]}) | "
+                     f"**{g3[0]}** ({g3[1]}) |")
+    passed = sorted({f"`{nm}` under {par}" for (par, nm), (v, _f) in V3.items()
+                     if v == "PASS"})
+    unusable = sorted({f"`{nm}` under {par}" for (par, nm), (v, _f) in V3.items()
+                       if v == "unusable"})
+    if passed:
+        L += ["", "Gate 3 is the decisive one, and it is cleared by: "
+              + ", ".join(passed) + ".", ""]
+    else:
+        L += ["", "Gate 3 is the decisive one and **no parameter clears it under "
+              "any parametrisation**: where both channels can be estimated they "
+              "disagree by more than the swings differ from one another.", ""]
+    if unusable:
+        L += ["Not even testable, for want of a swing on which both channels "
+              "estimate the parameter at all: " + ", ".join(unusable) + ".", ""]
+
+    L += ["## Reproduction", "",
+          "```", args.per_swing_cmd or "(command not recorded)", "```", ""]
+    Path(path).write_text("\n".join(L) + "\n", encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# P1 (--p1): one free parameter per swing, a release TIME-SHIFT.
+#
+# The P7/P4/P3 experiment above returned a negative result whose mechanism was
+# coverage: the release occupies the last ~60 ms, a single swing carries a
+# handful of measured samples there and the instrumented tape carries none on
+# eight swings in ten, so t_r, w_r and r are unconstrained one swing at a time.
+#
+# P1 collapses the ambition to the smallest question that still means something
+# to a coach -- DOES THIS SWING RELEASE EARLIER OR LATER THAN THE POPULATION? --
+# by freezing the whole population curve except a scalar shift of the release
+# event:
+#
+#     beta_d(t) = b0 + A*L((t-tc)/wc) * (1 - r*L((t-(tr+d))/wr))
+#
+# One parameter is constrained by the whole release SLOPE, not only by samples
+# inside the transition, so the last 250 ms carries it -- where truth has a
+# median of 15 rows rather than 0.
+#
+# Four channels, in rising order of how much they are inferred:
+#   measured         the tracker's measured tier (what production has)
+#   measured+anchor  the same, plus the single P7 impact anchor from
+#                    club.positions as one weighted observation at t=0
+#   synth            club.synth, the Layer-C 240 Hz Hermite series through the
+#                    P-anchors. INFERRED, not measured (see the summary)
+#   truth            the instrumented fusion band+ray rows (10 swings)
+#
+# The fit is a grid search rather than a simplex: with one bounded parameter a
+# 0.5 ms sweep of the whole interval is cheap, deterministic, and cannot end in
+# a local minimum -- which the seven-parameter fits above could and did.
+
+P1_DELTA_LO = -0.10                 # s; earlier release than the population
+P1_DELTA_HI = 0.06                  # s; later
+P1_TR_CAP = 0.02                    # tr + delta may not pass 20 ms after impact
+P1_COARSE = 0.0005                  # 0.5 ms sweep
+P1_FINE = 0.00002                   # 0.02 ms refinement
+P1_SIGMA_REF = 8.0                  # deg: the measured tier's own robust residual
+P1_SIGMA_ANCHOR_DEFAULT = 5.0       # deg: used when sigmaThetaDeg is unset (-1)
+P1_ANCHOR_WMAX = 25.0               # the anchor may never outweigh 25 samples
+P1_NOTE = {"b0": -10.4, "A": 98.7, "tc": -0.702, "wc": 0.089,
+           "tr": -0.032, "wr": 0.011, "r": 0.741}
+P1_NOTE_TOL = {"b0": 1.0, "A": 3.0, "tc": 0.02, "wc": 0.005,
+               "tr": 0.005, "wr": 0.003, "r": 0.05}
+P1_CHANNELS = ("measured", "measured+anchor", "synth", "truth")
+
+
+def beta_shift(t, pop, deltas):
+    """The population curve with its release shifted by delta, vectorised over
+    delta: returns an array of shape (len(deltas), len(t))."""
+    b0, A, tc, wc, tr, wr, r = [float(v) for v in pop]
+    t = np.asarray(t, dtype=float)[None, :]
+    d = np.asarray(deltas, dtype=float)[:, None]
+    Lc = _logistic((t - tc) / max(abs(wc), 1e-3))
+    Lr = _logistic((t - (tr + d)) / max(abs(wr), 1e-3))
+    return b0 + A * Lc * (1.0 - r * Lr)
+
+
+def _p1_huber(res, w=None):
+    """The harness's Huber loss, over the last axis, optionally weighted."""
+    a = np.abs(res)
+    d = PS_HUBER_D
+    h = np.where(a <= d, 0.5 * res * res, d * (a - 0.5 * d))
+    if w is None:
+        return h.mean(axis=-1)
+    return (h * w).sum(axis=-1) / float(np.sum(w))
+
+
+def _p1_losses(x, b, w, pop, deltas):
+    return _p1_huber(np.asarray(b, dtype=float)[None, :] - beta_shift(x, pop, deltas), w)
+
+
+def _p1_bounds(pop):
+    return P1_DELTA_LO, min(P1_DELTA_HI, P1_TR_CAP - float(pop[4]))
+
+
+def _p1_fit(x, b, w, pop):
+    """Grid-and-refine over the whole bounded interval."""
+    lo, hi = _p1_bounds(pop)
+    grid = np.arange(lo, hi + 1e-12, P1_COARSE)
+    L = _p1_losses(x, b, w, pop, grid)
+    i = int(np.argmin(L))
+    fine = np.arange(max(lo, grid[i] - P1_COARSE), min(hi, grid[i] + P1_COARSE) + 1e-12,
+                     P1_FINE)
+    Lf = _p1_losses(x, b, w, pop, fine)
+    j = int(np.argmin(Lf))
+    return float(fine[j]), float(Lf[j]), grid, L
+
+
+def _p1_diagnose(d_hat, val, grid, L, pop, x, b, w):
+    """On a bound, or flat? With one parameter the flatness probe of the
+    seven-parameter fits reduces to asking whether the loss moves over delta at
+    all -- globally across the sweep, and locally about the optimum."""
+    lo, hi = _p1_bounds(pop)
+    span = hi - lo
+    on_bound = (d_hat - lo) <= 1e-3 * span or (hi - d_hat) <= 1e-3 * span
+    rng = float(L.max() - L.min())
+    flat_global = rng <= 1e-6 * max(abs(float(L.min())), 1e-12)
+    near = np.array([max(lo, d_hat - 0.005), min(hi, d_hat + 0.005)])
+    Ln = _p1_losses(x, b, w, pop, near)
+    flat_local = float(np.max(np.abs(Ln - val))) <= 1e-6 * max(abs(val), 1e-12)
+    return bool(on_bound), bool(flat_global or flat_local)
+
+
+def _p1_leverage(x, pop, frac=0.10):
+    """How many of these samples can SEE delta at all.
+
+    d(beta)/d(delta) = A*Lc*r*Lr*(1-Lr)/wr, which is appreciable only within a
+    few w_r of the release and is exactly zero everywhere else. A swing whose
+    samples all sit outside that window contains no information about when the
+    release fired, however many samples it has -- which is why a raw sample
+    count, even a count over the last 250 ms, overstates what a channel knows.
+    Counted here against 10% of the derivative's theoretical maximum."""
+    b0, A, tc, wc, tr, wr, r = [float(v) for v in pop]
+    x = np.asarray(x, dtype=float)
+    Lc = _logistic((x - tc) / max(abs(wc), 1e-3))
+    Lr = _logistic((x - tr) / max(abs(wr), 1e-3))
+    dbdd = np.abs(A * Lc * r * Lr * (1.0 - Lr) / max(abs(wr), 1e-3))
+    dmax = abs(A) * abs(r) * 0.25 / max(abs(wr), 1e-3)
+    return int((dbdd >= frac * dmax).sum()), float(dbdd.max() / 1e3)   # deg/ms
+
+
+def _p1_phi_at(run_dir, rec):
+    """The swing's arm angle as a function of time, rebuilt exactly as
+    load_swing() builds it -- and PINNED to it: the assertion below fails if the
+    two ever diverge, which is the only thing that could silently put the synth
+    and anchor channels on a different phi from the measured one."""
+    an = json.load(open(Path(run_dir) / "result.json", encoding="utf-8"))["analysis"]
+    club = an.get("club", {})
+    wpx, hpx = club.get("frameWidth") or 0, club.get("frameHeight") or 0
+    ev = rec["events"]
+    pose_block = an.get("pose2d", {})
+    lead_left, _m = decide_lead_side(pose_block.get("frames") or [],
+                                     ev[PH_ADDRESS], ev[PH_TAKEAWAY])
+    pt, praw = arm_series(pose_block, "frames", lead_left, wpx, hpx)
+    sm = smooth_angle(praw["phi"])
+    good = np.isfinite(sm)
+    phi_u = np.degrees(np.unwrap(np.radians(sm[good])))
+
+    def phi_at(times):
+        times = np.asarray(times, dtype=float)
+        v = np.interp(times, pt[good].astype(float), phi_u, left=np.nan, right=np.nan)
+        near = np.abs(times[:, None] - pt[good][None, :]).min(axis=1)
+        v[near > 60_000.0] = np.nan
+        return v
+
+    chk = phi_at(rec["t"])
+    m = np.isfinite(chk) & np.isfinite(rec["phi"])
+    if m.any():
+        assert float(np.max(np.abs(chk[m] - rec["phi"][m]))) < 1e-9, \
+            f"{rec['name']}: rebuilt phi differs from load_swing's"
+    return phi_at, an
+
+
+def _p1_channels(rec, args):
+    """The four channels, each as (name, x, beta, weights, meta)."""
+    out = []
+    imp = rec["events"][PH_IMPACT]
+    chir = rec["chir"]
+    run_dir = Path(args.run_root) / rec["name"]
+    phi_at, an = _p1_phi_at(run_dir, rec)
+    club = an.get("club", {})
+
+    base = _ps_channels(rec, args)               # measured (+ truth, if present)
+    meas = [c for c in base if c[0] == "tracker"][0]
+    xm, bm = meas[1], meas[2]
+    out.append(("measured", xm, bm, None, {}))
+
+    # + the P7 impact anchor: one observation at t=0, weighted by its own stated
+    # sigma against the measured tier's residual, and never allowed to outweigh
+    # P1_ANCHOR_WMAX samples however confident it claims to be.
+    p7 = [p for p in (club.get("positions") or []) if int(p.get("p", -1)) == 7]
+    if p7:
+        p7 = p7[0]
+        gx, gy = p7["grip"]
+        hx, hy = p7["head"]
+        wpx, hpx = club.get("frameWidth") or 1, club.get("frameHeight") or 1
+        th = math.degrees(math.atan2((hy - gy) * hpx, (hx - gx) * wpx))
+        ta = float(p7["t_us"])
+        ph = phi_at(np.array([ta]))[0]
+        sg = float(p7.get("sigmaThetaDeg", -1.0))
+        sg = sg if sg > 0 else P1_SIGMA_ANCHOR_DEFAULT
+        wt = min((P1_SIGMA_REF / sg) ** 2, P1_ANCHOR_WMAX)
+        if np.isfinite(ph):
+            ba = chir * wrap180(np.array([th - ph]))[0]
+            xa = float(time_to_impact(np.array([ta]), rec["events"])[0])
+            out.append(("measured+anchor",
+                        np.append(xm, xa), np.append(bm, ba),
+                        np.append(np.ones(len(xm)), wt),
+                        {"anchor_beta_deg": float(ba), "anchor_sigma_deg": sg,
+                         "anchor_weight": float(wt),
+                         "anchor_dt_ms": (ta - float(imp)) / 1e3}))
+
+    # synth: the Layer-C 240 Hz Hermite series. Same phi, same chirality, same
+    # domain window as every other channel.
+    syn = club.get("synth") or []
+    if syn:
+        ts = np.array([s["t_us"] for s in syn], dtype=np.int64)
+        th = np.degrees(np.array([s["theta"] for s in syn], dtype=float))
+        ph = phi_at(ts.astype(float))
+        xs = time_to_impact(ts, rec["events"])
+        k = (np.asarray(ts) <= imp) & (xs >= -1.3) & (xs <= 0.05) & np.isfinite(ph) \
+            & np.isfinite(th)
+        if k.sum() >= PS_MIN_SAMPLES:
+            out.append(("synth", xs[k], chir * wrap180(th[k] - ph[k]), None,
+                        {"synth_rows_total": len(syn)}))
+
+    tr = [c for c in base if c[0] == "truth"]
+    if tr:
+        out.append(("truth", tr[0][1], tr[0][2], None, {}))
+    return out
+
+
+def run_p1(swings, rejected, args):
+    """P1: fit the release time-shift per swing, on four channels, and gate it."""
+    import time as _time
+    t_start = _time.time()
+    out = Path(args.out)
+
+    # population fit, same in-run derivation and the same §7 sanity gate
+    X, B, P = [], [], []
+    for s in swings:
+        m = s["measured"] & np.isfinite(s["beta"]) & np.isfinite(s["phi"])
+        m &= s["t"] <= s["events"][PH_IMPACT]
+        if m.sum() == 0:
+            continue
+        X.append(time_to_impact(s["t"][m], s["events"]))
+        B.append(s["beta"][m])
+        P.append(s["phi"][m])
+    pop = np.asarray(ParamForm("F5", "population").fit(
+        np.concatenate(X), np.concatenate(B), np.concatenate(P), args.halfwidth).params)
+    pop_check = []
+    for nm, v in zip(PS_PARAM_NAMES, pop):
+        d = float(v) - P1_NOTE[nm]
+        pop_check.append((nm, float(v), P1_NOTE[nm], d, abs(d) <= P1_NOTE_TOL[nm]))
+    print("[p1] population fit vs model note §7:")
+    for nm, v, ref, d, ok in pop_check:
+        print(f"[p1]   {nm:3s} {v:9.4f}  note {ref:8.3f}  delta {d:+8.4f}  "
+              f"{'ok' if ok else 'MISMATCH'}")
+    if not all(c[-1] for c in pop_check):
+        raise SystemExit("[p1] population fit disagrees with the model note")
+    lo, hi = _p1_bounds(pop)
+    print(f"[p1] delta bounds [{lo:+.4f}, {hi:+.4f}] s  (tr+delta capped at "
+          f"{P1_TR_CAP:+.3f} s)")
+
+    rows, drops = [], []
+    fit_i = 0
+    for s in sorted(swings, key=lambda z: z["name"]):
+        chans = _p1_channels(s, args)
+        have = {c[0] for c in chans}
+        for want in P1_CHANNELS:
+            if want == "truth" and s.get("ftruth_t") is None:
+                continue
+            if want not in have:
+                drops.append((s["name"], want, "channel absent or below "
+                              f"{PS_MIN_SAMPLES} samples in the domain window"))
+        for chan, x, b, w, meta in chans:
+            if len(x) < PS_MIN_SAMPLES:
+                drops.append((s["name"], chan, f"only {len(x)} samples"))
+                continue
+            fit_i += 1
+            seed = int(args.p1_seed) + fit_i
+            rng = np.random.default_rng(seed)
+            d_hat, val, grid, L = _p1_fit(x, b, w, pop)
+            on_bound, flat = _p1_diagnose(d_hat, val, grid, L, pop, x, b, w)
+            reps, boot_ok = [], 0
+            n = len(x)
+            for _ in range(args.p1_boot):
+                idx = rng.integers(0, n, n)
+                wb = None if w is None else np.asarray(w)[idx]
+                db, vb, gb, Lb = _p1_fit(x[idx], b[idx], wb, pop)
+                reps.append(db)
+                ob, fl = _p1_diagnose(db, vb, gb, Lb, pop, x[idx], b[idx], wb)
+                if not (ob or fl):
+                    boot_ok += 1
+            ci = (0.5 * (np.percentile(reps, 95) - np.percentile(reps, 5))
+                  if reps else float("nan"))
+            res = np.asarray(b) - beta_shift(x, pop, [d_hat])[0]
+            n_lev, lev_max = _p1_leverage(x, pop)
+            row = {"swing": s["name"], "session": s["session"], "channel": chan,
+                   "n_samples": n,
+                   "n_samples_last_250ms": int((x >= -0.25).sum()),
+                   "n_samples_last_100ms": int((x >= -0.10).sum()),
+                   "n_leverage": n_lev, "leverage_max_deg_per_ms": lev_max,
+                   "converged": int(not on_bound and not flat),
+                   "on_bound": int(on_bound), "flat": int(flat),
+                   "boot_reps": args.p1_boot,
+                   "boot_ok_frac": boot_ok / max(args.p1_boot, 1),
+                   "seed": seed,
+                   "pathological": int(s["session"].startswith(PS_PATHOLOGICAL)),
+                   "delta_s": d_hat, "delta_ms": d_hat * 1e3,
+                   "ci_delta_s": float(ci), "ci_delta_ms": float(ci) * 1e3,
+                   "tr_eff_s": float(pop[4]) + d_hat,
+                   "resid_robust_deg": float(0.7413 * (np.percentile(res, 75)
+                                                       - np.percentile(res, 25))),
+                   "resid_med_abs_deg": float(np.median(np.abs(res))),
+                   "loss": val}
+            for k in ("anchor_beta_deg", "anchor_sigma_deg", "anchor_weight",
+                      "anchor_dt_ms", "synth_rows_total"):
+                row[k] = meta.get(k, float("nan"))
+            rows.append(row)
+        print(f"[p1] {s['name']}: " + ", ".join(
+            f"{c[0]} n={len(c[1])}({int((c[1] >= -0.10).sum())} in last 100ms)"
+            for c in chans))
+
+    cols = ["swing", "session", "channel", "n_samples", "n_samples_last_250ms",
+            "n_samples_last_100ms", "n_leverage", "leverage_max_deg_per_ms",
+            "converged", "on_bound", "flat", "boot_reps",
+            "boot_ok_frac", "seed", "pathological", "delta_s", "delta_ms",
+            "ci_delta_s", "ci_delta_ms", "tr_eff_s", "resid_robust_deg",
+            "resid_med_abs_deg", "loss", "anchor_beta_deg", "anchor_sigma_deg",
+            "anchor_weight", "anchor_dt_ms", "synth_rows_total"]
+    with open(out / "p1_params.csv", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: (f"{r[k]:.6g}" if isinstance(r[k], float) else r[k])
+                        for k in cols})
+
+    _p1_write_summary(out / "p1_summary.md", rows, pop, pop_check, swings, rejected,
+                      drops, args, _time.time() - t_start)
+    print(f"[p1] {len(rows)} fits in {(_time.time()-t_start)/60:.1f} min → "
+          f"{out/'p1_params.csv'}, {out/'p1_summary.md'}")
+    return 0
+
+
+def _p1_pairs(rows, ch_a, ch_b, converged_both=True):
+    a = {r["swing"]: r for r in rows if r["channel"] == ch_a}
+    b = {r["swing"]: r for r in rows if r["channel"] == ch_b}
+    keys = sorted(set(a) & set(b))
+    if converged_both:
+        keys = [k for k in keys if a[k]["converged"] and b[k]["converged"]]
+    return keys, a, b
+
+
+def _p1_write_summary(path, rows, pop, pop_check, swings, rejected, drops, args, secs):
+    healthy = [r for r in rows if not r["pathological"]]
+    lo, hi = _p1_bounds(pop)
+    L = ["# P1: one free parameter per swing — the release time-shift δ", "",
+         f"*Generated by `wrist_cock_fit.py --p1`, sha `{git_sha()}`, run root "
+         f"`{args.run_root}`, {secs/60:.1f} min.*", "",
+         "The P7/P4/P3 experiment (`per_swing_summary.md`) failed on **coverage**: "
+         "`t_r`, `w_r` and `r` live in the last 60 ms, where one swing carries a "
+         "handful of measured samples and the instrumented tape carries none at "
+         "all on eight swings in ten. P1 asks the smallest question that still "
+         "means something to a coach — *does this swing release earlier or later "
+         "than the population?* — by freezing the entire population curve except a "
+         "scalar shift δ of the release event:", "",
+         "```",
+         "β_δ(t) = b₀ + A·L((t−t_c)/w_c) · (1 − r·L((t−(t_r+δ))/w_r))",
+         "```", "",
+         "One parameter is constrained by the whole release **slope**, not only by "
+         "samples inside the transition, so the last 250 ms carries it — where "
+         "truth has a median of 15 rows rather than 0.", "",
+         "## Method", "",
+         f"- δ ∈ [{lo:+.3f}, {hi:+.3f}] s (upper bound is `t_r+δ ≤ "
+         f"{P1_TR_CAP:+.3f}` s); fitted by a {P1_COARSE*1e3:.1f} ms sweep of the "
+         f"whole interval refined to {P1_FINE*1e3:.2f} ms — deterministic, and "
+         "with one bounded parameter it cannot end in a local minimum the way the "
+         "seven-parameter simplex could;",
+         "- same robust (Huber, knee 15°) loss, same address→impact domain, same "
+         "seconds-before-impact axis, same φ and chirality as every other channel "
+         "(the rebuilt φ is asserted identical to the one `load_swing` produced);",
+         f"- bootstrap CI: {args.p1_boot} reps, resampling frames within the swing "
+         "with replacement, fixed seeds recorded per row; half the central-90% "
+         "interval;",
+         "- **converged** = δ̂ is not on a bound and the loss is not flat in δ "
+         "(globally over the sweep or locally within ±5 ms of the optimum).", "",
+         "### the four channels", "",
+         "| channel | what it is | measured or inferred |", "|---|---|---|",
+         "| `measured` | the tracker's measured tier | measured |",
+         "| `measured+anchor` | + the single P7 impact anchor from "
+         "`club.positions` as one weighted observation at t≈0 | measured |",
+         "| `synth` | `club.synth`, the Layer-C 240 Hz monotone-safe Hermite series "
+         "through the P-anchors (θ, θ̇) | **inferred** |",
+         "| `truth` | instrumented stripe-fusion band+ray, 2026-07-05 | measured, "
+         "independent |", "",
+         "**The `synth` channel is a deliberate research exception.** That tier is "
+         "excluded from estimands in production — it exists for visualisation. Its "
+         "information in the release window is not an observation of the shaft: it "
+         "is the P5/P6/P7 anchor geometry smoothly interpolated. A δ fitted to it "
+         "measures where the *phase ladder* puts the release, not where the club "
+         "was seen to go. It is carried here because it is dense exactly where the "
+         "measured tier is empty, and it must never be read as a fifth opinion of "
+         "equal standing.", "",
+         f"**The anchor weight.** σ_θ comes from the P7 row's own `sigmaThetaDeg`; "
+         f"it is unset (−1) on 56 of 59 swings, so the default "
+         f"{P1_SIGMA_ANCHOR_DEFAULT:.1f}° is used there. Weight = "
+         f"min((σ_ref/σ_θ)², {P1_ANCHOR_WMAX:.0f}) with σ_ref = "
+         f"{P1_SIGMA_REF:.1f}° (the measured tier's own robust residual), so the "
+         f"anchor counts as at most {P1_ANCHOR_WMAX:.0f} samples and typically as "
+         f"{(P1_SIGMA_REF/P1_SIGMA_ANCHOR_DEFAULT)**2:.1f}.", "",
+         "## The population fit (the curve δ shifts)", "",
+         "| parameter | this run | model note §7 | Δ |", "|---|---|---|---|"]
+    for nm, v, ref, d, ok in pop_check:
+        L.append(f"| `{nm}` | {v:.4f} | {ref:.3f} | {d:+.4f} "
+                 f"{'' if ok else '**MISMATCH**'} |")
+
+    L += ["", "## Availability and convergence", "",
+          "`n leverage` is the number of samples that can see δ at all — where "
+          "|∂β/∂δ| exceeds 10% of its theoretical maximum, i.e. inside the release "
+          "transition. A sample count, even over the last 250 ms, overstates what "
+          "a channel knows; this does not. The CI column is over **converged** "
+          "rows only (a fit pinned to a bound has a degenerate bootstrap).", "",
+          "| channel | swings | median n | median n last 250 ms | median n last "
+          "100 ms | **median n leverage** | converged | on bound | flat | median CI "
+          "half-width | median robust residual |",
+          "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for ch in P1_CHANNELS:
+        sel = [r for r in rows if r["channel"] == ch]
+        if not sel:
+            L.append(f"| `{ch}` | 0 | — | — | — | — | — | — | — | — | — |")
+            continue
+        cv = [r for r in sel if r["converged"]]
+        L.append(f"| `{ch}` | {len(sel)} | {np.median(_ps_vals(sel,'n_samples')):.0f} | "
+                 f"{np.median(_ps_vals(sel,'n_samples_last_250ms')):.0f} | "
+                 f"{np.median(_ps_vals(sel,'n_samples_last_100ms')):.0f} | "
+                 f"**{np.median(_ps_vals(sel,'n_leverage')):.0f}** | "
+                 f"**{len(cv)}/{len(sel)}** | "
+                 f"{sum(r['on_bound'] for r in sel)} | {sum(r['flat'] for r in sel)} | "
+                 + (f"{np.median(_ps_vals(cv,'ci_delta_ms')):.1f} ms" if cv else "—")
+                 + f" | {np.median(_ps_vals(sel,'resid_robust_deg')):.1f}° |")
+    # where the on-bound fits pile up, and what that means
+    L += ["", "Where the non-converged fits go:", ""]
+    for ch in P1_CHANNELS:
+        sel = [r for r in rows if r["channel"] == ch and r["on_bound"]]
+        if not sel:
+            continue
+        v = _ps_vals(sel, "delta_ms")
+        L.append(f"- `{ch}`: {len(sel)} on a bound — {int((v > 0).sum())} at the "
+                 f"upper cap (δ = {v.max():+.0f} ms, the release pushed past "
+                 f"impact: *this channel never saw a release*) and "
+                 f"{int((v < 0).sum())} at the lower bound (δ = {v.min():+.0f} ms).")
+    L.append("")
+    L += ["### by session", "",
+          "| session | swings | median n leverage (measured / synth) | converged "
+          "measured | +anchor | synth | median δ measured | median δ synth |",
+          "|---|---|---|---|---|---|---|---|"]
+    for ss in sorted({r["session"] for r in rows}):
+        cells, meds = [], []
+        for ch in ("measured", "measured+anchor", "synth"):
+            q = [r for r in rows if r["session"] == ss and r["channel"] == ch]
+            cells.append(f"{sum(r['converged'] for r in q)}/{len(q)}")
+        for ch in ("measured", "synth"):
+            v = _ps_vals([r for r in rows if r["session"] == ss
+                          and r["channel"] == ch and r["converged"]], "delta_ms")
+            meds.append(f"{np.median(v):+.1f} ms" if len(v) >= 2 else "—")
+        lev = []
+        for ch in ("measured", "synth"):
+            q = [r for r in rows if r["session"] == ss and r["channel"] == ch]
+            lev.append(f"{np.median(_ps_vals(q,'n_leverage')):.0f}" if q else "—")
+        n = len([r for r in rows if r["session"] == ss and r["channel"] == "measured"])
+        flag = " *(path.)*" if any(r["pathological"] for r in rows
+                                   if r["session"] == ss) else ""
+        L.append(f"| `{ss}`{flag} | {n} | {' / '.join(lev)} | "
+                 + " | ".join(cells) + " | " + " | ".join(meds) + " |")
+
+    L += ["", f"- {len(swings)} swings loaded; {len(rejected)} dropped before "
+          "loading:"]
+    for nm, why in rejected:
+        L.append(f"  - `{nm}` — {why}")
+    if drops:
+        L.append(f"- dropped per channel ({len(drops)}):")
+        for nm, ch, why in drops:
+            L.append(f"  - `{nm}` / {ch} — {why}")
+    else:
+        L.append("- no swing×channel dropped after loading: every swing carries a "
+                 "P7 anchor row and a synth series.")
+
+    # sanity: population-centred, so the median should sit near zero
+    L += ["", "### sanity: δ is population-centred, so its median should sit near 0",
+          "", "| channel | median δ (ms) | p10–p90 (ms) | healthy median (ms) |",
+          "|---|---|---|---|"]
+    for ch in P1_CHANNELS:
+        sel = [r for r in rows if r["channel"] == ch and r["converged"]]
+        hs = [r for r in healthy if r["channel"] == ch and r["converged"]]
+        if not sel:
+            continue
+        v = _ps_vals(sel, "delta_ms")
+        L.append(f"| `{ch}` | {np.median(v):+.1f} | "
+                 f"{np.percentile(v,10):+.1f} … {np.percentile(v,90):+.1f} | "
+                 + (f"{np.median(_ps_vals(hs,'delta_ms')):+.1f}" if hs else "—") + " |")
+
+    # ---- Gate 1
+    L += ["", "## Gate 1 — identifiability", "",
+          "Per-swing bootstrap CI half-width against the between-swing spread "
+          "(1.645 × 1.4826 × MAD, i.e. the same central-90% half-width the CI is), "
+          "healthy sessions only. **PASS** = ratio ≤ 0.5, **marginal** ≤ 1.0.", "",
+          "| channel | swings used | median CI half-width | between-swing "
+          "half-width | ratio | verdict |", "|---|---|---|---|---|---|"]
+    for ch in P1_CHANNELS:
+        sel = [r for r in healthy if r["channel"] == ch and r["converged"]]
+        if len(sel) < 4:
+            L.append(f"| `{ch}` | {len(sel)} | — | — | — | **unusable** |")
+            continue
+        ci = float(np.median(_ps_vals(sel, "ci_delta_ms")))
+        hw = 1.645 * _ps_sigma(_ps_vals(sel, "delta_ms"))
+        ratio = ci / hw if hw > 0 else float("nan")
+        L.append(f"| `{ch}` | {len(sel)} | {ci:.1f} ms | {hw:.1f} ms | "
+                 f"{_ps_fmt(ratio,'{:.2f}')} | **{_ps_verdict(ratio, 0.5, 1.0)}** |")
+    L += ["", "### the two pathological sessions, separately", "",
+          "| channel | 2026-06-11 median δ (σ) | 2026-07-04 median δ (σ) | healthy "
+          "median δ (σ) |", "|---|---|---|---|"]
+    for ch in P1_CHANNELS:
+        cells = []
+        for pref in PS_PATHOLOGICAL:
+            v = _ps_vals([r for r in rows if r["channel"] == ch and r["converged"]
+                          and r["session"].startswith(pref)], "delta_ms")
+            cells.append(f"{np.median(v):+.1f} ({_ps_sigma(v):.1f}) ms" if len(v) >= 3 else "—")
+        v = _ps_vals([r for r in healthy if r["channel"] == ch and r["converged"]],
+                     "delta_ms")
+        cells.append(f"{np.median(v):+.1f} ({_ps_sigma(v):.1f}) ms" if len(v) >= 3 else "—")
+        L.append(f"| `{ch}` | " + " | ".join(cells) + " |")
+
+    # ---- Gate 2
+    L += ["", "## Gate 2 — repeatability", "",
+          "Within-session spread against between-session spread of session medians, "
+          "both robust σ, healthy sessions with ≥4 converged swings. **PASS** = "
+          "between/within ≥ 1.5.", "",
+          "| channel | sessions | within-session σ (median) | between-session σ | "
+          "ratio | verdict |", "|---|---|---|---|---|---|"]
+    for ch in P1_CHANNELS:
+        sel = [r for r in healthy if r["channel"] == ch and r["converged"]]
+        within, meds = [], []
+        for ss in sorted({r["session"] for r in sel}):
+            v = _ps_vals([r for r in sel if r["session"] == ss], "delta_ms")
+            if len(v) >= 4:
+                within.append(_ps_sigma(v))
+                meds.append(float(np.median(v)))
+        if len(meds) < 2:
+            L.append(f"| `{ch}` | {len(meds)} | — | — | — | **unusable** (needs ≥2 "
+                     "sessions with ≥4 converged swings) |")
+            continue
+        w = float(np.median(within))
+        bs = _ps_sigma(np.array(meds))
+        ratio = bs / w if w > 0 else float("nan")
+        L.append(f"| `{ch}` | {len(meds)} | {w:.1f} ms | {bs:.1f} ms | "
+                 f"{_ps_fmt(ratio,'{:.2f}')} | "
+                 f"**{_ps_verdict(ratio, 1.5, 0.5, invert=True)}** |")
+
+    L += ["", "### the coverage-artefact probe", "",
+          "*The previous experiment's between-session differences tracked how many "
+          "samples a session had near impact rather than anything about the "
+          "golfer. This asks the question directly: does δ correlate with "
+          "coverage?* Spearman ρ across converged healthy swings. **A |ρ| above "
+          "≈0.5 means the number is reading the camera, not the swing.**", "",
+          "| channel | n | ρ(δ, n last 100 ms) | ρ(δ, n last 250 ms) | reading |",
+          "|---|---|---|---|---|"]
+    for ch in P1_CHANNELS:
+        sel = [r for r in healthy if r["channel"] == ch and r["converged"]]
+        if len(sel) < 6:
+            L.append(f"| `{ch}` | {len(sel)} | — | — | too few |")
+            continue
+        r100 = _ps_spearman(_ps_vals(sel, "delta_ms"), _ps_vals(sel, "n_samples_last_100ms"))
+        r250 = _ps_spearman(_ps_vals(sel, "delta_ms"), _ps_vals(sel, "n_samples_last_250ms"))
+        both = [v for v in (r100, r250) if np.isfinite(v)]
+        if not both:
+            note = ("probe undefined — this channel's coverage is **constant** "
+                    "across swings, so there is nothing to correlate against")
+        else:
+            worst = max(abs(v) for v in both)
+            note = ("**contaminated by coverage**" if worst >= 0.5 else
+                    "borderline" if worst >= 0.3 else "clean")
+        L.append(f"| `{ch}` | {len(sel)} | {_ps_fmt(r100,'{:+.2f}')} | "
+                 f"{_ps_fmt(r250,'{:+.2f}')} | {note} |")
+
+    # ---- Gate 3
+    tsel = [r for r in rows if r["channel"] == "truth"]
+    tcv = [r for r in tsel if r["converged"]]
+    tconv = len(tcv)
+    tci = float(np.median(_ps_vals(tcv, "ci_delta_ms"))) if tcv else float("nan")
+    tspread = 1.645 * _ps_sigma(_ps_vals([r for r in tsel if r["converged"]], "delta_ms")) \
+        if tconv >= 4 else float("nan")
+    L += ["", "## Gate 3 — truthfulness (decisive)", "",
+          "*Before comparing anything to truth, does truth itself pin δ?*", "",
+          f"- truth channel: median **{np.median(_ps_vals(tsel,'n_leverage')):.0f} "
+          f"samples with leverage on δ** out of "
+          f"{np.median(_ps_vals(tsel,'n_samples_last_250ms')):.0f} in the last "
+          f"250 ms — the premise that the release *slope* would carry δ where the "
+          f"release *window* could not does not survive contact with these rows.",
+          f"- truth channel: **{tconv}/{len(tsel)} converged**, median CI "
+          f"half-width **{_ps_fmt(tci,'{:.1f}')} ms** against a between-swing "
+          f"half-width of {_ps_fmt(tspread,'{:.1f}')} ms "
+          f"(ratio {_ps_fmt(tci/tspread if np.isfinite(tspread) and tspread > 0 else float('nan'),'{:.2f}')}).",
+          ""]
+    if not (tconv >= 4 and np.isfinite(tspread) and tspread > 0 and tci <= tspread):
+        L += ["**The truth channel does not identify δ well enough to grade "
+              "against.** Every comparison below is reported, but a disagreement "
+              "cannot be attributed to the tracker channel when the reference "
+              "itself is this loose.", ""]
+    L += ["| comparison | pairs | median \\|Δδ\\| | between-swing σ (truth) | "
+          "\\|Δ\\|/σ | Spearman ρ | sign agreement | verdict |",
+          "|---|---|---|---|---|---|---|---|"]
+    for ch in ("measured", "measured+anchor", "synth"):
+        keys, a, b = _p1_pairs(rows, ch, "truth")
+        allk, _a, _b = _p1_pairs(rows, ch, "truth", converged_both=False)
+        if len(keys) < 4:
+            L.append(f"| `{ch}` vs `truth` | {len(keys)}/{len(allk)} | — | — | — | "
+                     "— | — | **unusable** |")
+            continue
+        va = np.array([a[k]["delta_ms"] for k in keys])
+        vb = np.array([b[k]["delta_ms"] for k in keys])
+        md = float(np.median(np.abs(va - vb)))
+        sig = _ps_sigma(vb)
+        rho = _ps_spearman(va, vb)
+        sgn = float(np.mean(np.sign(va) == np.sign(vb)))
+        ratio = md / sig if sig > 0 else float("nan")
+        ok = (np.isfinite(rho) and rho >= 0.6 and sgn >= 0.8
+              and np.isfinite(ratio) and ratio <= 0.5)
+        mid = (np.isfinite(rho) and rho >= 0.3 and sgn >= 0.6)
+        L.append(f"| `{ch}` vs `truth` | {len(keys)}/{len(allk)} | {md:.1f} ms | "
+                 f"{_ps_fmt(sig,'{:.1f}')} ms | {_ps_fmt(ratio,'{:.2f}')} | "
+                 f"{_ps_fmt(rho,'{:+.2f}')} | {sgn*100:.0f}% | "
+                 f"**{'PASS' if ok else ('marginal' if mid else 'FAIL')}** |")
+    L += ["", "Sign agreement here is agreement on the *sign of δ itself* — "
+          "earlier or later than the population — because δ is population-centred "
+          "by construction.", ""]
+
+    # ---- cross-channel consistency
+    L += ["## Cross-channel consistency (informative, not truth)", "",
+          "| comparison | pairs | median \\|Δδ\\| | Spearman ρ | sign agreement |",
+          "|---|---|---|---|---|"]
+    for a_ch, b_ch in (("synth", "measured"), ("measured+anchor", "measured"),
+                       ("synth", "measured+anchor")):
+        keys, a, b = _p1_pairs(healthy, a_ch, b_ch)
+        if len(keys) < 4:
+            L.append(f"| `{a_ch}` vs `{b_ch}` | {len(keys)} | — | — | — |")
+            continue
+        va = np.array([a[k]["delta_ms"] for k in keys])
+        vb = np.array([b[k]["delta_ms"] for k in keys])
+        L.append(f"| `{a_ch}` vs `{b_ch}` | {len(keys)} | "
+                 f"{np.median(np.abs(va-vb)):.1f} ms | "
+                 f"{_ps_fmt(_ps_spearman(va,vb),'{:+.2f}')} | "
+                 f"{np.mean(np.sign(va)==np.sign(vb))*100:.0f}% |")
+
+    L += ["", "## Reproduction", "", "```",
+          args.per_swing_cmd or "(command not recorded)", "```", ""]
+    Path(path).write_text("\n".join(L) + "\n", encoding="utf-8")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1051,7 +2426,33 @@ def main(argv=None):
     ap.add_argument("--doc-figure", help="write a single-panel figure to this path")
     ap.add_argument("--emit-header", action="store_true",
                     help="print the winning table as the C++ literal")
+    ap.add_argument("--per-swing", action="store_true",
+                    help="fit the F5 parametric form PER SWING under P7/P4/P3 on the "
+                         "tracker and instrumented-truth channels, and put the "
+                         "estimates through the identifiability/repeatability/"
+                         "truthfulness gates (model note §13). Additive: without "
+                         "this flag no per-swing code runs and the harness behaves "
+                         "exactly as before.")
+    ap.add_argument("--per-swing-boot", type=int, default=100,
+                    help="bootstrap reps per P3/P4 per-swing fit")
+    ap.add_argument("--per-swing-boot-p7", type=int, default=100,
+                    help="bootstrap reps per P7 per-swing fit (7 parameters is the "
+                         "expensive one; cut this first if runtime bites)")
+    ap.add_argument("--per-swing-seed", type=int, default=20260811,
+                    help="base RNG seed; each fit's seed is base+index and is "
+                         "recorded in the CSV")
+    ap.add_argument("--p1", action="store_true",
+                    help="fit ONE parameter per swing — a shift of the release "
+                         "event in the population F5 curve — on the measured, "
+                         "measured+anchor, synth and instrumented-truth channels, "
+                         "and gate it. Additive, like --per-swing.")
+    ap.add_argument("--p1-boot", type=int, default=100,
+                    help="bootstrap reps per P1 per-swing fit")
+    ap.add_argument("--p1-seed", type=int, default=20260901,
+                    help="base RNG seed for --p1; per-fit seed is base+index")
     args = ap.parse_args(argv)
+    args.per_swing_cmd = "python3 tools/swinglab/wrist_cock_fit.py " + " ".join(
+        argv if argv is not None else sys.argv[1:])
     args.run_root = str(args.run_root)
 
     out = Path(args.out)
@@ -1077,6 +2478,11 @@ def main(argv=None):
     nlab = sum(len(s["truth_t"]) for s in swings if s["truth_t"] is not None)
     print(f"[fit] {len(swings)} swings, {ntruth} with truth ({nlab} labels), "
           f"domain={args.domain}")
+
+    if getattr(args, "per_swing", False):
+        return run_per_swing(swings, rejected, args)
+    if getattr(args, "p1", False):
+        return run_p1(swings, rejected, args)
 
     forms = build_forms(args)
     order = [f.key for f in forms]
