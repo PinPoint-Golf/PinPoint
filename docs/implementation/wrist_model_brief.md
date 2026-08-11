@@ -8,7 +8,7 @@ the harness is `tools/swinglab/wrist_cock_fit.py`.*
 >
 > Task 0 and the projection layer have now been executed; results and the commands
 > that produce them are in
-> [`docs/research/wrist_projection_layer.md`](../research/wrist_projection_layer.md).
+> [`docs/research/wrist_cock_model.md`](../research/wrist_cock_model.md).
 > Five load-bearing claims below did not survive contact with the data. They are
 > left in place, because the reasoning around them is still worth reading, but do
 > not act on them:
@@ -55,7 +55,7 @@ the harness is `tools/swinglab/wrist_cock_fit.py`.*
 > the noise floor. Absolute calibration is NOT yet confirmed and the sign convention
 > (larger ι = flatter) needs one down-the-line cross-check before it becomes a
 > coaching output. The full model definition is in
-> [`docs/research/wrist_model_definition.md`](../research/wrist_model_definition.md).
+> [`docs/research/wrist_cock_model.md`](../research/wrist_cock_model.md) §2 and §9.
 > θ, the shaft angle, is what the whole layer exists to explain.
 
 ## What this is
