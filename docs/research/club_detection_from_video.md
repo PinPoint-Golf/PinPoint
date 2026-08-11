@@ -2,7 +2,7 @@
 
 *PinPoint shaftlab programme — research report covering the work from
 inception (first drafted 2026-07-05; reorganised into this phase narrative
-2026-08-10). Empirical basis: hand-labelled swings 0008 and 0009, the c1
+2026-08-10; corpus shape model added 2026-08-11). Empirical basis: hand-labelled swings 0008 and 0009, the c1
 multi-club corpus (100 clubhead labels), the tape_20260704 pilot and
 tape_20260705 instrumented corpora, the 2026-07-09 live-app corpus, and the
 61-swing five-session production corpus. Tooling: `tools/shaftlab/`,
@@ -59,9 +59,15 @@ the image plane and taken from the **grip** — the point where the hands hold
 the club, which a pose estimator locates for us in every frame. The absolute
 zero of θ is arbitrary; what matters is θ(t), the shaft angle traced through
 the swing, which *is* the swing as far as this one camera is concerned. Two
-companion angles travel with it: **φ**, the direction of the lead arm (also
-from the pose), and their difference **ψ = θ − φ**, the **wrist angle** — how
-the club is hinged relative to the forearm. Alongside the angles we recover
+companion angles travel with it: **φ**, the direction of the lead **forearm**
+— specifically the line from the lead elbow to the grip, read from the same
+pose — and their difference **ψ = θ − φ**, the **wrist angle**, which is how
+the club is hinged relative to that forearm. The precision matters, because φ
+is a forearm and not a whole arm: the upper arm runs at its own angle, and the
+two are separated by the elbow. Where this report needs those as well it calls
+them **β** (lead shoulder to elbow) and **α** (lead shoulder to grip, the
+whole-arm line), with **ε = φ − β** the elbow's opening; only φ enters the
+tracker itself. Alongside the angles we recover
 the shaft's *projected scale* (how many pixels correspond to one millimetre of
 shaft), which shrinks whenever the club tilts toward or away from the lens —
 the effect called **foreshortening** — and the **clubhead position** in the
@@ -71,7 +77,7 @@ None of these is the deliverable a golfer actually sees; they are the *inputs*
 to almost everything a coach reads. In PinPoint's shot-analyzer pipeline
 ([`docs/design/shot_analyzer_design.md`](../design/shot_analyzer_design.md)),
 the shaft direction θ feeds **swing plane, shaft lean, club path, attack
-angle, clubhead speed, and a face-angle proxy**; the lead-arm angle φ feeds
+angle, clubhead speed, and a face-angle proxy**; the lead-forearm angle φ feeds
 **lead-arm flexion and the kinematic sequence**; and the wrist angle ψ = θ − φ
 *is itself* the headline metric of a Wrist session — the flexion/extension and
 radial/ulnar deviation a coach diagnoses. Each of these is then scored against
@@ -961,6 +967,56 @@ segments concentrate at the top of the follow-through; the consistent fan
 geometry down the ranking is the visual echo of the near-uniform 88–91%
 coverage and sub-degree medians.*
 
+**Since measured at corpus scale (2026-08-11).** The law above was verified on
+one hand-marked swing, which is the right way to test a physical claim but says
+nothing about how much a *population* of swings varies around it. Running the
+same angles — plus the arm segments φ had been standing in for — across the
+61-swing production corpus — every swing time-warped
+onto a common axis anchored on its own event ladder, so the top of one lines up
+with the top of another — gives the law a median and a band (Figure 4), and with
+it the first measurement of the quantity an arm-witness estimator actually
+depends on: how tightly ψ is determined once the swing's progress is known.
+
+The answer is that it is determined about twice as tightly as θ itself. Across
+the corpus the p10–p90 width is **53.5° for θ and 25.1° for ψ**, so subtracting
+the forearm removes rather more than half the spread — which is the
+arm-as-witness premise stated as a number rather than an argument. Reading the
+whole arm instead of the forearm is no better (θ − α at 28.3°), confirming the
+tracker's choice of φ, though the two are close enough that a model using both
+would likely beat either. The most repeatable signal in the set is not an
+arm-to-shaft residual at all but the **upper arm β, at 17.3°** — slower,
+larger, and better posed than the forearm, and therefore the natural first term
+of any estimator that has to work where the shaft is lost. One further reading
+is a check on the whole construction rather than a result: the elbow ε sits at
+about −5° at address, which is a straight lead arm, and folds to +55° through
+the finish. That is anatomy falling out of the keypoint conventions, not a fit.
+
+Two limits keep this in proportion. The band mixes the golfer's own
+repeatability with the tracker's error and cannot yet separate them — that needs
+either the truth-marked subset as a reference or a second athlete. And the
+width through the backswing carries tempo variance as well as shape variance,
+because only address, top, impact and finish are warped on; anchoring
+additionally on the shaft- and arm-parallel positions tightens θ to 33.0° and ψ
+to 19.0°, at the cost of defining away exactly the timing differences one might
+want to measure.
+
+![Corpus shape model: shaft angle, the three lead-arm directions, the shaft-minus-arm residuals, and the elbow, each as a median with percentile bands over 61 swings.](figures/club_track_corpus_shape.png)
+
+***Figure 4.** The corpus shape model across 61 production swings (five
+sessions), every swing warped onto a common axis whose anchors — address, top,
+impact, finish — sit at the corpus-median tempo. Each panel draws the **median**
+with the **p25–p75** and **p10–p90** bands; individual swings run faint behind
+the first and last panels. **Top:** the shaft angle θ, referenced to its own
+value at impact, a clean single-reversal arc. **Second:** the three lead-arm
+directions — forearm φ, upper arm β, whole arm α — which separate through the
+backswing exactly as the elbow opens. **Third:** the residuals an arm-witness
+estimator would be built on, θ − φ and θ − α; the tighter band is the better
+predictor, and both are far tighter than θ itself. **Bottom:** the elbow ε,
+near zero at address and folding through the finish. The strip beneath gives
+the number of swings standing behind each point. Generated by
+`tools/swinglab/theta_psi_model.py`, which also emits the model and the
+per-swing deviations as data series.*
+
 ## 10. Phase 7 — Reading the blur: stacking, and the exposure arc
 
 Two ideas aimed at the one hole the constraint system left: θ right at impact.
@@ -1025,7 +1081,7 @@ tracker says so" into "two unrelated physics say so."
 
 ![Corpus montage of the impact-zone angular speed: the independent exposure-arc against the tracked speed, per swing.](figures/club_track_omega_v31.png)
 
-***Figure 4.** Impact-zone angular speed across the ten-swing corpus, one panel
+***Figure 5.** Impact-zone angular speed across the ten-swing corpus, one panel
 per swing, ordered by peak agreement between the two measures — tightest first
 (s01, 0.2°/frame) to loosest last (s09, 3.6°/frame). Grey dots are the tracked
 per-frame speed (noisy); the gold line is the **exposure-arc** reading — the
@@ -1103,7 +1159,7 @@ static measurement.
 
 ![Corpus montage of the address recovery: the hold-period stack with the recovered resting shaft, per swing.](figures/club_track_address_v32.png)
 
-***Figure 5.** The address recovery across the ten-swing corpus, one panel per
+***Figure 6.** The address recovery across the ten-swing corpus, one panel per
 swing, ordered by how much of the hold was published (most first). Each panel is
 the hold-period **stack** — the address integrated on the grip anchor, so the
 still club sharpens while the swaying body and legs blur — with **red = the
