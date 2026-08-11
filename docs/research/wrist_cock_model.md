@@ -1,4 +1,4 @@
-# Predicting the Club from the Arm: a Fitted Wrist-Cock Model
+# Predicting the Club from the Arm: an Empirical Wrist-Cock Curve, and its Parametric Reading
 
 *PinPoint shaftlab programme — model note, 2026-08-11. Fitted and graded by
 `tools/swinglab/wrist_cock_fit.py` against the 61-swing production corpus and
@@ -65,9 +65,11 @@ samples only — the tier graded at 0.6% bad against dense truth — while the
 tracker nothing. Every number below is leave-one-swing-out: the held-out swing
 contributes nothing to the table it is scored against.
 
-Both are reported, because the gap between them is the circularity, and it is
-visible: the tracker-tier numbers are consistently rosier than the truth
-numbers, by roughly 20% on the winning form.
+Both are reported, because the gap between them carries information. Some of it
+is circularity — the tracker-tier numbers are rosier, by roughly 20% on the
+winning form. But some of it is the *distribution* of the labels rather than the
+quality of the model, and §5 shows a case where reading the truth column alone
+inverts a conclusion. Neither column should be read on its own.
 
 ## 4. What the shipped table was doing
 
@@ -83,35 +85,64 @@ backswing, +12° in the downswing, −14° through), so no constant correction f
 it. A quarter of the frames where the tracker consults the prediction are
 consulting something more than 30° wrong.
 
-## 5. The finding: the axis was the error, not the numbers
+## 5. The finding: the clock matters more than the numbers
 
-The obvious repair is to refit the table's nine knots on the axis it already
-uses. **That does not work at all** — refitting on swing progress leaves the
-residual unchanged at 75.6°, no better than the hand-authored curve it replaced.
+Two changes are available: fit the curve to data, and change the variable it is
+indexed by. Both help, and it is worth separating them, because our first
+reading of this got the split badly wrong.
 
-The reason is that swing progress is the wrong clock. Wrist release is not a
-fixed *fraction* of the swing; it is an event at a roughly fixed *time* before
-impact. Two golfers — or the same golfer on two swings — who reach the top at
-the same fraction but take different times to get there will release at the same
-number of milliseconds before impact and at quite different fractions. Indexing
-by progress smears every swing's release across every other's.
+**The axes, measured directly.** Before fitting anything, ask how much each
+candidate clock can possibly support: the spread of β about its own conditional
+median on that axis, on a fine grid, leave-one-swing-out. This is the floor no
+model on that axis can beat.
 
-Re-indexing the same model on **seconds before impact**, and changing nothing
-else, takes the residual from 74.3° to 20.9°.
+| axis | frame-averaged | at the instants truth labels sit |
+|---|---|---|
+| swing progress (bs0 / top / impact anchored) | 30.4° | **67.3°** |
+| address → impact, linear | 36.8° | — |
+| top → impact, linear | 25.6° | — |
+| **seconds before impact** | **16.1°** | **15.4°** |
 
-| form | median | p10–p90 | \|err\|>30° | within 1σ |
-|---|---|---|---|---|
-| F0 shipped, hand-authored | −9.1° | 74.3° | 26.3% | 62% |
-| F1 refit, same progress axis | −1.2° | 75.6° | 25.3% | 50% |
-| **F2 refit, seconds before impact** | **+0.1°** | **20.9°** | **6.7%** | **66%** |
-| F3 + linear in φ | +6.5° | 17.4° | 5.8% | 35% |
-| F4 + shape constraints | +5.2° | 17.9° | 5.8% | 36% |
+Seconds-before-impact is the better clock on both readings, and the reason is
+physical: wrist release is not a fixed *fraction* of the swing but an event at a
+roughly fixed *time* before impact. Two swings that reach the top at the same
+fraction but take different times to get there release at the same number of
+milliseconds before impact and at quite different fractions, so a progress index
+smears every swing's release across every other's.
 
-*463 hand-placed labels, 23 swings, leave-one-swing-out.*
+**But look at the two columns.** The progress axis is twice as bad at
+truth-label instants as it is frame-averaged, and the time axis is not. Truth
+labels cluster at s ≈ 0.30–0.57 — the transition region, because that is where a
+human can see the shaft to label it — and `swingProgress` is anchored on the
+**top**, the noisiest event in the ladder. Small top-placement errors blow β up
+precisely where our labels are densest.
+
+That distinction matters because our first pass reported the axis comparison
+against truth alone and concluded that refitting on the progress axis was
+"worthless" (75.6° against the hand-authored 74.3°). Both numbers sit on that
+axis's truth-instant floor of 67.3°; the fit was doing as well as the axis
+allows. Frame-averaged, refitting the progress axis is a large gain:
+
+| | frame-averaged (all measured samples) | against truth |
+|---|---|---|
+| F0 hand-authored | 51.6° | 74.3° |
+| F1 fitted, progress axis | **29.6°** | 66.9° |
+| **F2 fitted, seconds before impact** | **17.4°** | **20.9°** |
+| F3 + linear in φ | 14.7° | 17.4° |
+
+*Frame-averaged over 9,463 measured-tier samples; truth over 463 hand-placed
+labels across 23 swings. Both leave-one-swing-out.*
+
+So the honest reading is: **fitting the curve is worth about 22°, and changing
+the clock is worth about another 12°** — and the far larger figures a
+truth-only comparison produces are partly a statement about where our labels
+are, not only about the axes. This is the label-selection bias the programme
+report documents, met again from the inside.
 
 F2 improves **every session in the corpus**, not merely the average — 56→38,
 59→23, 36→12, 63→16, 43→17, 37→12 (p10–p90 by session, tracker tier) — which is
-what distinguishes a real effect from a fit to the corpus mean.
+what distinguishes a real effect from a fit to the corpus mean, and which does
+not depend on the truth distribution at all.
 
 Two further details mattered, and both are about representation rather than
 statistics:
@@ -129,9 +160,13 @@ statistics:
 
 ## 6. What did not work
 
-**Refitting on the existing axis** (F1). No improvement whatsoever — 75.6°
-against 74.3°. Recorded because it is the change one would naturally try first,
-and it is worthless.
+**Reading the axis comparison against truth alone** — an error of ours, not of
+the model. It made refitting the progress axis look worthless (75.6° against
+74.3°) when frame-averaged it is a 22° gain. Both numbers were sitting on that
+axis's floor *at the instants our labels occupy*, and we mistook a property of
+the label distribution for a property of the axis. The lesson generalises past
+this model: when a comparison is scored only where truth exists, check what the
+truth distribution is doing before believing the ranking.
 
 **Adding a linear term in φ** (F3). Genuinely more accurate on paper — 17.4°
 against F2's 20.9° — but it fails on two counts. It carries a +6.5° bias against
@@ -183,7 +218,93 @@ explicit price of a corpus with one athlete in it — the fitted centre is a
 measurement, the fitted spread is one golfer's repeatability, and only the first
 of those generalises.
 
-## 8. The table
+## 8. Is this a model, or a data set?
+
+A fair challenge, and the honest answer is that everything above fits a **lookup
+table**: fifteen knots and linear interpolation between them. That is an
+empirical curve, not a model. It has as many free numbers as it has knots, none
+of those numbers means anything on its own, and nothing stops it wiggling
+wherever the data is thin. Calling it a model would be flattering it.
+
+So we asked whether the curve can be written down. The physics says it has a
+shape — a wrist that cocks once, holds, and releases — and two logistic
+transitions express exactly that:
+
+    β(t) = b₀ + A · Lc(t) · (1 − r · Lr(t))
+    Lc(t) = logistic((t − t_c) / w_c)     the cocking
+    Lr(t) = logistic((t − t_r) / w_r)     the release
+
+Seven parameters, and every one is a quantity coaching already has a word for.
+Fitted on the corpus under a robust loss, leave-one-swing-out:
+
+| parameter | meaning | value | fold-to-fold spread |
+|---|---|---|---|
+| b₀ | wrist offset at address | −4.3° | ±0.5 |
+| A | peak lag amplitude | 90.7° | ±0.7 |
+| t_c | when the wrist cocks | −0.690 s | ±0.001 |
+| w_c | how fast it cocks | 0.079 s | ±0.001 |
+| **t_r** | **when the release happens** | **−0.038 s** | ±0.000 |
+| **w_r** | **how fast the release is** | **0.014 s** | ±0.000 |
+| r | release completeness | 0.846 | ±0.007 |
+
+The stability is the striking part: drop any swing from the fit and the release
+timing moves by less than a millisecond. This golfer releases 38 ms before
+impact, over a 14 ms window, spending 85% of a 91° lag. Those are three numbers
+that describe a golf swing, and they came out of a shaft detector.
+
+**But the table is more accurate, and we ship the table.**
+
+| | median | p10–p90 | \|err\|>30° | 3σ envelope covers |
+|---|---|---|---|---|
+| empirical table (15 knots) | +0.1° | **20.9°** | 6.7% | 97.0% |
+| parametric (7 params) | −1.3° | 32.6° | 7.8% | 98.3% |
+| shipped, hand-authored | −9.1° | 74.3° | 26.3% | 96.8% |
+
+The parametric form is unbiased and beats the shipped table by better than two
+to one, but it gives up about 12° to the lookup table. The reason is visible in
+Figure 1: the real curve does not hold a flat plateau. It dips around 0.36 s
+before impact and rises again to a distinct peak at 0.14 s, and a product of two
+logistics cannot express that shape at all. Whether that structure is real
+mechanics — a re-cock as the arm changes direction at transition — or an
+artefact of one golfer's corpus is not settled by this data, and it is the first
+thing a second athlete would tell us.
+
+**One form is not a modelling exercise, and this section is not one.** The
+logistic product was chosen by looking at the empirical curve and picking a
+shape that resembled it. It fits because the curve is sigmoid-ish, and it would
+have fitted about as well had the underlying mechanism been something else — so
+it describes the shape without testing any hypothesis about the cause. No
+alternative families were fitted, nothing was derived from the two-link
+dynamics this note keeps invoking, and no model selection was performed. A
+proper pass would derive a family from the double pendulum with a wrist torque
+(where the release is largely passive once the arm decelerates, which *predicts*
+a functional form rather than borrowing one), fit several families, and judge
+them on out-of-domain prediction — fit the backswing, predict the release —
+rather than on in-domain residual. Until that is done the seven parameters
+should be read as a compact description, not as physics.
+
+So the position is: **the shipped artefact is an empirical curve, and the
+parametric fit is what it means.** The table is what the tracker evaluates,
+because accuracy is what the tracker needs; the seven parameters are how the
+curve is interpreted, sanity-checked, and compared between golfers, and they are
+what would carry to a per-golfer model if one is ever wanted. Both are produced
+by the same harness and reported together, and neither is dressed as the other.
+
+![The wrist-cock curve: the observed cloud, the fitted knots, the empirical curve and the parametric fit.](figures/wrist_cock_model.png)
+
+***Figure 1.** Left: the signed wrist cock against seconds before impact.
+Grey is the observed cloud — every measured-tier sample from 40 corpus swings.
+The **dashed blue** curve is the shipped hand-authored table, mapped onto this
+axis at the corpus-median tempo; note that it is offset through the downswing
+and diverges entirely after impact. The **orange** curve with markers is the
+fitted 15-knot table, the markers being the knots themselves, so the reader can
+see where the curve is pinned and where it is only interpolating; the shaded
+band is ±1σ as fitted. The **green** curve is the 7-parameter fit. Right:
+residuals against the 463 hand-placed shaft labels, leave-one-swing-out — the
+shipped table is biased low and wide, both fitted forms are centred, and the
+lookup table is tighter than the parametric one.*
+
+## 9. The table
 
 Axis: seconds before impact, clamped to [−1.100, 0.000]. β̂ signed, trail side
 positive. σ as fitted × 2.5.
@@ -203,18 +324,63 @@ Read as mechanics: the wrist is near neutral a second before impact, cocks
 through the backswing to about 86° by the halfway point, *holds* between 76° and
 97° for the whole of the downswing — the lag — and then releases 85° of it in
 the final 140 ms, arriving 11° from in-line at impact. Nothing in the fitting
-procedure asked for that shape.
+procedure asked for that shape, and §8 puts numbers on it.
 
-## 9. Status and limitations
+## 10. Status and limitations
 
-The table is **dark**, behind `shaft.wedge.kinModelV2`, with the v1 path
-byte-identical when the key is off (pinned in `shaft_kinematics_test`). What
-remains before it can be considered for a default flip is the corpus A/B on the
-studio machine: the prediction feeds the wedge trigger and the kinCone penalty,
-so enabling it moves real output, and the risk to watch is not θ accuracy but
-*coverage* — a better-centred, narrower envelope could in principle suppress
-genuine wedge candidates. The A/B watches the wedge stamp count, P6 recall, the
-truth-labelled P5/P6/P7 errors, and `track.valid`.
+The table is **dark**, behind `shaft.wedge.kinModelV2`, and on the evidence
+below **it stays dark**. The key-off path is byte-identical (pinned in
+`shaft_kinematics_test`, and confirmed 61/61 on the corpus); the key-on path
+regresses the tracker, and a more accurate model that makes the tracker worse is
+not a model the tracker should use.
+
+### The corpus A/B, and why it failed
+
+Three runs on the studio machine, pose-pinned, 61 swings: a baseline at the code
+immediately before this change, the same code with the key off, and the key on.
+(The baseline had to be rebuilt rather than reusing the previous gate run,
+because the microphone calibration landed in between and moves the impact anchor
+on legacy acoustic captures by ~17 ms — which would have shown up as a spurious
+diff attributed to this model.)
+
+| | key off | key on | |
+|---|---|---|---|
+| byte-identity vs baseline | **61/61** | — | the refactor is clean |
+| P5 emitted | 59/61 | 49/61 | **−10** |
+| P6 emitted | 59/61 | 51/61 | **−8** |
+| P8 emitted | 61/61 | 46/61 | **−15** |
+| `track.valid` | 61 | 60 | −1 |
+| WEDGE stamps | 581 | 360 | **−38%** |
+| measured samples | 11,838 | 11,090 | −748 |
+| mean coverage | 0.911 | 0.840 | **−0.071** |
+
+**The mechanism, and it is worth understanding because it is not a bug.** The
+table has two consumers with incompatible needs. As a *centre* it wants to be
+accurate, and v2 is three times more accurate. But the wedge *trigger* fires on
+the predicted angular rate — the time derivative of φ + chir·β — and there the
+shape matters more than the value.
+
+The hand-authored curve declines steadily from its peak all the way to the
+finish, so dβ/dt contributes rate across the whole downswing. The fitted curve
+holds its lag nearly flat and then dumps 85° in the last 140 ms — which is what
+the wrist actually does — so it contributes almost no rate until the release and
+a large spike at it. Measured on the real pose across the corpus, frames clearing
+the 720°/s trigger fall from **33.9% to 23.6%**, a 30% reduction that matches the
+38% drop in wedge stamps.
+
+So the fitted table starves the trigger *by being right*. The 720°/s threshold
+was calibrated against a curve that was wrong in a way that happened to help,
+and correcting the curve without recalibrating the threshold trades wedge
+coverage for centre accuracy. That is a bad trade on this corpus, and the gate
+caught it.
+
+**What would unblock it** — none of it attempted here, because each needs its own
+gate. The trigger could read the arm's own rate rather than the prediction's,
+which is what it arguably wanted all along; or `omegaMinDegS` could be
+recalibrated against the v2 curve, which means re-opening a tuned constant; or
+the two roles could be split, taking the centre and envelope from v2 while the
+trigger keeps v1. The last is the least invasive and the most honest about what
+was actually measured: the *centre* improved and the *rate* did not.
 
 Three limits belong on the face of this note.
 

@@ -1022,15 +1022,45 @@ carried a version of this: it predicts the club as the arm plus a stereotyped
 wrist-cock offset, and uses that prediction to centre the blur-wedge search. The
 offset table was authored by hand and never fitted, and graded against the
 hand-placed labels it proved biased by −9.1° with a p10–p90 residual of 74.3°.
-Fitting it moved one thing that mattered — not the numbers but the *clock*.
-Indexed by swing progress, refitting changes nothing (75.6°); re-indexed by
-**seconds before impact**, the same model measures 20.9° with the bias gone,
-because release is an event at a fixed time before impact rather than at a fixed
-fraction of the swing. The fitted curve reproduces the one-reversal law without
-being asked to, which is mild evidence the law is in the data rather than in our
-assumptions. The derivation, the forms that lost, and the negative results are
-in [wrist_cock_model.md](wrist_cock_model.md); the table ships dark pending its
-corpus A/B.
+Fitting it helps, and re-indexing it helps more. Measured over all
+measured-tier samples, the hand-authored curve sits at 51.6°; fitting it on its
+own swing-progress axis takes it to 29.6°; re-indexing on **seconds before
+impact** takes it to 17.4°, because release is an event at a fixed time before
+impact rather than at a fixed fraction of the swing. The fitted curve reproduces
+the one-reversal law without being asked to, which is mild evidence the law is in
+the data rather than in our assumptions.
+
+A caution belongs with those figures, because we got them wrong once. Scored
+only against the hand-placed labels, refitting the progress axis appears to
+achieve *nothing* — and that is an artefact of where the labels are. They
+cluster in the transition region, where a human can see the shaft, and the
+progress axis is anchored on the top, the noisiest event in the ladder; both
+curves are then sitting on that axis's floor. The label-selection bias of Phase
+4 is not only a historical finding.
+
+What ships is a lookup table, and it is worth being plain that a table is an
+empirical curve rather than a model. The curve *can* be written down — a product
+of two logistics, one for the cock and one for the release, with seven
+parameters — and that form is unbiased and beats the shipped table two to one,
+though it gives up about 12° to the table because the real curve has a dip and a
+second peak through the transition that no product of logistics can express. The
+parametric fit is therefore carried as the curve's *interpretation* rather than
+its implementation, and it reads a swing in terms a coach would recognise: this
+golfer releases 38 ms before impact over a 14 ms window, spending 85% of a 91°
+lag — figures stable to under a millisecond when any swing is dropped from the
+fit.
+
+The corpus A/B then refused it, and the reason is the most interesting thing in
+the episode. The table has two consumers: it centres the blur-wedge search, and
+its time derivative triggers that search. The hand-authored curve declined
+steadily from the top to the finish, contributing rate across the whole
+downswing; the fitted curve holds its lag flat and dumps it in 140 ms, which is
+what a wrist does, so it contributes rate only at the release. Frames clearing
+the trigger fall by 30%, wedge stamps by 38%, and P5/P6/P8 recall with them. The
+fitted table starves the trigger *by being right* — the threshold had been
+calibrated against a curve whose error happened to help. The model stays dark
+until the trigger is separated from the centre. The derivation, the forms that
+lost, and the full A/B are in [wrist_cock_model.md](wrist_cock_model.md).
 
 ## 10. Phase 7 — Reading the blur: stacking, and the exposure arc
 

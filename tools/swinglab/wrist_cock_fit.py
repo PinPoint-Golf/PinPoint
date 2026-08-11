@@ -219,6 +219,14 @@ class Form:
         self.sigma = None
         self.slope = None
 
+    def clone(self):
+        """A fresh, unfitted copy of this form. Leave-one-out fits one model per
+        held-out swing, and the copy must be the same TYPE as the prototype --
+        constructing a plain Form here would silently fit a parametric form as
+        a two-knot lookup table, which is a straight line."""
+        return Form(self.key, self.label, self.axis, self.knots_x,
+                    use_phi=self.use_phi, shape=self.shape, quad=self.quad)
+
     # -- axis ------------------------------------------------------------
     def x_of(self, t_us, ev):
         return swing_progress(t_us, ev) if self.axis == "s" else time_to_impact(t_us, ev)
@@ -338,6 +346,136 @@ def _isotonic(y, increasing=True):
     return np.asarray(out[:len(y)])
 
 
+# ---------------------------------------------------------------------------
+# A parametric form, and why one is worth having
+#
+# Everything above fits a LOOKUP TABLE: knots and linear interpolation. That is
+# an empirical curve, not a model -- it has as many free numbers as it has
+# knots, it can wiggle wherever the data is thin, and none of its numbers means
+# anything on its own. The physics says the curve has a shape, so it should be
+# possible to write that shape down.
+#
+#     beta(t) = b0 + A * Lc(t) * (1 - r * Lr(t))
+#
+#     Lc(t) = logistic((t - tc) / wc)     the wrist COCKING on the backswing
+#     Lr(t) = logistic((t - tr) / wr)     the wrist RELEASING into impact
+#
+# Seven parameters, and every one of them is a quantity a coach already has a
+# word for:
+#
+#     b0  the wrist offset at address (setup)
+#     A   peak lag amplitude -- how much the wrist cocks
+#     tc  when the cocking happens, seconds before impact
+#     wc  how fast it cocks
+#     tr  WHEN THE RELEASE HAPPENS -- casting vs holding lag, in seconds
+#     wr  how fast the release is once it starts
+#     r   release completeness: how much of the lag is spent by impact
+#
+# The form cannot express a second reversal, so the one-reversal law holds by
+# construction rather than by assertion; and it cannot wiggle, so thin data
+# produces a wrong curve rather than a jagged one -- which is the failure mode
+# you want, because it is visible.
+
+def _logistic(z):
+    return 1.0 / (1.0 + np.exp(-np.clip(z, -60.0, 60.0)))
+
+
+def beta_param(t, p):
+    """The parametric wrist-cock curve. p = (b0, A, tc, wc, tr, wr, r)."""
+    b0, A, tc, wc, tr, wr, r = p
+    wc = max(abs(wc), 1e-3)
+    wr = max(abs(wr), 1e-3)
+    return b0 + A * _logistic((t - tc) / wc) * (1.0 - r * _logistic((t - tr) / wr))
+
+
+def _nelder_mead(f, x0, step, iters=2000, tol=1e-7):
+    """Nelder-Mead, so the harness keeps its numpy-only dependency set. Seven
+    parameters with a sensible seed is well inside what a simplex handles."""
+    n = len(x0)
+    sim = [np.array(x0, dtype=float)]
+    for i in range(n):
+        y = np.array(x0, dtype=float)
+        y[i] += step[i]
+        sim.append(y)
+    val = [f(s) for s in sim]
+    for _ in range(iters):
+        idx = np.argsort(val)
+        sim = [sim[i] for i in idx]
+        val = [val[i] for i in idx]
+        if abs(val[-1] - val[0]) <= tol * (abs(val[0]) + tol):
+            break
+        cen = np.mean(sim[:-1], axis=0)
+        xr = cen + (cen - sim[-1])
+        fr = f(xr)
+        if fr < val[0]:
+            xe = cen + 2.0 * (cen - sim[-1])
+            fe = f(xe)
+            sim[-1], val[-1] = (xe, fe) if fe < fr else (xr, fr)
+        elif fr < val[-2]:
+            sim[-1], val[-1] = xr, fr
+        else:
+            xc = cen + 0.5 * (sim[-1] - cen)
+            fc = f(xc)
+            if fc < val[-1]:
+                sim[-1], val[-1] = xc, fc
+            else:
+                for i in range(1, len(sim)):
+                    sim[i] = sim[0] + 0.5 * (sim[i] - sim[0])
+                    val[i] = f(sim[i])
+    idx = int(np.argmin(val))
+    return sim[idx], val[idx]
+
+
+class ParamForm(Form):
+    """The parametric curve, fitted by robust (Huber) loss on the same samples
+    the tables see, and evaluated through the same predict() interface so the
+    comparison is like for like."""
+
+    def __init__(self, key, label):
+        super().__init__(key, label, "t", [-1.1, 0.0])
+        self.params = None
+
+    def clone(self):
+        return ParamForm(self.key, self.label)
+
+    def fit(self, X, B, PHI, halfwidth):
+        m = np.isfinite(X) & np.isfinite(B) & (X >= -1.3) & (X <= 0.05)
+        x, b = X[m], B[m]
+        if len(x) < 100:
+            self.params = np.array([0.0, 90.0, -0.75, 0.12, -0.10, 0.03, 0.85])
+            self.sigma_scalar = 20.0
+            return self
+
+        def loss(p):
+            r = b - beta_param(x, p)
+            a = np.abs(r)
+            d = 15.0                                   # Huber knee, degrees
+            return float(np.mean(np.where(a <= d, 0.5 * r * r, d * (a - 0.5 * d))))
+
+        seed = np.array([0.0, 90.0, -0.75, 0.12, -0.10, 0.03, 0.85])
+        step = np.array([5.0, 20.0, 0.1, 0.05, 0.05, 0.02, 0.1])
+        best, _ = _nelder_mead(loss, seed, step)
+        self.params = best
+        # sigma: the robust spread about the fitted curve, in the same bins the
+        # tables use, so the envelope is comparable.
+        self.knots_x = np.linspace(-1.1, 0.0, 15)
+        self.centre = beta_param(self.knots_x, best)
+        self.sigma = np.full(len(self.knots_x), np.nan)
+        for i, kx in enumerate(self.knots_x):
+            w = np.abs(x - kx) <= 0.05
+            if w.sum() >= 12:
+                r = b[w] - beta_param(x[w], best)
+                self.sigma[i] = 0.7413 * (np.percentile(r, 75) - np.percentile(r, 25))
+        self._fill_gaps()
+        return self
+
+    def predict(self, X, PHI=None):
+        if self.params is None:
+            return np.full(len(np.atleast_1d(X)), np.nan), np.full(len(np.atleast_1d(X)), np.nan)
+        b = beta_param(np.clip(np.asarray(X, dtype=float), -1.1, 0.0), self.params)
+        return b, piecewise(X, self.knots_x, self.sigma)
+
+
 def shipped_form():
     f = Form("F0", "shipped table (hand-authored)", "s",
              [k[0] for k in SHIPPED_KNOTS])
@@ -362,8 +500,22 @@ def time_knots(n, layout):
     return list(np.round(-(u ** 2), 3))
 
 
+def progress_knots(n, layout, hi=0.9):
+    """Knot placement on the swing-progress axis.
+
+    Matched to time_knots() on purpose. The shipped table puts two knots
+    (s=0.8, 0.9) across the whole release, so refitting AT THOSE POSITIONS
+    measures knot placement, not the axis -- an 85 deg drop inside one linear
+    segment cannot be fitted by any choice of endpoint values."""
+    if layout == "uniform":
+        return list(np.round(np.linspace(0.0, hi, n), 4))
+    u = np.linspace(math.sqrt(hi), 0.0, n)
+    return list(np.round(hi - u ** 2, 4))
+
+
 def build_forms(args):
-    s_knots = [k[0] for k in SHIPPED_KNOTS]
+    s_knots = ([k[0] for k in SHIPPED_KNOTS] if args.shipped_knots
+               else progress_knots(args.knots, args.knot_layout))
     t_knots = time_knots(args.knots, args.knot_layout)
     forms = {
         "F0": shipped_form(),
@@ -372,6 +524,7 @@ def build_forms(args):
         "F3": Form("F3", "+ linear in phi", "t", t_knots, use_phi=True),
         "F4": Form("F4", "+ shape constraints (one reversal, in line at impact)",
                    "t", t_knots, use_phi=True, shape=True),
+        "F5": ParamForm("F5", "parametric: cock x release logistics (7 params)"),
     }
     want = [w.strip() for w in args.forms.split(",") if w.strip()]
     return [forms[w] for w in want if w in forms]
@@ -428,11 +581,16 @@ def evaluate(forms, swings, args):
                     P.append(s["phi"][m])
                 if not X:
                     continue
-                mdl = Form(f.key, f.label, f.axis, f.knots_x,
-                           use_phi=f.use_phi, shape=f.shape, quad=f.quad)
+                mdl = f.clone()
                 mdl.fit(np.concatenate(X), np.concatenate(B), np.concatenate(P),
                         args.halfwidth if f.axis == "t" else args.halfwidth_s)
                 fitted_tables[f.key].append((mdl.centre.copy(), mdl.sigma.copy()))
+                # The fitted model owns its knots: a parametric form resamples
+                # itself onto a grid, so the prototype's axis is not the one the
+                # fitted curve lives on.
+                results[f.key]["knots_x"] = np.asarray(mdl.knots_x, dtype=float)
+                if getattr(mdl, "params", None) is not None:
+                    results[f.key].setdefault("params", []).append(np.array(mdl.params))
 
             # score on the held-out swing
             for src, tsel, bsel, psel in (
@@ -475,6 +633,10 @@ def evaluate(forms, swings, args):
                 if res[src] else None
         res["seg_stats"] = {lbl: stats(np.concatenate(v)) for lbl, v in res["seg"].items()}
         res["sess_stats"] = {lbl: stats(np.concatenate(v)) for lbl, v in res["sess"].items()}
+        if res.get("params"):
+            res["params_median"] = list(np.median(np.array(res["params"]), axis=0))
+            res["params_spread"] = list(np.percentile(np.array(res["params"]), 90, axis=0)
+                                        - np.percentile(np.array(res["params"]), 10, axis=0))
         if fitted_tables[k]:
             c = np.median(np.array([t[0] for t in fitted_tables[k]]), axis=0)
             s = np.median(np.array([t[1] for t in fitted_tables[k]]), axis=0)
@@ -589,7 +751,7 @@ def write_tables_csv(path, results, order):
             res = results[k]
             f = res["form"]
             c, s = res.get("table", (f.centre, f.sigma))
-            for x, cc, ss in zip(f.knots_x, c, s):
+            for x, cc, ss in zip(res.get("knots_x", f.knots_x), c, s):
                 w.writerow([f.key, f.axis, f"{x:.3f}", f"{cc:.2f}", f"{ss:.2f}"])
 
 
@@ -607,20 +769,26 @@ def make_figure(path, results, order, swings, args):
         res = results[k]
         f = res["form"]
         c, sg = res.get("table", (f.centre, f.sigma))
+        kx = res.get("knots_x", f.knots_x)
         if f.axis == "t":
             x = xs_t
-            y, se = piecewise(x, f.knots_x, c), piecewise(x, f.knots_x, sg)
+            y, se = piecewise(x, kx, c), piecewise(x, kx, sg)
         else:
             # map the progress axis onto seconds using the corpus-median tempo
             med = {ph: np.median([(s["events"][ph] - s["events"][PH_IMPACT]) / 1e6
                                   for s in swings]) for ph, _ in PROGRESS_ANCHORS}
-            x = np.interp(f.knots_x, [v for _, v in PROGRESS_ANCHORS],
+            x = np.interp(kx, [v for _, v in PROGRESS_ANCHORS],
                           [med[ph] for ph, _ in PROGRESS_ANCHORS])
             y, se = c, sg
         lw = 2.5 if k == "F0" else 1.8
         ls = "--" if k == "F0" else "-"
         line, = ax.plot(x, y, ls, lw=lw, label=f"{k} {f.label}", zorder=3)
         ax.fill_between(x, y - se, y + se, alpha=0.12, color=line.get_color(), lw=0, zorder=2)
+        # The knots themselves, so the reader can see where the curve is
+        # pinned and where it is only interpolating.
+        if f.axis == "t" and not isinstance(f, ParamForm):
+            ax.plot(kx, c, "o", ms=4, color=line.get_color(),
+                    markeredgecolor="white", markeredgewidth=0.6, zorder=4)
     ax.axvline(0, color="k", lw=1, alpha=0.5)
     ax.axhline(0, color="k", lw=0.6, alpha=0.3)
     ax.set_xlabel("seconds before impact")
@@ -654,9 +822,11 @@ def make_figure(path, results, order, swings, args):
 def emit_header(res, form, sigma_inflate=1.0):
     """The fitted table as the C++ literal it would replace."""
     c, s = res.get("table", (form.centre, form.sigma))
+    kx = res.get("knots_x", form.knots_x)
     s = np.asarray(s) * sigma_inflate
-    out = ["inline constexpr WristCockKnot kWristCockKnots[%d] = {" % len(form.knots_x)]
-    for x, cc, ss in zip(form.knots_x, c, s):
+    out = ["inline constexpr WristCockKnot kWristCockKnots[%d] = {" % len(kx)]
+    for x, cc, ss in zip(kx, c, s):
+        x = x + 0.0            # normalise negative zero: the last knot is -0.0
         out.append(f"    {{{x:6.3f}, {cc:7.1f}, {ss:6.1f}}},")
     out.append("};")
     return "\n".join(out)
@@ -668,8 +838,11 @@ def main(argv=None):
     ap.add_argument("run_root")
     ap.add_argument("--corpus", required=True, help="swing library holding truth.json")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--forms", default="F0,F1,F2,F3,F4")
+    ap.add_argument("--forms", default="F0,F1,F2,F3,F4,F5")
     ap.add_argument("--knots", type=int, default=13, help="knots on the time axis")
+    ap.add_argument("--shipped-knots", action="store_true",
+                    help="hold F1 at the shipped 9 knot POSITIONS (confounds axis with "
+                         "knot placement; the default gives both axes the same budget)")
     ap.add_argument("--knot-layout", choices=("dense-late", "uniform"), default="dense-late",
                     help="dense-late spaces knots in sqrt(-t), resolving the release")
     ap.add_argument("--halfwidth", type=float, default=0.05,
@@ -687,6 +860,7 @@ def main(argv=None):
                          "golfers it has never seen. 2.5 is not a guess -- it is the "
                          "factor at which the 3-sigma envelope covers as much true beta "
                          "as the shipped table does, while still searching a narrower arc")
+    ap.add_argument("--doc-figure", help="write a single-panel figure to this path")
     ap.add_argument("--emit-header", action="store_true",
                     help="print the winning table as the C++ literal")
     args = ap.parse_args(argv)
@@ -753,6 +927,15 @@ def main(argv=None):
             winner = k
     print(f"[fit] verdict: " + (f"{winner} clears the gate" if winner
                                 else "no candidate clears the gate — keep the shipped table"))
+
+    for k in order:
+        pm = results[k].get("params_median")
+        if pm:
+            names = ("b0 address offset", "A peak lag", "tc cock centre", "wc cock width",
+                     "tr release centre", "wr release width", "r release completeness")
+            print(f"\n[fit] {k} parametric parameters (median over folds, p10-p90 spread):")
+            for nm, v, sp in zip(names, pm, results[k]["params_spread"]):
+                print(f"[fit]   {nm:24s} {v:8.3f}   +-{sp:6.3f}")
 
     write_report(out / "WRIST_COCK_FIT.md", results, order, swings, args)
     write_tables_csv(out / "wrist_cock_tables.csv", results, order)

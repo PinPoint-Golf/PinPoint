@@ -71,6 +71,14 @@ struct WedgeConfig {
     // truth the fitted model cuts the p10–p90 residual 74.3° → 20.9° and removes
     // a −9.1° bias; the envelope is inflated so it stays as forgiving as the one
     // it replaces. false ⇒ the v1 table, byte-for-byte.
+    //
+    // MEASURED AND HELD DARK (2026-08-11 corpus A/B). Enabling it costs 38% of
+    // the WEDGE stamps and 8-15 P-position emissions, because this table feeds
+    // the wedge TRIGGER as well as its centre: the fitted curve holds its lag
+    // flat and releases in 140 ms, so its time derivative clears omegaMinDegS on
+    // 30% fewer frames than the v1 curve's steady decline. The centre got
+    // better and the rate got worse. Separating the trigger from the centre is
+    // the prerequisite for flipping this — see docs/research/wrist_cock_model.md.
     bool   kinModelV2       = false;
 };
 
