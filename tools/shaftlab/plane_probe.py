@@ -781,17 +781,187 @@ def _planes_report(rows, b1, club_mm, run_root, lab_root, out_dir):
         print(f"\nwrote {od}/plane_probe_planes.csv")
 
 
+def corpus(run_root, out_dir, fig_path=None):
+    """The whole-corpus extension of `planes`: per-swing back/down inclination and
+    the transition delta on EVERY swing at the run root, not just the lab session.
+
+    Emits transition_plane_corpus.csv, and (with --fig) the distribution figure the
+    model note carries. Quality travels with every row — sample counts, conic
+    residual, and odd/even split-half repeatability per phase — because at this
+    run root only ~33/61 swings yield both conic fits (the blur-thinned downswing
+    arc degenerates elsewhere), and a consumer must be able to gate on that."""
+    from theta_psi_model import PH_TAKEAWAY as _TW, PH_TOP as _TP, PH_IMPACT as _IM
+
+    pathological = {"2026-06-11", "2026-07-04"}   # the note's §12 sessions
+
+    def _split_half(t, hx, hy, lo, hi):
+        m = (t >= lo) & (t <= hi)
+        x, y = hx[m], hy[m]
+        if x.size < 24:
+            return None
+        a_ = fit_ellipse(x[0::2], y[0::2])
+        b_ = fit_ellipse(x[1::2], y[1::2])
+        return abs(a_["iota_deg"] - b_["iota_deg"]) if (a_ and b_) else None
+
+    rows, skipped = [], []
+    for d in sorted(Path(run_root).iterdir()):
+        if not (d / "result.json").exists():
+            continue
+        run = load_run(d)
+        if run is None or run["shaft_xy"] is None:
+            skipped.append((d.name, "no usable shaft samples"))
+            continue
+        pl = head_path_plane(run)
+        if "back" not in pl or "down" not in pl:
+            skipped.append((d.name, "conic fit failed (" +
+                            "/".join(sorted({"back", "down"} - set(pl))) + ")"))
+            continue
+        t, hx, hy = run["shaft_xy"]
+        ev = run["events"]
+        date = d.name.split("__")[0].split("_")[0]
+        rows.append({
+            "swing": d.name, "date": date,
+            "pathological": int(date in pathological),
+            "iota_back_deg": round(pl["back"]["iota_deg"], 2),
+            "iota_down_deg": round(pl["down"]["iota_deg"], 2),
+            "delta_deg": round(pl["back"]["iota_deg"] - pl["down"]["iota_deg"], 2),
+            "node_back_deg": round(pl["back"]["node_deg"], 2),
+            "node_down_deg": round(pl["down"]["node_deg"], 2),
+            "n_back": pl["back"]["n"], "n_down": pl["down"]["n"],
+            "conic_resid_back": round(pl["back"]["conic_resid"], 4),
+            "conic_resid_down": round(pl["down"]["conic_resid"], 4),
+            "split_half_back_deg": _split_half(t, hx, hy, ev[_TW], ev[_TP]),
+            "split_half_down_deg": _split_half(t, hx, hy, ev[_TP], ev[_IM]),
+        })
+
+    out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    with open(out / "transition_plane_corpus.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader(); w.writerows(rows)
+
+    D = np.array([r["delta_deg"] for r in rows])
+    H = np.array([not r["pathological"] for r in rows], dtype=bool)
+    print(f"corpus: {len(rows)} swings fit both phases, {len(skipped)} skipped")
+    for nm, sel in (("all", np.ones_like(H)), ("healthy", H)):
+        v = D[sel]
+        print(f"  {nm}: n={v.size} median={np.median(v):+.1f} "
+              f"p10..p90=[{np.percentile(v, 10):+.1f},{np.percentile(v, 90):+.1f}] "
+              f"steepen={int((v > 0).sum())}/{v.size}")
+    for name, why in skipped:
+        print(f"  skipped {name}: {why}")
+
+    if fig_path:
+        _corpus_figure(rows, fig_path)
+        print(f"  figure -> {fig_path}")
+
+
+def _corpus_figure(rows, fig_path):
+    """The two-panel distribution figure: per-swing delta by session, and the two
+    phase inclinations against each other. Open markers = split-half worse than
+    5 deg; the black tick is the session median."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    SURFACE, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
+    BLUE, ORANGE = "#2a78d6", "#eb6834"
+    sessions = sorted({r["date"] for r in rows})
+    lowq = {r["swing"]: (r["split_half_down_deg"] is None or r["split_half_down_deg"] > 5.0)
+            for r in rows}
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.6), dpi=200,
+                                   gridspec_kw={"width_ratios": [1.5, 1.0], "wspace": 0.28})
+    fig.patch.set_facecolor(SURFACE)
+
+    ax1.set_facecolor(SURFACE)
+    rng = np.random.default_rng(7)
+    for i, s in enumerate(sessions):
+        sr = [r for r in rows if r["date"] == s]
+        ys = i + rng.uniform(-0.13, 0.13, len(sr))
+        for r, yy in zip(sr, ys):
+            c = ORANGE if r["pathological"] else BLUE
+            if lowq[r["swing"]]:
+                ax1.scatter(r["delta_deg"], yy, s=52, facecolor="none", edgecolor=c,
+                            linewidth=1.6, zorder=3)
+            else:
+                ax1.scatter(r["delta_deg"], yy, s=52, facecolor=c, edgecolor=SURFACE,
+                            linewidth=1.2, zorder=3)
+        med = np.median([r["delta_deg"] for r in sr])
+        ax1.plot([med, med], [i - 0.26, i + 0.26], color=INK, linewidth=1.6, zorder=4)
+    ax1.axvline(0, color=INK2, linewidth=1.0, linestyle=(0, (4, 3)), zorder=2)
+    ax1.set_yticks(range(len(sessions)))
+    ax1.set_yticklabels([f"{s}   ({len([r for r in rows if r['date'] == s])} fit)"
+                         for s in sessions], fontsize=8.5, color=INK)
+    ax1.set_xlabel("transition delta  =  backswing ι − downswing ι   (°)",
+                   fontsize=9, color=INK)
+    ax1.set_xlim(-65, 65)
+    ax1.invert_yaxis()
+    ax1.tick_params(colors=INK2, labelsize=8)
+    ax1.grid(axis="x", color=GRID, linewidth=0.7, zorder=0)
+    for sp in ax1.spines.values():
+        sp.set_visible(False)
+    ax1.annotate("steepens in transition →", xy=(0.985, 1.015), xycoords="axes fraction",
+                 ha="right", fontsize=8.5, color=INK2, style="italic")
+    ax1.annotate("← shallows", xy=(0.015, 1.015), xycoords="axes fraction",
+                 ha="left", fontsize=8.5, color=INK2, style="italic")
+    ax1.set_title("transition_plane across the corpus — per swing, by session",
+                  fontsize=10.5, color=INK, loc="left", pad=22)
+
+    ax2.set_facecolor(SURFACE)
+    lim = (5, 70)
+    ax2.plot(lim, lim, color=INK2, linewidth=1.0, linestyle=(0, (4, 3)), zorder=2)
+    for r in rows:
+        c = ORANGE if r["pathological"] else BLUE
+        if lowq[r["swing"]]:
+            ax2.scatter(r["iota_back_deg"], r["iota_down_deg"], s=52, facecolor="none",
+                        edgecolor=c, linewidth=1.6, zorder=3)
+        else:
+            ax2.scatter(r["iota_back_deg"], r["iota_down_deg"], s=52, facecolor=c,
+                        edgecolor=SURFACE, linewidth=1.2, zorder=3)
+    ax2.set_xlim(lim); ax2.set_ylim(lim)
+    ax2.set_aspect("equal")
+    ax2.set_xlabel("backswing ι (°)  — larger = flatter", fontsize=9, color=INK)
+    ax2.set_ylabel("downswing ι (°)", fontsize=9, color=INK)
+    ax2.tick_params(colors=INK2, labelsize=8)
+    ax2.grid(color=GRID, linewidth=0.7, zorder=0)
+    for sp in ax2.spines.values():
+        sp.set_visible(False)
+    ax2.annotate("steepens\n(below the line)", xy=(52, 21), fontsize=8.5, color=INK2,
+                 ha="center", style="italic")
+    ax2.set_title("the two phases, per swing", fontsize=10.5, color=INK, loc="left", pad=22)
+
+    handles = [
+        Line2D([], [], marker="o", linestyle="none", markersize=7.5, markerfacecolor=BLUE,
+               markeredgecolor=SURFACE, label="healthy session"),
+        Line2D([], [], marker="o", linestyle="none", markersize=7.5, markerfacecolor=ORANGE,
+               markeredgecolor=SURFACE, label="pathological session (§12)"),
+        Line2D([], [], marker="o", linestyle="none", markersize=7.5, markerfacecolor="none",
+               markeredgecolor=INK2, markeredgewidth=1.6,
+               label="split-half > 5° (low-quality fit)"),
+        Line2D([], [], color=INK, linewidth=1.6, label="session median"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False,
+               fontsize=8.5, labelcolor=INK, bbox_to_anchor=(0.5, -0.035))
+    plt.savefig(fig_path, bbox_inches="tight", facecolor=SURFACE)
+    plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=("census", "planes"))
+    ap.add_argument("mode", choices=("census", "planes", "corpus"))
     ap.add_argument("--run-root", default="/mnt/swingdata/stagegate/corpm3-off")
     ap.add_argument("--lab-root", default="/mnt/swingdata/shaftlab/lab/tape_20260705")
     ap.add_argument("--club-mm", type=float, default=CLUB_LEN_MM_DEFAULT)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--fig", default=None,
+                    help="corpus mode: also write the distribution figure to this path")
     a = ap.parse_args()
     if a.mode == "census":
         census(a.run_root, a.lab_root, a.out)
+    elif a.mode == "corpus":
+        corpus(a.run_root, a.out or ".", a.fig)
     else:
         planes(a.run_root, a.lab_root, a.out, a.club_mm)
     return 0

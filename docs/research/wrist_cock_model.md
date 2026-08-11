@@ -491,9 +491,18 @@ output. If not, the residual is noise wearing a physical name.
 
 **Open before the delta becomes a coaching output:**
 
-- **The sign convention needs validating.** The geometry says larger ι = flatter,
-  but that mapping has not been confirmed against a known-plane swing or a second
-  camera. One down-the-line cross-check settles it.
+- **The sign convention is corroborated, not independently proven.** The
+  geometry says larger ι = flatter, and the corpus supplies a directional check
+  for free: this golfer is known — from coaching and ball flight, independently
+  of this estimator — to come over the top, and the delta duly reads the
+  instrumented session steepening 8/10, median +17.3° (corpus-wide the picture
+  is softer and session-structured — 14/24 healthy fits steepen, median +6.4°;
+  §13, Figure 2). An inverted convention would read him as shallowing like a
+  tour professional. What this cannot exclude is an estimator
+  artefact that systematically thins the downswing ellipse and mimics
+  steepening; the cheap falsifier is a few swings from a golfer known to
+  shallow, not a second camera. A down-the-line recording is the tool for the
+  *absolute* plane angle, which remains uncalibrated — not for the sign.
 - **The axis ratio alone cannot tell which way the plane leans** — two planes
   tilted oppositely share a ratio. The **node line** (the ellipse's major-axis
   direction, recorded as `node_*_deg`) carries that and has not been analysed.
@@ -677,12 +686,61 @@ same fit, on the same swing, so the shared bias cancels in their difference.
 What remains is precision, and the precision is excellent: refit the plane on
 half the frames and the delta moves 0.6–0.7°, against a 17° median signal.
 
-Two things stand between the delta and that role, both already on §9's open
-list. The sign convention — larger inclination means flatter — has never been
-checked against a swing whose plane is independently known; one down-the-line
-recording settles it. And the projection layer is ten swings of one golfer.
-The first is an afternoon; the second is the corpus problem this whole note
-shares.
+One apparent blocker dissolves on inspection, and the way it dissolves is
+itself instructive. Validating the sign convention sounds like it needs an
+independent plane measurement — a second camera down the line. It does not:
+it needs an independent *fact about the plane*, and the corpus already holds
+one. This golfer is known, from coaching and ball flight and independently of
+anything this estimator computed, to come over the top — so a correctly
+signed delta must read his swings as steepening, and on the session where
+the estimator is best grounded, it does: the instrumented ten steepen eight
+times out of ten, median +17.3°, against a 0.7° noise floor. Had the
+convention been inverted, that session would have read as a golfer who
+shallows like a tour professional. The check is weaker than an independent
+measurement — an estimator artefact that systematically thins the downswing
+ellipse would mimic steepening — but the cheap falsifier for that is a few
+swings from a golfer known to shallow, not a camera rig. A down-the-line
+recording remains the right tool for a different job: calibrating the
+*absolute* plane angle, which the delta deliberately does not depend on.
+
+Extending the fit from the instrumented ten to every swing in the corpus
+shows what the measure looks like in the wild, and it teaches two cautions
+before anyone wires it to a fault:
+
+![The transition-plane delta across the corpus.](figures/transition_plane_corpus.png)
+
+***Figure 2.** Left: the per-swing transition delta by session — positive
+means the club steepened between backswing and downswing. Filled dots are
+swings whose downswing fit repeats to better than 5° split-half; open circles
+are worse; the black tick is the session median. Right: the two phase
+inclinations against each other; a swing below the diagonal steepened. Only
+33 of 61 swings yield both conic fits, so the figure is also a picture of the
+coverage gate.*
+
+First, coverage gates this measure like everything else in this note: 28 of
+61 swings yield no delta at all, almost always because the blur-thinned
+downswing arc is too sparse for a stable conic — the same legibility
+constraint as §13's release story, in a milder form. Second, the corpus-wide
+distribution is wider and less one-sided than the instrumented session
+suggested: across the 24 healthy-session fits, 14 steepen, median +6.4°,
+p10–p90 −15° to +25° — and the structure is by session. 2026-07-05 reads
++17.3° while 2026-07-09, an equally well-measured session (both repeat to
+0.6–0.7° split-half), reads −4.1°. Either the transition genuinely varies
+day to day — nobody comes over the top identically every session — or a
+between-session effect survives in the delta; ten swings per session cannot
+separate those. The coverage-correlation check that caught the release
+parameters is worth its callback here too: the delta correlates +0.45 with
+backswing sample count across the healthy fits — not damning at n = 24, but
+the lesson of this section is to watch exactly that. The practical
+conclusion is that the delta should ship as a *raw metric with its quality
+attached* — both inclinations, both split-halves, the sample counts, the
+node line — so consumers gate on fit quality rather than pretending every
+swing yields a number.
+
+What genuinely stands between the delta and the diagnostic model is the
+corpus problem this whole note shares — one golfer — and the falsifier above
+doubles as the fix: the first sessions from a second golfer, ideally one who
+shallows, test the sign, the spread, and the between-golfer story at once.
 
 ### Why "fits the population" is not "reads a swing"
 
@@ -917,6 +975,10 @@ python3 tools/swinglab/wrist_cock_fit.py /mnt/swingdata/stagegate/corpm3-off \
 
 python3 tools/shaftlab/plane_probe.py census --out <dir>      # §9 foreshortening
 python3 tools/shaftlab/plane_probe.py planes --out <dir>      # §9 the plane
+
+python3 tools/shaftlab/plane_probe.py corpus \
+    --out docs/research/data/wrist_cock_model \
+    --fig docs/research/figures/transition_plane_corpus.png   # §13 Figure 2
 
 python3 tools/swinglab/wrist_cock_fit.py /mnt/swingdata/stagegate/corpm3-off \
     --corpus /mnt/swingdata/Mark-Liversedge \
