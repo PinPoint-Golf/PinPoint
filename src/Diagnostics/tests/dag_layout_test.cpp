@@ -76,6 +76,7 @@ static CharacteristicPack fixture()
         p.measures.push_back(m);
     };
     measure("mLive", MeasureStatus::Live);
+    measure("mLive2", MeasureStatus::Live);
     measure("mGhost", MeasureStatus::NoProducer);
 
     auto signal = [&](const char *id, const char *mid) {
@@ -88,18 +89,27 @@ static CharacteristicPack fixture()
     };
     signal("sLive", "mLive");
     signal("sGhost", "mGhost");
+    // A second live signal, so a condition can be a genuine conjunction of two DIFFERENT measures
+    // rather than one measure counted twice — the row de-dup would collapse the latter.
+    signal("sLive2", "mLive2");
 
     auto cond = [&](const char *id, const char *label, ConfirmedBy by, Observability obs,
-                    std::initializer_list<const char *> detectedBy) {
+                    std::initializer_list<const char *> detectedBy,
+                    DetectionMode detection = DetectionMode::Any) {
         Condition c;
         c.id            = QString::fromLatin1(id);
         c.label         = QString::fromLatin1(label);
         c.confirmedBy   = by;
         c.observability = obs;
+        c.detection     = detection;
         for (const char *s : detectedBy) c.detectedBy << QString::fromLatin1(s);
         p.conditions.push_back(c);
     };
     cond("focus",      "The focus",       ConfirmedBy::Measured, Observability::Observable, { "sLive" });
+    // The conjunction. Two live measures that only mean something together — the shape `top` and
+    // `sky` ship as, and the one the caption exists to draw.
+    cond("both",       "Both at once",    ConfirmedBy::Measured, Observability::Observable,
+         { "sLive", "sLive2" }, DetectionMode::All);
     cond("cause1",     "First cause",     ConfirmedBy::Measured, Observability::Observable, { "sLive" });
     cond("cause2",     "Second cause",    ConfirmedBy::Measured, Observability::Observable, { "sGhost" });
     cond("cause3",     "Third cause",     ConfirmedBy::Asserted, Observability::Latent,     {});
@@ -127,6 +137,7 @@ static CharacteristicPack fixture()
     edge("cause2", "focus", Strength::Moderate);
     edge("cause3", "focus", Strength::Weak);
     edge("cause3", "cause1", Strength::Weak);       // same-rank edge
+    edge("both", "focus", Strength::Moderate);      // the conjunction, drawn at rank -1
     edge("deepA", "cause1", Strength::Moderate);
     edge("deepB", "cause1", Strength::Moderate);
     edge("focus", "effect1", Strength::Strong);
@@ -614,6 +625,40 @@ int main()
                   "…and below the condition's own row, never over it");
         }
 
+        // ── A CONJUNCTION IS DRAWN AS ONE CLAIM ─────────────────────────────
+        //
+        // The caption costs height, and the height is spent in two places that must agree: the slot
+        // sizing that makes the box tall enough, and the row cursor that pushes the measures down
+        // past it. Charge one and not the other and the last row hangs out of the box — which the
+        // stacking assertions further down catch, but only once the caption exists to be got wrong.
+        {
+            const DagNode *both = nodeById(l, "both");
+            check(both && both->measures.size() == 2, "a conjunction carries a row per measure");
+            check(both && both->captionH > 0, "…and room for the caption that says so");
+            check(both && both->detection == QLatin1String("all"),
+                  "…named by the token, so a view branches without parsing prose");
+            // The caption's own words, pinned: it must NOT be the enum label the editor's field
+            // shows ("every signal"), which answers a question rather than introducing a list.
+            check(both && both->detectionLabel == QLatin1String("all of"),
+                  "…captioned as the head of a list, not as an answer to a question");
+
+            // Every row still inside the box, and now BELOW the caption as well as below the title
+            // row. This is the assertion that fails if the two sites disagree by the caption.
+            for (const DagMeasure &dm : both->measures) {
+                check(dm.y + dm.h <= both->y + both->h + 0.001, "every row is inside the box");
+                check(dm.y >= both->y + DagLayoutOptions{}.nodeH + both->captionH - 0.001,
+                      "…and below the caption, not over it");
+            }
+            // The box is taller than the same rows without a caption would be, which is the whole
+            // visible difference — `focus` has one row and no caption to compare against.
+            check(both && f && both->h > f->h, "a captioned box with two rows is taller than one with one");
+
+            // AN ORDINARY BOX IS UNTOUCHED. Nothing in a library that has authored no conjunctions
+            // may move, which is what makes this safe to ship over existing content.
+            check(f && f->captionH == 0.0 && f->detection.isEmpty(),
+                  "an `any` condition carries no caption at all");
+        }
+
         // THE BOX HAS TO BE WIDE ENOUGH FOR THE ROW. A row the reader can see and cannot read is
         // worse than no row, and a measure label is a sentence where a condition's name is a
         // phrase — which is why the rows have their own cap rather than sharing maxW.
@@ -904,7 +949,10 @@ int main()
 
         check(nodeById(l, "cause3") != nullptr, "the one seat goes to the cause that reaches furthest");
         check(!nodeById(l, "cause1") && !nodeById(l, "cause2"), "and the shorter reaches stand down");
-        check(nodeById(l, "focus")->hiddenCauses == 2, "counted on the focus, as always");
+        // 2 -> 3 when `both` was added to the fixture as a fourth cause of the focus. The claim is
+        // unchanged — whatever the cap drops is counted — and the number is the fixture's, not this
+        // test's subject.
+        check(nodeById(l, "focus")->hiddenCauses == 3, "counted on the focus, as always");
     }
 
     // ── The non-causal relations ────────────────────────────────────────────

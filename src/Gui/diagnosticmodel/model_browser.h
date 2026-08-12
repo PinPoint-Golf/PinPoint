@@ -317,6 +317,12 @@ public:
     Q_INVOKABLE QVariantList measureCandidates(const QString &conditionId,
                                                const QString &search = QString()) const;
 
+    // Metrics this measure could read INSTEAD of its own where a swing carries one — the rungs its
+    // instrument ladder does not already hold. Filtered to the measure's UNIT, because a ladder is
+    // one quantity measured twice and a rung in another unit would grade against the wrong corridor.
+    Q_INVOKABLE QVariantList metricKeyCandidates(const QString &measureId,
+                                                 const QString &search = QString()) const;
+
     // Would this link be legal, and if not, why? Returns { ok, reason }.
     //
     // Asked DURING a drag in the graph, not on release: an illegal target has to refuse while the
@@ -422,6 +428,11 @@ public:
     Q_INVOKABLE QVariantMap addMeasureTo(const QString &conditionId, const QString &measureId,
                                          const QString &direction = QStringLiteral("high"));
     Q_INVOKABLE QVariantMap removeMeasureFrom(const QString &conditionId, const QString &measureId);
+
+    // Append to / drop from a measure's instrument ladder (Measure::preferKeys). Append, not
+    // insert: the list is ordered best-first and nothing here reorders one — see addPreferKey().
+    Q_INVOKABLE QVariantMap addPreferKey(const QString &measureId, const QString &metricKey);
+    Q_INVOKABLE QVariantMap removePreferKey(const QString &measureId, const QString &metricKey);
 
     // Duplicate beats blank: a new object pre-filled from an existing one. Returns the new id in
     // `id` so the table can select it and the author can type over the label.
@@ -722,7 +733,7 @@ private:
     // construction for a kind whose values are ranges instead of strings.
     QVariantList quantileFacets(const QString &type) const;
 
-    int  measureUsers(const QString &measureId) const;     // blast radius, as a count
+    int  measureUsers(const QString &measureId) const;     // what it detects, as a count
     QVariantList measureUserRows(const QString &measureId) const;   // and as the actual list
 
     // The three columns the flat cross-type list adds — what an object is connected to, how many

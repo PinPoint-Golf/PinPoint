@@ -198,8 +198,19 @@ QString shapeName(Shape s)  { return nameOf(kShapes, s); }
 QString shapeLabel(Shape s) { return labelOf(kShapes, s); }
 bool    shapeFromName(const QString &s, Shape &out) { return fromName(kShapes, s, out); }
 
-QString signalTestName(SignalTest t) { return nameOf(kSignalTests, t); }
+QString signalTestName(SignalTest t)  { return nameOf(kSignalTests, t); }
+QString signalTestLabel(SignalTest t) { return labelOf(kSignalTests, t); }
 bool    signalTestFromName(const QString &s, SignalTest &out) { return fromName(kSignalTests, s, out); }
+
+const std::vector<SignalTest> &allSignalTests()
+{
+    static const std::vector<SignalTest> v = [] {
+        std::vector<SignalTest> r;
+        for (const auto &row : kSignalTests) r.push_back(row.value);
+        return r;
+    }();
+    return v;
+}
 
 QString directionName(Direction d) { return nameOf(kDirections, d); }
 bool    directionFromName(const QString &s, Direction &out) { return fromName(kDirections, s, out); }
@@ -268,8 +279,19 @@ double prominenceWeight(Prominence p)
 QString observabilityName(Observability o) { return nameOf(kObservabilities, o); }
 bool    observabilityFromName(const QString &s, Observability &out) { return fromName(kObservabilities, s, out); }
 
-QString detectionModeName(DetectionMode d) { return nameOf(kDetectionModes, d); }
+QString detectionModeName(DetectionMode d)  { return nameOf(kDetectionModes, d); }
+QString detectionModeLabel(DetectionMode d) { return labelOf(kDetectionModes, d); }
 bool    detectionModeFromName(const QString &s, DetectionMode &out) { return fromName(kDetectionModes, s, out); }
+
+const std::vector<DetectionMode> &allDetectionModes()
+{
+    static const std::vector<DetectionMode> v = [] {
+        std::vector<DetectionMode> r;
+        for (const auto &row : kDetectionModes) r.push_back(row.value);
+        return r;
+    }();
+    return v;
+}
 
 QString confirmedByName(ConfirmedBy c) { return nameOf(kConfirmedBys, c); }
 bool    confirmedByFromName(const QString &s, ConfirmedBy &out) { return fromName(kConfirmedBys, s, out); }

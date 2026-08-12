@@ -803,7 +803,8 @@ Item {
                                                  && (sectionItem.modelData.action === "cause"
                                                      || sectionItem.modelData.action === "measure"
                                                      || sectionItem.modelData.action === "settles"
-                                                     || sectionItem.modelData.action === "answers")
+                                                     || sectionItem.modelData.action === "answers"
+                                                     || sectionItem.modelData.action === "preferKey")
                                         font.family:    Theme.fontData
                                         font.pixelSize: Theme.fontSzBody
                                         color:          Theme.colorText3
@@ -836,11 +837,12 @@ Item {
                                      && sectionItem.modelData.action !== "binding"
                             x: Theme.sp(18)
                             topPadding: Theme.sp(4)
-                            text: sectionItem.modelData.action === "cause"    ? qsTr("+ add cause")
-                                : sectionItem.modelData.action === "corridor" ? qsTr("+ add corridor")
-                                : sectionItem.modelData.action === "settles"  ? qsTr("+ settles a characteristic")
-                                : sectionItem.modelData.action === "answers"  ? qsTr("+ answers a characteristic")
-                                                                              : qsTr("+ add measure")
+                            text: sectionItem.modelData.action === "cause"     ? qsTr("+ add cause")
+                                : sectionItem.modelData.action === "corridor"  ? qsTr("+ add corridor")
+                                : sectionItem.modelData.action === "settles"   ? qsTr("+ settles a characteristic")
+                                : sectionItem.modelData.action === "answers"   ? qsTr("+ answers a characteristic")
+                                : sectionItem.modelData.action === "preferKey" ? qsTr("+ prefer a metric")
+                                                                               : qsTr("+ add measure")
                             font.family:    Theme.fontBody
                             font.pixelSize: Theme.fontSzMicro
                             color:          Theme.colorAccent
@@ -857,7 +859,8 @@ Item {
                                     else if (sectionItem.modelData.action === "corridor")
                                         root.addCorridorRequested()
                                     else if (sectionItem.modelData.action === "settles"
-                                             || sectionItem.modelData.action === "answers")
+                                             || sectionItem.modelData.action === "answers"
+                                             || sectionItem.modelData.action === "preferKey")
                                         root.addRowRequested(sectionItem.modelData.action)
                                     else
                                         root.addMeasureRequested()

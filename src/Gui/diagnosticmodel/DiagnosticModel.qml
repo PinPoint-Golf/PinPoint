@@ -322,7 +322,7 @@ Item {
         root._trail = [ _trailStep(type, id) ]
     }
 
-    // Navigating from the inspector may cross types — a measure's blast radius lands on a
+    // Navigating from the inspector may cross types — what a measure detects lands on a
     // characteristic — so the table follows the selection rather than the other way round.
     function navigateTo(type, id) {
         if (type === "" || id === "") return
@@ -1293,6 +1293,9 @@ Item {
                         return browser.graph(root._graphFocus.type, root._graphFocus.id, {
                             nodeH: Theme.sp(34), gapX: Theme.sp(165), gapY: Theme.sp(39),
                             rowH: Theme.sp(24), padX: Theme.sp(12), charW: Theme.sp(6.4),
+                            // Shorter than a row: the caption carries one word and the head of a
+                            // rail, and one as tall as the rows it introduces reads as one of them.
+                            captionH: Theme.sp(15),
                             // The inner rows render at fontSzMicro against the name's fontSzBody2,
                             // so their advance is scaled by that ratio rather than sharing charW.
                             rowCharW: Theme.sp(6.4) * (Theme.fontSzMicro / Theme.fontSzBody2),
@@ -1604,12 +1607,18 @@ Item {
                     onDuplicateRequested: root.doDuplicate(root._selectedId, root._selectedType)
                     onRemoveRequested:    root.doRemove(root._selectedId, root._selectedType)
                     onAddRowRequested: (action) => {
+                        if (action === "preferKey") {
+                            root._openPickerNear(preferKeyPicker, inspector, inspector.actionOrigin)
+                            return
+                        }
                         settlesPicker.mode = action
                         root._openPickerNear(settlesPicker, inspector, inspector.actionOrigin)
                     }
                     onRemoveRowRequested: (kind, id) => {
                         if (kind === "measure")
                             root._report(browser.removeMeasureFrom(root._selectedId, id))
+                        else if (kind === "preferKey")
+                            root._report(browser.removePreferKey(root._selectedId, id))
                         else if (kind === "settles")
                             root._report(browser.removeScreenSettles(root._selectedId, id))
                         else if (kind === "answers")
@@ -1705,6 +1714,19 @@ Item {
         candidateSource: (text) => { root._revision
                                      return browser.measureCandidates(root._selectedId, text) }
         onPicked: (id) => root._report(browser.addMeasureTo(root._selectedId, id, "high"))
+    }
+
+    // A better instrument for the measure on screen. The candidate list is already filtered to the
+    // measure's own unit in C++, so what this offers is exactly what addPreferKey() would accept —
+    // the picker and the write cannot disagree about legality because they ask the same layer.
+    ModelPicker {
+        id: preferKeyPicker
+        parent: root
+        title: qsTr("Prefer which metric?")
+        candidateSource: (text) => { root._revision
+                                     if (root._selectedId === "") return []
+                                     return browser.metricKeyCandidates(root._selectedId, text) }
+        onPicked: (id) => root._report(browser.addPreferKey(root._selectedId, id))
     }
 
     // One picker for both relationships, because it is one gesture — pick the characteristic this

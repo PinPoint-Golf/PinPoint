@@ -24,6 +24,7 @@
 #include <QStringList>
 
 #include <optional>
+#include <vector>
 
 // The MEASUREMENT vocabulary: what a Measure is, which way its corridor is open, and how a Signal
 // tests it. Split out of characteristic.h, which otherwise carried this alongside the condition
@@ -236,7 +237,15 @@ bool    shapeFromName(const QString &s, Shape &out);
 // corridor drawn with two hard edges would state a bound the norm does not hold.
 inline bool shapeIsOneSided(Shape s) { return s != Shape::Target; }
 QString signalTestName(SignalTest t);
+// "past a threshold", not "threshold". Every other enum here already had one and this did not, so
+// the editor printed the bare token — which reads as a category to somebody who already knows the
+// vocabulary and as nothing at all to somebody choosing between them.
+QString signalTestLabel(SignalTest t);
 bool    signalTestFromName(const QString &s, SignalTest &out);
+
+// The tests, in the order an author meets them. One definition, for the same reason
+// allConditionGroups() exists: a picker and a filter row that each spell the list lose step.
+const std::vector<SignalTest> &allSignalTests();
 QString directionName(Direction d);
 bool    directionFromName(const QString &s, Direction &out);
 

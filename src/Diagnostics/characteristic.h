@@ -408,7 +408,12 @@ double prominenceWeight(Prominence p);
 QString observabilityName(Observability o);
 bool    observabilityFromName(const QString &s, Observability &out);
 QString detectionModeName(DetectionMode d);
+QString detectionModeLabel(DetectionMode d);   // "every signal" — never the bare token
 bool    detectionModeFromName(const QString &s, DetectionMode &out);
+
+// Both modes, in the order a picker should offer them: the ordinary one first. One definition, for
+// the same reason allConditionGroups() exists.
+const std::vector<DetectionMode> &allDetectionModes();
 QString confirmedByName(ConfirmedBy c);
 bool    confirmedByFromName(const QString &s, ConfirmedBy &out);
 QString provenanceTierName(ProvenanceTier t);

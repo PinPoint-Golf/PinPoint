@@ -23,6 +23,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <optional>
 #include <vector>
 
 // Layout for the navigable causal DAG — a LOCAL view of the graph around one condition.
@@ -130,6 +131,21 @@ struct DagMeasure {
     QString label;
     QString statusLabel;        // "Live", "No producer", …
     QString metricKey;
+    // EVERY key this measure will read, best first — Measure::preferKeys then metricKey. Carried in
+    // full rather than as the winning one, because which rung answers is a property of the SWING and
+    // this layout describes the library. A row showing only `metricKey` said the wrong thing the
+    // moment a measure preferred a launch monitor over our own estimate: it named the fallback.
+    QStringList keyLadder;
+    // What the signal reading this measure actually asks. Empty testLabel means the row is drawn as
+    // it always was — a corridor test states no number of its own and does not need one shown.
+    QString testLabel;
+    std::optional<double> threshold;
+    // THE ONE STRING DRAWN TO THE RIGHT OF THE LABEL, chosen here rather than in the delegate. The
+    // row has room for exactly one, three different facts compete for it, and the width estimate has
+    // to charge for whichever won — a view that picked its own would be sized for a different string
+    // than the one it drew. Priority is what is WRONG, then what the test asks, then which instrument
+    // answers: a measure nothing can produce has nothing else worth saying about it.
+    QString detail;
     bool    available = true;   // Live; anything else is a gap and is drawn as one
     QString unavailableReason;
     double  y = 0, h = 0;
@@ -185,6 +201,20 @@ struct DagNode {
     // is taller than `nodeH` whenever this is non-empty. Empty when the caller did not ask for
     // measures, and on a condition nothing detects.
     std::vector<DagMeasure> measures;
+
+    // How those rows combine. A conjunction is drawn with a caption above the rows and a rail down
+    // their left, because an unlabelled list of three rows reads as three ways of detecting one
+    // thing — which is exactly what it is NOT, and the difference decides whether the box describes
+    // one shot or three unrelated ones.
+    //
+    // `captionH` is the height that caption costs and is ZERO on an `any` box, so nothing in an
+    // existing library shifts. The caption carries no `y` of its own: it sits at `y + nodeH` by
+    // construction and the measures start below it, so there is one number to keep in step rather
+    // than two. The view must SUBTRACT it, along with the rows, when working out how tall the
+    // condition's own title row is.
+    QString detection;        // "any" | "all" — the token, so a view branches without parsing prose
+    QString detectionLabel;   // "every signal" — what the caption actually says
+    double  captionH = 0;
 
     // What this condition is cited from, as one more row under the measures. At most one — a
     // condition carries a single `provenance.citation` — and empty when the caller did not ask for
@@ -273,6 +303,10 @@ struct DagLayoutOptions {
     // different words — same height, same text size, same cap — and giving each its own triple of
     // options would be three numbers that must never differ, which is three ways for them to.
     double rowH = 26;      // one inner row, measure or reference
+    // The `all of` caption above a conjunction's rows. Its own height rather than rowH, because it
+    // carries a word and a rail rather than a label and a value, and a caption as tall as the rows
+    // it introduces reads as one of them.
+    double captionH = 16;
 
     // The advance for an inner row's text, which the view draws smaller than the condition's own
     // name. Sizing those rows with `charW` overestimated their width by the ratio between the two

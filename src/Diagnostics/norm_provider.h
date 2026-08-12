@@ -237,7 +237,7 @@ std::unique_ptr<INormProvider> makeNormProvider();
 //
 // Same reason as makeMemoryPackProvider(): an editor holds a WORKING COPY of the user norm set that
 // has not been saved yet, and every surface showing that edit — the corridor list, the measure's
-// blast radius, the health strip — has to read an assembly containing it. Without this seam the
+// detection list, the health strip — has to read an assembly containing it. Without this seam the
 // only assembly available is the one on disk, so an unsaved corridor is invisible until it is
 // written, which forces a per-corridor save and makes one undo history across both registries
 // impossible.

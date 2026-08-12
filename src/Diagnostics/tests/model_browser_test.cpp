@@ -877,7 +877,7 @@ int main(int argc, char **argv)
                    .value(QStringLiteral("found")).toBool(),
               "an unknown id reports not-found rather than a blank page");
 
-        // A measure's blast radius is the LIST and not only a count: a count alone does not say
+        // What a measure detects is the LIST and not only a count: a count alone does not say
         // what is about to change.
         QString sharedMeasure;
         for (const QVariant &v : m.rows(QStringLiteral("measures"))) {
@@ -890,8 +890,11 @@ int main(int argc, char **argv)
                 for (const QVariant &sv : m.inspect(QStringLiteral("measures"), mid)
                                                .value(QStringLiteral("sections")).toList()) {
                     const QVariantMap s = sv.toMap();
+                    // Matched on the section's own title, so a rename has to come through here —
+                    // which is how "Blast radius" became "Detects" without the check quietly
+                    // passing over a section that no longer existed.
                     if (s.value(QStringLiteral("title")).toString().contains(
-                            QStringLiteral("Blast"), Qt::CaseInsensitive)
+                            QStringLiteral("Detects"), Qt::CaseInsensitive)
                         && s.value(QStringLiteral("count")).toInt() > 1) {
                         sharedMeasure = mid;
                         break;
@@ -1150,7 +1153,7 @@ int main(int argc, char **argv)
         check(m.unsavedCount() == 0, "and undo puts it back");
     }
 
-    std::printf("=== attaching a measure mints its signal ===\n");
+    std::printf("=== attaching a measure finds or mints its signal ===\n");
     {
         const auto  core = makeResourcePackProvider();
         const auto &p    = core->pack();
@@ -1161,13 +1164,59 @@ int main(int argc, char **argv)
 
         const QVariantList cands = m.measureCandidates(cond);
         check(!cands.isEmpty(), "there are measures this characteristic does not already read");
-        const QString mid = cands.value(0).toMap().value(QStringLiteral("id")).toString();
 
+        // Split by whether the library ALREADY asks this question of this measure, because the two
+        // answers are different and only one of them used to happen.
+        //
+        // Reuse is what conjunctions need. `top` is `thin` AND two further facts, so it is detected
+        // by the very signal `thin` is detected by — one test, cited twice. Minting unconditionally
+        // put a second signal with identical semantics beside the first, and the two then had to be
+        // kept in step for ever by an author with no way of knowing they were a pair.
+        const auto highCorridorSignalFor = [&p](const QString &measureId) {
+            for (const Signal &sg : p.signalDefs)
+                if (sg.measures.size() == 1 && sg.measures.first() == measureId
+                    && sg.test == SignalTest::OutsideCorridor && !sg.threshold.has_value()
+                    && sg.direction.has_value() && *sg.direction == Direction::High)
+                    return sg.id;
+            return QString();
+        };
+
+        QString fresh, shared, sharedSignal;
+        for (const QVariant &v : cands) {
+            const QString id  = v.toMap().value(QStringLiteral("id")).toString();
+            const QString sig = highCorridorSignalFor(id);
+            if (sig.isEmpty()) { if (fresh.isEmpty())  fresh  = id; }
+            else               { if (shared.isEmpty()) { shared = id; sharedSignal = sig; } }
+        }
+        check(!fresh.isEmpty() && !shared.isEmpty(),
+              "the shipped pack offers both a measure nothing reads at this tail and one something does");
+
+        const QString mid = fresh;
         const int signalsBefore = m.rows(QStringLiteral("signals")).size();
         const QVariantMap r = m.addMeasureTo(cond, mid, QStringLiteral("high"));
         check(r.value(QStringLiteral("ok")).toBool(), "the measure attaches");
         check(m.rows(QStringLiteral("signals")).size() == signalsBefore + 1,
-              "and a signal is minted to read it");
+              "and a signal is minted when nothing already asks that question");
+
+        // The other half: a measure some other condition already reads at this tail borrows THAT
+        // signal rather than growing a near-duplicate beside it.
+        const int beforeShared = m.rows(QStringLiteral("signals")).size();
+        const QVariantMap rs = m.addMeasureTo(cond, shared, QStringLiteral("high"));
+        check(rs.value(QStringLiteral("ok")).toBool(), "a measure something already reads attaches too");
+        check(m.rows(QStringLiteral("signals")).size() == beforeShared,
+              "…and mints NOTHING — the existing signal is reused");
+        {
+            // Read through the table rather than the pack, the way QML would: the signal's OWN
+            // "read by" count is what says the two conditions cite one test rather than two copies
+            // of it, and it is the number an author would notice going up.
+            const QVariantMap sigRow = rowFor(m.rows(QStringLiteral("signals")), sharedSignal);
+            check(!sigRow.isEmpty(), "…and the reused signal is still the same row");
+            const QVariantList sigCells = sigRow.value(QStringLiteral("cells")).toList();
+            check(!sigCells.isEmpty()
+                      && sigCells.last().toMap().value(QStringLiteral("text")).toInt() >= 2,
+                  "…now read by at least two conditions, which is the point of reusing it");
+        }
+        m.undo();
 
         // Offering it twice must refuse, and must leave nothing behind — the copy-on-write reach
         // for the condition happens before the refusal can be known.
@@ -1380,6 +1429,37 @@ int main(int argc, char **argv)
         check(g.value(QStringLiteral("width")).toDouble() > 0
               && g.value(QStringLiteral("height")).toDouble() > 0,
               "with a size to scroll inside");
+
+        // THE SHIPPED CONJUNCTION, ALL THE WAY THROUGH THE MARSHALLING. dag_layout_test proves the
+        // caption on a hand-built fixture; this proves it survives the trip to QML on the content a
+        // reader will actually open, which is the only place the node map's keys are exercised.
+        {
+            QVariantMap withRows = opts;
+            withRows.insert(QStringLiteral("includeMeasures"), true);
+            const QVariantMap tg = m.dag(QStringLiteral("top"), withRows);
+            QVariantMap topNode;
+            for (const QVariant &nv : tg.value(QStringLiteral("nodes")).toList())
+                if (nv.toMap().value(QStringLiteral("id")).toString() == QLatin1String("top"))
+                    topNode = nv.toMap();
+            check(!topNode.isEmpty(), "`top` draws");
+            check(topNode.value(QStringLiteral("detection")).toString() == QStringLiteral("all"),
+                  "…as a conjunction, in the map the view reads");
+            check(topNode.value(QStringLiteral("captionH")).toDouble() > 0,
+                  "…with room for the caption that says so");
+            check(topNode.value(QStringLiteral("measures")).toList().size() == 3,
+                  "…over the three measures it is the conjunction of");
+
+            // The row detail, chosen in the layout so the width and the drawing agree on one string.
+            // `top` reads a strike height past a threshold, so at least one row states its number
+            // rather than leaving the reader to guess what "outside its normal range" meant.
+            int withNumber = 0;
+            for (const QVariant &rv : topNode.value(QStringLiteral("measures")).toList()) {
+                const QString d = rv.toMap().value(QStringLiteral("detail")).toString();
+                if (d.startsWith(QStringLiteral("above ")) || d.startsWith(QStringLiteral("below ")))
+                    ++withNumber;
+            }
+            check(withNumber >= 1, "…and a thresholded row says which side of what");
+        }
 
         // Every characteristic in the table, so no row can open onto a blank canvas.
         int blank = 0;
@@ -2447,7 +2527,7 @@ int main(int argc, char **argv)
         for (const QString &want : { QStringLiteral("consequence"), QStringLiteral("injuryNote"),
                                      QStringLiteral("aliases"), QStringLiteral("citation"),
                                      QStringLiteral("state"), QStringLiteral("kind"),
-                                     QStringLiteral("prominence") })
+                                     QStringLiteral("prominence"), QStringLiteral("detection") })
             check(offered.contains(want),
                   qPrintable(QStringLiteral("a characteristic's %1 is reachable").arg(want)));
 
@@ -2670,6 +2750,123 @@ int main(int argc, char **argv)
                       == QStringLiteral("alignment stick · mat"),
                   "and the list round-trips through the one-line form");
             check(m.undo().value(QStringLiteral("ok")).toBool(), "and undoes");
+        }
+    }
+
+    std::printf("=== a conjunction, a threshold and an instrument ladder ===\n");
+    {
+        // The three fields the engine grew for `top`, `sky` and the launch-monitor ladder, none of
+        // which the editor could see or set. Each is checked through the SAME surfaces an author
+        // uses — the table cell and the inspector field — rather than against the pack, because a
+        // field that round-trips in C++ and never reaches a control is the bug being closed.
+
+        // ── how a condition combines its signals ─────────────────────────────
+        const QString conj = QStringLiteral("top");
+        if (!rowFor(m.rows(QStringLiteral("characteristics")), conj).isEmpty()) {
+            const QVariantMap row  = rowFor(m.rows(QStringLiteral("characteristics")), conj);
+            const QVariantMap cellD = cellFor(row, QStringLiteral("detection"));
+            check(cellD.value(QStringLiteral("value")).toString() == QStringLiteral("all"),
+                  "a shipped conjunction reads `all` in the table");
+            check(cellD.value(QStringLiteral("editable")).toBool(),
+                  "…and the cell is one you can change it from");
+
+            check(m.setField(QStringLiteral("characteristics"), conj,
+                             QStringLiteral("detection"), QStringLiteral("any"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "it can be turned back into a disjunction");
+            check(cellFor(rowFor(m.rows(QStringLiteral("characteristics")), conj),
+                          QStringLiteral("detection")).value(QStringLiteral("value")).toString()
+                      == QStringLiteral("any"),
+                  "…and the table says so");
+            check(!m.setField(QStringLiteral("characteristics"), conj,
+                              QStringLiteral("detection"), QStringLiteral("both"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "a mode that is not one of the two is refused");
+            check(m.undo().value(QStringLiteral("ok")).toBool(), "and it undoes");
+        }
+
+        // ── the number a threshold signal grades against ─────────────────────
+        const QString thin = QStringLiteral("sig_thin");
+        if (!rowFor(m.rows(QStringLiteral("signals")), thin).isEmpty()) {
+            check(m.setField(QStringLiteral("signals"), thin,
+                             QStringLiteral("threshold"), QStringLiteral("-12"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "a threshold signal's number can be typed");
+            check(!m.setField(QStringLiteral("signals"), thin,
+                              QStringLiteral("threshold"), QStringLiteral("deep"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "…and a word is not a number");
+
+            // THE TRANSACTION RULE. The pack validates test and threshold against each other in both
+            // directions, so a test change that left the pair disagreeing would save a library that
+            // will not load. Moving TO a test that authors a number is refused while there is none;
+            // moving AWAY from one drops it, which undo can put back.
+            check(m.setField(QStringLiteral("signals"), thin,
+                             QStringLiteral("test"), QStringLiteral("outsideCorridor"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "a threshold test can become a corridor test");
+            check(cellFor(rowFor(m.rows(QStringLiteral("signals")), thin),
+                          QStringLiteral("threshold")).value(QStringLiteral("field")).toString()
+                      .isEmpty(),
+                  "…and its number stops being editable, because it now inherits one");
+            check(!m.setField(QStringLiteral("signals"), thin,
+                              QStringLiteral("test"), QStringLiteral("threshold"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "…and it cannot go back until a number is given, which is the trap being closed");
+            check(m.undo().value(QStringLiteral("ok")).toBool(), "the test change undoes");
+            check(m.undo().value(QStringLiteral("ok")).toBool(), "and so does the number");
+        }
+
+        // ── the instrument ladder ────────────────────────────────────────────
+        const QString aa = QStringLiteral("m_attackAngle");
+        if (!rowFor(m.rows(QStringLiteral("measures")), aa).isEmpty()) {
+            const QVariantMap row = rowFor(m.rows(QStringLiteral("measures")), aa);
+            const QVariantList cells = row.value(QStringLiteral("cells")).toList();
+            bool showsLadder = false;
+            for (const QVariant &cv : cells)
+                if (cv.toMap().value(QStringLiteral("text")).toString()
+                        .contains(QStringLiteral("lm.attackAngle → attackAngle")))
+                    showsLadder = true;
+            check(showsLadder, "the measures table shows the whole ladder, preferred rung first");
+
+            // Every refusal the two registries between them require, asked HERE so an author meets
+            // it while typing rather than when the library is next assembled.
+            check(!m.addPreferKey(aa, QStringLiteral("attackAngle"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "a measure cannot prefer its own key over itself");
+            check(!m.addPreferKey(aa, QStringLiteral("lm.attackAngle"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "…nor one it already prefers");
+            check(!m.addPreferKey(aa, QStringLiteral("no.such.metric"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "…nor a metric the catalogue has never heard of");
+            check(!m.addPreferKey(aa, QStringLiteral("lm.strikeHeight"))
+                       .value(QStringLiteral("ok")).toBool(),
+                  "…nor one stated in another unit, which would grade against the wrong corridor");
+
+            // And the same rule stated the other way: the picker cannot OFFER what the write
+            // refuses. Counted rather than checked per candidate — one PASS a line for every metric
+            // in the catalogue would bury the block it sits in.
+            const QVariantList offers = m.metricKeyCandidates(aa);
+            int illegal = 0, wrongUnit = 0;
+            for (const QVariant &cv : offers) {
+                const QString key = cv.toMap().value(QStringLiteral("id")).toString();
+                if (key == QStringLiteral("attackAngle") || key == QStringLiteral("lm.attackAngle"))
+                    ++illegal;
+                if (key == QStringLiteral("lm.strikeHeight")) ++wrongUnit;
+            }
+            check(!offers.isEmpty(), "the picker has something to offer at all");
+            check(illegal == 0, "…offering neither its own key nor one already on the ladder");
+            check(wrongUnit == 0, "…and nothing stated in another unit");
+
+            check(m.removePreferKey(aa, QStringLiteral("lm.attackAngle"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "a rung can be taken off the ladder");
+            check(m.addPreferKey(aa, QStringLiteral("lm.attackAngle"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "…and put back");
+            check(m.undo().value(QStringLiteral("ok")).toBool(), "which undoes");
+            check(m.undo().value(QStringLiteral("ok")).toBool(), "and so does the removal");
         }
     }
 

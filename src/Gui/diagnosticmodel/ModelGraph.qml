@@ -276,6 +276,10 @@ Item {
         for (var i = 0; i < ms.length; i++)   h -= (ms[i].h || 0)
         var rs = n.references || []
         for (var k = 0; k < rs.length; k++)   h -= (rs[k].h || 0)
+        // The conjunction caption is inner room too, and forgetting it here does not draw a wrong
+        // caption — it silently makes the TITLE row taller by that much, mis-centring the label and
+        // the expand toggles on every box that has one. Zero on an `any` node, which is most of them.
+        h -= (n.captionH || 0)
         return h
     }
 
@@ -739,6 +743,34 @@ Item {
                 // A measure nothing can produce is drawn as the gap it is rather than left to look
                 // live. That is the whole reason for showing detectors at all: a condition the app
                 // cannot currently see is the thing this view is best placed to make obvious.
+                // ── The conjunction caption ──────────────────────────────────
+                //
+                // An unlabelled stack of rows reads as alternatives — any of these detects this —
+                // and on a conjunction that is the opposite of true. The caption says which, and
+                // the rail below it carries the claim down the rows it governs so a reader arriving
+                // at the third row still knows it is one of three and not one of one.
+                //
+                // INERT. It is not in _measureAt(), so it has no hover and no press: pressing a row
+                // opens that measure, and there is no measure here to open. Adding it there would
+                // also shift the topmost measure's hit rect off its own drawing.
+                Item {
+                    visible: (nodeItem.modelData.captionH || 0) > 0
+                    x: 0
+                    y: root._condRowH(nodeItem.modelData)
+                    width:  nodeItem.width
+                    height: nodeItem.modelData.captionH || 0
+
+                    Text {
+                        anchors.left:           parent.left
+                        anchors.leftMargin:     Theme.sp(9)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: nodeItem.modelData.detectionLabel || ""
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                    }
+                }
+
                 Repeater {
                     model: nodeItem.modelData.measures || []
                     delegate: Item {
@@ -775,13 +807,30 @@ Item {
 
                         // A hairline above each row, so the stack reads as rows of one box rather
                         // than as text that happened to be placed under a name.
+                        //
+                        // NOT on the first row of a conjunction: the caption sits directly above it
+                        // and a rule between them would cut the caption off from the rows it is
+                        // introducing, which is the one thing it is there to be attached to.
                         Rectangle {
+                            visible: !(mrow.index === 0 && (nodeItem.modelData.captionH || 0) > 0)
                             anchors { left: parent.left; right: parent.right; top: parent.top }
                             anchors.leftMargin:  Theme.sp(6)
                             anchors.rightMargin: Theme.sp(6)
                             height: 1
                             color: Theme.colorBorderMid
                             opacity: Theme.borderOpacityNormal
+                        }
+
+                        // The rail. Only on a conjunction, and it is what makes three rows read as
+                        // one claim rather than three — the caption names the rule and this carries
+                        // it down the rows the rule applies to.
+                        Rectangle {
+                            visible: (nodeItem.modelData.captionH || 0) > 0
+                            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                            anchors.leftMargin: Theme.sp(6)
+                            width: Theme.sp(2)
+                            color: Theme.colorAccent
+                            opacity: 0.5
                         }
 
                         RowLayout {
@@ -801,7 +850,10 @@ Item {
                                 elide: Text.ElideRight
                             }
                             Text {
-                                text: mrow.modelData.available ? "" : mrow.modelData.statusLabel
+                                // Chosen in the layout, not here — the box was SIZED for whichever
+                                // of the three competing facts won, and picking a different one at
+                                // draw time would elide against a width computed for another string.
+                                text: mrow.modelData.detail || ""
                                 visible: text.length > 0
                                 font.family:    Theme.fontData
                                 font.pixelSize: Theme.fontSzMicro

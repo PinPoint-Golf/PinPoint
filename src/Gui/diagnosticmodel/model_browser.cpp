@@ -240,6 +240,50 @@ QVariantList stateOptions()
     return l;
 }
 
+// Which of the four tests a signal applies. Enum-table driven, like groupOptions() and unlike
+// directionOptionList() — the labels beside each token were already authored in characteristic.cpp
+// and spelling them again here is how the two would come to disagree.
+QVariantList testOptions()
+{
+    QVariantList l;
+    for (SignalTest t : allSignalTests())
+        l.append(option(signalTestName(t), signalTestLabel(t)));
+    return l;
+}
+
+// True when the test grades against a figure the AUTHOR types rather than one the norm supplies.
+// The pack validator states this rule in both directions (characteristic_pack.cpp, signalThreshold)
+// and the editor has to know it too, because the two fields have to be written in one go.
+bool signalAuthorsNumber(SignalTest t)
+{
+    return t == SignalTest::Threshold || t == SignalTest::Ratio;
+}
+
+QString signalTestHint(SignalTest t)
+{
+    switch (t) {
+    case SignalTest::OutsideCorridor:
+        return QObject::tr("inherits the corridor — needs a norm, authors no number");
+    case SignalTest::Threshold:
+        return QObject::tr("works where no norm exists; you type the number");
+    case SignalTest::Order:
+        return QObject::tr("two measures, and the first must peak before the second");
+    case SignalTest::Ratio:
+        return QObject::tr("two measures of the SAME unit, divided; you type the number");
+    }
+    return QString();
+}
+
+// How a condition combines its signals. Two values, so a picker is overkill in a table cell and
+// exactly right in the inspector — see the ALL semantics in characteristic_engine.cpp.
+QVariantList detectionOptions()
+{
+    QVariantList l;
+    for (DetectionMode d : allDetectionModes())
+        l.append(option(detectionModeName(d), detectionModeLabel(d)));
+    return l;
+}
+
 // Resolvability drives the row dot. A capture gap is deliberately NOT the fault colour: it is not a
 // failure, it is an honest statement that no sensor we have can see this. Returned as a tone NAME
 // rather than a colour, so the delegate keeps it in Theme tokens.
@@ -482,6 +526,10 @@ static QStringList valueFacetOrder(const QString &key)
         const auto &rungs = allProminences();
         for (auto it = rungs.rbegin(); it != rungs.rend(); ++it) out << prominenceLabel(*it);
     }
+    else if (key == QLatin1String("detection"))
+        for (DetectionMode d : allDetectionModes()) out << detectionModeLabel(d);
+    else if (key == QLatin1String("test"))
+        for (SignalTest t : allSignalTests()) out << signalTestLabel(t);
     return out;
 }
 
@@ -909,6 +957,17 @@ QVariantList ModelBrowser::columns(const QString &type) const
         c.append(column(QStringLiteral("kind"), tr("Kind"), 104));
         c.append(column(QStringLiteral("prominence"), tr("How common"), 118));
         c.append(column(QStringLiteral("measures"), tr("Meas"), 52, false, QStringLiteral("right"), true));
+        // Beside the COUNT it qualifies, because the two are one fact: three signals that each fire
+        // this on their own and three that only fire it together are different conditions wearing
+        // the same "3".
+        //
+        // STATED ON EVERY ROW, not blanked on the ordinary value. Blanking read better in a mock-up
+        // and breaks two things in practice: the facet machinery skips empty cells and then drops
+        // any facet left with one value, so "which of these are conjunctions" — the one question
+        // this column exists to answer, and otherwise unaskable — would silently never appear. And
+        // an empty cell in an editable column looks like a cell nobody has filled in rather than one
+        // holding the default. `reach` and `kind` are near-uniform down the same table already.
+        c.append(column(QStringLiteral("detection"), tr("Fires on"), 104));
         c.append(column(QStringLiteral("causes"), tr("Caus"), 52, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("explains"), tr("Expl"), 52, false, QStringLiteral("right"), true));
         // What CONVERGES here — how many faults eventually produce this. A characteristic is
@@ -940,6 +999,11 @@ QVariantList ModelBrowser::columns(const QString &type) const
         c.append(column(QStringLiteral("name"), tr("Name"), 240, true));
         c.append(column(QStringLiteral("unit"), tr("Unit"), 96));
         c.append(column(QStringLiteral("anchor"), tr("Anchor"), 86, false, QStringLiteral("left"), true));
+        // WHAT IT READS, which this table has never shown. It was survivable while a measure read
+        // exactly one metric; an instrument ladder makes the omission into a question the table
+        // cannot answer at all — "does this one prefer the device?" — so the whole ladder goes in,
+        // best first, and the arrow is the order the engine tries them in.
+        c.append(column(QStringLiteral("reads"), tr("Reads"), 190, false, QStringLiteral("left"), true));
         c.append(column(QStringLiteral("status"), tr("Status"), 96));
         c.append(column(QStringLiteral("readBy"), tr("Read by"), 68, false, QStringLiteral("right"), true));
         // What the swing on screen actually read. ONLY when there is one — a permanent column of
@@ -975,6 +1039,9 @@ QVariantList ModelBrowser::columns(const QString &type) const
         c.append(column(QStringLiteral("name"), tr("Id"), 240, true, QStringLiteral("left"), true));
         c.append(column(QStringLiteral("test"), tr("Test"), 130));
         c.append(column(QStringLiteral("direction"), tr("Direction"), 104));
+        // Blank unless the test authors one. Beside `test` rather than at the end, because "past a
+        // threshold" and the number it is past are one statement split over two cells.
+        c.append(column(QStringLiteral("threshold"), tr("Past"), 78, false, QStringLiteral("right"), true));
         c.append(column(QStringLiteral("measures"), tr("Measures"), 220));
         c.append(column(QStringLiteral("usedBy"), tr("Used by"), 68, false, QStringLiteral("right"), true));
     } else if (type == kLinks) {
@@ -1074,6 +1141,15 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
     editable(reachCell, QStringLiteral("reach"), QStringLiteral("enum"),
              confirmedByName(c.confirmedBy), reachOptions());
 
+    // Blank on `any`, and blank means "the ordinary thing" rather than "unset" — every condition has
+    // a mode. Editable even while blank, so the column is how you MAKE a conjunction as well as how
+    // you spot one; the enum editor supplies both words when it opens.
+    QVariantMap detectionCell = cell(detectionModeLabel(c.detection),
+                                     c.detection == DetectionMode::All ? QString()
+                                                                       : QStringLiteral("dim"));
+    editable(detectionCell, QStringLiteral("detection"), QStringLiteral("enum"),
+             detectionModeName(c.detection), detectionOptions());
+
     QVariantMap tierCell = cell(provenanceTierLabel(c.provenance.tier),
                                 c.provenance.tier == ProvenanceTier::Proposed
                                     ? QStringLiteral("warn") : QString());
@@ -1105,6 +1181,7 @@ QVariantMap ModelBrowser::conditionRow(const Condition &c, bool asCause) const
         cells.append(tierCell);
     } else {
         cells.append(cell(QString::number(measureN), QString(), true, QStringLiteral("right")));
+        cells.append(detectionCell);
         cells.append(cell(QString::number(causesOf(p, c.id).size()), QString(), true, QStringLiteral("right")));
         cells.append(cell(QString::number(effectsOf(p, c.id).size()), QString(), true, QStringLiteral("right")));
         // Dimmed at zero, never WARNED. Nothing leading here has two readings and the cell cannot
@@ -1204,10 +1281,19 @@ QVariantMap ModelBrowser::measureRow(const Measure &m) const
 
     const int users = measureUsers(m.id);
 
+    // WHAT IT READS, best first, joined by the arrow the engine walks. A Composed measure reads no
+    // catalogue key at all — it is built from facets — and says so rather than showing an empty
+    // cell that would read as an unfilled one.
+    const QStringList ladder = measureKeyLadder(m);
+    QVariantMap readsCell = cell(ladder.isEmpty() ? tr("built from facets")
+                                                  : ladder.join(QStringLiteral(" → ")),
+                                 ladder.isEmpty() ? QStringLiteral("dim") : QString(), true);
+
     QVariantList cells;
     cells.append(nameCell);
     cells.append(unitCell);
     cells.append(cell(anchor, QStringLiteral("dim"), true));
+    cells.append(readsCell);
     cells.append(statusCell);
     // Read by nothing is the interesting case — 42 measures in the shipped pack — so it is toned
     // rather than rendered as an ordinary zero.
@@ -1276,10 +1362,29 @@ QVariantMap ModelBrowser::signalRow(const Signal &s) const
         editable(dirCell, QStringLiteral("direction"), QStringLiteral("enum"),
                  directionName(*s.direction), directionOptionList());
 
+    // The test, in words rather than as its token, and EDITABLE — the four kinds were readable here
+    // long before any of them could be chosen.
+    QVariantMap testCell = cell(signalTestLabel(s.test));
+    editable(testCell, QStringLiteral("test"), QStringLiteral("enum"),
+             signalTestName(s.test), testOptions());
+
+    // Blank where the test inherits its number, dimmed rather than empty so the column reads as
+    // "nothing to state here" instead of "nobody has filled this in". Editable only on the two tests
+    // that author one: an author who types into a corridor signal's cell is told why it cannot take
+    // one, which is a better answer than a cell that silently accepts and discards.
+    QVariantMap thresholdCell = cell(s.threshold.has_value() ? QString::number(*s.threshold)
+                                                             : tr("—"),
+                                     s.threshold.has_value() ? QString() : QStringLiteral("dim"),
+                                     true, QStringLiteral("right"));
+    if (signalAuthorsNumber(s.test))
+        editable(thresholdCell, QStringLiteral("threshold"), QStringLiteral("number"),
+                 s.threshold.has_value() ? QString::number(*s.threshold) : QString());
+
     QVariantList cells;
     cells.append(cell(s.id, QString(), true));
-    cells.append(cell(signalTestName(s.test)));
+    cells.append(testCell);
     cells.append(dirCell);
+    cells.append(thresholdCell);
     cells.append(cell(measureLabels.join(QStringLiteral(" · "))));
     cells.append(cell(QString::number(users), users == 0 ? QStringLiteral("warn") : QString(), true,
                       QStringLiteral("right")));
@@ -1986,9 +2091,14 @@ QVariantList ModelBrowser::facets(const QString &type) const
     // list has no numeric facet at all now (see quantileFacets()), so without this "how common is
     // it" would sit below `group`'s nine chips and `kind`'s seven, which is below the fold. The
     // question a coach arrives with should not need scrolling to.
+    // `detection` sits LAST of the vocabularies, and deliberately: it has two values and one of them
+    // holds all but a couple of rows, so as a browsing question it is nearly always the wrong one to
+    // ask. What it is for is the other direction — "which conditions are conjunctions" is a question
+    // with a short, exact answer that is otherwise unaskable, and an author maintaining them needs
+    // to find them without knowing their names.
     if (type == kCharacteristics)  keys = { QStringLiteral("prominence"), QStringLiteral("group"),
                                             QStringLiteral("kind"), QStringLiteral("reach"),
-                                            QStringLiteral("evidence") };
+                                            QStringLiteral("evidence"), QStringLiteral("detection") };
     else if (type == kCauses)      keys = { QStringLiteral("prominence"), QStringLiteral("group"),
                                             QStringLiteral("kind"), QStringLiteral("reach"),
                                             QStringLiteral("evidence") };
@@ -2283,7 +2393,7 @@ QVariantList ModelBrowser::searchAll(const QString &query) const
     return out;
 }
 
-// ── Blast radius ────────────────────────────────────────────────────────────
+// ── What a measure detects ──────────────────────────────────────────────────
 
 int ModelBrowser::measureUsers(const QString &measureId) const
 {
@@ -2600,6 +2710,18 @@ QVariantList ModelBrowser::fieldsOf(const QString &type, const QString &id) cons
         f.append(fieldRow(QStringLiteral("reach"), tr("How it is reached"), QStringLiteral("enum"),
                           confirmedByName(c->confirmedBy), reachOptions(),
                           reachHint(c->confirmedBy)));
+        // Beside `reach`, because the pair is one question asked twice: how this is established,
+        // and — when it is established by signals — how those signals combine. The hint counts the
+        // signals rather than restating the mode, since "every signal" means nothing until you know
+        // there are three of them.
+        f.append(fieldRow(QStringLiteral("detection"), tr("Signals combine by"),
+                          QStringLiteral("enum"), detectionModeName(c->detection),
+                          detectionOptions(),
+                          c->detectedBy.isEmpty()
+                              ? tr("nothing detects this yet")
+                              : (c->detection == DetectionMode::All
+                                     ? tr("all %n signal(s) must fire", "", c->detectedBy.size())
+                                     : tr("any of %n signal(s) fires it", "", c->detectedBy.size()))));
         f.append(fieldRow(QStringLiteral("state"), tr("State"), QStringLiteral("enum"),
                           conditionStateName(c->state), stateOptions()));
         f.append(fieldRow(QStringLiteral("aliases"), tr("Also called"), QStringLiteral("text"),
@@ -2633,10 +2755,24 @@ QVariantList ModelBrowser::fieldsOf(const QString &type, const QString &id) cons
     } else if (type == kSignals) {
         const Signal *sig = p.signal(id);
         if (!sig) return f;
+        f.append(fieldRow(QStringLiteral("test"), tr("How it is tested"),
+                          QStringLiteral("enum"), signalTestName(sig->test), testOptions(),
+                          signalTestHint(sig->test)));
         f.append(fieldRow(QStringLiteral("direction"), tr("Which tail fires"),
                           QStringLiteral("enum"),
                           sig->direction.has_value() ? directionName(*sig->direction) : QString(),
                           directionOptionList()));
+        // Offered on EVERY signal, not only the two that author a number, because the field is where
+        // an author reads that this one does not — a threshold row that appeared and vanished with
+        // the test above it would leave "inherits its corridor" as something you can only learn by
+        // changing the test and changing it back. Blank on a corridor test, and writing blank there
+        // is accepted as the no-op it is.
+        f.append(fieldRow(QStringLiteral("threshold"), tr("Fires past"),
+                          QStringLiteral("number"),
+                          sig->threshold.has_value() ? QString::number(*sig->threshold) : QString(),
+                          {}, signalAuthorsNumber(sig->test)
+                                  ? tr("the number this test compares against")
+                                  : tr("inherited from the corridor — not authored here")));
 
     } else if (type == kLinks) {
         QString  from, to;
@@ -2967,6 +3103,29 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
             sections.append(section(tr("Comes from metric"), rows));
         }
 
+        // ── The instrument ladder ────────────────────────────────────────────
+        //
+        // Tried BEFORE the key above, in order, and the first rung this swing actually carries is
+        // the one that answers. Shown even when empty, unlike most sections here, because the empty
+        // state is the thing worth knowing: a measure with no ladder reads one instrument and only
+        // one, and on a paired quantity that is a decision somebody made rather than a fact.
+        if (m->kind == MeasureKind::Provided) {
+            QVariantList ladder;
+            for (const QString &k : m->preferKeys) {
+                const MetricDescriptor *pd = m_cat.descriptor(k);
+                ladder.append(hubRow(kMetrics, k, k,
+                                     pd && !pd->label.isEmpty() ? pd->label
+                                                                : tr("not in the catalogue")));
+            }
+            sections.append(section(
+                tr("Prefers"), ladder,
+                ladder.isEmpty()
+                    ? tr("Reads %1 and nothing else. A better instrument added here is tried "
+                         "first, and this key stays as the fallback.").arg(m->metricKey)
+                    : tr("Tried in this order; %1 is the fallback.").arg(m->metricKey),
+                QStringLiteral("list"), QStringLiteral("preferKey")));
+        }
+
         QVariantList sigs;
         for (const Signal &s : p.signalDefs) {
             if (!s.measures.contains(id)) continue;
@@ -2978,10 +3137,15 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
         }
         sections.append(section(tr("Read by signals"), sigs));
 
-        // The blast radius, as the LIST and not only a count: a count alone does not say what is
-        // about to change, and this measure may be shared.
+        // THE INVERSE OF "Detected by", and named as it. A condition's page lists the measures
+        // that detect it; this is the same edge read from the other end, so it is the same word.
+        // "Blast radius" said it before — a demolition metaphor for what is only a graph edge, and
+        // one that made a shared measure sound like a hazard rather than a measure doing its job.
+        //
+        // The LIST and not only a count: a count alone does not say what is about to change, and
+        // this measure may be shared.
         const QVariantList users = measureUserRows(id);
-        sections.append(section(tr("Blast radius"), users,
+        sections.append(section(tr("Detects"), users,
                                 tr("characteristics that would change if this measure changed")));
     } else if (type == kMetrics) {
         const MetricDescriptor *d = m_cat.descriptor(id);
@@ -3177,9 +3341,11 @@ QVariantMap ModelBrowser::inspect(const QString &type, const QString &id) const
                                       statusTone(meas->status)));
         sections.append(section(tr("Grades"), meas2));
 
-        // Who this actually moves. A corridor edit has no blast radius outside its measure, and
-        // every bit of one inside it.
-        sections.append(section(tr("Blast radius"), measureUserRows(mid),
+        // Who this actually moves. A corridor reaches nothing outside its own measure and
+        // everything inside it — so this is the measure's detection edge again, read through the
+        // numbers that grade it. "Decides" rather than "Detects": the measure does the detecting,
+        // and what a corridor contributes is where the line falls.
+        sections.append(section(tr("Decides"), measureUserRows(mid),
                                 tr("characteristics graded by this corridor")));
 
         // The other contexts, so driver-against-iron-against-wedge is one glance rather than five
@@ -3366,6 +3532,9 @@ QVariantMap ModelBrowser::dag(const QString &conditionId, const QVariantMap &opt
     opt.gapX       = num("gapX", opt.gapX);
     opt.gapY       = num("gapY", opt.gapY);
     opt.rowH       = num("rowH", opt.rowH);
+    // Read here or it silently keeps its C++ default while the QML that passed one believes it took
+    // effect — the caption would then be sized in layout units the theme never chose.
+    opt.captionH   = num("captionH", opt.captionH);
     opt.rowCharW   = num("rowCharW", opt.rowCharW);
     opt.rowMaxW    = num("rowMaxW", opt.rowMaxW);
     opt.padX       = num("padX", opt.padX);
@@ -3423,6 +3592,13 @@ QVariantMap ModelBrowser::marshalLayout(const DagLayout &l, bool hideWeak, bool 
         m.insert(QStringLiteral("reachLabel"), n.reachLabel);
         m.insert(QStringLiteral("available"), n.available);
         m.insert(QStringLiteral("unavailableReason"), n.unavailableReason);
+        // How the rows below combine, and what the caption above them costs. Empty and zero on an
+        // `any` box — which is every box in a library that has authored no conjunctions, so the
+        // view's arithmetic is unchanged there. layoutHub() emits no measures at all and therefore
+        // no caption either, which is why these have to read sensibly at their defaults.
+        m.insert(QStringLiteral("detection"), n.detection);
+        m.insert(QStringLiteral("detectionLabel"), n.detectionLabel);
+        m.insert(QStringLiteral("captionH"), n.captionH);
         m.insert(QStringLiteral("coverage"), n.coverage);
         m.insert(QStringLiteral("hiddenCauses"), n.hiddenCauses);
         m.insert(QStringLiteral("hiddenEffects"), n.hiddenEffects);
@@ -3438,6 +3614,10 @@ QVariantMap ModelBrowser::marshalLayout(const DagLayout &l, bool hideWeak, bool 
             r.insert(QStringLiteral("label"), dm.label);
             r.insert(QStringLiteral("statusLabel"), dm.statusLabel);
             r.insert(QStringLiteral("metricKey"), dm.metricKey);
+            // The chosen right-hand string, decided in the layout so the width it was sized for and
+            // the width it draws at are the same string. See DagMeasure::detail.
+            r.insert(QStringLiteral("detail"), dm.detail);
+            r.insert(QStringLiteral("keyLadder"), dm.keyLadder);
             r.insert(QStringLiteral("available"), dm.available);
             r.insert(QStringLiteral("unavailableReason"), dm.unavailableReason);
             r.insert(QStringLiteral("y"), dm.y);
@@ -3639,6 +3819,59 @@ QVariantList ModelBrowser::measureCandidates(const QString &conditionId, const Q
         r.insert(QStringLiteral("label"), label);
         r.insert(QStringLiteral("detail"), measureStatusLabel(m.status));
         r.insert(QStringLiteral("tone"), statusTone(m.status));
+        out.append(r);
+    }
+    std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value(QStringLiteral("label")).toString().toCaseFolded()
+             < b.toMap().value(QStringLiteral("label")).toString().toCaseFolded();
+    });
+    return out;
+}
+
+// The metrics this measure could read INSTEAD of its own, when a swing carries one — the instrument
+// ladder, Measure::preferKeys.
+//
+// THE UNIT FILTER IS THE POINT, not a courtesy. A ladder is one quantity measured twice, so every
+// rung has to state the measure's unit or a corridor authored in degrees would grade a reading in
+// millimetres — silently, and ONLY on the swings where the preferred instrument happened to be
+// absent, which is the hardest possible failure to reproduce. diagnostics_catalogue_integrity_test
+// refuses such a pack, but a refusal at library-build time is a long way from the author who typed
+// it. Filtering here makes the illegal choice unofferable instead.
+//
+// It reads the CATALOGUE directly rather than the pack, and has to: the pack validator says in its
+// own comment that it has never been able to see the catalogue and must not start guessing at one,
+// so unit agreement between two metric keys is knowable only from this side of the join.
+QVariantList ModelBrowser::metricKeyCandidates(const QString &measureId, const QString &search) const
+{
+    const Measure *m = pack().measure(measureId);
+    if (!m) return {};
+
+    // Its own key is not a rung of its own ladder — the validator refuses `k == metricKey` — and
+    // neither is anything already on it.
+    QSet<QString> already(m->preferKeys.cbegin(), m->preferKeys.cend());
+    already.insert(m->metricKey);
+
+    // The unit to match against. The measure's own is authoritative where it states one; where it
+    // does not, its metricKey's descriptor is the next best thing; and where there is neither there
+    // is nothing to check against, so the filter stands down rather than offering nothing at all.
+    QString unit = m->unit;
+    if (unit.isEmpty())
+        if (const MetricDescriptor *own = m_cat.descriptor(m->metricKey)) unit = own->unit;
+
+    QVariantList out;
+    for (const MetricDescriptor *d : m_cat.all()) {
+        if (!d || already.contains(d->key)) continue;
+        if (!unit.isEmpty() && d->unit != unit) continue;
+        if (!search.trimmed().isEmpty()) {
+            const QString hay = QStringList{ d->key, d->label, d->group }.join(QLatin1Char(' '));
+            if (!matches(hay, search.trimmed())) continue;
+        }
+        QVariantMap r;
+        r.insert(QStringLiteral("id"), d->key);
+        // The KEY leads, because that is the identity an author is choosing and the thing that has
+        // to match the catalogue exactly; the human label is the detail beside it.
+        r.insert(QStringLiteral("label"), d->key);
+        r.insert(QStringLiteral("detail"), d->label);
         out.append(r);
     }
     std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
@@ -4153,6 +4386,20 @@ QVariantMap ModelBrowser::setField(const QString &type, const QString &id, const
         return refuse(why);
     };
 
+    // THE SAME ROLLBACK, ANSWERING YES. A write that turns out to change nothing — committing a
+    // field's own current value, which is the ordinary result of tabbing through an inspector — is
+    // not a refusal, so it must not read as one. But it has already touched the working copy on the
+    // way to finding out, and returning `accept` straight would leave exactly the override `reject`
+    // exists to prevent. It also returns BEFORE pushCommand, so an undo stack does not fill with
+    // entries that undo nothing.
+    auto unchanged = [&](const QString &why) {
+        m_working        = before;
+        m_workingNorms   = normsBefore;
+        m_workingScreens = screensBefore;
+        m_workingDrills  = drillsBefore;
+        return accept(why);
+    };
+
     QString what;    // for the undo label
     QString subject; // for the Edits list detail line
 
@@ -4186,6 +4433,18 @@ QVariantMap ModelBrowser::setField(const QString &type, const QString &id, const
             if (!confirmedByFromName(text, r)) return reject(tr("%1 is not a reach.").arg(text));
             c->confirmedBy = r;
             what           = tr("Reach → %1").arg(reachLabel(r));
+        } else if (field == QStringLiteral("detection")) {
+            DetectionMode d{};
+            if (!detectionModeFromName(text, d))
+                return reject(tr("%1 is not a way of combining signals.").arg(text));
+            c->detection = d;
+            // The label SAYS WHAT IT DID TO THE SIGNALS, not which token was written. This edit
+            // changes the meaning of every signal already attached — three signals that each
+            // identified the condition on their own now identify it only together — and an undo
+            // entry reading "Detection → all" would describe the keystroke rather than the change.
+            what = (d == DetectionMode::All)
+                       ? tr("Now needs ALL %n signal(s) together", "", c->detectedBy.size())
+                       : tr("Now fires on ANY of %n signal(s)", "", c->detectedBy.size());
         } else if (field == QStringLiteral("tier")) {
             ProvenanceTier t{};
             if (!provenanceTierFromName(text, t)) return reject(tr("%1 is not a tier.").arg(text));
@@ -4267,8 +4526,8 @@ QVariantMap ModelBrowser::setField(const QString &type, const QString &id, const
             return reject(tr("%1 cannot be edited here.").arg(field));
         }
 
-        // A measure is shared. The blast radius is stated in the result so the surface can say what
-        // else just changed, rather than leaving the author to discover it.
+        // A measure is shared. HOW MANY CHARACTERISTICS IT DETECTS is stated in the result so the
+        // surface can say what else just changed, rather than leaving the author to discover it.
         const int users = measureUsers(id);
         if (users > 1) subject = tr("%1 · %n characteristic(s) affected", "", users).arg(subject);
 
@@ -4291,6 +4550,58 @@ QVariantMap ModelBrowser::setField(const QString &type, const QString &id, const
             }
             s->direction = d;
             what = tr("Direction → %1").arg(directionPhrase(d, m ? m->highMeans : QString()).label);
+        } else if (field == QStringLiteral("test")) {
+            SignalTest t{};
+            if (!signalTestFromName(text, t)) return reject(tr("%1 is not a test.").arg(text));
+
+            // TEST AND THRESHOLD ARE ONE WRITE, because the pack validates their agreement in BOTH
+            // directions: the two tests that author a number must carry one, and the two that
+            // inherit theirs must not. Writing the test alone would leave the working pack in a
+            // state the validator fails — a saved library that will not load — and the author would
+            // see it as an error against a field they had not touched.
+            //
+            // The two directions are not symmetrical, so neither is the handling. Dropping TO an
+            // inheriting test discards the number, which is safe and recoverable by undo. Moving TO
+            // an authoring test cannot invent one, so it is refused with the order to do it in.
+            if (signalAuthorsNumber(t) && !s->threshold.has_value())
+                return reject(tr("“%1” grades against a number nobody has typed yet. Set “Fires "
+                                 "past” first, then change the test.").arg(signalTestLabel(t)));
+            if (!signalAuthorsNumber(t) && s->threshold.has_value())
+                s->threshold.reset();
+
+            // Arity is the validator's other rule about this field, and it is the one an author
+            // cannot fix from here — a signal's measures are set by attaching them to a condition.
+            if ((t == SignalTest::Order || t == SignalTest::Ratio) && s->measures.size() != 2)
+                return reject(tr("“%1” compares two measures and this signal reads %n.", "",
+                                 s->measures.size()).arg(signalTestLabel(t)));
+
+            s->test = t;
+            what    = tr("Test → %1").arg(signalTestLabel(t));
+        } else if (field == QStringLiteral("threshold")) {
+            // BLANK IS A NO-OP ON A TEST THAT INHERITS ITS NUMBER, not a refusal. The field is
+            // offered on every signal so an author can read that this one authors nothing (see
+            // fieldsOf), and a field that is shown and then rejects its own current value is a
+            // worse answer than one that quietly agrees there is nothing to write.
+            if (text.trimmed().isEmpty()) {
+                if (!signalAuthorsNumber(s->test)) {
+                    if (!s->threshold.has_value())
+                        return unchanged(tr("“%1” authors no number.").arg(signalTestLabel(s->test)));
+                    s->threshold.reset();
+                    what = tr("Threshold cleared");
+                } else {
+                    return reject(tr("“%1” has to be given a number — it has no corridor to inherit "
+                                     "one from.").arg(signalTestLabel(s->test)));
+                }
+            } else {
+                bool         ok  = false;
+                const double num = text.toDouble(&ok);
+                if (!ok) return reject(tr("%1 is not a number.").arg(text));
+                if (!signalAuthorsNumber(s->test))
+                    return reject(tr("“%1” inherits its number from the corridor, so one typed here "
+                                     "would never be read.").arg(signalTestLabel(s->test)));
+                s->threshold = num;
+                what         = tr("Fires past → %1").arg(num);
+            }
         } else {
             return reject(tr("%1 cannot be edited here.").arg(field));
         }
@@ -5019,10 +5330,31 @@ QVariantMap ModelBrowser::addMeasureTo(const QString &conditionId, const QString
 
     const CharacteristicPack before = m_working;
 
+    // AN EXISTING SIGNAL THAT ALREADY ASKS THIS QUESTION IS THE ONE TO USE, before any minting.
+    //
+    // Signals are shared, and conjunctions are the reason it matters. `top` is `thin` AND two
+    // further facts, so it reads the very signal `thin` is detected by — one test, cited twice.
+    // Minting on every attach instead would put a second signal with identical semantics beside the
+    // first, and the two would then have to be edited in step for ever by an author with no way of
+    // knowing they were a pair. It also made the shipped library unreproducible through the UI: the
+    // hand-authored `sig_thin` would never be found, only shadowed.
+    //
+    // Matched on everything that decides what a signal ASKS — measure, tail, test and the authored
+    // number — rather than on the id, so a hand-named signal is reused exactly as a minted one is.
+    QString reuseId;
+    for (const Signal &x : p.signalDefs) {
+        if (x.measures.size() != 1 || x.measures.first() != measureId) continue;
+        if (x.test != SignalTest::OutsideCorridor) continue;   // this path only ever mints these
+        if (x.threshold.has_value()) continue;
+        if (!x.direction.has_value() || *x.direction != d) continue;
+        reuseId = x.id;
+        break;
+    }
+
     // Same minted id as the old editor's attachMeasure(), deliberately: two spellings of one signal
     // id would let the same measure be attached twice at one tail.
     Signal s;
-    s.id        = QStringLiteral("sig_%1_%2").arg(measureId, direction);
+    s.id        = reuseId.isEmpty() ? QStringLiteral("sig_%1_%2").arg(measureId, direction) : reuseId;
     s.test      = SignalTest::OutsideCorridor;   // authors no numbers; inherits the corridor
     s.measures  = { measureId };
     s.direction = d;
@@ -5094,6 +5426,70 @@ QVariantMap ModelBrowser::removeMeasureFrom(const QString &conditionId, const QS
     rebuild();
     const QString what = tr("%1 no longer reads %2").arg(condLabel, measureLabel);
     pushCommand(tr("Measure removed"), what, before, m_workingNorms);
+    return accept(what);
+}
+
+// ── The instrument ladder ───────────────────────────────────────────────────
+//
+// Add and remove rather than a typed list, and APPEND rather than insert: `preferKeys` is ordered
+// best-first, and nothing in this panel reorders a list. That is a real limit and it is stated here
+// rather than hidden — with one preferred key, which is every ladder the library ships, the order is
+// fully determined and the gap costs nothing. The day a measure wants two, this is where the
+// reordering gesture goes.
+QVariantMap ModelBrowser::addPreferKey(const QString &measureId, const QString &metricKey)
+{
+    const CharacteristicPack &p = pack();
+    const Measure            *m = p.measure(measureId);
+    if (!m) return refuse(tr("No measure with id %1.").arg(measureId));
+
+    // Everything the pack validator and the integrity test between them forbid, refused HERE, in the
+    // author's own terms and against the object in front of them. The candidate list already makes
+    // each of these unpickable; this is the same rule stated where a caller that did not come
+    // through the picker still meets it.
+    if (m->kind == MeasureKind::Composed)
+        return refuse(tr("%1 is built from facets, so it has no metric key to prefer over.")
+                          .arg(measureDisplayLabel(*m)));
+    if (metricKey == m->metricKey)
+        return refuse(tr("%1 already reads that metric — a ladder cannot prefer a key over itself.")
+                          .arg(measureDisplayLabel(*m)));
+    if (m->preferKeys.contains(metricKey))
+        return refuse(tr("%1 already prefers %2.").arg(measureDisplayLabel(*m), metricKey));
+
+    const MetricDescriptor *d = m_cat.descriptor(metricKey);
+    if (!d) return refuse(tr("There is no metric called %1.").arg(metricKey));
+    if (!m->unit.isEmpty() && d->unit != m->unit)
+        return refuse(tr("%1 is stated in %2 and %3 in %4. A ladder is one quantity measured twice, "
+                         "so both rungs have to carry the same unit.")
+                          .arg(measureDisplayLabel(*m), m->unit, metricKey, d->unit));
+
+    const CharacteristicPack before = m_working;
+    Measure *w = workingMeasure(measureId);
+    if (!w) { m_working = before; return refuse(tr("No measure with id %1.").arg(measureId)); }
+    const QString measureLabel = measureDisplayLabel(*w);
+    w->preferKeys << metricKey;
+
+    rebuild();
+    const QString what = tr("%1 now prefers %2").arg(measureLabel, metricKey);
+    pushCommand(tr("Preferred metric added"), what, before, m_workingNorms);
+    return accept(what);
+}
+
+QVariantMap ModelBrowser::removePreferKey(const QString &measureId, const QString &metricKey)
+{
+    const CharacteristicPack before = m_working;
+    Measure                 *w      = workingMeasure(measureId);
+    if (!w) { m_working = before; return refuse(tr("No measure with id %1.").arg(measureId)); }
+
+    const QString measureLabel = measureDisplayLabel(*w);
+    if (!w->preferKeys.contains(metricKey)) {
+        m_working = before;   // workingMeasure() above may have copied it; undo that
+        return refuse(tr("%1 does not prefer %2.").arg(measureLabel, metricKey));
+    }
+    w->preferKeys.removeAll(metricKey);
+
+    rebuild();
+    const QString what = tr("%1 no longer prefers %2").arg(measureLabel, metricKey);
+    pushCommand(tr("Preferred metric removed"), what, before, m_workingNorms);
     return accept(what);
 }
 

@@ -219,6 +219,27 @@ int main(int argc, char **argv)
     check(title() == renamed, "and the pane follows the redo");
     while (browser->canUndo()) browser->undo();
 
+    // ── An instrument ladder redraws the measure's own pane ─────────────────
+    //
+    // Same question as the screen case below, on the verb added with Measure::preferKeys: the write
+    // goes to the measure in front of the reader, so if the binding chain is right the "Prefers"
+    // section grows a row without anything else being touched. A delta, never an absolute — the
+    // section list will keep growing and a pinned row count would be wrong the first time it did.
+    {
+        const QString aa = QStringLiteral("m_attackAngle");
+        root->setProperty("selectedType", QStringLiteral("measures"));
+        root->setProperty("selectedId", aa);
+        const int before = rowCount();
+        if (before > 0) {
+            check(browser->removePreferKey(aa, QStringLiteral("lm.attackAngle"))
+                      .value(QStringLiteral("ok")).toBool(),
+                  "a rung comes off the ladder");
+            check(rowCount() == before - 1, "and the measure's pane loses the row");
+            check(browser->undo().value(QStringLiteral("ok")).toBool(), "undo puts it back");
+            check(rowCount() == before, "and the pane follows the undo");
+        }
+    }
+
     // ── The same question for the panes added in ADDENDUM-02 ────────────────
     const QVariantList screens = browser->rows(QStringLiteral("screens"));
     if (!screens.isEmpty()) {

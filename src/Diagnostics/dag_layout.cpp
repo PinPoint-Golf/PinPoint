@@ -62,7 +62,7 @@ double rowWidth(const QString &label, const QString &detail, const DagLayoutOpti
 // so a live one is sized on its label alone.
 double measureRowWidth(const DagMeasure &dm, const DagLayoutOptions &opt)
 {
-    return rowWidth(dm.label, dm.available ? QString() : dm.statusLabel, opt);
+    return rowWidth(dm.label, dm.detail, opt);
 }
 
 QString measureLabelOf(const Measure &m)
@@ -471,8 +471,41 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                         dm.label       = measureLabelOf(*m);
                         dm.statusLabel = measureStatusLabel(m->status);
                         dm.metricKey   = m->metricKey;
+                        // The whole ladder, from the one place its order is expressed. Naming only
+                        // `metricKey` said the wrong thing the moment a measure preferred a device
+                        // reading over our own estimate: it named the fallback.
+                        dm.keyLadder   = measureKeyLadder(*m);
                         dm.available   = m->status == MeasureStatus::Live;
                         if (!dm.available) dm.unavailableReason = m->gapReason;
+                        // WHAT THIS SIGNAL ASKS OF IT. Only where the signal authors a number of its
+                        // own — a corridor test states none, and printing "outside its normal range"
+                        // on every row would be a caption on the ordinary case.
+                        //
+                        // The de-dup above keeps the FIRST signal to reach a measure, so a condition
+                        // reading one measure through two signals shows only the first one's test.
+                        // No shipped condition does; a row that quietly described the wrong test
+                        // would be worse than this comment, which is why it is here.
+                        if (sg->threshold.has_value()) {
+                            dm.testLabel = signalTestLabel(sg->test);
+                            dm.threshold = sg->threshold;
+                        }
+
+                        // The one thing said to the right of the label — see DagMeasure::detail for
+                        // why the choice is made here and not in the view.
+                        if (!dm.available) {
+                            dm.detail = dm.statusLabel;
+                        } else if (dm.threshold.has_value()) {
+                            // With the tail, because a bare number is not a test. "below -10" is a
+                            // claim; "-10" is a coordinate.
+                            const bool high = sg->direction.value_or(Direction::High) == Direction::High;
+                            dm.detail = (high ? QStringLiteral("above ") : QStringLiteral("below "))
+                                        + QString::number(*dm.threshold);
+                        } else if (dm.keyLadder.size() > 1) {
+                            // It prefers an instrument over its own key. Only the winner is named:
+                            // the whole ladder belongs in the table and the inspector, and a row
+                            // that spelled it out would elide the measure's name to do it.
+                            dm.detail = dm.keyLadder.constFirst();
+                        }
                         dm.h           = opt.rowH;
                         rows.push_back(dm);
                     }
@@ -543,6 +576,15 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
                 for (const DagMeasure &dm : mit.value())
                     s.w = std::max(s.w, measureRowWidth(dm, opt));
                 s.h += double(mit.value().size()) * opt.rowH;
+                // The conjunction caption, and ONE OF THE TWO PLACES its height is spent — the
+                // other is the row cursor at node-emit. They must agree exactly: the tests pin
+                // that the last inner row ends flush with the box bottom, so a caption charged
+                // here and not there (or the reverse) fails immediately rather than drawing a
+                // row over the node below.
+                if (c && c->detection == DetectionMode::All) {
+                    s.h += opt.captionH;
+                    s.w  = std::max(s.w, rowWidth(detectionModeLabel(c->detection), QString(), opt));
+                }
             }
             const auto rit = referencesFor.constFind(id);
             if (rit != referencesFor.constEnd()) {
@@ -664,6 +706,24 @@ DagLayout layoutDag(const CharacteristicPack &pack, const QString &focusId,
             const auto mit = measuresFor.constFind(s.id);
             if (mit != measuresFor.constEnd()) {
                 n.measures = mit.value();
+                // The caption sits between the title row and the first measure, and takes its room
+                // from the same cursor everything else here runs off — see the slot sizing above,
+                // which is where the box was made tall enough for it. It carries no `y` of its
+                // own: it is at `n.y + nodeH` by construction, so there is one number to keep in
+                // step rather than two, and the origin shift below has nothing extra to move.
+                if (const Condition *c = pack.condition(s.id);
+                    c && c->detection == DetectionMode::All) {
+                    n.detection      = detectionModeName(c->detection);
+                    // ITS OWN WORDS, not the shared enum label. "every signal" is what the field
+                    // that SETS this says, and it is right there: it answers "how do they combine",
+                    // which is the question an editor asks. A caption is not answering a question —
+                    // it is introducing the three rows underneath it, and "all of" is what reads as
+                    // the head of a list. The token above is what a view should branch on; this is
+                    // only ever drawn.
+                    n.detectionLabel = QStringLiteral("all of");
+                    n.captionH       = opt.captionH;
+                    rowY            += opt.captionH;
+                }
                 for (DagMeasure &dm : n.measures) { dm.y = rowY; rowY += dm.h; }
             }
             const auto rit = referencesFor.constFind(s.id);
