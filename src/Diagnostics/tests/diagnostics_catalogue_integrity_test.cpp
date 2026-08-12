@@ -66,8 +66,15 @@ int main()
             for (const QString &mid : s->measures) {
                 const Measure *m = p.measure(mid);
                 if (!m) continue;
-                if (m->metricKey.isEmpty()) packMeasuresWithoutKey.insert(m->id);
-                else                        packUses[m->metricKey].insert(c.id);
+                // EVERY RUNG OF THE LADDER IS A USE. A measure that prefers `lm.attackAngle` and
+                // falls back to `attackAngle` genuinely uses both — which one answers is a property
+                // of the swing in front of it, not of the content. `usedBy` is what the directory
+                // quotes to tell a golfer what a reading buys them, so recording it against only
+                // one rung would understate the device for the owner and the camera for everyone
+                // else, and the same sentence would be wrong for one of them either way.
+                const QStringList ladder = measureKeyLadder(*m);
+                if (ladder.isEmpty()) packMeasuresWithoutKey.insert(m->id);
+                for (const QString &key : ladder) packUses[key].insert(c.id);
             }
         }
     }
@@ -196,6 +203,50 @@ int main()
             }
         }
         check(overclaimed == 0, "no measure claims a producer the catalogue does not have");
+    }
+
+    // ── 5b. Every rung of an instrument ladder is real, and states the same unit ─
+    //
+    // `Measure::preferKeys` lets one measure read a better instrument where the swing carries one —
+    // m_attackAngle takes `lm.attackAngle` over our projected `attackAngle`. That is only sound
+    // while every rung measures THE SAME QUANTITY IN THE SAME UNIT, and this is the only place that
+    // can tell: the pack validator cannot see the catalogue, and the catalogue has never heard of
+    // measures. A ladder mixing degrees with inches would grade a golfer against a corridor stated
+    // in something else — silently, and ONLY on the swings where the preferred instrument happened
+    // to be missing, which is the hardest possible failure to reproduce.
+    {
+        int broken = 0, ladders = 0;
+        for (const Measure &m : p.measures) {
+            if (m.preferKeys.isEmpty()) continue;
+            ++ladders;
+            const MetricDescriptor *own = cat.descriptor(m.metricKey);
+            for (const QString &k : m.preferKeys) {
+                const MetricDescriptor *d = cat.descriptor(k);
+                if (!d) {
+                    ++broken;
+                    std::printf("        measure '%s' prefers '%s', which is not in the catalogue\n",
+                                qPrintable(m.id), qPrintable(k));
+                    continue;
+                }
+                // Against the measure's own declared unit, and against its fallback's — the three
+                // have to agree, and checking only one pair would let a measure whose own unit was
+                // already adrift drag the ladder along with it.
+                if (!m.unit.isEmpty() && d->unit != m.unit) {
+                    ++broken;
+                    std::printf("        measure '%s' is in %s but prefers '%s', which is in %s\n",
+                                qPrintable(m.id), qPrintable(m.unit), qPrintable(k),
+                                qPrintable(d->unit));
+                }
+                if (own != nullptr && d->unit != own->unit) {
+                    ++broken;
+                    std::printf("        measure '%s': rung '%s' (%s) and fallback '%s' (%s) differ\n",
+                                qPrintable(m.id), qPrintable(k), qPrintable(d->unit),
+                                qPrintable(m.metricKey), qPrintable(own->unit));
+                }
+            }
+        }
+        std::printf("        %d measures prefer a better instrument\n", ladders);
+        check(broken == 0, "every preferred instrument exists and states the measure's unit");
     }
 
     // ── 6. Capture gaps are marked consistently in both registries ─────────────

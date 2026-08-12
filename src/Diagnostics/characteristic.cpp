@@ -115,6 +115,11 @@ const Row<Observability> kObservabilities[] = {
     { Observability::Both,       "both",       "Both" },
 };
 
+const Row<DetectionMode> kDetectionModes[] = {
+    { DetectionMode::Any, "any", "any signal" },
+    { DetectionMode::All, "all", "every signal" },
+};
+
 const Row<ConfirmedBy> kConfirmedBys[] = {
     { ConfirmedBy::Measured, "measured", "Measured" },
     { ConfirmedBy::Screened, "screened", "Physical" },
@@ -262,6 +267,9 @@ double prominenceWeight(Prominence p)
 
 QString observabilityName(Observability o) { return nameOf(kObservabilities, o); }
 bool    observabilityFromName(const QString &s, Observability &out) { return fromName(kObservabilities, s, out); }
+
+QString detectionModeName(DetectionMode d) { return nameOf(kDetectionModes, d); }
+bool    detectionModeFromName(const QString &s, DetectionMode &out) { return fromName(kDetectionModes, s, out); }
 
 QString confirmedByName(ConfirmedBy c) { return nameOf(kConfirmedBys, c); }
 bool    confirmedByFromName(const QString &s, ConfirmedBy &out) { return fromName(kConfirmedBys, s, out); }

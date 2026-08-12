@@ -207,7 +207,7 @@ int main(int argc, char **argv)
 
     std::printf("\ncontent\n");
     check(pack.conditions.size() == 152, "the shipped pack carries 152 conditions");
-    check(pack.measures.size() == 129, "…and 129 measures");
+    check(pack.measures.size() == 130, "…and 130 measures");
     check(!norms->norms().norms.empty(), "the shipped norm set loaded");
 
     QTemporaryDir tmp;
@@ -356,13 +356,40 @@ int main(int argc, char **argv)
     // regression this test exists to catch.
     std::printf("\nthe measurement\n");
     check(cRich.assessable > 0 && cLm.assessable > 0, "the two rich captures assess something at all");
-    check(cRich.assessable == 51, "rich_7iron: 51 of 152 conditions assessable (observed)");
+    // 51 → 53 on 2026-08-12: `top` and `sky`, and this fixture has NO launch monitor at all — so
+    // it is worth saying why they became answerable on a camera-only swing. Both are conjunctions
+    // (detection: all), and one conjunct that was assessed and did not fire settles an AND whatever
+    // the unreadable terms would have said. This capture has no strike height and never will, but
+    // it has an attack angle, and an attack angle of -4° is not the upward strike a top requires.
+    // "Definitely not a top" is a real answer, and the conjunction reaches it from evidence no
+    // single one of its terms could.
+    check(cRich.assessable == 53, "rich_7iron: 53 of 152 conditions assessable (observed)");
     check(cRich.measures   == 38, "rich_7iron: 38 of 109 live measures resolved (observed)");
     // 12 → 14 on 2026-08-09: sig_launchLow/sig_launchHigh moved onto m_lmLaunchAngle (the
     // measured key this fixture actually carries), so launch_low and launch_high became
     // assessable on an LM-only capture.
-    check(cLm.assessable   == 14, "lm_7iron: 14 of 152 conditions assessable (observed)");
-    check(cLm.measures     == 25, "lm_7iron: 25 of 109 live measures resolved (observed)");
+    //
+    // 14 → 17 on 2026-08-12: thin, chunk and shank stopped being asserted. All three are now
+    // threshold signals on the two face-impact readings this fixture already carried, so nothing
+    // new had to be captured for them to become answerable — the numbers were always there and the
+    // pack simply had no signal reading them. The one finding that fires on this swing is `thin`:
+    // 14.1 mm below centre, past the panel's own 10 mm boundary.
+    //
+    // NOT 19. `pull_hook` and `push_slice` are measured too now, but they read `m_compoundMiss`,
+    // which is DERIVED at write time rather than read off the device — and this fixture is a
+    // verbatim corpus copy written by an older build, so its metrics array does not contain the
+    // key. That is the honest state of every swing already on disk: they gain the two conditions
+    // when the reading is next folded in, not before. Regenerating the fixture to paper over it
+    // would hide exactly the thing worth knowing.
+    // 17 → 21 and 25 → 26 on 2026-08-12, and the single extra MEASURE is the whole story. It is
+    // `m_attackAngle`, which now prefers `lm.attackAngle` and falls back to our projected
+    // `attackAngle` (Measure::preferKeys). This fixture is device-only: it has never had a bare
+    // `attackAngle` and could not have one, so before the ladder the measure resolved nothing —
+    // and `attack_too_steep` and `attack_too_shallow` were therefore unanswerable on a swing whose
+    // launch monitor had reported the attack angle outright, -2.73°, sitting in the document read
+    // by nothing. Those two conditions plus `top` and `sky` are the four.
+    check(cLm.assessable   == 21, "lm_7iron: 21 of 152 conditions assessable (observed)");
+    check(cLm.measures     == 26, "lm_7iron: 26 of 109 live measures resolved (observed)");
     check(cSparse.assessable == 2, "sparse_noclub: 2 of 152 conditions assessable (observed)");
     check(cSparse.measures   == 1, "sparse_noclub: 1 of 109 live measures resolved (observed)");
     check(cRich.assessable > cSparse.assessable,

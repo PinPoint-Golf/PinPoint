@@ -984,6 +984,66 @@ int main()
               "…and positive out on the open side, rather than flattened to zero");
     }
 
+    // ── A conjunction: detection == All ─────────────────────────────────────────
+    //
+    // Three signals, and the condition is all three at once — `top` is a thin strike AND a low
+    // point behind the ball AND an upward attack. The interesting behaviour is not "fires when all
+    // three fire"; it is WHICH OF THE TWO FAILURE STATES it reaches, because that inverts against
+    // the ANY rule and getting it backwards is silent in both directions.
+    {
+        CharacteristicPack p = pack;
+        Condition          c;
+        c.id            = QStringLiteral("conjunction");
+        c.label         = c.id;
+        c.observability = Observability::Observable;
+        c.confirmedBy   = ConfirmedBy::Measured;
+        c.detectedBy    = { QStringLiteral("sigSway"), QStringLiteral("sigSlide"),
+                            QStringLiteral("sigBuckle") };
+        c.detection     = DetectionMode::All;
+        c.state         = ConditionState::Active;
+        p.conditions.push_back(c);
+
+        const auto stateOf = [&](const FakeSource &src) {
+            const DetectionResult d = detect(p, src);
+            const Finding        *f = d.find(QStringLiteral("conjunction"));
+            return f ? f->state : FindingState::Unavailable;
+        };
+
+        FakeSource all;
+        all.add(QStringLiteral("mSway"),   9.0, -1.0, 1.0);
+        all.add(QStringLiteral("mSlide"),  9.0, -1.0, 1.0);
+        all.add(QStringLiteral("mBuckle"), 9.0, -1.0, 1.0);
+        check(stateOf(all) == FindingState::Fired, "every term fired, so the conjunction fired");
+
+        // ONE TERM SHORT IS NOT THE CONDITION — the case a plain OR gets wrong, and the reason
+        // this mode exists. Two of three is a swing with two of the three facts, not a top.
+        FakeSource two = all;
+        two.add(QStringLiteral("mBuckle"), 0.0, -1.0, 1.0);
+        check(stateOf(two) == FindingState::NotFired, "two terms out of three does NOT fire");
+
+        // A KNOWN-FALSE TERM SETTLES IT, whatever the unreadable ones would have said. This is the
+        // inversion: under ANY, an unavailable sibling makes the whole finding unassessable when
+        // nothing fired; under ALL it must not, because an AND with a false term is false and we
+        // hold that answer. Reporting Unavailable here would throw away a verdict — and it is the
+        // COMMON case, the one that lets a camera-only swing say "definitely not a top" with no
+        // strike height anywhere in the capture.
+        FakeSource falseAndBlind;
+        falseAndBlind.add(QStringLiteral("mSway"), 0.0, -1.0, 1.0);   // assessed, did not fire
+        // mSlide and mBuckle absent entirely
+        check(stateOf(falseAndBlind) == FindingState::NotFired,
+              "one term assessed false settles the AND even with the others unreadable");
+
+        // ONLY WITH NOTHING FALSE does an unreadable term make it unassessable, because then the
+        // answer really does turn on what could not be seen.
+        FakeSource firedAndBlind;
+        firedAndBlind.add(QStringLiteral("mSway"), 9.0, -1.0, 1.0);   // fired
+        check(stateOf(firedAndBlind) == FindingState::Unavailable,
+              "…but a term that fired plus an unreadable one is genuinely unassessable");
+
+        FakeSource none;
+        check(stateOf(none) == FindingState::Unavailable, "nothing readable at all is Unavailable");
+    }
+
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
 }

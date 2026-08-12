@@ -336,6 +336,7 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
 
         bool  anyFired      = false;
         bool  anyUnavailable = false;
+        bool  anyAssessedNotFired = false;   // ALL mode only — see the verdict block below
         float conf          = 1.0f;
 
         std::vector<EvidenceCandidate> candidates;   // in c.detectedBy order — see pickEvidence()
@@ -354,11 +355,44 @@ DetectionResult detect(const CharacteristicPack &pack, const IMeasureSource &sou
                 anyFired = true;
                 f.firedSignals << sid;
                 f.direction = sig->direction.value_or(Direction::High);
+            } else {
+                anyAssessedNotFired = true;
             }
             conf = std::min(conf, v.confidence);
 
             if (v.driving) candidates.push_back({ sid, v.drivingMeasureId, *v.driving,
                                                   v.confidence, v.fired });
+        }
+
+        // ── ALL: a conjunction, and the precedence INVERTS ───────────────────
+        //
+        // Every signal must have fired. What is worth spelling out is the order of the two failure
+        // cases, because it is the mirror image of the ANY rule below and for the same reason.
+        //
+        // A CONJUNCT THAT WAS ASSESSED AND DID NOT FIRE SETTLES IT. The conjunction is false, and
+        // it is false whatever the signals we could not read would have said — an AND with one
+        // known-false term needs no other term. So that is NotFired, a real negative answer, and
+        // reporting Unavailable instead would throw away a verdict we actually hold. This is the
+        // common case by a distance: `top` asks for a thin strike AND a low point behind the ball
+        // AND an upward attack, and the overwhelming majority of swings settle it on the first.
+        //
+        // ONLY WITH NOTHING FALSE does an unreadable conjunct make it unassessable, because then
+        // the answer really does turn on what we could not see.
+        if (c.detection == DetectionMode::All) {
+            if (anyAssessedNotFired) {
+                f.state      = FindingState::NotFired;
+                f.confidence = conf;
+                f.evidence   = pickEvidence(candidates, /*firedOnly*/ false);
+            } else if (anyUnavailable) {
+                f.state      = FindingState::Unavailable;
+                f.confidence = 0.0f;
+            } else {
+                f.state      = FindingState::Fired;
+                f.confidence = conf;
+                f.evidence   = pickEvidence(candidates, /*firedOnly*/ true);
+            }
+            out.findings.push_back(std::move(f));
+            continue;
         }
 
         // Precedence: a signal that fired is a positive observation and stands even if a sibling

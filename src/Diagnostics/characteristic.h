@@ -76,6 +76,12 @@ enum class Observability {
     Both,
 };
 
+// How a condition's signals combine. See Condition::detection.
+enum class DetectionMode {
+    Any,   // the default: alternative routes to one observation, any of which is it
+    All,   // a conjunction: every signal must fire, because no one of them is the condition
+};
+
 // How a condition can be established. The UI must never blur these three.
 enum class ConfirmedBy {
     Measured,   // a signal fired — the app knows
@@ -236,6 +242,18 @@ struct Condition {
     Prominence                  prominence   = Prominence::Occasional;
     Observability               observability = Observability::Observable;
     QStringList                 detectedBy;            // signal ids; empty => Latent
+    // How the signals above combine. ANY is the default and the overwhelming case: a condition is
+    // usually one tail of one measure, and where it has several signals they are alternative
+    // routes to the same observation, so any of them firing is the observation.
+    //
+    // ALL is for the conditions that are genuinely a CONJUNCTION of independent facts — a top is a
+    // thin strike AND a low point behind the ball AND an upward attack, and no one of those three
+    // is a top. Before this existed such a condition could only be written by pushing the
+    // conjunction into a producer and grading the result as a single derived number, which works
+    // but puts the definition in C++ and, worse, computes it wherever the producer happens to run
+    // rather than where measures resolve — so it cannot use `Measure::preferKeys` and silently
+    // ignores the better instrument.
+    DetectionMode               detection    = DetectionMode::Any;
     ConfirmedBy                 confirmedBy  = ConfirmedBy::Measured;
     QString                     screenRef;             // screen.* namespace; no UI in v1
     LocalisedText               consequence;
@@ -389,6 +407,8 @@ const std::vector<Prominence> &allProminences();
 double prominenceWeight(Prominence p);
 QString observabilityName(Observability o);
 bool    observabilityFromName(const QString &s, Observability &out);
+QString detectionModeName(DetectionMode d);
+bool    detectionModeFromName(const QString &s, DetectionMode &out);
 QString confirmedByName(ConfirmedBy c);
 bool    confirmedByFromName(const QString &s, ConfirmedBy &out);
 QString provenanceTierName(ProvenanceTier t);

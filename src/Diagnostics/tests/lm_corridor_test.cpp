@@ -45,9 +45,14 @@
 #include "../metric_corridor.h"
 #include "../pack_provider.h"
 
+// The panel's own tuning, so the numbers the pack authored can be checked against it rather than
+// against a second copy written here — see "one classifier, two readers" at the end of main().
+#include "../../Analysis/lm_inferred_reads.h"
+
 #include <QSet>
 #include <QStringList>
 
+#include <cmath>
 #include <cstdio>
 #include <memory>
 
@@ -144,6 +149,7 @@ int main()
     gradable.sort();
 
     const QStringList want{
+        QStringLiteral("lm.attackAngle"),
         QStringLiteral("lm.carryDistance"),   QStringLiteral("lm.clubPath"),
         QStringLiteral("lm.faceToPath"),      QStringLiteral("lm.launchAngle"),
         QStringLiteral("lm.launchDirection"), QStringLiteral("lm.smashFactor"),
@@ -153,8 +159,21 @@ int main()
     check(lmKeys.size() >= 25, "the pack still describes the launch monitor's readings");
     // lm.launchAngle joined 2026-08-09: sig_launchLow/High moved onto m_lmLaunchAngle and its
     // norm rows were mirrored from m_launchAngle, so the measured reading now grades.
+    //
+    // lm.attackAngle joined 2026-08-12, and by a DIFFERENT ROUTE worth understanding, because it is
+    // the first key here that grades without anybody authoring a norm for it. `m_attackAngle` now
+    // PREFERS `lm.attackAngle` over our projected `attackAngle` (Measure::preferKeys), and the
+    // metric-to-measure join walks the whole ladder — so the device's reading resolves the corridor
+    // that was already authored for the quantity, mu and sigma per club, with no second row.
+    //
+    // That is the intended consequence rather than a side effect: it is one quantity measured two
+    // ways, so one corridor is the correct number of corridors, and the board colouring the
+    // measured attack angle is the thing a golfer with the device should have been getting all
+    // along. It also means a norm edit can never leave the two instruments grading differently,
+    // which is exactly the drift the mirrored launchAngle rows above have to be kept in step by hand
+    // to avoid.
     check(gradable == want,
-          "exactly the nine authored readings resolve a corridor; the rest stay silent");
+          "exactly the ten authored readings resolve a corridor; the rest stay silent");
     if (gradable != want)
         std::printf("       got: %s\n", gradable.join(QStringLiteral(", ")).toUtf8().constData());
 
@@ -238,6 +257,10 @@ int main()
     // of both. Which of them cost the golfer a shot is a question about the PAIR, and it needs
     // either a derived measure or a two-measure signal test; the engine's `detectedBy` is an OR, so
     // it cannot be an AND of two corridor signals either.
+    //
+    // THAT DERIVED MEASURE NOW EXISTS — `m_compoundMiss`, graded by a threshold rather than a
+    // corridor — and the two lines below are still correct about face-to-path, which is why they
+    // stay. What changed is that the pair is no longer unaskable, only unaskable OF THIS MEASURE.
     std::printf("\n-- the interaction a single corridor cannot see --\n");
     checkSilent(pack, *norms, "7-iron", "lm.faceToPath", -2.0,
                 "path +4, face -2: a push-draw. Face to path alone cannot know that");
@@ -262,6 +285,42 @@ int main()
     // print a fault in the kit as a fault in the swing.
     checkSilent(pack, *norms, "Driver", "lm.smashFactor", 1.90,
                 "past the restitution limit it is a bad reading, not a bad shot");
+
+    // ── ONE CLASSIFIER, TWO READERS ─────────────────────────────────────────
+    //
+    // The panel names a shot "Thin" from `LmInferenceTuning`; the pack fires `thin` from a number
+    // typed into core.json. They are the same judgement about the same millimetres, and until this
+    // check existed nothing stopped them drifting apart — a coach could then be shown a card
+    // reading "Thin" beside a diagnosis that did not mention it, on one shot, from one device.
+    //
+    // The C++ struct is the authoring point and the JSON follows it, rather than the other way
+    // round, for the ordinary reason: the struct is where the numbers are explained, and a number
+    // is only defensible next to its reason. This test is what makes the JSON copy safe.
+    std::printf("\n-- the pack's thresholds match the panel's tuning --\n");
+    {
+        const LmInferenceTuning t;
+        struct Want { const char *signalId; double value; const char *why; };
+        const Want wants[] = {
+            { "sig_thin",      -t.severeVMm, "the panel's fat/thin boundary, below centre" },
+            { "sig_chunk",      t.severeVMm, "…and above it" },
+            { "sig_shank",      t.hoselMm,   "the hosel" },
+            // Not a tuning number: the compound miss is stated AS A RATIO against the two
+            // boundaries, so 1.0 is the definition of the metric rather than a judgement about
+            // golf. Asserted here anyway because it is the contract the producer's arithmetic
+            // rests on — normalise differently and these two signals mean something else.
+            { "sig_pullHook",  -1.0,         "both halves cleared their own threshold, leftward" },
+            { "sig_pushSlice",  1.0,         "…and rightward" },
+        };
+        for (const Want &w : wants) {
+            const Signal *s = pack.signal(QString::fromLatin1(w.signalId));
+            const bool    ok = s != nullptr && s->test == SignalTest::Threshold
+                               && s->threshold.has_value()
+                               && std::abs(*s->threshold - w.value) < 1e-9;
+            std::printf("  [%s] %-14s %8.2f  %s\n", ok ? "PASS" : "FAIL", w.signalId,
+                        (s != nullptr && s->threshold) ? *s->threshold : 0.0, w.why);
+            if (!ok) ++g_fail;
+        }
+    }
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail,
                 g_fail == 1 ? "" : "s");

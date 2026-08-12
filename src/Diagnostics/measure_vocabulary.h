@@ -117,6 +117,32 @@ struct Measure {
     // this design exists to avoid. For a PointInTime or Summary metric the reducer is At().
     Reducer       reducer;
     QString       metricKey;                            // link into MetricCatalogue (Provided)
+
+    // BETTER INSTRUMENTS FOR THE SAME QUANTITY, tried in order BEFORE metricKey. Empty for almost
+    // every measure; `metricKey` alone is still the ordinary case.
+    //
+    // This is the answer to a question the paragraph above ("why the vocabulary holds some
+    // quantities twice") left open, and it does not reopen it. The pairs stay: m_attackAngle is
+    // still our estimate and m_lmAttackAngle is still the device's reading, separately addressable,
+    // so the validation comparison a golfer who owns both is entitled to is untouched — a measure
+    // still cannot validate itself. What changes is what a DIAGNOSIS binds to. Before this, a
+    // signal had to name one instrument for ever: `attack_too_steep` named our projected estimate,
+    // so a golfer with a launch monitor plugged in was diagnosed from the camera while the device's
+    // own attack angle sat in the document read by nothing at all.
+    //
+    // AUTHORED, NOT INFERRED, which is the distinction that matters. The loader does not decide
+    // anything from what happens to be plugged in; it walks a list somebody wrote in the measure
+    // row, best first, and takes the first key this swing actually carries. That is the same
+    // best-first ladder MetricRoute already uses one layer down, for the same reason: which
+    // instrument is better is a per-quantity judgement, and it belongs where it can be read.
+    //
+    // EVERY KEY IN THE LADDER MUST CARRY THE MEASURE'S UNIT. A ladder is one quantity measured
+    // twice, so a corridor authored in degrees has to mean degrees whichever rung answered;
+    // `measureKeyUnit` in the pack validator refuses the row otherwise. Mixing units here would
+    // grade a golfer against a number stated in something else, silently, and only on the shots
+    // where the preferred instrument happened to be absent.
+    QStringList   preferKeys;
+
     QString       label;                                // canonical for Composed, authored for Provided
     QStringList   aliases;                              // coach phrasing that resolved here; grows with use
     QString       unit;
@@ -158,6 +184,18 @@ struct Measure {
     std::optional<Direction> unwatchedTail;
     QString                  unwatchedReason;
 };
+
+// Every catalogue key this measure will accept a value from, best first: the preferred instruments
+// and then its own. THE ONE PLACE THE ORDER IS EXPRESSED — reading a value, reporting why there
+// wasn't one, and the reverse metric-to-measure join all walk this, so none of them can disagree
+// about which rungs exist or which comes first.
+inline QStringList measureKeyLadder(const Measure &m)
+{
+    QStringList keys = m.preferKeys;
+    if (!m.metricKey.isEmpty())
+        keys << m.metricKey;
+    return keys;
+}
 
 // ── Signal ──────────────────────────────────────────────────────────────────
 // Signals are purely COMPARATIVE. Change and rate are not tests — they are reducers, and live on

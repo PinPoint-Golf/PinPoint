@@ -361,6 +361,92 @@ int main()
                  "Flushed", "a wider centre forgives the same strike");
     }
 
+    // ── The compound miss ───────────────────────────────────────────────────────
+    //
+    // The metric the diagnostic pack grades `pull_hook` and `push_slice` from. It has ONE
+    // obligation and everything below is a way of stating it: |value| >= 1 EXACTLY WHEN THE
+    // PANEL WOULD PRINT "PULL–HOOK" OR "PUSH–SLICE". Two code paths that name the same shot
+    // must never be able to name it differently, and the header shares its arithmetic with
+    // lmFlightShape precisely so this can be checked rather than hoped for.
+    //
+    // It holds by construction — lmCompoundMiss calls lmFlightShape rather than reapplying its
+    // rules — so the sweep below requires ZERO disagreements rather than few. An earlier
+    // version normalised both halves to ratios and re-derived the verdict from them, and
+    // disagreed on ten shots out of 1225: every one of them sat exactly on the start-line
+    // threshold, where the window comparison is strict and a ratio test is not. That is the
+    // failure this shape of code exists to make impossible, and it is why the sweep is a
+    // sweep and not three hand-picked shots.
+    {
+        // The claim, swept: every shot in a grid is put through both, and the two answers
+        // are required to be the same answer. This is the test — the cases below it are
+        // there to prove the sweep is exercising something rather than passing vacuously.
+        int agreed = 0, disagreed = 0, compounds = 0;
+        for (int s = -12; s <= 12; ++s) {
+            for (int a = -24; a <= 24; ++a) {
+                const double startDir = s * 0.5;      // ±6°
+                const double axis     = a * 0.5;      // ±12°
+                const QString name = shape(startDir, axis).name;
+                const bool    named = name == QString::fromUtf8("Pull–hook")
+                                      || name == QString::fromUtf8("Push–slice");
+                const double  v = lmCompoundMiss(startDir, axis, 0.0, std::optional<double>{},
+                                                 std::optional<double>{}).value;
+                if (named) ++compounds;
+                if (named == (std::abs(v) >= 1.0)) ++agreed; else ++disagreed;
+            }
+        }
+        check(disagreed == 0, "the metric and the panel's name agree on every shot in the sweep");
+        check(compounds > 0, "…and the sweep actually contains compound misses");
+        std::printf("      (%d shots, %d of them compound misses, %d disagreements)\n",
+                    agreed + disagreed, compounds, disagreed);
+
+        // THE SIGN CARRIES THE SIDE, and the two compounds cannot both fire.
+        check(lmCompoundMiss(-3.0, -12.0, 0.0, std::optional<double>{},
+                             std::optional<double>{}).value < -1.0,
+              "started left, hooked: negative and past the boundary");
+        check(lmCompoundMiss(3.0, 12.0, 0.0, std::optional<double>{},
+                             std::optional<double>{}).value > 1.0,
+              "started right, sliced: positive and past it");
+
+        // ZERO WHEN THE HALVES DISAGREE, and zero is a real reading rather than a missing
+        // one. A pull-fade is not a weak pull-hook; it is the other kind of shot, and the
+        // halves cancelling is the whole of what makes it one.
+        {
+            const LmCompoundMiss m = lmCompoundMiss(-3.0, 12.0, 0.0, std::optional<double>{},
+                                                    std::optional<double>{});
+            check(m.has && m.value == 0.0, "a pull-fade reads exactly zero, and it IS a read");
+        }
+
+        // ONE HALF SHORT IS NOT A COMPOUND MISS. Both of these are inside ±1 — the first
+        // curved hard but started straight, the second started left but only drew — and
+        // this is the pair a two-signal OR would have got wrong, which is why the metric
+        // exists at all.
+        check(std::abs(lmCompoundMiss(0.5, -12.0, 0.0, std::optional<double>{},
+                                      std::optional<double>{}).value) <= 1.0,
+              "a hook that started on line is a hook, not a pull-hook");
+        check(std::abs(lmCompoundMiss(-3.0, -4.0, 0.0, std::optional<double>{},
+                                      std::optional<double>{}).value) <= 1.0,
+              "a pull that only drew is a pull-draw, not a pull-hook");
+
+        // MEASURED CURVATURE PROMOTES IT, exactly as it promotes the panel's word. Same
+        // shot as the "…and a higher curvature threshold stops promoting" case above: a
+        // modest axis, but the ball finished 41 yards left of a start line that only
+        // pointed 8.7° left. lmFlightShape calls that Pull–hook; so must this.
+        checkStr(flown(-8.7, -7.8, -3.8, 177.8, -41.5).name, "Pull–hook",
+                 "the panel promotes it on the curvature the ball actually flew");
+        check(lmCompoundMiss(-8.7, -7.8, -3.8, 177.8, -41.5).value < -1.0,
+              "…and so does the metric, from the same curvature");
+
+        // A MISSING INPUT YIELDS NO READ — the header's rule, and the reason `has` is not
+        // simply "value != 0". The pack's engine turns this into Unavailable, which is a
+        // different finding from "we looked and there was no compound miss".
+        check(!lmCompoundMiss(std::optional<double>{}, -12.0, 0.0, std::optional<double>{},
+                              std::optional<double>{}).has,
+              "no start direction, no read");
+        check(!lmCompoundMiss(-3.0, std::optional<double>{}, std::optional<double>{},
+                              std::optional<double>{}, std::optional<double>{}).has,
+              "nothing that speaks to the curve, no read");
+    }
+
     std::printf("%s\n", g_fail == 0 ? "OK" : "FAILURES");
     return g_fail == 0 ? 0 : 1;
 }

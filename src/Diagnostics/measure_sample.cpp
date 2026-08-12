@@ -293,9 +293,18 @@ std::optional<double> reduceOverGrid(const SwingPhaseGrid &grid, const Measure &
     // A Composed measure names facets, not a catalogue key: nothing in a swing.json produces it, so
     // it is unavailable here by construction rather than by a lookup failure. Saying so explicitly
     // keeps the two reasons distinguishable to anyone reading a stack trace.
-    if (m.metricKey.isEmpty())
+    if (m.metricKey.isEmpty() && m.preferKeys.isEmpty())
         return std::nullopt;
-    return reduceOverGrid(grid, m.metricKey, m.reducer);
+
+    // BEST INSTRUMENT FIRST, and the first rung that ANSWERS wins — not the first that exists. A
+    // launch monitor can report a shot while omitting one column (the GCQuad fixture carries no low
+    // point at all), and a device reading that is present-but-empty must fall through to our own
+    // estimate rather than dark the measure. That is the whole difference between a ladder and a
+    // preference, and it is why this asks reduceOverGrid rather than grid.metric().
+    for (const QString &key : measureKeyLadder(m))
+        if (const std::optional<double> v = reduceOverGrid(grid, key, m.reducer))
+            return v;
+    return std::nullopt;
 }
 
 // ── Sidecar ─────────────────────────────────────────────────────────────────

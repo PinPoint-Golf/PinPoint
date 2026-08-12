@@ -908,12 +908,16 @@ set_tests_properties(seed_conversion_test PROPERTIES
 # readings are gradable too, so authoring the eighth norm is a deliberate edit here rather than a
 # colour appearing on a golfer's board unannounced. No Metrics link: this asks the pack and the norm
 # set directly, exactly as the model does.
+# launch_monitor_reading.cpp: the test includes lm_inferred_reads.h for LmInferenceTuning, to check
+# the pack's authored thresholds against the panel's own numbers rather than against a second copy.
+# That header reaches the reading struct, and fieldDefs() lives in the .cpp.
 pp_add_test(lm_corridor_test
     SOURCES ${DIAG}/tests/lm_corridor_test.cpp
             ${DIAG_NORM} ${DIAG}/resource_norm_provider.cpp ${DIAG}/file_norm_provider.cpp
             ${DIAG}/merged_norm_provider.cpp
             ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
             ${DIAG}/merged_pack_provider.cpp
+            ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
     INCLUDE ${DIAG} ${SRC}/Metrics ${ANALYSIS})
 set_tests_properties(lm_corridor_test PROPERTIES
     ENVIRONMENT "PINPOINT_CORE_PACK=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/core.json;PINPOINT_CORE_NORMS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/norms.json;PINPOINT_CORE_CONTEXTS=${CMAKE_CURRENT_SOURCE_DIR}/../../Resources/diagnostics/contexts.json")

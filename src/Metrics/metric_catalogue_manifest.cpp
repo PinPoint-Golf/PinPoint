@@ -1106,7 +1106,14 @@ void installMetricManifest(MetricCatalogue &cat)
                                "plane — which is the plane containing the target line, so this is "
                                "NOT a down-the-line metric")) },
         .usedBy = { QStringLiteral("characteristic:attack_too_shallow"),
-                    QStringLiteral("characteristic:attack_too_steep") },
+                    QStringLiteral("characteristic:attack_too_steep"),
+                    // The upward and downward halves of the two low-point outcomes. `m_attackAngle`
+                    // PREFERS `lm.attackAngle` and falls back to this, so both keys carry the same
+                    // four names — the ladder is a choice of instrument, not of quantity, and a
+                    // directory that listed them on only one rung would understate whichever kit
+                    // the reader happens to own.
+                    QStringLiteral("characteristic:top"),
+                    QStringLiteral("characteristic:sky") },
     });
 
     cat.addDescriptor({
@@ -1140,7 +1147,12 @@ void installMetricManifest(MetricCatalogue &cat)
                 QStringLiteral("the arc's low point against the ball, in the face-on image and in "
                                "the ball's own ruler")) },
         .usedBy = { QStringLiteral("characteristic:low_point_behind_ball"),
-                    QStringLiteral("characteristic:low_point_too_far_ahead") },
+                    QStringLiteral("characteristic:low_point_too_far_ahead"),
+                    // …and the two outcomes those become when a strike height and an attack angle
+                    // agree with them. Same note as attackAngle: `lm.lowPointAhead` is preferred
+                    // over this key and carries the same names.
+                    QStringLiteral("characteristic:top"),
+                    QStringLiteral("characteristic:sky") },
     });
 
     // --------------------------------------------- Tempo & sequence (phase events / fused)
@@ -2317,6 +2329,12 @@ void installMetricManifest(MetricCatalogue &cat)
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
                 QStringLiteral("the vertical club path at impact, read from a launch monitor")) },
+        // The measured rung of `m_attackAngle`, which prefers this over our projected
+        // `attackAngle` and so carries the same four names.
+        .usedBy = { QStringLiteral("characteristic:attack_too_steep"),
+                    QStringLiteral("characteristic:attack_too_shallow"),
+                    QStringLiteral("characteristic:top"),
+                    QStringLiteral("characteristic:sky") },
     });
 
     cat.addDescriptor({
@@ -2413,6 +2431,11 @@ void installMetricManifest(MetricCatalogue &cat)
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
                 QStringLiteral("the low point of the swing arc, read from a launch monitor")) },
+        // The measured rung of `m_lowPointAhead` — preferred over our own key, same names on both.
+        .usedBy = { QStringLiteral("characteristic:low_point_behind_ball"),
+                    QStringLiteral("characteristic:low_point_too_far_ahead"),
+                    QStringLiteral("characteristic:top"),
+                    QStringLiteral("characteristic:sky") },
     });
 
     cat.addDescriptor({
@@ -2591,7 +2614,8 @@ void installMetricManifest(MetricCatalogue &cat)
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
                 QStringLiteral("the face-impact position, from a launch monitor")) },
         .usedBy = { QStringLiteral("characteristic:strike_heel"),
-                    QStringLiteral("characteristic:strike_toe") },
+                    QStringLiteral("characteristic:strike_toe"),
+                    QStringLiteral("characteristic:shank") },
     });
 
     cat.addDescriptor({
@@ -2607,13 +2631,23 @@ void installMetricManifest(MetricCatalogue &cat)
             "the launch-high, spin-low strike that carries, low gives the opposite."),
         .howToRead = QStringLiteral(
             "Read at Impact. POSITIVE IS ABOVE CENTRE, negative below. Read it alongside spin rate "
-            "and launch angle rather than alone — its whole effect is on those two."),
+            "and launch angle rather than alone — its whole effect is on those two. The two ends of "
+            "it are the two low-point misses: a strike well BELOW centre is the leading edge "
+            "catching the ball's equator (thin), and one well above it is the club already climbing "
+            "by the time it arrives, which is what the ground being struck first does (chunk)."),
         .signPositive = QStringLiteral("struck ABOVE the centre of the face"),
         .signNegative = QStringLiteral("struck below centre"),
         .phases = { P::Impact },
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
                 QStringLiteral("the face-impact height, from a launch monitor")) },
+        .usedBy = { QStringLiteral("characteristic:thin"),
+                    QStringLiteral("characteristic:chunk"),
+                    // `top` and `sky` are those two plus a low point and an attack angle. The strike
+                    // height is one conjunct of three, and recording it here is how the directory
+                    // can answer "what would I lose without this reading" truthfully.
+                    QStringLiteral("characteristic:top"),
+                    QStringLiteral("characteristic:sky") },
     });
 
     cat.addDescriptor({
@@ -2847,6 +2881,50 @@ void installMetricManifest(MetricCatalogue &cat)
         .routes = {
             via("launchMonitor", RM::Device, Direct, { .launchMonitor = true },
                 QStringLiteral("read from a launch monitor's flight model")) },
+    });
+
+    // ------------------------------------------- Derived from launch-monitor readings
+    //
+    // THE FIRST DESCRIPTOR HERE THAT NEEDS A LAUNCH MONITOR AND IS NOT A READING, and the naming
+    // follows from that rather than from where the numbers came in. `lm.` means THE DEVICE SAID
+    // THIS — the whole section above rests on it, and the catalogue test enforces it in both
+    // directions: no reading field may lack a descriptor, and no `lm.` descriptor may exist that no
+    // reading field can fill. A quantity we compute has no field to be filled from, so an `lm.` key
+    // would fail that check, and rightly: the device did not say this, we did.
+    //
+    // So it is a bare key with a Device rung. There is no bare-versus-`lm.` pair to worry about
+    // here — the pairing rule above exists to stop a device rung REPLACING an optical estimate of
+    // the same quantity, and nothing optical will ever estimate this one, because it is made of
+    // spin axis and carry.
+
+    cat.addDescriptor({
+        .key = QStringLiteral("compoundMiss"),
+        .type = MetricType::PointInTime,
+        .label = QStringLiteral("Compound miss"),
+        .shortLabel = QStringLiteral("Compound"),
+        .unit = QStringLiteral("ratio"),
+        .group = QStringLiteral("Ball flight"),
+        .description = QStringLiteral(
+            "Whether the ball started off line and then curved FURTHER THE SAME WAY — the "
+            "pull-hook and the push-slice, the two misses with nothing at impact aimed anywhere "
+            "near the target. It is one number rather than two because a diagnosis needs the "
+            "conjunction: a shot that starts left and fades is a shape, and only a shot that starts "
+            "left and keeps going left is the smother."),
+        .howToRead = QStringLiteral(
+            "Read at Impact. POSITIVE IS STARTED AND CURVED RIGHT, negative both left, and ZERO "
+            "when the two disagree — a pull-fade reads 0, not a small number, because the halves "
+            "cancelling is what makes it a different shot. Stated as a RATIO against the "
+            "boundaries: each half is divided by the point its own word starts to apply, so BEYOND "
+            "±1 MEANS BOTH HALVES CLEARED THEIR OWN THRESHOLD and 0.9 means one of them did not. "
+            "Read it beside start direction and spin axis, which are the two halves themselves."),
+        .signPositive = QStringLiteral("started RIGHT and curved further right — the push-slice"),
+        .signNegative = QStringLiteral("started left and curved further left — the pull-hook"),
+        .phases = { P::Impact },
+        .routes = {
+            via("compoundMiss", RM::Derived, Direct, { .launchMonitor = true },
+                QStringLiteral("start direction against measured curvature, from a launch monitor")) },
+        .usedBy = { QStringLiteral("characteristic:pull_hook"),
+                    QStringLiteral("characteristic:push_slice") },
     });
 }
 

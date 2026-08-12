@@ -1493,6 +1493,9 @@
       "id": "m_lowPointAhead",
       "kind": "provided",
       "metricKey": "lowPointAhead",
+      "preferKeys": [
+        "lm.lowPointAhead"
+      ],
       "reducer": {
         "kind": "at",
         "anchor": "p7"
@@ -1506,6 +1509,9 @@
       "id": "m_attackAngle",
       "kind": "provided",
       "metricKey": "attackAngle",
+      "preferKeys": [
+        "lm.attackAngle"
+      ],
       "reducer": {
         "kind": "at",
         "anchor": "p7"
@@ -1790,6 +1796,19 @@
       "label": "Strike height, on the face",
       "unit": "mm",
       "highMeans": "the strike further above the centre of the face"
+    },
+    {
+      "id": "m_compoundMiss",
+      "kind": "provided",
+      "metricKey": "compoundMiss",
+      "reducer": {
+        "kind": "at",
+        "anchor": "p7"
+      },
+      "status": "live",
+      "label": "Compound miss, at impact",
+      "unit": "ratio",
+      "highMeans": "the ball both starting and curving further to the right — the push-slice; negative is the same shot to the left, and zero means the start line and the curve disagreed"
     },
     {
       "id": "m_lmBackSpin",
@@ -2610,6 +2629,69 @@
         "m_strikeLocation"
       ],
       "direction": "low"
+    },
+    {
+      "id": "sig_attackUp3",
+      "test": "threshold",
+      "measures": [
+        "m_attackAngle"
+      ],
+      "direction": "high",
+      "threshold": 3.0
+    },
+    {
+      "id": "sig_attackDown3",
+      "test": "threshold",
+      "measures": [
+        "m_attackAngle"
+      ],
+      "direction": "low",
+      "threshold": -3.0
+    },
+    {
+      "id": "sig_thin",
+      "test": "threshold",
+      "measures": [
+        "m_lmStrikeHeight"
+      ],
+      "direction": "low",
+      "threshold": -10.0
+    },
+    {
+      "id": "sig_chunk",
+      "test": "threshold",
+      "measures": [
+        "m_lmStrikeHeight"
+      ],
+      "direction": "high",
+      "threshold": 10.0
+    },
+    {
+      "id": "sig_shank",
+      "test": "threshold",
+      "measures": [
+        "m_strikeLocation"
+      ],
+      "direction": "low",
+      "threshold": -30.0
+    },
+    {
+      "id": "sig_pullHook",
+      "test": "threshold",
+      "measures": [
+        "m_compoundMiss"
+      ],
+      "direction": "low",
+      "threshold": -1.0
+    },
+    {
+      "id": "sig_pushSlice",
+      "test": "threshold",
+      "measures": [
+        "m_compoundMiss"
+      ],
+      "direction": "high",
+      "threshold": 1.0
     },
     {
       "id": "sig_smashDeficit",
@@ -5285,7 +5367,10 @@
       "kind": "outcome",
       "prominence": "occasional",
       "observability": "observable",
-      "confirmedBy": "asserted",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_pullHook"
+      ],
       "state": "draft",
       "consequence": "Starts left AND curves further left — the smother. The face was closed to the target and closed to the path, so nothing was pointing anywhere near where the ball was meant to go.",
       "provenance": {
@@ -5304,7 +5389,10 @@
       "kind": "outcome",
       "prominence": "common",
       "observability": "observable",
-      "confirmedBy": "asserted",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_pushSlice"
+      ],
       "state": "draft",
       "consequence": "Starts right and curves further right. The path went right and the face was open even to that, so there was nothing at impact aimed at the target at all.",
       "provenance": {
@@ -5326,7 +5414,10 @@
       "kind": "outcome",
       "prominence": "common",
       "observability": "observable",
-      "confirmedBy": "asserted",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_chunk"
+      ],
       "state": "draft",
       "consequence": "The ground was struck before the ball. Most of the clubhead speed goes into the turf, so the ball comes up well short however good the swing looked.",
       "provenance": {
@@ -5351,7 +5442,10 @@
       "kind": "outcome",
       "prominence": "common",
       "observability": "observable",
-      "confirmedBy": "asserted",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_thin"
+      ],
       "state": "draft",
       "consequence": "The leading edge caught the ball around its equator. It screams away low with almost normal speed but no height and no spin, so it will not stop.",
       "provenance": {
@@ -5374,7 +5468,13 @@
       "kind": "outcome",
       "prominence": "occasional",
       "observability": "observable",
-      "confirmedBy": "asserted",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_thin",
+        "sig_lowPointBehind",
+        "sig_attackUp3"
+      ],
+      "detection": "all",
       "state": "draft",
       "consequence": "The club bottomed out above the ball's equator and the ball dribbles forward along the ground.",
       "provenance": {
@@ -5395,7 +5495,13 @@
       "kind": "outcome",
       "prominence": "uncommon",
       "observability": "observable",
-      "confirmedBy": "asserted",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_chunk",
+        "sig_lowPointTooFarAhead",
+        "sig_attackDown3"
+      ],
+      "detection": "all",
       "state": "draft",
       "consequence": "A teed ball struck high on the crown from too steep an attack. Very high, very short, and usually a mark on the top of the driver to remember it by.",
       "provenance": {
@@ -5416,7 +5522,10 @@
       "kind": "outcome",
       "prominence": "uncommon",
       "observability": "observable",
-      "confirmedBy": "asserted",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_shank"
+      ],
       "state": "draft",
       "consequence": "Struck off the hosel, so the ball shoots sharply right and low. The most feared miss in the game, and almost always a standoff problem: the club is further from the body at impact than it was at address.",
       "provenance": {

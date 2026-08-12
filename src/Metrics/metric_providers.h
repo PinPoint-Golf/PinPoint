@@ -184,4 +184,18 @@ public:
     std::vector<QString> provides() const override;
 };
 
+// What we DERIVE from a launch monitor's readings, as distinct from what it reported. A separate
+// class rather than three more lines in LaunchMonitorProvider, because that one's claim list is
+// governed by a rule it states in its own comment — every key `lm.`-prefixed — and these keys are
+// deliberately bare: the device did not measure them, it supplied the inputs. Folding them in would
+// have made the rule read "every key is `lm.`-prefixed except the ones that are not", which is not
+// a rule.
+//
+// The requirement is still a launch monitor, so the route ladder says the same thing to the golfer
+// either way ("needs a launch monitor"). What changes is who is answerable for the number.
+class LaunchMonitorDerivedProvider : public IMetricProvider {
+public:
+    std::vector<QString> provides() const override;
+};
+
 } // namespace pinpoint::analysis

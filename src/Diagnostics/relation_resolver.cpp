@@ -85,17 +85,37 @@ Explanation explain(const CharacteristicPack &pack, const DetectionResult &detec
     // nothing about which of them happened.
     {
         QHash<QString, float> confidence;
+        QHash<QString, int>   specificity;
         for (const Finding &f : detection.findings)
-            if (f.state == FindingState::Fired) confidence.insert(f.conditionId, f.confidence);
+            if (f.state == FindingState::Fired) {
+                confidence.insert(f.conditionId, f.confidence);
+                specificity.insert(f.conditionId, int(f.firedSignals.size()));
+            }
 
         for (const QString &a : firedList) {
             if (!fired.contains(a)) continue;                 // already suppressed
             for (const QString &b : relatedBy(pack, a, EdgeType::Excludes)) {
                 if (!fired.contains(b) || a == b) continue;
 
+                // Confidence, then SPECIFICITY, then the id. The middle rung was added with the
+                // first conjunctions and it is not a tweak: `top` is `thin` AND two further facts,
+                // so when a swing is genuinely topped BOTH fire, they exclude each other, and they
+                // tie on confidence because they are read off the same capture. Falling straight to
+                // the id kept "thin" — alphabetically before "top" — and the more specific finding,
+                // the one that had strictly more evidence behind it, was the one thrown away.
+                //
+                // MORE FIRED SIGNALS IS MORE EVIDENCE, which is why the count is the right measure
+                // of it rather than anything about the content. A condition that cleared three
+                // independent tests is a stronger reading of the same swing than one that cleared
+                // one of them, and it stays true for any future pair without either of them having
+                // to know the other exists.
                 const float ca = confidence.value(a, 0.0f);
                 const float cb = confidence.value(b, 0.0f);
-                const bool  keepA = (ca != cb) ? (ca > cb) : (a < b);
+                const int   sa = specificity.value(a, 0);
+                const int   sb = specificity.value(b, 0);
+                const bool  keepA = (ca != cb) ? (ca > cb)
+                                  : (sa != sb) ? (sa > sb)
+                                               : (a < b);
 
                 const QString kept    = keepA ? a : b;
                 const QString dropped = keepA ? b : a;

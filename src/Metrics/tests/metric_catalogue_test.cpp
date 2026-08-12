@@ -67,7 +67,7 @@ int main()
         // 87 -> 88 with balanceHeelToe, the depth-axis partner to comOverLeadFoot. Balance was
         // measured along the stance line only, so a golfer sat on their heels — which is one of
         // the setup causes of early extension — had no metric to be sat on their heels IN.
-        checkEqI(static_cast<int>(cat.all().size()), 89, "descriptor count == 89");   // 71 + 26 lm. - 9 renamed, + transitionPlaneDelta
+        checkEqI(static_cast<int>(cat.all().size()), 90, "descriptor count == 90");   // 71 + 26 lm. - 9 renamed, + transitionPlaneDelta, + compoundMiss
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -101,7 +101,7 @@ int main()
         checkEqI(countType(cat, MetricType::TimeSeries),  39, "TimeSeries count");   // +balanceHeelToe
         // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
         // as duplicates of a series the catalogue already carries.
-        checkEqI(countType(cat, MetricType::PointInTime), 44, "PointInTime count");   // +17: a monitor reports one number per shot; +transitionPlaneDelta
+        checkEqI(countType(cat, MetricType::PointInTime), 45, "PointInTime count");   // +17: a monitor reports one number per shot; +transitionPlaneDelta, +compoundMiss
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
@@ -126,7 +126,7 @@ int main()
         // Strike is what the face did; keeping them apart matters because one of them is mostly
         // camera-resolvable and the other is entirely launch-monitor territory.
         MetricQuery bfq; bfq.group = QStringLiteral("Ball flight");
-        checkEqI(static_cast<int>(cat.query(bfq).size()), 17, "group 'Ball flight' == 17");
+        checkEqI(static_cast<int>(cat.query(bfq).size()), 18, "group 'Ball flight' == 18");   // +compoundMiss, derived from the readings rather than one of them
 
         MetricQuery stq; stq.group = QStringLiteral("Strike");
         checkEqI(static_cast<int>(cat.query(stq).size()), 3, "group 'Strike' == 3");   // + lm.strikeHeight
@@ -595,16 +595,31 @@ int main()
         checkEqI(bareUncontaminated, int(std::size(paired)),
                  "…and no bare key has a launch-monitor rung that would supersede our own producer");
 
-        // A monitor must not change the answer for anything it did not measure. Turning it on
-        // improves the lm. metrics and touches nothing else.
+        // A monitor must not change the answer for anything that does not need one. Turning it on
+        // improves the metrics that asked for it and touches nothing else.
+        //
+        // THE EXCLUSION IS "ASKS FOR A MONITOR", NOT "IS `lm.`-PREFIXED", and the difference is the
+        // point rather than a loosening. The prefix means THE DEVICE SAID THIS; it was a workable
+        // stand-in only while every device-dependent metric was also a device reading, and
+        // `compoundMiss` — start direction against measured curvature, computed by us from the
+        // device's numbers — is the first that is not. Excluding by prefix would have failed it for
+        // resolving differently with a monitor attached, which is exactly what it should do.
+        //
+        // Nothing is let through by the change. A bare key CANNOT quietly acquire a device rung
+        // where we also estimate the quantity: the six paired keys are checked for precisely that
+        // two assertions above, and they are the only ones where a device rung could supersede a
+        // producer of our own.
         ShotContext withLm = capable;
         withLm.hasLaunchMonitor = true;
         int drifted = 0;
         for (const MetricDescriptor *d : cat.all()) {
-            if (d->key.startsWith(QStringLiteral("lm."))) continue;
+            bool needsLm = false;
+            for (const MetricRoute &r : d->routes)
+                if (r.requirement.launchMonitor) needsLm = true;
+            if (needsLm) continue;
             if (cat.resolve(d->key, capable).state != cat.resolve(d->key, withLm).state) ++drifted;
         }
-        checkEqI(drifted, 0, "connecting a monitor changes no metric outside the lm. namespace");
+        checkEqI(drifted, 0, "connecting a monitor changes no metric that did not ask for one");
     }
 
     // 3e2. Every metric that can carry a direction says which way is positive.

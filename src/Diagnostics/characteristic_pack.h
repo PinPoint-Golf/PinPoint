@@ -55,6 +55,9 @@ inline constexpr int kPackSchemaVersion = 1;
 //                        and every issue it raises would be attributed to the empty string
 //   unknownKind          a MEASURE declares a kind that is not composed or provided
 //   unknownSignalTest    a signal declares a test that is not one of the four
+//   unknownDetection     a condition declares a signal-combining mode that is not any or all.
+//                        An ERROR rather than a fall back to `any`, because "all" misread as "any"
+//                        turns one conjunction into N faults that each fire on their own
 //   unknownShape         a measure declares a shape that is not target/floor/ceiling. An error
 //                        rather than a fall back to Target: "flooor" would grade the good tail
 //   unknownDirection     a measure's unwatchedTail is not high or low — same reasoning
@@ -107,6 +110,9 @@ inline constexpr int kPackSchemaVersion = 1;
 //   needsRevalidation    flagged for review
 //   singleTailAxis       an axis with only one authored tail — deliberate, or an oversight?
 //   inconsistentReach    a Screened/Asserted condition that also claims to be detected by a signal
+//   conjunctionOfOne     a condition combining its signals with `all` when it has fewer than two.
+//                        `all` and `any` are the same test on one signal, so the field is either a
+//                        leftover or an author part-way through adding the rest
 //   screenedHasCause     a Screened cause with an incoming edge — the likeliest symptom of a
 //                        wholly INVERTED graph, which no coverage count can detect
 //   bothTailsOneCondition  one condition flagging BOTH sides of one measure's corridor. It fires

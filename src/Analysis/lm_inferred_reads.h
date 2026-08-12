@@ -71,6 +71,13 @@ struct LmInferenceTuning {
     double f2pSevereT     = 4.0;   // °
     double centreMm       = 3.0;   // mm — inside this in BOTH axes is flushed
     double severeVMm      = 10.0;  // mm — vertical miss beyond this is fat/thin, not high/low
+    // The hosel, for the one strike this panel never names. `lmStrikeQuality` stops at "Heel"
+    // because the millimetres are already on the card and a card does not need to shout; the
+    // DIAGNOSTIC pack does need the boundary, because `shank` is a condition of its own with its
+    // own causes and its own drill. Provisional and the least-evidenced number here: a shanked
+    // ball often leaves the device nothing to read at all, so this fires on the strikes near
+    // enough the hosel to still be measured, and the ones past it are silent rather than wrong.
+    double hoselMm        = -30.0; // mm — a strike this far toward the heel is off the hosel
 };
 
 // ── flight shape ─────────────────────────────────────────────────────────────
@@ -111,11 +118,51 @@ struct LmFlightShape {
     int     curveIdx  = 1;    // 0 draw/hook · 1 straight · 2 fade/slice
     QString name;             // "Pull–fade", "Straight", "Hook", …
     QString evidence;         // "start 1.3° left · axis 4.7° right · curved 8.9 yd right"
+    // Whether the curve was promoted: hook rather than draw, slice rather than fade. Exposed so
+    // that lmCompoundMiss can ASK this function whether the shot qualifies instead of re-deriving
+    // the answer from the same inputs. Two derivations of one judgement is the drift the whole
+    // header is arranged to prevent, and the mixed strictness below is why it would have happened:
+    // the window comparison is strict and the severity comparison is not, so a second reader
+    // normalising both to one ratio disagrees on the boundary shots and nowhere else — the hardest
+    // kind of difference to notice.
+    bool    severe    = false;
     // The curvature the name was decided from, when carry and offline were both reported.
     bool    hasCurve  = false;
     double  curveYd   = 0.0;  // + = right for a right-hander, raw (unmirrored)
     double  curveDeg  = 0.0;
 };
+
+// HOW MUCH THE BALL ACTUALLY CURVED: the finish, less where it would have finished had it flown
+// straight down its own start line. Not the offline — a pull that never curved still finishes left,
+// and calling that a hook is the error this replaces.
+//
+// It lives out here, rather than inside lmFlightShape where it was written, because a second reader
+// arrived: the `compoundMiss` metric the diagnostic pack grades `pull_hook` and `push_slice` from.
+// Two computations of "how much did it curve" that agreed today would be two that could disagree
+// after one edit, and the panel and the pack would then name the same shot differently — which is
+// the whole failure this extraction exists to make impossible.
+struct LmCurvature {
+    bool   has = false;
+    double yd  = 0.0;   // + = right for a right-hander, RAW (unmirrored) — it is a measurement
+    double deg = 0.0;   // the same, as an angle, so a wedge and a driver are comparable
+};
+
+inline LmCurvature lmCurvature(const std::optional<double> &startDirDeg,
+                               const std::optional<double> &carryYd,
+                               const std::optional<double> &offlineYd)
+{
+    LmCurvature out;
+    if (!startDirDeg || !carryYd || !offlineYd
+        || !std::isfinite(*startDirDeg) || !std::isfinite(*carryYd) || !std::isfinite(*offlineYd)
+        || *carryYd <= 0.0)
+        return out;
+
+    const double straightYd = *carryYd * std::tan(*startDirDeg * kDegToRadIr);
+    out.yd  = *offlineYd - straightYd;
+    out.deg = std::atan2(out.yd, *carryYd) * kRadToDegIr;
+    out.has = true;
+    return out;
+}
 
 // A signed lateral quantity as the evidence line says it: magnitude, unit, side word.
 // Never a bare minus — "start −1.3°" makes a reader work out a sign convention that the
@@ -174,21 +221,13 @@ inline LmFlightShape lmFlightShape(const std::optional<double> &startDirDeg,
     const double axis  = haveAxis ? *spinAxisDeg   * flip : 0.0;
     const double f2p   = haveF2p   ? *faceToPathDeg * flip : 0.0;
 
-    // HOW MUCH THE BALL ACTUALLY CURVED: the finish, less where it would have finished
-    // had it flown straight down its own start line. Not the offline — a pull that never
-    // curved still finishes left, and calling that a hook is the error this replaces.
-    const bool haveCurve = carryYd && offlineYd
-                           && std::isfinite(*carryYd) && std::isfinite(*offlineYd)
-                           && *carryYd > 0.0;
-    double curveYd = 0.0, curveDeg = 0.0;
-    if (haveCurve) {
-        const double straightYd = *carryYd * std::tan(*startDirDeg * kDegToRadIr);
-        curveYd  = *offlineYd - straightYd;
-        curveDeg = std::atan2(curveYd, *carryYd) * kRadToDegIr;
-        out.hasCurve = true;
-        out.curveYd  = curveYd;      // raw, unmirrored — it is a measurement
-        out.curveDeg = curveDeg;
-    }
+    // How much the ball actually curved — see lmCurvature(), which owns the arithmetic.
+    const LmCurvature c = lmCurvature(startDirDeg, carryYd, offlineYd);
+    const bool haveCurve = c.has;
+    const double curveDeg = c.deg;
+    out.hasCurve = c.has;
+    out.curveYd  = c.yd;         // raw, unmirrored — it is a measurement
+    out.curveDeg = c.deg;
 
     // Direction from the axis where there is one, because the axis is what bends the
     // ball. Face-to-path only when the device reported no axis at all.
@@ -201,6 +240,7 @@ inline LmFlightShape lmFlightShape(const std::optional<double> &startDirDeg,
     const bool severe = (haveAxis  && std::abs(axis) >= t.severeAxisT)
                         || (haveCurve && std::abs(curveDeg * flip) >= t.severeCurveDeg)
                         || (!haveAxis && std::abs(f2p) > t.f2pSevereT);
+    out.severe = severe;
 
     out.windowIdx = start < -t.startT ? 0 : (start > t.startT ? 2 : 1);
     out.curveIdx  = curveSignal < -curveThresh ? 0
@@ -255,6 +295,105 @@ inline LmFlightShape lmFlightShape(const std::optional<double> &startDirDeg,
     out.evidence = ev;
 
     out.has = true;
+    return out;
+}
+
+// ── the compound miss ────────────────────────────────────────────────────────
+
+// ONE NUMBER THAT MEANS "IT STARTED OFF LINE AND THEN CURVED FURTHER THE SAME WAY".
+//
+// This exists for the diagnostic pack, not for the panel, and the reason is structural. A
+// condition fires when ANY of its signals fires — the engine ORs them (characteristic_engine.cpp,
+// the anyFired branch) and there is no AND anywhere in the vocabulary. So `pull_hook`, which is
+// precisely "pull AND hook", cannot be written as two signals: two would fire on a plain pull and
+// name the smother. The pack has one place to put a conjunction, and it is here, in the producer.
+//
+// THE TRICK IS THE MINIMUM OF TWO NORMALISED RATIOS. Divide each half of the claim by its own
+// threshold — the start direction by the pull/push boundary, the curvature by the hook/slice
+// boundary — and each is 1.0 exactly at the point its own word starts to apply. The smaller of the
+// two therefore exceeds 1.0 if and only if BOTH did. A single threshold on the minimum is the
+// conjunction, exactly, with no new test kind and no second signal.
+//
+// THE SIGN CARRIES THE SIDE, so one metric serves both compounds and they cannot both fire: it is
+// positive only when the ball started right and curved right, negative only when both went left,
+// and ZERO whenever the two disagree. A pull-fade and a push-draw are not weak compound misses,
+// they are the opposite kind of shot — the two halves cancelling is the whole point of the shape —
+// so they read 0 rather than something small. The pack's `pull_hook excludes push_slice` edge is
+// then a statement this arithmetic already guarantees rather than one it has to police.
+//
+// THE CONTRACT IS |value| >= 1 EXACTLY WHEN lmFlightShape NAMES THE SHOT "PULL–HOOK" OR
+// "PUSH–SLICE" — not approximately, and not on the shots that are not near a boundary. It holds by
+// construction because this function does not decide anything: it asks lmFlightShape and then
+// measures. lm_inferred_reads_test sweeps the pair over a grid and requires zero disagreements.
+//
+// The pack's threshold signals fire strictly ABOVE ±1, so they differ from the panel on values of
+// exactly 1.0 — a shot whose weaker half landed precisely on its threshold. Left alone: that is one
+// value of one double in a physical measurement, and the alternative is an authored number that is
+// not the boundary it claims to be.
+//
+// RAW, UNMIRRORED, POSITIVE IS RIGHT. Same convention as `lm.launchDirection`, which `sig_pull`
+// and `sig_push` already read unmirrored — the pack has no handedness anywhere in its measure
+// source, so a metric that mirrored itself would be the only one that did and would disagree with
+// the two signals it sits beside. Handedness belongs to the gloss (see lmFlightShape), and the
+// gloss is the panel's job.
+struct LmCompoundMiss {
+    // `has` is a statement about the READ, not the value: a shot that started left and faded has a
+    // perfectly good compound-miss reading of zero, and the absence of one is a different fact.
+    bool   has   = false;
+    double value = 0.0;   // ratio · + = started and curved RIGHT · − = both left · 0 = they disagree
+};
+
+inline LmCompoundMiss lmCompoundMiss(const std::optional<double> &startDirDeg,
+                                     const std::optional<double> &spinAxisDeg,
+                                     const std::optional<double> &faceToPathDeg,
+                                     const std::optional<double> &carryYd,
+                                     const std::optional<double> &offlineYd,
+                                     const LmInferenceTuning &t = LmInferenceTuning())
+{
+    LmCompoundMiss out;
+
+    // ASK THE PANEL'S CLASSIFIER WHETHER THIS IS ONE. Not "apply the same rules" — call the same
+    // function. Read RIGHT-HANDED, always, because windowIdx and curveIdx are in the gloss space
+    // and the gloss is the only thing handedness touches; the geometry underneath is the same shot
+    // either way and this metric is stated in it.
+    const LmFlightShape s = lmFlightShape(startDirDeg, spinAxisDeg, faceToPathDeg,
+                                          carryYd, offlineYd, /*leftHanded*/ false, t);
+    if (!s.has)
+        return out;
+    out.has = true;
+
+    // Both halves must have earned their own word, and both must point the SAME WAY. windowIdx and
+    // curveIdx share an encoding — 0 is the left end, 2 the right, 1 the middle — so agreeing is
+    // simply being equal and not being 1. A pull-fade fails here and reads 0, which is the whole
+    // distinction: it is a different shot, not a milder version of this one.
+    if (s.windowIdx == 1 || s.curveIdx == 1 || s.windowIdx != s.curveIdx || !s.severe)
+        return out;
+
+    // ── the magnitude ───────────────────────────────────────────────────────
+    //
+    // Only now, and only for shots already known to qualify. Each half divided by its own
+    // threshold, and the SMALLER of the two reported: the one that came closest to not making it is
+    // what the claim actually rests on, so it is the number to state.
+    //
+    // Both ratios are >= 1 here, by construction rather than by hope — the window test above fired,
+    // so |start| cleared startT, and `severe` fired, so at least one severity route cleared its
+    // own. That is what makes |value| >= 1 EXACTLY the panel's verdict, on every shot, with no
+    // boundary of its own to disagree on.
+    const double startRatio = std::abs(*startDirDeg) / t.startT;
+
+    double severity = 0.0;
+    const bool haveAxis = spinAxisDeg && std::isfinite(*spinAxisDeg);
+    if (haveAxis)
+        severity = std::max(severity, std::abs(*spinAxisDeg) / t.severeAxisT);
+    if (s.hasCurve)
+        severity = std::max(severity, std::abs(s.curveDeg) / t.severeCurveDeg);
+    if (!haveAxis && faceToPathDeg && std::isfinite(*faceToPathDeg))
+        severity = std::max(severity, std::abs(*faceToPathDeg) / t.f2pSevereT);
+
+    // The sign comes off the grid rather than off the raw start direction, so the number and the
+    // lit cell can never point different ways: windowIdx 2 is the right-hand column, and the two
+    // indices were required to be equal above, so either one would do.
+    out.value = std::copysign(std::min(startRatio, severity), s.windowIdx == 2 ? 1.0 : -1.0);
     return out;
 }
 

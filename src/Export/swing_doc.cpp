@@ -30,6 +30,7 @@
 #include <cmath>
 
 #include "swing_paths.h"
+#include "../Analysis/lm_inferred_reads.h"
 #include "../Analysis/swing_analysis.h"
 #include "../Core/club_vocabulary.h"
 
@@ -535,6 +536,40 @@ QJsonObject lmRawBlock(const lm::LaunchMonitorReading &reading)
 // One entry per reading: an EMPTY CURVE carrying a single phaseSample at Impact — the
 // representation club_delivery already uses for its scalars. A launch monitor reports
 // one number per shot; inventing a curve for it would be a lie the charts would draw.
+QJsonObject lmMetricEntry(const QString &key, const QString &label, const QString &unit,
+                          double value, qint64 impactUs)
+{
+    return QJsonObject{
+        { QStringLiteral("key"),   key },
+        { QStringLiteral("label"), label },
+        { QStringLiteral("unit"),  unit },
+        { QStringLiteral("t_us"),  QJsonArray{} },
+        { QStringLiteral("value"), QJsonArray{} },
+        { QStringLiteral("phaseSamples"), QJsonArray{ QJsonObject{
+              { QStringLiteral("phase"), int(analysis::Phase::Impact) },
+              { QStringLiteral("t_us"),  impactUs },
+              { QStringLiteral("value"), value },
+              { QStringLiteral("band"),  QString() } } } },
+    };
+}
+
+// The keys we DERIVE from a reading rather than read off it, and the reason they are listed
+// separately from fieldDefs(). A derived quantity has no member to point at, so it cannot live in
+// that table — and it must NOT be `lm.`-prefixed either, because that prefix means "the device
+// said this" and the catalogue test enforces it in both directions (metric_catalogue_test §3f: no
+// `lm.` descriptor may exist that no reading field can fill). These are ours, computed from the
+// device's numbers, so they carry bare keys and a Device route.
+//
+// THE LIST EXISTS FOR THE STRIP RULE, not for the emitter. updateLaunchMonitor() drops the old
+// entries before re-adding so that re-applying a reading replaces rather than duplicates, and it
+// recognises them by the `lm.` prefix. A derived key has no prefix to be caught by, so a second
+// pairing would have appended a second copy — silently, and only on shots a device was re-read for.
+const QStringList &lmDerivedKeys()
+{
+    static const QStringList keys = { QStringLiteral("compoundMiss") };
+    return keys;
+}
+
 QJsonArray lmMetricEntries(const lm::LaunchMonitorReading &reading, qint64 impactUs)
 {
     QJsonArray metrics;
@@ -542,19 +577,25 @@ QJsonArray lmMetricEntries(const lm::LaunchMonitorReading &reading, qint64 impac
         const auto &val = reading.*(f.member);
         if (!val)
             continue;
-        metrics.append(QJsonObject{
-            { QStringLiteral("key"),   QString::fromLatin1(f.key) },
-            { QStringLiteral("label"), QString::fromUtf8(f.label) },
-            { QStringLiteral("unit"),  QString::fromUtf8(f.unit) },
-            { QStringLiteral("t_us"),  QJsonArray{} },
-            { QStringLiteral("value"), QJsonArray{} },
-            { QStringLiteral("phaseSamples"), QJsonArray{ QJsonObject{
-                  { QStringLiteral("phase"), int(analysis::Phase::Impact) },
-                  { QStringLiteral("t_us"),  impactUs },
-                  { QStringLiteral("value"), *val },
-                  { QStringLiteral("band"),  QString() } } } },
-        });
+        metrics.append(lmMetricEntry(QString::fromLatin1(f.key), QString::fromUtf8(f.label),
+                                     QString::fromUtf8(f.unit), *val, impactUs));
     }
+
+    // ── derived ─────────────────────────────────────────────────────────────
+    //
+    // Produced HERE, beside the readings, rather than in an analysis stage — and that is a fact
+    // about when a launch monitor speaks, not a shortcut. A reading is paired to a swing by
+    // shot_pairing AFTER the stages have run, and often after the document is already on disk, so
+    // a stage would compute this from a `launchMonitor` block that was not there yet. This is the
+    // first point at which the reading and the document are in the same room.
+    const analysis::LmCompoundMiss cm =
+        analysis::lmCompoundMiss(reading.launchDirection, reading.spinAxis, reading.faceToPath,
+                                 reading.carryDistance, reading.offline);
+    if (cm.has)
+        metrics.append(lmMetricEntry(QStringLiteral("compoundMiss"),
+                                     QStringLiteral("Compound miss"), QStringLiteral("ratio"),
+                                     cm.value, impactUs));
+
     return metrics;
 }
 
@@ -795,12 +836,16 @@ bool SwingDocWriter::updateLaunchMonitor(const QString &swingDir,
                                        .value(QStringLiteral("impactUs")).toDouble(-1)));
 
         // Drop any `lm.` entries already present so re-applying replaces rather than
-        // duplicates. Bare keys are untouched — that separation is the whole point.
+        // duplicates. Bare keys are untouched — that separation is the whole point — EXCEPT the
+        // handful we derive from the reading ourselves, which are ours and bare and would
+        // otherwise accumulate one copy per pairing. See lmDerivedKeys().
         QJsonArray metrics;
-        for (const QJsonValue &v : an[QStringLiteral("metrics")].toArray())
-            if (!v.toObject().value(QStringLiteral("key")).toString()
-                   .startsWith(QStringLiteral("lm.")))
-                metrics.append(v);
+        for (const QJsonValue &v : an[QStringLiteral("metrics")].toArray()) {
+            const QString key = v.toObject().value(QStringLiteral("key")).toString();
+            if (key.startsWith(QStringLiteral("lm.")) || lmDerivedKeys().contains(key))
+                continue;
+            metrics.append(v);
+        }
 
         for (const QJsonValue &v : lmMetricEntries(reading, impactUs))
             metrics.append(v);

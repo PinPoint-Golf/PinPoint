@@ -429,6 +429,60 @@ int main()
         check(!stale && s3.isEmpty(), "a NEWER schema is rebuilt, never partially read");
     }
 
+    // ── The instrument ladder: Measure::preferKeys ──────────────────────────────
+    //
+    // A measure may name better instruments to try before its own key. The rule that carries the
+    // weight is that the ladder walks until one ANSWERS, not until one EXISTS — a launch monitor
+    // can report a shot and omit a column, and a preferred key that is present but silent at this
+    // phase has to fall through rather than dark the measure.
+    {
+        const auto ladderMeasure = [](const char *own, std::initializer_list<const char *> prefer) {
+            Measure m;
+            m.id             = QStringLiteral("m_test");
+            m.kind           = MeasureKind::Provided;
+            m.metricKey      = QString::fromLatin1(own);
+            for (const char *k : prefer) m.preferKeys << QString::fromLatin1(k);
+            m.reducer.kind   = ReducerKind::At;
+            m.reducer.anchor = Phase::Address;
+            return m;
+        };
+
+        // pelvisSway reads 10.0 at Address in the fixture; thoraxRotation is present but has no
+        // Address sample, and `nope` is absent entirely.
+        near(reduceOverGrid(grid, ladderMeasure("pelvisSway", {})).value_or(-999), 10.0,
+             "no ladder: the measure's own key, exactly as before");
+        near(reduceOverGrid(grid, ladderMeasure("pelvisSway", { "nope" })).value_or(-999), 10.0,
+             "a preferred key that does not exist falls through to our own");
+
+        // THE CASE THE WHOLE DESIGN TURNS ON. `partial` is in the grid, but it carries only a
+        // Transition sample — the shape of a device that reported the shot and omitted this column
+        // at the phase we want. A lookup that stopped at "the preferred metric exists" would take
+        // it, find nothing at Address, and report the measure unavailable while a perfectly good
+        // reading sat on the very next rung.
+        {
+            QJsonObject an      = fixtureAnalysis();
+            QJsonArray  metrics = an.value(QStringLiteral("metrics")).toArray();
+            metrics.append(metricScalar(QStringLiteral("partial"), QStringLiteral("mm"),
+                                        Phase::Transition, 400'000, 99.0));
+            an.insert(QStringLiteral("metrics"), metrics);
+            const SwingPhaseGrid g = buildPhaseGrid(an);
+
+            check(g.metric(QStringLiteral("partial")) != nullptr,
+                  "the preferred metric really is present in the grid");
+            near(reduceOverGrid(g, ladderMeasure("pelvisSway", { "partial" })).value_or(-999), 10.0,
+                 "a preferred key present but silent at this phase falls through too");
+        }
+
+        // And when the preferred rung does answer, it wins — that is the point of preferring it.
+        Measure top = ladderMeasure("pelvisSway", { "thoraxRotation" });
+        top.reducer.anchor = Phase::Top;
+        near(reduceOverGrid(grid, top).value_or(-999), 4.0,
+             "…and where the preferred key answers, it is the one that answers");
+
+        check(!reduceOverGrid(grid, ladderMeasure("nope", { "alsoNope" })).has_value(),
+              "no rung answers, no value");
+    }
+
     std::printf("\n%s (%d failures)\n", g_fail ? "FAILED" : "OK", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -90,7 +90,7 @@ std::optional<IMeasureValueSource::Value> LiveMeasureSource::value(const QString
     // produces one — reduceOverGrid() says the same thing by returning nullopt on an empty
     // metricKey, and the point of checking first is that "there is no producer for this" and
     // "the producer ran and this capture has nothing" are different sentences for the panel.
-    if (m->metricKey.isEmpty()) {
+    if (m->metricKey.isEmpty() && m->preferKeys.isEmpty()) {
         note(measureId, MissingKind::NoMetricBinding);
         return std::nullopt;
     }
@@ -117,8 +117,22 @@ std::optional<IMeasureValueSource::Value> LiveMeasureSource::value(const QString
     // reduceOverGrid() returns one nullopt for two situations, and the panel needs them apart. The
     // discriminator is exactly the one the reduction itself uses first: no such metric, or a phase
     // the reducer wanted that the segmenter never found.
-    if (m_grid.metric(m->metricKey) == nullptr) {
-        if (m->metricKey.startsWith(kLmPrefix))
+    // NOT ONE KEY BUT THE WHOLE LADDER, or a measure that prefers the device would always blame the
+    // device. `m_lowPointAhead` tries `lm.lowPointAhead` and then our own `lowPointAhead`: on a
+    // camera swing with no monitor the first rung is absent and the second is what actually failed,
+    // and "needs a launch monitor" would be the wrong sentence to put in front of that golfer.
+    //
+    // So: if NO rung is present, the reason comes from the LAST one — the fallback, the rung that
+    // was this capture's real chance. If some rung IS present, the metric was produced and the
+    // reduction is what came up empty, which is the phase answer below.
+    const QStringList ladder = measureKeyLadder(*m);
+    bool anyPresent = false;
+    for (const QString &key : ladder)
+        if (m_grid.metric(key) != nullptr) anyPresent = true;
+
+    if (!anyPresent) {
+        const QString &blame = ladder.constLast();
+        if (blame.startsWith(kLmPrefix))
             note(measureId, hasLaunchMonitor() ? MissingKind::LaunchMonitorFieldAbsent
                                                : MissingKind::NoLaunchMonitor);
         else

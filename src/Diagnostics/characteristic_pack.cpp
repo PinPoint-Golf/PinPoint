@@ -345,7 +345,11 @@ std::vector<const Measure *> measuresForMetricAtPhase(const CharacteristicPack &
     if (metricKey.isEmpty()) return {};
 
     for (const Measure &m : pack.measures) {
-        if (m.metricKey != metricKey) continue;
+        // ANY RUNG OF THE LADDER, not just the measure's own key. This is the join a chart uses to
+        // ask "what corridor grades this curve", and a measure that prefers `lm.attackAngle` over
+        // our `attackAngle` grades both — so a plot of the device's reading has to find it, or the
+        // corridor drawn on the chart and the corridor the diagnosis used would be different rows.
+        if (!measureKeyLadder(m).contains(metricKey)) continue;
 
         switch (m.reducer.kind) {
         case ReducerKind::At:
@@ -429,6 +433,37 @@ ValidationReport validatePack(const CharacteristicPack &pack)
         } else if (m.metricKey.isEmpty()) {
             err(r, QStringLiteral("badFacets"), m.id,
                 QStringLiteral("Provided measure '%1' names no metric key.").arg(m.id));
+        }
+
+        // --- the instrument ladder ------------------------------------------
+        //
+        // Structure only. That every rung EXISTS in the catalogue and states the measure's unit is
+        // checked by diagnostics_catalogue_integrity_test, which is the one place that holds both
+        // registries at once; this file has never been able to see the catalogue and must not start
+        // guessing at it. What it can see is a row that contradicts itself.
+        if (!m.preferKeys.isEmpty()) {
+            if (m.kind == MeasureKind::Composed)
+                err(r, QStringLiteral("badFacets"), m.id,
+                    QStringLiteral("Composed measure '%1' names preferred metric keys. A composed "
+                                   "measure is built from facets and has no catalogue key to prefer "
+                                   "over.").arg(m.id));
+
+            QSet<QString> seen;
+            for (const QString &k : m.preferKeys) {
+                if (k.isEmpty())
+                    err(r, QStringLiteral("badFacets"), m.id,
+                        QStringLiteral("Measure '%1' has an empty entry in preferKeys.").arg(m.id));
+                // Both of these would read as a ladder while behaving as a single rung — the first
+                // silently, the second by putting the fallback ahead of itself.
+                else if (seen.contains(k))
+                    err(r, QStringLiteral("badFacets"), m.id,
+                        QStringLiteral("Measure '%1' lists '%2' twice in preferKeys.").arg(m.id, k));
+                else if (k == m.metricKey)
+                    err(r, QStringLiteral("badFacets"), m.id,
+                        QStringLiteral("Measure '%1' prefers '%2' over itself — that key IS its "
+                                       "metricKey.").arg(m.id, k));
+                seen.insert(k);
+            }
         }
 
         // The reducer is checked for BOTH kinds: a Provided measure over a catalogue TimeSeries
@@ -619,6 +654,17 @@ ValidationReport validatePack(const CharacteristicPack &pack)
             && !isOutsideCaptureReach(c.confirmedBy))
             warn(r, QStringLiteral("observableNoSignal"), c.id,
                  QStringLiteral("'%1' is Observable and Measured, but nothing detects it.").arg(c.id));
+
+        // A CONJUNCTION OF ONE IS NOT A CONJUNCTION. With a single signal, `all` and `any` are the
+        // same test written two ways — so the field is either a leftover from signals that were
+        // removed, or an author part-way through adding the rest. Both are worth a look, and
+        // neither is worth failing the load over: the pack still behaves correctly.
+        if (c.detection == DetectionMode::All && c.detectedBy.size() < 2)
+            warn(r, QStringLiteral("conjunctionOfOne"), c.id,
+                 QStringLiteral("'%1' combines its signals with `all` but has %2. A conjunction "
+                                "needs at least two terms to mean anything.")
+                     .arg(c.id, c.detectedBy.isEmpty() ? QStringLiteral("none")
+                                                       : QStringLiteral("only one")));
 
         // A condition that is only reachable by a screen or by asking cannot also be measured.
         if (isOutsideCaptureReach(c.confirmedBy) && !c.detectedBy.isEmpty())
@@ -960,7 +1006,8 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         if (!readReducer(o.value(QStringLiteral("reducer")).toObject(), m.reducer, why))
             err(r, QStringLiteral("badReducer"), m.id, QStringLiteral("Measure '%1': %2").arg(m.id, why));
 
-        m.metricKey = o.value(QStringLiteral("metricKey")).toString();
+        m.metricKey  = o.value(QStringLiteral("metricKey")).toString();
+        m.preferKeys = readStringList(o.value(QStringLiteral("preferKeys")));
         m.label     = o.value(QStringLiteral("label")).toString();
         m.aliases   = readStringList(o.value(QStringLiteral("aliases")));
         m.unit      = o.value(QStringLiteral("unit")).toString();
@@ -1084,6 +1131,15 @@ PackLoadResult loadPack(const QJsonObject &root, const QString &sourceLabel)
         c.aliases    = readStringList(o.value(QStringLiteral("aliases")));
         c.axis       = o.value(QStringLiteral("axis")).toString();
         c.detectedBy = readStringList(o.value(QStringLiteral("detectedBy")));
+        // Absent => Any, so every condition authored before conjunctions existed keeps combining
+        // its signals exactly as it did. An unknown token is an error rather than a silent fall
+        // back to Any: "all" misread as "any" turns a conjunction into three separate faults that
+        // each fire on their own, which is the loudest possible way to be wrong.
+        if (o.contains(QStringLiteral("detection"))
+            && !detectionModeFromName(o.value(QStringLiteral("detection")).toString(), c.detection))
+            err(r, QStringLiteral("unknownDetection"), c.id,
+                QStringLiteral("Condition '%1' declares detection '%2'; the modes are any and all.")
+                    .arg(c.id, o.value(QStringLiteral("detection")).toString()));
         c.screenRef  = o.value(QStringLiteral("screenRef")).toString();
         c.drills     = readStringList(o.value(QStringLiteral("drills")));
         c.consequence = readLocalised(o.value(QStringLiteral("consequence")));
@@ -1288,6 +1344,7 @@ QJsonObject savePack(const CharacteristicPack &pack)
             o.insert(QStringLiteral("series"), writeSeries(m.series));
         o.insert(QStringLiteral("reducer"), writeReducer(m.reducer));
         if (!m.metricKey.isEmpty()) o.insert(QStringLiteral("metricKey"), m.metricKey);
+        if (!m.preferKeys.isEmpty()) o.insert(QStringLiteral("preferKeys"), writeStringList(m.preferKeys));
         if (!m.label.isEmpty())     o.insert(QStringLiteral("label"), m.label);
         if (!m.aliases.isEmpty())   o.insert(QStringLiteral("aliases"), writeStringList(m.aliases));
         if (!m.unit.isEmpty())      o.insert(QStringLiteral("unit"), m.unit);
@@ -1335,6 +1392,8 @@ QJsonObject savePack(const CharacteristicPack &pack)
         o.insert(QStringLiteral("observability"), observabilityName(c.observability));
         o.insert(QStringLiteral("confirmedBy"), confirmedByName(c.confirmedBy));
         if (!c.detectedBy.isEmpty()) o.insert(QStringLiteral("detectedBy"), writeStringList(c.detectedBy));
+        if (c.detection != DetectionMode::Any)
+            o.insert(QStringLiteral("detection"), detectionModeName(c.detection));
         if (!c.screenRef.isEmpty())  o.insert(QStringLiteral("screenRef"), c.screenRef);
         if (!c.consequence.isEmpty()) o.insert(QStringLiteral("consequence"), writeLocalised(c.consequence));
         if (!c.injuryNote.isEmpty())  o.insert(QStringLiteral("injuryNote"), writeLocalised(c.injuryNote));
