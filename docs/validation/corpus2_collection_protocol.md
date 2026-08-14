@@ -9,7 +9,7 @@ HackMotion criterion programme). **Reporting standard:** GRRAS (Kottner 2011) + 
 reporting conventions (Bland & Altman 1999) for the agreement analysis; STROBE for design.
 
 > **What the collection team must produce:** ~50 **paired** swings in which the *same shots* are recorded
-> simultaneously by the PinPoint IMUs **and** the HackMotion glove sensor, reconciled in sign/zero/time,
+> simultaneously by the PinPoint IMUs **and** the HackMotion wearable sensor, reconciled in sign/zero/time,
 > so PinPoint's lead-wrist FE/RUD/PS can be compared against an accepted criterion reference. This is the
 > dataset that **locks the metric signs, diagnoses anatomical calibration, and re-seats the scoring bands**.
 
@@ -41,7 +41,7 @@ Still **single golfer** (within-subject) — population generalisation remains C
 | Field | Value |
 |---|---|
 | Corpus ID | `corpus-2` |
-| Instruments | PinPoint IMUs (forearm + hand; ± upper arm) **+ HackMotion glove sensor**, worn together |
+| Instruments | PinPoint IMUs (forearm + hand; ± upper arm) **+ HackMotion wearable sensor**, worn together |
 | Primary unit | one **paired** swing |
 | Validity earned | **criterion / concurrent validity** for lead-wrist FE / RUD / PS |
 | Validity NOT earned | external/population (Corpus 3); absolute accuracy (HackMotion is a criterion, not gold standard) |
@@ -92,7 +92,7 @@ As Corpus 1 (§5), **plus:**
 
 | Item | Spec / setting | Note |
 |---|---|---|
-| HackMotion sensor | on the lead glove, per HackMotion's mount guide | the criterion device |
+| HackMotion sensor | on the lead wrist + hand, per HackMotion's mount guide | the criterion device |
 | HackMotion app/export | record firmware + export version in `CORPUS.md` | the `hackmotion.json` source schema is confirmed during the pilot |
 | Co-mount clearance | HackMotion must not displace the PinPoint hand IMU (🟡) | verified by the perturbation check (§6.4) |
 | Sync aid | a defined sync action (e.g. 3 sharp wrist snaps) at each capture block | for clock cross-correlation (§6.5) |
@@ -110,7 +110,7 @@ As Corpus 1 (§5), **plus:**
 
 ### 6.2 Calibration cadence
 Inherit Corpus 1 §6.2 for PinPoint. **Additionally:** re-zero HackMotion whenever PinPoint is
-recalibrated, and after any glove re-don. Both devices' calibration state must be current for a paired
+recalibrated, and after any sensor re-don. Both devices' calibration state must be current for a paired
 swing to count.
 
 ### 6.3 Repeatability regimes
@@ -119,7 +119,7 @@ re-zero both devices** between sets — this also measures HackMotion's own re-m
 
 ### 6.4 Co-mount perturbation check (new, mandatory)
 After donning **both** devices, re-run PinPoint **Confirm Tracking**. If the 3D model now tracks worse
-than before HackMotion was added, the glove sensor has shifted the hand IMU → **re-seat and recalibrate**.
+than before HackMotion was added, the HackMotion sensor has shifted the hand IMU → **re-seat and recalibrate**.
 A paired swing captured with a perturbed mount is invalid (it would attribute a mounting artifact to a
 device disagreement).
 
