@@ -52,7 +52,7 @@ The window stays read-only. The restatement is the whole design:
 > rings freeze on time, and the window is built when the deferred sources have reported or their
 > deadline has passed.**
 
-So we split two things `captureWindowAndLaunch()` (`shot_processor.cpp:517`) currently does in one
+So we split two things `captureWindowAndLaunch()` (`shot_processor.cpp:562`) currently does in one
 breath:
 
 | Today | Proposed |
@@ -259,7 +259,7 @@ Landing the mechanism does not answer it, and the mechanism should not pretend t
 
 ### 4.4 Stages gate on data, never on the device
 
-`CaptureCapabilities` (`analysis_stage.h:58`) is the established seam — stages call `canRun` against
+`CaptureCapabilities` (`analysis_stage.h:59`) is the established seam — stages call `canRun` against
 it so a webcam-only or IMU-only capture skips what it cannot feed instead of branching inside
 itself. A deferred source fits by **extending `BoundImu`**, not by adding a device check:
 
