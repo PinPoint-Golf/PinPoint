@@ -28,11 +28,13 @@
 #include "../../Gui/diagnostics/session_diagnostics_model.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <cstdio>
@@ -64,6 +66,22 @@ static QString makeSession(const QTemporaryDir &tmp, const char *athlete, const 
     return dir;
 }
 
+// ⚠ THE STAGED swing.json's MTIME IS INPUT DATA, NOT INCIDENTAL.
+// SessionDiagnosticsModel::ingest() takes each shot's timestamp from the file's mtime
+// (session_diagnostics_model.cpp:331) and toJson() writes it straight into the ledger as
+// `shots[].timestampMs` (diagnostic_ledger.h:1405). QFile::copy does NOT preserve mtime — each
+// copy is stamped "now" — so two sessions staged from the SAME fixture used to disagree whenever
+// their two copies landed in different milliseconds. That is roughly a coin flip, and it made the
+// byte-identical-ledger check below fail about 40% of the time while looking like a real defect
+// in cadence handling.
+//
+// So the mtime is pinned, deterministically and per shot: same fixture staged anywhere yields the
+// same ledger bytes, and later shot ids stay later in time so any ordering that reads the stamp
+// still sees a sane sequence. Fix the staging rather than relax the assertion — "cadence changes
+// no evidence" is worth checking to the byte, and a comparison that skips the fields that happen
+// to be awkward stops being that check.
+static constexpr qint64 kStageEpochMs = 1767225600000LL;  // 2026-01-01T00:00:00Z
+
 static bool stageShot(const QString &sessionDir, int shotId, const char *fixture)
 {
     const QString dst = QDir(sessionDir).filePath(
@@ -71,7 +89,24 @@ static bool stageShot(const QString &sessionDir, int shotId, const char *fixture
     if (!QDir().mkpath(dst)) return false;
     const QString src = QDir(QLatin1String(PP_LIVE_SWINGS_DIR))
                             .filePath(QLatin1String(fixture) + QLatin1String("/swing.json"));
-    return QFile::copy(src, QDir(dst).filePath(QStringLiteral("swing.json")));
+    const QString dstFile = QDir(dst).filePath(QStringLiteral("swing.json"));
+    if (!QFile::copy(src, dstFile)) return false;
+
+    QFile f(dstFile);
+    if (!f.open(QIODevice::ReadWrite)) return false;
+    // One second per shot id, so shot 2 is a second after shot 1 rather than merely different.
+    const bool stamped = f.setFileTime(
+        QDateTime::fromMSecsSinceEpoch(kStageEpochMs + qint64(shotId) * 1000, QTimeZone::UTC),
+        QFileDevice::FileModificationTime);
+    f.close();
+    // Deliberately fatal rather than a warning. If the mtime cannot be pinned the ledger
+    // comparisons below become a coin flip again, and a suite that quietly degrades into an
+    // intermittent one is worse than a suite that says it cannot run here.
+    if (!stamped)
+        std::printf("    setFileTime failed on %s — the filesystem will not take an mtime, so the\n"
+                    "    byte-identical ledger checks cannot be trusted here.\n",
+                    qPrintable(dstFile));
+    return stamped;
 }
 
 static QString swingDirFor(const QString &sessionDir, int shotId)
@@ -182,6 +217,21 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     std::printf("session_diagnostics_model_test\n");
+
+    // ⚠ Fail here, loudly, rather than 400 lines later with a SIGSEGV.
+    // This suite reads the shipped content through PINPOINT_CORE_* — ctest supplies them via
+    // set_tests_properties(... ENVIRONMENT ...), so running the binary DIRECTLY (the natural move
+    // when debugging one case) leaves the pack empty. Detection then finds nothing, the assertions
+    // below reach for `cards().first()` on an empty list, and the run dies in QVariant::toMap with
+    // a null `this` — a crash that reads like a defect in the model and is nothing of the kind.
+    if (qEnvironmentVariableIsEmpty("PINPOINT_CORE_PACK")) {
+        std::printf("\nPINPOINT_CORE_PACK is unset — this suite needs the shipped content.\n"
+                    "Run it through ctest, which sets the environment for you:\n"
+                    "    ctest --test-dir build/tests -R session_diagnostics_model_test\n"
+                    "or export PINPOINT_CORE_{PACK,NORMS,CONTEXTS,SCREENS,DRILLS,REFERENCES}\n"
+                    "pointing at src/Resources/diagnostics/*.json.\n\nFAILURES\n");
+        return 1;
+    }
 
     QTemporaryDir tmp;
     check(tmp.isValid(), "a temporary swing library");
