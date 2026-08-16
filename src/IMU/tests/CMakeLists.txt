@@ -64,3 +64,21 @@ pp_add_test(eskf_gyro_units_test
             ${PP_THIRD}/imu_ekf_compat   # <Eigen.h>/<Wire.h> shims — MUST precede imu_ekf
             ${PP_THIRD}/imu_ekf          # ESKF.h, Quaternion.h
     STD 20)
+
+# ── libhackmotion link + ABI smoke test ──────────────────────────────────────
+# The dependency is linked into the app but nothing references a HackMotion
+# symbol until the integration lands, so a library that compiles and fails to
+# LINK would otherwise go unnoticed. This target is what makes "added for Linux,
+# macOS and Windows" a claim rather than an expectation, and hm_abi_check()
+# additionally catches headers and archive coming from different builds — the
+# characteristic failure of a dependency that tracks a branch.
+#
+# NO_QT: the library is C11 with no Qt anywhere near it, and the test is a
+# self-contained main(). pp_require_hackmotion() resolves the source the same way
+# the app does (sibling checkout, app build's _deps, else fetch main).
+pp_require_hackmotion()
+pp_add_test(hackmotion_link_test
+    SOURCES hackmotion_link_test.cpp
+    LINK    hackmotion
+    NO_QT
+    STD 20)

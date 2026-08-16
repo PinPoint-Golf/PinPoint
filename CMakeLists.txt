@@ -186,6 +186,121 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(eigen)
 
+# ── libhackmotion — C11 sans-I/O driver for the HackMotion wG3 wrist sensor ───
+# github.com/PinPoint-Golf/libhackmotion, LGPL-2.1-or-later. A sister project:
+# it owns no radio, thread, timer or clock — PinPoint supplies the BLE transport
+# (BleImuTransport) and the host clock, and drains the library. See
+# docs/implementation/hackmotion_integration_brief.md for what consumes it.
+#
+# Static, like whisper/samplerate/espeak-ng, courtesy of the global
+# BUILD_SHARED_LIBS OFF above — so nothing has to be bundled by any of the three
+# packaging paths. Placed here (before qt_add_executable) so hackmotion_SOURCE_DIR
+# is resolved for the provenance block and the offline-target function below.
+#
+# ⚠ SOURCE RESOLUTION: a sibling ../libhackmotion checkout WINS over GitHub.
+# The library is under active co-development and its fixes are made and pushed
+# from that clone, so the build follows it directly — CMake performs no download
+# and no checkout when FETCHCONTENT_SOURCE_DIR_HACKMOTION is set, which is the
+# mechanism its own documentation points developers at. NEVER edit the fetched
+# copy under build/*/_deps/hackmotion-src: it is a shallow clone, the update step
+# overwrites local changes on reconfigure, and `rm -rf build` destroys them.
+option(PP_HACKMOTION_LOCAL "Prefer a sibling ../libhackmotion checkout over GitHub" ON)
+
+set(_hm_local "${CMAKE_CURRENT_SOURCE_DIR}/../libhackmotion")
+if(PP_HACKMOTION_LOCAL AND EXISTS "${_hm_local}/CMakeLists.txt")
+    get_filename_component(_hm_local "${_hm_local}" ABSOLUTE)
+    set(FETCHCONTENT_SOURCE_DIR_HACKMOTION "${_hm_local}" CACHE PATH
+        "Local libhackmotion checkout to build against instead of fetching" FORCE)
+    set(_hm_origin "local ${_hm_local}")
+else()
+    unset(_hm_local)
+    set(_hm_origin "github main")
+endif()
+
+# The library's own options all default ON. Tests build ~24 binaries, tools build
+# two CLIs, and FFI builds a shared object only the Python binding dlopen()s —
+# none of which belong in this build. RECORD stays ON: it is the .hmwire wire
+# container, linked into the offline tools below. It is a static-only target
+# (it reaches the core's internal symbols), which our BUILD_SHARED_LIBS OFF above
+# guarantees is available.
+set(HM_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+set(HM_BUILD_TOOLS  OFF CACHE BOOL "" FORCE)
+set(HM_BUILD_FFI    OFF CACHE BOOL "" FORCE)
+set(HM_BUILD_RECORD ON  CACHE BOOL "" FORCE)
+# ⚠ HM_WERROR defaults ON, with -Wconversion/-Wsign-conversion/-Wdouble-promotion
+# and -Werror. Their CI is green on gcc, clang and MSVC — but a compiler *version*
+# we happen to have could warn where theirs does not, and a warning inside a
+# dependency must never break PinPoint's build. Off here; the library's own CI is
+# where that gate belongs.
+set(HM_WERROR       OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+  hackmotion
+  # ⚠ Deliberately tracking a BRANCH, not a tag: bugs are expected while the
+  # integration lands, and FETCHCONTENT_UPDATES_DISCONNECTED is OFF by default so
+  # every reconfigure picks up the latest main. Revert to a tag pin (GIT_TAG
+  # v0.x.0) once the library stabilises — and note GIT_SHALLOW works with
+  # branches and tags but NOT with a raw commit hash, so it must go if a SHA is
+  # ever pinned. Ignored entirely when a sibling checkout was found above.
+  GIT_REPOSITORY https://github.com/PinPoint-Golf/libhackmotion.git
+  GIT_TAG        main
+  GIT_SHALLOW    TRUE
+  EXCLUDE_FROM_ALL
+)
+
+# ⚠ libhackmotion/CMakeLists.txt:27-28 does
+#     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
+# when no build type is set. As an add_subdirectory child that FORCE rewrites OUR
+# cache — it is not scoped to the subproject.
+#
+# It does not currently bite HERE, and the reason is worth knowing rather than
+# rediscovering: whisper.cpp does the same thing to Release first
+# (_deps/whisper-src/CMakeLists.txt:13-14) and is populated ~90 lines above, so
+# by this point the build type is never empty and the Debug FORCE cannot fire.
+# That is an accident of ordering, not a guarantee — move this block above
+# whisper and a bare `cmake -S . -B build` silently produces a Debug app.
+#
+# Where it DOES fire is the umbrella test project, which pulls in no whisper;
+# PinPointTests.cmake carries the same guard and it is load-bearing there.
+# Remove both once the library guards that line with PROJECT_IS_TOP_LEVEL.
+set(_pp_build_type_before "${CMAKE_BUILD_TYPE}")
+FetchContent_MakeAvailable(hackmotion)
+if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "${_pp_build_type_before}")
+    set(CMAKE_BUILD_TYPE "${_pp_build_type_before}" CACHE STRING "" FORCE)
+endif()
+unset(_pp_build_type_before)
+
+# Provenance. With a branch tracked upstream and a local checkout able to win,
+# "which libhackmotion built this?" is a question the About box has to answer —
+# it is how a capture gets traced back to a library build while chasing a bug.
+file(STRINGS "${hackmotion_SOURCE_DIR}/include/hackmotion/version.h" _hm_ver_line
+     REGEX "^#define[ \t]+HM_VERSION_STRING")
+string(REGEX REPLACE ".*\"([^\"]+)\".*" "\\1" PP_HACKMOTION_VERSION "${_hm_ver_line}")
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY "${hackmotion_SOURCE_DIR}"
+    OUTPUT_VARIABLE _hm_sha OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+execute_process(
+    COMMAND git status --porcelain
+    WORKING_DIRECTORY "${hackmotion_SOURCE_DIR}"
+    OUTPUT_VARIABLE _hm_dirty OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(_hm_sha)
+    if(_hm_dirty)
+        string(APPEND _hm_sha "-dirty")
+    endif()
+    if(_hm_local)
+        string(APPEND PP_HACKMOTION_VERSION " (${_hm_sha}, local)")
+    else()
+        string(APPEND PP_HACKMOTION_VERSION " (${_hm_sha})")
+    endif()
+endif()
+message(STATUS "libhackmotion: ${PP_HACKMOTION_VERSION} — ${_hm_origin}")
+unset(_hm_ver_line)
+unset(_hm_sha)
+unset(_hm_dirty)
+unset(_hm_local)
+unset(_hm_origin)
+
 # EventBuffer library — lock-free ring-buffer capture store
 add_subdirectory(src/Buffer)
 
@@ -1080,7 +1195,11 @@ else()
     message(STATUS "AssemblyAI: no API key configured")
 endif()
 
-target_link_libraries(PinPointStudio PRIVATE whisper samplerate)
+target_link_libraries(PinPointStudio PRIVATE whisper samplerate hackmotion)
+# No include directory needed — libhackmotion's include/ is PUBLIC on the target,
+# so <hackmotion/hackmotion.h> resolves through the link. HAVE_HACKMOTION means
+# only "the library is linked"; the runtime feature gate is a separate setting.
+target_compile_definitions(PinPointStudio PRIVATE HAVE_HACKMOTION)
 target_include_directories(PinPointStudio PRIVATE
     ${whisper_SOURCE_DIR}/include
     ${whisper_SOURCE_DIR}/ggml/include
@@ -2855,6 +2974,13 @@ if(PINPOINT_BUILD_TOOLS)
         target_link_libraries(${tgt} PRIVATE
             Qt6::Core Qt6::Gui Qt6::Multimedia
             pinpoint_buffer whisper
+            # hackmotion_record is the .hmwire wire container and the reconciliation
+            # that reads a capture back — what an offline target needs to replay a
+            # recorded HackMotion session. Nothing offline CALLS it yet, so the
+            # linker drops the code and the binaries do not grow; what it buys is
+            # that the day swinglab_run replays one, the link does not fail. Same
+            # argument as screen_pack/drill_pack above.
+            hackmotion hackmotion_record
             ${PP_OPENCV_LIBS}   # same core/imgproc/imgcodecs subset — no viz/VTK (see above)
             # The offline tools read recorded MP4s via cv::VideoCapture — pull in
             # opencv_videoio (no-op on monolithic opencv_world via TARGET_NAME_IF_EXISTS).

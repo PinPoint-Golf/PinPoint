@@ -103,6 +103,76 @@ function(pp_find_eigen out_var)
     set(${out_var} "${eigen_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
+# --- libhackmotion (lazy; defines the `hackmotion` target) --------------------
+# Shaped like pp_require_gtest rather than pp_find_eigen because what a suite
+# needs here is a TARGET, not an include dir. The umbrella deliberately pulls in
+# none of the app's dependencies (see the header above), so it resolves its own.
+#
+# Resolution order mirrors the app's, with one extra step: explicit
+# -DPP_HACKMOTION_DIR; a sibling ../libhackmotion checkout; any app build's
+# FetchContent copy (build/*/_deps/hackmotion-src); else fetch main from GitHub.
+# Everything routes through FetchContent even when the source is already on disk,
+# so an out-of-tree source still gets a binary dir inside this build.
+set(PP_HACKMOTION_DIR "" CACHE PATH "libhackmotion source root (dir containing CMakeLists.txt)")
+function(pp_require_hackmotion)
+    if(TARGET hackmotion)
+        return()
+    endif()
+
+    set(_hm_src "")
+    if(PP_HACKMOTION_DIR AND EXISTS "${PP_HACKMOTION_DIR}/CMakeLists.txt")
+        set(_hm_src "${PP_HACKMOTION_DIR}")
+    elseif(EXISTS "${PP_REPO_ROOT}/../libhackmotion/CMakeLists.txt")
+        get_filename_component(_hm_src "${PP_REPO_ROOT}/../libhackmotion" ABSOLUTE)
+    else()
+        file(GLOB _cand "${PP_REPO_ROOT}/build/*/_deps/hackmotion-src")
+        foreach(_c ${_cand})
+            if(EXISTS "${_c}/CMakeLists.txt")
+                set(_hm_src "${_c}")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(_hm_src)
+        message(STATUS "PinPointTests: libhackmotion from ${_hm_src}")
+        set(FETCHCONTENT_SOURCE_DIR_HACKMOTION "${_hm_src}" CACHE PATH "" FORCE)
+    else()
+        message(STATUS "PinPointTests: libhackmotion not found locally — fetching main")
+    endif()
+
+    # Same option forcing as the app build: no test binaries, no CLI tools, no
+    # Python FFI object, and no -Werror on a dependency. RECORD off — no test
+    # suite reads a .hmwire container today.
+    set(HM_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+    set(HM_BUILD_TOOLS  OFF CACHE BOOL "" FORCE)
+    set(HM_BUILD_FFI    OFF CACHE BOOL "" FORCE)
+    set(HM_BUILD_RECORD OFF CACHE BOOL "" FORCE)
+    set(HM_WERROR       OFF CACHE BOOL "" FORCE)
+
+    include(FetchContent)
+    FetchContent_Declare(hackmotion
+        GIT_REPOSITORY https://github.com/PinPoint-Golf/libhackmotion.git
+        GIT_TAG        main
+        GIT_SHALLOW    TRUE
+        EXCLUDE_FROM_ALL)
+
+    # ⚠ LOAD-BEARING, unlike its twin in the root CMakeLists.txt.
+    # libhackmotion/CMakeLists.txt:27-28 FORCEs CMAKE_BUILD_TYPE to Debug when it
+    # is unset, and that FORCE rewrites the cache of whatever project embeds it.
+    # The app build gets away with it because whisper.cpp already forced Release
+    # ~90 lines earlier; this project pulls in no whisper, so libhackmotion is the
+    # first thing here that could set it — and without this save/restore, adding
+    # the dependency would silently turn every test suite into a Debug build.
+    # Verified by configuring with no -DCMAKE_BUILD_TYPE and checking the cache
+    # entry stays empty. Remove once the library guards that line upstream.
+    set(_bt_before "${CMAKE_BUILD_TYPE}")
+    FetchContent_MakeAvailable(hackmotion)
+    if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "${_bt_before}")
+        set(CMAKE_BUILD_TYPE "${_bt_before}" CACHE STRING "" FORCE)
+    endif()
+endfunction()
+
 # --- Sanitizers (one convention for ALL suites) -------------------------------
 # -DPP_SANITIZE=address  |  "address;undefined"  |  thread
 # Replaces the three current spellings (PINPOINT_ENABLE_ASAN/UBSAN/TSAN,

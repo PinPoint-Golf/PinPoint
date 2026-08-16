@@ -458,6 +458,7 @@ The following are fetched at `cmake ..` time — no manual steps required:
 | espeak-ng 1.52.0 | Built from source | — | Only if not found on system |
 | libsamplerate 0.2.2 | Built from source | — | Always |
 | Eigen 3.4.0 | Header-only (IMU EKF) | ~few MB | Always |
+| libhackmotion (`main`) | Built from source (HackMotion wG3 wrist sensor) | ~2 MB | Always — unless a sibling `../libhackmotion` checkout is found, see below |
 | `ggml-base.en.bin` | Whisper STT model (Hugging Face) | ~148 MB | Always |
 | MoveNet Lightning | ONNX pose model (Hugging Face) | ~9 MB | Always |
 | MoveNet Thunder | ONNX pose model (Hugging Face) | ~30 MB | Always |
@@ -470,6 +471,35 @@ If a download fails, the affected feature is disabled but the rest of the build 
 > **Not downloaded at build time:**
 > - The local LLM model (Phi-4-mini) is fetched by the app itself on first run — into the per-user app-data directory, and only when a compatible GPU is present.
 > - **ViTPose++-L wholebody** (`vitpose-l-wholebody.onnx`, ~1.2 GB) — the "High" motion-capture-quality pose model. Deliberately never built or packaged; the app downloads it on demand (with an explicit size warning) when the user selects the **High** tier in Settings → General, into `AppLocalDataLocation/models/vitpose/`. "High" runs ViTPose++-L; "Low"/"Medium" run the packaged ViTPose-B.
+
+### Co-developing libhackmotion
+
+[libhackmotion](https://github.com/PinPoint-Golf/libhackmotion) is a sister project rather than a
+frozen third-party dependency, so the build is set up for a fix-and-push loop against it.
+
+**Source resolution**, in order:
+
+1. A sibling checkout at `../libhackmotion` (i.e. next to the PinPoint repo) — used automatically
+   whenever it exists. CMake prints which source won and the exact commit:
+   `-- libhackmotion: 0.1.0 (5caec2e, local) — local /home/markl/Projects/libhackmotion`
+2. Otherwise `main` from GitHub, re-fetched on every reconfigure.
+
+Pass `-DPP_HACKMOTION_LOCAL=OFF` to ignore a sibling checkout and always take upstream.
+
+**Make fixes in the sibling checkout and push from there.** It is an ordinary git clone with its own
+`origin`; PinPoint builds against it directly, so a change is picked up by the next build with no
+CMake edit and no re-fetch. ⚠ **Never edit the fetched copy under `build/*/_deps/hackmotion-src`** —
+it is a shallow clone, FetchContent's update step overwrites local changes on reconfigure, and
+`rm -rf build` destroys them. This is CMake's own recommendation for exactly this workflow (see
+`FETCHCONTENT_SOURCE_DIR_<name>`).
+
+The resolved version *and commit* appear in the About box, because the dependency tracks a branch
+and can be overridden locally — the version string alone does not identify a build. The umbrella
+test suite resolves the library the same way and adds `-DPP_HACKMOTION_DIR=<path>` for an explicit
+override; `ctest -R hackmotion` runs the link/ABI check.
+
+The dependency tracks `main` deliberately while the HackMotion integration lands. It reverts to a
+tag pin once the library stabilises.
 
 ---
 
