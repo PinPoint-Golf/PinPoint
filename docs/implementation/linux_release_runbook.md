@@ -40,7 +40,8 @@ tests are *not* part of the app build — they are nine standalone CTest suites 
 no `OpenCV_DIR` is needed:
 ```bash
 QT=~/Qt/6.11.0/gcc_64
-cmake -S tests -B build/tests -DCMAKE_PREFIX_PATH="$QT" \
+rm -rf build/tests \
+  && cmake -S tests -B build/tests -DCMAKE_PREFIX_PATH="$QT" \
   && cmake --build build/tests -j 4 \
   && ctest --test-dir build/tests --output-on-failure -j 4 \
   || echo "❌ RELEASE BLOCKED"
@@ -49,6 +50,14 @@ The last line must read `100% tests passed, 0 tests failed out of N` — N grows
 and tests are added (121 as of v0.1-alpha11), so treat the *zero failures*, not the count,
 as the gate. **If the umbrella fails to configure or build, or any test fails, STOP — fix
 it and re-run before you tag.** Do not proceed to Path A/B below.
+
+> **⚠ `rm -rf build/tests` first, and it is not housekeeping — the gate is unsound without
+> it.** An incremental configure happily reports `100% tests passed` while running binaries
+> built from an older checkout, so the gate certifies code that is not the code being
+> shipped. Observed 2026-08-16: a full umbrella run over a pre-existing `build/tests`
+> reported 134/134, and deleting it and reconfiguring **at the same commit** immediately
+> surfaced a failure. Nothing had changed but the staleness. Deleting costs a few minutes of
+> rebuild once per release; not deleting costs a green gate that means nothing.
 
 > **Use the umbrella, never a per-suite loop.** `tests/CMakeLists.txt` enumerates the
 > suites, so one added later is picked up by this gate automatically. The hand-rolled loop

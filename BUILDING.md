@@ -399,7 +399,9 @@ cmake --build build/tests -j6
 ctest --test-dir build/tests --output-on-failure
 ```
 
-The Qt prefix is auto-resolved per platform; pass `-DCMAKE_PREFIX_PATH=/path/to/Qt/6.11.x/<abi>` only if Qt is installed somewhere non-standard. Eigen is found automatically (explicit `-DPP_EIGEN_DIR`, then the app build's `build/*/_deps/eigen-src`, then a 3.4.0 fetch) — configuring the app once first lets the tests reuse its copy with no extra download.
+The Qt prefix is auto-resolved per platform; pass `-DCMAKE_PREFIX_PATH=/path/to/Qt/6.11.x/<abi>` only if Qt is installed somewhere non-standard. Eigen and libhackmotion are found automatically (explicit `-DPP_EIGEN_DIR` / `-DPP_HACKMOTION_DIR`, then a sibling checkout or the app build's `build/*/_deps/…`, then a fetch) — configuring the app once first lets the tests reuse its copies with no extra download.
+
+> **⚠ An incremental umbrella can report green while testing stale binaries.** Re-using an existing `build/tests` is fine for day-to-day iteration, but it will happily print `100% tests passed` over executables built from an older checkout. Observed 2026-08-16: a run over a pre-existing `build/tests` reported 134/134, and `rm -rf build/tests` followed by a clean reconfigure **at the same commit** immediately surfaced a failure. **Delete `build/tests` before any run whose result you intend to rely on** — cutting a release, confirming a fix, or declaring a suite green. The release runbooks now do this as part of the mandatory gate.
 
 Equivalent via the presets in `tests/CMakePresets.json` (CMake reads `CMakePresets.json` from the current directory, so run them **from `tests/`**):
 

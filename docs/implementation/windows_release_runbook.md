@@ -63,6 +63,7 @@ shell with CMake + Ninja on `PATH`:
 $Qt  = 'C:/Qt/6.11.0/msvc2022_64'
 $OCV = 'C:/tools/opencv/build'                          # Analysis & Pose need OpenCV
 $env:PATH = "$Qt/bin;$OCV/x64/vc16/bin;$env:PATH"       # so test exes resolve Qt/OpenCV DLLs
+if (Test-Path build/tests) { Remove-Item -Recurse -Force build/tests }  # see the warning below
 cmake -S tests -B build/tests -G Ninja -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_PREFIX_PATH=$Qt" "-DOpenCV_DIR=$OCV"
 if ($LASTEXITCODE) { Write-Error 'RELEASE BLOCKED — configure failed'; return }
 cmake --build build/tests -j 6
@@ -74,6 +75,17 @@ The last line must read `100% tests passed, 0 tests failed out of N` — N grows
 and tests are added (121 as of v0.1-alpha11), so treat the *zero failures*, not the count,
 as the gate. **If the umbrella fails to configure or build, or any test fails, STOP — fix
 it and re-run before you tag.** Do not proceed to the build/sign steps below.
+
+> **⚠ Delete `build/tests` first, and it is not housekeeping — the gate is unsound without
+> it.** An incremental configure happily reports `100% tests passed` while running binaries
+> built from an older checkout, so the gate certifies code that is not the code being
+> shipped. Observed 2026-08-16: a full umbrella run over a pre-existing `build/tests`
+> reported 134/134, and deleting it and reconfiguring **at the same commit** immediately
+> surfaced a failure. Nothing had changed but the staleness. Deleting costs one rebuild per
+> release; not deleting costs a green gate that means nothing.
+>
+> On this platform it also settles the stale-`CMakeCache.txt` trap described below in one
+> step — a bad `OpenCV_DIR` is cached and re-used on every retry until the directory goes.
 
 > **Use the umbrella, never a per-suite loop.** `tests/CMakeLists.txt` enumerates the
 > suites, so one added later is picked up by this gate automatically. The hand-rolled loop
