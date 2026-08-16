@@ -217,22 +217,12 @@ else()
     set(_hm_origin "github main")
 endif()
 
-# The library's own options all default ON. Tests build ~24 binaries, tools build
-# two CLIs, and FFI builds a shared object only the Python binding dlopen()s —
-# none of which belong in this build. RECORD stays ON: it is the .hmwire wire
-# container, linked into the offline tools below. It is a static-only target
-# (it reaches the core's internal symbols), which our BUILD_SHARED_LIBS OFF above
-# guarantees is available.
-set(HM_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
-set(HM_BUILD_TOOLS  OFF CACHE BOOL "" FORCE)
-set(HM_BUILD_FFI    OFF CACHE BOOL "" FORCE)
-set(HM_BUILD_RECORD ON  CACHE BOOL "" FORCE)
-# ⚠ HM_WERROR defaults ON, with -Wconversion/-Wsign-conversion/-Wdouble-promotion
-# and -Werror. Their CI is green on gcc, clang and MSVC — but a compiler *version*
-# we happen to have could warn where theirs does not, and a warning inside a
-# dependency must never break PinPoint's build. Off here; the library's own CI is
-# where that gate belongs.
-set(HM_WERROR       OFF CACHE BOOL "" FORCE)
+# Nothing to switch off: the library's tests, tools, FFI object, -Werror and
+# install rules all default to its own top-level check, so embedding it yields
+# the library and nothing else. Asking for the record module is the one positive
+# statement we make — the offline targets below link it, so say so rather than
+# inherit it.
+set(HM_BUILD_RECORD ON CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
   hackmotion
@@ -248,27 +238,7 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
 )
 
-# ⚠ libhackmotion/CMakeLists.txt:27-28 does
-#     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
-# when no build type is set. As an add_subdirectory child that FORCE rewrites OUR
-# cache — it is not scoped to the subproject.
-#
-# It does not currently bite HERE, and the reason is worth knowing rather than
-# rediscovering: whisper.cpp does the same thing to Release first
-# (_deps/whisper-src/CMakeLists.txt:13-14) and is populated ~90 lines above, so
-# by this point the build type is never empty and the Debug FORCE cannot fire.
-# That is an accident of ordering, not a guarantee — move this block above
-# whisper and a bare `cmake -S . -B build` silently produces a Debug app.
-#
-# Where it DOES fire is the umbrella test project, which pulls in no whisper;
-# PinPointTests.cmake carries the same guard and it is load-bearing there.
-# Remove both once the library guards that line with PROJECT_IS_TOP_LEVEL.
-set(_pp_build_type_before "${CMAKE_BUILD_TYPE}")
 FetchContent_MakeAvailable(hackmotion)
-if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "${_pp_build_type_before}")
-    set(CMAKE_BUILD_TYPE "${_pp_build_type_before}" CACHE STRING "" FORCE)
-endif()
-unset(_pp_build_type_before)
 
 # Provenance. With a branch tracked upstream and a local checkout able to win,
 # "which libhackmotion built this?" is a question the About box has to answer —

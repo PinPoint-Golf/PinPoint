@@ -141,14 +141,11 @@ function(pp_require_hackmotion)
         message(STATUS "PinPointTests: libhackmotion not found locally — fetching main")
     endif()
 
-    # Same option forcing as the app build: no test binaries, no CLI tools, no
-    # Python FFI object, and no -Werror on a dependency. RECORD off — no test
-    # suite reads a .hmwire container today.
-    set(HM_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
-    set(HM_BUILD_TOOLS  OFF CACHE BOOL "" FORCE)
-    set(HM_BUILD_FFI    OFF CACHE BOOL "" FORCE)
+    # The library defaults its tests, tools, FFI object, -Werror and install
+    # rules off when embedded, so there is nothing to switch off here. Record is
+    # the exception — it defaults ON as a library target, and no suite reads a
+    # .hmwire container, so skip compiling it.
     set(HM_BUILD_RECORD OFF CACHE BOOL "" FORCE)
-    set(HM_WERROR       OFF CACHE BOOL "" FORCE)
 
     include(FetchContent)
     FetchContent_Declare(hackmotion
@@ -157,20 +154,7 @@ function(pp_require_hackmotion)
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL)
 
-    # ⚠ LOAD-BEARING, unlike its twin in the root CMakeLists.txt.
-    # libhackmotion/CMakeLists.txt:27-28 FORCEs CMAKE_BUILD_TYPE to Debug when it
-    # is unset, and that FORCE rewrites the cache of whatever project embeds it.
-    # The app build gets away with it because whisper.cpp already forced Release
-    # ~90 lines earlier; this project pulls in no whisper, so libhackmotion is the
-    # first thing here that could set it — and without this save/restore, adding
-    # the dependency would silently turn every test suite into a Debug build.
-    # Verified by configuring with no -DCMAKE_BUILD_TYPE and checking the cache
-    # entry stays empty. Remove once the library guards that line upstream.
-    set(_bt_before "${CMAKE_BUILD_TYPE}")
     FetchContent_MakeAvailable(hackmotion)
-    if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "${_bt_before}")
-        set(CMAKE_BUILD_TYPE "${_bt_before}" CACHE STRING "" FORCE)
-    endif()
 endfunction()
 
 # --- Sanitizers (one convention for ALL suites) -------------------------------
