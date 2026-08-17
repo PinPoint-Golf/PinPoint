@@ -1254,6 +1254,49 @@ pinpoint::SwingExportJob ShotProcessor::buildSwingExportJob()
                     const double skew = hm->skewUsMean();
                     if (std::isfinite(skew))
                         hmInfo.skewUs = skew;
+
+                    // ── Capture provenance, scoped to THIS window (Phase B′) ──
+                    // ⚠ Queried per unit, not per device: pinning is a property of
+                    // one board — the palm sits at the larger radius and saturates
+                    // first — so folding both units into one count would report a
+                    // clipped palm as a fault of the lower arm as well.
+                    //
+                    // ⚠ Left entirely at its "not measured" defaults when there is no
+                    // window. A swing exported without one cannot say what happened
+                    // inside it, and inventing a clean answer is the failure this
+                    // whole block exists to prevent.
+                    if (m_swingWindow) {
+                        const HmInstance::CaptureProvenance prov =
+                            hm->captureProvenance(m_swingWindow->startTimestampUs(),
+                                                  m_swingWindow->endTimestampUs());
+                        hmInfo.hmCalibrationStateAtStart = prov.calibration.stateAtStart;
+                        hmInfo.hmCalibrationStateAtEnd   = prov.calibration.stateAtEnd;
+                        hmInfo.hmCalibrationSpansTransition =
+                            prov.calibration.spansTransition;
+                        hmInfo.hmConfigBits           = prov.configBits;
+                        hmInfo.hmProvenanceDropped    = int(prov.exceptionsDropped);
+                        hmInfo.hmNoFitSkippedSession  = int(prov.noFitSkipped);
+
+                        const quint8 thisUnit =
+                            quint8(unit == hm->unitPalm() ? HM_UNIT_PALM
+                                                          : HM_UNIT_LOWER_ARM);
+                        for (const HmInstance::SampleException &e : prov.exceptions) {
+                            switch (e.reason) {
+                            case HmInstance::SampleException::Pinned:
+                                if (e.unit == thisUnit)
+                                    ++hmInfo.hmPinnedSamples;
+                                break;
+                            case HmInstance::SampleException::QuatNormSuspect:
+                                // ⚠ Record-level, so it counts for BOTH units rather
+                                // than being assigned to one. A misaligned decode is
+                                // not something one board did.
+                                ++hmInfo.hmQuatNormSuspect;
+                                break;
+                            default:
+                                break;
+                            }
+                        }
+                    }
                     job.imuDeviceBySerial.insert(unitId, hmInfo);
                 }
                 break;

@@ -103,3 +103,17 @@ pp_add_test(hm_sample_convert_test
     LINK    hackmotion
     NO_QT
     STD 20)
+
+# The window arithmetic that decides what a recorded swing may claim about itself
+# (Phase B′). Pure and header-only for exactly this reason: a HackMotion lane
+# reaches swing.json as ten floats, so a sample taken before calibration and one
+# taken after are byte-identical there and the device's transform cannot be
+# recovered afterwards — which makes these rules the only thing standing between a
+# reader and a confident wrong answer. No hackmotion link: the header takes its
+# three state integers as ints rather than depending on the library enum, so this
+# runs anywhere.
+pp_add_test(hm_capture_provenance_test
+    SOURCES hm_capture_provenance_test.cpp
+    INCLUDE ${IMU}
+    NO_QT
+    STD 20)

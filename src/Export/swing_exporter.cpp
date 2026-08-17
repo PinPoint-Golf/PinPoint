@@ -588,6 +588,43 @@ SwingExportResult SwingExporter::run(const SwingWindow& window, const SwingExpor
                 // this key by a future accident elsewhere.
                 if (isHackMotion && dev.skewUs != 0.0 && std::isfinite(dev.skewUs))
                     deviceObj[QStringLiteral("skewUs")] = dev.skewUs;
+
+                // ── Capture provenance (Phase B′) ────────────────────────────
+                // ⚠ EVERY KEY HERE IS OMITTED WHEN NOT MEASURED rather than written
+                // as a zero or a -1. "calibrationState": 0 would be read as a value
+                // by anything scanning the corpus, and a missing key is the only
+                // form that cannot be mistaken for a measurement. That matters most
+                // for the counts: an absent "pinnedSamples" means nobody looked,
+                // while 0 is a positive claim that nothing clipped.
+                if (isHackMotion) {
+                    if (dev.hmCalibrationStateAtStart >= 0) {
+                        deviceObj[QStringLiteral("calibrationStateAtStart")] =
+                            dev.hmCalibrationStateAtStart;
+                        deviceObj[QStringLiteral("calibrationStateAtEnd")] =
+                            dev.hmCalibrationStateAtEnd;
+                        // Only written when true: a false here would be one more
+                        // key on every export saying nothing happened.
+                        if (dev.hmCalibrationSpansTransition)
+                            deviceObj[QStringLiteral("calibrationSpansTransition")] = true;
+                    }
+                    if (dev.hmConfigBits >= 0)
+                        deviceObj[QStringLiteral("configBits")] = dev.hmConfigBits;
+                    // ⚠ Gated on the calibration state having been measured, because
+                    // that is the flag that says a sample was seen at all. Writing
+                    // "pinnedSamples": 0 for a device that never streamed would be a
+                    // clean bill of health issued over no evidence.
+                    if (dev.hmCalibrationStateAtStart >= 0 || dev.hmConfigBits >= 0) {
+                        deviceObj[QStringLiteral("pinnedSamples")]   = dev.hmPinnedSamples;
+                        deviceObj[QStringLiteral("quatNormSuspect")] = dev.hmQuatNormSuspect;
+                    }
+                    // Both are faults rather than measurements, so they appear only
+                    // when non-zero — and when they do, they change what the counts
+                    // above mean.
+                    if (dev.hmProvenanceDropped > 0)
+                        deviceObj[QStringLiteral("provenanceDropped")] = dev.hmProvenanceDropped;
+                    if (dev.hmNoFitSkippedSession > 0)
+                        deviceObj[QStringLiteral("noFitSkippedSession")] = dev.hmNoFitSkippedSession;
+                }
                 s[QStringLiteral("device")] = deviceObj;
             }
             if (isHackMotion) {

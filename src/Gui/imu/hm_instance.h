@@ -25,6 +25,8 @@
 
 #include <hackmotion/sample.h>      // hm_unit — the cable-fixed unit ordering
 
+#include "hm_capture_provenance.h"  // the pure window arithmetic behind Phase B′
+
 #include "device_enumerator.h"
 #include "imu_device.h"
 #include "types.h"
@@ -381,6 +383,45 @@ public:
     // Latest measurement, invalid until one lands and driven back to invalid by
     // every invalidation.
     ReferenceAnchor referenceAnchor() const { return m_anchor; }
+
+    // ── Capture provenance (Phase B′) ────────────────────────────────────────
+    //
+    // ⚠ WHY THIS EXISTS. A HackMotion reading reaches swing.json as ten floats
+    // (pinpoint::ImuSample) plus a host timestamp. The NUMBERS survive intact —
+    // accel is raw counts × 0.001 exactly, the quaternion is i16/16384 exact in
+    // float32 — but every field of hm_sample that says WHETHER TO TRUST THEM
+    // stops at writeSample(). Two of those are load-bearing and neither can be
+    // reconstructed from the recording afterwards:
+    //
+    //   CALIBRATION STATE — the device applies its own transform, and sample.h is
+    //     explicit that it "is not recoverable later, so if the recording does not
+    //     carry this flag the mistake is permanent and invisible". Pre-calibration
+    //     quaternions are valid geometry and anatomically meaningless (§8.1 puts
+    //     the raw mounting offset at 11-15° at a straight wrist).
+    //   PINNING — int16 fields SATURATE rather than wrap, so a clipped peak is a
+    //     plausible flat top rather than a fault, and nothing else in the protocol
+    //     reports it (§6.4: a struck swing reaches 53-58 % of full scale, a
+    //     deliberate wrist flick 83 %).
+    //
+    // ⚠ SPLIT BY HOW THE DATA BEHAVES, NOT BY HOW IMPORTANT IT IS. Calibration
+    // state cannot change inside a swing — the link drop that would change it also
+    // ends the stream — so it is carried as a SPAN. Pinning can land on any
+    // individual sample, so it is carried as TIMESTAMPED ENTRIES a window selects
+    // from: a session total would answer "did this session ever clip", which is
+    // not the question the analysis of one swing asks.
+    // ⚠ THE TYPES AND THE WINDOW ARITHMETIC LIVE IN THE PURE HEADER
+    // (Imu/hm_capture_provenance.h), so the rules deciding what a swing is allowed
+    // to claim about itself are testable without a device, a session or a BLE link.
+    // These aliases exist so call sites keep saying HmInstance::… rather than
+    // reaching past this class for a type it hands out.
+    using SampleException   = pinpoint::hm::SampleException;
+    using CalibrationSpan   = pinpoint::hm::CalibrationSpan;
+    using CaptureProvenance = pinpoint::hm::CaptureProvenance;
+    static constexpr quint8 kSampleLevel = pinpoint::hm::kSampleLevel;
+
+    // Window-scoped. Callable from any thread; the worker copies out under the
+    // same mutex snapshot() uses.
+    CaptureProvenance captureProvenance(qint64 windowStartUs, qint64 windowEndUs) const;
 
     // ioThread is ImuManager's shared IMU I/O thread. Everything that touches
     // the hm_session lives there — see HmSessionWorker in the .cpp and the

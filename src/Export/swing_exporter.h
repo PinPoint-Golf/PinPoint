@@ -119,6 +119,40 @@ struct SwingImuDeviceInfo {
     // free-running counters that happens to be stable. 0.0 = not measured
     // (omit the key rather than write a fake zero-skew claim).
     double      skewUs = 0.0;
+
+    // ── HackMotion capture provenance (Phase B′) ─────────────────────────────
+    //
+    // ⚠ THESE SAY WHETHER THE NUMBERS IN THIS STREAM CAN BE TRUSTED, and nothing
+    // else in swing.json carries that. A HackMotion lane is ten floats per sample
+    // like any other, so a reading taken before calibration and one taken after are
+    // byte-indistinguishable — and the device applies its transform itself, so the
+    // difference cannot be recovered later. §8.1 puts the uncalibrated mounting
+    // offset at 11-15° at a straight wrist: real geometry, meaningless anatomy.
+    //
+    // -1 throughout means NOT MEASURED, never "fine". The exporter omits the keys
+    // rather than writing a default that reads as a clean bill of health.
+    int  hmCalibrationStateAtStart = -1;  // hm_calibration_state at the window start
+    int  hmCalibrationStateAtEnd   = -1;  // ...and at its end
+    bool hmCalibrationSpansTransition = false;  // it changed INSIDE the window
+    int  hmConfigBits = -1;               // the `a0 01 <cfg>` byte behind these samples
+
+    // ⚠ Saturation, counted over THIS window. int16 fields saturate rather than
+    // wrap, so a clipped peak is a plausible flat top and nothing in the protocol
+    // reports it (§6.4). A non-zero count here means a metric computed at impact may
+    // be reading a clamped value; it is not a reason to discard the swing, and the
+    // decision belongs to whoever reads it.
+    int  hmPinnedSamples = 0;
+    // Samples whose quaternion norm was outside tolerance — the decode may have been
+    // misaligned, which makes the orientation meaningless rather than merely noisy.
+    int  hmQuatNormSuspect = 0;
+    // ⚠ Non-zero means pinning outran the capture ring, so hmPinnedSamples is a
+    // FLOOR and not a count. It also invalidates the rarity assumption that ring is
+    // sized on — see the plan's Phase B′.
+    int  hmProvenanceDropped = 0;
+    // ⚠ SESSION TOTAL, not windowed: a sample skipped for having no mapped host time
+    // has no host time to attribute to a window. Should be 0 — the clock fit exists
+    // from the first live frame — so a non-zero value is a symptom, not a rate.
+    int  hmNoFitSkippedSession = 0;
 };
 
 // Host/app provenance recorded under capture.host — explains cross-host

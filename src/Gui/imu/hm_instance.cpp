@@ -214,6 +214,11 @@ public:
     // of being marshalled through a metatype.
     HmInstance::ReferenceAnchor referenceAnchor() const;
 
+    // Window-scoped capture provenance (Phase B′). Callable from any thread; copies
+    // out from under the same mutex snapshot() uses.
+    HmInstance::CaptureProvenance captureProvenance(qint64 windowStartUs,
+                                                    qint64 windowEndUs) const;
+
     // ── I/O thread only ──────────────────────────────────────────────────────
     void initialise();          // create the session and the drain timer
     void connectTo(const QBluetoothDeviceInfo &device, const QBluetoothAddress &adapter);
@@ -363,6 +368,16 @@ private:
     uint64_t m_clockDegradedStreamId = 0;
     uint32_t m_clockDegradedP90Us    = 0;
     quint64  m_clockDegradedCount    = 0;
+
+    // ── Capture provenance (Phase B′) ────────────────────────────────────────
+    // ⚠ GUARDED BY m_mutex, like m_snap and m_anchor: written on the I/O thread as
+    // samples are recorded, read from the export thread through captureProvenance().
+    // The log itself is pure and does no locking of its own — see the note on its
+    // class — so this mutex is the only one, rather than two with divergent ideas of
+    // what they protect.
+    pinpoint::hm::CaptureProvenanceLog m_provenance;
+
+    void noteProvenance(const hm_sample &s);   // I/O thread; needs a mapped host time
 
     mutable QMutex m_mutex;
     Snapshot       m_snap;
@@ -1204,6 +1219,32 @@ void HmSessionWorker::drainLive()
     m_snap = next;
 }
 
+// ⚠ CALLED ONLY FOR SAMPLES THAT ARE ACTUALLY RECORDED — past the capture gate and
+// past the no-fit gate. Provenance that described samples the window does not
+// contain would be worse than none: it would attribute a clip to a swing that never
+// saw it.
+void HmSessionWorker::noteProvenance(const hm_sample &s)
+{
+    // ⚠ pinned_mask, the PER-UNIT field, rather than HM_SAMPLE_PINNED, which is the
+    // record-level summary of the same condition. Keying off the mask is what keeps
+    // one saturation from being reported once per unit, and it is also the only form
+    // that says WHICH channel clipped.
+    QMutexLocker lk(&m_mutex);
+    m_provenance.noteSample(qint64(s.host_time_us),
+                            s.lower_arm.pinned_mask,
+                            s.palm.pinned_mask,
+                            (s.flags & HM_SAMPLE_QUAT_NORM_SUSPECT) != 0,
+                            int(s.calibration),
+                            int(s.config_bits));
+}
+
+HmInstance::CaptureProvenance
+HmSessionWorker::captureProvenance(qint64 windowStartUs, qint64 windowEndUs) const
+{
+    QMutexLocker lk(&m_mutex);
+    return m_provenance.inWindow(windowStartUs, windowEndUs);
+}
+
 void HmSessionWorker::writeSample(const hm_sample &s)
 {
     // ⚠ skew_us IS ACCUMULATED BEFORE ANY GATE, because it does not come from the
@@ -1287,9 +1328,22 @@ void HmSessionWorker::writeSample(const hm_sample &s)
     // first live frame (brief §0 #1), so HM_SAMPLE_NO_FIT arriving here is a
     // symptom rather than the expected start-up condition it once was.
     if (s.host_time_us == HM_TIME_UNKNOWN || (s.flags & HM_SAMPLE_NO_FIT)) {
+        // ⚠ COUNTED TWICE, INTO TWO DIFFERENT AUDIENCES, and neither is redundant:
+        // m_noFitSkipped feeds the 10 s device summary a coach's support bundle
+        // carries, while the provenance log is what reaches swing.json so that a
+        // window missing samples says so a year later. The path is unreachable after
+        // the first live frame (brief §0 #1), so the lock costs nothing in practice.
         ++m_noFitSkipped;
+        {
+            QMutexLocker lk(&m_mutex);
+            m_provenance.noteNoFitSkipped();
+        }
         return;
     }
+
+    // Past every gate, so this sample has a mapped host time and is about to be
+    // recorded — which is exactly the set the provenance describes.
+    noteProvenance(s);
 
     // ⚠ ONE SAMPLE, ONE INDEX, ONE MAPPED HOST TIME — SO BOTH BLOCKS GET THE SAME
     // STAMP, and the palm is NOT offset by skew_us. The fit maps index → host
@@ -2032,6 +2086,16 @@ QStringList HmInstance::sourceLabels() const
         if (unit->sourceId() != pinpoint::kInvalidSourceId)
             labels.append(unit->unitLabel());
     return labels;
+}
+
+HmInstance::CaptureProvenance
+HmInstance::captureProvenance(qint64 windowStartUs, qint64 windowEndUs) const
+{
+    // ⚠ A default-constructed value is NOT "clean" — every field's absent form says
+    // "not measured" (state -1, configBits -1, no entries), which is what a device
+    // with no worker honestly has to report. It must never read as "nothing clipped".
+    if (!m_worker) return {};
+    return m_worker->captureProvenance(windowStartUs, windowEndUs);
 }
 
 double HmInstance::skewUsMean() const

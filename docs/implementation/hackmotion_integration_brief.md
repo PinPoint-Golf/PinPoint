@@ -348,6 +348,24 @@ F→G (do not validate a metric whose route has not landed).
   the full internal rate in *every* session containing motion. A ring sized from an assumed
   maximum is wrong under exactly the conditions that matter.
 
+### Phase B′ — the addendum, and why it is not part of Phase B
+
+Phase B shipped before the loss was noticed, so this is separate work that runs **before Phase D**:
+the live lane is recording today and every swing it has written is affected. The finding, the
+reason the record is not simply widened, and the two carriers that replace that are in §7 above and
+in the plan's Phase B′.
+
+Two things worth stating here because they are easy to get backwards:
+
+- **Window-constant vs per-sample is the axis that decides where a field goes**, not how important
+  it is. Calibration state and the config byte cannot change inside a swing — the link drop that
+  would change calibration also ends the stream — so they belong in the stream's `device` object,
+  where the plumbing already runs per unit id. Pinning and `QUAT_NORM_SUSPECT` can occur on any
+  individual sample, so they need something that a window can *select* from.
+- ⚠ **`NO_FIT` skips are counted, never ringed.** A sample skipped for having no mapped host time
+  has, by definition, no host time to place it in a window with. A cumulative count is the honest
+  form; a ring entry would need a timestamp it cannot have.
+
 ### Phase C — calibration flow
 
 - `ImuCalibrationFlow.qml` gains a device-type branch (see §6.3 for the UI).
@@ -502,6 +520,22 @@ that as a real property, not as a glitch.
 ## 7. Schema and provenance
 
 - **`ImuSample` is unchanged.** Two sources of the existing 40-byte v2 struct. No schema bump.
+  ⚠ **AND THAT DECISION IS WHY THE CAPTURE PATH IS LOSSY — read Phase B′ before relying on this
+  line.** Ten floats and a host timestamp is the whole of what reaches `swing.json`. The *numbers*
+  survive intact (accel is raw counts × 0.001 exactly; the quaternion is i16/16384, exact in
+  float32; gyro comes from the library's config-aware scaled field, not a guessed divisor) — but
+  every field of `hm_sample` that says **whether to trust those numbers** stops at
+  `hm_instance.cpp:1339`. `sample.h` states the cost of the worst one plainly: the calibration
+  transform *"is applied ON-DEVICE and is not recoverable later, so if the recording does not carry
+  this flag the mistake is permanent and invisible."* Also dropped: `pinned_mask` (int16 saturates
+  rather than wraps, so a clipped peak is a plausible flat top), `device_time_us`, `sample_index`,
+  `stream_id`, `source`, and the rest of the `hm_sample_flag` word.
+  ⚠ **Do not "fix" this by widening the record.** A prefix-compatible `imu_sample_v2 + extras` is
+  invisible to every consumer except `swing_window.cpp:100`, which compares `h.bytes` to
+  `sizeof(ImuSample)` with **exact equality** and would silently drop the HackMotion lane out of
+  analysis — in the interpolation pre-stage shared with Witmotion. Phase B′ carries the
+  window-constant facts in `SwingImuDeviceInfo` and the rare exceptions in a bounded ring instead;
+  Phase E's sidecar owns the genuinely per-sample fields.
 - **`ImuSegmentBinding` gains a calibration *kind*.** Today it carries `alignA`/`mountM` plus
   `mountDeviationDeg`/`mountGravityErrorDeg`, all artefacts of a host-side solve that does not
   exist for HackMotion. Add `calibrationSource` (`HostSolved` | `DeviceApplied`) and
