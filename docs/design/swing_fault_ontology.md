@@ -4,6 +4,10 @@
 body of this document is left as the review it was, because the argument is what makes the fields
 defensible and a rewritten proposal reads as though it were always obvious. Every number in §1–§10
 was read at `69b37b6` and is therefore pre-change; §11 carries the shipped figures.
+**Two exceptions, both dated 2026-08-17 and both marked inline**: the over-the-top row in §2's
+canonical-fault table and the last sentence of §3.4 were factually wrong rather than merely stale —
+the repair this document proposed has since landed — so each carries a correction block. Struck text
+is preserved. Nothing else in §1–§10 was touched.
 **Occasioned by**: "over the top and early extension are both incredibly common swing faults, yet
 one is a characteristic and one is a cause."
 **Reviewed from**: the coaching side. What a coach names, what a coach measures, and what a coach
@@ -93,15 +97,44 @@ ships:
 | Loss of posture | posture | observable | measured | `spine_bend_change` | no (planned) |
 | Flat shoulder plane | posture | observable | measured | `shoulder_plane` | **yes** |
 | Early extension | posture | observable | measured | `pelvis_thrust` | no (planned) |
-| **Over the top** | **armsAndClub** | **latent** | **asserted** | **—** | **never** |
+| **Over the top** † | **armsAndClub** | ~~latent~~ observable | ~~asserted~~ measured | ~~—~~ `transition_plane` | ~~never~~ no (placeholder corridor) |
 | Sway | lateral | observable | measured | `pelvis_sway_backswing` | **yes** |
 | Slide | lateral | observable | measured | — | **yes** |
-| Reverse spine angle | posture | observable | measured | `axis_tilt_top` | **yes** |
+| Reverse spine angle ‡ | posture | observable | measured | `axis_tilt_top` | **yes** |
 | Hanging back | lateral | observable | measured | — | **yes** |
 | Casting | release | observable | measured | `lag_retention` | **yes** |
 | Scooping | release | observable | measured | `lead_wrist_impact` | **yes** |
 | Chicken wing | armsAndClub | observable | measured | — | **yes** |
 | Forward lunge | lateral | observable | measured | — | **yes** |
+
+> **† CORRECTED 2026-08-17.** The over-the-top row is the only one in this table that has since
+> changed, and it changed because of this review — see §8's DONE block. It is now
+> `observable`/`measured` with an axis, detected by `sig_overTheTop` on `m_transitionPlaneDelta`
+> (`status: live`). Struck text is what shipped at `69b37b6` and is left visible because the
+> argument below is built on it; the replacement is what ships today.
+>
+> **It is no longer four columns different — it is now zero.** The asymmetry §2 is *about* has been
+> repaired, and with it the sole surviving example of Pattern B. All fourteen canonical faults now
+> use Pattern A. Read §2's argument as the diagnosis that produced the fix rather than as a
+> description of the pack: the complaint that **nothing in the schema records which pattern was used
+> or why** is untouched by the repair and still stands, it simply no longer has a live example to
+> point at.
+>
+> "Fires today" is now `no (placeholder corridor)` rather than `never`. The distinction is the whole
+> point of the fix and is not a technicality: `never` meant no measure could exist, `no` means the
+> measure exists, is live and accumulating, and its corridor is a deliberately unreachable σ25
+> placeholder because the characterisation behind it is one golfer. That is a **data** blocker, not
+> a capture one — the measure is face-on and needs no second camera. Contrast `out_to_in_path` and
+> `steep_downswing_shaft`, which sit on `clubPath` and `swingPlane`, both `planned` and both
+> genuinely waiting on down-the-line triangulation.
+>
+> **‡ RENAMED 2026-08-17.** `reverse_spine` is now `reverse_spine_p4`, labelled "Reverse spine angle
+> at P4". Its row is otherwise unchanged. The rename came with `reverse_pivot`, which is detected
+> from the conjunction of that condition and `reverse_spine_p7` (the low tail of tilt at impact,
+> formerly `insufficient_axis_tilt_impact`) — an unqualified "reverse spine" with no phase on it had
+> already misled one reader into modelling the pivot as lateral translation.
+>
+> Every other row was re-checked against the pack on this date and is unchanged.
 
 One row is different from the other thirteen in four columns at once. That is not a modelling
 decision; it is a row nobody revisited.
@@ -172,6 +205,12 @@ argued for — **it is a hole the code has already documented and worked around.
 45 conditions hold an axis; 48 hold none. A fault modelled by Pattern A gets an axis and is covered
 by `bothTailsOneCondition` and `inconsistentReach`. A fault modelled by Pattern B gets neither, and
 no check notices. Over the top has no axis and no check will ever ask it for one.
+
+> **CORRECTED 2026-08-17.** That last sentence is no longer true, and it is the one place in §3
+> where the repair changed a fact rather than a count. Over the top now holds `transition_plane`,
+> with `shallowing` on the opposite tail, so both checks reach it. The structural point survives the
+> counter-example intact: the checks still fire only for axis-holders, so the *next* Pattern B node
+> authored will be just as invisible to them. What changed is that the pack no longer contains one.
 
 Worse, Pattern A **manufactures conditions coaches do not have words for** to fill the opposite tail:
 `backing_off_the_ball`, `arms_over_connected`, `over_rotation_at_top`, `locked_lead_arm`,

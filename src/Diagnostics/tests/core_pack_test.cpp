@@ -172,14 +172,24 @@ int main()
         }
 
         auto coverage = [&](const char *id) { return coverageOf(p, QString::fromLatin1(id)); };
-        check(coverage("poor_pelvic_disassociation") == 13, "poor pelvic disassociation explains 13");
+        // 13 -> 15 with reverse_pivot. Two edges, not one: the fault itself, and the pelvis drifting
+        // to the lead side going back, which this capacity plainly explains and had never been wired
+        // to. The second was the older gap — the same restriction already reached SWAY, the opposite
+        // tail of the very same pelvis-sway measure, so the graph could account for one direction of
+        // a two-tailed failure and not the other.
+        check(coverage("poor_pelvic_disassociation") == 15, "poor pelvic disassociation explains 15");
         // 15 and 9, up from 13 and 8. The face-on producer batch made six authored conditions
         // gradeable for the first time, and the "everything that can fire has a cause" check below
         // caught that they had nothing behind them. Two of the six route to a thoracic-rotation
         // restriction (a chest that cannot turn is why the arms run away and why the finish stops
         // short) and one to the lead hip (a hip that cannot internally rotate spins the pelvis out
         // rather than turning over a stable lead leg).
-        check(coverage("limited_thoracic_rotation") == 15, "limited thoracic rotation explains 15");
+        //
+        // 15 -> 16 with reverse_pivot: a chest that cannot turn away from the target has to get to
+        // the top some other way, and leaning toward the target is the cheapest substitute. Moderate
+        // rather than Strong — the restriction makes the substitution available, it does not compel
+        // it, and a golfer with the same restriction can shorten the backswing instead.
+        check(coverage("limited_thoracic_rotation") == 16, "limited thoracic rotation explains 16");
         // 9 -> 10 with the lead-side audit: the hip that cannot internally rotate cannot accept the
         // load and turn over it, so the rotation stops rather than being slow to start — which is
         // late_pelvis_rotation, a fault it already explained and a different one.
@@ -202,7 +212,11 @@ int main()
         // The core case was the conspicuous one — it already carried an edge to BACKING OFF THE
         // BALL, which is the opposite tail of the same pelvis-thrust axis, so the graph could
         // explain the rarer direction of that fault and not the common one.
-        check(coverage("limited_trail_hip_ir") == 14, "limited trail-hip internal rotation explains 14");
+        //
+        // 14 -> 15 with reverse_pivot, and this is the Strong one. The trail hip is the joint the
+        // backswing loads INTO; if it cannot internally rotate there is nowhere for the load to go,
+        // and the mass stays on the lead side because it was never invited across.
+        check(coverage("limited_trail_hip_ir") == 15, "limited trail-hip internal rotation explains 15");
         check(coverage("poor_core_stability") == 11, "poor core stability explains 11");
 
         const int topFive = coverage("poor_pelvic_disassociation") + coverage("limited_thoracic_rotation")

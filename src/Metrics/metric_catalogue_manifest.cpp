@@ -653,22 +653,32 @@ void installMetricManifest(MetricCatalogue &cat)
             "trail-side tilt that lets the club approach from the inside and, for the driver, on a "
             "slight upswing."),
         .howToRead = QStringLiteral(
-            "Read at Impact. Players tend to set roughly 6–8° of tilt at address and increase it to "
-            "about 20–25° by impact; a driver wants more of this than an iron. Too little tilt at "
-            "impact is a classic reverse-pivot or early-extension signature. POSITIVE IS AWAY "
-            "FROM THE TARGET — the one lateral channel that is trail-positive rather than "
-            "lead-positive, because the quantity is named for the lean away from the target and "
-            "inverting it would leave every sentence about it backwards. Needs a face-on camera."),
+            "READ AT THE TOP AND AT IMPACT, and read the PAIR — the two anchors answer different "
+            "questions and the fault library depends on both. Players tend to set roughly 6–8° of "
+            "tilt at address, hold some of it at the top, and increase it to about 20–25° by "
+            "impact; a driver wants more of this than an iron. Too little tilt at impact on its "
+            "own is the common half-signal and does not settle anything: early extension and a "
+            "stalled pelvis flatten the same angle. Leaning TOWARD the target at the top, together "
+            "with too little tilt at impact, is the reverse pivot — that conjunction is what "
+            "identifies it, which is why `reverse_pivot` is detected from both anchors and neither "
+            "alone. POSITIVE IS AWAY FROM THE TARGET — the one lateral channel that is "
+            "trail-positive rather than lead-positive, because the quantity is named for the lean "
+            "away from the target and inverting it would leave every sentence about it backwards. "
+            "Needs a face-on camera."),
         .signPositive = QStringLiteral("the upper body leaning AWAY from the target — trail-side lean"),
         .signNegative = QStringLiteral("leaning toward the target"),
-        .phases = { P::Impact },
+        // Top joined Impact when reverse_pivot landed. The top anchor was always read — three
+        // conditions hang off m_axisTiltAtTop — and the descriptor said Impact only, so the metric
+        // documented itself for one phase while the library graded it at two.
+        .phases = { P::Top, P::Impact },
         .routes = {
             via("faceOn", RM::Projected, Direct, { .faceOnCamera = true },
                 QStringLiteral("the frontal spine vector against vertical, in the face-on image")) },
         .usedBy = { QStringLiteral("characteristic:excessive_axis_tilt_impact"),
-                    QStringLiteral("characteristic:insufficient_axis_tilt_impact"),
-                    QStringLiteral("characteristic:reverse_spine"),
-                    QStringLiteral("characteristic:excessive_axis_tilt_top") },
+                    QStringLiteral("characteristic:reverse_spine_p7"),
+                    QStringLiteral("characteristic:reverse_spine_p4"),
+                    QStringLiteral("characteristic:excessive_axis_tilt_top"),
+                    QStringLiteral("characteristic:reverse_pivot") },
     });
 
     cat.addDescriptor({

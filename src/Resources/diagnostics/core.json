@@ -2087,7 +2087,7 @@
       "direction": "high"
     },
     {
-      "id": "sig_reverseSpine",
+      "id": "sig_reverseSpineP4",
       "test": "outsideCorridor",
       "measures": [
         "m_axisTiltAtTop"
@@ -3329,22 +3329,23 @@
       "axis": "pelvis_thrust"
     },
     {
-      "id": "reverse_spine",
-      "label": "Reverse spine angle",
+      "id": "reverse_spine_p4",
+      "label": "Reverse spine angle at P4",
       "aliases": [
-        "reverse pivot",
-        "leaning left at the top"
+        "leaning left at the top",
+        "forward spine angle at the top",
+        "reverse spine angle at the top"
       ],
       "group": "posture",
       "kind": "fault",
-      "prominence": "common",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
-        "sig_reverseSpine"
+        "sig_reverseSpineP4"
       ],
       "state": "active",
-      "consequence": "Leaning toward the target at the top loads the trail side of the lower back and makes a sequenced downswing hard to start from the ground.",
+      "consequence": "Leaning toward the target at the top loads the trail side of the lower back and makes a sequenced downswing hard to start from the ground. On its own it is a posture, and a golfer can hold it and still transfer weight correctly. Read it with the P7 reading — the two together are what identify a reverse pivot.",
       "provenance": {
         "tier": "supported",
         "citation": "10.1016/j.smhs.2020.03.002",
@@ -3353,6 +3354,35 @@
       },
       "injuryNote": "Combined end-range extension and rotation is the loading pattern most often linked with lower back pain in golfers. Worth raising with a clinician if pain is present.",
       "axis": "axis_tilt_top"
+    },
+    {
+      "id": "reverse_pivot",
+      "label": "Reverse pivot",
+      "aliases": [
+        "tilting instead of turning",
+        "weight on the lead foot at the top"
+      ],
+      "group": "lateral",
+      "kind": "fault",
+      "prominence": "ubiquitous",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_reverseSpineP4",
+        "sig_axisTiltImpactLow"
+      ],
+      "detection": "all",
+      "state": "active",
+      "consequence": "The upper body is leaning the wrong way at both ends of the swing: toward the target at the top, where it should be tilted away from it, and still not tilted away at impact, where the trail shoulder should have dropped. That pair is the signature. The transfer of mass is inverted with it — going back the weight stays on the lead foot instead of loading the trail side, and coming down it falls back onto the trail foot instead of moving forward through the ball — but the two spine readings are what identify it, and either one alone does not. Leaning toward the target at the top is a posture the golfer can hold and still transfer correctly. Too little tilt at impact on its own is the commoner half-signal, and it points at a reverse pivot without settling it, because early extension and a stalled pelvis both flatten the same angle. Not to be confused with hanging back, which is the downswing alone in a golfer who did load the trail side going back. It is commonest in new golfers and is usually among the first faults corrected, so it thins out quickly with experience — expect to see it often in a beginner and rarely in a single-figure handicap.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-17",
+        "searchTerms": "reverse pivot centre of pressure trail foot loading backswing golf force plate — the force-plate literature was searched for a prevalence or a criterion and has neither. The nearest hit, Ball & Best 2007, names a REVERSE cluster that is a downswing pattern in golfers who loaded the trail side correctly; it is carried as ref.ballBest2007 with the reason it must not be cited here.\n\nWHY UBIQUITOUS, AND WHY BOTH LEGS ARE TOO. A conjunction cannot be commoner than its rarer part, so seating this at the top rung forces reverse_spine_p4 and reverse_spine_p7 there with it; they were raised deliberately and not to make an arithmetic complaint go away. The judgement being recorded is that this is close to universal in golfers who have not been taught otherwise. It is ALSO the prominence in this library most exposed to a cohort effect the schema cannot express: prevalence here is a function of experience, not of population, and contexts key on shot type rather than skill. THE CORPUS WILL DISAGREE WITH THIS PRIOR and the disagreement will not be evidence against it — a swing library collected from people who own a launch monitor is not a sample of new golfers. Re-seat only against a population that contains beginners."
+      },
+      "drills": [
+        "drill.trailHipLoad",
+        "drill.pressureShiftStep"
+      ]
     },
     {
       "id": "flat_shoulder_plane",
@@ -5064,23 +5094,25 @@
       "axis": "pelvis_rotation_impact"
     },
     {
-      "id": "insufficient_axis_tilt_impact",
-      "label": "Not enough tilt at impact",
+      "id": "reverse_spine_p7",
+      "label": "Reverse spine angle at P7",
       "aliases": [
         "no tilt",
-        "level shoulders at impact"
+        "level shoulders at impact",
+        "reverse spine angle at impact",
+        "not enough tilt at impact"
       ],
       "axis": "axis_tilt_impact",
       "group": "impact",
       "kind": "fault",
-      "prominence": "occasional",
+      "prominence": "ubiquitous",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
         "sig_axisTiltImpactLow"
       ],
-      "state": "draft",
-      "consequence": "The upper body is not leaning away from the target enough at impact. The club then arrives too steeply, and with a driver there is no room left to hit up on the ball.",
+      "state": "active",
+      "consequence": "The upper body is not leaning away from the target at impact — level, or leaning toward the target, where the trail shoulder should have dropped. The club then arrives too steeply, and with a driver there is no room left to hit up on the ball. On its own this usually indicates a reverse pivot without settling it: early extension and a stalled pelvis flatten the same angle. Read it with the P4 reading — the two together are what identify the pivot. NAMING: this is the LOW tail of tilt at impact as a whole, so mild readings inside it are insufficient tilt rather than a spine truly reversed. The tail is named for what it means when it matters, which is the coach's usage.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
@@ -6844,7 +6876,7 @@
     },
     {
       "from": "s_posture",
-      "to": "reverse_spine",
+      "to": "reverse_spine_p4",
       "type": "causes",
       "strength": "strong",
       "provenance": {
@@ -6855,7 +6887,7 @@
     },
     {
       "from": "limited_thoracic_rotation",
-      "to": "reverse_spine",
+      "to": "reverse_spine_p4",
       "type": "causes",
       "strength": "strong",
       "provenance": {
@@ -6866,7 +6898,7 @@
     },
     {
       "from": "limited_trail_hip_ir",
-      "to": "reverse_spine",
+      "to": "reverse_spine_p4",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -6878,7 +6910,7 @@
     },
     {
       "from": "poor_core_stability",
-      "to": "reverse_spine",
+      "to": "reverse_spine_p4",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -8301,7 +8333,7 @@
       }
     },
     {
-      "from": "insufficient_axis_tilt_impact",
+      "from": "reverse_spine_p7",
       "to": "attack_too_steep",
       "type": "causes",
       "strength": "moderate",
@@ -8647,7 +8679,7 @@
     },
     {
       "from": "flat_lumbar_spine",
-      "to": "reverse_spine",
+      "to": "reverse_spine_p4",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -8955,13 +8987,124 @@
     },
     {
       "from": "pelvis_drift_lead_backswing",
-      "to": "reverse_spine",
+      "to": "reverse_spine_p4",
       "type": "corroborates",
       "strength": "strong",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-28",
         "searchTerms": "lateral pelvis displacement reverse spine angle same pattern golf"
+      }
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "pelvis_drift_lead_backswing",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "pelvic disassociation backswing trail side loading golf"
+      }
+    },
+    {
+      "from": "limited_trail_hip_ir",
+      "to": "reverse_pivot",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "trail hip internal rotation restriction trail side loading reverse pivot golf"
+      }
+    },
+    {
+      "from": "poor_pelvic_disassociation",
+      "to": "reverse_pivot",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "pelvic disassociation tilt instead of turn reverse pivot golf"
+      }
+    },
+    {
+      "from": "poor_single_leg_balance",
+      "to": "reverse_pivot",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "single leg balance trail side loading backswing golf"
+      }
+    },
+    {
+      "from": "limited_thoracic_rotation",
+      "to": "reverse_pivot",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "thoracic rotation restriction lateral bend substitution backswing golf"
+      }
+    },
+    {
+      "from": "poor_glute_strength",
+      "to": "reverse_pivot",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "gluteal strength trail side load acceptance backswing golf"
+      }
+    },
+    {
+      "from": "limited_trail_ankle_dorsiflexion",
+      "to": "reverse_pivot",
+      "type": "causes",
+      "strength": "weak",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "trail ankle dorsiflexion weight transfer backswing golf"
+      }
+    },
+    {
+      "from": "pelvis_drift_lead_backswing",
+      "to": "reverse_pivot",
+      "type": "corroborates",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-17",
+        "searchTerms": "pelvis toward target backswing weight stays lead reverse pivot golf"
+      }
+    },
+    {
+      "from": "head_drift_lead_backswing",
+      "to": "reverse_pivot",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "head lateral displacement toward target backswing reverse pivot golf"
+      }
+    },
+    {
+      "from": "flat_shoulder_plane",
+      "to": "reverse_pivot",
+      "type": "corroborates",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "shoulder line tilt at top lead shoulder fails to drop reverse pivot golf"
+      }
+    },
+    {
+      "from": "reverse_pivot",
+      "to": "hanging_back",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchTerms": "reverse pivot downswing weight moves away from target golf"
       }
     },
     {
@@ -9935,8 +10078,8 @@
       }
     },
     {
-      "from": "reverse_spine",
-      "to": "insufficient_axis_tilt_impact",
+      "from": "reverse_spine_p4",
+      "to": "reverse_spine_p7",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
@@ -10119,6 +10262,17 @@
         "tier": "practice",
         "searchedOn": "2026-08-06",
         "searchTerms": "early extension golf swing compensation downswing arms room"
+      }
+    },
+    {
+      "from": "hanging_back",
+      "to": "over_the_top",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-17",
+        "searchTerms": "weight stays trail side downswing reaching for the ball over the top golf — the swing centre never moves to the lead side, so the ball is further away than the arc allows and the arms throw out and around to reach it. STRONG while the sibling edge to early_extension is Moderate: both are the same failure to get left, but reaching OUT is the first compensation available and standing UP is the second, taken when the reach alone does not cover the distance."
       }
     },
     {
