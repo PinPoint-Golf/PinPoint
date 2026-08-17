@@ -379,6 +379,7 @@ private:
     // device log ring carries the running numbers but has no reachable UI.
     bool    m_skewReported     = false;
     bool    m_skewSpreadWarned = false;
+    bool    m_relAngleReported = false;
 
     QString m_stateLabel = QStringLiteral("Disconnected");
     bool    m_connected  = false;

@@ -154,6 +154,15 @@ public:
         double  skewSumUs = 0.0;
         qint32  skewMinUs = 0;
         qint32  skewMaxUs = 0;
+        // Inter-unit relative angle in degrees — see writeSample() for the bands.
+        // `Now` is the LATEST sample's value and is the one to read while holding a
+        // pose; the session band behind it is polluted by every movement since the
+        // link came up, which is the wrong shape for "hold still and read it".
+        float   relAngleNowDeg = 0.0f;
+        quint64 relAngleCount  = 0;
+        double  relAngleSumDeg = 0.0;
+        float   relAngleMinDeg = 0.0f;
+        float   relAngleMaxDeg = 0.0f;
     };
 
     explicit HmSessionWorker(const QString &deviceId);
@@ -261,6 +270,13 @@ private:
     double  m_skewSumUs = 0.0;
     qint32  m_skewMinUs = 0;
     qint32  m_skewMaxUs = 0;
+
+    // Inter-unit relative angle, degrees — the calibrated / uncalibrated / not-in-
+    // the-mounting discriminator. See writeSample() for what the values mean.
+    quint64 m_relAngleCount  = 0;
+    double  m_relAngleSumDeg = 0.0;
+    float   m_relAngleMinDeg = 0.0f;
+    float   m_relAngleMaxDeg = 0.0f;
 
     // HM_EV_CLOCK_DEGRADED application-log rate limiting — see handleEvent().
     // The device log ring keeps every report regardless.
@@ -864,6 +880,11 @@ void HmSessionWorker::drainLive()
     next.skewSumUs    = m_skewSumUs;
     next.skewMinUs    = m_skewMinUs;
     next.skewMaxUs    = m_skewMaxUs;
+    next.relAngleNowDeg = hm_relative_angle_deg(&latest);
+    next.relAngleCount  = m_relAngleCount;
+    next.relAngleSumDeg = m_relAngleSumDeg;
+    next.relAngleMinDeg = m_relAngleMinDeg;
+    next.relAngleMaxDeg = m_relAngleMaxDeg;
     for (int u = 0; u < HM_UNIT_COUNT; ++u) {
         next.written[u]       = m_written[u];
         next.nonMonotonic[u]  = m_nonMonotonic[u];
@@ -899,6 +920,51 @@ void HmSessionWorker::writeSample(const hm_sample &s)
         }
         m_skewSumUs += double(s.skew_us);
         ++m_skewCount;
+    }
+
+    // ⚠ THE ONE NUMBER THAT SAYS WHETHER THE TWO UNITS ARE WHERE THEY SHOULD BE,
+    // and it is accumulated before the capture gate because it describes the
+    // DEVICE, not the recording. hm_relative_angle_deg() is the library's own
+    // 2·acos|q_palm · q_arm| — deliberately convention-blind, which makes it
+    // useless for anything needing a sign and exactly right here.
+    //
+    // ⚠ IT IS ONLY INTERPRETABLE IN A KNOWN POSE, and reading it in any other is
+    // how it gets mistaken for a fault. Measured by replaying the library's own
+    // fixtures through this same decode path — every sample in both is
+    // UNCALIBRATED:
+    //   tests/fixtures/smoke.hmwire   first 200 samples (still) mean 14.96°,
+    //                                 matching §8.3's 15.01° for a straight wrist,
+    //                                 then up to 173° once the hand moves
+    //   tests/fixtures/swings.hmwire  modal band 170-180° (28 % of samples),
+    //                                 max 180.00°, across five real golf swings
+    // So the bands are:
+    //   0.4-0.8°   calibration applied and holding (§8.3)
+    //   ~15°       UNCALIBRATED, AT REST, WRIST STRAIGHT — board placement, not
+    //              anatomy. The only pose where a number carries a verdict, and the
+    //              expected reading until Phase C exists.
+    //   up to 180° ORDINARY for an uncalibrated pair away from that pose. It is NOT
+    //              evidence of a mounting or decode fault: uncalibrated, this angle
+    //              carries both boards' offsets and is not an anatomical quantity at
+    //              all, which is the whole reason Phase C and D exist.
+    //
+    // ⚠ IT IS NOT A CALIBRATION QUALITY SCORE — §8.2 measured a no-raise
+    // calibration scoring BEST on it, because it tests the zeroing and is blind to
+    // the axis. Its sound uses are this one and the presence check, both of which
+    // ask "did calibration happen at all", where the gap is an order of magnitude.
+    //
+    // Samples whose decode may be misaligned are excluded: a suspect quaternion
+    // norm makes the angle meaningless rather than merely noisy.
+    if ((s.flags & HM_SAMPLE_QUAT_NORM_SUSPECT) == 0) {
+        const float relDeg = hm_relative_angle_deg(&s);
+        if (m_relAngleCount == 0) {
+            m_relAngleMinDeg = relDeg;
+            m_relAngleMaxDeg = relDeg;
+        } else {
+            m_relAngleMinDeg = qMin(m_relAngleMinDeg, relDeg);
+            m_relAngleMaxDeg = qMax(m_relAngleMaxDeg, relDeg);
+        }
+        m_relAngleSumDeg += double(relDeg);
+        ++m_relAngleCount;
     }
 
     if (!m_buffer || !m_buffer->isCapturing())
@@ -1232,6 +1298,36 @@ HmInstance::HmInstance(const Device &device,
                   .arg(snap.skewCount)
             : QString();
 
+        // ⚠ THE INTER-UNIT ANGLE, AND IT IS THE FIRST THING TO READ WHEN THE TWO
+        // LIVE CUBES LOOK WRONG. They are shown in two UNRECONCILED raw device
+        // frames — no per-unit rotation exists until Phase D solves R_lowerArm and
+        // R_palm — so how far apart they LOOK carries no verdict. This number does,
+        // because it is a rotation magnitude and independent of both conventions.
+        // Bands are in writeSample(), and the load-bearing part is that they only
+        // mean anything AT REST WITH A STRAIGHT WRIST. Uncalibrated and in motion
+        // this angle reaches 180° as a matter of course.
+        QString relAngle;
+        if (snap.relAngleCount > 0) {
+            const double relMean = snap.relAngleSumDeg / double(snap.relAngleCount);
+            relAngle = QStringLiteral("  REL-ANGLE now=%1° (session %2/%3/%4°)")
+                           .arg(snap.relAngleNowDeg, 0, 'f', 1)
+                           .arg(snap.relAngleMinDeg, 0, 'f', 1)
+                           .arg(relMean, 0, 'f', 1)
+                           .arg(snap.relAngleMaxDeg, 0, 'f', 1);
+            if (!m_relAngleReported) {
+                m_relAngleReported = true;
+                ppInfo() << "[HmInstance]" << m_deviceId << "— inter-unit angle now"
+                         << snap.relAngleNowDeg << "°, session mean" << relMean
+                         << "° (" << snap.relAngleMinDeg << "-" << snap.relAngleMaxDeg
+                         << "). ⚠ Only interpretable AT REST WITH THE WRIST STRAIGHT, where"
+                            " uncalibrated reads ~15° and an applied calibration reads 0.4-0.8°."
+                            " In any other pose an uncalibrated pair reaches 180° routinely —"
+                            " the library's own swing fixtures sit at 170-180° for 28 % of their"
+                            " samples — so a large value here is not a fault. Not a quality"
+                            " score either: it is blind to the calibration axis.";
+            }
+        }
+
         if (snap.skewCount > 0) {
             const qint32 spread = snap.skewMaxUs - snap.skewMinUs;
             // ONCE PER SESSION, into the application log. The mean is what the
@@ -1300,13 +1396,14 @@ HmInstance::HmInstance(const Device &device,
         m_lastNonMonotonic = backSteps;
 
         appendLog(timestamp()
-            + QStringLiteral("  Data: %1 samples total  (+%2 in last 10s)  %3 Hz avg%4%5%6%7%8%9")
+            + QStringLiteral("  Data: %1 samples total  (+%2 in last 10s)  %3 Hz avg%4%5%6%7%8%9%10")
                 .arg(m_totalSamples)
                 .arg(m_samplesSinceLog)
                 .arg(m_dataRateHz, 0, 'f', 1)
                 .arg(bat)
                 .arg(dropped)
                 .arg(written)
+                .arg(relAngle)
                 .arg(skew)
                 .arg(noFit)
                 .arg(nonMono));
