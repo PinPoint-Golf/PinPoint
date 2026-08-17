@@ -30,6 +30,21 @@ Item {
     // ImuVizView and ArmVizView are persistent; only this binding changes.
     property QtObject firstInst: imuManager.instances.length > 0 ? imuManager.instances[0] : null
 
+    // ⚠ WHAT THE CUBE IS BOUND TO IS NOT THE INSTANCE FOR EVERY DEVICE KIND.
+    // ImuVizView resolves quat*/accel* by NAME through the metaobject, and an
+    // HmInstance has none of them — the wG3's two units each carry their own set
+    // (hm_instance.h), because one peripheral holds two sensors that are supposed
+    // to disagree. Binding the instance itself produced three "Unable to assign
+    // [undefined] to double" warnings per connect, and this page is inside the
+    // shell's StackLayout, so its bindings evaluate whether or not anyone ever
+    // navigates here. The lower arm is the arbitrary-but-fixed choice for a
+    // single cube; ImusPanel is where both units are shown side by side.
+    // `unitLowerArm` is undefined on a Witmotion, so that falls through unchanged.
+    property QtObject vizController: capturePage.firstInst
+                                     && capturePage.firstInst.unitLowerArm
+                                        ? capturePage.firstInst.unitLowerArm
+                                        : capturePage.firstInst
+
     // Clear log and backfill any entries already emitted before Connections wired.
     onFirstInstChanged: {
         imuLogModel.clear()
@@ -304,7 +319,7 @@ Item {
 
                     // Viz tab — persistent View3D; controller rebinds, view never destroyed.
                     ImuVizView {
-                        controller: capturePage.firstInst
+                        controller: capturePage.vizController
                     }
 
                     // Log tab

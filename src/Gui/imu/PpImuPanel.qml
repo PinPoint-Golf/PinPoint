@@ -347,15 +347,32 @@ Item {
                     ColorAnimation { from: Theme.colorGood;  to: Theme.colorText3; duration: Theme.durationSlow }
                 }
             }
+            // ⚠ THE THREE WIDTH LINES BELOW ARE WHAT MAKES elide WORK. A Text with
+            // no width uses its implicitWidth, and elide is inert against an
+            // unconstrained width — so `elide: Text.ElideRight` alone did nothing.
+            // Worse, a plain Column reports the widest child as its own
+            // implicitWidth, and a RowLayout will not shrink a fillWidth item below
+            // that, so one long name pushed the chips and the toggle past the right
+            // edge and drew them over the text. The default IMU alias is
+            // "<description> <device id>", and on macOS that id is a 36-character
+            // per-host UUID (CoreBluetooth never exposes a MAC), so a HackMotion row
+            // hit it every time while a short-named sensor never did.
+            // preferredWidth 0 + minimumWidth 0: take the space that is left after
+            // the fixed-size siblings, never demand more.
             Column {
                 Layout.fillWidth: true; spacing: Theme.sp(2)
+                Layout.preferredWidth: 0
+                Layout.minimumWidth: 0
                 opacity: deviceEnabled ? 1.0 : 0.45
                 Text {
+                    width: parent.width
                     text: devName
                     font.family: Theme.fontBody; font.pixelSize: Theme.fontSzBody2
                     color: Theme.colorText; elide: Text.ElideRight
                 }
                 Text {
+                    width: parent.width
+                    elide: Text.ElideRight
                     // Battery moved to its own colour-coded chip (below); the
                     // subtitle now carries connection state + data rate only.
                     text: {
