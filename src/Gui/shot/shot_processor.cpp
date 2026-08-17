@@ -24,6 +24,7 @@
 #include "camera_manager.h"
 #include "device_enumerator.h"
 #include "event_buffer.h"
+#include "hm_instance.h"
 #include "imu_instance.h"
 #include "imu_manager.h"
 #include "session_controller.h"
@@ -1196,6 +1197,66 @@ pinpoint::SwingExportJob ShotProcessor::buildSwingExportJob()
                     }
                     break;
                 }
+            }
+
+            // A HackMotion wG3 is ONE peripheral that registers TWO EventBuffer
+            // sources, "<deviceId>#lowerArm" / "<deviceId>#palm" (hm_instance.h) —
+            // neither equals `serial` above (the bare device id), so the alias
+            // and `info` this loop iteration built reach no stream at all: a
+            // captured wG3's two lanes would export with the raw unit id as
+            // their only label and no device object. Insert under each real
+            // unit id instead; additive, and unreachable for a Witmotion
+            // (qobject_cast below returns null).
+            for (const QVariant &v : insts) {
+                auto *hm = qobject_cast<HmInstance *>(v.value<QObject *>());
+                if (!hm || hm->deviceId() != dev.id)
+                    continue;
+                const QString baseAlias = alias.isEmpty() ? serial : alias;
+                HmUnit *const units[2] = { hm->unitLowerArm(), hm->unitPalm() };
+                for (HmUnit *unit : units) {
+                    // sourceId() is kInvalidSourceId if this unit's own
+                    // registerSource() call failed — BLE registration is
+                    // allowed to fail per unit, and a lane with no source
+                    // never appears in the export window, so an alias/device
+                    // entry for it would just be dead.
+                    if (!unit || unit->sourceId() == pinpoint::kInvalidSourceId)
+                        continue;
+                    const QString unitId = unit->unitId();
+                    job.imuAliasBySerial.insert(
+                        unitId, baseAlias + QStringLiteral(" · ") + unit->unitLabel());
+
+                    // ⚠ Deliberately NOT a copy of `info` above: hasCalibration/
+                    // alignA/mountM must stay unset (SwingImuDeviceInfo's
+                    // defaults) — the re-analyzer treats a device object
+                    // carrying a 4-element alignA + mountM pair as a fallback
+                    // IMU->segment binding (swing_reanalyzer.cpp:471), so
+                    // writing them here would silently bind a HackMotion lane
+                    // into the Witmotion wrist maths in a frame nobody has
+                    // reconciled — that reconciliation is Phase D.
+                    // fusionMode/orientationFilter stay empty too, rather than
+                    // inheriting the app's Witmotion defaults: this device
+                    // fuses on-device, and a persisted "madgwick" against a
+                    // HackMotion lane would be a fabricated provenance record.
+                    // placementSlot/role/roleName stay unset — unit-keyed
+                    // placement is Phase C; an empty slot correctly resolves to
+                    // no role rather than a guessed one.
+                    pinpoint::SwingImuDeviceInfo hmInfo;
+                    // Measured average of an ADAPTIVE rate (25 Hz at rest, 100 Hz
+                    // in motion, dense bursts to ~799 Hz) — not a configured
+                    // output rate like Witmotion's outputRateHz, so a reader must
+                    // not treat this single number as a period. Rounded to the
+                    // nearest Hz; the settings default of 200 never applies here.
+                    hmInfo.outputRateHz = int(std::lround(hm->dataRateHz()));
+                    // Palm-minus-lower-arm skew: the two blocks are NOT paired as
+                    // simultaneous (see SwingImuDeviceInfo::skewUs). NaN until a
+                    // sample has been seen — leave 0.0 (the "absent" value the
+                    // exporter checks) rather than writing a fake measurement.
+                    const double skew = hm->skewUsMean();
+                    if (std::isfinite(skew))
+                        hmInfo.skewUs = skew;
+                    job.imuDeviceBySerial.insert(unitId, hmInfo);
+                }
+                break;
             }
         }
         job.imuDeviceBySerial.insert(serial, info);

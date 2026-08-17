@@ -22,6 +22,11 @@
 #include "ble_adapter_pool.h"
 #include "ble_imu_transport.h"
 #include "event_buffer.h"
+#include "imu_sample.h"
+// The pure hm_unit_sample → ImuSample converter (src/IMU). It owns the m/s² → g
+// conversion from the raw mg counts and passes gyro and the quaternion through
+// verbatim; it is unit-agnostic, so both blocks go through the same call.
+#include "hm_sample_convert.h"
 
 #include <hackmotion/hackmotion.h>
 
@@ -42,6 +47,7 @@
 #include <cstring>
 #include <deque>
 #include <limits>
+#include <stdexcept>
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -128,6 +134,26 @@ public:
         double    rateHz = 0.0;
         quint64   droppedLive = 0;   // hm_session_dropped_live — never silent
         UnitState unit[HM_UNIT_COUNT];
+
+        // ── Ring-write accounting, copied out of the worker's own counters ────
+        quint64 written[HM_UNIT_COUNT] = { 0, 0 };
+        // Samples the ring never saw because they carried no mapped host time.
+        // ⚠ NOT the obsolete "drop the first two seconds" rule: the clock fit
+        // exists from the first live frame (brief §0 #1) and HM_SAMPLE_NO_FIT
+        // fires only before it, so a non-zero count here means something is
+        // wrong — which is exactly why it is counted rather than assumed zero.
+        quint64 noFitSkipped = 0;
+        // Samples whose host_time_us did not advance past the last one written to
+        // that source, and the largest such backward step. MEASUREMENT ONLY — the
+        // merger owns the clamping (see writeSample()).
+        quint64 nonMonotonic[HM_UNIT_COUNT]  = { 0, 0 };
+        qint64  maxBackStepUs[HM_UNIT_COUNT] = { 0, 0 };
+        // skew_us provenance: min / mean / max of palm − lower_arm over the
+        // session. Never applied to a timestamp — see HmInstance::skewUsMean().
+        quint64 skewCount = 0;
+        double  skewSumUs = 0.0;
+        qint32  skewMinUs = 0;
+        qint32  skewMaxUs = 0;
     };
 
     explicit HmSessionWorker(const QString &deviceId);
@@ -135,6 +161,16 @@ public:
 
     // Callable from any thread.
     Snapshot snapshot() const;
+
+    // ⚠ CALLED FROM HmInstance's CONSTRUCTOR, BEFORE moveToThread(), and that is
+    // what makes it safe without a lock: at that instant this object still has
+    // the constructing thread's affinity, nothing else holds a reference to it,
+    // and the moveToThread() + queued initialise() that follow establish the
+    // happens-before for every later I/O-thread read. There is no attach point
+    // later in the life cycle for the same reason there is no detach one: the
+    // buffer pointer is only ever cleared from shutdown(), on the I/O thread.
+    void attachBuffer(pinpoint::EventBuffer *buffer,
+                      const pinpoint::SourceId ids[HM_UNIT_COUNT]);
 
     // ── I/O thread only ──────────────────────────────────────────────────────
     void initialise();          // create the session and the drain timer
@@ -163,6 +199,7 @@ private:
     void drainWrites();
     void drainEvents();
     void drainLive();
+    void writeSample(const hm_sample &s);   // one hm_sample → two ring writes
     void handleEvent(const hm_event &ev);
 
     static hm_time_us nowUs() { return pinpoint::EventBuffer::nowMicros(); }
@@ -196,6 +233,41 @@ private:
     // makes this ~800 entries, which is a few kilobytes of deque and O(1) either
     // end — the same shape of cost the Witmotion lane already pays at 100 Hz.
     std::deque<qint64> m_liveMs;
+
+    // ── The recording path. I/O-thread state throughout: the writes happen here
+    // and shutdown() — which clears the pointer — is delivered here too, under a
+    // BlockingQueuedConnection, so the stop barrier needs no producer-side lock
+    // (ImuIoWorker takes one only because its detachBuffer() is called from the
+    // GUI thread). One id per unit; kInvalidSourceId means that unit's
+    // registration failed and its lane simply does not record.
+    pinpoint::EventBuffer *m_buffer = nullptr;
+    pinpoint::SourceId     m_sourceIds[HM_UNIT_COUNT] =
+        { pinpoint::kInvalidSourceId, pinpoint::kInvalidSourceId };
+
+    // Cumulative counters. They live here rather than in m_snap because
+    // drainLive() rebuilds the snapshot from scratch each pass and would
+    // otherwise reset them; the snapshot carries a copy out.
+    quint64 m_written[HM_UNIT_COUNT] = { 0, 0 };
+    quint64 m_noFitSkipped = 0;
+
+    // Per-unit last host time actually written, for the monotonicity measurement.
+    // HM_TIME_UNKNOWN (INT64_MIN) is the "nothing written yet" sentinel and can
+    // never be a real mapped time, so no first-sample special case is needed.
+    hm_time_us m_lastWrittenUs[HM_UNIT_COUNT] = { HM_TIME_UNKNOWN, HM_TIME_UNKNOWN };
+    quint64    m_nonMonotonic[HM_UNIT_COUNT]  = { 0, 0 };
+    hm_time_us m_maxBackStepUs[HM_UNIT_COUNT] = { 0, 0 };
+
+    quint64 m_skewCount = 0;
+    double  m_skewSumUs = 0.0;
+    qint32  m_skewMinUs = 0;
+    qint32  m_skewMaxUs = 0;
+
+    // HM_EV_CLOCK_DEGRADED application-log rate limiting — see handleEvent().
+    // The device log ring keeps every report regardless.
+    bool     m_clockDegradedLogged   = false;
+    uint64_t m_clockDegradedStreamId = 0;
+    uint32_t m_clockDegradedP90Us    = 0;
+    quint64  m_clockDegradedCount    = 0;
 
     mutable QMutex m_mutex;
     Snapshot       m_snap;
@@ -272,6 +344,14 @@ HmSessionWorker::~HmSessionWorker()
     }
 }
 
+void HmSessionWorker::attachBuffer(pinpoint::EventBuffer *buffer,
+                                   const pinpoint::SourceId ids[HM_UNIT_COUNT])
+{
+    m_buffer = buffer;
+    for (int u = 0; u < HM_UNIT_COUNT; ++u)
+        m_sourceIds[u] = ids[u];
+}
+
 void HmSessionWorker::initialise()
 {
     if (m_session) return;
@@ -286,6 +366,15 @@ void HmSessionWorker::initialise()
     // does not hold looks exactly like a real wrist movement. The pointer stays
     // NULL so the library allocates it inside its single create-time allocation.
     cfg.memory.digest_ring_capacity = HM_DIGEST_RING_RECOMMENDED;
+
+    // ⚠ THE LIVE RING IS LEFT AT ITS RECOMMENDED DEFAULT ON PURPOSE, and that is
+    // worth a line precisely because "there is no live rate ceiling" makes an
+    // untouched default look like an oversight. HM_LIVE_RING_RECOMMENDED is
+    // documented as sized from HOW OFTEN THE HOST DRAINS rather than from a rate,
+    // and we drain on every notification AND every timer tick — which is the
+    // condition it assumes. Raising it would buy nothing a faster drain does not
+    // already give; hm_session_dropped_live() is the number that would say
+    // otherwise, and it is in the 10 s summary.
 
     // ⚠ UNMODIFIED, and keepalive_period_us above all. §9.2: a silent connection
     // is dropped at exactly 5.0 minutes and an ACTIVE STREAM DOES NOT PREVENT IT
@@ -346,6 +435,15 @@ void HmSessionWorker::shutdown()
     // reach a session that is about to close.
     if (m_transport)
         QObject::disconnect(m_transport, &BleImuTransport::dataReceived, this, nullptr);
+
+    // ⚠ AND MAKE THE RING BARRIER A PROPERTY OF THE CODE RATHER THAN OF THE CALL
+    // ORDER. The two lines above already mean no drain can run after this returns,
+    // so nothing below could write — but that argument depends on the timer and
+    // the signal being the only two ways in. Nulling the pointer here means a
+    // third way in, added later, still cannot reach a source that is about to be
+    // deregistered. The drains further down this function run with it already
+    // null, which is correct: they finish EVENT work, not sample work.
+    m_buffer = nullptr;
 
     if (m_session && hm_session_is_streaming(m_session)) {
         // Best effort only, and deliberately not waited on: session.h asks the
@@ -619,7 +717,44 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
                  << hm_warning_code_name(static_cast<hm_warning_code>(ev.u.warning.code));
         break;
 
-    case HM_EV_CLOCK_DEGRADED:
+    case HM_EV_CLOCK_DEGRADED: {
+        // ⚠ EVERY ONE OF THESE STAYS IN THE DEVICE LOG RING (log is left true) —
+        // only the APPLICATION log is rate-limited. Measured on this Mac: seven
+        // reports in six minutes, all saying the same thing, which is how a
+        // recurring condition crowds out the one-off lines a support bundle is
+        // read for.
+        //
+        // And it says something worth saying once, properly. The residual spread
+        // is BLE notification jitter (p90 ~20-25 ms here), not a device fault and
+        // not something a retry or a reconnect changes. What it costs is the
+        // PRECISION of the host times this lane writes into the buffer, which is
+        // what an alignment against video would rest on — so it is a link-health
+        // signal that belongs in provenance rather than a fault to act on. Note
+        // what it does NOT touch: each unit's device_time_us is derived from the
+        // frame alone, so it is unaffected by any fit state.
+        const hm_clock_snapshot &clk = ev.u.clock;
+        const bool  first  = !m_clockDegradedLogged || clk.stream_id != m_clockDegradedStreamId;
+        // Re-report only on a material worsening, so a slow drift into a genuinely
+        // bad link is still visible while a steady one is not repeated.
+        const bool  worse  = clk.residual_p90_us > m_clockDegradedP90Us * 2;
+        ++m_clockDegradedCount;
+        if (first || worse) {
+            m_clockDegradedLogged   = true;
+            m_clockDegradedStreamId = clk.stream_id;
+            m_clockDegradedP90Us    = clk.residual_p90_us;
+            ppWarn() << "[HmInstance]" << m_deviceId
+                     << "— clock fit degraded: link jitter p90"
+                     << clk.residual_p90_us / 1000.0 << "ms, max"
+                     << clk.residual_max_us / 1000.0 << "ms, rate"
+                     << clk.fitted_rate_hz << "Hz over" << clk.observations
+                     << "observations. Recorded sample times carry that much"
+                        " precision against the video clock; per-unit device time"
+                        " is unaffected. Further reports suppressed unless it doubles"
+                        " (total so far" << m_clockDegradedCount << ").";
+        }
+        break;
+    }
+
     case HM_EV_DEVICE_ERROR:
         ppWarn() << "[HmInstance]" << m_deviceId << "—" << hm_event_type_name(type)
                  << ":" << text;
@@ -657,6 +792,14 @@ void HmSessionWorker::drainLive()
             // before the fit has observations it is not available at all — while
             // what this number is for is "is data flowing, and how fast".
             m_liveMs.push_back(nowMs);
+
+            // ⚠ EVERY POLLED SAMPLE IS WRITTEN, not only the newest. Keeping just
+            // `latest` is right for the 60 Hz display and wrong for the ring,
+            // because THE RING IS THE RECORDING: a burst at the device's full
+            // ≈799.2 Hz arrives as tens of samples in one notification, and
+            // decimating it here would lose most of a swing while every counter
+            // in the system still read "no drops".
+            writeSample(samples[i]);
         }
         if (n > 0) {
             decoded += n;
@@ -714,6 +857,19 @@ void HmSessionWorker::drainLive()
                            + b.gyro_dps[2] * b.gyro_dps[2]);
     }
 
+    // The cumulative ring-write counters live on the worker (this snapshot is
+    // rebuilt from scratch each pass) and are copied out here.
+    next.noFitSkipped = m_noFitSkipped;
+    next.skewCount    = m_skewCount;
+    next.skewSumUs    = m_skewSumUs;
+    next.skewMinUs    = m_skewMinUs;
+    next.skewMaxUs    = m_skewMaxUs;
+    for (int u = 0; u < HM_UNIT_COUNT; ++u) {
+        next.written[u]       = m_written[u];
+        next.nonMonotonic[u]  = m_nonMonotonic[u];
+        next.maxBackStepUs[u] = m_maxBackStepUs[u];
+    }
+
     QMutexLocker lk(&m_mutex);
     next.seq         = m_snap.seq + decoded;
     next.rateHz      = rateHz;
@@ -721,6 +877,108 @@ void HmSessionWorker::drainLive()
     // surfaced in the 10 s summary rather than swallowed.
     next.droppedLive = hm_session_dropped_live(m_session);
     m_snap = next;
+}
+
+void HmSessionWorker::writeSample(const hm_sample &s)
+{
+    // ⚠ skew_us IS ACCUMULATED BEFORE ANY GATE, because it does not come from the
+    // clock fit: it is the difference of the two units' own tick counters, so a
+    // sample the ring rejects for having no host time still carries a valid one.
+    // The exception is a configuration that ships no ticks at all (`5e` — §10.3
+    // says it removes the counter and with it any skew measurement), where the
+    // field would fold a meaningless 0 into the mean and make the export claim a
+    // 0 µs skew it never measured. We ask for `7e`, so this branch should not be
+    // reachable; it costs one test and it stops a silent lie if it ever is.
+    if ((s.flags & (HM_SAMPLE_TICKS_MISSING | HM_SAMPLE_NOT_TIME_ALIGNABLE)) == 0) {
+        if (m_skewCount == 0) {
+            m_skewMinUs = s.skew_us;
+            m_skewMaxUs = s.skew_us;
+        } else {
+            m_skewMinUs = qMin(m_skewMinUs, s.skew_us);
+            m_skewMaxUs = qMax(m_skewMaxUs, s.skew_us);
+        }
+        m_skewSumUs += double(s.skew_us);
+        ++m_skewCount;
+    }
+
+    if (!m_buffer || !m_buffer->isCapturing())
+        return;
+
+    // ⚠ NEVER FALL BACK TO ARRIVAL TIME. host_recv_us is one-sidedly late and is
+    // what the fit is built FROM; mixing two timebases inside one source looks
+    // fine and corrupts the capture. A sample with no mapped time is skipped and
+    // counted instead — and the count matters, because the fit exists from the
+    // first live frame (brief §0 #1), so HM_SAMPLE_NO_FIT arriving here is a
+    // symptom rather than the expected start-up condition it once was.
+    if (s.host_time_us == HM_TIME_UNKNOWN || (s.flags & HM_SAMPLE_NO_FIT)) {
+        ++m_noFitSkipped;
+        return;
+    }
+
+    // ⚠ ONE SAMPLE, ONE INDEX, ONE MAPPED HOST TIME — SO BOTH BLOCKS GET THE SAME
+    // STAMP, and the palm is NOT offset by skew_us. The fit maps index → host
+    // time, and one record has one index; §10.3 states that whether the stable
+    // 0.92 ms is real sampling skew or arbitrary phase between two free-running
+    // counters cannot be told from the counters alone, so applying it here would
+    // bake in an interpretation the library explicitly refuses to make. It is
+    // carried as provenance instead (skewUsMean()), and the fit-independent
+    // per-unit device_time_us is what Phase E/G anchor on when sub-millisecond
+    // pairing genuinely matters.
+    const hm_unit_sample *const blocks[HM_UNIT_COUNT] = { &s.lower_arm, &s.palm };
+
+    for (int u = 0; u < HM_UNIT_COUNT; ++u) {
+        const pinpoint::SourceId id = m_sourceIds[u];
+        if (id == pinpoint::kInvalidSourceId)
+            continue;   // this unit's registration failed — it does not record
+
+        auto slot = m_buffer->acquireWriteSlot(id);
+        if (!slot.valid || slot.capacity < sizeof(pinpoint::ImuSample))
+            continue;
+
+        // ⚠ MEASURED HERE, CLAMPED BY THE MERGER — NOT BOTH. host_time_us is
+        // monotonic in sample_index within one clock fit and the samples arrive in
+        // index order, so per-source monotonicity (event_buffer.cpp:84) is safe by
+        // construction — but the library RE-ANCHORS the fit (design §6.1.1 at every
+        // history pull, and the lower-envelope offset moves as observations arrive)
+        // and nothing in clock.h promises the published host_time_us never steps
+        // back across a re-anchor. So it is asserted by measurement rather than by
+        // assumption. Clamping it locally would hide the event from the resource
+        // monitor's monotonicity_violations counter — the one diagnostic a coach's
+        // support bundle actually carries — so the merger stays the single site.
+        //
+        // Per unit rather than per device because the merger's state is per SOURCE.
+        // The two counts move together while both lanes are registered (same stamp,
+        // same order); they diverge exactly when one registration failed.
+        if (s.host_time_us <= m_lastWrittenUs[u]) {
+            ++m_nonMonotonic[u];
+            const hm_time_us step = m_lastWrittenUs[u] - s.host_time_us;
+            if (step > m_maxBackStepUs[u])
+                m_maxBackStepUs[u] = step;
+        }
+        m_lastWrittenUs[u] = s.host_time_us;
+
+        // The converter owns the m/s² → g conversion and is the single source of
+        // truth for this lane's stored units; the quaternion goes in exactly as it
+        // arrived (world→body, §6.7 — the convention question is Phase D's).
+        const pinpoint::ImuSample smp = pinpoint::hm::toImuSample(*blocks[u]);
+        std::memcpy(slot.data, &smp, sizeof smp);
+        *slot.bytes_written = static_cast<uint32_t>(sizeof smp);
+        *slot.timestamp_us  = s.host_time_us;
+        m_buffer->publish(id, slot.sequence);
+        ++m_written[u];
+
+        // ⚠ ONE LINE PER LANE, THE FIRST TIME IT RECORDS, IN THE APPLICATION LOG.
+        // Everything else about this lane lives in the device log ring, which has
+        // no reachable UI — so without this, "two sources are registered" and "two
+        // sources are recording" look identical from outside, and they are NOT the
+        // same thing: writes gate on isCapturing(), which only becomes true when a
+        // SESSION starts. A registered lane sitting at zero events in Settings is
+        // correct behaviour, and this is the line that says when that changed.
+        if (m_written[u] == 1) {
+            ppInfo() << "[HmInstance]" << m_deviceId << "— recording started on the"
+                     << hm_unit_name(static_cast<hm_unit>(u)) << "lane, source" << id;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -767,9 +1025,96 @@ HmInstance::HmInstance(const Device &device,
     m_presenceAngleDeg = std::numeric_limits<double>::quiet_NaN();
     m_calibrationPhase = HM_CALP_IDLE;
 
-    // Phase B registers two EventBuffer sources here and hands each id to its
-    // HmUnit. Nothing is registered in Phase A on purpose — see the header.
-    Q_UNUSED(m_eventBuffer)
+    // ── TWO SOURCES, ONE DEVICE ──────────────────────────────────────────────
+    //
+    // Registering from a constructor is legal because ImuManager pauses the
+    // EventBuffer around createInstance() exactly as it does for a Witmotion
+    // (imu_manager.cpp setSelected()), and registerSource() requires Idle or
+    // Paused. This device is nonetheless the first thing in the tree to take TWO
+    // slots at once, which is why the failure below is handled rather than
+    // assumed away.
+    HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
+    pinpoint::SourceId ids[HM_UNIT_COUNT] =
+        { pinpoint::kInvalidSourceId, pinpoint::kInvalidSourceId };
+
+    for (int u = 0; m_eventBuffer && u < HM_UNIT_COUNT; ++u) {
+        HmUnit *const unit = units[u];
+
+        pinpoint::SourceDescriptor desc;
+        // Display only — the resource monitor shows this as the source name.
+        desc.name = (m_deviceDescription + QStringLiteral(" · ") + unit->unitLabel())
+                        .toStdString();
+        // ⚠ NOT RESPELLED HERE. unitId() is spelled once, in HmUnit's constructor,
+        // because it is persisted twice over: it is this identifier now and the
+        // AppSettings::imuPlacement key in Phase C.
+        desc.identifier = unit->unitId().toStdString();
+
+        pinpoint::ImuFormat fmt{};
+        // ⚠ IMU_HackMotion IS THIS LANE'S PROVENANCE, and it is the only machine-
+        // readable thing that says the accel column is not what a Witmotion lane's
+        // accel column is: the same 40-byte imu_sample_v2 struct holds GRAVITY-
+        // REMOVED linear acceleration here (≈0 at rest) and a raw accelerometer
+        // reading there. It travels with every window through formatOf(), so a
+        // reader can tell them apart; nothing downstream should compare or pool
+        // the two, and nothing may average this device's two units either.
+        fmt.device         = pinpoint::DeviceKind::IMU_HackMotion;
+        fmt.sample_rate_hz = kRingSizingRateHz;   // a sizing ceiling — see the header
+        fmt.packet_bytes   = sizeof(pinpoint::ImuSample);
+        fmt.packet_schema  = "imu_sample_v2";     // unchanged: 40 bytes, no schema bump
+
+        desc.format.device            = pinpoint::DeviceKind::IMU_HackMotion;
+        desc.format.format            = fmt;
+        desc.window_duration          = std::chrono::milliseconds(kSourceWindowMs);
+        desc.expected_interarrival_us = std::chrono::microseconds(kExpectedInterarrivalUs);
+        desc.sync_source              = pinpoint::SyncSource::SoftwareTimestamp;
+        // ⚠ desc.format.device_serial IS DELIBERATELY LEFT EMPTY. registerSource()
+        // normalises it to the identifier (event_buffer.cpp:152), and that is what
+        // the swing exporter keys `source.serial` on — so leaving it empty is how
+        // the two stay in step. Setting it to the device id would give both units
+        // the same serial and make the pair indistinguishable downstream.
+
+        try {
+            const pinpoint::SourceId id = m_eventBuffer->registerSource(desc);
+            if (id == pinpoint::kInvalidSourceId) {
+                // The buffer was neither Idle nor Paused. Same outcome as a full
+                // buffer: this lane does not record.
+                appendLog(timestamp()
+                          + QStringLiteral("  ERROR: could not register the %1 lane — the "
+                                           "event buffer refused it in its current state. "
+                                           "This unit will stream to the display but will "
+                                           "not be recorded.").arg(unit->unitLabel()));
+                ppError() << "[HmInstance]" << m_deviceDescription
+                          << "— registerSource refused for" << unit->unitId();
+                continue;
+            }
+            unit->setSourceId(id);
+            ids[u] = id;
+        } catch (const std::exception &e) {
+            // ⚠ registerSource() THROWS std::runtime_error at MAX_SOURCES (16), and
+            // this device is the first that can hit it mid-way through claiming its
+            // second slot. It is reached from a QML button press, so an escaping
+            // exception terminates the application over a full buffer. Degrade to
+            // "connected, not recording" instead: Phase A already made every
+            // consumer handle a short or empty sourceIds() gracefully.
+            //
+            // ⚠ A HALF-REGISTERED wG3 IS A REAL STATE, not an impossible one — the
+            // lower arm can take the last free slot and leave the palm without one.
+            // It records one lane and cannot produce a wrist angle, so the log says
+            // so plainly rather than leaving the coach to infer it from a wizard row.
+            appendLog(timestamp()
+                      + QStringLiteral("  ERROR: could not register the %1 lane (%2). "
+                                       "The sensor will connect and display, but this "
+                                       "unit will not be recorded — and a wrist angle "
+                                       "needs both.")
+                            .arg(unit->unitLabel(), QString::fromUtf8(e.what())));
+            ppError() << "[HmInstance]" << m_deviceDescription
+                      << "— registerSource failed for" << unit->unitId() << ":" << e.what();
+        }
+    }
+
+    // Hand the ids to the I/O-thread worker BEFORE moveToThread() — see
+    // HmSessionWorker::attachBuffer() for why that ordering is the lock.
+    m_worker->attachBuffer(m_eventBuffer, ids);
 
     // Host the session worker on the shared IMU I/O thread. The BLE transport is
     // its child and migrates with it, and the QLowEnergyController is created
@@ -867,13 +1212,104 @@ HmInstance::HmInstance(const Device &device,
             dropped = QStringLiteral("  DROPPED=%1").arg(snap.droppedLive - m_lastDroppedLive);
             m_lastDroppedLive = snap.droppedLive;
         }
+
+        // What actually reached the rings, per lane. The display rate above says
+        // data is flowing; only these say it is being RECORDED, and the pair
+        // diverges precisely when a registration failed.
+        const QString written = QStringLiteral("  WROTE=%1/%2")
+                                    .arg(snap.written[HM_UNIT_LOWER_ARM])
+                                    .arg(snap.written[HM_UNIT_PALM]);
+
+        // Provenance, not a correction: the two blocks are never paired as
+        // simultaneous and this is never applied to a timestamp. §10.3 measures a
+        // stable 0.92 ms; a WIDE spread here is the interesting outcome, because it
+        // would mean the offset is not the constant that reasoning depends on.
+        const QString skew = snap.skewCount > 0
+            ? QStringLiteral("  SKEW(palm−arm)=%1/%2/%3 µs (min/mean/max, n=%4)")
+                  .arg(snap.skewMinUs)
+                  .arg(snap.skewSumUs / double(snap.skewCount), 0, 'f', 2)
+                  .arg(snap.skewMaxUs)
+                  .arg(snap.skewCount)
+            : QString();
+
+        if (snap.skewCount > 0) {
+            const qint32 spread = snap.skewMaxUs - snap.skewMinUs;
+            // ONCE PER SESSION, into the application log. The mean is what the
+            // exporter bakes into swing.json (device.skewUs), so a reader of a
+            // capture can see the same figure the capture was made under — and
+            // this is the only reachable place it appears live, the device log ring
+            // having no UI.
+            if (!m_skewReported) {
+                m_skewReported = true;
+                ppInfo() << "[HmInstance]" << m_deviceId << "— inter-unit skew (palm − lower arm)"
+                         << snap.skewSumUs / double(snap.skewCount) << "µs mean, spread"
+                         << spread << "µs over" << snap.skewCount
+                         << "samples. Carried into provenance, never applied to a timestamp.";
+            }
+            // ⚠ THE SPREAD IS THE INTERESTING NUMBER, NOT THE MEAN. §10.3's
+            // measured 0.92 ms is stable, and "stable" is exactly what makes it
+            // subtractable later as a constant. A wide spread means it is not that
+            // constant, which changes what Phase E/G may assume — so it is warned
+            // about once rather than left sitting in a log nobody can open.
+            if (spread > kSkewSpreadWarnUs && !m_skewSpreadWarned) {
+                m_skewSpreadWarned = true;
+                ppWarn() << "[HmInstance]" << m_deviceId << "— inter-unit skew is NOT stable:"
+                         << snap.skewMinUs << "to" << snap.skewMaxUs
+                         << "µs. The published 0.92 ms constant does not hold here, so it"
+                            " cannot be treated as a subtractable offset.";
+            }
+        }
+
+        // ⚠ Both of the next two are expected to be zero for the whole life of a
+        // session. They are reported as TOTALS and warned on GROWTH, because either
+        // one appearing means an assumption this lane rests on has broken: that the
+        // clock fit exists from the first frame (brief §0 #1), and that the
+        // published host_time_us never steps back across a fit re-anchor.
+        QString noFit;
+        if (snap.noFitSkipped > 0) {
+            noFit = QStringLiteral("  NO-FIT-SKIPPED=%1").arg(snap.noFitSkipped);
+            if (snap.noFitSkipped > m_lastNoFitSkipped) {
+                ppWarn() << "[HmInstance]" << m_deviceDescription
+                         << "— samples with no mapped host time were skipped, total"
+                         << snap.noFitSkipped
+                         << "— the clock fit is supposed to exist from the first live frame";
+            }
+        }
+        m_lastNoFitSkipped = snap.noFitSkipped;
+
+        const quint64 backSteps = snap.nonMonotonic[HM_UNIT_LOWER_ARM]
+                                + snap.nonMonotonic[HM_UNIT_PALM];
+        QString nonMono;
+        if (backSteps > 0) {
+            // ⚠ MEASURED, NOT CLAMPED HERE — the merger clamps, and the count it
+            // keeps is what a support bundle carries. This line says the same thing
+            // per lane, with the size of the worst step the merger had to absorb.
+            nonMono = QStringLiteral("  HOST-TIME-BACKSTEPS=%1/%2 (worst %3/%4 µs)")
+                          .arg(snap.nonMonotonic[HM_UNIT_LOWER_ARM])
+                          .arg(snap.nonMonotonic[HM_UNIT_PALM])
+                          .arg(snap.maxBackStepUs[HM_UNIT_LOWER_ARM])
+                          .arg(snap.maxBackStepUs[HM_UNIT_PALM]);
+            if (backSteps > m_lastNonMonotonic) {
+                ppWarn() << "[HmInstance]" << m_deviceDescription
+                         << "— host_time_us stepped backwards; the merger clamped it. Total"
+                         << backSteps << "worst step (µs) lowerArm"
+                         << snap.maxBackStepUs[HM_UNIT_LOWER_ARM]
+                         << "palm" << snap.maxBackStepUs[HM_UNIT_PALM];
+            }
+        }
+        m_lastNonMonotonic = backSteps;
+
         appendLog(timestamp()
-            + QStringLiteral("  Data: %1 samples total  (+%2 in last 10s)  %3 Hz avg%4%5")
+            + QStringLiteral("  Data: %1 samples total  (+%2 in last 10s)  %3 Hz avg%4%5%6%7%8%9")
                 .arg(m_totalSamples)
                 .arg(m_samplesSinceLog)
                 .arg(m_dataRateHz, 0, 'f', 1)
                 .arg(bat)
-                .arg(dropped));
+                .arg(dropped)
+                .arg(written)
+                .arg(skew)
+                .arg(noFit)
+                .arg(nonMono));
         m_samplesSinceLog = 0;
     });
 
@@ -943,10 +1379,40 @@ HmInstance::~HmInstance()
 
 std::vector<pinpoint::SourceId> HmInstance::sourceIds() const
 {
-    // Empty in Phase A, and empty on purpose: registering a source nothing ever
-    // writes to would put a permanently silent lane in the data viewer and a
-    // stale binding candidate in the wizard. Phase B registers two.
-    return {};
+    // ⚠ ORDER IS {lowerArm, palm} — the cable's own order (wire block 0 is the
+    // lower arm, §6.3), which is also what sourceLabels() and every positional
+    // consumer assume. A unit whose registration failed is SKIPPED rather than
+    // represented by kInvalidSourceId, so the vector never hands a caller an id
+    // it must remember to test.
+    std::vector<pinpoint::SourceId> ids;
+    ids.reserve(HM_UNIT_COUNT);
+    const HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
+    for (const HmUnit *unit : units)
+        if (unit->sourceId() != pinpoint::kInvalidSourceId)
+            ids.push_back(unit->sourceId());
+    return ids;
+}
+
+QStringList HmInstance::sourceLabels() const
+{
+    // Same order, same skips, same length as sourceIds() — the resource monitor
+    // pairs them by position.
+    QStringList labels;
+    const HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
+    for (const HmUnit *unit : units)
+        if (unit->sourceId() != pinpoint::kInvalidSourceId)
+            labels.append(unit->unitLabel());
+    return labels;
+}
+
+double HmInstance::skewUsMean() const
+{
+    if (!m_worker) return std::numeric_limits<double>::quiet_NaN();
+    const HmSessionWorker::Snapshot snap = m_worker->snapshot();
+    // ⚠ NaN, not 0, until a sample has been seen: 0 µs is a perfectly plausible
+    // skew, so a default of 0 would be indistinguishable from a measurement.
+    if (snap.skewCount == 0) return std::numeric_limits<double>::quiet_NaN();
+    return snap.skewSumUs / double(snap.skewCount);
 }
 
 void HmInstance::start()
@@ -1025,8 +1491,22 @@ void HmInstance::stop()
 
 void HmInstance::deregisterFromBuffer()
 {
-    // Phase B fills this in, once there are sources to deregister. Nothing is
-    // registered in Phase A, so there is nothing to undo.
+    // ⚠ LEGAL ONLY WITH THE BUFFER PAUSED AND NO SwingWindow LIVE — both asserted
+    // by EventBuffer::deregisterSource(). The ordering is ImuManager's guarantee,
+    // not ours to re-check: it calls stop() (the producer stop barrier, which also
+    // nulls the worker's buffer pointer) and only then deregisterFromBuffer(),
+    // with the buffer paused, in both ~ImuManager and setSelected(false).
+    //
+    // Idempotent: the ids are invalidated as they go, and deregisterSource() is
+    // itself a no-op on an unknown id, so a second call does nothing.
+    if (!m_eventBuffer) return;
+
+    HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
+    for (HmUnit *unit : units) {
+        if (unit->sourceId() == pinpoint::kInvalidSourceId) continue;
+        m_eventBuffer->deregisterSource(unit->sourceId());
+        unit->setSourceId(pinpoint::kInvalidSourceId);
+    }
 }
 
 QString HmInstance::saveLog()

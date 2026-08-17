@@ -78,6 +78,18 @@ public:
     // structural in the first place.
     virtual std::vector<pinpoint::SourceId> sourceIds() const = 0;
 
+    // Parallel to sourceIds() when non-empty — same length, same order, one
+    // short human label per registered source ("Lower arm" / "Palm" on the
+    // wG3). Defaults to {} rather than being derived from the buffer's
+    // SourceInfo::name: that string is a display value this layer does not
+    // own or parse, and deriving from it would make the label depend on
+    // registration-time formatting instead of device semantics. A Witmotion
+    // has one unnamed source and returns {}; the resource monitor treats an
+    // empty list as "no per-source labels", NOT as "no sources" — sourceIds()
+    // is still the count. Without this, a multi-source device's rows fall
+    // back to "#1"/"#2", which tells a coach nothing about which strap moved.
+    virtual QStringList sourceLabels() const { return {}; }
+
     // Lifecycle, called by ImuManager.
     //
     // ⚠ THE ORDER IS A CONTRACT, not a convention: stop() is the producer stop

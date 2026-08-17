@@ -34,6 +34,13 @@ enum class DeviceKind {
     IMU_WitMotion,
     IMU_Bosch,
     IMU_Custom,
+    // ⚠ A separate KIND, not another vendor of the same thing: fusion happens on
+    // the device, ONE peripheral presents TWO units (so one device registers two
+    // sources), and its accel channel is gravity-removed LINEAR acceleration —
+    // ≈0 at rest — rather than a raw accelerometer reading. A consumer that
+    // compares this lane's accel against a WitMotion lane's is comparing two
+    // different physical quantities.
+    IMU_HackMotion,
     Marker_App,      // application-generated marker events (e.g. shot impact)
 };
 

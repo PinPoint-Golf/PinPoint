@@ -107,6 +107,18 @@ struct SwingImuDeviceInfo {
     double      mountGravityErrorDeg  = 0.0;
     QString     calibratedAtUtc;          // ISO8601; empty = never calibrated
     double      calibAgeSec = -1.0;       // age at shot time; -1 = never calibrated
+
+    // HackMotion only: measured palm-minus-lower-arm skew, microseconds. The
+    // wG3's two units are read from ONE stream but are NOT sampled
+    // simultaneously — the measured skew is a stable ~0.92 ms, worth ~0.9° of
+    // relative angle at 1000°/s (the device's primary output, wrist angular
+    // velocity through impact). It is recorded rather than silently
+    // subtracted from one lane's timestamps because its physical meaning is
+    // unresolved and cannot be settled from the counters alone: it could be
+    // real inter-unit sampling skew, or just the arbitrary phase between two
+    // free-running counters that happens to be stable. 0.0 = not measured
+    // (omit the key rather than write a fake zero-skew claim).
+    double      skewUs = 0.0;
 };
 
 // Host/app provenance recorded under capture.host — explains cross-host

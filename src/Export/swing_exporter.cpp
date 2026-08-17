@@ -515,6 +515,13 @@ SwingExportResult SwingExporter::run(const SwingWindow& window, const SwingExpor
             const FormatDescriptor& fd = window.formatOf(sid);
             const QString serial = QString::fromStdString(fd.device_serial);
             const QString alias  = job.imuAliasBySerial.value(serial, serial);
+            // HackMotion lanes need honest units/instrument tagging below — the
+            // accel channel is a different physical quantity from a Witmotion
+            // lane's and nothing downstream may compare or pool the two. Every
+            // use of this pointer is inside a branch that runs ONLY for this
+            // device kind, so a Witmotion export is byte-identical to before.
+            const ImuFormat* imf = std::get_if<ImuFormat>(&fd.format);
+            const bool isHackMotion = imf && imf->device == DeviceKind::IMU_HackMotion;
 
             std::vector<int64_t> tUs;
             std::vector<std::array<float, 10>> rows;   // accel3, gyro3, quat4(wxyz)
@@ -536,6 +543,11 @@ SwingExportResult SwingExporter::run(const SwingWindow& window, const SwingExpor
             QJsonObject s;
             s[QStringLiteral("kind")]   = QStringLiteral("imu");
             s[QStringLiteral("alias")]  = alias;
+            // "imu_sample_v2" names the 40-byte record LAYOUT (imu_sample.h),
+            // which a HackMotion lane shares byte-for-byte with a Witmotion
+            // one — do not invent a second schema string for it. The semantic
+            // difference (units, world->body quat) travels in "instrument"
+            // and "units" below instead.
             s[QStringLiteral("schema")] = QStringLiteral("imu_sample_v2");
             s[QStringLiteral("source")] = QJsonObject{{QStringLiteral("serial"), serial}};
             // Device configuration at capture time (additive) — outputRateHz
@@ -567,13 +579,43 @@ SwingExportResult SwingExporter::run(const SwingWindow& window, const SwingExpor
                     if (!dev.calibratedAtUtc.isEmpty())
                         deviceObj[QStringLiteral("calibratedAt")]     = dev.calibratedAtUtc;
                 }
+                // HackMotion only: the two units' blocks are NOT paired as
+                // simultaneous (see SwingImuDeviceInfo::skewUs) — recorded
+                // rather than silently applied because whether it is real
+                // sampling skew or arbitrary counter phase is unresolved.
+                // isHackMotion gates this so a Witmotion export — whose
+                // skewUs is always the untouched 0.0 default — cannot gain
+                // this key by a future accident elsewhere.
+                if (isHackMotion && dev.skewUs != 0.0 && std::isfinite(dev.skewUs))
+                    deviceObj[QStringLiteral("skewUs")] = dev.skewUs;
                 s[QStringLiteral("device")] = deviceObj;
             }
-            s[QStringLiteral("units")]  = QJsonObject{
-                {QStringLiteral("accel"), QStringLiteral("g")},
-                {QStringLiteral("gyro"),  QStringLiteral("deg/s")},
-                {QStringLiteral("quat"),  QStringLiteral("wxyz")},
-            };
+            if (isHackMotion) {
+                // Honest units for a HackMotion lane, plus a machine-checkable
+                // discriminator (Phase F is the consumer) instead of making a
+                // reader parse prose out of the unit strings:
+                //  - accel is gravity-removed LINEAR acceleration in g (reads
+                //    ~0 at rest) — a different physical quantity from a
+                //    Witmotion lane's accel channel; nothing downstream may
+                //    compare or pool the two ("g (linear, gravity-removed —
+                //    NOT comparable to a Witmotion accel channel)").
+                //  - quat maps world->body (§6.7), the CONJUGATE of what the
+                //    rest of the pipeline assumes; unreconciled until Phase D.
+                s[QStringLiteral("instrument")] = QStringLiteral("hackmotion");
+                s[QStringLiteral("units")] = QJsonObject{
+                    {QStringLiteral("accel"),
+                     QStringLiteral("g (linear, gravity-removed — NOT comparable to a Witmotion accel channel)")},
+                    {QStringLiteral("gyro"), QStringLiteral("deg/s")},
+                    {QStringLiteral("quat"),
+                     QStringLiteral("wxyz, world->body (conjugate of the pipeline's convention — unreconciled, Phase D)")},
+                };
+            } else {
+                s[QStringLiteral("units")]  = QJsonObject{
+                    {QStringLiteral("accel"), QStringLiteral("g")},
+                    {QStringLiteral("gyro"),  QStringLiteral("deg/s")},
+                    {QStringLiteral("quat"),  QStringLiteral("wxyz")},
+                };
+            }
 
             // Inline-JSON samples object (also the fallback if a sidecar fails).
             auto inlineSamples = [&]() -> QJsonObject {

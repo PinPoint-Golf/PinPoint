@@ -142,6 +142,13 @@ public:
         // see imu_device.h). Nothing left here reads a single scalar id, so
         // there is no separate `sourceId` field to keep in sync.
         std::vector<pinpoint::SourceId> sourceIds;
+        // Parallel to sourceIds — see ImuDeviceBase::sourceLabels(). Empty for
+        // a Witmotion (and for a Phase A HackMotion, which registers zero
+        // sources); the resource monitor falls back to "#N" suffixes when
+        // this is empty but sourceIds isn't, so callers must not read a short
+        // sourceLabels as "no labels for the later ids" — it means exactly
+        // that, and the fallback is the intended handling, not a bug.
+        QStringList        sourceLabels;
         double             dataRateHz     = 0.0;
         int                batteryPercent = -1;
         int                gimbalDropCount = 0;

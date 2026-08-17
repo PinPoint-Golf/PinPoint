@@ -82,3 +82,24 @@ pp_add_test(hackmotion_link_test
     LINK    hackmotion
     NO_QT
     STD 20)
+
+# ── HackMotion block → ImuSample conversion pin ───────────────────────────────
+# hm_sample_convert.h is the ONE place a HackMotion reading becomes an
+# ImuSample, and every way of getting it wrong still looks plausible: a 0.068 %
+# accel scale error (via the library's scaled m/s² field instead of the raw
+# milli-g counts), a gyro re-derived with the wrong config-dependent divisor
+# (out by exactly 2×), or a conjugated/swapped quaternion — which leaves the
+# wrist ANGLE correct while mirroring every decomposed component, so no
+# plausibility check downstream can catch it. Nothing else in the tree asserts
+# any of that, so it is asserted here, against the wrong values by name.
+#
+# The header is pure and header-only, so there is nothing to compile alongside
+# it: ImuSample comes from ${PP_BUFFER}, which pp_add_test puts on the include
+# path for every target. We LINK hackmotion only to inherit its PUBLIC include
+# directory — the test calls no library symbol and would link without it.
+pp_add_test(hm_sample_convert_test
+    SOURCES hm_sample_convert_test.cpp
+    INCLUDE ${IMU}
+    LINK    hackmotion
+    NO_QT
+    STD 20)

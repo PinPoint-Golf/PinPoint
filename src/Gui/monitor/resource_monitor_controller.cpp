@@ -316,16 +316,24 @@ void ResourceMonitorController::refresh()
                                 : imuDev.description + QStringLiteral(" (") + imuId + QStringLiteral(")")).toString();
 
             // ⚠ PLURAL, AND THAT IS THE POINT (see ImuDeviceBase::sourceIds()).
-            // A HackMotion can carry two sources (lower arm, palm — from Phase
-            // B onward); this device-level loop already runs per enumerated
+            // A HackMotion carries two sources (lower arm, palm, from Phase B
+            // onward); this device-level loop already runs per enumerated
             // Device, so a second inner loop turns each source into its own
             // row rather than the row silently reporting only the first one.
-            // Phase A's HmInstance registers none, which the empty-vector
-            // fallback below turns into exactly one row — live state, no
-            // buffer statistics — instead of hiding the device or indexing
-            // past the end of an empty vector.
+            // An HmInstance that registers none (e.g. mid-connect) falls back
+            // through the empty-vector case below into exactly one row — live
+            // state, no buffer statistics — instead of hiding the device or
+            // indexing past the end of an empty vector.
             const bool multiSource = imu.sourceIds.size() > 1;
             const int  rowCount    = imu.sourceIds.empty() ? 1 : int(imu.sourceIds.size());
+            // ⚠ Labels beat "#N": both wG3 sources would otherwise resolve to
+            // the SAME device-level alias below, so the two buffer-source
+            // lanes in the one view whose job is telling you which lane is
+            // recording would be indistinguishable from each other. Only used
+            // when the instance supplies exactly one label per row — a
+            // mismatched count (e.g. mid-registration) falls back to "#N"
+            // rather than pairing labels to the wrong rows.
+            const bool hasLabels = imu.sourceLabels.size() == rowCount;
 
             for (int row = 0; row < rowCount; ++row) {
                 const pinpoint::SourceId sid = imu.sourceIds.empty()
@@ -348,14 +356,24 @@ void ResourceMonitorController::refresh()
                 QString imuSrcName = imuSrc
                     ? QString::fromStdString(imuSrc->name) : QString();
 
-                if (sid != pinpoint::kInvalidSourceId)
-                    sourceAliases[sid] = imuAlias;
-
                 // One physical device, more than one row: distinguish them by
-                // source rather than inventing a per-unit label this layer
-                // doesn't own (unitLabel lives on HmUnit, not on SourceInfo).
-                const QString rowSuffix = multiSource
-                    ? QStringLiteral(" #%1").arg(row + 1) : QString();
+                // the device's own source label ("Lower arm" / "Palm") when it
+                // supplies one, since a "#N" suffix by itself doesn't tell a
+                // coach which strap moved. Falls back to "#N" when multiSource
+                // but hasLabels is false, and is empty for a single-source
+                // device — a Witmotion row is byte-identical to before this
+                // change (multiSource is false, so rowSuffix stays "").
+                const QString rowSuffix = hasLabels
+                    ? QStringLiteral(" · ") + imu.sourceLabels[row]
+                    : (multiSource ? QStringLiteral(" #%1").arg(row + 1) : QString());
+
+                // sourceAliases keys the resource monitor's separate Sources
+                // table (buildSources() below) — without rowSuffix here, both
+                // wG3 sources would collapse onto the SAME device alias and
+                // be indistinguishable in that table even though they are
+                // distinguishable in the device rows above.
+                if (sid != pinpoint::kInvalidSourceId)
+                    sourceAliases[sid] = imuAlias + rowSuffix;
 
                 QVariantMap dev;
                 dev[QStringLiteral("kind")]               = QStringLiteral("IMU");

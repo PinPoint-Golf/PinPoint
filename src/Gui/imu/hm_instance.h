@@ -193,10 +193,13 @@ private:
 // two units. Both kinds are held through ImuDeviceBase, which is the
 // device-kind-agnostic slice ImuManager actually calls.
 //
-// PHASE A SCOPE. This registers NO EventBuffer source and writes NO samples —
-// that is Phase B. It does decode live samples and drive the display state, so
-// the Settings panel can show two live orientation cubes; that is the visible
-// proof the transport, the decode and the drain loop all work.
+// PHASE B SCOPE. This registers TWO EventBuffer sources — one per unit, keyed
+// on HmUnit::unitId() — and every drained hm_sample becomes two ImuSample ring
+// writes, both stamped with the sample's mapped host time. The display path
+// (60 Hz tick, two orientation cubes) is unchanged and still shows only the
+// newest sample; the RING gets every one of them, because the ring is the
+// recording. What is still absent is an anatomical frame (Phase D), the
+// calibration flow (Phase C) and the deferred history pull (Phase E).
 class HmInstance : public ImuDeviceBase
 {
     Q_OBJECT
@@ -253,6 +256,24 @@ public:
 
     std::vector<pinpoint::SourceId> sourceIds() const override;
 
+    // ⚠ PARALLEL TO sourceIds() AND THE SAME LENGTH, including when a
+    // registration failed and the vector is short. The resource monitor pairs
+    // them positionally, so a labels list built independently of the ids would
+    // mislabel every row of a partially-registered device rather than omit one.
+    // The strings come from HmUnit::unitLabel(), so they are spelled once and
+    // stay translated.
+    QStringList sourceLabels() const override;
+
+    // Mean of hm_sample.skew_us over every sample this session, NaN until one has
+    // been seen. ⚠ PROVENANCE, NOT A CORRECTION: the two units' blocks are NOT
+    // paired as simultaneous and this value is never applied to a timestamp. §10.3
+    // measures a stable 59 ticks (0.92 ms) whose physical meaning is unresolved —
+    // real sampling skew and arbitrary phase between two free-running counters
+    // cannot be told apart from the counters alone — so the honest thing is to
+    // carry it into swing.json and let the analysis decide. Read by the export
+    // path; there is no provenance block to put it in yet (Phase E builds one).
+    double skewUsMean() const;
+
     void start()               override;
     void stop()                override;
     void deregisterFromBuffer() override;
@@ -291,10 +312,10 @@ private:
     void handleConnectFailure();
     int  retryDelayMs(int attempt) const;
 
-    // Phase B registers two sources here and hands each id to its HmUnit.
-    // Left empty on purpose: registering a source nothing writes to would put a
-    // permanently silent lane in the data viewer and a stale binding candidate
-    // in the wizard.
+    // The two sources are registered against this in the constructor and the
+    // ids handed to the HmUnits; the worker holds the same pointer for the ring
+    // writes. Null is legal and means "no recording" — every consumer already
+    // handles an empty sourceIds().
     pinpoint::EventBuffer *m_eventBuffer = nullptr;
 
     // I/O-thread residents. The worker has no QObject parent (parenting would
@@ -349,6 +370,15 @@ private:
     quint64 m_totalSamples    = 0;
     quint64 m_samplesSinceLog = 0;
     quint64 m_lastDroppedLive = 0;
+    // Totals as of the previous summary, so a GROWING count warns while a
+    // historic one is merely reported. Both are expected to stay at zero for a
+    // whole session; they are counted rather than assumed, which is the point.
+    quint64 m_lastNoFitSkipped = 0;
+    quint64 m_lastNonMonotonic = 0;
+    // The skew figure and its spread reach the application log once each — the
+    // device log ring carries the running numbers but has no reachable UI.
+    bool    m_skewReported     = false;
+    bool    m_skewSpreadWarned = false;
 
     QString m_stateLabel = QStringLiteral("Disconnected");
     bool    m_connected  = false;
@@ -358,6 +388,32 @@ private:
 
     double m_presenceAngleDeg = 0.0;   // set to NaN in the constructor
     int    m_calibrationPhase = 0;     // HM_CALP_IDLE
+
+    // ── Source-descriptor numbers, and why the two rate figures disagree ──────
+    //
+    // ⚠ kRingSizingRateHz IS A SIZING CEILING, NOT A CLAIM ABOUT THE RATE.
+    // SourceDescriptor::computeSlotCount() is next-pow2(rate × window), so 800 ×
+    // 5 s → 4,096 slots × 40 B = 160 KB per unit, 320 KB for the device. The live
+    // rate is adaptive: 25 Hz at rest and 100 Hz in motion are two strong modes
+    // of a continuum, and dense bursts reach index step 1 — the full ≈799.2 Hz
+    // internal rate — in every session containing motion (§6.6). Sizing from an
+    // assumed 100 Hz would give 512 slots, i.e. a ring holding 0.64 s of a dense
+    // stretch, which silently overwrites the front of a five-second swing window
+    // under exactly the conditions that matter most.
+    //
+    // ⚠ kExpectedInterarrivalUs (25 Hz) DELIBERATELY DISAGREES WITH IT, and the
+    // two must not be "fixed" to match. That field feeds ONLY the stall watchdog
+    // (EventBuffer::maybeRunWatchdog), which floors at 1 s anyway; declaring the
+    // fast end there would flag a resting wrist — which genuinely does drop to
+    // ~25 Hz — as a stalled source. Each number is right for its own job.
+    // A skew spread wider than this means the ~0.92 ms offset is not the constant
+    // §10.3 measured. Set well above that figure (and above Q14/tick quantisation)
+    // so only a real departure trips it, not jitter around a stable value.
+    static constexpr qint32   kSkewSpreadWarnUs       = 2'000;
+
+    static constexpr uint32_t kRingSizingRateHz        = 800;
+    static constexpr int      kSourceWindowMs          = 5'000;
+    static constexpr int      kExpectedInterarrivalUs  = 40'000;
 
     static constexpr int kMaxRetries       = 4;
     static constexpr int kRetryBaseDelayMs = 2'000;

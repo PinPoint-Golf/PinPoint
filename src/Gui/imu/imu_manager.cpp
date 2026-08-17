@@ -457,6 +457,7 @@ ImuManager::ImuDeviceStats ImuManager::liveDeviceStats(const QString &deviceId) 
     stats.selected = e.selected;
     if (e.selected && e.instance) {
         stats.sourceIds       = e.instance->sourceIds();
+        stats.sourceLabels    = e.instance->sourceLabels();
         stats.dataRateHz      = e.instance->dataRateHz();
         stats.batteryPercent  = e.instance->batteryPercent();
         stats.connected       = e.instance->imuConnected();
