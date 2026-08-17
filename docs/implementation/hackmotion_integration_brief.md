@@ -1,6 +1,7 @@
 # HackMotion integration — implementation brief
 
-**Status:** brief. Nothing built. Written 2026-08-15.
+**Status:** Phase A shipped 2026-08-17 (`3b4980f`). Written 2026-08-15, **before the library
+existed** — see §0 for the nine places that made it wrong.
 **Scope:** add the HackMotion wG3 wrist sensor to PinPoint as a new IMU type, with its own
 calibration process, feeding the Wrist session, the metric catalogue and the measure
 vocabulary — and then use it as a **criterion instrument** to validate the wrist metrics we
@@ -17,9 +18,61 @@ extract from our own Witmotion placements.
 - The library's own `docs/specification.md`, `docs/design.md` and `docs/design-review.md` in
   `../libhackmotion`. Bare **§x** below is the specification; **L §x** is the library design.
 
-**The library is a separate team's work.** We consume it; we do not modify it. Friction found
-while writing this brief is recorded in their `docs/design-review.md` (third pass, R14–R20) —
-not worked around silently here.
+**The library is a separate team's work.** We consume it; we do not modify it. ⚠ Friction found
+while writing this brief was recorded as R14–R20 in a `docs/design-review.md` that **does not
+exist in the published repo** — libhackmotion ships only `specification.md` and `design.md`, and
+its history begins 2026-08-16, the day *after* this brief. Those review items were discharged
+into the library's code and design doc rather than answered in a tracker. Do not go looking for
+the file.
+
+---
+
+## 0. Corrections — this brief was written before the library existed
+
+Nine findings from reading the published library and the current tree, recorded 2026-08-17 while
+building Phase A. **Everything below this section is the original text; where it conflicts with
+this table, this table wins.**
+
+| # | The brief says | Actually |
+|---|---|---|
+| 1 | §3.5: the first ~2 s of a stream have no host time; "drop them and count them" | **Obsolete — there is no dead zone.** `clock.h` is explicit: `HM_CLOCK_HAS_FIT` is set from the *first live frame*, so every sample from the first frame onward carries a `host_time_us`. `HM_CLOCK_SHORT_BASELINE` now gates only whether the *rate* is independently fitted or seeded. `HM_SAMPLE_NO_FIT` fires only before the very first frame. Nothing to drop, no count to surface. |
+| 2 | Phase E delivers "a stitched ~800 Hz wrist lane"; §10.3 "Phase E delivers 800 Hz" | **The device buffer is motion-adaptive**, floored at ~100 Hz (index step 8) and capped at ~799 Hz (step 1). A still pre-roll replays at 99.9 Hz; the swing itself replays in full. Window coverage of 16–50 % is *correct*, not a fault, and a narrower request does **not** come back denser — density is set by the motion, not the width. The §7 size estimate ("2 s × 800 Hz × 2 units ≈ 128 KB") is therefore an upper bound. |
+| 3 | Issuing `a1` in place avoids the recording gap | **It does not.** The sample counter stalls for the pull's own duration — 289 ms mean across six measured pulls, 90–99 % of the bracket. Reported as `hm_history_block.self_recording_gap`, which falls *outside* `requested` by construction. The clock fit must re-anchor at every bracket close; one fit cannot span a pull. |
+| 4 | Phase E "implements `deferred_sources_design.md` as written" | **That design is entirely unimplemented.** Zero of its identifiers exist in `src/`: no `reserveSourceId`, no `RamPayloadSource`, no `CompositePayloadSource`, no `Gathering` state, no `BoundImu::effectiveHz`, and `interpolateImu` is still the linear scan it warns about. Phase E *builds* the mechanism, it does not consume it. |
+| 5 | Keys are `m_wristFlexExt`, `m_wristDeviation`, `m_wristRotation` | **None of those exist.** Real series keys: `leadWristFlexExt`, `leadWristRadUln`, `forearmPronation`, `leadArmFlexion`. Real measure ids: `m_leadWristFlexExt_p1..p8`, `m_leadWristRadUln_p*`, `m_leadForearmRot_p*` (note the measure stem differs from the metric key). |
+| 6 | "A new `MetricRoute` on each wrist metric" *and* new keys | Pick one, and the codebase pattern is unambiguous: **new keys + `preferKeys`**, the `lm.attackAngle` shape. Adding a second route to `leadWristFlexExt` would make the pair *not* separately addressable, which is the one thing Phase G cannot do without. |
+| 7 | "requirement = a HackMotion binding" | ⚠ **`MetricRequirement` cannot express that.** It knows anatomical `imuRoles` plus fixed bools, so a HackMotion route is today indistinguishable from the Witmotion one. Needs a `hackMotion` bool mirroring `launchMonitor`, a matching `ShotContext::hasHackMotion`, a `missingForRequirement` clause and a `CaptureDevice` value. |
+| 8 | *(unstated)* | ⚠ **`FusedStreams::streamFor(role)` returns the FIRST match.** Two bindings with the same role silently first-wins, so **wearing both instruments at once — the entire point — is not expressible today.** Fix this before any dual-worn capture. |
+| 9 | *(unstated)* | ⚠ **The library's digest ring defaults to OFF.** With it off, a history block reports `live_overlap_samples == 0`, which means *no evidence*, not agreement — and the stitch of §7 depends on that agreement. Set `digest_ring_capacity`. *(Done in Phase A.)* |
+
+**One thing that improved.** §8.2's 64-byte `0x94` payload is no longer opaque in the
+specification: it is eight Q14 quaternions, of which q5/q6 are the **palm** at each marker and
+q7/q8 the **lower arm** — ⚠ palm first, the reverse of a stream record's block order — and the
+separation within each pair *is* the raise that was performed. That is exactly the axis
+information §4.2's presence angle is blind to. ⚠ **But the library keeps it opaque and exposes no
+API to read it**; the intended substitute is `hm_calibration_presence_event`'s medoid pair and
+averaged anchor. Worth raising upstream if Phase D wants the poses themselves.
+
+### Decisions taken since, which override the text below
+
+1. **Unit-keyed placement** — `imuPlacement` keys become `<deviceId>#lowerArm` / `<deviceId>#palm`
+   for a HackMotion; Witmotion keeps the bare device id. *(Phase C. Phase A pins a HackMotion to
+   slot A and locks the control as an interim, which under-describes it — one wG3 fills A **and**
+   B — and will collide if a Witmotion already holds A.)*
+2. **The device-native calibration routine is mandatory**, not optional: forearm horizontal →
+   continuous raise across the chest. **But the presentation is reused** — `BodyVizView`'s guided
+   avatar for the poses (it already animates between two override quaternions and signals when the
+   motion finishes, which is what the device's *watched* raise needs), then `ArmVizView` for live
+   free-movement confirmation.
+3. **`hm.*` keys, and HackMotion grades when present** — `preferKeys: ["hm.leadWristFlexExt"]`,
+   the launch-monitor pattern. ⚠ Consequence, stated once: the graded corpus then mixes
+   instruments depending on what was worn, which matters for norm-building. The *comparison* is
+   unaffected — both series are produced on every dual-worn swing and compared at series level.
+4. **The frame constants are solved offline** from a `.hmwire` capture of single-axis motions,
+   baked into `pp_tuned_constants.h` and pinned by a unit test.
+5. **One phase per session**, orchestrated: Opus decomposes, briefs and reviews; Opus/Sonnet
+   agents implement. Opus for anything where being subtly wrong is invisible — frame conventions,
+   threading, buffer contracts, clock alignment.
 
 ---
 
@@ -167,17 +220,22 @@ drained `hm_sample` splits into two `ImuSample` writes.
 carry `hm_sample.host_time_us` **mapped through the fit**, which is monotonic in index and
 therefore safe — but see §3.5.
 
-### 3.5 ⚠ The first ~2 seconds of a stream have no host time
+### 3.5 ~~The first ~2 seconds of a stream have no host time~~ — WRONG, see §0 #1
 
-Until the clock fit has a baseline the library reports `HM_SAMPLE_NO_FIT` and
-`host_time_us = HM_TIME_UNKNOWN` (`HM_CLOCK_SHORT_BASELINE` is < 2 s). Those samples **cannot
-be written to the ring** — there is no timestamp to write.
+**This section is obsolete and its Phase B decision must not be implemented.** The library sets
+`HM_CLOCK_HAS_FIT` from the **first live frame**, so there is no dead zone, no unusable prefix
+and no dropped-sample budget to surface. `HM_CLOCK_SHORT_BASELINE` survives but gates only
+whether the *rate* is independently fitted or seeded, and its cost shows up honestly as a wider
+`residual_max_us` in `hm_clock_error_at()` rather than as missing samples.
 
-Decision for Phase B: **drop them and count them**, surfacing the count as a warning rather
-than absorbing it. Do not fall back to arrival time: arrival is one-sidedly late and mixing
-two timebases inside one source is exactly the kind of thing that looks fine and corrupts a
-capture. Two seconds at the start of a session, before anyone has swung, is an acceptable
-price; silently splicing timebases is not.
+What was right, and still is: **never fall back to arrival time.** Arrival is one-sidedly late,
+and mixing two timebases inside one source is exactly the kind of thing that looks fine and
+corrupts a capture. That reasoning simply no longer has a case to apply to.
+
+Also worth knowing for Phase B: `sample_index` and the per-unit `device_time_us` are populated on
+**every** sample regardless of fit state, because they are derived from the frame alone. Analysis
+anchored on device time — comparing two instruments at matched events rather than on a shared
+clock, which is what §8.2 asks for — never waits on the host mapping at all.
 
 ---
 
@@ -242,13 +300,20 @@ session type (`analysis_pipeline_developer_guide.md` §4).
 
 | Phase | Deliverable | Gate to move on | Status |
 |---|---|---|---|
-| **A** | Transport + enumeration | A wG3 appears in Settings → IMUs and connects; explicit-UUID `BleImuTransport` lands with a Witmotion regression | ☐ |
-| **B** | Live streaming → two EventBuffer sources | Two lanes in the data viewer at the right rates; no monotonicity violations; no-fit drops counted | ☐ |
-| **C** | Device-native calibration flow | A coach can calibrate end to end; presence angle recorded, never scored; reconnect invalidates | ☐ |
+| **A** | Transport + enumeration | A wG3 appears in Settings → IMUs and connects; explicit-UUID `BleImuTransport` lands with a Witmotion regression | ✅ `3b4980f` |
+| **B** | Live streaming → two EventBuffer sources | Two lanes in the data viewer at the right rates; no monotonicity violations. ⚠ *No "no-fit drops" — §0 #1* | ☐ |
+| **C** | Device-native calibration flow | A coach can calibrate end to end; presence angle recorded, never scored; reconnect invalidates. Includes unit-keyed placement (§0 decision 1) | ☐ |
 | **D** | **Frame reconciliation** — solve `R_unit` | A known single-axis wrist motion moves one PPS DOF and leaves the others near zero, from HackMotion data | ☐ |
-| **E** | Deferred history → SwingWindow | A shot produces a stitched ~800 Hz wrist lane; coverage and gaps in provenance | ☐ |
-| **F** | Metric route + measure `preferKeys` | HackMotion wrist metrics produced and separately addressable; measures prefer them; corridors unchanged | ☐ |
+| **E** | Deferred history → SwingWindow | A shot produces a stitched **variable-rate** wrist lane — ~100 Hz over the still pre-roll, full rate through the swing (§0 #2) — with coverage, gaps and the fit in provenance. ⚠ Builds `deferred_sources_design.md`, does not consume it (§0 #4) | ☐ |
+| **F** | New `hm.*` keys + measure `preferKeys` | HackMotion wrist metrics produced and separately addressable; measures prefer them; corridors unchanged. ⚠ Blocked on `streamFor` (§0 #8) | ☐ |
 | **G** | Validation against Witmotion | Corpus-scale agreement report; decision on whether HackMotion grades or only reports | ☐ |
+
+**Phase A, as shipped.** Explicit-UUID `BleImuTransport` + the first MTU plumbing in the tree;
+`hm_looks_like_hackmotion()` discovery with the 90 s window; an `ImuVendor` discriminator on
+`Device`; `ImuDeviceBase` so `ImuManager` holds two device kinds, with a **plural** `sourceIds()`;
+`HmInstance` owning one `hm_session` on the shared I/O thread with the drain loop and stop
+barrier; and `HmUnit` × 2 duck-typing as an `ImuInstance` so `ImuVizView`/`ArmVizView` need no
+change. No EventBuffer source is registered and no sample is written — that is Phase B.
 
 **Where a session BREAKS:** A→B (transport must be proven before framing), C→D (you cannot
 solve the frame until you can calibrate), D→E (do not stitch a lane whose frame is unresolved),
@@ -277,7 +342,11 @@ F→G (do not validate a metric whose route has not landed).
   differ by ω²r — measured at 31–51 m/s² through a swing (§6.4). They are supposed to disagree.
 - Carry `skew_us` (a stable 0.92 ms, worth ~0.9° at 1,000 °/s) into provenance rather than
   pairing the two blocks as simultaneous.
-- Drop-and-count the no-fit prefix (§3.5).
+- ~~Drop-and-count the no-fit prefix (§3.5).~~ ⚠ **Nothing to drop — §0 #1.**
+- ⚠ **Size the live ring from how often the host drains, not from a rate.** There is no live rate
+  ceiling: 25 Hz at rest and 100 Hz in motion are two modes of a continuum, and dense bursts reach
+  the full internal rate in *every* session containing motion. A ring sized from an assumed
+  maximum is wrong under exactly the conditions that matter.
 
 ### Phase C — calibration flow
 
@@ -331,8 +400,14 @@ to HackMotion:
   measured effective rate in the window (`BoundImu::effectiveHz`, design §4.4), and write
   `largest_gap_us` into provenance: it is the number that decides whether impact survived.
 - **One lane, stitched.** History is a superset of live over the same span, so the stitched
-  `[live prefix] + [800 Hz span] + [live suffix]` is one ascending variable-rate trace.
-  ⚠ We have asked the library to verify the superset claim rather than assume it (R17).
+  `[live prefix] + [high-rate span] + [live suffix]` is one ascending variable-rate trace.
+  ⚠ The superset claim is now **measured on every pull** rather than assumed: the block carries
+  `live_overlap_samples` / `live_overlap_mismatches` (first evidence: 234 indices, 0 mismatches).
+  ⚠ A zero *sample* count means **no evidence**, not agreement — always read the pair together,
+  and see §0 #9 for the ring that has to be on for the check to happen at all.
+- ⚠ **The pull's own recording hole** (§0 #3) is `self_recording_gap` and falls *outside*
+  `requested`. A consumer stitching a session has no other way to know a span was never recorded
+  rather than merely never requested.
 - **Persist the clock fit with the block.** `hm_clock_snapshot` by value into swing.json, so
   re-analysis a year later reproduces the day's alignment.
 
@@ -341,13 +416,19 @@ to HackMotion:
 **Almost all of this already exists**, built for the launch monitor. Do not invent a parallel
 mechanism.
 
-- **New metric keys, not overwritten ones.** `m_hmWristFlexExt`, `m_hmWristDeviation`,
-  `m_hmWristRotation` beside `m_wristFlexExt` etc. The pair must stay separately addressable —
-  that is what makes Phase G possible at all. `measure_vocabulary.h:122` says it directly:
-  *"a measure still cannot validate itself."*
-- **A new `MetricRoute` on each wrist metric** — `id: "hackmotion"`, `RouteQuality::Direct`,
-  requirement = a HackMotion binding — so the catalogue explains availability in terms of
-  method rather than missing hardware.
+- ⚠ **First, make both instruments bindable at once — §0 #8.** `FusedStreams::streamFor(role)`
+  returns the first match, so a swing wearing both silently drops one. Add an instrument
+  discriminator to `ImuSegmentBinding` / `SegmentStream` and make the lookup instrument-aware.
+  Then the comparison is nearly free: `ImuVisionFuser::fuse()` already takes a *binding vector* and
+  `MetricExtractor::extract()` already takes a `FusedStreams`, so partition the bindings by
+  instrument and run both through the **identical wrist maths**, emitting the second under an
+  `hm.` prefix. Any difference between the two series is then the instrument, not the arithmetic.
+- **New metric keys, not overwritten ones** — `hm.leadWristFlexExt`, `hm.leadWristRadUln`,
+  `hm.forearmPronation` beside ours. ⚠ The names in the original text were wrong; see §0 #5.
+  The pair must stay separately addressable — that is what makes Phase G possible at all.
+  `measure_vocabulary.h` says it directly: *"a measure still cannot validate itself."*
+- **Their own descriptors with a `RouteMethod::Device` route**, the `lm.attackAngle` shape — not a
+  second route on the existing metric (§0 #6). ⚠ The requirement axis does not exist yet (§0 #7).
 - **`preferKeys` on the affected measures**, HackMotion first. Authored, not inferred: the
   loader walks a list somebody wrote, best first, and takes the first key the swing carries.
   ⚠ **Every key in a ladder must carry the measure's unit** — the pack validator's
@@ -356,8 +437,12 @@ mechanism.
 - **No corridor changes.** The corridors grade a quantity, not an instrument. If HackMotion
   says the corridor is wrong, that is a Phase G finding to act on deliberately — not a thing
   to tune while wiring a route.
-- ⚠ **Land dark.** The `preferKeys` entries stay empty until Phase G says the instrument is
-  trustworthy. Landing the route and landing the preference are two different decisions.
+- ⚠ ~~**Land dark.** The `preferKeys` entries stay empty until Phase G says the instrument is
+  trustworthy.~~ **Overridden — see §0 decision 3.** HackMotion grades when present, following the
+  launch monitor exactly. Landing the route and landing the preference remain two different
+  decisions; they are simply both taken now. The consequence — a graded corpus that mixes
+  instruments by what was worn — is recorded there, and does not affect the Phase G comparison,
+  which happens at series level on swings carrying both.
 
 ### Phase G — validation
 
@@ -495,8 +580,11 @@ to coaching doctrine; an instrument comparison is evidence about *instruments*.
    device's pose 0 must be horizontal or merely known. Unanswered, and **ours to answer**:
    Phase D run twice settles it (§4.4). ⚠ Not by the presence angle — that measures the half
    that cannot fail.
-2. **Does the stitch seam hold?** History should be a strict superset of live over the same
-   span. Asked the library to measure it rather than assume (R17).
+2. ~~**Does the stitch seam hold?**~~ **ANSWERED, and it now ships as a standing measurement.**
+   History *is* a strict superset of live over the same span — 234 indices across six real pulls,
+   0 mismatches — and every block reports its own `live_overlap_samples` /
+   `live_overlap_mismatches` rather than the conclusion. One capture, one unit, which is exactly
+   why the counter ships instead of the claim. ⚠ Requires the digest ring (§0 #9).
 3. **What analysis rate do the wrist metrics actually need?** `deferred_sources_design.md` §4.3
    is explicit that landing the mechanism does not answer this. Phase E delivers 800 Hz; what
    uses it is a separate question and should not be assumed.
@@ -512,4 +600,5 @@ to coaching doctrine; an instrument comparison is evidence about *instruments*.
 
 | Date | Session | What happened |
 |---|---|---|
-| 2026-08-15 | Brief written | Scope, phases and validation design. Nothing built. Friction raised with the library team as R14–R20 in `../libhackmotion/docs/design-review.md`. |
+| 2026-08-15 | Brief written | Scope, phases and validation design. Nothing built. Friction raised with the library team as R14–R20 — ⚠ in a `design-review.md` that was never published; see the note under **Read first**. |
+| 2026-08-17 | Phase A — transport, discovery, settings | Shipped `3b4980f`, verified on hardware: the wG3 is discovered, connects, streams and drives two live orientation cubes; Witmotion regression clean. §0 written — nine corrections found by reading the published library and the current tree, four of which change what gets built. Decisions taken on placement keying, the calibration routine and its reused presentation, the `preferKeys` direction, and where the frame constants get solved. ⚠ Interim: a HackMotion is pinned to slot A and the control locked, which under-describes a device that fills A **and** B — Phase C's unit-keyed placement is the fix. |
