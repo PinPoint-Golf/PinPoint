@@ -449,6 +449,37 @@ int main(int argc, char **argv)
         check(ledgerBytesOf(aDir) == before, "…and rewrites no evidence");
     }
 
+    // ── 4b. A shot is dated by the capture instant, not by the file's mtime ──────────
+    std::printf("\ncapture instant, not file mtime\n");
+    {
+        // Copying, moving or restoring a session directory rewrites swing.json's mtime and leaves
+        // clock.wallclock untouched — and the corpus tooling moves swing dirs between hosts as a
+        // matter of course. So the SAME swing staged twice, with deliberately different mtimes,
+        // must produce identical evidence. Dating the shot from the mtime fails this by exactly
+        // the amount the mtimes differ, which is why the difference here is a whole day: a
+        // failure should be unmistakable in the diff rather than a plausible-looking millisecond.
+        const QString origDir = makeSession(tmp, "athlete_e", "session_orig");
+        const QString copyDir = makeSession(tmp, "athlete_e", "session_restored");
+        check(stageShot(origDir, 1, "rich_7iron") && stageShot(copyDir, 1, "rich_7iron"),
+              "the same swing staged into two sessions");
+
+        QFile moved(QDir(swingDirFor(copyDir, 1)).filePath(QStringLiteral("swing.json")));
+        check(moved.open(QIODevice::ReadWrite), "the restored copy is writable");
+        const bool aged = moved.setFileTime(
+            QDateTime::fromMSecsSinceEpoch(kStageEpochMs + 86'400'000LL, QTimeZone::UTC),
+            QFileDevice::FileModificationTime);
+        moved.close();
+        check(aged, "…and its mtime is moved a day, as a restore would");
+
+        auto o = freshModel();
+        o->activateSession(origDir);
+        auto c = freshModel();
+        c->activateSession(copyDir);
+        check(o->shotCount() == 1 && c->shotCount() == 1, "both sessions ingested their swing");
+        check(ledgerBytesOf(origDir) == ledgerBytesOf(copyDir),
+              "a shifted mtime changes no evidence — the stamp is clock.wallclock");
+    }
+
     // ── 5. Focus contract and declared miss: persisted, and inert on the evidence ────
     std::printf("\nfocus contract and declared miss\n");
     {

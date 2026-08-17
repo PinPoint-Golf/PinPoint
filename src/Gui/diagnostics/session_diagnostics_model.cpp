@@ -24,6 +24,7 @@
 #include "../../Diagnostics/pack_io.h"
 #include "../../Diagnostics/pack_provider.h"
 #include "../../Diagnostics/screen_pack.h"
+#include "../../Export/swing_doc.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -328,9 +329,27 @@ SessionDiagnosticsModel::Ingested SessionDiagnosticsModel::detectShot(int shotId
     rec.shotId    = shotId;
     rec.club      = d.club;
     rec.contextId = d.contextId;
+    // ⚠ THE INSTANT THE DOCUMENT RECORDS, NOT THE INSTANT THE FILE WAS LAST TOUCHED.
+    // This read the file's mtime, which is only incidentally the capture time: copying, moving or
+    // restoring a session directory rewrites every shot's timestamp, and the corpus tooling moves
+    // swing dirs between hosts as a matter of course. A re-analysis that rewrites swing.json bumps
+    // it too. clock.wallclock is the capture instant and survives all of that.
+    //
+    // writeSidecar TRUE, and load-bearing rather than copied from the phase grid above: the summary
+    // sidecar's guard is the source document's size AND mtime, so a copied directory invalidates
+    // it — the very case this fixes is the case that misses the cache. Passing false would take the
+    // miss and fall straight back to the mtime that is wrong. One lean parse per swing, once, and
+    // it re-seats the stale sidecar on the way through.
+    //
+    // The mtime stays as the fallback, for a document written before clock.wallclock existed or one
+    // whose clock block will not parse — wallclockMs is 0 in both cases, never a plausible date.
+    const pinpoint::SwingSummary summary =
+        pinpoint::SwingDocReader::readSwingSummary(swingDir, /*writeSidecar=*/true);
     rec.timestampMs =
-        QFileInfo(QDir(swingDir).filePath(QStringLiteral("swing.json"))).lastModified()
-            .toMSecsSinceEpoch();
+        summary.wallclockMs > 0
+            ? summary.wallclockMs
+            : QFileInfo(QDir(swingDir).filePath(QStringLiteral("swing.json"))).lastModified()
+                  .toMSecsSinceEpoch();
     // Warm-up is the FIRST-N rule only, applied inside shotWeight(). A declared warm-up flag
     // has no producer yet and inventing one from the shot index would double-count the rule.
     rec.warmUp = false;

@@ -841,7 +841,15 @@ pp_add_test(session_diagnostics_model_test
             ${DIAG}/merged_norm_provider.cpp
             ${DIAG}/resource_pack_provider.cpp ${DIAG}/file_pack_provider.cpp
             ${DIAG}/merged_pack_provider.cpp
-    INCLUDE ${NORM_INC}
+            # The model dates each shot from clock.wallclock via SwingDocReader::readSwingSummary
+            # rather than the file's mtime, so the summary reader comes with it. swing_paths.cpp is
+            # swing_doc.cpp's own dependency and logs through pp_debug.h — hence the Core stub, since
+            # the real pp_debug.cpp drags in whisper/ggml (same reason shot_list_model_test uses it).
+            ${SRC}/Export/swing_doc.cpp
+            ${SRC}/Export/swing_paths.cpp
+            ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
+            ${SRC}/Core/tests/pp_log_stub.cpp
+    INCLUDE ${NORM_INC} ${SRC} ${SRC}/Core ${SRC}/LaunchMonitor
     LINK    Qt6::Qml
     AUTOMOC
     COMPILE_OPTIONS -DPP_LIVE_SWINGS_DIR="${DIAG}/tests/data/live_swings")
