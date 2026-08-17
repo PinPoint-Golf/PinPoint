@@ -603,4 +603,141 @@ to coaching doctrine; an instrument comparison is evidence about *instruments*.
 | 2026-08-15 | Brief written | Scope, phases and validation design. Nothing built. Friction raised with the library team as R14–R20 — ⚠ in a `design-review.md` that was never published; see the note under **Read first**. |
 | 2026-08-17 | Phase A — transport, discovery, settings | Shipped `3b4980f`, verified on hardware: the wG3 is discovered, connects, streams and drives two live orientation cubes; Witmotion regression clean. §0 written — nine corrections found by reading the published library and the current tree, four of which change what gets built. Decisions taken on placement keying, the calibration routine and its reused presentation, the `preferKeys` direction, and where the frame constants get solved. ⚠ Interim: a HackMotion is pinned to slot A and the control locked, which under-describes a device that fills A **and** B — Phase C's unit-keyed placement is the fix. |
 | — | Phase B — two live lanes | Shipped `9bc8aee`, `17ccca0`, `cdddefa`; ⚠ **no log row was written at the time**, so what that session found is recorded only in the commits. Two lanes record and appear in the resource monitor with counts climbing. ⚠ Two of its stated acceptance criteria are STILL UNVERIFIED and need a worn sensor: the two lanes appearing in the **data viewer** under their aliases, and the palm reading several g more than the lower arm through a downswing. The second is the Phase B failure mode that looks entirely plausible when it is wrong. |
-| 2026-08-17 | Phase C — device-native calibration, guided | **Verified on hardware** — a coach calibrates end to end, and failed attempts were exercised too and read correctly. Five units, orchestrated: the calibration state machine on `HmInstance`, the unit-keyed placement resolver on `ImuManager`, the QML placement migration, the guided device-native flow, and the `hackmotion/enabled` flag. App build clean, `qml_reactivity_test` green. **Interim retired:** placement is now keyed `<deviceId>#lowerArm` / `<deviceId>#palm`, one wG3 genuinely fills A and B, and both wizard rows read as the two units of one peripheral. **Three defects found in review that no agent could have seen:** (1) neither the pin nor the migration checked whether *another* sensor held A or B, so a wG3 arriving beside two configured Witmotions double-claimed both letters and resolution fell to key sort order with the displaced sensor never mentioned — both paths now refuse and name the blocking slot; (2) the resolver funnel constructed an `AppSettings` (several hundred `QSettings` reads) three times per 30 Hz tick; (3) the startup scan bypassed the feature-flag push. **Two things the library forced that the plan had not anticipated:** `HM_WARN_PRESENCE_NOT_MEASURED` needs its own property — the phase reaches `COMPLETE` either way, so a check that never ran reads as success from any other combination of state; and `HM_WARN_CALIBRATION_INDETERMINATE` must leave the state untouched, because an angle between §8.2's two populations is evidence of neither and guessing there is exactly how a presence check becomes a quality score. ⚠ **THE GUIDE POSES WERE WRONG, AND THE SPEC'S WORDING IS NOT ENOUGH TO GET THEM RIGHT.** §8.2 says "forearm horizontal" then "raised ~30° across the chest", which was read as: pose 0 forearm pointing FORWARD, pose 1 sweeping horizontally inward by shoulder internal rotation. The actual routine, per the athlete who performs it: **pose 0 forearm ACROSS THE CHEST, palm down; pose 1 the forearm ELEVATED 30° with the elbow stationary.** Two consequences worth recording because neither is obvious from the text. (1) The travel is a **forearm** rotation, not an upper-arm one — "elbow in the same position" fixes the upper arm, since the elbow sits at the end of that bone — so `BodyVizView` had to learn to animate `leadForeArmOverrideRotation`; with the upper-arm override identical in both poses, the existing trigger meant the guide would never have animated at all. (2) The motion is in a near-FRONTAL plane, so the default face-on camera is the right *direction* and only needed to move closer; the off-axis guide camera added for the forward-pointing reading was removed. Derived using the composition `body_pose_adapter.cpp` already uses (`forearm_local = conj(upperArm_world) ⊗ forearm_world`, cpp:216) with that file's pre-baked parent chain, cross-checked against the live node chain to 1e-6, and verified in the running scene: pose 0 wrist level with the elbow to 0.0°, pose 1 lifted exactly 0.2761·sin30°, elbow unmoved, dorsal marker above palmar throughout, both handednesses mirrored. ⚠ **AND THE FIRST CORRECTION WAS STILL WRONG.** Tilting the FOREARM forward to keep it out of the torso makes it read as pointing out diagonally, not across the body. The fix — the user's diagnosis — is to flex the **UPPER ARM** forward (`hmCalUpperArmFwdDeg`, 40°) so the elbow comes out in front, letting the forearm lie straight across and still clear the torso: pose 0's forearm direction is then exactly `(-1, 0, 0)`, wrist at identical y and z to the elbow. That also makes `hmCalUpperArmQuat` handed for the first time — the flexion puts non-zero y and z in it, so the `(w,x,-y,-z)` mirror is no longer a no-op. Both a presentation constant, chosen by rendering, not from the spec. **Two further defects found only by RUNNING it.** (1) The guide animated the WRONG SEGMENT: `resetArmAnimation()` set `_leadArmFrom` but not `_leadArmTo`, and the handler that would have set it returns early while `animateLeadArm` is false — the exact state a caller is in while posing a start position — so the upper arm still held `_leadArmTo = identity`, the T-pose, and the raise swung the whole arm out while the forearm kept its relative angle. Anchored `to = from` in the reset; the protocol itself is a follow-up. (2) ⚠ **THE DEVICE REPORTS SUCCESS FOR A ROUTINE NOBODY PERFORMED**, and no amount of reading the presence angle fixes it — §8.2's no-raise attempt scored the BEST of three. The flow now measures the lower-arm unit's own angular travel between the markers from the live stream (that unit sits on the segment this routine rotates, so its travel *is* the raise) and **aborts before `a2 01`** below 15°, leaving the device untouched rather than applying a transform whose axis is undetermined; shown as evidence, never as a score. ⚠ Open, with no evidence either way: the calibration flow's state machine has **no test** — see the plan's follow-ups. |
+| 2026-08-17 | Phase C — device-native calibration, guided | **Verified on hardware** — a coach calibrates end to end, and failed attempts were exercised too and read correctly. Five units, orchestrated: the calibration state machine on `HmInstance`, the unit-keyed placement resolver on `ImuManager`, the QML placement migration, the guided device-native flow, and the `hackmotion/enabled` flag. App build clean, `qml_reactivity_test` green. **Interim retired:** placement is now keyed `<deviceId>#lowerArm` / `<deviceId>#palm`, one wG3 genuinely fills A and B, and both wizard rows read as the two units of one peripheral. **Three defects found in review that no agent could have seen:** (1) neither the pin nor the migration checked whether *another* sensor held A or B, so a wG3 arriving beside two configured Witmotions double-claimed both letters and resolution fell to key sort order with the displaced sensor never mentioned — both paths now refuse and name the blocking slot; (2) the resolver funnel constructed an `AppSettings` (several hundred `QSettings` reads) three times per 30 Hz tick; (3) the startup scan bypassed the feature-flag push. **Two things the library forced that the plan had not anticipated:** `HM_WARN_PRESENCE_NOT_MEASURED` needs its own property — the phase reaches `COMPLETE` either way, so a check that never ran reads as success from any other combination of state; and `HM_WARN_CALIBRATION_INDETERMINATE` must leave the state untouched, because an angle between §8.2's two populations is evidence of neither and guessing there is exactly how a presence check becomes a quality score. ⚠ **THE GUIDE POSES WERE WRONG, AND THE SPEC'S WORDING IS NOT ENOUGH TO GET THEM RIGHT.** §8.2 says "forearm horizontal" then "raised ~30° across the chest", which was read as: pose 0 forearm pointing FORWARD, pose 1 sweeping horizontally inward by shoulder internal rotation. The actual routine, per the athlete who performs it: **pose 0 forearm ACROSS THE CHEST, palm down; pose 1 the forearm ELEVATED 30° with the elbow stationary.** Two consequences worth recording because neither is obvious from the text. (1) The travel is a **forearm** rotation, not an upper-arm one — "elbow in the same position" fixes the upper arm, since the elbow sits at the end of that bone — so `BodyVizView` had to learn to animate `leadForeArmOverrideRotation`; with the upper-arm override identical in both poses, the existing trigger meant the guide would never have animated at all. (2) The motion is in a near-FRONTAL plane, so the default face-on camera is the right *direction* and only needed to move closer; the off-axis guide camera added for the forward-pointing reading was removed. Derived using the composition `body_pose_adapter.cpp` already uses (`forearm_local = conj(upperArm_world) ⊗ forearm_world`, cpp:216) with that file's pre-baked parent chain, cross-checked against the live node chain to 1e-6, and verified in the running scene: pose 0 wrist level with the elbow to 0.0°, pose 1 lifted exactly 0.2761·sin30°, elbow unmoved, dorsal marker above palmar throughout, both handednesses mirrored. ⚠ **AND THE FIRST CORRECTION WAS STILL WRONG.** Tilting the FOREARM forward to keep it out of the torso makes it read as pointing out diagonally, not across the body. The fix — the user's diagnosis — is to flex the **UPPER ARM** forward (`hmCalUpperArmFwdDeg`, 40°) so the elbow comes out in front, letting the forearm lie straight across and still clear the torso: pose 0's forearm direction is then exactly `(-1, 0, 0)`, wrist at identical y and z to the elbow. That also makes `hmCalUpperArmQuat` handed for the first time — the flexion puts non-zero y and z in it, so the `(w,x,-y,-z)` mirror is no longer a no-op. Both a presentation constant, chosen by rendering, not from the spec. **Two further defects found only by RUNNING it.** (1) The guide animated the WRONG SEGMENT: `resetArmAnimation()` set `_leadArmFrom` but not `_leadArmTo`, and the handler that would have set it returns early while `animateLeadArm` is false — the exact state a caller is in while posing a start position — so the upper arm still held `_leadArmTo = identity`, the T-pose, and the raise swung the whole arm out while the forearm kept its relative angle. Anchored `to = from` in the reset; the protocol itself is a follow-up. (2) ⚠ **THE DEVICE REPORTS SUCCESS FOR A ROUTINE NOBODY PERFORMED**, and no amount of reading the presence angle fixes it — §8.2's no-raise attempt scored the BEST of three. The flow now measures the lower-arm unit's own angular travel between the markers from the live stream (that unit sits on the segment this routine rotates, so its travel *is* the raise) and **aborts before `a2 01`** below 15°, leaving the device untouched rather than applying a transform whose axis is undetermined; shown as evidence, never as a score. ⚠ Open, with no evidence either way: the calibration flow's state machine has **no test** — see §12.3. |
+
+---
+
+## 12. Follow-ups — after G, not during
+
+Deferred deliberately — none of these blocks a phase from landing. Items 1 and 2 are here
+because the cost of *not* doing them has already been paid twice; items 3 and 4 are gaps in
+what has been **verified**, recorded at the confidence the evidence actually supports rather
+than talked up or waved away.
+
+### 1. Replace `BodyVizView`'s arm-animation protocol with one explicit call
+
+**Raised at the end of Phase C, deferred by the user to avoid regression surface on a flow that
+now works.**
+
+The guide animation is driven by six mutable properties — `_leadArmFrom/_leadArmTo`,
+`_leadForeArmFrom/_leadForeArmTo`, `_leadArmP/_leadArmT` — through an implicit call order:
+`resetArmAnimation()`, then set `animateLeadArm`, then change a target property so an
+`onChanged` handler captures the destination. ⚠ **Those handlers return early while
+`animateLeadArm` is false**, which is exactly the state a caller is in while posing a *starting*
+position, so a destination survives from whatever ran last and nothing anywhere detects it.
+
+Two incidents, both expensive:
+
+- The original body-pose work ("hours to get right", per the user).
+- Phase C: the HackMotion raise retargets ONLY the forearm, so the upper arm still held
+  `_leadArmTo = identity` — the T-pose — and the raise swung the whole arm out to the side while
+  the forearm kept its relative angle. Shipped in one build; caught on hardware, not by review.
+  Patched by anchoring `to = from` inside `resetArmAnimation()`, which makes "a segment nobody
+  retargeted does not move" true by construction. That is a guard, not a cure.
+
+**The cure:** one call that takes everything, so there is no reset, no ordering, no early-return
+and nothing to leave behind.
+
+```qml
+startArmAnimation({ armFrom, armTo, foreFrom, foreTo, durationMs })
+```
+
+**Regression surface, which is why it is deferred:** `BodyVizView` plus both callers in
+`ImuCalibrationFlow` — including the Witmotion intro chain (`introUp` → `introDown` → `raise`),
+which is shipped, working, and hardware-verified. Do it with the offscreen frame-capture harness
+below, on both routines, before and after.
+
+### 2. Land the offscreen pose/animation harness in `tools/`
+
+Currently throwaway scratch. It is a standalone QML scene that loads `src/Resources/body/*.glb`,
+poses the chain, and grabs frames to PNG — run under Qt's own `qml` binary, so it needs no
+CMake wiring. It is what caught the animation bug above (frame-by-frame capture of the slerp
+path), and what settled the guide poses when reasoning from source had produced a confidently
+wrong routine that passed its own numeric self-check.
+
+⚠ Three traps worth keeping in the file's header comment, all of which cost silent blank renders:
+Qt Quick 3D's default **`clipNear` is 10**, which clips a metre-scale body to nothing; `View3D`
+needs an explicit `camera:` binding when it is inside a `Repeater`; and
+`QT_QPA_PLATFORM=offscreen` forces the software backend, where Quick 3D renders nothing at all —
+use a real window.
+
+### 3. Test the HackMotion calibration state machine
+
+**Raised by the user at the end of Phase C: "not convinced the states for the calibration flows are
+rock solid — you had issues with this in the past", with no direct evidence of a fault.** That is
+the right level of confidence to record, because nothing currently justifies more.
+
+There is **no test** of it. The machine spans `HmSessionWorker` → queued signals → `HmInstance`
+properties → `ImuCalibrationFlow`'s `hmStep`/`_hmEvaluate`, and every transition is driven by a
+library event arriving asynchronously. Its correctness today rests on review plus one hardware run.
+
+What a test would have to cover, all of it reachable by driving `HmInstance`'s signals directly
+without a device:
+
+- `COMPLETE` with each of `HM_CAL_CALIBRATED` / `UNKNOWN` / `UNCALIBRATED`.
+- ⚠ `HM_CAL_ABORT_CALLER` arriving on a transition to **COMPLETE**, not ABORTED — the case where
+  "abort reason set" must NOT read as "the routine failed".
+- `presenceNotMeasured` — the phase reaches COMPLETE either way, so this is the only thing
+  separating "we could not check" from "we checked and it passed".
+- Presence event arriving **after** the phase event, and before it. `_hmEvaluate()` is written to
+  be order-independent and idempotent; nothing proves it stays that way.
+- The stale-state guard: state/phase/abortReason persist from the PREVIOUS attempt until the
+  library moves them, which is why the verdict refuses to read below `hmStep` 3/4. A test that
+  begins a second routine while the first attempt's COMPLETE is still latched is the one that
+  would catch a regression here.
+- `calibrationInvalidated()` mid-routine and post-success.
+- Refusals: `HM_ERR_NO_STREAM`, and `HM_ERR_BUSY` once Phase E makes it reachable.
+
+### 4. The start-session wizard path, across the IMU/HackMotion combination matrix
+
+**Raised by the user at the end of Phase C: the wizard path has not been tried, and it is complex
+given the combinations we might encounter.** Phase C rewrote six resolution sites in
+`ScreenSessionWizard.qml` (`imusOk`, `imusAllConnected`, `readinessIssues`, `canConnect`,
+`startConnect()`, the per-slot `CheckRow`) onto the unit-keyed resolver. Only the HackMotion-only
+Wrist path has been exercised on hardware.
+
+⚠ **A LATENT COUPLING TO PAY OFF AT THE FIRST NEW SESSION TYPE — NOT A LIVE DEFECT.**
+`ImuManager::setPlacementForDevice()` pins a HackMotion to **A and B unconditionally**, with no
+notion of session type, and `imuPlacement` is global rather than per-type. That encodes
+"HackMotion ⇒ lead forearm + lead hand", which is true for **Wrist Motion, the only session type
+implemented today** — `segmentRoleForSlot()` (`swing_analysis.h:58-66`) resolves slots for
+`sessionType == 1` and returns `SegmentRole::Unknown` for every other type, which is the tree
+saying the same thing.
+
+The reason it is worth writing down is that `ScreenSessionWizard.qml:264-289` already declares a
+requirement table for four types, and the letters mean different anatomy in each:
+
+| type | A | B | C |
+|---|---|---|---|
+| 0 Swing Analysis | Thorax | Lumbar spine | T12 junction |
+| 1 Wrist Motion *(implemented)* | Forearm | Hand | Upper arm *(optional)* |
+| 2 Ground Forces | Lead thigh | Trail thigh | Lumbar spine |
+| 3 AI Coach | Thorax | Lumbar spine | T12 junction |
+
+So the day a second type is implemented, an unconditional A+B pin would have a wrist sensor
+satisfying *"IMU A — Thorax"* and *"IMU B — Lumbar spine"* — and since `imusOk` /
+`imusAllConnected` only ask whether the slot resolves, the readiness gate would pass. The work is
+part of implementing that session type, not a fix to make now.
+
+The design question to settle then: does a wG3's A+B assignment belong to the Wrist session only
+(gate the pin and the requirement matching on session type), or should placement become
+per-session-type — the more honest model, since the letters already are, but a larger change that
+touches Witmotion and migrates persisted settings? Do not paper over it by hiding the rows.
+
+**The matrix to test once that is decided.** Each of these should be checked in the wizard AND at
+the calibrate step, for a right- and a left-handed athlete:
+
+1. Witmotion only — A; A+B; A+B+C. **The regression case**: the shipped path now resolves through
+   the new unit-keyed resolver.
+2. HackMotion only — fills A+B, C empty (optional for Wrist).
+3. HackMotion on A+B **plus** a Witmotion on C. The genuinely useful pairing — wG3 for the wrist,
+   Witmotion for the upper arm — and the first case with both vendors live at once.
+4. A Witmotion already holding A or B when a wG3 appears. `setPlacementForDevice()` refuses and
+   names the blocking slot; check the wizard says something true rather than showing an empty row.
+5. A wG3 present but never assigned, alongside Witmotions on A and B.
+6. A wG3 assigned, then session-disabled by the row toggle. ⚠ Both rows must move together (one
+   peripheral), and `canConnect`/`startConnect()` must skip it — `assignedDevices()` dedups by
+   device so the wG3 is not connected twice, which is the bug that would otherwise fire two
+   connects 2 s apart.
+7. Nothing assigned at all.
+8. *(Only once a second session type is implemented — see the coupling above.)*
