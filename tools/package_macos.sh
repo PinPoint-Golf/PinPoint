@@ -418,6 +418,26 @@ if [[ -n "$PREBUILT_APP" ]]; then
     cp -a "$PREBUILT_APP" "$STAGE_APP"
 else
     if [[ "$DO_BUILD" == 1 ]]; then
+        # ⚠ A CMake cache pins the toolchain by ABSOLUTE path. Remove Xcode.app (or
+        # move it, or switch to Command Line Tools only) and every configure in a
+        # tree written under it dies at project() with "is not a full path to an
+        # existing compiler tool" — naming a compiler, saying nothing about the
+        # release, and doing it the first time this script is run in months, which
+        # is to say mid-release. The cache is derived state and the tree costs a
+        # rebuild, so start it over rather than hand that message to someone who is
+        # trying to cut a version. Guarded by CMakeCache.txt existing, so the rm
+        # only ever removes something that is in fact a CMake build tree.
+        if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+            for _cc_var in CMAKE_CXX_COMPILER CMAKE_C_COMPILER; do
+                _cc="$(sed -n "s/^${_cc_var}:[A-Z]*=//p" "$BUILD_DIR/CMakeCache.txt" | head -1)"
+                if [[ -n "$_cc" && ! -x "$_cc" ]]; then
+                    log "STALE CACHE: $_cc_var is $_cc, which no longer exists"
+                    log "removing $BUILD_DIR so it can be configured against the current toolchain"
+                    rm -rf "$BUILD_DIR"
+                    break
+                fi
+            done
+        fi
         log "configuring Release in $BUILD_DIR (PINPOINT_INSTALLED=ON)"
         # CMAKE_OSX_DEPLOYMENT_TARGET pins OUR code's floor. Nothing set it before, so
         # clang defaulted to the build host's OS — a 26.x binary that cannot start on
