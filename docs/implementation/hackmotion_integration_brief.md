@@ -136,10 +136,11 @@ polarity table, never against the vendor's display.
 
 Three consequences that are not optional:
 
-- **Phase D's target frame is ISB**, not "some PinPoint frame". `R_lowerArm` / `R_palm` map
-  HackMotion-anatomical → **ISB**-anatomical, and the DOFs the single-axis acceptance moves are ISB's:
+- **Phase D's target frame is ISB**, not "some PinPoint frame". Its constant maps
+  HackMotion-anatomical → **ISB**-anatomical, and the DOFs its acceptance moves are ISB's:
   flexion/extension, radial/ulnar deviation, pronation/supination, with `+flexion` = bowed,
-  `+deviation` = ulnar, `+pronation` = pronation.
+  `+deviation` = ulnar, `+pronation` = pronation. ⚠ And those DOFs must be moved in a **recorded
+  direction** — the sign is what selects, and an unlabelled motion selects nothing.
 - **Phase F's `hm.*` series must land in ISB polarity.** If it carried the vendor's sign while the
   Witmotion series stayed ISB, Phase G's agreement report would show a spurious *anti*-correlation on
   bow/cup and the obvious reading of that chart would be that one instrument is broken.
@@ -420,9 +421,22 @@ Two things worth stating here because they are easy to get backwards:
 
 ### Phase D — frame reconciliation (the linchpin)
 
-Solve one constant quaternion per unit, `R_lowerArm` and `R_palm`, mapping
-HackMotion-anatomical → PPS-anatomical, so that everything downstream can treat a HackMotion
-lane exactly as it treats a calibrated Witmotion lane.
+Establish the constant quaternion mapping HackMotion-anatomical → PPS-anatomical, so that
+everything downstream can treat a HackMotion lane exactly as it treats a calibrated Witmotion
+lane.
+
+⚠ **THIS IS ONE ROTATION, NOT TWO.** The `R_lowerArm` / `R_palm` framing this section used to
+carry is retired: the device zeroes the relative rotation at its own pose 0, so the two units
+share a frame and one constant serves both. The plan's own §8.3 evidence — the presence angle
+collapsing to 0.36–0.79° once calibration is applied — is what settles it. ⚠ With the caveat
+that this settles **one R or two** and says nothing whatever about where that shared frame's
+axes point, which is the entire remaining question.
+
+⚠ **AND IT IS A SELECTION AMONG FOUR, NOT A CONTINUOUS FIT.** Both frames are built on the same
+two anatomical landmarks — a limb axis and a flexion axis — so the map between them is
+axis-aligned, and a determinant-+1 rotation carrying `X → ±Z` and `Z → ±X` is one of exactly
+four. `src/IMU/hm_frame.h` holds the table, the derivation, and the two assumptions it rests
+on; `hm_frame_test.cpp` pins the properties on synthetic quaternions with no hardware.
 
 ⚠ **"PPS-anatomical" HERE MEANS ISB — see §1a**, and the DOFs the acceptance test moves are ISB's,
 with `+flexion` = bowed, `+deviation` = ulnar, `+pronation` = pronation. Leaving the target frame
@@ -441,23 +455,140 @@ confirmation rather than a gate — and it needs **peaks over a genuine swing**:
 majority and not a per-sample rule, the margin grows with the vigour of the motion, and at rest,
 where both units read ≈0, it says nothing at all.
 
-**Method.** Both systems worn simultaneously and calibrated. Capture a set of deliberate
-single-axis wrist motions — pure flexion/extension, pure radial/ulnar deviation, pure
-pronation — held slowly enough that neither timebase matters. For each, the PPS lane defines
-the axis; solve the rotation that carries the HackMotion lane onto it. Then compose into the
-existing path so that `q_anat_hm = R_unit · q_hm`, and `wrist_angles.h` is used **unmodified**.
+**Method.** Capture a set of deliberate single-axis wrist motions — flexion/extension,
+radial/ulnar deviation, forearm rotation — performed slowly, so that neither timebase matters
+and the axis being isolated is not smeared. ⚠ **Record the DIRECTION of each one** (see the
+acceptance below; an unlabelled capture cannot settle this). Then run
+`tools/hm_frame_select.py` over the recording, which reports what each candidate makes of each
+motion and names the survivor.
 
-**Acceptance, and it is the one that matters:** a pure single-axis motion must move one PPS
-DOF and leave the others near zero. ⚠ Do **not** accept on "the wrist angle looks right" — F3
-says that passes with the composition order reversed and every sign wrong.
+⚠ **Both scripts need an interpreter that is not this machine's `python3`.** `hm_capture.py`
+needs `bleak` for the radio, and the Homebrew Python is PEP 668 externally-managed so it cannot
+be installed into. A shared virtualenv sits at `~/Projects/.venv-hackmotion` — outside both
+repos, so neither `.gitignore` has to know about it.
 
-**Deliverables:** the two constants in `pp_tuned_constants.h` behind a dotted key; a unit test
-in `src/Analysis/tests/` that pins the `q_rel_pps = q_arm* ⊗ q_rel_hm ⊗ q_arm` identity on
-synthetic quaternions (no hardware); and a second test that asserts the *angle* check cannot
-distinguish the two orders — so nobody later "simplifies" it away.
+⚠ **PinPoint must be disconnected** — the device allows one connection at a time. ⚠ **And the
+calibration must be in the SAME connection as the motions**: it does not survive a disconnect or
+a power cycle, so it cannot be done beforehand.
 
-⚠ **These constants are per mounting convention, not per device.** If the strap position
-changes, they change. Record the mounting in the capture that produced them.
+#### ⚠ The capture protocol lives in `hm_frame_select.py --protocol`, and not in prose here
+
+`~/Projects/.venv-hackmotion/bin/python tools/hm_frame_select.py --protocol` prints it. It is
+kept there rather than duplicated here **because the first attempt at this capture failed on
+exactly that duplication**: `hm_capture.py` prints its own agenda while recording — *hold still,
+one single-axis move, a fast flick, a few swings* — which is **libhackmotion's protocol-spec
+reconciliation, a different job**. An athlete following the screen produces a recording that
+cannot select a candidate, and the first real capture did precisely that: the wrist was swept
+bow-*through*-to-cup so only 3 of 15 flexion bursts shared a sign, deviation got one burst, and
+the one burst that read as rotation sat 68° off the limb axis. ⚠ **So the two on-screen
+instruction sets disagree, the capture tool's is the louder one, and it is the wrong one for
+this phase.** Say so to whoever performs it.
+
+The three rules that capture has to obey, and each of them killed the first attempt:
+
+1. ⚠ **One direction from neutral, then back — never a sweep through it.** The SIGN is the only
+   thing that selects; a motion passing through neutral to the other side produces both signs
+   and settles nothing.
+2. ⚠ **Slowly.** Slowness matters more than range; a fast motion smears the axis being isolated,
+   and cross-talk is how a capture gets rejected.
+3. ⚠ **Include a deliberate forearm rotation.** It is the only test of the limb-axis assumption,
+   and without it the tool reports `NO EVIDENCE` rather than confirming it.
+
+The composition needs no new machinery: the device streams world→body and our anatomical
+quaternions run body→world, so
+
+```
+q_anat_pps = toAnatomical(A = identity, q_raw = q_hm*, M = R_ph)
+```
+
+is the **existing** `imu_calibration::toAnatomical`, with the constant in the `M` slot and
+`wrist_angles.h` used **unmodified**. `A` is identity by design rather than as a stub — the
+device already referenced the pair at its own pose, and the constant offset from our neutral is
+what `wristRel`'s Address reference absorbs.
+
+⚠ **The conjugate belongs at that one site.** `hm_sample_convert.h` stores the streamed
+quaternion verbatim and explains at length why it refuses to conjugate; that refusal is
+correct. Conjugating in two places is the same as conjugating in none. And note
+`hm_quat_relative()` returns `q_palm ⊗ q_arm*`, the conjugate of what a decomposition needs —
+correct in its own convention, and unfit as a decomposition input.
+
+#### Acceptance — and the original criterion here provably could not accept
+
+This section used to read: *"a pure single-axis motion must move one PPS DOF and leave the
+others near zero"*. ⚠ **THAT TEST CANNOT SELECT A CANDIDATE. ALL FOUR SCORE EXACTLY ZERO
+CROSS-TALK, AND SO DOES A REVERSED COMPOSITION ORDER.** They differ only in the SIGNS they
+produce. A capture that is beautifully single-axis, decomposed to a textbook `0.00°` on both
+secondary channels, still leaves eight possibilities standing. `hm_frame_test.cpp` §C asserts
+this as an executable fact so it cannot be quietly reintroduced.
+
+So acceptance is **two** things, and neither substitutes for the other:
+
+1. **Cross-talk — as FALSIFICATION, not selection.** It tests the axis-alignment assumption the
+   four-candidate reduction rests on. If every candidate shows large cross-talk, the reduction
+   is wrong and the phase falls back to a general empirical solve. Small residuals are expected:
+   a human performing a "pure" single-axis motion contributes most of them.
+2. **Sign against a DIRECTED motion — this is the selector.** Each candidate has a unique
+   `(flexion, deviation)` signature, so **two labelled motions settle it**: one known bow, one
+   known ulnar deviation. In our convention `+flexion` = bowed, `+deviation` = ulnar,
+   `+pronation` = pronation.
+
+⚠ **"Pure flexion" is not enough information; "bowed, then returned" is.** This is the single
+most important change to this phase, and the reason the capture protocol needs the athlete to
+record directions rather than just clean motions.
+
+⚠ There is a third assumption — that the device puts its limb axis on Y — which only a
+deliberate forearm **rotation** tests. `hm_frame_select.py` checks it against the recording and
+says `NO EVIDENCE` rather than `ok` when the capture contains no such motion.
+
+⚠ Do **not** accept on "the wrist angle looks right" — F3 says that passes with the composition
+order reversed and every sign wrong. ⚠ And do **not** sanity-check against the vendor's
+application: it reports the inverse on bow/cup, so a **correct** selection shows an inverted
+sign on the primary channel there. §1a has the trap in full.
+
+⚠ **A degeneracy worth knowing:** reversing the composition order maps one candidate's
+signature onto another's. That is harmless — only the composite transform is observable and
+only the composite ships — but it does mean "frame" and "order" cannot be separated from
+flexion and deviation alone. The pronation sign separates them, which is one more reason to
+capture a rotation.
+
+**Deliverables:**
+
+- `src/IMU/hm_frame.h` — the candidate table, the composition, the derivation, and the two
+  assumptions it rests on.
+- `pinpoint::tuned::hmframe::kCandidate` in `pp_tuned_constants.h`, behind the
+  `"hmframe.candidate"` dotted key. ⚠ Only the SELECTION is tuned; the candidates themselves are
+  a structural fact about the two frames and stay at their source of truth, for the same reason
+  `wrist_angles.h` keeps its own axis choices. Defaults to `kCandidateUnset` — a HackMotion lane
+  reports **no** anatomical frame until a directed capture has chosen, rather than a plausible
+  default.
+- `src/Analysis/tests/hm_frame_test.cpp` — five sections, no hardware. The similarity identity
+  by two independent routes; ⚠ that the angle cannot distinguish the two orders; ⚠ that
+  cross-talk cannot distinguish the four candidates; that the sign signature can; and that the
+  unselected state yields identity rather than a guess.
+- `tools/hm_frame_select.py` — reads a `.hmwire` capture and names the surviving candidate.
+  It does **no** wire decoding: libhackmotion owns every byte of that, and this tool owns only
+  the frame maths.
+- `HmUnit::anatQuat` / `mountM` / `anatCalibrated` wired, where `anatCalibrated` is the
+  **conjunction** of the device having applied its calibration and a candidate having been
+  selected. Either alone produces a quaternion that moves convincingly and means nothing.
+
+⚠ **A test that asserts a check does NOT work is an unusual thing to write, and both of the
+warned sections above are that.** They are what stands between a future reader and accepting a
+mirrored pipeline on a beautiful-looking capture — the more so because this brief itself used to
+recommend the check that cannot accept.
+
+⚠ **The constant is per mounting convention, not per device.** If the strap position changes, it
+changes. Record the mounting in the capture that produced it; `hm_frame_select.py` takes a
+`--mounting` string and says so loudly when it is not given.
+
+**Pronation, and what this device cannot give us.** `forearmPronation` is an ISB radioulnar
+joint angle read against the **upper arm**, and a wG3 has no upper-arm unit — so that metric is
+not available from this device at all, and nothing may be published under its name. What is
+available is the angular **rate** about the forearm's long axis (`HmUnit::pronationRateDps`,
+°/s), taken from the lower-arm unit alone. ⚠ Not from a difference of the two: during pronation
+both units turn together and the wrist barely articulates, so differencing them cancels most of
+the signal. Whether that rate earns a catalogue metric of its own is a separate design question
+with its own sign-convention review, and is deliberately not answered here.
 
 ### Phase E — deferred history
 
@@ -657,7 +788,7 @@ to coaching doctrine; an instrument comparison is evidence about *instruments*.
 
 | Risk | Why it bites | Mitigation |
 |---|---|---|
-| **Frame reconciliation lands wrong and looks right** | The angle is convention-blind; every sign can be inverted with nothing failing | Phase D's single-axis acceptance, plus the two unit tests. Never accept on a plausible angle |
+| **Frame reconciliation lands wrong and looks right** | The angle is convention-blind; every sign can be inverted with nothing failing | Phase D's DIRECTED-sign acceptance, plus `hm_frame_test.cpp`. ⚠ Never accept on a plausible angle — and never on cross-talk either, which all four candidates pass |
 | **Correlated error mistaken for corroboration** | Both systems are magnetometer-free | §8.2's stationary-hold check, run first |
 | **A second shot inside 3 s silently loses data** | ~7.5 s buffer, ~4.5 s pull, serialised | Surface `HM_EV_HISTORY_EVICTION_RISK` at capture time |
 | **Holed pull read as a short one** | The device holes rather than clamps, with no error | Gate on measured `effectiveHz` and `largest_gap_us`, never on sample count |
@@ -697,6 +828,7 @@ to coaching doctrine; an instrument comparison is evidence about *instruments*.
 | 2026-08-17 | Phase A — transport, discovery, settings | Shipped `3b4980f`, verified on hardware: the wG3 is discovered, connects, streams and drives two live orientation cubes; Witmotion regression clean. §0 written — nine corrections found by reading the published library and the current tree, four of which change what gets built. Decisions taken on placement keying, the calibration routine and its reused presentation, the `preferKeys` direction, and where the frame constants get solved. ⚠ Interim: a HackMotion is pinned to slot A and the control locked, which under-describes a device that fills A **and** B — Phase C's unit-keyed placement is the fix. |
 | — | Phase B — two live lanes | Shipped `9bc8aee`, `17ccca0`, `cdddefa`; ⚠ **no log row was written at the time**, so what that session found is recorded only in the commits. Two lanes record and appear in the resource monitor with counts climbing. ⚠ Two of its stated acceptance criteria are STILL UNVERIFIED and need a worn sensor: the two lanes appearing in the **data viewer** under their aliases, and the palm reading several g more than the lower arm through a downswing. The second is the Phase B failure mode that looks entirely plausible when it is wrong. |
 | 2026-08-17 | Phase C — device-native calibration, guided | **Verified on hardware** — a coach calibrates end to end, and failed attempts were exercised too and read correctly. Five units, orchestrated: the calibration state machine on `HmInstance`, the unit-keyed placement resolver on `ImuManager`, the QML placement migration, the guided device-native flow, and the `hackmotion/enabled` flag. App build clean, `qml_reactivity_test` green. **Interim retired:** placement is now keyed `<deviceId>#lowerArm` / `<deviceId>#palm`, one wG3 genuinely fills A and B, and both wizard rows read as the two units of one peripheral. **Three defects found in review that no agent could have seen:** (1) neither the pin nor the migration checked whether *another* sensor held A or B, so a wG3 arriving beside two configured Witmotions double-claimed both letters and resolution fell to key sort order with the displaced sensor never mentioned — both paths now refuse and name the blocking slot; (2) the resolver funnel constructed an `AppSettings` (several hundred `QSettings` reads) three times per 30 Hz tick; (3) the startup scan bypassed the feature-flag push. **Two things the library forced that the plan had not anticipated:** `HM_WARN_PRESENCE_NOT_MEASURED` needs its own property — the phase reaches `COMPLETE` either way, so a check that never ran reads as success from any other combination of state; and `HM_WARN_CALIBRATION_INDETERMINATE` must leave the state untouched, because an angle between §8.2's two populations is evidence of neither and guessing there is exactly how a presence check becomes a quality score. ⚠ **THE GUIDE POSES WERE WRONG, AND THE SPEC'S WORDING IS NOT ENOUGH TO GET THEM RIGHT.** §8.2 says "forearm horizontal" then "raised ~30° across the chest", which was read as: pose 0 forearm pointing FORWARD, pose 1 sweeping horizontally inward by shoulder internal rotation. The actual routine, per the athlete who performs it: **pose 0 forearm ACROSS THE CHEST, palm down; pose 1 the forearm ELEVATED 30° with the elbow stationary.** Two consequences worth recording because neither is obvious from the text. (1) The travel is a **forearm** rotation, not an upper-arm one — "elbow in the same position" fixes the upper arm, since the elbow sits at the end of that bone — so `BodyVizView` had to learn to animate `leadForeArmOverrideRotation`; with the upper-arm override identical in both poses, the existing trigger meant the guide would never have animated at all. (2) The motion is in a near-FRONTAL plane, so the default face-on camera is the right *direction* and only needed to move closer; the off-axis guide camera added for the forward-pointing reading was removed. Derived using the composition `body_pose_adapter.cpp` already uses (`forearm_local = conj(upperArm_world) ⊗ forearm_world`, cpp:216) with that file's pre-baked parent chain, cross-checked against the live node chain to 1e-6, and verified in the running scene: pose 0 wrist level with the elbow to 0.0°, pose 1 lifted exactly 0.2761·sin30°, elbow unmoved, dorsal marker above palmar throughout, both handednesses mirrored. ⚠ **AND THE FIRST CORRECTION WAS STILL WRONG.** Tilting the FOREARM forward to keep it out of the torso makes it read as pointing out diagonally, not across the body. The fix — the user's diagnosis — is to flex the **UPPER ARM** forward (`hmCalUpperArmFwdDeg`, 40°) so the elbow comes out in front, letting the forearm lie straight across and still clear the torso: pose 0's forearm direction is then exactly `(-1, 0, 0)`, wrist at identical y and z to the elbow. That also makes `hmCalUpperArmQuat` handed for the first time — the flexion puts non-zero y and z in it, so the `(w,x,-y,-z)` mirror is no longer a no-op. Both a presentation constant, chosen by rendering, not from the spec. **Two further defects found only by RUNNING it.** (1) The guide animated the WRONG SEGMENT: `resetArmAnimation()` set `_leadArmFrom` but not `_leadArmTo`, and the handler that would have set it returns early while `animateLeadArm` is false — the exact state a caller is in while posing a start position — so the upper arm still held `_leadArmTo = identity`, the T-pose, and the raise swung the whole arm out while the forearm kept its relative angle. Anchored `to = from` in the reset; the protocol itself is a follow-up. (2) ⚠ **THE DEVICE REPORTS SUCCESS FOR A ROUTINE NOBODY PERFORMED**, and no amount of reading the presence angle fixes it — §8.2's no-raise attempt scored the BEST of three. The flow now measures the lower-arm unit's own angular travel between the markers from the live stream (that unit sits on the segment this routine rotates, so its travel *is* the raise) and **aborts before `a2 01`** below 15°, leaving the device untouched rather than applying a transform whose axis is undetermined; shown as evidence, never as a score. ⚠ Open, with no evidence either way: the calibration flow's state machine has **no test** — see §12.3. |
+| 2026-08-18 | Phase D — frame reconciliation | **COMPLETE. C2 selected on hardware, and every assumption under it MEASURED rather than assumed.** The phase collapsed twice: ONE rotation, not two (the device zeroes the pair at its own pose), and a SELECTION AMONG FOUR rather than a continuous solve (both frames are built on a limb axis and a flexion axis, so the map is axis-aligned, and a det-+1 rotation carrying `X → ±Z`, `Z → ±X` is one of exactly four). ⚠ **AND THE ACCEPTANCE TEST THIS BRIEF SPECIFIED PROVABLY COULD NOT ACCEPT** — all four candidates score EXACTLY zero cross-talk, as does a reversed composition order; they differ only in SIGN. What selects is the sign of a motion whose direction was RECORDED when performed. **Result: C2, `Ry(+90°)`, `x→−z, y→+y, z→+x`**, mounting `wg3-mount1`, capture `phased2.hmwire`. Evidence: calibration applied (relative angle 6.82° → 2.03° across the `0x94`); axis roles measured from the JOINT RATE — flexion joint axis 19.7°/14.5° from device X, deviation 16.5°/14.4° from device Z, each ≥74.6° from the nearest other axis; limb axis at 2.0° from device Y, 99% single-axis; 2/2 bursts agreed in each DOF. ⚠ C2 inverts flexion against the device's own sense, which is the EXPECTED result — we report ISB, the vendor reports the inverse on bow/cup. **Three defects found only by running the tool on a real capture, each of which gave a confident wrong answer first.** (1) ⚠ The per-sample `calibration` flag is UNUSABLE ON A REPLAY — it is stamped from the session's own state machine, which advances only because the LIBRARY issued the pose markers, and `hm_capture.py` is a standalone recorder that writes `a2 00`/`a2 01` itself. A replaying session therefore stamps every sample UNCALIBRATED however good the capture, and it rejected one whose `0x94` was plainly on the wire. The boundary now comes from the wire, with the relative-angle collapse as evidence the transform was APPLIED and not merely emitted. (2) ⚠ Excursion must be measured FROM NEUTRAL, not from each burst's start: a directed motion is performed and returned, so a burst-relative delta makes the outward half positive and the return negative, and one bow yields both signs. (3) ⚠ Cross-talk is the WRONG falsification quantity — a human 'pure' single-axis motion contributes 15-20° of real off-axis movement, so a good capture looks alarming. The joint RATE axis is the direct test and is what the tool now reports. **A capture-protocol defect the athlete found:** `hm_capture.py` prints its OWN agenda while recording (hold still / a flick / a few swings — libhackmotion's protocol-spec reconciliation, a different job), so the two on-screen instruction sets disagree and the capture tool's is the louder one. The first capture followed it and could not select. The protocol now lives in `hm_frame_select.py --protocol` as its single source. ⚠ Also from the athlete: the rotation step starts PALM DOWN because that is the calibration pose, so the forearm is already near full pronation and the motion available is SUPINATION. The pronation channel is a RATE, so its sign is unbiased by that — an ANGLE referenced to that pose would carry the offset and would have to say so. App builds and signs; `hm_frame_test` 5 sections green, `imu_calibration_test` and `live_wrist_angles_test` green, IMU suite 7/7. **REPEATABILITY MEASURED, and it holds:** three captures on one uninterrupted mounting (`phased2/3/4.hmwire`), each with its own run of the calibration routine, all select C2 — the two richer ones on all THREE DOFs including the rotation. So the selection is a property of the mounting and not of the calibration attempt, which is what baking it in requires. ⚠ **But they also show a REPRODUCIBLE ~17-18° residual, and it must NOT be corrected away.** Real single-axis motions sit 17.0/13.9/20.9° off device X for flexion and 15.5/21.6/18.2° off device Z for deviation, pointing the same way each time (deviation means agree to 3.7-10.2°). That is a measurement of the GOLFER, not the device: both frames here are CONVENTIONAL — landmark-defined, not measured helical axes — and a real wrist's axes are oblique to them; `wrist_angles.h` already records 10-15° of the same family on our own Witmotion lane. Folding it into R would bake one golfer's anatomy into a mounting constant, which is exactly the one-golfer trap that stalled the earlier per-swing wrist work. ⚠ **And one more classifier defect the repeat captures exposed**, which had every rotation in all three captures reading as FAIL: a forearm rotation was recognised by the wrist STAYING STILL (small flexion AND small deviation AND a large rate), and a real supination fails that — the wrist is not a rigid coupling and picks up 10-20° of genuine flex/dev while the forearm turns. So every rotation was filed as flexion or deviation, where it then failed the axis test for the entirely correct reason that a rotation sits on neither X nor Z — an artefact that reads exactly like the reduction being falsified. Recognised now by the LOWER-ARM unit's own rate, which is the direct test. ⚠ Note the rotations were performed with the ELBOW BENT (travel MEASURED at 95-103° by integrating the lower-arm rate about its own limb axis, rather than left at the estimate) and that is the better test, not a compromise: a bent elbow stops the shoulder substituting for the forearm, and only the AXIS and the SIGN are used here, never the range. |
 
 ---
 

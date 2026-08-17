@@ -135,6 +135,11 @@ pp_add_test(lm_flight_path_test SOURCES lm_flight_path_test.cpp)
 pp_add_test(lm_inferred_reads_test SOURCES lm_inferred_reads_test.cpp)
 
 pp_add_test(imu_calibration_test  SOURCES imu_calibration_test.cpp)   # A·q·M solve + keystone golden
+# Phase D — the HackMotion→PinPoint frame constant. Two of its sections assert that a
+# check does NOT work (the scalar angle is blind to composition order; cross-talk is
+# blind to the candidate), which is the only thing standing between a future reader and
+# accepting a mirrored pipeline on a beautiful-looking single-axis capture.
+pp_add_test(hm_frame_test         SOURCES hm_frame_test.cpp)          # HM→PPS frame reconciliation
 pp_add_test(live_wrist_angles_test SOURCES live_wrist_angles_test.cpp) # live tick() math contract
 pp_add_test(imu_sample_test       SOURCES imu_sample_test.cpp)         # exported swing.json vector frame
 pp_add_test(viz_frame_test        SOURCES viz_frame_test.cpp)         # worldToScene + ArmVizView bone math

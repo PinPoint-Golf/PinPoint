@@ -72,6 +72,67 @@ inline constexpr float kNominalArmMount[4]  = { 0.5f, -0.5f, -0.5f, -0.5f };
 inline constexpr float kNominalHandMount[4] = { 0.4388f, 0.6054f, 0.4965f, -0.4409f };
 } // namespace calib
 
+// --- HackMotion frame reconciliation (src/IMU/hm_frame.h) --------------------------
+//
+// The constant rotation carrying the device's post-calibration anatomical frame onto
+// ours. ⚠ THIS IS A MOUNTING CONSTANT, NOT A DEVICE CONSTANT: it describes where the
+// boards sit on the strap, so a changed strap position changes it. Record the mounting
+// alongside any value written here.
+//
+// Only the SELECTION lives in this header — the four candidates themselves are a
+// structural fact about the two frames, not tuned numbers, so they stay at their source
+// of truth in hm_frame.h (same reason wrist_angles.h keeps its own axis choices). What
+// is tunable is which of the four a given mounting selects, via "hmframe.candidate".
+namespace hmframe {
+// Index into hm_frame.h's candidate table; -1 = NOT YET SELECTED, which is the
+// honest state until a directed capture has selected one. While it is -1 a
+// HackMotion lane reports no anatomical frame at all and drives nothing — never a
+// plausible-looking guess, which is the one failure mode this phase exists to avoid.
+inline constexpr int kCandidateUnset = -1;
+
+// SELECTED: C2 — Ry(+90°), x→−z, y→+y, z→+x.
+//
+// ⚠ MOUNTING THIS DESCRIBES: wG3 `wg3-mount1`, capture of 18 Aug 2026
+// (`phased2.hmwire`). Move the strap and this must be re-selected.
+//
+// Chosen by `tools/hm_frame_select.py` from a directed capture, on the sign of
+// a known bow and a known ulnar deviation — NOT on cross-talk, which all four
+// candidates pass identically. Evidence from that capture:
+//   · calibration applied     relative angle 6.82° → 2.03° across the 0x94
+//   · axis roles MEASURED     flexion joint axis 19.7°/14.5° from device X,
+//                             deviation 16.5°/14.4° from device Z, each ≥74.6°
+//                             from the nearest other axis
+//   · limb axis MEASURED      forearm rate axis 2.0° from device Y, 99%
+//                             single-axis
+//   · sign consistency        2/2 bursts agreed in each DOF
+//
+// ⚠ C2 inverts flexion relative to the device's own reported sense, and that is
+// the expected result, not a red flag: we report ISB (flexion positive) and the
+// vendor reports the inverse on bow/cup. A correct selection looks wrong beside
+// their application. See docs/design/pinpoint_sign_conventions.md Rule 0.
+//
+// REPEATABILITY — MEASURED, not assumed. Three captures on one uninterrupted
+// mounting (`phased2/3/4.hmwire`), each with its own run of the calibration
+// routine, all select C2; the two richer ones agree on all THREE DOFs including
+// the rotation. So the selection is a property of the mounting and not of the
+// calibration attempt, which is what baking it in requires.
+//
+// ⚠ AND A REPRODUCIBLE ~17-18° RESIDUAL, WHICH IS NOT A FRAME ERROR AND MUST NOT
+// BE "CORRECTED" AWAY. Real single-axis motions sit 17.0/13.9/20.9° off the
+// device X for flexion and 15.5/21.6/18.2° off the device Z for deviation, and
+// the offsets point the same way across captures (deviation means agree to
+// 3.7-10.2°). Two reasons that is a measurement of the golfer rather than of the
+// device: both frames here are CONVENTIONAL — defined by landmarks, not by
+// measured helical axes — and a real human wrist's flexion and deviation axes
+// are oblique to them, so the residual is what an anatomy-versus-convention gap
+// looks like. `wrist_angles.h` already records 10-15° of the same family on our
+// own Witmotion lane. Folding it into R would bake ONE golfer's anatomy into a
+// mounting constant, which is precisely the one-golfer trap that stalled the
+// earlier per-swing wrist work. Recorded here so the next reader treats an 18°
+// cross-talk reading as expected rather than as a defect.
+inline constexpr int kCandidate = 1;
+} // namespace hmframe
+
 // --- Swing scoring bands + deadbands (src/Analysis/swing_scorer.cpp) ----------------
 namespace scoring {
 // Deadband + bounded falloff (design §B.1): |z| ≤ kZIn ⇒ 100; ramps to ~0 at kZOut.

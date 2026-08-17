@@ -26,6 +26,7 @@
 // The pure hm_unit_sample → ImuSample converter (src/IMU). It owns the m/s² → g
 // conversion from the raw mg counts and passes gyro and the quaternion through
 // verbatim; it is unit-agnostic, so both blocks go through the same call.
+#include "hm_frame.h"
 #include "hm_sample_convert.h"
 // The skew median and the §10.3 half-split stability test — pure, and pure so that
 // the statistic gating a "not stable" warning can be tested without hardware.
@@ -147,6 +148,10 @@ public:
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         float roll = 0.0f, pitch = 0.0f, yaw = 0.0f;
         float velDps = 0.0f;
+        // ⚠ The gyro VECTOR, not just the magnitude above. Phase D reads the
+        // pronation rate off the lower-arm unit's component about the limb axis,
+        // which a magnitude has already thrown away.
+        float gx = 0.0f, gy = 0.0f, gz = 0.0f;
     };
 
     struct Snapshot {
@@ -1273,6 +1278,12 @@ void HmSessionWorker::drainLive()
         s.velDps = std::sqrt(b.gyro_dps[0] * b.gyro_dps[0]
                            + b.gyro_dps[1] * b.gyro_dps[1]
                            + b.gyro_dps[2] * b.gyro_dps[2]);
+
+        // The vector too, in the device's own axes and unremapped — the frame
+        // constant is applied once, at the display tick, alongside the quaternion.
+        s.gx = b.gyro_dps[0];
+        s.gy = b.gyro_dps[1];
+        s.gz = b.gyro_dps[2];
     }
 
     // The cumulative ring-write counters live on the worker (this snapshot is
@@ -2134,6 +2145,51 @@ HmInstance::HmInstance(const Device &device,
             unit->m_eulerPitch = s.pitch;
             unit->m_eulerYaw   = s.yaw;
             unit->m_angularVelocityDps = s.velDps;
+
+            // --- Phase D: the anatomical frame -------------------------------
+            //
+            // TWO conditions, and both are needed. The DEVICE must have applied
+            // its own calibration (before that the streamed quaternion carries
+            // board placement, not anatomy), and a directed capture must have
+            // SELECTED a frame candidate (before that we do not know which way
+            // its axes point). Either one alone produces a quaternion that moves
+            // convincingly and means nothing.
+            const bool deviceCalibrated = (m_calibrationState == HM_CAL_CALIBRATED);
+            const bool anat = deviceCalibrated && pinpoint::hm_frame::isSelected();
+
+            if (anat != unit->m_anatCalibrated) {
+                unit->m_anatCalibrated = anat;
+                emit unit->anatCalibratedChanged();
+            }
+
+            if (anat) {
+                unit->m_anatQuat = pinpoint::hm_frame::toAnatomical(
+                    QQuaternion(s.qw, s.qx, s.qy, s.qz).normalized());
+                unit->m_mountM   = pinpoint::hm_frame::mountM();
+                // ⚠ A is IDENTITY for this lane, and that is not a stub. The
+                // device referenced the pair at its own pose 0, so there is no
+                // per-session world→anatomical solve left to do; what that pose
+                // leaves behind is a constant offset from our neutral, which
+                // wristRel's Address reference absorbs downstream.
+                unit->m_alignA   = QQuaternion();
+            } else {
+                unit->m_anatQuat = QQuaternion();
+                unit->m_mountM   = QQuaternion();
+                unit->m_alignA   = QQuaternion();
+            }
+
+            // ⚠ PRONATION RATE COMES FROM THE LOWER-ARM UNIT ALONE. During
+            // pronation both units rotate together — the wrist barely
+            // articulates about this axis — so a difference of the two would
+            // cancel most of the signal. The palm unit carries no such reading
+            // and is left at zero rather than given a plausible one.
+            const float pron = (u == 0 && anat)
+                                   ? pinpoint::hm_frame::pronationRateDps(QVector3D(s.gx, s.gy, s.gz))
+                                   : 0.0f;
+            if (qAbs(pron - unit->m_pronationRateDps) > 0.5f) {
+                unit->m_pronationRateDps = pron;
+                emit unit->pronationRateDpsChanged();
+            }
 
             emit unit->quatChanged();
             emit unit->accelChanged();

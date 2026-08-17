@@ -92,6 +92,7 @@ class HmUnit : public QObject
     // the legacy single-factor fallback (calibrated + calibTransform).
     Q_PROPERTY(bool        anatCalibrated READ anatCalibrated NOTIFY anatCalibratedChanged)
     Q_PROPERTY(QQuaternion anatQuat       READ anatQuat       NOTIFY quatChanged)
+    Q_PROPERTY(float pronationRateDps READ pronationRateDps NOTIFY pronationRateDpsChanged)
     Q_PROPERTY(bool        calibrated     READ calibrated     NOTIFY calibratedChanged)
     Q_PROPERTY(QQuaternion calibTransform READ calibTransform NOTIFY calibratedChanged)
 
@@ -136,28 +137,43 @@ public:
     // quaternion difference. There is nothing to estimate here.
     float angularVelocityDps() const { return m_angularVelocityDps; }
 
-    // ⚠ NEITHER PHASE A NOR PHASE C HAS AN ANATOMICAL FRAME, AND NEITHER WILL
-    // PRETEND OTHERWISE. ⚠ THIS IS UNCHANGED BY CALIBRATION, which is the trap:
-    // once the routine below succeeds the device applies its own transform and the
-    // cubes start moving sensibly, and it becomes very tempting to conclude that
-    // the frame is now known. It is not. The device calibrates into ITS anatomical
-    // convention (§8.1), which the specification never defines; the constant
-    // per-unit rotation from that convention to ours is solved empirically in
-    // Phase D and is the linchpin of the integration.
-    // Until it exists, anatCalibrated is false and anatQuat is identity, so
-    // ArmVizView parks the segment at rest rather than driving it with a frame
-    // nobody has reconciled. Inventing a transform here — or conjugating the
-    // streamed quaternion because a cube "looks better" — would produce a display
-    // that looks right and is mirrored: F3 in the integration brief.
+    // ⚠ DEVICE CALIBRATION ALONE IS NOT AN ANATOMICAL FRAME, and that is the trap
+    // this pair exists to avoid. Once the routine below succeeds the device
+    // applies its own transform and the cubes start moving sensibly, which makes
+    // it very tempting to conclude the frame is now known. It is not. The device
+    // calibrates into ITS anatomical convention (§8.1), which the specification
+    // never defines; the constant rotation from that convention to ours is
+    // hm_frame.h's, and it is only known once a DIRECTED capture has selected
+    // among its four candidates.
+    //
+    // So anatCalibrated is the conjunction of both — the device having applied
+    // its calibration AND a candidate having been selected. While either is
+    // missing, anatQuat stays identity and ArmVizView parks the segment rather
+    // than driving it with a frame nobody has reconciled. Inventing a transform
+    // here — or conjugating the streamed quaternion because a cube "looks better"
+    // — would produce a display that looks right and is mirrored: F3 in the
+    // integration brief.
     bool        anatCalibrated() const { return m_anatCalibrated; }
     QQuaternion anatQuat()       const { return m_anatQuat; }
+
+    // Pronation RATE about the forearm's long axis, °/s, from the lower-arm unit
+    // only (zero on the palm unit, and zero until the frame is reconciled).
+    //
+    // ⚠ THIS IS NOT `forearmPronation`. That metric is an ISB radioulnar joint
+    // ANGLE read against the UPPER ARM, which a wG3 has no unit for — so it is
+    // not available from this device at all, and this rate must never be
+    // published under its name. See hm_frame.h::pronationRateDps.
+    float       pronationRateDps() const { return m_pronationRateDps; }
     // Exists only so ArmVizView's fallback path is defined. There is no
     // host-side zeroing on this device, so this never becomes true.
     bool        calibrated()     const { return false; }
     QQuaternion calibTransform() const { return QQuaternion(1.0f, 0.0f, 0.0f, 0.0f); }
 
     // Session-metadata accessors, matching ImuInstance's so a future binding
-    // writer can ask either kind. Identity until Phase D solves R_unit.
+    // writer can ask either kind. ⚠ `A` is IDENTITY for this lane by design, not
+    // as a placeholder: the device referenced the pair at its own pose, so there
+    // is no per-session world→anatomical solve to record. `M` carries the frame
+    // constant. Both stay identity while the frame is unreconciled.
     QQuaternion alignA() const { return m_alignA; }
     QQuaternion mountM() const { return m_mountM; }
 
@@ -172,6 +188,7 @@ signals:
     void angularVelocityDpsChanged();
     void anatCalibratedChanged();
     void calibratedChanged();
+    void pronationRateDpsChanged();
 
 private:
     friend class HmInstance;   // the 60 Hz display tick writes these members
@@ -192,6 +209,7 @@ private:
 
     bool        m_anatCalibrated = false;
     QQuaternion m_anatQuat{ 1.0f, 0.0f, 0.0f, 0.0f };
+    float       m_pronationRateDps = 0.0f;
     QQuaternion m_alignA  { 1.0f, 0.0f, 0.0f, 0.0f };
     QQuaternion m_mountM  { 1.0f, 0.0f, 0.0f, 0.0f };
 
