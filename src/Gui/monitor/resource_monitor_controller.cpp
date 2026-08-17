@@ -281,9 +281,6 @@ void ResourceMonitorController::refresh()
         for (const Device &imuDev : imuDevices) {
             const auto imu = m_imu->liveDeviceStats(imuDev.id);
 
-            const pinpoint::SourceId sid = imu.sourceId;
-            const auto *imuSrc = findSourceById(sid);
-
             const QString backend = imuDev.imuTransport == ImuBase::Transport::Ble
                 ? QStringLiteral("Bluetooth LE")
                 : QStringLiteral("Serial");
@@ -291,11 +288,16 @@ void ResourceMonitorController::refresh()
                 ? imuDev.description
                 : imuDev.imuCapabilities.modelName;
 
+            // ⚠ Status keys off `selected`, not off source presence. A Phase A
+            // HackMotion registers ZERO EventBuffer sources even while fully
+            // connected (see ImuDeviceStats::selected and hm_instance.h) — the
+            // old "sourceId == invalid ⇒ idle" test would have shown a live wG3
+            // as idle forever. `selected` is the direct signal instead.
             QString imuStatus;
-            if (sid == pinpoint::kInvalidSourceId) imuStatus = QStringLiteral("idle");
-            else if (imu.connected)                imuStatus = QStringLiteral("connected");
-            else if (imu.busy)                     imuStatus = QStringLiteral("connecting");
-            else                                   imuStatus = QStringLiteral("disconnected");
+            if (!imu.selected)      imuStatus = QStringLiteral("idle");
+            else if (imu.connected) imuStatus = QStringLiteral("connected");
+            else if (imu.busy)      imuStatus = QStringLiteral("connecting");
+            else                    imuStatus = QStringLiteral("disconnected");
 
             double  imuRate      = imu.dataRateHz;
             int     batPct       = imu.batteryPercent;
@@ -304,21 +306,6 @@ void ResourceMonitorController::refresh()
             const QString imuIdent = imuDev.imuCapabilities.serialNumber.isEmpty()
                 ? imuDev.id
                 : imuDev.imuCapabilities.serialNumber;
-            const auto *imuLife = imuSrc ? nullptr : findLifetimeByIdent(imuIdent);
-            quint64 imuEW = imuSrc  ? quint64(imuSrc->lifetime_events_written)
-                          : imuLife ? quint64(imuLife->events_written)      : 0;
-            quint64 imuBW = imuSrc  ? quint64(imuSrc->lifetime_bytes_written)
-                          : imuLife ? quint64(imuLife->bytes_written)       : 0;
-            quint64 imuOW = imuSrc  ? quint64(imuSrc->lifetime_events_overwritten)
-                          : imuLife ? quint64(imuLife->events_overwritten)  : 0;
-            quint64 imuRingBytes = imuSrc
-                ? quint64(m_buffer->getSlotCapacity(imuSrc->id)) * quint64(imuSrc->slot_count)
-                : 0;
-            double fill = imuSrc && imuSrc->slot_count > 0
-                ? std::min(1.0, double(imuSrc->events_written) / double(imuSrc->slot_count))
-                : 0.0;
-            QString imuSrcName = imuSrc
-                ? QString::fromStdString(imuSrc->name) : QString();
 
             const QString imuId = imuDev.imuCapabilities.serialNumber.isEmpty()
                 ? imuDev.id
@@ -328,41 +315,81 @@ void ResourceMonitorController::refresh()
                 imuId.isEmpty() ? imuDev.description
                                 : imuDev.description + QStringLiteral(" (") + imuId + QStringLiteral(")")).toString();
 
-            if (sid != pinpoint::kInvalidSourceId)
-                sourceAliases[sid] = imuAlias;
+            // ⚠ PLURAL, AND THAT IS THE POINT (see ImuDeviceBase::sourceIds()).
+            // A HackMotion can carry two sources (lower arm, palm — from Phase
+            // B onward); this device-level loop already runs per enumerated
+            // Device, so a second inner loop turns each source into its own
+            // row rather than the row silently reporting only the first one.
+            // Phase A's HmInstance registers none, which the empty-vector
+            // fallback below turns into exactly one row — live state, no
+            // buffer statistics — instead of hiding the device or indexing
+            // past the end of an empty vector.
+            const bool multiSource = imu.sourceIds.size() > 1;
+            const int  rowCount    = imu.sourceIds.empty() ? 1 : int(imu.sourceIds.size());
 
-            QVariantMap dev;
-            dev[QStringLiteral("kind")]               = QStringLiteral("IMU");
-            dev[QStringLiteral("name")]               = imuAlias;
-            dev[QStringLiteral("model")]              = model;
-            dev[QStringLiteral("backend")]            = backend;
-            dev[QStringLiteral("identifier")]         = imuDev.id;
-            dev[QStringLiteral("status")]             = imuStatus;
-            dev[QStringLiteral("dataRateHz")]         = imuRate;
-            dev[QStringLiteral("batteryPct")]         = batPct;
-            dev[QStringLiteral("sourceName")]         = imuSrcName;
-            dev[QStringLiteral("ringFill")]           = fill;
-            dev[QStringLiteral("hasWarning")]         = capturing && imuSrc && imuSrc->stalled;
-            dev[QStringLiteral("eventsWritten")]      = imuEW;
-            dev[QStringLiteral("bytesWritten")]       = imuBW;
-            dev[QStringLiteral("eventsOverwritten")]  = imuOW;
-            dev[QStringLiteral("dataRateStr")]        = imuRate > 0
-                ? QString::number(imuRate, 'f', 1) + QStringLiteral(" Hz")
-                : QStringLiteral("—");
-            dev[QStringLiteral("eventsWrittenStr")]   = fmtCount(imuEW);
-            dev[QStringLiteral("bytesWrittenStr")]    = fmtBytes(imuBW);
-            dev[QStringLiteral("eventsOverwrittenStr")] = imuOW > 0
-                ? QString::number(imuOW) : QStringLiteral("0");
-            dev[QStringLiteral("batteryStr")]         = batPct >= 0
-                ? QString::number(batPct) + QStringLiteral(" %")
-                : QStringLiteral("—");
-            dev[QStringLiteral("ringCapacityStr")]    = imuRingBytes > 0
-                ? fmtBytes(imuRingBytes) : QStringLiteral("—");
-            dev[QStringLiteral("gimbalDropCount")]    = imu.gimbalDropCount;
-            dev[QStringLiteral("gimbalDropCountStr")] = imu.gimbalDropCount > 0
-                ? QString::number(imu.gimbalDropCount)
-                : QStringLiteral("0");
-            m_devices.append(dev);
+            for (int row = 0; row < rowCount; ++row) {
+                const pinpoint::SourceId sid = imu.sourceIds.empty()
+                    ? pinpoint::kInvalidSourceId : imu.sourceIds[row];
+                const auto *imuSrc = findSourceById(sid);
+                const auto *imuLife = imuSrc ? nullptr : findLifetimeByIdent(imuIdent);
+
+                quint64 imuEW = imuSrc  ? quint64(imuSrc->lifetime_events_written)
+                              : imuLife ? quint64(imuLife->events_written)      : 0;
+                quint64 imuBW = imuSrc  ? quint64(imuSrc->lifetime_bytes_written)
+                              : imuLife ? quint64(imuLife->bytes_written)       : 0;
+                quint64 imuOW = imuSrc  ? quint64(imuSrc->lifetime_events_overwritten)
+                              : imuLife ? quint64(imuLife->events_overwritten)  : 0;
+                quint64 imuRingBytes = imuSrc
+                    ? quint64(m_buffer->getSlotCapacity(imuSrc->id)) * quint64(imuSrc->slot_count)
+                    : 0;
+                double fill = imuSrc && imuSrc->slot_count > 0
+                    ? std::min(1.0, double(imuSrc->events_written) / double(imuSrc->slot_count))
+                    : 0.0;
+                QString imuSrcName = imuSrc
+                    ? QString::fromStdString(imuSrc->name) : QString();
+
+                if (sid != pinpoint::kInvalidSourceId)
+                    sourceAliases[sid] = imuAlias;
+
+                // One physical device, more than one row: distinguish them by
+                // source rather than inventing a per-unit label this layer
+                // doesn't own (unitLabel lives on HmUnit, not on SourceInfo).
+                const QString rowSuffix = multiSource
+                    ? QStringLiteral(" #%1").arg(row + 1) : QString();
+
+                QVariantMap dev;
+                dev[QStringLiteral("kind")]               = QStringLiteral("IMU");
+                dev[QStringLiteral("name")]               = imuAlias + rowSuffix;
+                dev[QStringLiteral("model")]              = model;
+                dev[QStringLiteral("backend")]            = backend;
+                dev[QStringLiteral("identifier")]         = imuDev.id + rowSuffix;
+                dev[QStringLiteral("status")]             = imuStatus;
+                dev[QStringLiteral("dataRateHz")]         = imuRate;
+                dev[QStringLiteral("batteryPct")]         = batPct;
+                dev[QStringLiteral("sourceName")]         = imuSrcName;
+                dev[QStringLiteral("ringFill")]           = fill;
+                dev[QStringLiteral("hasWarning")]         = capturing && imuSrc && imuSrc->stalled;
+                dev[QStringLiteral("eventsWritten")]      = imuEW;
+                dev[QStringLiteral("bytesWritten")]       = imuBW;
+                dev[QStringLiteral("eventsOverwritten")]  = imuOW;
+                dev[QStringLiteral("dataRateStr")]        = imuRate > 0
+                    ? QString::number(imuRate, 'f', 1) + QStringLiteral(" Hz")
+                    : QStringLiteral("—");
+                dev[QStringLiteral("eventsWrittenStr")]   = fmtCount(imuEW);
+                dev[QStringLiteral("bytesWrittenStr")]    = fmtBytes(imuBW);
+                dev[QStringLiteral("eventsOverwrittenStr")] = imuOW > 0
+                    ? QString::number(imuOW) : QStringLiteral("0");
+                dev[QStringLiteral("batteryStr")]         = batPct >= 0
+                    ? QString::number(batPct) + QStringLiteral(" %")
+                    : QStringLiteral("—");
+                dev[QStringLiteral("ringCapacityStr")]    = imuRingBytes > 0
+                    ? fmtBytes(imuRingBytes) : QStringLiteral("—");
+                dev[QStringLiteral("gimbalDropCount")]    = imu.gimbalDropCount;
+                dev[QStringLiteral("gimbalDropCountStr")] = imu.gimbalDropCount > 0
+                    ? QString::number(imu.gimbalDropCount)
+                    : QStringLiteral("0");
+                m_devices.append(dev);
+            }
         }
     }
 

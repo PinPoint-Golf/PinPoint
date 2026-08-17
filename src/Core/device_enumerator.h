@@ -35,6 +35,16 @@ enum class DeviceType {
     Imu
 };
 
+// Distinguishes the physical vendor of an IMU device. imuTransport alone
+// cannot do this: both WitMotion (WT901) and HackMotion (wG3) devices are
+// discovered over Ble, so transport is the same for either. WitMotion is the
+// default so every existing construction site — none of which sets this
+// field — keeps meaning "WitMotion", its historical (only) meaning.
+enum class ImuVendor {
+    WitMotion,
+    HackMotion
+};
+
 struct Device {
     DeviceType type = DeviceType::VideoInput;
 
@@ -44,6 +54,7 @@ struct Device {
 
     // --- IMU fields (valid when type == Imu) ---
     ImuBase::Transport imuTransport    = ImuBase::Transport::Serial;
+    ImuVendor          imuVendor       = ImuVendor::WitMotion;
     ImuCapabilities    imuCapabilities;
     // Opaque transport handle. For BLE: stores QBluetoothDeviceInfo via QVariant::fromValue().
     // Callers that need it: #include <QBluetoothDeviceInfo> and use .value<QBluetoothDeviceInfo>().
@@ -69,7 +80,7 @@ public:
     // Synchronous enumeration — individual backends register themselves on demand.
     void enumerate();
 
-    // Starts an asynchronous BLE IMU scan (30 s timeout) in a worker thread.
+    // Starts an asynchronous BLE IMU scan (90 s timeout) in a worker thread.
     // Serial scan is a stub that finds nothing (TODO: probe serial ports).
     // Safe to call multiple times; ignored if a scan is already in progress.
     void scanImu();
@@ -94,7 +105,8 @@ public:
                            const QString &id,
                            const QString &description,
                            const ImuCapabilities &capabilities = {},
-                           const QVariant &platformHandle = {});
+                           const QVariant &platformHandle = {},
+                           ImuVendor vendor = ImuVendor::WitMotion);
 
 signals:
     // Emitted whenever a new device is added (any type).

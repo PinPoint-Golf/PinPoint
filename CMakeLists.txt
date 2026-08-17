@@ -342,6 +342,11 @@ qt_add_executable(PinPointStudio
     src/Gui/app/app_settings.h               src/Gui/app/app_settings.cpp
     src/Gui/imu/imu_manager.h                src/Gui/imu/imu_manager.cpp
     src/Gui/imu/imu_instance.h               src/Gui/imu/imu_instance.cpp
+    # imu_device.h carries Q_OBJECT and has no .cpp of its own, so AUTOMOC only
+    # sees it if it is listed here — without the line, HmInstance links against
+    # an ImuDeviceBase with no metaobject.
+    src/Gui/imu/imu_device.h
+    src/Gui/imu/hm_instance.h                src/Gui/imu/hm_instance.cpp
     src/Gui/media/transcription_controller.h src/Gui/media/transcription_controller.cpp
     src/Gui/media/tts_controller.h           src/Gui/media/tts_controller.cpp
     src/Gui/media/film_controller.h          src/Gui/media/film_controller.cpp

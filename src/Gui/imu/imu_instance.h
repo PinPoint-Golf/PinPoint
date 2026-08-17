@@ -28,6 +28,7 @@
 #include <QVector3D>
 
 #include "device_enumerator.h"
+#include "imu_device.h"
 #include "types.h"
 #include "wt9011dcl_ble.h"
 
@@ -37,7 +38,11 @@ namespace pinpoint { class EventBuffer; }
 
 // Manages the BLE connection lifecycle and live data for a single IMU device.
 // Created and owned by ImuManager; one instance per selected device.
-class ImuInstance : public QObject
+//
+// Inherits ImuDeviceBase (see imu_device.h) so ImuManager can hold this and
+// an HmInstance through one pointer type. Everything below that isn't marked
+// `override` is Witmotion-specific and stays off the base on purpose.
+class ImuInstance : public ImuDeviceBase
 {
     Q_OBJECT
 
@@ -92,15 +97,23 @@ public:
     ~ImuInstance() override;
 
     // Identification (C++ callers and ResourceMonitor)
-    QString            deviceId()          const { return m_deviceId; }
-    QString            deviceDescription() const { return m_deviceDescription; }
-    QStringList        logEntries()        const { return m_logEntries; }
+    QString            deviceId()          const override { return m_deviceId; }
+    QString            deviceDescription() const override { return m_deviceDescription; }
+    QStringList        logEntries()        const override { return m_logEntries; }
+    // ⚠ Scalar, kept alongside sourceIds() below. shot_processor.cpp and other
+    // files outside this task's ownership call this directly and are not to be
+    // touched — see imu_manager.cpp's brief. Do not remove.
     pinpoint::SourceId sourceId()          const { return m_imuSourceId; }
+    std::vector<pinpoint::SourceId> sourceIds() const override
+    {
+        if (m_imuSourceId == pinpoint::kInvalidSourceId) return {};
+        return { m_imuSourceId };
+    }
 
     // State
-    QString stateLabel()     const { return m_stateLabel; }
-    bool    imuConnected()   const { return m_connected; }
-    bool    busy()           const { return m_busy; }
+    QString stateLabel()     const override { return m_stateLabel; }
+    bool    imuConnected()   const override { return m_connected; }
+    bool    busy()           const override { return m_busy; }
     float   quatW()          const { return m_quatW; }
     float   quatX()          const { return m_quatX; }
     float   quatY()          const { return m_quatY; }
@@ -112,8 +125,8 @@ public:
     float   accelY()         const { return m_accelY; }
     float   accelZ()         const { return m_accelZ; }
     int     outputRateHz()      const { return m_outputRateHz; }
-    double  dataRateHz()        const { return m_dataRateHz; }
-    int     batteryPercent()    const { return m_batteryPercent; }
+    double  dataRateHz()        const override { return m_dataRateHz; }
+    int     batteryPercent()    const override { return m_batteryPercent; }
     int     gimbalDropCount()   const { return m_gimbalDropCount; }
     float   angularVelocityDps() const { return m_angularVelocityDps; }
     bool        calibrated()          const { return m_calibrated; }
@@ -153,9 +166,9 @@ public:
     static constexpr qint64 kImuBleLatencyUs = 30'000;
 
     // Lifecycle — called by ImuManager
-    void start();                // begin BLE connection
-    void stop();                 // disconnect and cancel any retry
-    void deregisterFromBuffer(); // call while EventBuffer is paused
+    void start()               override; // begin BLE connection
+    void stop()                override; // disconnect and cancel any retry
+    void deregisterFromBuffer() override; // call while EventBuffer is paused
 
     // Select the local orientation-fusion algorithm (Madgwick / ESKF). Forwards
     // to the device driver, which applies the swap on its packet-consumer thread.
@@ -168,7 +181,7 @@ public:
 
     // QML-invokable per-device actions
     Q_INVOKABLE void    zeroOrientation();
-    Q_INVOKABLE QString saveLog();
+    Q_INVOKABLE QString saveLog() override;
     Q_INVOKABLE void    setOutputRateHz(int hz);
     Q_INVOKABLE void    setCalibration(const QQuaternion &armDown, const QQuaternion &tPose);
     Q_INVOKABLE void    clearCalibration();
@@ -204,14 +217,15 @@ public:
     Q_INVOKABLE void    endRawDump();
 
 signals:
-    void stateLabelChanged();
-    void imuConnectedChanged();
-    void busyChanged();
+    // stateLabelChanged / imuConnectedChanged / busyChanged / batteryPercentChanged /
+    // dataRateHzChanged / logEntryAdded now live on ImuDeviceBase — declaring them
+    // here too would be a hard moc error (duplicate signal in the hierarchy).
+    // Every `emit` of these below is unchanged; it just resolves to the inherited
+    // member, and existing `connect(inst, &ImuInstance::imuConnectedChanged, …)`
+    // call sites still compile against it.
     void quatChanged();
     void accelChanged();
     void outputRateHzChanged();
-    void dataRateHzChanged();
-    void batteryPercentChanged();
     void gimbalDropCountChanged();
     void angularVelocityDpsChanged();
     void calibratedChanged();
@@ -219,7 +233,6 @@ signals:
     void zeroingChanged();
     void zeroingConfirmed();
     void zeroingFailed();
-    void logEntryAdded(const QString &entry);
 
     // IMU impact auto-trigger (shot detection P1). estImpactUs is the
     // back-dated true-impact estimate in EventBuffer::nowMicros() domain

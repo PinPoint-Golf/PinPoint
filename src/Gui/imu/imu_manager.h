@@ -28,14 +28,15 @@
 
 #include "app_settings.h"
 #include "device_enumerator.h"
-#include "imu_instance.h"
+#include "imu_device.h"
 #include "types.h"
 
 namespace pinpoint { class EventBuffer; }
 
 class ShotProcessor;
 
-// Manages N ImuInstance objects, one per user-selected IMU device.
+// Manages N ImuDeviceBase instances (Witmotion ImuInstance or HackMotion
+// HmInstance), one per user-selected IMU device.
 // Mirrors the CameraManager pattern: imuList / instances / setSelected().
 //
 // Device discovery is the authority of DeviceEnumerator — imuList() and
@@ -128,18 +129,31 @@ public:
     // IMUs: persists to AppSettings and pushes the change to every live instance.
     Q_INVOKABLE void setOrientationFilter(const QString &name);
 
-    // Returns the live ImuInstance QObject* for deviceId, or nullptr if not selected.
+    // Returns the live instance's QObject* for deviceId (Witmotion or
+    // HackMotion — see ImuEntry), or nullptr if not selected.
     Q_INVOKABLE QObject *instanceFor(const QString &deviceId) const;
 
     // Snapshot of live per-device stats for monitoring purposes.
-    // Avoids exposing ImuInstance to callers that only need metrics.
+    // Avoids exposing ImuDeviceBase to callers that only need metrics.
     struct ImuDeviceStats {
-        pinpoint::SourceId sourceId       = pinpoint::kInvalidSourceId;
+        // ⚠ PLURAL — see ImuDeviceBase::sourceIds(). A Witmotion contributes at
+        // most one id; a HackMotion contributes two once Phase B registers them
+        // (zero in Phase A, since HmInstance::sourceIds() is empty on purpose —
+        // see imu_device.h). Nothing left here reads a single scalar id, so
+        // there is no separate `sourceId` field to keep in sync.
+        std::vector<pinpoint::SourceId> sourceIds;
         double             dataRateHz     = 0.0;
         int                batteryPercent = -1;
         int                gimbalDropCount = 0;
         bool               connected      = false;
         bool               busy           = false;
+        // ⚠ Explicit, not inferred from sourceIds being non-empty. A Phase A
+        // HackMotion registers zero sources even while connected, so "no
+        // sources" no longer means "never selected" the way it did when every
+        // selected device registered exactly one. A caller distinguishing
+        // "idle" (never selected) from "disconnected" (selected, link down)
+        // needs this bit directly.
+        bool               selected       = false;
     };
     ImuDeviceStats liveDeviceStats(const QString &deviceId) const;
 
@@ -175,11 +189,16 @@ signals:
 
 private:
     struct ImuEntry {
-        bool         selected = false;
-        ImuInstance *instance = nullptr;
+        bool           selected = false;
+        // ⚠ The device-kind-agnostic base (imu_device.h), not ImuInstance —
+        // this map holds either a Witmotion ImuInstance or a HackMotion
+        // HmInstance, and every site that touches it only needs what both
+        // answer. Callers that need the concrete Witmotion API (shot_processor,
+        // live_wrist_angles) qobject_cast<ImuInstance*> over instances().
+        ImuDeviceBase *instance = nullptr;
     };
 
-    ImuInstance *createInstance(const Device &device);
+    ImuDeviceBase *createInstance(const Device &device);
     // swingDetectionSensitivity ("Low"/"Medium"/"High") → detector threshold scale.
     static float impactScaleFor(const QString &sensitivity);
 

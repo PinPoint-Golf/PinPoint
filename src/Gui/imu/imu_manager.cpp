@@ -21,6 +21,8 @@
 
 #include "ble_adapter_pool.h"
 #include "event_buffer.h"
+#include "hm_instance.h"
+#include "imu_instance.h"
 #include "pp_os_metrics.h"
 
 ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, QObject *parent)
@@ -218,6 +220,12 @@ QVariantList ImuManager::imuDeviceList() const
         entry[QStringLiteral("transport")]   = (dev.imuTransport == ImuBase::Transport::Ble)
                                                    ? QStringLiteral("BLE")
                                                    : QStringLiteral("Serial");
+        // The device KIND, not the capability struct's free-text vendorName —
+        // QML branches on this string (ImusPanel's isHackMotion) rather than
+        // guessing from the model name.
+        entry[QStringLiteral("vendor")]      = (dev.imuVendor == ImuVendor::HackMotion)
+                                                   ? QStringLiteral("hackmotion")
+                                                   : QStringLiteral("witmotion");
         entry[QStringLiteral("vendorName")]     = cap.vendorName;
         entry[QStringLiteral("modelName")]      = cap.modelName;
         entry[QStringLiteral("serialNumber")]   = cap.serialNumber;
@@ -381,7 +389,7 @@ void ImuManager::setSelected(int index, bool selected)
         // source); let CameraManager re-apply the user capture intent.
         emit bufferStateChanged();
     } else {
-        ImuInstance *inst = entry.instance;
+        ImuDeviceBase *inst = entry.instance;
         entry.instance = nullptr;
         if (inst) {
             disconnect(inst, nullptr, this, nullptr);
@@ -446,13 +454,19 @@ ImuManager::ImuDeviceStats ImuManager::liveDeviceStats(const QString &deviceId) 
 {
     ImuDeviceStats stats;
     const ImuEntry &e = m_selected.value(deviceId);
+    stats.selected = e.selected;
     if (e.selected && e.instance) {
-        stats.sourceId        = e.instance->sourceId();
+        stats.sourceIds       = e.instance->sourceIds();
         stats.dataRateHz      = e.instance->dataRateHz();
         stats.batteryPercent  = e.instance->batteryPercent();
-        stats.gimbalDropCount = e.instance->gimbalDropCount();
         stats.connected       = e.instance->imuConnected();
         stats.busy            = e.instance->busy();
+        // Gimbal-lock drop counting is a Euler-gimbal artefact of the
+        // Witmotion fusion path (imu_device.h's "WHAT DELIBERATELY IS NOT
+        // HERE") — a HackMotion fuses on-device and has no equivalent, so it
+        // reports 0 rather than a number that looks measured but isn't.
+        if (auto *wt = qobject_cast<ImuInstance *>(e.instance))
+            stats.gimbalDropCount = wt->gimbalDropCount();
     }
     return stats;
 }
@@ -469,8 +483,11 @@ QString ImuManager::saveLog()
 
 void ImuManager::zeroAll()
 {
+    // No host-side zero on a HackMotion (it fuses on-device) — skip anything
+    // that isn't a Witmotion rather than asserting a control we don't have.
     for (const auto &entry : m_selected)
-        if (entry.instance) entry.instance->zeroOrientation();
+        if (auto *wt = qobject_cast<ImuInstance *>(entry.instance))
+            wt->zeroOrientation();
 }
 
 void ImuManager::setOrientationFilter(const QString &name)
@@ -481,16 +498,49 @@ void ImuManager::setOrientationFilter(const QString &name)
 
     const OrientationFilterType type =
         orientationFilterFromString(name.toUtf8().constData());
+    // The wG3 fuses on-device — there is no host filter to swap, so a
+    // HackMotion instance is simply skipped rather than handed a call it has
+    // no way to honour.
     for (const auto &entry : m_selected)
-        if (entry.instance) entry.instance->setOrientationFilter(type);
+        if (auto *wt = qobject_cast<ImuInstance *>(entry.instance))
+            wt->setOrientationFilter(type);
 }
 
 // ---------------------------------------------------------------------------
 // Private
 // ---------------------------------------------------------------------------
 
-ImuInstance *ImuManager::createInstance(const Device &device)
+ImuDeviceBase *ImuManager::createInstance(const Device &device)
 {
+    // The wG3 is a second device KIND, not a second Witmotion — output rate,
+    // orientation filter and impact sensitivity are all Witmotion concepts
+    // that simply don't exist on this device (adaptive rate, on-device
+    // fusion, no impact detector yet — see imu_device.h and hm_instance.h).
+    // Forcing them on would be asserting control we do not have, so this
+    // branch wires up only what IS generic across both kinds.
+    if (device.imuVendor == ImuVendor::HackMotion) {
+        auto *inst = new HmInstance(device, m_eventBuffer, &m_ioThread, this);
+
+        // Forward log entries to any QML log view listening to imuManager.
+        connect(inst, &ImuDeviceBase::logEntryAdded,
+                this, &ImuManager::logEntryAdded);
+
+        // Re-emit imuListChanged when connection state changes so chip colours update.
+        connect(inst, &ImuDeviceBase::imuConnectedChanged, this, [this]() {
+            emit imuListChanged();
+            emit instancesChanged(); // instanceFor() rebinds in QML
+            emit batteryChanged();   // connect/disconnect changes the aggregate min
+        });
+        connect(inst, &ImuDeviceBase::busyChanged, this, [this]() {
+            emit imuListChanged();
+            emit anyConnectingChanged();   // aggregate connect-in-flight changed
+        });
+        // Forward live battery updates to the aggregate lowBatteryPercent property.
+        connect(inst, &ImuDeviceBase::batteryPercentChanged, this, &ImuManager::batteryChanged);
+
+        return inst;
+    }
+
     auto *inst = new ImuInstance(device, m_eventBuffer, &m_ioThread, this);
 
     // Restore persisted output rate so it is applied from the very first

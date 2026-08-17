@@ -52,6 +52,21 @@ BleImuTransport::~BleImuTransport()
     teardownController();
 }
 
+BleImuTransport::UuidConfig BleImuTransport::explicitUuids(const QBluetoothUuid &service,
+                                                           const QBluetoothUuid &notify,
+                                                           const QBluetoothUuid &write,
+                                                           int minAttMtu)
+{
+    UuidConfig cfg;
+    // The fragments stay empty: usesExplicitUuids() is what selects the path, and
+    // setupService() never reads them once it is true.
+    cfg.serviceUuid = service;
+    cfg.notifyUuid  = notify;
+    cfg.writeUuid   = write;      // null == one bidirectional characteristic
+    cfg.minAttMtu   = minAttMtu;
+    return cfg;
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -90,6 +105,11 @@ void BleImuTransport::teardownController()
     }
     m_writeChar  = QLowEnergyCharacteristic{};
     m_notifyChar = QLowEnergyCharacteristic{};
+    // The MTU belongs to the link that just went away. Clearing it here (rather
+    // than leaving the last value as a souvenir) keeps mtu() describing the
+    // CURRENT attempt — connectToDevice() tears down first, so a retry never
+    // inherits the previous link's number.
+    m_mtu = -1;
 }
 
 void BleImuTransport::failConnection(const QString &message)
@@ -253,6 +273,11 @@ void BleImuTransport::doConnect()
             QOverload<QLowEnergyController::Error>::of(
                 &QLowEnergyController::errorOccurred),
             this, &BleImuTransport::onControllerError);
+    // MTU negotiation is not part of the connect handshake on every backend — the
+    // value can land after connected() and change again during service discovery.
+    // Track the signal rather than sampling once, so mtu() is never stale.
+    connect(m_controller, &QLowEnergyController::mtuChanged,
+            this,         &BleImuTransport::onMtuChanged);
 
     m_controller->connectToDevice();
 }
@@ -292,6 +317,12 @@ void BleImuTransport::onControllerConnected()
     emit diagnosticInfo(
         QStringLiteral("BLE link established in %1 ms — discovering services")
         .arg(m_connectTimer.elapsed()));
+    // Seed the MTU from the controller in case it was negotiated before we could
+    // connect to mtuChanged (or the backend never emits it at all). onMtuChanged
+    // de-dupes, so a backend that reports nothing yet (-1) stays silent here and
+    // the real value still arrives by signal.
+    onMtuChanged(m_controller->mtu());
+
     setState(State::DiscoveringServices);
     m_controller->discoverServices();
 }
@@ -314,6 +345,15 @@ void BleImuTransport::onServiceDiscoveryFinished()
     setupService();
 }
 
+void BleImuTransport::onMtuChanged(int newMtu)
+{
+    if (newMtu == m_mtu) return;
+    m_mtu = newMtu;
+    emit diagnosticInfo(QStringLiteral("ATT MTU now %1 bytes (%2 usable payload)")
+                        .arg(newMtu).arg(newMtu - 3));
+    emit mtuChanged(newMtu);
+}
+
 void BleImuTransport::onControllerError(QLowEnergyController::Error error)
 {
     // Read the errorString() BEFORE failConnection() tears the controller down.
@@ -332,13 +372,27 @@ void BleImuTransport::onControllerError(QLowEnergyController::Error error)
 
 void BleImuTransport::setupService()
 {
-    // Search by the 16-bit fragment from UuidConfig rather than an exact 128-bit
-    // match — different hardware revisions use different base UUID suffixes.
+    const bool explicitMode = m_uuids.usesExplicitUuids();
+
     QBluetoothUuid svcUuid;
-    for (const QBluetoothUuid &uuid : m_controller->services()) {
-        if (uuid.toString().contains(m_uuids.serviceFragment, Qt::CaseInsensitive)) {
-            svcUuid = uuid;
-            break;
+    if (explicitMode) {
+        // Exact 128-bit equality — see UuidConfig. A substring match here could
+        // land on the wG3's inert ISSC pipe, which shares the transparent-UART
+        // service's 49535343 base, accepts every write and answers none.
+        for (const QBluetoothUuid &uuid : m_controller->services()) {
+            if (uuid == m_uuids.serviceUuid) {
+                svcUuid = uuid;
+                break;
+            }
+        }
+    } else {
+        // Search by the 16-bit fragment from UuidConfig rather than an exact 128-bit
+        // match — different hardware revisions use different base UUID suffixes.
+        for (const QBluetoothUuid &uuid : m_controller->services()) {
+            if (uuid.toString().contains(m_uuids.serviceFragment, Qt::CaseInsensitive)) {
+                svcUuid = uuid;
+                break;
+            }
         }
     }
 
@@ -346,20 +400,37 @@ void BleImuTransport::setupService()
         QString found;
         for (const QBluetoothUuid &uuid : m_controller->services())
             found += QStringLiteral("\n  ") + uuid.toString();
+        // Name what was actually looked for. In explicit mode serviceFragment is
+        // empty, and "BLE service '' not found" is a bug report nobody can act on.
         failConnection(QStringLiteral("BLE service '%1' not found. Device has:%2")
-                       .arg(m_uuids.serviceFragment, found));
+                       .arg(explicitMode ? m_uuids.serviceUuid.toString()
+                                         : m_uuids.serviceFragment,
+                            found));
         return;
     }
 
-    // Derive characteristic UUIDs from the same base as the discovered service.
-    const QString base = svcUuid.toString().mid(1, 36); // strip Qt's surrounding braces
-    QString notifyStr = base;
-    notifyStr.replace(m_uuids.serviceFragment, m_uuids.notifyFragment, Qt::CaseInsensitive);
-    QString writeStr = base;
-    writeStr.replace(m_uuids.serviceFragment, m_uuids.writeFragment, Qt::CaseInsensitive);
-    m_resolvedServiceUuid = svcUuid;
-    m_resolvedNotifyUuid  = QBluetoothUuid(notifyStr);
-    m_resolvedWriteUuid   = QBluetoothUuid(writeStr);
+    if (explicitMode) {
+        // No derivation: the characteristics were given to us in full precisely
+        // because they do not share the service's base.
+        m_resolvedServiceUuid = svcUuid;
+        m_resolvedNotifyUuid  = m_uuids.notifyUuid;
+        // A null writeUuid declares one bidirectional characteristic (the wG3),
+        // so write resolves onto the notify UUID and both handles below end up
+        // referring to the same characteristic. Nothing downstream assumes they
+        // differ — see enableNotifications() and writeToDevice().
+        m_resolvedWriteUuid   = m_uuids.writeUuid.isNull() ? m_uuids.notifyUuid
+                                                           : m_uuids.writeUuid;
+    } else {
+        // Derive characteristic UUIDs from the same base as the discovered service.
+        const QString base = svcUuid.toString().mid(1, 36); // strip Qt's surrounding braces
+        QString notifyStr = base;
+        notifyStr.replace(m_uuids.serviceFragment, m_uuids.notifyFragment, Qt::CaseInsensitive);
+        QString writeStr = base;
+        writeStr.replace(m_uuids.serviceFragment, m_uuids.writeFragment, Qt::CaseInsensitive);
+        m_resolvedServiceUuid = svcUuid;
+        m_resolvedNotifyUuid  = QBluetoothUuid(notifyStr);
+        m_resolvedWriteUuid   = QBluetoothUuid(writeStr);
+    }
 
     m_service = m_controller->createServiceObject(m_resolvedServiceUuid, this);
     if (!m_service) {
@@ -379,8 +450,63 @@ void BleImuTransport::setupService()
     m_service->discoverDetails();
 }
 
+bool BleImuTransport::checkMtuRequirement()
+{
+    if (m_uuids.minAttMtu <= 0)
+        return true;                      // device doesn't care — the Witmotion path
+
+    const int negotiated = m_mtu;
+
+    // Some backends only produce an MTU once ATT traffic has flowed. We are past
+    // service-detail discovery here, so a non-positive value means the platform
+    // never told us — NOT that the MTU is small. Say so and let the link proceed:
+    // failing on a number we could not read would break links that work.
+    if (negotiated <= 0) {
+        emit diagnosticInfo(
+            QStringLiteral("ATT MTU not reported by this platform — cannot verify the "
+                           "%1-byte minimum this device needs; continuing")
+                .arg(m_uuids.minAttMtu));
+        return true;
+    }
+
+    if (negotiated < m_uuids.minAttMtu) {
+        // Its own failure mode, deliberately not folded into the generic connect
+        // error: the link came up, GATT resolved, the characteristics are right —
+        // only the payload size is wrong, and NOTHING the application can do fixes
+        // it, because no Qt platform exposes an MTU request. Emit the typed signal
+        // for callers that can react, then funnel through failConnection() so the
+        // teardown is the same as every other failure and the message alone is
+        // enough to diagnose it from a log.
+        emit mtuTooSmall(negotiated, m_uuids.minAttMtu);
+        failConnection(QStringLiteral(
+            "ATT MTU too small: negotiated %1 bytes (%2 usable payload), this device "
+            "requires at least %3. Its longer frames would arrive truncated and parse "
+            "as garbage. The link is otherwise healthy and no application-side request "
+            "can raise the MTU — this is a platform/adapter limitation.")
+            .arg(negotiated).arg(negotiated - 3).arg(m_uuids.minAttMtu));
+        return false;
+    }
+
+    emit diagnosticInfo(QStringLiteral("ATT MTU %1 bytes meets the %2-byte minimum")
+                        .arg(negotiated).arg(m_uuids.minAttMtu));
+    return true;
+}
+
 void BleImuTransport::enableNotifications()
 {
+    // Gate on the MTU here rather than at connected(): by this point service
+    // details have been discovered, so ATT traffic has flowed and every backend
+    // that will ever report an MTU has reported one. It is also still BEFORE
+    // gattReady(), so the owner never sends an init command over a link whose
+    // replies could not fit. checkMtuRequirement() has already failed the
+    // connection when it returns false.
+    if (!checkMtuRequirement())
+        return;
+
+    // These may resolve to the SAME characteristic — the explicit form allows one
+    // bidirectional characteristic carrying Notify | Write | WriteNoResponse at
+    // once. Everything below reads properties off whichever handle it needs, so a
+    // combined characteristic satisfies both the notify checks and writeToDevice().
     m_notifyChar = m_service->characteristic(m_resolvedNotifyUuid);
     m_writeChar  = m_service->characteristic(m_resolvedWriteUuid);
 
@@ -459,10 +585,39 @@ void BleImuTransport::writeToDevice(const QByteArray &data)
     if (!m_service || !m_writeChar.isValid())
         return;
 
+    // m_writeChar may be the very same characteristic as m_notifyChar (explicit
+    // single-characteristic devices). That is harmless: the mode below is chosen
+    // from this handle's own properties, and a characteristic carrying
+    // Notify | Write | WriteNoResponse simply takes the no-response branch, which
+    // is what a transparent-UART pipe wants anyway.
     const QLowEnergyService::WriteMode mode =
         (m_writeChar.properties() & QLowEnergyCharacteristic::WriteNoResponse)
             ? QLowEnergyService::WriteWithoutResponse
             : QLowEnergyService::WriteWithResponse;
+
+    m_service->writeCharacteristic(m_writeChar, data, mode);
+}
+
+void BleImuTransport::writeToDevice(const QByteArray &data, bool withoutResponse)
+{
+    if (!m_service || !m_writeChar.isValid())
+        return;
+
+    // Deliberately NOT implemented in terms of the overload above, and the
+    // overload above deliberately unchanged: the Witmotion path goes through it
+    // on every command and must keep behaving exactly as it does today.
+    const QLowEnergyCharacteristic::PropertyTypes props = m_writeChar.properties();
+    const bool canWithoutResponse = props & QLowEnergyCharacteristic::WriteNoResponse;
+    const bool canWithResponse    = props & QLowEnergyCharacteristic::Write;
+
+    // Fall back to whatever the characteristic does support: a write issued in a
+    // mode the characteristic lacks is rejected by the stack, so honouring an
+    // unsupported preference would drop the command rather than downgrade it.
+    const QLowEnergyService::WriteMode mode = withoutResponse
+        ? (canWithoutResponse ? QLowEnergyService::WriteWithoutResponse
+                              : QLowEnergyService::WriteWithResponse)
+        : (canWithResponse    ? QLowEnergyService::WriteWithResponse
+                              : QLowEnergyService::WriteWithoutResponse);
 
     m_service->writeCharacteristic(m_writeChar, data, mode);
 }

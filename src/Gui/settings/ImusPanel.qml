@@ -81,6 +81,12 @@ Item {
         readonly property bool isExcluded:  appSettings.imuExcluded.indexOf(imuData.id) >= 0
         readonly property bool testOpen:    root.openTestId === imuData.id
 
+        // A HackMotion wG3 is a different device KIND, not a Witmotion variant:
+        // it has two sensor units instead of one, an adaptive (not settable)
+        // output rate, on-device (not host-side) fusion, and no host-side zero.
+        // Every branch below on this flag exists because one of those is true.
+        readonly property bool isHackMotion: imuData.vendor === "hackmotion"
+
         // Capabilities strip cell model — reactive to live battery data.
         readonly property var capsCells: {
             var sensors = []
@@ -283,6 +289,25 @@ Item {
                             id: placementCombo
                             implicitWidth: Theme.sp(200)
 
+                            // A HackMotion's placement is not the coach's to
+                            // choose. The wG3 is one peripheral carrying two
+                            // units on a cable — wire block 0 is the lower arm,
+                            // block 1 the palm — and that order is fixed by the
+                            // wiring, so which anatomical segments it covers is
+                            // a property of the hardware rather than a setting.
+                            // It is pinned to slot A and the control is locked.
+                            //
+                            // ⚠ INTERIM. Slot A alone under-describes it: one
+                            // wG3 actually fills A (lead forearm) AND B (lead
+                            // hand). This map is keyed by DEVICE id and cannot
+                            // say that — a device maps to exactly one letter.
+                            // Phase C re-keys placement by UNIT
+                            // ("<deviceId>#lowerArm" / "#palm") so both slots
+                            // can be filled by the one device; until then slot A
+                            // is the anchor and the wizard's slot-B row stays
+                            // unfilled.
+                            enabled: !imuRow.isHackMotion
+
                             readonly property var placementOptions: [
                                 { label: qsTr("— Unassigned —"),                  value: ""      },
                                 { label: qsTr("A — Thorax / Lead Wrist"),         value: "A"     },
@@ -314,6 +339,16 @@ Item {
                             }
 
                             Component.onCompleted: {
+                                // A HackMotion pins itself to slot A, writing it
+                                // through if it is not already stored, so the
+                                // binding exists whether or not anyone opened
+                                // this panel to set it.
+                                if (imuRow.isHackMotion
+                                        && appSettings.imuPlacement[imuData.id] !== "A") {
+                                    var m = appSettings.imuPlacement
+                                    m[imuData.id] = "A"
+                                    appSettings.imuPlacement = m
+                                }
                                 var saved = appSettings.imuPlacement[imuData.id] || ""
                                 for (var i = 0; i < placementOptions.length; i++) {
                                     if (placementOptions[i].value === saved) { currentIndex = i; break }
@@ -341,7 +376,14 @@ Item {
                     }
 
                     // ── Output rate chips ────────────────────────────────────
+                    // Witmotion only: the wG3's output rate is adaptive, not a
+                    // host-settable register (hm_instance.h) — offering a chip
+                    // row that silently does nothing would be worse than
+                    // offering none, so a HackMotion shows the MEASURED rate
+                    // instead (the readout that already exists at :744-745,
+                    // driven by inst.dataRateHz).
                     ColumnLayout {
+                        visible: !imuRow.isHackMotion
                         spacing: Theme.sp(4)
                         Layout.alignment: Qt.AlignTop
 
@@ -416,6 +458,35 @@ Item {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // ── Measured rate (HackMotion only) ──────────────────────
+                    // No chips: there is nothing here to SET, only to read. The
+                    // wG3 adapts its own rate up to ~799.2 Hz internally
+                    // (hm_instance.h §6.6); this is the same measured dataRateHz
+                    // the live-test readout shows once the test panel is open.
+                    ColumnLayout {
+                        visible: imuRow.isHackMotion
+                        spacing: Theme.sp(4)
+                        Layout.alignment: Qt.AlignTop
+
+                        Text {
+                            text:                qsTr("OUTPUT RATE")
+                            font.family:         Theme.fontData
+                            font.pixelSize:      Theme.fontSzMicro
+                            font.letterSpacing:  Theme.trackingMicro
+                            font.capitalization: Font.AllUppercase
+                            color:               Theme.colorText3
+                        }
+
+                        Text {
+                            text: (imuRow.isConnected && imuRow.inst && imuRow.inst.dataRateHz > 0)
+                                      ? (imuRow.inst.dataRateHz.toFixed(1) + qsTr(" Hz (adaptive)"))
+                                      : qsTr("Adaptive — not set")
+                            font.family:    Theme.fontData
+                            font.pixelSize: Theme.fontSzBody2
+                            color:          Theme.colorText2
                         }
                     }
 
@@ -679,14 +750,29 @@ Item {
 
                     // ImuVizView — loaded only when test panel is open to avoid
                     // creating GPU contexts for every row at startup.
+                    //
+                    // ImuVizView is duck-typed: it documents itself as taking
+                    // "any QtObject with quat*/accel* properties" and resolves
+                    // them by NAME through the metaobject, so it needs no change
+                    // to drive either an ImuInstance or an HmUnit.
                     Item {
+                        visible: !imuRow.isHackMotion
                         width:  Theme.sp(220)
                         height: Theme.sp(220)
                         Layout.alignment: Qt.AlignTop
 
                         Loader {
                             anchors.fill: parent
+                            // ⚠ GATED ON active, NOT JUST THE PARENT'S visible.
+                            // A hidden item still instantiates its children and
+                            // still evaluates their bindings, so leaving this
+                            // active for a HackMotion bound `controller` to an
+                            // HmInstance — which has no quat*/accel* properties
+                            // of its own (they live per HmUnit) — and every
+                            // frame produced "Unable to assign [undefined] to
+                            // double" from inside ImuVizView.
                             active:  imuRow.testOpen && imuRow.inst !== null
+                                     && !imuRow.isHackMotion
                             visible: imuRow.isConnected
                             sourceComponent: Component {
                                 ImuVizView {
@@ -711,6 +797,75 @@ Item {
                                 font.family:    Theme.fontData
                                 font.pixelSize: Theme.fontSzMicro
                                 color:          Theme.colorText3
+                            }
+                        }
+                    }
+
+                    // ── Two orientation cubes (HackMotion only) ───────────────
+                    // One wG3 peripheral, two sensor units on a fixed cable
+                    // order (hm_instance.h) — a single viz would have to pick
+                    // one and hide the other, so this drives ImuVizView twice,
+                    // once per HmUnit, side by side.
+                    Row {
+                        visible: imuRow.isHackMotion
+                        spacing: Theme.sp(10)
+                        Layout.alignment: Qt.AlignTop
+
+                        Repeater {
+                            model: imuRow.isHackMotion && imuRow.inst
+                                       ? [ { obj: imuRow.inst.unitLowerArm, label: qsTr("Lower arm") },
+                                           { obj: imuRow.inst.unitPalm,     label: qsTr("Palm") } ]
+                                       : []
+
+                            delegate: ColumnLayout {
+                                required property var modelData
+                                spacing: Theme.sp(4)
+
+                                Text {
+                                    text:                modelData.label
+                                    font.family:         Theme.fontData
+                                    font.pixelSize:      Theme.fontSzMicro
+                                    font.letterSpacing:  Theme.trackingMicro
+                                    font.capitalization: Font.AllUppercase
+                                    color:               Theme.colorText3
+                                }
+
+                                Item {
+                                    width:  Theme.sp(105)
+                                    height: Theme.sp(105)
+
+                                    Loader {
+                                        anchors.fill: parent
+                                        active:  imuRow.testOpen && modelData.obj !== null
+                                        visible: imuRow.isConnected
+                                        sourceComponent: Component {
+                                            ImuVizView {
+                                                anchors.fill: parent
+                                                controller:   modelData.obj
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill:  parent
+                                        color:         Theme.colorBg
+                                        border.width:  1
+                                        border.color:  Theme.colorBorderMid
+                                        radius:        Theme.radius
+                                        visible:       !imuRow.isConnected
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text:           qsTr("Not connected")
+                                            font.family:    Theme.fontData
+                                            font.pixelSize: Theme.fontSzMicro
+                                            color:          Theme.colorText3
+                                            wrapMode:       Text.WordWrap
+                                            horizontalAlignment: Text.AlignHCenter
+                                            width: parent.width - Theme.sp(12)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -805,7 +960,14 @@ Item {
                         // ── Gimbal drop counter ───────────────────────────────
                         RowLayout {
                             Layout.fillWidth: true
+                            // ⚠ The isHackMotion term is load-bearing, not
+                            // belt-and-braces: gimbalDropCount is a Witmotion
+                            // Euler-gimbal artefact and does not exist on an
+                            // HmInstance, so without it the child Text below
+                            // still binds to undefined even while this row is
+                            // hidden — a hidden item evaluates its bindings.
                             visible: imuRow.isConnected && imuRow.inst !== null
+                                     && !imuRow.isHackMotion
                                      && imuRow.inst.gimbalDropCount > 0
                             spacing: Theme.sp(6)
 
@@ -816,7 +978,8 @@ Item {
                                 color:          Theme.colorText3
                             }
                             Text {
-                                text:           imuRow.inst ? imuRow.inst.gimbalDropCount : 0
+                                text:           (imuRow.inst && !imuRow.isHackMotion)
+                                                    ? imuRow.inst.gimbalDropCount : 0
                                 font.family:    Theme.fontData
                                 font.pixelSize: Theme.fontSzMicro
                                 color:          Theme.colorWarn
@@ -831,7 +994,14 @@ Item {
                         }
 
                         // ── Euler angles ──────────────────────────────────────
+                        // Witmotion: quatW..Z live directly on inst. A
+                        // HackMotion has no such properties on the instance
+                        // itself — they live per unit (HmUnit) — so binding
+                        // this block to inst.quatW would resolve to undefined
+                        // rather than a real quantity; show one tile row PER
+                        // UNIT instead of leaving it bound to nothing.
                         ColumnLayout {
+                            visible: !imuRow.isHackMotion
                             Layout.fillWidth:    true
                             Layout.bottomMargin: Theme.sp(8)
                             spacing: Theme.sp(4)
@@ -850,7 +1020,15 @@ Item {
                                 spacing: Theme.sp(6)
 
                                 Repeater {
-                                    model: 4
+                                    // ⚠ 0 rather than 4 for a HackMotion. The
+                                    // enclosing ColumnLayout is already hidden
+                                    // for it, but hiding does not stop a
+                                    // delegate instantiating or its bindings
+                                    // running — and these read inst.quatW..Z,
+                                    // which an HmInstance does not have (they
+                                    // live per HmUnit), so .toFixed() was being
+                                    // called on undefined four times a row.
+                                    model: imuRow.isHackMotion ? 0 : 4
 
                                     delegate: Rectangle {
                                         required property int index
@@ -895,6 +1073,86 @@ Item {
                             }
                         }
 
+                        // HackMotion: one QUATERNION row per unit, reading the
+                        // HmUnit directly rather than a non-existent inst.quat*.
+                        ColumnLayout {
+                            visible: imuRow.isHackMotion
+                            Layout.fillWidth:    true
+                            Layout.bottomMargin: Theme.sp(8)
+                            spacing: Theme.sp(8)
+
+                            Repeater {
+                                model: imuRow.isHackMotion && imuRow.inst
+                                           ? [ { obj: imuRow.inst.unitLowerArm, label: qsTr("Lower arm") },
+                                               { obj: imuRow.inst.unitPalm,     label: qsTr("Palm") } ]
+                                           : []
+
+                                delegate: ColumnLayout {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    spacing: Theme.sp(4)
+
+                                    Text {
+                                        text:                qsTr("QUATERNION — ") + modelData.label
+                                        font.family:         Theme.fontData
+                                        font.pixelSize:      Theme.fontSzMicro
+                                        font.letterSpacing:  Theme.trackingMicro
+                                        font.capitalization: Font.AllUppercase
+                                        color:               Theme.colorText3
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: Theme.sp(6)
+
+                                        Repeater {
+                                            model: 4
+
+                                            delegate: Rectangle {
+                                                required property int index
+
+                                                Layout.fillWidth: true
+                                                height: Theme.sp(60)
+                                                color:  Theme.colorBg2
+                                                radius: Theme.radius
+                                                border.width: 1
+                                                border.color: Theme.colorBorderMid
+
+                                                ColumnLayout {
+                                                    anchors.fill:          parent
+                                                    anchors.topMargin:     Theme.sp(8)
+                                                    anchors.bottomMargin:  Theme.sp(12)
+                                                    anchors.leftMargin:    Theme.sp(8)
+                                                    anchors.rightMargin:   Theme.sp(8)
+                                                    spacing: Theme.sp(2)
+
+                                                    Text {
+                                                        text: ["W", "X", "Y", "Z"][index]
+                                                        font.family:         Theme.fontData
+                                                        font.pixelSize:      Theme.fontSzMicro
+                                                        font.letterSpacing:  Theme.trackingMicro
+                                                        font.capitalization: Font.AllUppercase
+                                                        color:               Theme.colorText3
+                                                    }
+                                                    Text {
+                                                        text: [
+                                                            (modelData.obj ? modelData.obj.quatW.toFixed(4) : "1.0000"),
+                                                            (modelData.obj ? modelData.obj.quatX.toFixed(4) : "0.0000"),
+                                                            (modelData.obj ? modelData.obj.quatY.toFixed(4) : "0.0000"),
+                                                            (modelData.obj ? modelData.obj.quatZ.toFixed(4) : "0.0000")
+                                                        ][index]
+                                                        font.family:    Theme.fontData
+                                                        font.pixelSize: Theme.fontSzHeading
+                                                        color:          Theme.colorText
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // ── Calibration tools ─────────────────────────────────
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -913,9 +1171,13 @@ Item {
                             Row {
                                 spacing: Theme.sp(6)
 
-                                // Zero orientation
+                                // Zero orientation — Witmotion only. There is no
+                                // host-side zero on a HackMotion (imu_device.h);
+                                // a control that silently does nothing is worse
+                                // than no control.
                                 Rectangle {
                                     id: zeroBtn
+                                    visible: !imuRow.isHackMotion
                                     width:  zeroLabel.implicitWidth + Theme.sp(20)
                                     height: Theme.sp(24)
                                     radius: Theme.radius

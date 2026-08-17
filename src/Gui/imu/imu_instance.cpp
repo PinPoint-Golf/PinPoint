@@ -41,7 +41,7 @@ ImuInstance::ImuInstance(const Device &device,
                          pinpoint::EventBuffer *buffer,
                          QThread *ioThread,
                          QObject *parent)
-    : QObject(parent)
+    : ImuDeviceBase(parent)
     , m_eventBuffer(buffer)
     , m_ioThread(ioThread)
     , m_imu(new WT9011DCL_BLE)        // no parent — lives on the I/O thread
