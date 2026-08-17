@@ -202,7 +202,7 @@ jobs:
       - name: Configure + build (Release, core only)
         shell: cmd
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%QT_ROOT_DIR%" || exit /b 1
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPP_SHIPPING_BUILD=ON -DCMAKE_PREFIX_PATH="%QT_ROOT_DIR%" || exit /b 1
           cmake --build build --target PinPointStudio || exit /b 1
 
       - name: Package -core installer (UNSIGNED)

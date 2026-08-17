@@ -138,6 +138,10 @@ function(pp_require_hackmotion)
         message(STATUS "PinPointTests: libhackmotion from ${_hm_src}")
         set(FETCHCONTENT_SOURCE_DIR_HACKMOTION "${_hm_src}" CACHE PATH "" FORCE)
     else()
+        # Clear it, don't just skip setting it: the branch above writes FORCE, so
+        # a build dir that once found a local source would keep using that path
+        # after it moved away or -DPP_HACKMOTION_DIR was pointed elsewhere.
+        unset(FETCHCONTENT_SOURCE_DIR_HACKMOTION CACHE)
         message(STATUS "PinPointTests: libhackmotion not found locally — fetching main")
     endif()
 

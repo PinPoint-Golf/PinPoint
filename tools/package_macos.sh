@@ -428,7 +428,8 @@ else
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX" \
               -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
-              -DPINPOINT_INSTALLED=ON
+              -DPINPOINT_INSTALLED=ON \
+              -DPP_SHIPPING_BUILD=ON
         log "building (-j$JOBS)"
         cmake --build "$BUILD_DIR" --parallel "$JOBS"
     else

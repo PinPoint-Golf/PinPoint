@@ -87,7 +87,7 @@ UPDATE_INFO="gh-releases-zsync|${GH_OWNER}|${GH_REPO}|latest|PinPointStudio-*-x8
 # ── 2. configure + build Release ─────────────────────────────────────────────────
 if [[ "$DO_BUILD" == 1 ]]; then
     log "configuring Release in $BUILD_DIR"
-    cmake_args=(-S "$REPO_ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release)
+    cmake_args=(-S "$REPO_ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPP_SHIPPING_BUILD=ON)
     [[ -n "${CMAKE_PREFIX:-}" ]] && cmake_args+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX")
     cmake "${cmake_args[@]}"
     log "building (-j$JOBS)"

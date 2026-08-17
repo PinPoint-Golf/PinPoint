@@ -57,6 +57,45 @@ include(GNUInstallDirs)
 # unins000.exe probe today, this is the portable knob.
 option(PINPOINT_INSTALLED "Mark this as a packaged/installed build" OFF)
 
+# ── Shipping-build assertion ─────────────────────────────────────────────────
+# Separate from PINPOINT_INSTALLED on purpose. That one is a RUNTIME marker —
+# it compiles a define in and the update engines key off it — and only the macOS
+# script sets it, because flipping it on Linux/Windows would change how those
+# builds decide whether they may update themselves. This one has no runtime
+# effect whatsoever: it exists so a configure can be told "the output of this
+# build is going to be handed to someone", and be checked.
+#
+# What it guards is a dependency we do not compile ourselves. libhackmotion is
+# embedded (§ the block before qt_add_executable), so it is built with THIS
+# project's CMAKE_BUILD_TYPE — there is no separate library build to get right,
+# and its own `release` preset cannot apply to an add_subdirectory. Release is
+# therefore what strips it, and the two ways that silently stops being true are
+# a packaging path edited to RelWithDebInfo (-> 15 DWARF compile units and a
+# 348 KB archive instead of 112 KB) and a configure with no build type at all,
+# which is worse: no -O, no NDEBUG, and nothing warns. Both now fail loudly.
+option(PP_SHIPPING_BUILD "This configure produces a distributable artefact — assert it is Release" OFF)
+
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    message(FATAL_ERROR
+        "No CMAKE_BUILD_TYPE set.\n"
+        "A single-config generator with an empty build type compiles everything — this "
+        "project AND the embedded libhackmotion — with no optimisation and no NDEBUG, "
+        "and nothing downstream reports it. Pass one explicitly:\n"
+        "  -DCMAKE_BUILD_TYPE=Debug     for development\n"
+        "  -DCMAKE_BUILD_TYPE=Release   for anything you intend to ship")
+endif()
+
+if(PP_SHIPPING_BUILD AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(FATAL_ERROR
+        "PP_SHIPPING_BUILD=ON but CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}, not Release.\n"
+        "This build is packaged and handed to someone, so it must be Release: that is "
+        "what builds the embedded libhackmotion the way its `release` preset does "
+        "(-O3 -DNDEBUG, no -g). RelWithDebInfo ships the library's full DWARF and the "
+        "source layout of this machine, and does so silently.\n"
+        "To debug an optimised libhackmotion, build the LIBRARY on its own with its "
+        "`rel` preset — do not change the build type of a shipping configure.")
+endif()
+
 # ── Windows runtime bundling helper ───────────────────────────────────────────
 # Copy a list of DLLs/files next to the dev executable (POST_BUILD) AND register
 # them for install/packaging under bin/, tagged with a CPack component. Windows
@@ -197,6 +236,21 @@ FetchContent_MakeAvailable(eigen)
 # packaging paths. Placed here (before qt_add_executable) so hackmotion_SOURCE_DIR
 # is resolved for the provenance block and the offline-target function below.
 #
+# ⚠ BUILD TYPE: the library's own CMakePresets.json — including its `release`
+# preset — is INERT here. Presets apply to a top-level configure only, and this
+# is an add_subdirectory, so the library compiles at whatever CMAKE_BUILD_TYPE
+# this project was configured with. Release therefore already yields exactly what
+# that preset yields: measured on this source, -O3 -DNDEBUG and no -g, 112 KB
+# with zero DWARF compile units. Every path that produces a distributable passes
+# -DCMAKE_BUILD_TYPE=Release — tools/package_macos.sh, tools/package_appimage.sh
+# and packaging/build_installer.ps1, plus the direct configure in the Windows leg
+# of .github/workflows/release.yml (its macOS and Linux legs run those scripts) —
+# and PP_SHIPPING_BUILD now makes each of them assert it, so shipping the debug
+# info takes a deliberate change. Do NOT switch a release
+# path to RelWithDebInfo to get a symbolised stack: it lifts the archive to 348 KB
+# / 15 compile units and the failure is silent. Build the LIBRARY standalone with
+# its `rel` preset instead — that is the question that preset exists to answer.
+#
 # ⚠ SOURCE RESOLUTION: a sibling ../libhackmotion checkout WINS over GitHub.
 # The library is under active co-development and its fixes are made and pushed
 # from that clone, so the build follows it directly — CMake performs no download
@@ -213,6 +267,13 @@ if(PP_HACKMOTION_LOCAL AND EXISTS "${_hm_local}/CMakeLists.txt")
         "Local libhackmotion checkout to build against instead of fetching" FORCE)
     set(_hm_origin "local ${_hm_local}")
 else()
+    # Clear the cache entry rather than merely not setting it. It was written
+    # FORCE above, so a build dir that once resolved the sibling checkout still
+    # carries the path — and FetchContent would keep honouring it, making
+    # -DPP_HACKMOTION_LOCAL=OFF a silent no-op on an existing build dir. That
+    # switch exists to check a local fix against upstream main, so it has to
+    # actually reach upstream main.
+    unset(FETCHCONTENT_SOURCE_DIR_HACKMOTION CACHE)
     unset(_hm_local)
     set(_hm_origin "github main")
 endif()
