@@ -75,37 +75,41 @@ Item {
     }
 
     // ── Per-slot IMU bindings ─────────────────────────────────────────────────
-    // Resolved by slot assignment (A/B/C from appSettings.imuPlacement) so the
-    // correct ImuInstance drives each segment regardless of device-ID ordering.
-    // The `var _dep = imuManager.instances` forces re-evaluation when any
-    // instance is created or destroyed (instanceFor() is a Q_INVOKABLE, not a
-    // reactive property, so the explicit dep is required).
+    // Resolved by SLOT, not by walking imuDeviceList against a scalar placement
+    // map — imuManager.instanceForSlot() is the one canonical resolver (Phase C
+    // unit-keyed placement: a Witmotion's key is still its bare device id, but a
+    // HackMotion's key is "<deviceId>#lowerArm" / "<deviceId>#palm", so a single
+    // wG3 can answer to BOTH slot A and slot B). instanceForSlot() returns the
+    // per-UNIT object a viz binding wants — an HmUnit for a HackMotion slot, an
+    // ImuInstance for a Witmotion one — never the owning peripheral, which is
+    // what quatApplyCalib() below actually reads (quatW/X/Y/Z, anatCalibrated,
+    // anatQuat, calibrated, calibTransform all live on the unit, not the device).
+    // `var _dep = imuManager.instances` AND `var _dep2 = appSettings.imuPlacement`
+    // force re-evaluation when either changes: instanceForSlot() is a
+    // Q_INVOKABLE, not a reactive property, so neither dependency is picked up
+    // automatically.
+    //
+    // ⚠ PHASE C HAS NO ANATOMICAL FRAME for a HackMotion unit. HmUnit::
+    // anatCalibrated() is false and anatQuat() is identity until Phase D solves
+    // the per-unit constant rotation (hm_instance.h:127-134) — quatApplyCalib()
+    // already handles that correctly by parking an uncalibrated segment at rest,
+    // so a HackMotion-driven slot just sits still rather than showing a live
+    // (but wrong/mirrored) avatar. That is correct and honest, not a bug: do not
+    // "fix" it here by inventing a transform.
     readonly property QtObject imuSlotA: {   // Wrist (forearm) — calibrated
-        var _dep      = imuManager.instances
-        var placement = appSettings.imuPlacement
-        var list      = imuManager.imuDeviceList
-        for (var i = 0; i < list.length; ++i)
-            if (placement[list[i].id] === "A")
-                return imuManager.instanceFor(list[i].id)
-        return null
+        var _dep  = imuManager.instances
+        var _dep2 = appSettings.imuPlacement
+        return imuManager.instanceForSlot("A")
     }
     readonly property QtObject imuSlotB: {   // Hand
-        var _dep      = imuManager.instances
-        var placement = appSettings.imuPlacement
-        var list      = imuManager.imuDeviceList
-        for (var i = 0; i < list.length; ++i)
-            if (placement[list[i].id] === "B")
-                return imuManager.instanceFor(list[i].id)
-        return null
+        var _dep  = imuManager.instances
+        var _dep2 = appSettings.imuPlacement
+        return imuManager.instanceForSlot("B")
     }
     readonly property QtObject imuSlotC: {   // Upper arm (optional)
-        var _dep      = imuManager.instances
-        var placement = appSettings.imuPlacement
-        var list      = imuManager.imuDeviceList
-        for (var i = 0; i < list.length; ++i)
-            if (placement[list[i].id] === "C")
-                return imuManager.instanceFor(list[i].id)
-        return null
+        var _dep  = imuManager.instances
+        var _dep2 = appSettings.imuPlacement
+        return imuManager.instanceForSlot("C")
     }
 
     // ── Quaternion helpers ────────────────────────────────────────────────────
@@ -359,12 +363,21 @@ Item {
             ]
             delegate: Row {
                 spacing: Theme.sp(6)
+                // ⚠ CONNECTEDNESS IS A DEVICE PROPERTY, SO THIS ASKS THE DEVICE.
+                // The imuSlotA/B/C bindings above hold the per-UNIT object, which for
+                // a HackMotion is an HmUnit — and an HmUnit has no imuConnected at
+                // all. Reading it there yields `undefined`, and `inst !== null &&
+                // undefined` is `undefined` rather than false, which Qt reports as
+                // "Unable to assign [undefined] to bool" once per evaluation and
+                // leaves the dot stuck at its default. deviceForSlot() returns the
+                // peripheral, which is what "is there a sensor live on this slot"
+                // actually means for either device kind.
                 property bool live: {
-                    var _dep = imuManager.instances
-                    var inst = index === 0 ? root.imuSlotA
-                             : index === 1 ? root.imuSlotB
-                             : root.imuSlotC
-                    return inst !== null && inst.imuConnected
+                    var _dep  = imuManager.instances
+                    var _dep2 = appSettings.imuPlacement
+                    var slot  = index === 0 ? "A" : index === 1 ? "B" : "C"
+                    var dev   = imuManager.deviceForSlot(slot)
+                    return dev !== null && dev.imuConnected === true
                 }
                 Rectangle {
                     width: Theme.sp(6); height: Theme.sp(6); radius: Theme.sp(3)

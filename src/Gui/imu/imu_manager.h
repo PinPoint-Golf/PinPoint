@@ -133,6 +133,46 @@ public:
     // HackMotion — see ImuEntry), or nullptr if not selected.
     Q_INVOKABLE QObject *instanceFor(const QString &deviceId) const;
 
+    // ── Placement (slot) resolution — the one canonical implementation ────────
+    //
+    // Unit-keyed placement. AppSettings::imuPlacement maps a PLACEMENT KEY to a
+    // slot letter: the bare device id for a Witmotion, HmUnit::unitId()
+    // ("<deviceId>#lowerArm" / "<deviceId>#palm") for a HackMotion.
+    //
+    // WHY THIS LIVES HERE AND NOWHERE ELSE. Before Phase C the rule was "the key
+    // IS the device id", so every consumer (ArmVizView.qml, ImuCalibrationFlow,
+    // ScreenSessionWizard, live_wrist_angles.cpp, shot_processor) walked
+    // imuDeviceList() itself and compared placement[dev.id] to a letter — the
+    // same six-line loop copied six times. A device that fills TWO slots breaks
+    // every one of those copies in a way that reads as "no sensor" rather than as
+    // an error, so the loop is written once, here, and the copies call it.
+    //
+    // ⚠ instanceForSlot() returns the object the VIZ views bind to, which for a
+    // HackMotion is the per-unit HmUnit — that is the whole reason HmUnit exists
+    // (hm_instance.h:46-53). deviceForSlot() returns the PERIPHERAL, which is
+    // what device-level operations (calibration, connect, battery) need. Two
+    // functions because they are two different objects for one slot, and
+    // returning the wrong one is a mistake nothing catches: HmUnit and HmInstance
+    // both answer to QML by name, so an ImuVizView bound to the peripheral simply
+    // shows a cube that never moves, and a calibration flow handed a unit finds
+    // none of the methods it wanted at runtime rather than at build time.
+    Q_INVOKABLE QObject *instanceForSlot(const QString &slot) const;  // HmUnit* or ImuInstance*, or nullptr
+    Q_INVOKABLE QObject *deviceForSlot(const QString &slot) const;    // the owning ImuDeviceBase*, or nullptr
+    // The raw persisted key holding this slot, "" when the slot is unassigned.
+    // Resolves without a live instance — the start wizard reads placement before
+    // anything has connected, which is exactly why these are not derived from
+    // instances().
+    Q_INVOKABLE QString  placementKeyForSlot(const QString &slot) const;
+    Q_INVOKABLE QString  deviceIdForSlot(const QString &slot) const;
+    // "Lower arm" / "Palm" for a HackMotion unit key; "" for a Witmotion, whose
+    // device IS the segment and has no sub-unit to name.
+    Q_INVOKABLE QString  unitLabelForSlot(const QString &slot) const;
+
+    // Writes placement for a whole device, so no caller has to know the keying
+    // rule. Empty slot = unassign. See the implementation for why a HackMotion
+    // accepts only "A" or "".
+    Q_INVOKABLE void     setPlacementForDevice(const QString &deviceId, const QString &slot);
+
     // Snapshot of live per-device stats for monitoring purposes.
     // Avoids exposing ImuDeviceBase to callers that only need metrics.
     struct ImuDeviceStats {
@@ -209,6 +249,24 @@ private:
     // swingDetectionSensitivity ("Low"/"Medium"/"High") → detector threshold scale.
     static float impactScaleFor(const QString &sensitivity);
 
+    // Rewrites Phase A's interim bare-"<deviceId>" placement entry for a wG3 into
+    // the two unit keys it actually occupies. Idempotent, and a no-op for any
+    // device that is not a HackMotion.
+    //
+    // ⚠ RUNS ON THE DEVICE-LIST PATH, NOT ON CONNECT. The start wizard reads
+    // placement before anything connects, so a migration hung off createInstance()
+    // would leave an enumerated-but-unconnected wG3 reading as "slot A filled,
+    // slot B unfilled" — which is precisely the wrong picture Phase C exists to
+    // correct. See the call sites in the constructor.
+    void migrateHackMotionPlacement(const Device &device);
+
+    // Is this device id a HackMotion? Answered from DeviceEnumerator, which never
+    // forgets a device it has registered, so this stays true for a connected wG3
+    // that has stopped advertising. An id unknown to the enumerator answers false
+    // (i.e. "key it like a Witmotion"), which is the historical meaning of every
+    // persisted entry that predates the wG3.
+    bool isHackMotionDevice(const QString &deviceId) const;
+
     // True if the device appeared in the most recently completed BLE scan, OR is
     // currently selected (a connected device stops advertising, so it would
     // otherwise wrongly vanish). Drives the "present" flag in the chip lists —
@@ -239,6 +297,12 @@ private:
     // does the same sync for cameras).
     QStringList m_sessionExcluded;
     QStringList m_lastGlobalExcluded;
+
+    // Placement keys already reported as "bare device id on a HackMotion" by
+    // instanceForSlot(). Mutable because that resolver is const and is called from
+    // a ~30 Hz readout timer: without the memo the warning would be a log flood
+    // rather than a message. One line per offending key is enough to act on.
+    mutable QSet<QString> m_warnedBarePlacementKeys;
 
     // Last BLE discovery error surfaced to QML (empty = healthy). Helper keeps the
     // set-and-notify in one place.

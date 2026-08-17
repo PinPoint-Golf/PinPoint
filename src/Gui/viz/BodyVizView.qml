@@ -124,6 +124,137 @@ Item {
     property quaternion trailArmOverrideRotation:     Qt.quaternion(1, 0, 0, 0)
     property quaternion trailForeArmOverrideRotation: Qt.quaternion(1, 0, 0, 0)
 
+    // ── Device-native (HackMotion) calibration guide poses ────────────────────
+    // The wG3 computes its own calibration ON-DEVICE from a two-pose routine
+    // (libhackmotion specification.md §8.2), performed as ONE CONTINUOUS motion
+    // because the device watches the whole travel rather than sampling two static
+    // poses:
+    //
+    //   pose 0  upper arm hanging at the side but FLEXED FORWARD, elbow bent, the
+    //           forearm horizontal and STRAIGHT ACROSS the body, palm DOWN
+    //   pose 1  the forearm ELEVATED hmCalRaiseDeg, THE ELBOW STAYING PUT
+    //
+    // ⚠ THE RAISE MOVES THE FOREARM NODE, NOT THE UPPER ARM, and that is the whole
+    // reason this file animates the forearm override at all. "Elbow in the same
+    // position" fixes the upper arm: the elbow sits at the end of the upper-arm
+    // bone, so ANY upper-arm rotation other than one about its own long axis moves
+    // it. The upper-arm quaternion is therefore IDENTICAL in both poses and only
+    // leadForeArmOverrideRotation changes — which is why _leadForeArmFrom/_To and
+    // the forearm's own onChanged handler exist further down. ⚠ Without that
+    // handler this guide would not animate AT ALL: the existing trigger is a change
+    // in the upper-arm override, and here there isn't one.
+    //
+    // ⚠ WHY THE UPPER ARM IS FLEXED FORWARD, AND WHY THE FOREARM IS NOT. A forearm
+    // held straight across a body whose upper arm hangs vertically passes THROUGH
+    // the torso — the elbow sits at z ≈ -0.06, behind the belly's front surface.
+    // Two ways out, and only one of them is the routine: tilt the FOREARM forward
+    // (it then reads as pointing out diagonally, which is not "across the body"), or
+    // flex the UPPER ARM forward so the elbow comes out in front and the forearm can
+    // lie flat across the chest. The second is what a person actually does, so it is
+    // what the guide does. hmCalUpperArmFwdDeg is the amount.
+    //
+    // ── DERIVATION ────────────────────────────────────────────────────────────
+    // Built with the SAME composition the pose adapter already uses, rather than a
+    // fresh one: body_pose_adapter.cpp:41-63 pre-bakes the constant parent chain
+    // from this file's own rest quaternions, and body_pose_adapter.cpp:216 sets a
+    // forearm from  m_tLeftForeArm = lArmW.conjugated() * faW  — i.e.
+    //
+    //       forearm_local = conj(upperArm_world) ⊗ forearm_world
+    //
+    // with  upperArm_world = spineRest ⊗ spine2Rest ⊗ shoulderRest ⊗ upperArm_local.
+    // That chain reproduces the live node hierarchy's own sceneRotation to 1e-6, so
+    // the constants here and the running scene agree.
+    //
+    // The upper arm is the hanging-down rotation pre-rotated in WORLD space about
+    // +X by -hmCalUpperArmFwdDeg, which carries the bone from (0,-1,0) toward +Z
+    // (forward) while leaving its roll relationship intact; the local quaternion is
+    // then conj(parent) ⊗ that. forearm_world is the frame whose columns are the
+    // bone's own axes: +Y the bone direction, -Z the DORSAL face (the side
+    // OrientationTab marks and the wG3 sits on), +X = Y × Z. Pose 0 wants bone +Y
+    // straight across the body — exactly (-1,0,0) for a left lead arm, no forward
+    // component — with dorsal +Y (up), which is palm DOWN. Pose 1 rotates both by
+    // hmCalRaiseDeg in the vertical plane containing the bone, so the palm stays
+    // down relative to the forearm through the whole travel.
+    //
+    // ⚠ Checked against the live chain, not by eye. Shoulder at (0.188, 1.436,
+    // -0.062); the flexed upper arm puts the elbow at (0.182, 1.226, 0.114) — in
+    // FRONT of the torso. Pose 0's wrist is (-0.094, 1.226, 0.114): identical y and
+    // z to the elbow, so the forearm is exactly horizontal and exactly across, and
+    // it crosses the midline by 0.094. Pose 1 lifts the wrist to (-0.057, 1.364,
+    // 0.114) — elbow unmoved, z unmoved, bone direction exactly hmCalRaiseDeg
+    // higher, dorsal marker still above the palmar one.
+    //
+    // ⚠ 30° IS THE ROUTINE, NOT A MINIMUM. §8.2 separated a full ~30° travel
+    // cleanly in the 0x94 payload (28.9° palm / 30.9° arm) and could not separate
+    // a 4° one at all — but a BIGGER one is not "safer": it is a different routine
+    // from the one the device's own maths expects.
+    readonly property real hmCalRaiseDeg: 30
+    // ⚠ A PRESENTATION CONSTANT, SET BY RENDERING, NOT FROM THE SPEC. Rendered at
+    // 30/40/50°: at 30° the elbow is only at z ≈ 0.075 and the forearm still grazes
+    // the belly; 40° puts it clearly in front with the pose still reading as a
+    // relaxed arm. The device measures the RAISE and needs pose 0 only to be a pose
+    // the athlete can repeat, so this is ours to choose for legibility.
+    readonly property real hmCalUpperArmFwdDeg: 40
+
+    // Upper arm — THE SAME IN BOTH POSES (see the ⚠ above), and unlike the
+    // Witmotion flow's leadArmDownQuat this one IS handed: the forward flexion puts
+    // non-zero y and z in it, so the (w,x,y,z) → (w,x,-y,-z) mirror is no longer a
+    // no-op the way it is for a purely vertical hang.
+    readonly property quaternion hmCalUpperArmQuat: root.rightHanded
+        ? Qt.quaternion(0.6158076, 0.7131185, -0.2317729,  0.2419182)   // left arm  (lead when right-handed)
+        : Qt.quaternion(0.6158076, 0.7131185,  0.2317729, -0.2419182)   // right arm (y,z mirrored)
+
+    // Forearm, pose 0 — straight across the body, palm down.
+    readonly property quaternion hmCalForeArmPose0Quat: root.rightHanded
+        ? Qt.quaternion(0.1753510, 0.3046825,  0.6926323,  0.6298263)
+        : Qt.quaternion(0.1753510, 0.3046825, -0.6926323, -0.6298263)
+
+    // Forearm, pose 1 — elevated hmCalRaiseDeg, elbow unmoved.
+    // ⚠ Baked rather than composed from hmCalRaiseDeg at runtime, because it depends
+    // on hmCalUpperArmFwdDeg too (the forearm's local frame is relative to a flexed
+    // upper arm); a "simplification" that rebuilt it from one angle would quietly
+    // change the axis. Both constants are recorded above and the derivation is
+    // reproducible from them.
+    readonly property quaternion hmCalForeArmPose1Quat: root.rightHanded
+        ? Qt.quaternion(0.2482337, 0.2489165,  0.5060204,  0.7876319)
+        : Qt.quaternion(0.2482337, 0.2489165, -0.5060204, -0.7876319)
+
+    // The HackMotion routine happens in a near-FRONTAL plane — the forearm lies
+    // across the chest and elevates in place — so the default view DIRECTION
+    // (face-on, down -Z) is the right one for it and no angle change is wanted.
+    // What the default camera does lack is size: it frames a whole 1.8 m body from
+    // 3.5 m, which leaves the forearm a few dozen pixels and its 30° lift hard to
+    // read. So the guide camera keeps the direction and only moves closer.
+    //
+    // ⚠ CHECKED BY RENDERING, NOT ASSUMED. Both poses were rendered offscreen from
+    // the app default, from this zoomed face-on, and from several 3/4 and overhead
+    // angles; face-on is where "forearm horizontal across the chest" and "forearm
+    // raised" are both unmistakable, and the dorsal/palmar marker pair reads
+    // correctly (mount above, palm below). An earlier revision of this routine had
+    // the forearm pointing FORWARD, almost along the view axis, and did need an
+    // off-axis camera — that is no longer the routine.
+    //
+    // ⚠ SET IMPERATIVELY, NOT AS A BINDING, because OrbitCameraController writes
+    // camera.position / camera.eulerRotation directly — one user drag would
+    // destroy a binding here permanently and silently take the guide view with it.
+    // Orbit input is disabled while the guide camera is active for the same reason.
+    property bool useGuideCamera: false
+    readonly property vector3d guideCameraPosition: root.rightHanded
+        ? Qt.vector3d( 0.06, 1.28, 1.45)
+        : Qt.vector3d(-0.06, 1.28, 1.45)     // mirrored for a left-handed lead arm
+
+    readonly property vector3d defaultCameraPosition: Qt.vector3d(0, 0.9, 3.5)
+
+    function _applyCameraView() {
+        // Face-on either way, so the orientation is identity in both branches and
+        // only the distance changes.
+        camera.eulerRotation = Qt.vector3d(0, 0, 0)
+        camera.position = root.useGuideCamera ? root.guideCameraPosition
+                                              : root.defaultCameraPosition
+    }
+    onUseGuideCameraChanged: _applyCameraView()
+    onRightHandedChanged:    if (root.useGuideCamera) _applyCameraView()
+
     // When true, animate leadArmOverrideRotation changes via slerp (1.5 s).
     // Used by the calibration wizard to animate the guide from arm-down to T-pose.
     // Implemented with FrameAnimation + JS slerp: a wall-clock NumberAnimation
@@ -142,6 +273,14 @@ Item {
     property quaternion _leadArmTo:   Qt.quaternion(1, 0, 0, 0)
     property real       _leadArmP:    1.0   // linear progress 0 → 1 (frame-driven)
     property real       _leadArmT:    1.0   // eased (InOutCubic) copy of _leadArmP
+    // The forearm's own from/to. ⚠ ONE CLOCK, TWO SEGMENTS: both slerps read
+    // _leadArmT, so the upper arm and forearm always travel together and
+    // leadArmAnimFinished() still means "the whole guide motion is done". Giving
+    // the forearm its own progress would let a host chain on one segment while the
+    // other was still moving — and the HackMotion routine chains on exactly that
+    // signal to fire its second marker at the device.
+    property quaternion _leadForeArmFrom: Qt.quaternion(1, 0, 0, 0)
+    property quaternion _leadForeArmTo:   Qt.quaternion(1, 0, 0, 0)
 
     function _slerp(a, b, t) {
         var dot = a.scalar*b.scalar + a.x*b.x + a.y*b.y + a.z*b.z
@@ -165,9 +304,31 @@ Item {
                              s0*a.z      + s1*b.z)
     }
 
-    function resetArmAnimation(fromQ) {
+    // ⚠ TAKES BOTH SEGMENTS, because the HackMotion routine animates the FOREARM
+    // while the upper arm stays put. foreFromQ is optional so the Witmotion flow's
+    // existing single-argument calls keep meaning what they meant; when it is
+    // omitted the forearm's start state is left alone.
+    //
+    // ⚠ AND IT ANCHORS THE DESTINATIONS TO THE START, WHICH IS LOAD-BEARING.
+    // _leadArmTo / _leadForeArmTo are only updated by the two onChanged handlers,
+    // and those RETURN EARLY while animateLeadArm is false — which is exactly the
+    // state a caller is in while posing a starting position. So without this, a
+    // destination survives from whatever ran last, and the next animation
+    // interpolates the un-retargeted segment towards a stale target.
+    //
+    // That is not hypothetical: it shipped for one build. The HackMotion raise
+    // retargets ONLY the forearm, so the upper arm still held _leadArmTo = identity
+    // — the T-pose — and the raise swung the whole arm out to the side while the
+    // forearm kept its relative angle. Anchoring to == from here makes "a segment
+    // nobody retargeted does not move" true by construction instead of by protocol.
+    function resetArmAnimation(fromQ, foreFromQ) {
         _leadArmAnim.stop()
         _leadArmFrom = fromQ
+        _leadArmTo   = fromQ
+        if (foreFromQ !== undefined) {
+            _leadForeArmFrom = foreFromQ
+            _leadForeArmTo   = foreFromQ
+        }
         _leadArmP    = 1.0
         _leadArmT    = 1.0
     }
@@ -191,15 +352,40 @@ Item {
         }
     }
 
+    // ⚠ EITHER SEGMENT CHANGING STARTS THE MOTION, and the forearm handler is not
+    // optional garnish: in the HackMotion routine the UPPER ARM IS IDENTICAL in
+    // both poses, so if only the upper-arm override could start a slerp, that
+    // routine's guide would never animate at all — it would jump, the athlete
+    // would get no pacing, and the device would be watching a motion nobody was
+    // shown how to make.
+    //
+    // Both handlers re-anchor from the CURRENT interpolated value, so a target
+    // changed mid-flight continues from where the guide actually is rather than
+    // snapping. When both change in the same turn the second handler restarts a
+    // clock the first already reset to zero, which is harmless — the from/to pairs
+    // were both captured before either restart.
+    function _restartArmSlerp() {
+        root._leadArmP = 0.0
+        root._leadArmT = 0.0
+        _leadArmAnim.restart()
+    }
+
     onLeadArmOverrideRotationChanged: {
         if (!root.animateLeadArm) return
         root._leadArmFrom = _leadArmT < 1.0
             ? root._slerp(root._leadArmFrom, root._leadArmTo, root._leadArmT)
             : root._leadArmFrom
         root._leadArmTo = root.leadArmOverrideRotation
-        root._leadArmP  = 0.0
-        root._leadArmT  = 0.0
-        _leadArmAnim.restart()
+        root._restartArmSlerp()
+    }
+
+    onLeadForeArmOverrideRotationChanged: {
+        if (!root.animateLeadArm) return
+        root._leadForeArmFrom = _leadArmT < 1.0
+            ? root._slerp(root._leadForeArmFrom, root._leadForeArmTo, root._leadArmT)
+            : root._leadForeArmFrom
+        root._leadForeArmTo = root.leadForeArmOverrideRotation
+        root._restartArmSlerp()
     }
 
     // ── Loading state ─────────────────────────────────────────────────────────
@@ -257,6 +443,11 @@ Item {
             anchors.fill: parent
             origin: orbitOrigin
             camera: camera
+            // ⚠ Off while the guide camera is showing. This controller writes
+            // camera.position / camera.eulerRotation imperatively, so one drag
+            // would move the athlete off the only viewpoint the routine is legible
+            // from, with nothing to put them back.
+            enabled: !root.useGuideCamera
         }
 
         // ── Lighting ──────────────────────────────────────────────────────────
@@ -400,7 +591,13 @@ Item {
                                     position: Qt.vector3d(0, 0.274, 0)
                                     visible:  adapter.leftForeArmVisible
                                     rotation: {
-                                        if (root.useLeadArmOverride  &&  root.rightHanded) return root.leadForeArmOverrideRotation
+                                        // Slerped on the SHARED clock while a guide
+                                        // motion is in flight — the HackMotion routine's
+                                        // raise lives entirely in this node.
+                                        if (root.useLeadArmOverride  &&  root.rightHanded)
+                                            return root.animateLeadArm && root._leadArmT < 1.0
+                                                ? root._slerp(root._leadForeArmFrom, root._leadForeArmTo, root._leadArmT)
+                                                : root.leadForeArmOverrideRotation
                                         if (root.useTrailArmOverride && !root.rightHanded) return root.trailForeArmOverrideRotation
                                         return adapter.leftForeArmRotation
                                     }
@@ -507,7 +704,11 @@ Item {
                                     position: Qt.vector3d(0, 0.2741, 0)
                                     visible:  adapter.rightForeArmVisible
                                     rotation: {
-                                        if (root.useLeadArmOverride  && !root.rightHanded) return root.leadForeArmOverrideRotation
+                                        // Slerped on the shared clock — see the left arm.
+                                        if (root.useLeadArmOverride  && !root.rightHanded)
+                                            return root.animateLeadArm && root._leadArmT < 1.0
+                                                ? root._slerp(root._leadForeArmFrom, root._leadForeArmTo, root._leadArmT)
+                                                : root.leadForeArmOverrideRotation
                                         if (root.useTrailArmOverride &&  root.rightHanded) return root.trailForeArmOverrideRotation
                                         return adapter.rightForeArmRotation
                                     }

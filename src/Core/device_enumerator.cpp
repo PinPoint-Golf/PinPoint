@@ -62,9 +62,12 @@ static QList<hm_uuid> toHmUuids(const QList<QBluetoothUuid> &qtUuids)
 //
 // Accept filter, evaluated per discovered advertisement:
 //   - WT901 (WitMotion): name starts with "WT901" OR service UUID contains
-//     "ffe5". This is the ONLY WT901 discovery filter in the codebase.
+//     "ffe5". This is the ONLY WT901 discovery filter in the codebase, and it
+//     is unconditional — the hackmotion/enabled flag never touches it.
 //   - HackMotion (wG3): hm_looks_like_hackmotion(), owned by libhackmotion so
 //     the match logic lives in one place instead of being hand-rolled here.
+//     Skipped entirely when HackMotion discovery is disabled — see
+//     m_hackMotionEnabled below.
 // (BleImuTransport's connect-phase scan is a different concern — it matches
 // one already-selected device by address/UUID in matchesPendingDevice(), not
 // a discovery filter.)
@@ -74,7 +77,16 @@ class ImuBleScanner : public QObject
 {
     Q_OBJECT
 public:
-    explicit ImuBleScanner(QObject *parent = nullptr) : QObject(parent) {}
+    // hackMotionEnabled is read from DeviceEnumerator ONCE, here, when the
+    // scan is armed — never re-read for the duration of the scan. A scan
+    // whose accept filter (or window) changed mid-flight would accept a
+    // device the window wasn't sized for, and the resulting "sometimes it
+    // finds it" would be unreproducible.
+    explicit ImuBleScanner(bool hackMotionEnabled, QObject *parent = nullptr)
+        : QObject(parent)
+        , m_hackMotionEnabled(hackMotionEnabled)
+        , m_timeoutMs(hackMotionEnabled ? kHackMotionScanWindowMs : kWitmotionOnlyScanWindowMs)
+    {}
 
 public slots:
     void start()
@@ -116,10 +128,16 @@ private slots:
             return;
         }
 
-        // HackMotion wG3 accept filter, owned by libhackmotion. local_name may
-        // legitimately be null/empty and services may be empty (many stacks
-        // don't report service UUIDs in the advertisement) — the library
-        // handles both, matching on name alone when services are absent.
+        // HackMotion wG3 accept filter, owned by libhackmotion. Gated on the
+        // flag captured at scan-arm time: when discovery is disabled,
+        // hm_looks_like_hackmotion() is not even consulted, so no wG3 is
+        // offered — this is discovery-only, and does not touch a wG3 that is
+        // already connected or persisted in placement settings.
+        if (!m_hackMotionEnabled) return;
+
+        // local_name may legitimately be null/empty and services may be empty
+        // (many stacks don't report service UUIDs in the advertisement) — the
+        // library handles both, matching on name alone when services are absent.
         const QByteArray nameUtf8 = device.name().toUtf8();
         const QList<hm_uuid> services = toHmUuids(device.serviceUuids());
         if (hm_looks_like_hackmotion(nameUtf8.isEmpty() ? nullptr : nameUtf8.constData(),
@@ -161,7 +179,7 @@ private:
         QBluetoothDeviceDiscoveryAgent *agent =
             addr.isNull() ? new QBluetoothDeviceDiscoveryAgent(this)
                           : new QBluetoothDeviceDiscoveryAgent(addr, this);
-        agent->setLowEnergyDiscoveryTimeout(kTimeoutMs);
+        agent->setLowEnergyDiscoveryTimeout(m_timeoutMs);
 
         connect(agent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
                 this,  &ImuBleScanner::onDeviceDiscovered);
@@ -177,20 +195,32 @@ private:
         ppInfo() << "[IMU] BLE scan started on"
                  << (addr.isNull() ? QStringLiteral("default adapter")
                                    : addr.toString())
-                 << "(timeout" << kTimeoutMs / 1000 << "s)";
+                 << "(timeout" << m_timeoutMs / 1000 << "s)";
         agent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
         m_agents.append(agent);
     }
 
     QList<QBluetoothDeviceDiscoveryAgent *> m_agents;
     int m_pendingAgents = 0;
+
+    // Captured once at construction (scan-arm time) — see the ctor comment.
+    const bool m_hackMotionEnabled;
+
     // The HackMotion wG3 only advertises for a few seconds after a physical
     // button press (see HM_RECOMMENDED_SCAN_WINDOW_US in hackmotion/device.h),
     // so a short window routinely misses the button-press race entirely. 90 s
     // is the library's own recommended scan window; it costs nothing when a
     // device (of either vendor) appears immediately, and it also improves
     // WT901 discovery odds versus the old 30 s.
-    static constexpr int kTimeoutMs = HM_RECOMMENDED_SCAN_WINDOW_US / 1000;
+    static constexpr int kHackMotionScanWindowMs = HM_RECOMMENDED_SCAN_WINDOW_US / 1000;
+    // Historical Witmotion-only window. With HackMotion discovery disabled
+    // there is no button-press race to win, so a Witmotion-only user should
+    // not be made to wait three times as long for a scan they cannot benefit
+    // from — restore the pre-HackMotion 30 s.
+    static constexpr int kWitmotionOnlyScanWindowMs = 30000;
+    // Chosen once, from m_hackMotionEnabled, in the ctor init list — never
+    // recomputed mid-scan.
+    const int m_timeoutMs;
 };
 
 // ---------------------------------------------------------------------------
@@ -256,6 +286,15 @@ void DeviceEnumerator::registerDevice(DeviceType type, VideoInputFactory::Backen
     emit deviceAdded(dev);
 }
 
+void DeviceEnumerator::setHackMotionEnabled(bool on)
+{
+    // Just a stored value — ImuManager pushes AppSettings' hackmotion/enabled
+    // in here before every scan (see setHackMotionEnabled() call site there).
+    // Deliberately does nothing to an already-discovered, connected or
+    // persisted wG3: this gates discovery only.
+    m_hackMotionEnabled = on;
+}
+
 void DeviceEnumerator::registerImuDevice(ImuBase::Transport transport,
                                           const QString &id,
                                           const QString &description,
@@ -309,10 +348,13 @@ void DeviceEnumerator::scanImu()
     ppInfo() << "[IMU] Serial scan: stub — no serial devices enumerated";
 
     // --- BLE ---
-    // Run in a worker thread so the 90 s discovery window doesn't block the
+    // Run in a worker thread so the discovery window (90 s, or 30 s with
+    // HackMotion disabled) doesn't block the
     // main thread. The ImuBleScanner object lives on the worker thread.
     m_imuScanThread = new QThread(this);
-    auto *scanner = new ImuBleScanner;
+    // Capture m_hackMotionEnabled here, once, as the scan is armed — the
+    // scanner never re-reads it (see ImuBleScanner's ctor comment).
+    auto *scanner = new ImuBleScanner(m_hackMotionEnabled);
     scanner->moveToThread(m_imuScanThread);
 
     // Kick the scanner once the thread's event loop is running

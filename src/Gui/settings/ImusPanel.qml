@@ -288,6 +288,7 @@ Item {
                         PpComboBox {
                             id: placementCombo
                             implicitWidth: Theme.sp(200)
+                            visible: !imuRow.isHackMotion
 
                             // A HackMotion's placement is not the coach's to
                             // choose. The wG3 is one peripheral carrying two
@@ -295,18 +296,15 @@ Item {
                             // block 1 the palm — and that order is fixed by the
                             // wiring, so which anatomical segments it covers is
                             // a property of the hardware rather than a setting.
-                            // It is pinned to slot A and the control is locked.
-                            //
-                            // ⚠ INTERIM. Slot A alone under-describes it: one
-                            // wG3 actually fills A (lead forearm) AND B (lead
-                            // hand). This map is keyed by DEVICE id and cannot
-                            // say that — a device maps to exactly one letter.
-                            // Phase C re-keys placement by UNIT
-                            // ("<deviceId>#lowerArm" / "#palm") so both slots
-                            // can be filled by the one device; until then slot A
-                            // is the anchor and the wizard's slot-B row stays
-                            // unfilled.
-                            enabled: !imuRow.isHackMotion
+                            // Unit-keyed placement (Phase C): imuPlacement holds
+                            // "<deviceId>#lowerArm" → "A" and "<deviceId>#palm"
+                            // → "B", written in one call by
+                            // imuManager.setPlacementForDevice() below, so the
+                            // device genuinely fills BOTH slots rather than
+                            // anchoring on A alone the way Phase A's interim pin
+                            // did. There is nothing left for this combo to
+                            // offer, so it is hidden entirely for a HackMotion
+                            // row — see the read-only label sibling below.
 
                             readonly property var placementOptions: [
                                 { label: qsTr("— Unassigned —"),                  value: ""      },
@@ -318,16 +316,26 @@ Item {
 
                             model: placementOptions.map(function(o) { return o.label })
 
+                            // Placement KEYS, not device ids — Phase C's unit-keyed
+                            // placement means a slot letter can be held by a key that
+                            // is not this row's device id at all (a HackMotion's keys
+                            // are "<deviceId>#lowerArm"/"#palm"). Walking devList and
+                            // comparing map[d.id] === value — the old, device-keyed
+                            // check — would never see those keys, so a wG3's slots
+                            // would silently stop registering as taken and a coach
+                            // could assign a Witmotion straight on top of one. Walk
+                            // the map's own keys instead, and skip any key that
+                            // belongs to THIS row's own device (its bare id for a
+                            // Witmotion, "<id>#lowerArm"/"<id>#palm" for a HackMotion).
                             function placementTakenBy(value) {
                                 if (!value || value === "" || value === "other") return false
-                                var map     = appSettings.imuPlacement
-                                var devList = imuManager.imuDeviceList
-                                for (var i = 0; i < devList.length; ++i) {
-                                    var d = devList[i]
-                                    if (d.id !== imuData.id
-                                            && appSettings.imuExcluded.indexOf(d.id) < 0
-                                            && map[d.id] === value)
-                                        return true
+                                var map = appSettings.imuPlacement
+                                for (var key in map) {
+                                    if (map[key] !== value) continue
+                                    var ownerId = key.indexOf("#") >= 0 ? key.substring(0, key.indexOf("#")) : key
+                                    if (ownerId === imuData.id) continue
+                                    if (appSettings.imuExcluded.indexOf(ownerId) >= 0) continue
+                                    return true
                                 }
                                 return false
                             }
@@ -339,16 +347,10 @@ Item {
                             }
 
                             Component.onCompleted: {
-                                // A HackMotion pins itself to slot A, writing it
-                                // through if it is not already stored, so the
-                                // binding exists whether or not anyone opened
-                                // this panel to set it.
-                                if (imuRow.isHackMotion
-                                        && appSettings.imuPlacement[imuData.id] !== "A") {
-                                    var m = appSettings.imuPlacement
-                                    m[imuData.id] = "A"
-                                    appSettings.imuPlacement = m
-                                }
+                                // Combo is hidden for a HackMotion (see `visible` above) —
+                                // nothing here to initialise from the map, since its keys
+                                // are the unit keys, not this row's bare device id.
+                                if (imuRow.isHackMotion) return
                                 var saved = appSettings.imuPlacement[imuData.id] || ""
                                 for (var i = 0; i < placementOptions.length; i++) {
                                     if (placementOptions[i].value === saved) { currentIndex = i; break }
@@ -358,6 +360,7 @@ Item {
                             Connections {
                                 target: appSettings
                                 function onImuPlacementChanged() {
+                                    if (imuRow.isHackMotion) return
                                     var saved = appSettings.imuPlacement[imuData.id] || ""
                                     for (var i = 0; i < placementCombo.placementOptions.length; i++) {
                                         if (placementCombo.placementOptions[i].value === saved) {
@@ -368,9 +371,72 @@ Item {
                             }
 
                             onActivated: (idx) => {
-                                var map = appSettings.imuPlacement
-                                map[imuData.id] = placementOptions[idx].value
-                                appSettings.imuPlacement = map
+                                // Routed through the canonical resolver rather than a raw
+                                // map write — the keying rule (bare id vs. unit keys) now
+                                // lives in ImuManager alone, not spelled out again here.
+                                imuManager.setPlacementForDevice(imuData.id, placementOptions[idx].value)
+                            }
+                        }
+
+                        // HackMotion: nothing to pick, so a read-only label replaces
+                        // the combo — naming BOTH slots the wG3 fills so the row does
+                        // not under-describe the device the way Phase A's single-slot
+                        // pin did. Pinned via imuManager.setPlacementForDevice(), which
+                        // owns the keying rule and is idempotent.
+                        //
+                        // ⚠ THE LABEL REPORTS WHAT THE MAP SAYS, IT DOES NOT ASSERT THE
+                        // PIN TOOK. Filling A and B needs BOTH letters free, and
+                        // setPlacementForDevice() refuses when another sensor holds
+                        // either one rather than double-claiming it (a double claim
+                        // resolves by key order — deterministic, but an arbitrary answer
+                        // with the dropped sensor never mentioned). A label hard-coded
+                        // to "A + B" would then be describing an assignment that was
+                        // declined, which is the one thing worse than the collision.
+                        Text {
+                            id: hmPlacementLabel
+                            visible:     imuRow.isHackMotion
+                            width:       Theme.sp(200)
+                            wrapMode:    Text.WordWrap
+                            font.family: Theme.fontBody
+                            font.pixelSize: Theme.fontSzBody2
+
+                            // Both halves, resolved from placement itself. imuPlacement
+                            // is read as an explicit dependency because deviceIdForSlot()
+                            // is a Q_INVOKABLE and not reactive on its own.
+                            readonly property bool _pinned: {
+                                var _dep = appSettings.imuPlacement
+                                return imuManager.deviceIdForSlot("A") === imuData.id
+                                    && imuManager.deviceIdForSlot("B") === imuData.id
+                            }
+                            readonly property string _blockedBy: {
+                                var _dep = appSettings.imuPlacement
+                                var a = imuManager.deviceIdForSlot("A")
+                                var b = imuManager.deviceIdForSlot("B")
+                                if (a !== "" && a !== imuData.id) return "A"
+                                if (b !== "" && b !== imuData.id) return "B"
+                                return ""
+                            }
+
+                            color: _pinned ? Theme.colorText2 : Theme.colorWarn
+                            text:  _pinned
+                                ? qsTr("A + B — Lead forearm + hand (fixed by the cable)")
+                                : _blockedBy !== ""
+                                    ? qsTr("Not assigned — slot %1 is held by another sensor. Unassign it to use this wrist sensor.").arg(_blockedBy)
+                                    : qsTr("Not assigned")
+
+                            // Pin on load, and again whenever placement changes — a coach
+                            // freeing the blocking slot should not have to reopen the
+                            // panel. Terminates: setPlacementForDevice() re-emits
+                            // imuPlacementChanged, but by then _pinned is true and the
+                            // guard stops the second pass.
+                            function _pin() {
+                                if (imuRow.isHackMotion && !_pinned && _blockedBy === "")
+                                    imuManager.setPlacementForDevice(imuData.id, "A")
+                            }
+                            Component.onCompleted: _pin()
+                            Connections {
+                                target: appSettings
+                                function onImuPlacementChanged() { hmPlacementLabel._pin() }
                             }
                         }
                     }
@@ -641,9 +707,19 @@ Item {
 
                     Text {
                         text: {
-                            var p = appSettings.imuPlacement[imuData.id]
-                            var label = (p && p !== "") ? (p + " — " + imuData.description)
+                            // A HackMotion holds no entry under its own bare device id
+                            // (Phase C unit-keyed placement: its keys are
+                            // "<id>#lowerArm"/"<id>#palm") — it is always pinned to
+                            // BOTH A and B by ImusPanel's placement selector above, so
+                            // that pair is shown directly rather than read from the map.
+                            var label
+                            if (imuRow.isHackMotion) {
+                                label = qsTr("A + B — %1").arg(imuData.description)
+                            } else {
+                                var p = appSettings.imuPlacement[imuData.id]
+                                label = (p && p !== "") ? (p + " — " + imuData.description)
                                                         : imuData.description
+                            }
                             return qsTr("Live test — ") + label
                         }
                         font.family:         Theme.fontData
@@ -1471,6 +1547,12 @@ Item {
                 }
                 readonly property int connectedCount: imuManager.imuCount
 
+                // Deliberately UNCHANGED by Phase C's unit-keyed placement: this reads
+                // only the map's VALUES (slot letters), never its keys, so it does not
+                // care whether a slot is held by a bare device id or a HackMotion unit
+                // key — and it gets MORE correct for free, because a wG3's two unit
+                // keys now contribute both "A" and "B" as separate values, exactly
+                // reflecting that both slots are genuinely filled.
                 readonly property var assignedPlacements: {
                     var map = appSettings.imuPlacement
                     return Object.values(map).filter(function(v) { return v && v !== "" && v !== "other" })
@@ -1590,6 +1672,44 @@ Item {
                 TogglePill {
                     checked: appSettings.imuAutoReconnect
                     onToggled: (v) => appSettings.imuAutoReconnect = v
+                    Layout.alignment: Qt.AlignVCenter
+                }
+            }
+
+            // Look for a HackMotion wrist sensor
+            RowLayout {
+                objectName: "setting_hackmotionEnabled"
+                Layout.fillWidth: true
+                spacing: Theme.sp(16)
+                property bool searchHighlight: false
+                Rectangle { x: -Theme.sp(6); y: -Theme.sp(6); width: parent.width + Theme.sp(12); height: parent.height + Theme.sp(12); color: Theme.colorAccentLight; radius: Theme.radius; opacity: parent.searchHighlight ? 1.0 : 0.0; z: -1 }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.sp(3)
+
+                    Text {
+                        text:           qsTr("Look for a HackMotion wrist sensor")
+                        font.family:    Theme.fontBody
+                        font.pixelSize: Theme.fontSzBody
+                        color:          Theme.colorText
+                    }
+                    Text {
+                        // The wG3 advertises only for a few seconds after a button
+                        // press, which is why discovery uses a 90 s scan window
+                        // instead of the usual 30 s — turning this off also drops
+                        // back to the shorter window, since that budget exists
+                        // only for the wG3's advertising burst.
+                        text:           qsTr("Off restores the shorter Bluetooth scan window used for other sensors")
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
+                        color:          Theme.colorText3
+                    }
+                }
+
+                TogglePill {
+                    checked: appSettings.hackmotionEnabled
+                    onToggled: (v) => appSettings.hackmotionEnabled = v
                     Layout.alignment: Qt.AlignVCenter
                 }
             }

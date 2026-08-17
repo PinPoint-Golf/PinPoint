@@ -23,6 +23,7 @@
 #include "event_buffer.h"
 #include "hm_instance.h"
 #include "imu_instance.h"
+#include "pp_debug.h"
 #include "pp_os_metrics.h"
 
 ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, QObject *parent)
@@ -86,9 +87,25 @@ ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, 
         emit imuDeviceListChanged();
     });
 
+    // Normalise any HackMotion placement persisted by Phase A's interim
+    // bare-device-id pin BEFORE the first consumer can read it. DeviceEnumerator
+    // is a singleton that never forgets a registered device, so a wG3 may already
+    // be in its list here (an earlier scan in this process); those devices never
+    // emit deviceAdded again and would be missed by the hook below on its own.
+    for (const Device &dev : DeviceEnumerator::instance()->devices(DeviceType::Imu))
+        migrateHackMotionPlacement(dev);
+
     // Start the async BLE scan.  Results arrive via deviceAdded and are
     // automatically reflected by imuList() / imuDeviceList() reading directly
     // from DeviceEnumerator — no local list copy needed.
+    //
+    // ⚠ Push the HackMotion discovery flag HERE TOO, not only in rescanImu().
+    // This is the first-run scan and it happens before any coach can press
+    // Rescan, so a startup that skipped the push would run the whole 90 s
+    // HackMotion-enabled window against a setting the user had turned off —
+    // and the enumerator's own default (true) would make that look deliberate.
+    DeviceEnumerator::instance()->setHackMotionEnabled(
+        m_appSettings ? m_appSettings->hackmotionEnabled() : true);
     DeviceEnumerator::instance()->scanImu();
 
     // Emit property-change signals when new devices are registered so QML
@@ -106,6 +123,14 @@ ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, 
             aliasMap[imuKey] = QString(imuKey).replace(QLatin1Char('|'), QLatin1Char(' '));
             s->setImuAlias(aliasMap);
         }
+        // ⚠ THE MIGRATION HOOK, and this is the right one. A wG3 must be
+        // unit-keyed the moment it becomes KNOWN, not the moment it connects: the
+        // start wizard's requirement rows and ArmVizView both resolve slots from
+        // placement alone, with no live instance in sight. Hanging this off
+        // createInstance() would leave an enumerated-but-unconnected wG3 showing
+        // slot A filled and slot B empty — the exact misreading Phase C removes.
+        // Alias seeding above is here for the same reason and has the same shape.
+        migrateHackMotionPlacement(dev);
         emit imuListChanged();
         emit imuDeviceListChanged();
         emit imuEnumeratedCountChanged();
@@ -432,6 +457,14 @@ void ImuManager::disconnectAll()
 void ImuManager::rescanImu()
 {
     setImuScanError(QString());   // clear any stale error; a fresh scan may succeed
+    // Push the HackMotion discovery flag immediately before arming the scan.
+    // Every path that starts a scan does this — here and the first-run scan in
+    // the constructor — because the value must be READ AT ARM TIME, not latched.
+    // A value captured once at construction would go stale the first time a coach
+    // toggled the feature in Settings and then hit Rescan: the scan would filter
+    // on the old setting with nothing anywhere to say so.
+    DeviceEnumerator::instance()->setHackMotionEnabled(
+        m_appSettings ? m_appSettings->hackmotionEnabled() : true);
     DeviceEnumerator::instance()->scanImu();
 }
 
@@ -448,6 +481,245 @@ QObject *ImuManager::instanceFor(const QString &deviceId) const
     if (entry.selected && entry.instance)
         return static_cast<QObject *>(entry.instance);
     return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Unit-keyed placement — the single canonical resolver
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// "<deviceId>#lowerArm" / "<deviceId>#palm".
+//
+// ⚠ NOT RESPELLED HERE. HmUnit owns the spelling (HmUnit::unitIdFor) because the
+// string is persisted twice over — as the EventBuffer SourceDescriptor::identifier
+// and as the placement key below — and a second copy of the literal is exactly the
+// drift nothing would catch: the two spellings would not fail, they would silently
+// orphan one device's entire placement. These are thin wrappers rather than direct
+// calls only so the resolver below reads in terms of keys.
+QString hmUnitKey(const QString &deviceId, hm_unit unit)
+{
+    return HmUnit::unitIdFor(deviceId, unit);
+}
+
+QString hmUnitLabel(hm_unit unit)
+{
+    return HmUnit::unitLabelFor(unit);
+}
+
+// Splits a placement key into device id + unit. False for a bare device id —
+// a Witmotion, or a wG3 whose interim Phase A entry has not been migrated.
+bool parseUnitKey(const QString &key, QString *deviceId, hm_unit *unit)
+{
+    const int sep = key.lastIndexOf(QLatin1Char('#'));
+    if (sep <= 0) return false;
+    const QString id = key.left(sep);
+    // Regenerate and compare rather than matching the suffix text: the spelling
+    // stays owned by HmUnit, and a suffix this build does not recognise stays
+    // UNRESOLVED instead of being guessed at.
+    for (int u = 0; u < HM_UNIT_COUNT; ++u) {
+        const hm_unit candidate = static_cast<hm_unit>(u);
+        if (key == hmUnitKey(id, candidate)) {
+            *deviceId = id;
+            *unit     = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+}   // namespace
+
+QString ImuManager::placementKeyForSlot(const QString &slot) const
+{
+    if (slot.isEmpty()) return {};   // "" means unassigned; it is never a slot to look up
+
+    // ⚠ THE FALLBACK IS CONSTRUCTED ONLY WHEN IT IS ACTUALLY NEEDED, unlike the
+    // `AppSettings fallback; ... ? : &fallback` idiom used elsewhere in this file.
+    // This is the hottest placement accessor in the tree — every instanceForSlot()
+    // / deviceIdForSlot() / unitLabelForSlot() call funnels through it, and
+    // LiveWristAngles resolves three slots at 30 Hz — while the AppSettings
+    // constructor reads several hundred QSettings values. Constructing one
+    // unconditionally would pay a full settings load ninety times a second for a
+    // branch that is never taken outside tests (main.cpp always passes one).
+    const QVariantMap placement = m_appSettings ? m_appSettings->imuPlacement()
+                                                : AppSettings().imuPlacement();
+
+    // QVariantMap iterates in KEY order, which matters only in the failure case:
+    // if two keys claim one letter (a hand-edited settings file, or a Witmotion
+    // left on "A" when a wG3 was assigned there), the same key wins every time
+    // instead of the readout flapping between two sensors from tick to tick.
+    for (auto it = placement.cbegin(); it != placement.cend(); ++it)
+        if (it.value().toString() == slot) return it.key();
+    return {};
+}
+
+QString ImuManager::deviceIdForSlot(const QString &slot) const
+{
+    const QString key = placementKeyForSlot(slot);
+    if (key.isEmpty()) return {};
+    QString devId;
+    hm_unit unit = HM_UNIT_LOWER_ARM;
+    // Both key shapes name the peripheral unambiguously — it is only the UNIT that
+    // a bare key fails to name.
+    return parseUnitKey(key, &devId, &unit) ? devId : key;
+}
+
+QString ImuManager::unitLabelForSlot(const QString &slot) const
+{
+    const QString key = placementKeyForSlot(slot);
+    QString devId;
+    hm_unit unit = HM_UNIT_LOWER_ARM;
+    if (key.isEmpty() || !parseUnitKey(key, &devId, &unit)) return {};
+    return hmUnitLabel(unit);
+}
+
+QObject *ImuManager::instanceForSlot(const QString &slot) const
+{
+    const QString key = placementKeyForSlot(slot);
+    if (key.isEmpty()) return nullptr;
+
+    QString devId;
+    hm_unit unit = HM_UNIT_LOWER_ARM;
+    const bool unitKey = parseUnitKey(key, &devId, &unit);
+    if (!unitKey) devId = key;
+
+    const ImuEntry &entry = m_selected.value(devId);
+    // Assigned but not live (enumerated, never selected, or torn down). The
+    // placement accessors above still answer for this case — they are what the
+    // start wizard reads before anything has connected.
+    if (!entry.selected || !entry.instance) return nullptr;
+
+    auto *hm = qobject_cast<HmInstance *>(entry.instance);
+
+    if (unitKey) {
+        // A unit key naming a device that is not a HackMotion is a stale or
+        // hand-edited entry. There is no unit to hand back, so nothing is.
+        if (!hm) return nullptr;
+        // ⚠ WHICH UNIT IS ON WHICH SEGMENT IS FIXED BY THE CABLE — wire block 0 is
+        // the lower arm, block 1 is the palm — so it is read out of the KEY and
+        // never inferred from the slot letter or from the order the two views were
+        // created in. A consumer that swaps the two produces a plausible-looking
+        // wrist angle that is simply MIRRORED, which every plausibility check
+        // passes.
+        return unit == HM_UNIT_PALM ? hm->unitPalmObject() : hm->unitLowerArmObject();
+    }
+
+    if (hm) {
+        // ⚠ A BARE DEVICE-ID KEY ON A HACKMOTION IS *NOT* "THE LOWER ARM". It is
+        // Phase A's interim pin, which under-describes the device, and reading it
+        // as one unit rather than as an unmigrated entry is precisely how a
+        // mirrored wrist angle ships. migrateHackMotionPlacement() rewrites these
+        // on the device-list path, so reaching here means something re-wrote a bare
+        // key afterwards — the peripheral is resolvable (see deviceForSlot()) but
+        // the UNIT is not, so this returns nothing and says why. Once per key: this
+        // is called from a ~30 Hz readout timer.
+        if (!m_warnedBarePlacementKeys.contains(key)) {
+            m_warnedBarePlacementKeys.insert(key);
+            ppWarn() << "[ImuManager] placement slot" << slot << "holds bare device id" << key
+                     << "for a HackMotion — that key names the peripheral, not one of its two"
+                        " units, so no unit can be resolved. Reassign the device in"
+                        " Settings → IMUs (one wG3 fills A and B).";
+        }
+        return nullptr;
+    }
+
+    return static_cast<QObject *>(entry.instance);
+}
+
+QObject *ImuManager::deviceForSlot(const QString &slot) const
+{
+    // ⚠ DELIBERATELY MORE PERMISSIVE THAN instanceForSlot(). An unmigrated bare
+    // key still identifies the PERIPHERAL unambiguously, and device-level
+    // operations — calibrate, connect, battery, firmware — do not address a unit,
+    // so refusing them here would break the very flow a coach would use to fix the
+    // placement. It is only the anatomical reading that must not guess.
+    const QString devId = deviceIdForSlot(slot);
+    if (devId.isEmpty()) return nullptr;
+    const ImuEntry &entry = m_selected.value(devId);
+    if (!entry.selected || !entry.instance) return nullptr;
+    return static_cast<QObject *>(entry.instance);
+}
+
+void ImuManager::setPlacementForDevice(const QString &deviceId, const QString &slot)
+{
+    if (deviceId.isEmpty()) return;
+
+    AppSettings  fallback;
+    AppSettings *s = m_appSettings ? m_appSettings : &fallback;
+    QVariantMap map = s->imuPlacement();
+
+    if (isHackMotionDevice(deviceId)) {
+        const QString lowerKey = hmUnitKey(deviceId, HM_UNIT_LOWER_ARM);
+        const QString palmKey  = hmUnitKey(deviceId, HM_UNIT_PALM);
+
+        // ⚠ A HACKMOTION'S ASSIGNMENT IS NOT A CHOICE OF ONE LETTER, AND THE COACH
+        // DOES NOT GET TO PICK WHICH SEGMENTS IT COVERS. One wG3 is a single BLE
+        // peripheral carrying TWO sensor units on a cable, and the cable fixes
+        // which unit sits on which segment: block 0 on the lower arm, block 1 on
+        // the palm. So assigning it fills slot A (lead forearm) with the lower-arm
+        // unit and slot B (lead hand) with the palm unit, TOGETHER — which
+        // anatomical segments the device covers is a property of the HARDWARE, not
+        // a setting. There is no strap arrangement that makes any other pairing
+        // true, and a settings map that allowed one would yield a wrist angle that
+        // is exactly MIRRORED and passes every plausibility check.
+        //
+        // Hence "A" is the only non-empty slot accepted here, and any other letter
+        // is a CALLER ERROR: refused and logged, never coerced into something
+        // plausible.
+        if (slot.isEmpty()) {
+            map.remove(lowerKey);
+            map.remove(palmKey);
+            map.remove(deviceId);   // Phase A's interim pin, if still present
+        } else if (slot == QLatin1String("A")) {
+            // ⚠ AND IT TAKES TWO LETTERS, SO IT CAN COLLIDE TWICE. Filling A and B
+            // together is only expressible if nothing else holds either one: a
+            // coach with two Witmotions already on A and B has a working setup, and
+            // writing the wG3's keys on top of it would leave BOTH letters claimed
+            // by two keys each. Resolution then falls to placementKeyForSlot()'s
+            // key ordering — which is deterministic, deliberately, but arbitrary as
+            // an ANSWER — so the coach would get a wrist angle from whichever
+            // sensor sorted first and no indication that the other was dropped.
+            // That is the collision the plan says Phase C retires; unit keys make
+            // the two-slot device EXPRESSIBLE, they do not make a double claim
+            // mean anything. So refuse, say which letter is in the way, and leave
+            // the existing setup exactly as it was — reassigning the incumbent is
+            // the coach's decision, not a side effect of plugging in a wG3.
+            const QString holderA = deviceIdForSlot(QStringLiteral("A"));
+            const QString holderB = deviceIdForSlot(QStringLiteral("B"));
+            const bool clashA = !holderA.isEmpty() && holderA != deviceId;
+            const bool clashB = !holderB.isEmpty() && holderB != deviceId;
+            if (clashA || clashB) {
+                ppWarn() << "[ImuManager] refusing to place HackMotion" << deviceId
+                         << "— one wG3 fills slots A (lower arm) and B (palm) together, but"
+                         << (clashA ? "A" : "B") << "is already held by"
+                         << (clashA ? holderA : holderB)
+                         << ". Unassign that sensor in Settings → IMUs first. Placement unchanged.";
+                return;
+            }
+            map[lowerKey] = QStringLiteral("A");
+            map[palmKey]  = QStringLiteral("B");
+            map.remove(deviceId);
+        } else {
+            ppWarn() << "[ImuManager] refusing to place HackMotion" << deviceId << "at slot"
+                     << slot << "— one wG3 fills slots A (lower arm) and B (palm) together,"
+                        " fixed by its cable, so \"A\" and \"\" are the only assignments"
+                        " that exist for it. Placement unchanged.";
+            return;
+        }
+    } else {
+        // Witmotion: the bare device id, exactly as before Phase C — one device,
+        // one segment, one letter. Existing entries keep working untouched.
+        if (slot.isEmpty()) map.remove(deviceId);
+        else                map[deviceId] = slot;
+    }
+
+    // ONE write, after the whole map is built. AppSettings::setImuPlacement guards
+    // on equality, so an unchanged map emits nothing and this function is
+    // idempotent; writing key-by-key would emit imuPlacementChanged up to three
+    // times and let a QML consumer observe the device half-assigned — slot A filled
+    // and slot B not yet, which is the exact state Phase C exists to stop showing.
+    s->setImuPlacement(map);
 }
 
 ImuManager::ImuDeviceStats ImuManager::liveDeviceStats(const QString &deviceId) const
@@ -590,6 +862,95 @@ ImuDeviceBase *ImuManager::createInstance(const Device &device)
     }
 
     return inst;
+}
+
+bool ImuManager::isHackMotionDevice(const QString &deviceId) const
+{
+    for (const Device &dev : DeviceEnumerator::instance()->devices(DeviceType::Imu))
+        if (dev.id == deviceId) return dev.imuVendor == ImuVendor::HackMotion;
+    return false;
+}
+
+void ImuManager::migrateHackMotionPlacement(const Device &device)
+{
+    if (device.type != DeviceType::Imu || device.imuVendor != ImuVendor::HackMotion)
+        return;
+
+    AppSettings  fallback;
+    AppSettings *s = m_appSettings ? m_appSettings : &fallback;
+    QVariantMap map = s->imuPlacement();
+
+    const QString lowerKey = hmUnitKey(device.id, HM_UNIT_LOWER_ARM);
+    const QString palmKey  = hmUnitKey(device.id, HM_UNIT_PALM);
+    const bool alreadyUnitKeyed = map.contains(lowerKey) || map.contains(palmKey);
+
+    if (!map.contains(device.id)) {
+        // Nothing is keyed by bare device id, so there is nothing to migrate:
+        // either this device is already unit-keyed, or it was never assigned.
+        //
+        // ⚠ THOSE TWO ARE INDISTINGUISHABLE FROM AN ASSIGNMENT A COACH
+        // DELIBERATELY CLEARED, and both are left exactly as they are. This
+        // function migrates; it never assigns. An unassigned wG3 reads as
+        // unassigned until someone assigns it — a migration that helpfully filled
+        // A and B would silently undo a clearing every time the app restarted.
+        return;
+    }
+
+    const QString bare = map.value(device.id).toString();
+
+    if (alreadyUnitKeyed || bare.isEmpty()) {
+        // The unit keys are the authority the moment they exist, and an empty bare
+        // value means unassigned. Either way the bare entry now carries no
+        // information worth preserving, so it is dropped — that is all this branch
+        // does, and it is what makes a second run of this function a no-op.
+        map.remove(device.id);
+        s->setImuPlacement(map);
+        return;
+    }
+
+    if (bare != QLatin1String("A")) {
+        // ⚠ NOT REINTERPRETED. Phase A pinned a wG3 to slot A and locked the
+        // control, so "A" is the only value it could have written; anything else
+        // came from an older build or a hand-edited file, and there is no defined
+        // pair of slots for it — B+C is not an arrangement this hardware can be in.
+        // Silently mapping it onto lowerArm/palm anyway is exactly how a mirrored
+        // wrist angle gets shipped, so the entry is left unresolved and said out
+        // loud instead.
+        ppWarn() << "[ImuManager]" << device.id << "— persisted HackMotion placement" << bare
+                 << "cannot be migrated: one wG3 fills slots A (lower arm) and B (palm), and no"
+                    " other pair is defined. Left unresolved — reassign it in Settings → IMUs.";
+        return;
+    }
+
+    // ⚠ THE INTERIM PIN CLAIMED ONE LETTER; THE MIGRATION CLAIMS TWO, so it can
+    // collide on the second one even though the first is already this device's.
+    // Phase A's own comment named this: the bare pin "will collide if a Witmotion
+    // already holds A" — and B is the half nobody was holding a letter for yet.
+    // Writing the palm key on top of a Witmotion's B would leave that letter
+    // claimed twice, and placementKeyForSlot() would answer with whichever key
+    // sorted first: deterministic, but an arbitrary ANSWER, and the dropped sensor
+    // is never mentioned. Refusing instead leaves the bare entry in place, which
+    // instanceForSlot() already reports once per key as unresolvable — a dead end
+    // the coach can see and fix, rather than a wrist angle from the wrong sensor.
+    const QString holderB = deviceIdForSlot(QStringLiteral("B"));
+    if (!holderB.isEmpty() && holderB != device.id) {
+        ppWarn() << "[ImuManager]" << device.id
+                 << "— cannot migrate HackMotion placement: the palm unit needs slot B, which is"
+                    " already held by" << holderB
+                 << ". Left on the old bare-device-id key and therefore unresolved — unassign"
+                    " that sensor in Settings → IMUs, then reassign the wG3.";
+        return;
+    }
+
+    // Fully determined otherwise: the lower-arm unit keeps the letter that was
+    // stored and the palm unit takes B, in the cable's fixed order.
+    map[lowerKey] = QStringLiteral("A");
+    map[palmKey]  = QStringLiteral("B");
+    map.remove(device.id);
+    s->setImuPlacement(map);
+
+    ppInfo() << "[ImuManager]" << device.id
+             << "— migrated HackMotion placement to unit keys: lower arm → A, palm → B";
 }
 
 float ImuManager::impactScaleFor(const QString &sensitivity)

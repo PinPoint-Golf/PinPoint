@@ -98,13 +98,23 @@ public:
     // its two blocks this object represents.
     HmUnit(const QString &deviceId, hm_unit unit, QObject *parent = nullptr);
 
-    hm_unit unit()      const { return m_unit; }
     // ⚠ "<deviceId>#lowerArm" / "<deviceId>#palm", and the exact string matters:
-    // it becomes the EventBuffer SourceDescriptor::identifier in Phase B and the
-    // AppSettings::imuPlacement key in Phase C. Both are persisted, so it is
-    // fixed here, once, rather than spelled again at each of those sites.
+    // it is the EventBuffer SourceDescriptor::identifier (Phase B) and the
+    // AppSettings::imuPlacement key (Phase C). Both are PERSISTED, so the
+    // spelling is fixed here, once, rather than repeated at each of those sites —
+    // two spellings would not fail, they would silently orphan a device's
+    // placement and its recorded lanes.
+    //
+    // Static, because both persisted uses need the string for a device with no
+    // live HmUnit: ImuManager resolves and migrates placement keys for a wG3 that
+    // has been enumerated but never connected. Ask for the string; do not build a
+    // throwaway HmUnit to read one off, and do not respell the suffix.
+    static QString unitIdFor(const QString &deviceId, hm_unit unit);
+    static QString unitLabelFor(hm_unit unit);           // "Lower arm" / "Palm"
+
+    hm_unit unit()      const { return m_unit; }
     QString unitId()    const { return m_unitId; }
-    QString unitLabel() const { return m_unitLabel; }   // "Lower arm" / "Palm"
+    QString unitLabel() const { return m_unitLabel; }
 
     float quatW() const { return m_quatW; }
     float quatX() const { return m_quatX; }
@@ -124,14 +134,19 @@ public:
     // quaternion difference. There is nothing to estimate here.
     float angularVelocityDps() const { return m_angularVelocityDps; }
 
-    // ⚠ PHASE A HAS NO ANATOMICAL FRAME, AND WILL NOT PRETEND OTHERWISE.
-    // The device applies its own calibration in ITS anatomical convention
-    // (§8.1); the constant per-unit rotation from that convention to ours is
-    // solved empirically in Phase D and is the linchpin of the integration.
+    // ⚠ NEITHER PHASE A NOR PHASE C HAS AN ANATOMICAL FRAME, AND NEITHER WILL
+    // PRETEND OTHERWISE. ⚠ THIS IS UNCHANGED BY CALIBRATION, which is the trap:
+    // once the routine below succeeds the device applies its own transform and the
+    // cubes start moving sensibly, and it becomes very tempting to conclude that
+    // the frame is now known. It is not. The device calibrates into ITS anatomical
+    // convention (§8.1), which the specification never defines; the constant
+    // per-unit rotation from that convention to ours is solved empirically in
+    // Phase D and is the linchpin of the integration.
     // Until it exists, anatCalibrated is false and anatQuat is identity, so
     // ArmVizView parks the segment at rest rather than driving it with a frame
-    // nobody has reconciled. Inventing a transform here would produce a display
-    // that looks right and is mirrored — F3 in the integration brief.
+    // nobody has reconciled. Inventing a transform here — or conjugating the
+    // streamed quaternion because a cube "looks better" — would produce a display
+    // that looks right and is mirrored: F3 in the integration brief.
     bool        anatCalibrated() const { return m_anatCalibrated; }
     QQuaternion anatQuat()       const { return m_anatQuat; }
     // Exists only so ArmVizView's fallback path is defined. There is no
@@ -198,8 +213,35 @@ private:
 // writes, both stamped with the sample's mapped host time. The display path
 // (60 Hz tick, two orientation cubes) is unchanged and still shows only the
 // newest sample; the RING gets every one of them, because the ring is the
-// recording. What is still absent is an anatomical frame (Phase D), the
-// calibration flow (Phase C) and the deferred history pull (Phase E).
+// recording.
+//
+// PHASE C SCOPE. The device's own calibration routine, driven from QML through
+// the five Q_INVOKABLEs below and observed through the calibration properties.
+// ⚠ THE ORDER IS FIXED BY THE LIBRARY and there is no way to express any other:
+//
+//   connect → start stream → beginCalibration() → confirmHorizontal()
+//           → confirmRaise() → (device applies, `0x94`) → confirmReferencePose()
+//
+// Three things about that sequence are counter-intuitive enough to be worth
+// stating here rather than only at the call sites:
+//
+//   - `0x94` IS NOT A VERDICT. The device applies the transform for every
+//     `a2 01`, including attempts an application goes on to reject, so its
+//     arrival tells us the frame under the stream CHANGED and nothing about
+//     whether it changed correctly. Success is never inferred from it.
+//   - THE REFERENCE-POSE STEP IS NOT OPTIONAL. HM_CALP_COMPLETE means the
+//     device applied a transform; only a passed presence measurement makes
+//     hm_session_calibration_state() read HM_CAL_CALIBRATED. Skipping it leaves
+//     every recorded sample flagged HM_CAL_UNKNOWN — and it is also the step
+//     that yields the reference anchor Phase D's frame solve needs.
+//   - RECONNECT IS NOT RESUME. §8.3 measured 0.70° immediately before dropping
+//     a link and 18.80° at the same pose after reconnecting, strap untouched.
+//     Link-down and a stream restart both drive this whole surface back to
+//     nothing (see invalidateCalibration()), and there is deliberately NO
+//     persistence of any of it — see the comment on that function.
+//
+// What is still absent is an anatomical frame (Phase D) and the deferred
+// history pull (Phase E).
 class HmInstance : public ImuDeviceBase
 {
     Q_OBJECT
@@ -228,12 +270,118 @@ class HmInstance : public ImuDeviceBase
     // is catching "calibration never happened or was lost", where the gap is an
     // order of magnitude. Show it as STATE, never as a score.
     //
-    // Declared in Phase A so Phase C only has to fill them; NaN / HM_CALP_IDLE
-    // until then.
+    // NaN until a presence measurement lands, and driven back to NaN by every
+    // invalidation — a stale angle from the previous attempt sitting on screen is
+    // the shortest path to the ranking this must not permit.
     Q_PROPERTY(double presenceAngleDeg READ presenceAngleDeg NOTIFY calibrationStateChanged)
     Q_PROPERTY(int    calibrationPhase READ calibrationPhase NOTIFY calibrationStateChanged)
 
+    // ⚠ THE PHASE AND THE STATE ARE TWO DIFFERENT QUESTIONS AND NEITHER IS
+    // DERIVABLE FROM THE OTHER. `calibrationPhase` (hm_calibration_phase) is
+    // WHERE THE ROUTINE IS; `calibrationState` (hm_calibration_state) is WHAT IS
+    // KNOWN ABOUT THE DEVICE'S TRANSFORM. HM_CALP_COMPLETE with
+    // HM_CAL_UNKNOWN is an ordinary, expected combination — the device applied
+    // something and nobody checked it — which is exactly the mistake the
+    // library's own comment at HM_CALP_COMPLETE warns against. So this is read
+    // back from hm_session_calibration_state() on every phase event rather than
+    // inferred here.
+    Q_PROPERTY(int calibrationState READ calibrationState NOTIFY calibrationStateChanged)
+
+    // hm_calibration_abort_reason. ⚠ NOT A SYNONYM FOR "ABORTED":
+    // HM_CAL_ABORT_CALLER is carried on a transition to COMPLETE as well, because
+    // aborting at HM_CALP_VERIFYING declines the presence check on a transform the
+    // device HAS ALREADY APPLIED. Read it with the phase, never instead of it.
+    Q_PROPERTY(int calibrationAbortReason READ calibrationAbortReason NOTIFY calibrationStateChanged)
+
+    // Evidence about the HOLD, not about the calibration: the largest angular
+    // distance between any sample of the presence run and the run's mean, taken as
+    // the worse of the two units. ⚠ A mean without a spread is an estimate without
+    // evidence — this is what says whether the athlete held the reference pose or
+    // drifted through it, and Phase D looks at it before trusting the anchor. Show
+    // it BESIDE the presence figure and never as a quality number. NaN until
+    // measured.
+    Q_PROPERTY(double poseSpreadMaxDeg    READ poseSpreadMaxDeg    NOTIFY calibrationStateChanged)
+    Q_PROPERTY(int    presenceSamplesUsed READ presenceSamplesUsed NOTIFY calibrationStateChanged)
+
+    // ⚠ "WE COULD NOT CHECK", WHICH IS NOT "WE CHECKED AND IT WAS FINE" AND NOT
+    // "WE DECLINED TO CHECK". HM_WARN_PRESENCE_NOT_MEASURED means the reference
+    // pose was asked for and too few live samples reached the run to average, and
+    // the phase reaches HM_CALP_COMPLETE anyway — so a UI keyed only on the phase
+    // would claim success. Latched for the current attempt and cleared when the
+    // next routine begins. (A DECLINED check — abort at VERIFYING — leaves this
+    // false and puts HM_CAL_ABORT_CALLER in calibrationAbortReason instead.)
+    Q_PROPERTY(bool presenceNotMeasured READ presenceNotMeasured NOTIFY calibrationStateChanged)
+
+    // A routine is in flight: the phase is neither IDLE, COMPLETE nor ABORTED.
+    // The UI uses it to keep the guide on screen and the Calibrate button out of
+    // reach; it is NOT a claim that anything has been calibrated.
+    Q_PROPERTY(bool calibrationActive READ calibrationActive NOTIFY calibrationStateChanged)
+
+    // ⚠ THE UI MUST NOT OFFER "CALIBRATE" WITHOUT THIS. hm_calibration_begin()
+    // returns HM_ERR_NO_STREAM when no stream is running and there is deliberately
+    // no AWAIT_STREAM phase to fall into — the device observes a CONTINUOUS raise
+    // between the two markers, which two static samples cannot supply, so
+    // calibration is not a standalone transaction. Under our one-stream cycle the
+    // stream is up from just after HM_EV_READY and stays up, so this is normally
+    // true whenever the device is connected — which is a reason to bind it, not a
+    // reason to assume it.
+    Q_PROPERTY(bool streaming READ streaming NOTIFY streamingChanged)
+
+    // hm_relative_angle_deg() of the newest sample — the readout that PROVES a
+    // calibration took, because it is a rotation magnitude and therefore
+    // independent of both units' unreconciled frames.
+    //
+    // ⚠ IT IS ONLY INTERPRETABLE AT REST WITH A STRAIGHT WRIST, where ~15° means
+    // uncalibrated and 0.4-0.8° means the transform is applied and holding. In any
+    // other pose it is meaningless: the same stream reads 170-180° routinely while
+    // the wrist is moving (the library's own five-swing fixture sits in that band
+    // for 28 % of its samples), and a UI that shows this number mid-motion is
+    // showing a fault that is not there. NaN before the first sample.
+    Q_PROPERTY(double relativeAngleDeg READ relativeAngleDeg NOTIFY relativeAngleChanged)
+
 public:
+    // ── The reference-pose anchor, kept for Phase D's frame solve ─────────────
+    //
+    // Every field of hm_calibration_presence_event that cannot be re-derived once
+    // the pose has passed. C++ only: Phase D consumes it, QML has no business
+    // with it, and nothing here derives anything from it — the solve is Phase D's
+    // and this is the raw measurement the library already took.
+    //
+    // ⚠ BOTH FORMS ARE KEPT ON PURPOSE, because they answer different questions:
+    //
+    //   the MEAN   — the averaged pose, and the ONLY one a frame solve may use.
+    //                A person holding a declared pose still wobbles 0.5-2°, which
+    //                is one to two orders larger than Q14 quantisation (~0.007°),
+    //                and averaging the run is what removes it.
+    //   the MEDOID — one real measured pair, for the angle and its provenance.
+    //                ⚠ IT MUST NOT BE USED FOR THE SOLVE: it is selected on the
+    //                RELATIVE rotation, which is blind to a whole-arm movement
+    //                carrying both units together — precisely the motion that
+    //                contaminates an ABSOLUTE pose. However centrally it is
+    //                chosen, it still holds whatever the athlete was doing at
+    //                that instant.
+    //
+    // `valid` is the gate and the only gate. A quaternion has no NaN idiom, so
+    // there is no in-band sentinel: every other field is meaningless when it is
+    // false.
+    struct ReferenceAnchor {
+        bool        valid = false;
+        // (2) THE AVERAGED POSE — what a Phase D frame solve must use.
+        QQuaternion qLowerArmMean, qPalmMean;
+        // Per unit, [lowerArm, palm]. Check this before trusting the mean.
+        float       poseSpreadDeg[2] = { 0.0f, 0.0f };
+        // (1) The medoid record — for the angle and its provenance only.
+        QQuaternion qLowerArmMedoid, qPalmMedoid;
+        quint32     sampleIndex = 0;   // which record the medoid pair came from
+        qint32      skewUs      = 0;   // palm − lower_arm for THAT record
+        quint8      samplesUsed = 0;
+        float       relativeAngleDeg = 0.0f;
+    };
+
+    // Latest measurement, invalid until one lands and driven back to invalid by
+    // every invalidation.
+    ReferenceAnchor referenceAnchor() const { return m_anchor; }
+
     // ioThread is ImuManager's shared IMU I/O thread. Everything that touches
     // the hm_session lives there — see HmSessionWorker in the .cpp and the
     // threading contract at the top of hackmotion/session.h.
@@ -284,14 +432,73 @@ public:
     QObject *unitLowerArmObject() const { return m_lowerArm; }
     QObject *unitPalmObject()     const { return m_palm; }
 
-    double presenceAngleDeg() const { return m_presenceAngleDeg; }
-    int    calibrationPhase() const { return m_calibrationPhase; }
+    double presenceAngleDeg()      const { return m_presenceAngleDeg; }
+    int    calibrationPhase()      const { return m_calibrationPhase; }
+    int    calibrationState()      const { return m_calibrationState; }
+    int    calibrationAbortReason() const { return m_calibrationAbortReason; }
+    double poseSpreadMaxDeg()      const { return m_poseSpreadMaxDeg; }
+    int    presenceSamplesUsed()   const { return m_presenceSamplesUsed; }
+    bool   presenceNotMeasured()   const { return m_presenceNotMeasured; }
+    bool   calibrationActive()     const;
+    bool   streaming()             const { return m_streaming; }
+    double relativeAngleDeg()      const { return m_relativeAngleDeg; }
 
-    Q_INVOKABLE QString saveLog();
+    // ── The routine, driven from QML ─────────────────────────────────────────
+    //
+    // ⚠ EVERY ONE OF THESE IS MARSHALLED ONTO THE I/O THREAD AND RETURNS
+    // IMMEDIATELY, SO NONE OF THEM CAN REPORT A REFUSAL BY RETURNING ONE. The
+    // library's threading contract puts every hm_calibration_* call on the one
+    // thread that owns the session, and the hop is a QueuedConnection rather than
+    // a BlockingQueuedConnection deliberately: a calibration call must never block
+    // the GUI thread, whose renderer is PACING the athlete through a raise the
+    // device watches continuously. hm_calibration_confirm_reference_pose() is
+    // documented as returning BEFORE the measurement exists in any case, so there
+    // is nothing useful to wait for.
+    //
+    // ⚠ A UI THAT WAITS ON A RETURN VALUE HERE WILL HANG. The hm_status the
+    // library produced reaches the GUI thread ONLY as
+    // calibrationCallRefused(status, call) — that signal is the entire refusal
+    // channel. Everything else arrives as a phase or presence event.
+    Q_INVOKABLE void beginCalibration();
+    Q_INVOKABLE void confirmHorizontal();
+    Q_INVOKABLE void confirmRaise();
+    Q_INVOKABLE void confirmReferencePose();
+    Q_INVOKABLE void abortCalibration();
+
+    Q_INVOKABLE QString saveLog() override;
 
 signals:
     void deviceDescriptionChanged();
     void calibrationStateChanged();
+    void streamingChanged();
+    void relativeAngleChanged();
+
+    // ⚠ THE ONLY WAY A REFUSED CALIBRATION CALL IS REPORTED — see the
+    // Q_INVOKABLEs above for why a return value cannot serve. `call` is the
+    // function name so a log line says WHICH step was refused, and `status` is
+    // carried through raw rather than folded into a generic error because the
+    // three reachable values want three different things from the coach:
+    //
+    //   HM_ERR_NO_STREAM     the stream is not running. Nothing to wait for and
+    //                        nothing to retry — there is no AWAIT_STREAM phase on
+    //                        purpose. Reconnect.
+    //   HM_ERR_BUSY          a history bracket is open (Phase E). The presence
+    //                        check is measured FROM live samples and a retrieval
+    //                        suspends them, so the right answer is "try again in a
+    //                        second" — the athlete is standing still either way.
+    //                        ⚠ Not reachable today; Phase E makes it reachable,
+    //                        which is why it is carried legibly now rather than
+    //                        discovered then.
+    //   HM_ERR_INVALID_STATE no routine is running (abort), or the step is out of
+    //                        order. A UI bug, not a device condition.
+    void calibrationCallRefused(int status, const QString &call);
+
+    // ⚠ THE CALIBRATION IS GONE AND THE COACH MUST RE-RUN THE ROUTINE. Emitted on
+    // link-down (which ALWAYS invalidates — §8.3 measured 0.70° → 18.80° at the
+    // same pose across a plain disconnect, strap untouched) and on a stream
+    // restart. RECONNECT IS NOT RESUME, the library makes resume un-expressible,
+    // and this signal is how our UI matches that rather than papering over it.
+    void calibrationInvalidated();
 
     // The negotiated ATT MTU is below HM_MIN_ATT_MTU (96), so the library
     // refuses to run. ⚠ Its own error, deliberately not folded into a generic
@@ -311,6 +518,26 @@ private:
     void onConnectionLost(bool fromError);
     void handleConnectFailure();
     int  retryDelayMs(int attempt) const;
+
+    // ⚠ DRIVES THE WHOLE CALIBRATION SURFACE BACK TO NOTHING and says so. Phase
+    // → IDLE, state → whatever the LIBRARY now reports (UNCALIBRATED after a
+    // link-down, UNKNOWN after a stream restart — read, never guessed), presence
+    // angle and pose spread → NaN, samples → 0, the reference anchor → invalid,
+    // then calibrationInvalidated().
+    //
+    // ⚠ AND IT STORES NOTHING, ANYWHERE. There is no save, no load and no "reuse
+    // last session", and none may ever be added. §8.3: a calibration is lost by a
+    // power cycle, by remounting AND by a plain disconnect, and the library
+    // deliberately ships no hm_calibration_save()/_load() because such a
+    // convenience produces confidently wrong data with no error anywhere. Anything
+    // persisted here would be re-applied to a device whose transform is gone, and
+    // the resulting wrist angles would be plausible, permanently wrong, and
+    // unfalsifiable from the recording. The absence is the feature.
+    void invalidateCalibration(int libraryState, const QString &why);
+    // Clears just the presence half — called when a NEW routine begins, so the
+    // previous attempt's angle cannot sit on screen next to the new one and invite
+    // the ranking §8.2 shows would prefer the worst attempt available.
+    void clearPresenceSurface();
 
     // The two sources are registered against this in the constructor and the
     // ids handed to the HmUnits; the worker holds the same pointer for the ring
@@ -364,6 +591,7 @@ private:
     quint64 m_lastSeq        = 0;
     double  m_lastSentRateHz = 0.0;
     float   m_lastSentVelDps[HM_UNIT_COUNT] = { 0.0f, 0.0f };
+    double  m_lastSentRelAngleDeg = 0.0;
 
     // 10 s log summary.
     QTimer  m_logTimer;
@@ -387,8 +615,25 @@ private:
     int     m_batteryPercent = -1;
     double  m_dataRateHz     = 0.0;
 
+    // ── The calibration surface. Written only from the worker's queued
+    // calibration signals and from invalidateCalibration(); the enums live in
+    // <hackmotion/event.h> and are held as int here so this header stays the
+    // light one it is. Every default is established in the constructor, where
+    // that header is in scope, rather than spelled twice.
     double m_presenceAngleDeg = 0.0;   // set to NaN in the constructor
     int    m_calibrationPhase = 0;     // HM_CALP_IDLE
+    int    m_calibrationState = 0;     // HM_CAL_UNKNOWN
+    int    m_calibrationAbortReason = 0;   // HM_CAL_ABORT_NONE
+    double m_poseSpreadMaxDeg = 0.0;   // set to NaN in the constructor
+    int    m_presenceSamplesUsed = 0;
+    bool   m_presenceNotMeasured = false;
+    bool   m_streaming = false;
+    // ⚠ NaN, not 0. Zero degrees is the reading a perfectly applied calibration
+    // approaches, so a default of 0 would claim the best possible number before a
+    // single sample has arrived.
+    double m_relativeAngleDeg = 0.0;   // set to NaN in the constructor
+
+    ReferenceAnchor m_anchor;
 
     // ── Source-descriptor numbers, and why the two rate figures disagree ──────
     //

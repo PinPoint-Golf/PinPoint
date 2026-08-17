@@ -213,6 +213,11 @@ class AppSettings : public QObject
     Q_PROPERTY(QVariantMap imuMountOrientation    READ imuMountOrientation    WRITE setImuMountOrientation    NOTIFY imuMountOrientationChanged)
     Q_PROPERTY(bool        imuAutoConnect         READ imuAutoConnect         WRITE setImuAutoConnect         NOTIFY imuAutoConnectChanged)
     Q_PROPERTY(bool        imuAutoReconnect       READ imuAutoReconnect       WRITE setImuAutoReconnect       NOTIFY imuAutoReconnectChanged)
+    // Phases A and B (BLE transport, discovery, two live lanes) have shipped and are
+    // verified on hardware, so `true` is the current behaviour: this flag changes nothing
+    // until someone turns it off. Gates HackMotion wG3 *discovery* only; see
+    // DeviceEnumerator::setHackMotionEnabled().
+    Q_PROPERTY(bool        hackmotionEnabled      READ hackmotionEnabled      WRITE setHackmotionEnabled      NOTIFY hackmotionEnabledChanged)
     Q_PROPERTY(bool        imuSaveCalibrationToFlash READ imuSaveCalibrationToFlash WRITE setImuSaveCalibrationToFlash NOTIFY imuSaveCalibrationToFlashChanged)
     Q_PROPERTY(QString     imuDefaultFusionMode   READ imuDefaultFusionMode   WRITE setImuDefaultFusionMode   NOTIFY imuDefaultFusionModeChanged)
     // Software orientation-fusion algorithm: "Madgwick" (default) or "ESKF".
@@ -453,6 +458,7 @@ public:
         m_imuMountOrientation     = ppSettings().value(QStringLiteral("imu/mountOrientation"),     QVariantMap{}).toMap();
         m_imuAutoConnect          = ppSettings().value(QStringLiteral("imu/autoConnect"),          true).toBool();
         m_imuAutoReconnect        = ppSettings().value(QStringLiteral("imu/autoReconnect"),        true).toBool();
+        m_hackmotionEnabled       = ppSettings().value(QStringLiteral("hackmotion/enabled"),        true).toBool();
         m_imuSaveCalibrationToFlash = ppSettings().value(QStringLiteral("imu/saveCalibrationToFlash"), false).toBool();
         m_imuDefaultFusionMode    = ppSettings().value(QStringLiteral("imu/defaultFusionMode"),    QStringLiteral("9axis")).toString();
         m_imuOrientationFilter    = ppSettings().value(QStringLiteral("imu/orientationFilter"),    QStringLiteral("Madgwick")).toString();
@@ -619,6 +625,7 @@ public:
     QVariantMap imuMountOrientation()     const { return m_imuMountOrientation; }
     bool        imuAutoConnect()          const { return m_imuAutoConnect; }
     bool        imuAutoReconnect()        const { return m_imuAutoReconnect; }
+    bool        hackmotionEnabled()       const { return m_hackmotionEnabled; }
     bool        imuSaveCalibrationToFlash() const { return m_imuSaveCalibrationToFlash; }
     QString     imuDefaultFusionMode()    const { return m_imuDefaultFusionMode; }
     QString     imuOrientationFilter()    const { return m_imuOrientationFilter; }
@@ -1229,6 +1236,14 @@ public:
         emit imuAutoReconnectChanged();
     }
 
+    void setHackmotionEnabled(bool v)
+    {
+        if (m_hackmotionEnabled == v) return;
+        m_hackmotionEnabled = v;
+        ppSettings().setValue(QStringLiteral("hackmotion/enabled"), v);
+        emit hackmotionEnabledChanged();
+    }
+
     void setImuSaveCalibrationToFlash(bool v)
     {
         if (m_imuSaveCalibrationToFlash == v) return;
@@ -1553,6 +1568,7 @@ signals:
     void imuMountOrientationChanged();
     void imuAutoConnectChanged();
     void imuAutoReconnectChanged();
+    void hackmotionEnabledChanged();
     void imuSaveCalibrationToFlashChanged();
     void imuDefaultFusionModeChanged();
     void imuOrientationFilterChanged();
@@ -1666,6 +1682,7 @@ private:
     QVariantMap m_imuCalibration;
     bool        m_imuAutoConnect          = true;
     bool        m_imuAutoReconnect        = true;
+    bool        m_hackmotionEnabled       = true;
     bool        m_imuSaveCalibrationToFlash = false;
     QString     m_imuDefaultFusionMode    = QStringLiteral("9axis");
     QString     m_imuOrientationFilter    = QStringLiteral("Madgwick");

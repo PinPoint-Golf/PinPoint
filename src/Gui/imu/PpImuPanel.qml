@@ -223,8 +223,18 @@ Item {
                 opacity: modelData.present ? 1.0 : 0.45
                 Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
                 placement: {
-                    var p = appSettings.imuPlacement
-                    return p[modelData.id] ? p[modelData.id] : ""
+                    // Phase C unit-keyed placement: a HackMotion holds no entry
+                    // under its own bare device id (its keys are
+                    // "<id>#lowerArm"/"<id>#palm") — it is always pinned to BOTH
+                    // A and B at once (ImusPanel's placement selector), so that
+                    // fixed pair is shown directly instead of read from the map.
+                    // `var _dep = appSettings.imuPlacement` is read either way so
+                    // this binding still re-evaluates on a placement change —
+                    // deviceIdForSlot() is a Q_INVOKABLE and not reactive on its own.
+                    var _dep = appSettings.imuPlacement
+                    if (modelData.vendor === "hackmotion")
+                        return imuManager.deviceIdForSlot("A") === modelData.id ? "A + B" : ""
+                    return _dep[modelData.id] ? _dep[modelData.id] : ""
                 }
             }
         }

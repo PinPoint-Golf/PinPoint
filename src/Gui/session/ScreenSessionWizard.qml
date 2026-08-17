@@ -431,27 +431,22 @@ Item {
         return true
     }
 
-    // True when a device in imuDeviceList has been assigned to the given slot letter.
-    // Reactive: re-evaluates when imuDeviceList or imuPlacement changes.
-    function deviceForSlot(slotLetter) {
-        var list      = imuManager.imuDeviceList
-        var placement = appSettings.imuPlacement
-        for (var i = 0; i < list.length; ++i)
-            if (placement[list[i].id] === slotLetter) return list[i]
-        return null
-    }
+    // (A slot→imuDeviceList-row helper lived here and had no callers anywhere in
+    // the tree, in this file or outside it. Phase C's migration would have had to
+    // rename it as well — imuManager now has its own deviceForSlot() — so it was
+    // removed instead. The rows that DO need this resolve it inline from
+    // imuManager.deviceIdForSlot(); see the CheckRow delegate's _dev below.)
 
     // All required IMU slots assigned.
     readonly property bool imusOk: {
-        var reqs      = root.curImuReqs
-        var list      = imuManager.imuDeviceList
-        var placement = appSettings.imuPlacement
+        // deviceIdForSlot() is Q_INVOKABLE, not reactive on its own — this read
+        // is the explicit dependency that used to come for free from walking
+        // the placement map directly.
+        var _dep = appSettings.imuPlacement
+        var reqs = root.curImuReqs
         for (var i = 0; i < reqs.length; ++i) {
             if (!reqs[i].required) continue
-            var found = false
-            for (var j = 0; j < list.length; ++j)
-                if (placement[list[j].id] === reqs[i].slot) { found = true; break }
-            if (!found) return false
+            if (imuManager.deviceIdForSlot(reqs[i].slot) === "") return false
         }
         return reqs.some(function(r) { return r.required })
     }
@@ -460,20 +455,16 @@ Item {
     // Reactive: imuManager.instances fires instancesChanged() whenever any
     // ImuInstance.imuConnected changes (see imu_manager.cpp lambda at createInstance).
     readonly property bool imusAllConnected: {
-        var _dep = imuManager.instances   // reactive dependency
-        var reqs      = root.curImuReqs
-        var list      = imuManager.imuDeviceList
-        var placement = appSettings.imuPlacement
+        var _dep  = imuManager.instances     // reactive dependency
+        var _dep2 = appSettings.imuPlacement // deviceForSlot() is Q_INVOKABLE, not reactive on its own
+        var reqs = root.curImuReqs
         for (var i = 0; i < reqs.length; ++i) {
             if (!reqs[i].required) continue
-            var found = false
-            for (var j = 0; j < list.length; ++j) {
-                if (placement[list[j].id] === reqs[i].slot) {
-                    var inst = imuManager.instanceFor(list[j].id)
-                    if (inst && inst.imuConnected) { found = true; break }
-                }
-            }
-            if (!found) return false
+            // Connect state is a DEVICE property (imu_manager.h ⚠) — deviceForSlot(),
+            // NOT instanceForSlot(), which for a HackMotion slot hands back the
+            // per-unit HmUnit and has no imuConnected of its own.
+            var dev = imuManager.deviceForSlot(reqs[i].slot)
+            if (!dev || !dev.imuConnected) return false
         }
         return reqs.some(function(r) { return r.required })
     }
@@ -527,15 +518,15 @@ Item {
         if (stepStates[stepImus] === "skipped") {
             issues.push({ text: qsTr("Motion sensors skipped — no movement data will be captured"), panel: -1 })
         } else {
-            var reqs      = curImuReqs
-            var list      = imuManager.imuDeviceList
-            var placement = appSettings.imuPlacement
+            var reqs = curImuReqs
+            // deviceIdForSlot() is Q_INVOKABLE, not reactive on its own — keep
+            // an explicit read of imuPlacement so this whole readinessIssues
+            // binding still re-evaluates when placement changes, the way it
+            // used to for free by reading the map directly.
+            var _dep = appSettings.imuPlacement
             for (var i = 0; i < reqs.length; ++i) {
                 if (!reqs[i].required) continue
-                var found = false
-                for (var j = 0; j < list.length; ++j)
-                    if (placement[list[j].id] === reqs[i].slot) { found = true; break }
-                if (!found)
+                if (imuManager.deviceIdForSlot(reqs[i].slot) === "")
                     issues.push({ text: qsTr("IMU %1 — %2 not assigned")
                                             .arg(reqs[i].slot).arg(reqs[i].placement),
                                   panel: settingsPanelImus })
@@ -1282,45 +1273,60 @@ Item {
                             property int  _connectIdx:   0
                             property bool _connecting:   false
 
+                            // The imuDeviceList row for every device assigned to ANY slot
+                            // (required or optional) and enabled this session — DEDUPED by
+                            // device id. Phase C unit-keyed placement means a single
+                            // HackMotion wG3 answers to BOTH slot A and slot B at once
+                            // (deviceIdForSlot("A") === deviceIdForSlot("B")'s device), so
+                            // the naive per-slot loop this replaced would enumerate the
+                            // same peripheral twice — canConnect and startConnect share
+                            // this helper precisely so neither one re-introduces that.
+                            function assignedDevices() {
+                                var _dep = appSettings.imuPlacement   // deviceIdForSlot() is Q_INVOKABLE, not reactive on its own
+                                var reqs = root.curImuReqs
+                                var list = imuManager.imuDeviceList
+                                var seen = ({})
+                                var out  = []
+                                for (var i = 0; i < reqs.length; ++i) {
+                                    var devId = imuManager.deviceIdForSlot(reqs[i].slot)
+                                    if (!devId || seen[devId]) continue
+                                    for (var j = 0; j < list.length; ++j) {
+                                        if (list[j].id === devId && list[j].sessionEnabled) {
+                                            seen[devId] = true
+                                            out.push(list[j])
+                                            break
+                                        }
+                                    }
+                                }
+                                return out
+                            }
+
                             // True when at least one enabled, assigned sensor is not yet
                             // connected — i.e. there is something for "Connect" to do.
                             // Drives the wizard footer button (Connect ↔ Continue).
                             readonly property bool canConnect: {
                                 var _dep = imuManager.instances   // reactive
                                 if (_connecting) return false
-                                var reqs = root.curImuReqs
-                                var list = imuManager.imuDeviceList
-                                var placement = appSettings.imuPlacement
-                                for (var i = 0; i < reqs.length; ++i) {
-                                    for (var j = 0; j < list.length; ++j) {
-                                        if (placement[list[j].id] === reqs[i].slot
-                                                && list[j].sessionEnabled) {
-                                            var inst = imuManager.instanceFor(list[j].id)
-                                            if (!inst || !inst.imuConnected) return true
-                                        }
-                                    }
+                                var devs = assignedDevices()
+                                for (var i = 0; i < devs.length; ++i) {
+                                    var inst = imuManager.instanceFor(devs[i].id)
+                                    if (!inst || !inst.imuConnected) return true
                                 }
                                 return false
                             }
 
-                            // Build the list of assigned-but-unconnected device indices
-                            // for the current session's required slots, then connect them
-                            // sequentially with a 2-second gap between each to give BlueZ
-                            // time to reset its GATT state.
+                            // Build the list of assigned-but-unconnected device INDICES
+                            // (one per PERIPHERAL, thanks to assignedDevices()'s dedup —
+                            // queuing the same wG3 twice would connect it twice with a
+                            // 2 s gap, a real double-connect, not a cosmetic glitch), then
+                            // connect them sequentially with a 2-second gap between each
+                            // to give BlueZ time to reset its GATT state.
                             function startConnect() {
+                                var devs  = assignedDevices()
                                 var queue = []
-                                var reqs = root.curImuReqs
-                                var list = imuManager.imuDeviceList
-                                var placement = appSettings.imuPlacement
-                                for (var i = 0; i < reqs.length; ++i) {
-                                    for (var j = 0; j < list.length; ++j) {
-                                        if (placement[list[j].id] === reqs[i].slot
-                                                && list[j].sessionEnabled) {
-                                            var inst = imuManager.instanceFor(list[j].id)
-                                            if (!inst || !inst.imuConnected)
-                                                queue.push(list[j].index)
-                                        }
-                                    }
+                                for (var i = 0; i < devs.length; ++i) {
+                                    var inst = imuManager.instanceFor(devs[i].id)
+                                    if (!inst || !inst.imuConnected) queue.push(devs[i].index)
                                 }
                                 if (queue.length === 0) return
                                 _connectQueue = queue
@@ -1442,9 +1448,12 @@ Item {
                                 width: parent.width
                                 spacing: 0
 
-                                // Per-slot rows driven by the imuRequirements table.
-                                // A slot is "found" when a device in imuDeviceList has been
-                                // assigned to that slot letter in appSettings.imuPlacement.
+                                // Per-slot rows driven by the imuRequirements table. A slot is
+                                // "found" when imuManager.deviceIdForSlot(slot) resolves to a
+                                // device (Phase C unit-keyed placement — see _dev below). One
+                                // HackMotion wG3 answers to BOTH slot A and slot B, so this
+                                // Repeater renders it as two rows of the SAME device rather
+                                // than one filled row and one empty one.
                                 Repeater {
                                     model: root.curImuReqs
 
@@ -1456,26 +1465,53 @@ Item {
                                         optional: !modelData.required
                                         label:    qsTr("IMU %1 — %2").arg(modelData.slot).arg(modelData.placement)
 
-                                        // Resolved device for this slot (null = unassigned).
+                                        // imuDeviceList row for the device occupying this slot
+                                        // (null = unassigned). Resolved via
+                                        // imuManager.deviceIdForSlot() — the canonical
+                                        // unit-keyed placement resolver (imu_manager.h) — so a
+                                        // HackMotion wG3 correctly answers to BOTH slot A and
+                                        // slot B from the SAME device id; the two rows must
+                                        // both read as filled, not just the anchor slot.
                                         // imuManager.instances is a reactive dependency: any
                                         // imuConnected change fires instancesChanged() which
-                                        // re-evaluates these bindings.
+                                        // re-evaluates these bindings; appSettings.imuPlacement
+                                        // is read explicitly too because deviceIdForSlot() is a
+                                        // Q_INVOKABLE and not reactive on its own.
                                         readonly property var _dev: {
-                                            var _dep = imuManager.instances
-                                            var list      = imuManager.imuDeviceList
-                                            var placement = appSettings.imuPlacement
+                                            var _dep  = imuManager.instances
+                                            var _dep2 = appSettings.imuPlacement
+                                            var devId = imuManager.deviceIdForSlot(modelData.slot)
+                                            if (!devId) return null
+                                            var list = imuManager.imuDeviceList
                                             for (var i = 0; i < list.length; ++i)
-                                                if (placement[list[i].id] === modelData.slot) return list[i]
+                                                if (list[i].id === devId) return list[i]
                                             return null
                                         }
 
-                                        // Live instance — re-evaluated when imuManager.instances
-                                        // changes. Once non-null, QML tracks _inst.stateLabel and
-                                        // _inst.imuConnected directly for fine-grained reactivity.
+                                        // Live DEVICE instance. Connect state (stateLabel,
+                                        // imuConnected) is a DEVICE property, so this is
+                                        // imuManager.deviceForSlot() — NOT instanceForSlot(),
+                                        // which for a HackMotion slot would hand back the
+                                        // per-unit HmUnit and has no stateLabel/imuConnected of
+                                        // its own. Re-evaluated when imuManager.instances
+                                        // changes; once non-null, QML tracks _inst.stateLabel
+                                        // and _inst.imuConnected directly for fine-grained
+                                        // reactivity.
                                         property QtObject _inst: {
-                                            var _dep = imuManager.instances
-                                            return _dev ? imuManager.instanceFor(_dev.id) : null
+                                            var _dep  = imuManager.instances
+                                            var _dep2 = appSettings.imuPlacement
+                                            return imuManager.deviceForSlot(modelData.slot)
                                         }
+
+                                        // "Lower arm" / "Palm" when this slot is one half of a
+                                        // HackMotion wG3 (Phase C unit-keyed placement); "" for
+                                        // a Witmotion, whose device IS the segment. Appended to
+                                        // the sub-text below so slot A and slot B — which now
+                                        // legitimately share one _dev — read as the two units of
+                                        // ONE peripheral rather than as a naming collision a
+                                        // coach would read as a misconfiguration.
+                                        readonly property string _unitLabel:
+                                            imuManager.unitLabelForSlot(modelData.slot)
 
                                         // QML tracks these on _inst directly: stateLabelChanged()
                                         // and imuConnectedChanged() on the instance update them.
@@ -1498,6 +1534,14 @@ Item {
                                         showToggle:    _dev !== null
                                         toggleChecked: !_excluded
                                         onToggled: (v) => {
+                                            // setSessionImuEnabled is keyed on the DEVICE id, not
+                                            // the slot. For a HackMotion, slot A's row and slot
+                                            // B's row share one _dev.id, so toggling EITHER
+                                            // switch enables/disables the WHOLE peripheral — both
+                                            // rows will reflect it (they both read sessionEnabled
+                                            // off the same imuDeviceList entry via _dev above).
+                                            // That is CORRECT, one physical peripheral, not a
+                                            // bug — the two rows are meant to move together.
                                             // Disabling a selected/connected device also
                                             // disconnects it (manager side).
                                             if (_dev) imuManager.setSessionImuEnabled(_dev.id, v)
@@ -1533,14 +1577,16 @@ Item {
 
                                         subOk: {
                                             if (!_dev) return ""
-                                            return [_dev.alias || _dev.description, _dev.transport, _dev.id]
-                                                       .filter(function(s){ return s && s !== "" })
-                                                       .join(" · ")
+                                            var parts = [_dev.alias || _dev.description, _dev.transport, _dev.id]
+                                                            .filter(function(s){ return s && s !== "" })
+                                            if (_unitLabel !== "") parts.push(_unitLabel)
+                                            return parts.join(" · ")
                                         }
 
                                         subWarn: {
                                             if (!_dev) return ""
-                                            return (_dev.alias || _dev.description) + qsTr(" — PRESS CONNECT")
+                                            var suffix = _unitLabel !== "" ? (" (" + _unitLabel + ")") : ""
+                                            return (_dev.alias || _dev.description) + suffix + qsTr(" — PRESS CONNECT")
                                         }
 
                                         subFail: {

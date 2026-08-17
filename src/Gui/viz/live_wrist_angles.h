@@ -28,8 +28,9 @@ class AthleteController;
 
 // LiveWristAngles — real-time lead-wrist metrics measured against the calibration
 // NEUTRAL, for the session-wizard "Check your sensor" overlay (QML context property
-// `liveWrist`). It resolves the same A/B/C IMU slots ArmVizView uses, reads each
-// instance's anatQuat (identity at the neutral reference) on a timer, and runs the
+// `liveWrist`). It resolves the same A/B/C IMU slots ArmVizView uses — through
+// ImuManager::instanceForSlot(), which resolves either device kind — reads each
+// sensor's anatQuat (identity at the neutral reference) on a timer, and runs the
 // tested wrist_angles.h math:
 //   bow/cup + hinge = wristFlexExtDeviation(forearmAnat⁻¹ · handAnat)   [slots A + B]
 //   roll            = forearmPronElbowFlex(upperAnat⁻¹ · forearmAnat)   [slots C + A]
@@ -73,7 +74,13 @@ private:
     void tick();
 
     ImuManager        *m_imu;
-    AppSettings       *m_settings;
+    // ⚠ No AppSettings member. Slot→sensor resolution is ImuManager::
+    // instanceForSlot()'s job as of Phase C — it is the single place that knows
+    // placement is keyed by device id for a Witmotion and by UNIT for a HackMotion
+    // ("<deviceId>#lowerArm" / "#palm", one wG3 filling A and B). Reading
+    // imuPlacement here again would be a seventh copy of that rule, and the copies
+    // are what a two-unit device breaks silently. The constructor still takes the
+    // settings pointer so main.cpp is unchanged.
     AthleteController *m_athlete;
     QTimer             m_timer;
 

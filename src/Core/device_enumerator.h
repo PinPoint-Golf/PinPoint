@@ -80,7 +80,10 @@ public:
     // Synchronous enumeration — individual backends register themselves on demand.
     void enumerate();
 
-    // Starts an asynchronous BLE IMU scan (90 s timeout) in a worker thread.
+    // Starts an asynchronous BLE IMU scan in a worker thread. The window is
+    // 90 s when HackMotion discovery is enabled and 30 s when it is not — see
+    // setHackMotionEnabled(); the wG3's few-seconds advertising burst after a
+    // button press is the only reason for the longer one.
     // Serial scan is a stub that finds nothing (TODO: probe serial ports).
     // Safe to call multiple times; ignored if a scan is already in progress.
     void scanImu();
@@ -108,6 +111,18 @@ public:
                            const QVariant &platformHandle = {},
                            ImuVendor vendor = ImuVendor::WitMotion);
 
+    // Gates HackMotion wG3 *discovery* only (the BLE accept filter and the
+    // scan window — see ImuBleScanner in device_enumerator.cpp). Core knows
+    // nothing about AppSettings, so ImuManager pushes the current
+    // `hackmotion/enabled` value in here immediately before every scan;
+    // DeviceEnumerator just holds it. Defaults to true because HackMotion
+    // discovery has already shipped and is hardware-verified — this flag
+    // changes nothing until someone turns it off. Does NOT touch devices
+    // already discovered, connected or persisted (e.g. placement keys); it
+    // only stops new ones from being found.
+    void setHackMotionEnabled(bool on);
+    bool hackMotionEnabled() const { return m_hackMotionEnabled; }
+
 signals:
     // Emitted whenever a new device is added (any type).
     void deviceAdded(const Device &device);
@@ -129,6 +144,7 @@ private:
     bool m_audioOutputEnumerated = false;
     bool m_imuScanActive        = false;
     QThread *m_imuScanThread    = nullptr;
+    bool m_hackMotionEnabled    = true;
 
     // IMU scan generation. Incremented at the START of each scan and stamped onto
     // every device registered during it; the value of the just-finished scan is
