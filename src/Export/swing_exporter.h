@@ -108,7 +108,11 @@ struct SwingImuDeviceInfo {
     QString     calibratedAtUtc;          // ISO8601; empty = never calibrated
     double      calibAgeSec = -1.0;       // age at shot time; -1 = never calibrated
 
-    // HackMotion only: measured palm-minus-lower-arm skew, microseconds. The
+    // HackMotion only: measured palm-minus-lower-arm skew, microseconds — the
+    // SESSION MEDIAN, not a mean and never one record's reading. A single record's
+    // tick difference is dominated by ±½-sample pairing jitter (89 and 99 ticks on
+    // two consecutive records against a session median of 59), because the two units
+    // share a sample index by construction and run two free-running MCU timers. The
     // wG3's two units are read from ONE stream but are NOT sampled
     // simultaneously — the measured skew is a stable ~0.92 ms, worth ~0.9° of
     // relative angle at 1000°/s (the device's primary output, wrist angular

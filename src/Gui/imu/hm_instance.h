@@ -375,6 +375,14 @@ public:
         // (1) The medoid record — for the angle and its provenance only.
         QQuaternion qLowerArmMedoid, qPalmMedoid;
         quint32     sampleIndex = 0;   // which record the medoid pair came from
+        // ⚠ ONE RECORD'S DIFFERENCE, AND IT IS MOSTLY JITTER — NOT "the skew".
+        // libhackmotion's 0x90 analysis measured 89 and 99 ticks on two consecutive
+        // records of one capture against a session median of 59: a single reading is
+        // dominated by ±½-sample pairing jitter, because the two units share a
+        // sample index by construction (one record header) but run two free-running
+        // MCU timers. Kept because it is what was measured at the medoid record and
+        // it belongs with that record's provenance. ⚠ A frame solve that wants the
+        // skew must take HmInstance::skewUsMedian() over a run, never this.
         qint32      skewUs      = 0;   // palm − lower_arm for THAT record
         quint8      samplesUsed = 0;
         float       relativeAngleDeg = 0.0f;
@@ -453,15 +461,21 @@ public:
     // stay translated.
     QStringList sourceLabels() const override;
 
-    // Mean of hm_sample.skew_us over every sample this session, NaN until one has
-    // been seen. ⚠ PROVENANCE, NOT A CORRECTION: the two units' blocks are NOT
-    // paired as simultaneous and this value is never applied to a timestamp. §10.3
-    // measures a stable 59 ticks (0.92 ms) whose physical meaning is unresolved —
-    // real sampling skew and arbitrary phase between two free-running counters
-    // cannot be told apart from the counters alone — so the honest thing is to
-    // carry it into swing.json and let the analysis decide. Read by the export
-    // path; there is no provenance block to put it in yet (Phase E builds one).
-    double skewUsMean() const;
+    // MEDIAN of hm_sample.skew_us over this session, NaN until a sample has been
+    // seen. ⚠ PROVENANCE, NOT A CORRECTION: the two units' blocks are NOT paired as
+    // simultaneous and this value is never applied to a timestamp. §10.3 measures a
+    // stable 59 ticks (0.92 ms) whose physical meaning is unresolved — real sampling
+    // skew and arbitrary phase between two free-running counters cannot be told
+    // apart from the counters alone — so the honest thing is to carry it into
+    // swing.json and let the analysis decide.
+    //
+    // ⚠ A MEDIAN, AND IT USED TO BE A MEAN. libhackmotion's 0x90 analysis showed a
+    // single record's tick difference is dominated by ±½-sample PAIRING JITTER — 89
+    // and 99 ticks on two consecutive records of one capture against a session
+    // median of 59 — so the stable figure is session-level and only appears after
+    // aggregating. A mean carries every one of those outliers into the answer; the
+    // library's own guidance is to take a median over a run.
+    double skewUsMedian() const;
 
     void start()               override;
     void stop()                override;
@@ -696,7 +710,13 @@ private:
     // A skew spread wider than this means the ~0.92 ms offset is not the constant
     // §10.3 measured. Set well above that figure (and above Q14/tick quantisation)
     // so only a real departure trips it, not jitter around a stable value.
-    static constexpr qint32   kSkewSpreadWarnUs       = 2'000;
+    // ⚠ A HALF-SPLIT DELTA, NOT A MIN/MAX SPREAD, AND THE DIFFERENCE MATTERS. Single
+    // records scatter by ±½-sample pairing jitter — ~1250 µs at the device's internal
+    // rate, on a healthy unit — so the old 2 ms spread threshold fired on noise. §10.3
+    // established stability by splitting a 238 s session and finding the two halves'
+    // medians IDENTICAL, so the test is movement of the median between halves. 100 µs
+    // is ~6 ticks against a measured movement of zero, and ~0.1° at 1,000 °/s.
+    static constexpr double   kSkewHalfSplitWarnUs    = 100.0;
 
     static constexpr uint32_t kRingSizingRateHz        = 800;
     static constexpr int      kSourceWindowMs          = 5'000;

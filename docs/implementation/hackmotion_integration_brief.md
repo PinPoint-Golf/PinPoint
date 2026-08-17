@@ -43,6 +43,7 @@ this table, this table wins.**
 | 6 | "A new `MetricRoute` on each wrist metric" *and* new keys | Pick one, and the codebase pattern is unambiguous: **new keys + `preferKeys`**, the `lm.attackAngle` shape. Adding a second route to `leadWristFlexExt` would make the pair *not* separately addressable, which is the one thing Phase G cannot do without. |
 | 7 | "requirement = a HackMotion binding" | ⚠ **`MetricRequirement` cannot express that.** It knows anatomical `imuRoles` plus fixed bools, so a HackMotion route is today indistinguishable from the Witmotion one. Needs a `hackMotion` bool mirroring `launchMonitor`, a matching `ShotContext::hasHackMotion`, a `missingForRequirement` clause and a `CaptureDevice` value. |
 | 8 | *(unstated)* | ⚠ **`FusedStreams::streamFor(role)` returns the FIRST match.** Two bindings with the same role silently first-wins, so **wearing both instruments at once — the entire point — is not expressible today.** Fix this before any dual-worn capture. |
+| 10 | *(unstated)* | **The `0x84` sensor-count defect never reached our data, and this row exists so nobody re-derives that.** libhackmotion `f89cea4` found the count is the reply's **length**, not `data[1]`; `84 02 01` is two sensors because it carries two payload bytes, and the leading `02` is the first sensor's *location code*, which equals the count on this device **by coincidence**. The count sizes a record (header + one block per sensor), so a wrong one misplaces every field after the first block — but on this hardware both readings give 2, so every sample we have ever decoded was correct and **no capture is invalidated**. The byte that looked spare was the second sensor's location code; `sensor_map_undecoded` is now `sensor_location[]`. We read neither, so the API change cost us nothing. |
 | 9 | *(unstated)* | ⚠ **The library's digest ring defaults to OFF.** With it off, a history block reports `live_overlap_samples == 0`, which means *no evidence*, not agreement — and the stitch of §7 depends on that agreement. Set `digest_ring_capacity`. *(Done in Phase A.)* |
 
 **One thing that improved.** §8.2's 64-byte `0x94` payload is no longer opaque in the
@@ -104,6 +105,47 @@ stays possible. HackMotion is the wrist's version of that.
 *correlated error, not corroboration*. Both are magnetometer-free; both fuse per-unit. The
 0.58°/5 min figure is the evidence that they differ where it matters, and **Phase G exists to
 confirm that in our own captures before any HackMotion reading is allowed to grade anything.**
+
+---
+
+## 1a. ⚠ We report in ISB. We are not reimplementing the vendor's metrics
+
+**This is the deliberate difference between this integration and the vendor's own application, and
+it is a feature rather than a compromise.** The device is used here as a *criterion instrument* — a
+better measurement of the wrist than a camera or a 6-DOF IMU pair can give — and what we report from
+it is **ISB / Wu et al. 2005** (`ref.wu2005`), the recommendation of the Standardization and
+Terminology Committee of the International Society of Biomechanics. Twelve authors, five countries,
+published by the society under its standards collection.
+
+The canonical statement is [`../design/pinpoint_sign_conventions.md`](../design/pinpoint_sign_conventions.md)
+§Rule 0 — *a published standard outranks a popular product* — and it is enforced by
+`metric_catalogue_test`, which asserts all four ISB joint angles keep ISB polarity. Nothing in this
+integration may weaken that, and the phases below inherit it whether or not they mention it.
+
+Why it matters commercially as well as technically: a vendor can change their convention in the next
+release, and a standard is the thing that lets two datasets be compared at all. A number we publish
+is readable next to any biomechanics literature and any other ISB-conformant system; a number in a
+vendor's private convention is readable only next to that vendor.
+
+⚠ **AND IT SETS A TRAP FOR PHASE D THAT NOTHING ELSE IN THIS DOCUMENT WOULD WARN YOU ABOUT.** The
+vendor's application **reports the inverse of us on bow/cup** — extension (cupping) positive, flexion
+(bowing) negative. So the most natural sanity check available during the frame solve — put the device
+on, open their app, compare — **will show an inverted sign on the primary channel, and it will look
+exactly like a wrong solve.** It is not. Verify against a known single-axis motion and the ISB
+polarity table, never against the vendor's display.
+
+Three consequences that are not optional:
+
+- **Phase D's target frame is ISB**, not "some PinPoint frame". `R_lowerArm` / `R_palm` map
+  HackMotion-anatomical → **ISB**-anatomical, and the DOFs the single-axis acceptance moves are ISB's:
+  flexion/extension, radial/ulnar deviation, pronation/supination, with `+flexion` = bowed,
+  `+deviation` = ulnar, `+pronation` = pronation.
+- **Phase F's `hm.*` series must land in ISB polarity.** If it carried the vendor's sign while the
+  Witmotion series stayed ISB, Phase G's agreement report would show a spurious *anti*-correlation on
+  bow/cup and the obvious reading of that chart would be that one instrument is broken.
+- **ISB does not govern everything**, and claiming it would fail review faster than not claiming it.
+  Four metrics are ISB joint angles; the club, ball, turn magnitudes, image-plane body lines and
+  normalised displacements are not. The sign-conventions document has the table.
 
 ---
 
@@ -381,6 +423,23 @@ Two things worth stating here because they are easy to get backwards:
 Solve one constant quaternion per unit, `R_lowerArm` and `R_palm`, mapping
 HackMotion-anatomical → PPS-anatomical, so that everything downstream can treat a HackMotion
 lane exactly as it treats a calibrated Witmotion lane.
+
+⚠ **"PPS-anatomical" HERE MEANS ISB — see §1a**, and the DOFs the acceptance test moves are ISB's,
+with `+flexion` = bowed, `+deviation` = ulnar, `+pronation` = pronation. Leaving the target frame
+unnamed would repeat, in our own document, the exact omission that makes this phase necessary in the
+first place: §8.1 never defines the device's own anatomical convention either.
+⚠ **And do not sanity-check the solve against the vendor's application** — it reports the inverse on
+bow/cup, so a correct solve looks wrong there. §1a has the trap in full.
+
+⚠ **Which block is which is now settled and no longer a Phase D prerequisite.** libhackmotion
+`f89cea4` gives three independent routes where there was one plus the cable: the `0x84` sensor map's
+lever arms (0 → 0.00 m, 1 → 0.10 m, 2 → 0.26 m — no reading puts a 0.26 m segment on a hand); the
+`0x94` payload's per-unit pose fields matched **blind** against both blocks (palm fits block 1 by
+7.0°/8.2°, arm fits block 0 by 3.8°/2.5°, both attempts agreeing on all four); and acceleration
+radius at 4,996 of 5,487 moving samples across 30 swing captures. The accel check is now a cheap
+confirmation rather than a gate — and it needs **peaks over a genuine swing**: 91.1 % is a strong
+majority and not a per-sample rule, the margin grows with the vigour of the motion, and at rest,
+where both units read ≈0, it says nothing at all.
 
 **Method.** Both systems worn simultaneously and calibrated. Capture a set of deliberate
 single-axis wrist motions — pure flexion/extension, pure radial/ulnar deviation, pure

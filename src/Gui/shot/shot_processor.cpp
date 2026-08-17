@@ -1251,7 +1251,9 @@ pinpoint::SwingExportJob ShotProcessor::buildSwingExportJob()
                     // simultaneous (see SwingImuDeviceInfo::skewUs). NaN until a
                     // sample has been seen — leave 0.0 (the "absent" value the
                     // exporter checks) rather than writing a fake measurement.
-                    const double skew = hm->skewUsMean();
+                    // ⚠ The MEDIAN: a single record's difference is mostly ±½-sample
+                    // pairing jitter, so a mean would bake those outliers in.
+                    const double skew = hm->skewUsMedian();
                     if (std::isfinite(skew))
                         hmInfo.skewUs = skew;
 

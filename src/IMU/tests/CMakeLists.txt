@@ -117,3 +117,16 @@ pp_add_test(hm_capture_provenance_test
     INCLUDE ${IMU}
     NO_QT
     STD 20)
+
+# The inter-unit skew aggregation. Pure because the statistic it computes decides
+# whether the application tells a coach their sensor is misbehaving — and the first
+# version of that check was wrong in a way no test would have caught: it warned on
+# the min/max spread, which measures ±½-sample pairing jitter rather than the
+# offset, and would have fired on a healthy device. The even-count median branch is
+# the other reason: getting it wrong returns the upper middle every time, which is
+# right half the time and survives casual inspection.
+pp_add_test(hm_skew_stats_test
+    SOURCES hm_skew_stats_test.cpp
+    INCLUDE ${IMU}
+    NO_QT
+    STD 20)

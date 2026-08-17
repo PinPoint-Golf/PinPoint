@@ -27,6 +27,9 @@
 // conversion from the raw mg counts and passes gyro and the quaternion through
 // verbatim; it is unit-agnostic, so both blocks go through the same call.
 #include "hm_sample_convert.h"
+// The skew median and the §10.3 half-split stability test — pure, and pure so that
+// the statistic gating a "not stable" warning can be tested without hardware.
+#include "hm_skew_stats.h"
 
 #include <hackmotion/hackmotion.h>
 
@@ -45,6 +48,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <algorithm>
 #include <deque>
 #include <limits>
 #include <stdexcept>
@@ -107,6 +111,7 @@ static QQuaternion toQQuaternion(const float q[4])
     return QQuaternion(q[0], q[1], q[2], q[3]);
 }
 
+
 // ---------------------------------------------------------------------------
 // HmSessionWorker — the I/O-thread resident
 // ---------------------------------------------------------------------------
@@ -166,12 +171,23 @@ public:
         // merger owns the clamping (see writeSample()).
         quint64 nonMonotonic[HM_UNIT_COUNT]  = { 0, 0 };
         qint64  maxBackStepUs[HM_UNIT_COUNT] = { 0, 0 };
-        // skew_us provenance: min / mean / max of palm − lower_arm over the
-        // session. Never applied to a timestamp — see HmInstance::skewUsMean().
-        quint64 skewCount = 0;
-        double  skewSumUs = 0.0;
-        qint32  skewMinUs = 0;
-        qint32  skewMaxUs = 0;
+        // skew_us provenance: min / MEDIAN / max of palm − lower_arm over the
+        // session. Never applied to a timestamp — see HmInstance::skewUsMedian().
+        //
+        // ⚠ A MEDIAN, NOT A MEAN, AND THAT IS THE WHOLE POINT OF THIS FIELD. A
+        // single record's tick difference is dominated by ±½-sample PAIRING JITTER
+        // — libhackmotion measured 89 and 99 ticks on two consecutive records of
+        // one capture against a session median of 59 (§10.3) — so the stable
+        // 0.92 ms is a session-level figure that only appears after aggregating,
+        // and a mean carries every one of those outliers into the answer.
+        // ⚠ NO MEDIAN HERE. This snapshot is rebuilt on every drain — BLE notification
+        // rate — and a median needs the stored values, so computing one per pass would
+        // put an O(n) pass over 16 k samples on the hot path to answer a question
+        // nothing reads at that rate. See HmSessionWorker::skewStats(), computed on
+        // demand by the export path and the 10 s summary.
+        quint64 skewCount     = 0;   // every sample seen
+        qint32  skewMinUs     = 0;
+        qint32  skewMaxUs     = 0;
         // Inter-unit relative angle in degrees — see writeSample() for the bands.
         // `Now` is the LATEST sample's value and is the one to read while holding a
         // pose; the session band behind it is polluted by every movement since the
@@ -218,6 +234,29 @@ public:
     // out from under the same mutex snapshot() uses.
     HmInstance::CaptureProvenance captureProvenance(qint64 windowStartUs,
                                                     qint64 windowEndUs) const;
+
+    // ── The inter-unit skew, as a median rather than a mean ───────────────────
+    //
+    // ⚠ COMPUTED ON DEMAND, NOT PER DRAIN. A median needs the stored values, so it
+    // costs an O(n) pass; the callers are the export path and the 10 s summary, both
+    // of which ask rarely. Callable from any thread.
+    struct SkewStats {
+        quint64 total  = 0;    // every sample seen this session
+        quint64 stored = 0;    // …of which this many are behind the figures below.
+                               // ⚠ stored < total is a TRUNCATION, and a truncation
+                               // nobody reports reads as coverage.
+        double  medianUs = 0.0;
+        // ⚠ §10.3's stability claim, tested the way §10.3 tested it: the median of
+        // the first half of the run minus the median of the second. That measured
+        // IDENTICAL medians across the halves of a 238 s session, so a non-zero value
+        // here is the offset genuinely moving — which is the thing Phase E/G may not
+        // assume away. ⚠ The min/max SPREAD cannot do this job: single-record values
+        // scatter by ±½-sample pairing jitter (~1250 µs at the device's internal
+        // rate) on a perfectly healthy device, so a spread threshold fires on noise.
+        double  halfSplitDeltaUs = 0.0;
+        bool    halfSplitValid   = false;   // false when the run is too short to split
+    };
+    SkewStats skewStats() const;
 
     // ── I/O thread only ──────────────────────────────────────────────────────
     void initialise();          // create the session and the drain timer
@@ -350,8 +389,17 @@ private:
     quint64    m_nonMonotonic[HM_UNIT_COUNT]  = { 0, 0 };
     hm_time_us m_maxBackStepUs[HM_UNIT_COUNT] = { 0, 0 };
 
+    // ⚠ THE VALUES ARE KEPT, BECAUSE A MEDIAN CANNOT BE STREAMED. libhackmotion's
+    // own reconciler keeps them for the same reason and caps the store the same
+    // way. 16384 int32 is 64 KB and covers ~20 s of the device's full ≈799 Hz
+    // internal rate, or hours of the 25 Hz live rate.
+    //
+    // ⚠ AND A TRUNCATION NOBODY REPORTS READS AS COVERAGE, which is why the total
+    // is counted separately from the stored count: skewStored < skewCount says the
+    // median is over a prefix of the session rather than the session.
+    static constexpr size_t kMaxSkewSamples = 16384;
+    std::vector<qint32> m_skewSamples;
     quint64 m_skewCount = 0;
-    double  m_skewSumUs = 0.0;
     qint32  m_skewMinUs = 0;
     qint32  m_skewMaxUs = 0;
 
@@ -966,13 +1014,48 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         // hm_event_format already renders the code; the ppWarn gets it into the
         // application log too, where a support bundle will find it.
         const hm_warning_code code = static_cast<hm_warning_code>(ev.u.warning.code);
+        // ⚠ detail_i32 IS LOGGED FOR EVERY CODE, INCLUDING THE ONES WE DO NOT KNOW.
+        // For most warnings it is a supporting number; for at least one it is the
+        // ENTIRE content — HM_WARN_CALIBRATION_STATUS_FORM carries the status byte of
+        // a `0x94` short form that has never been observed and whose values mean
+        // nothing to anyone yet. If this application is ever the first to see one,
+        // logging the name alone would discard the single byte that would let
+        // somebody work out what it meant. Cheap here, unrecoverable if omitted.
         ppWarn() << "[HmInstance]" << m_deviceId << "— warning:"
-                 << hm_warning_code_name(code);
+                 << hm_warning_code_name(code)
+                 << "detail" << ev.u.warning.detail_i32;
 
         // ⚠ THREE OF THESE ARE CALIBRATION OUTCOMES, NOT DIAGNOSTICS, and folding
         // them into the generic warning line would leave the UI claiming success
         // for two of them: the phase reaches HM_CALP_COMPLETE regardless.
         switch (code) {
+        // ⚠ FIRST, AND DELIBERATELY NOT NEXT TO THE CALIBRATION CASES BELOW — two of
+        // those share a fallthrough, and a case inserted between them silently
+        // redirects the first one.
+        //
+        // ⚠ THIS IS NOT A DIAGNOSTIC. IT SAYS THIS DEVICE IS NOT THE ONE WE MODEL.
+        // §6.3's record is a header followed by one block PER SENSOR, and the count
+        // comes from the 0x84 reply's LENGTH (libhackmotion f89cea4 — reading it as a
+        // byte gave the right answer on this hardware by coincidence). This fires
+        // when that count is one the library's two-block layout cannot carry, which
+        // means the whole two-lane model — two sources, "#lowerArm" and "#palm", one
+        // wrist angle between them — does not describe what is on the arm.
+        //
+        // It reaches the coach's device log rather than only ppWarn, because the
+        // alternative is a session that records two lanes of something else and looks
+        // entirely normal doing it. detail_i32 is the count the device reported.
+        case HM_WARN_SENSOR_COUNT_UNSUPPORTED:
+            emit logLine(QStringLiteral("ERROR: this device reports %1 sensors. This "
+                                       "integration models exactly two — a lower-arm "
+                                       "unit and a palm unit — so the recorded lanes "
+                                       "may not be what they claim. Do not trust a "
+                                       "wrist angle from this session.")
+                             .arg(ev.u.warning.detail_i32));
+            ppError() << "[HmInstance]" << m_deviceId
+                      << "— sensor count unsupported:" << ev.u.warning.detail_i32
+                      << "— the two-lane model does not describe this device";
+            break;
+
         case HM_WARN_PRESENCE_NOT_MEASURED:
             // The check was ASKED FOR and could not be taken — too few live samples
             // reached the run. detail_i32 is how many were collected. The angle
@@ -1196,7 +1279,6 @@ void HmSessionWorker::drainLive()
     // rebuilt from scratch each pass) and are copied out here.
     next.noFitSkipped = m_noFitSkipped;
     next.skewCount    = m_skewCount;
-    next.skewSumUs    = m_skewSumUs;
     next.skewMinUs    = m_skewMinUs;
     next.skewMaxUs    = m_skewMaxUs;
     next.relAngleNowDeg = hm_relative_angle_deg(&latest);
@@ -1245,6 +1327,27 @@ HmSessionWorker::captureProvenance(qint64 windowStartUs, qint64 windowEndUs) con
     return m_provenance.inWindow(windowStartUs, windowEndUs);
 }
 
+HmSessionWorker::SkewStats HmSessionWorker::skewStats() const
+{
+    QMutexLocker lk(&m_mutex);
+
+    SkewStats st;
+    st.total  = m_skewCount;
+    st.stored = quint64(m_skewSamples.size());
+    if (m_skewSamples.empty())
+        return st;
+
+    // ⚠ m_skewSamples IS NEVER SORTED IN PLACE — the half-split needs arrival order.
+    // Both helpers are in Imu/hm_skew_stats.h, pure, so the arithmetic behind the
+    // "your sensor is not behaving" warning is testable without a device.
+    st.medianUs = pinpoint::hm::skewMedianUs(m_skewSamples);
+
+    const pinpoint::hm::HalfSplit hs = pinpoint::hm::skewHalfSplit(m_skewSamples);
+    st.halfSplitDeltaUs = hs.deltaUs;
+    st.halfSplitValid   = hs.valid;
+    return st;
+}
+
 void HmSessionWorker::writeSample(const hm_sample &s)
 {
     // ⚠ skew_us IS ACCUMULATED BEFORE ANY GATE, because it does not come from the
@@ -1263,7 +1366,8 @@ void HmSessionWorker::writeSample(const hm_sample &s)
             m_skewMinUs = qMin(m_skewMinUs, s.skew_us);
             m_skewMaxUs = qMax(m_skewMaxUs, s.skew_us);
         }
-        m_skewSumUs += double(s.skew_us);
+        if (m_skewSamples.size() < kMaxSkewSamples)
+            m_skewSamples.push_back(s.skew_us);
         ++m_skewCount;
     }
 
@@ -1852,14 +1956,27 @@ HmInstance::HmInstance(const Device &device,
 
         // Provenance, not a correction: the two blocks are never paired as
         // simultaneous and this is never applied to a timestamp. §10.3 measures a
-        // stable 0.92 ms; a WIDE spread here is the interesting outcome, because it
-        // would mean the offset is not the constant that reasoning depends on.
-        const QString skew = snap.skewCount > 0
-            ? QStringLiteral("  SKEW(palm−arm)=%1/%2/%3 µs (min/mean/max, n=%4)")
+        // stable 0.92 ms at the SESSION level.
+        //
+        // ⚠ THE WIDE MIN/MAX IS EXPECTED AND IS NOT THE OFFSET MOVING. A single
+        // record's difference is dominated by ±½-sample pairing jitter — 89 and 99
+        // ticks on two consecutive records against a session median of 59 — so the
+        // extremes describe the jitter and only the MEDIAN describes the skew.
+        // Reading the spread as "the offset is not constant" is the misreading this
+        // line is spelled out to prevent.
+        const HmSessionWorker::SkewStats skewSt =
+            m_worker ? m_worker->skewStats() : HmSessionWorker::SkewStats{};
+        const QString skew = skewSt.stored > 0
+            ? QStringLiteral("  SKEW(palm−arm)=%1/%2/%3 µs (min/MEDIAN/max, n=%4%5)")
                   .arg(snap.skewMinUs)
-                  .arg(snap.skewSumUs / double(snap.skewCount), 0, 'f', 2)
+                  .arg(skewSt.medianUs, 0, 'f', 2)
                   .arg(snap.skewMaxUs)
-                  .arg(snap.skewCount)
+                  .arg(skewSt.stored)
+                  // A truncation nobody reports reads as coverage: say when the
+                  // median is over a prefix rather than the whole session.
+                  .arg(skewSt.stored < skewSt.total
+                           ? QStringLiteral(" of %1").arg(skewSt.total)
+                           : QString())
             : QString();
 
         // ⚠ THE INTER-UNIT ANGLE, AND IT IS THE FIRST THING TO READ WHEN THE TWO
@@ -1892,9 +2009,9 @@ HmInstance::HmInstance(const Device &device,
             }
         }
 
-        if (snap.skewCount > 0) {
+        if (skewSt.stored > 0) {
             const qint32 spread = snap.skewMaxUs - snap.skewMinUs;
-            // ONCE PER SESSION, into the application log. The mean is what the
+            // ONCE PER SESSION, into the application log. The MEDIAN is what the
             // exporter bakes into swing.json (device.skewUs), so a reader of a
             // capture can see the same figure the capture was made under — and
             // this is the only reachable place it appears live, the device log ring
@@ -1902,21 +2019,33 @@ HmInstance::HmInstance(const Device &device,
             if (!m_skewReported) {
                 m_skewReported = true;
                 ppInfo() << "[HmInstance]" << m_deviceId << "— inter-unit skew (palm − lower arm)"
-                         << snap.skewSumUs / double(snap.skewCount) << "µs mean, spread"
-                         << spread << "µs over" << snap.skewCount
-                         << "samples. Carried into provenance, never applied to a timestamp.";
+                         << skewSt.medianUs << "µs median, spread" << spread
+                         << "µs over" << skewSt.stored
+                         << "samples. ⚠ The spread is EXPECTED to be wide — a single record's"
+                            " difference is dominated by ±½-sample pairing jitter — so only the"
+                            " median describes the offset. Carried into provenance, never"
+                            " applied to a timestamp.";
             }
-            // ⚠ THE SPREAD IS THE INTERESTING NUMBER, NOT THE MEAN. §10.3's
-            // measured 0.92 ms is stable, and "stable" is exactly what makes it
-            // subtractable later as a constant. A wide spread means it is not that
-            // constant, which changes what Phase E/G may assume — so it is warned
-            // about once rather than left sitting in a log nobody can open.
-            if (spread > kSkewSpreadWarnUs && !m_skewSpreadWarned) {
+            // ⚠ THIS USED TO WARN ON THE MIN/MAX SPREAD, AND THAT WAS WRONG. The two
+            // units share a sample index by construction but run two free-running MCU
+            // timers, so single-record values scatter by ±½ sample — libhackmotion
+            // measured 89 and 99 ticks on consecutive records against a session median
+            // of 59 — which is ~1250 µs of entirely healthy scatter at the internal
+            // rate. A spread threshold therefore fires on noise, on a good device.
+            //
+            // §10.3's stability claim is about the MEDIAN, and it was established by
+            // splitting a 238 s session and finding the two halves' medians identical.
+            // So that is what is tested: a half-split delta beyond a few ticks is the
+            // offset genuinely moving, which is what Phase E/G may not assume away.
+            if (skewSt.halfSplitValid
+                && std::abs(skewSt.halfSplitDeltaUs) > kSkewHalfSplitWarnUs
+                && !m_skewSpreadWarned) {
                 m_skewSpreadWarned = true;
                 ppWarn() << "[HmInstance]" << m_deviceId << "— inter-unit skew is NOT stable:"
-                         << snap.skewMinUs << "to" << snap.skewMaxUs
-                         << "µs. The published 0.92 ms constant does not hold here, so it"
-                            " cannot be treated as a subtractable offset.";
+                         << "the median moved" << skewSt.halfSplitDeltaUs
+                         << "µs between the first and second halves of the run (§10.3 measured"
+                            " no movement at all). The published 0.92 ms constant does not hold"
+                            " here, so it cannot be treated as a subtractable offset.";
             }
         }
 
@@ -2098,14 +2227,14 @@ HmInstance::captureProvenance(qint64 windowStartUs, qint64 windowEndUs) const
     return m_worker->captureProvenance(windowStartUs, windowEndUs);
 }
 
-double HmInstance::skewUsMean() const
+double HmInstance::skewUsMedian() const
 {
     if (!m_worker) return std::numeric_limits<double>::quiet_NaN();
-    const HmSessionWorker::Snapshot snap = m_worker->snapshot();
+    const HmSessionWorker::SkewStats st = m_worker->skewStats();
     // ⚠ NaN, not 0, until a sample has been seen: 0 µs is a perfectly plausible
     // skew, so a default of 0 would be indistinguishable from a measurement.
-    if (snap.skewCount == 0) return std::numeric_limits<double>::quiet_NaN();
-    return snap.skewSumUs / double(snap.skewCount);
+    if (st.stored == 0) return std::numeric_limits<double>::quiet_NaN();
+    return st.medianUs;
 }
 
 void HmInstance::start()
