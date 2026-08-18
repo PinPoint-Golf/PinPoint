@@ -1,7 +1,12 @@
 # HackMotion integration — implementation brief
 
-**Status:** Phase A shipped 2026-08-17 (`3b4980f`). Written 2026-08-15, **before the library
+**Status:** A, B, B′, C, D and E shipped — latest `0c7d128` (Phase E, 2026-08-18). **E2** (the
+no-sensor backlog) and **E3** (studio verification) are next, then **F**; **G is deferred to its
+own plan**. See §5's table for per-phase state. Written 2026-08-15, **before the library
 existed** — see §0 for the nine places that made it wrong.
+⚠ **§0 IS A SNAPSHOT OF 2026-08-17, NOT A LIVE STATUS.** Its rows record what was wrong with the
+ORIGINAL text and what was true when each was written; where a row has since been overtaken by
+work landing, it says so inline. Do not read an unqualified row as current.
 **Scope:** add the HackMotion wG3 wrist sensor to PinPoint as a new IMU type, with its own
 calibration process, feeding the Wrist session, the metric catalogue and the measure
 vocabulary — and then use it as a **criterion instrument** to validate the wrist metrics we
@@ -38,7 +43,7 @@ this table, this table wins.**
 | 1 | §3.5: the first ~2 s of a stream have no host time; "drop them and count them" | **Obsolete — there is no dead zone.** `clock.h` is explicit: `HM_CLOCK_HAS_FIT` is set from the *first live frame*, so every sample from the first frame onward carries a `host_time_us`. `HM_CLOCK_SHORT_BASELINE` now gates only whether the *rate* is independently fitted or seeded. `HM_SAMPLE_NO_FIT` fires only before the very first frame. Nothing to drop, no count to surface. |
 | 2 | Phase E delivers "a stitched ~800 Hz wrist lane"; §10.3 "Phase E delivers 800 Hz" | **The device buffer is motion-adaptive**, floored at ~100 Hz (index step 8) and capped at ~799 Hz (step 1). A still pre-roll replays at 99.9 Hz; the swing itself replays in full. Window coverage of 16–50 % is *correct*, not a fault, and a narrower request does **not** come back denser — density is set by the motion, not the width. The §7 size estimate ("2 s × 800 Hz × 2 units ≈ 128 KB") is therefore an upper bound. |
 | 3 | Issuing `a1` in place avoids the recording gap | **It does not.** The sample counter stalls for the pull's own duration — 289 ms mean across six measured pulls, 90–99 % of the bracket. Reported as `hm_history_block.self_recording_gap`, which falls *outside* `requested` by construction. The clock fit must re-anchor at every bracket close; one fit cannot span a pull. |
-| 4 | Phase E "implements `deferred_sources_design.md` as written" | **That design is entirely unimplemented.** Zero of its identifiers exist in `src/`: no `reserveSourceId`, no `RamPayloadSource`, no `CompositePayloadSource`, no `Gathering` state, no `BoundImu::effectiveHz`, and `interpolateImu` is still the linear scan it warns about. Phase E *builds* the mechanism, it does not consume it. |
+| 4 | Phase E "implements `deferred_sources_design.md` as written" | **True when written, and Phase E BUILT it — ⚠ this row is now historical (`0c7d128`, 2026-08-18).** The correction it made still stands: Phase E *built* the mechanism rather than consuming an existing one, which is why it was a large phase. As shipped: `RamPayloadSource`, `CompositePayloadSource`, `ShotProcessor::State::Gathering`, `BoundImu::effectiveHz` + `highRateSpanUs`, and `interpolateImu` is a per-source binary search rather than the linear scan the design warned about (73-91× on a deferred-shaped window; ~36× on an ordinary one). ⚠ **`reserveSourceId` was NOT built, deliberately** — the deferred source turned out to be a live ring producer already, so the stitched lane reuses the id it has and the composite reroutes it; see `deferred_sources_design.md` §3.3. The design note is now marked AS BUILT with all four of its open items closed. ⚠ **And "as written" was still the wrong instruction**: three things in it were wrong and are corrected in place — the median grid statistic, the single-span stitch, and that allocator. |
 | 5 | Keys are `m_wristFlexExt`, `m_wristDeviation`, `m_wristRotation` | **None of those exist.** Real series keys: `leadWristFlexExt`, `leadWristRadUln`, `forearmPronation`, `leadArmFlexion`. Real measure ids: `m_leadWristFlexExt_p1..p8`, `m_leadWristRadUln_p*`, `m_leadForearmRot_p*` (note the measure stem differs from the metric key). |
 | 6 | "A new `MetricRoute` on each wrist metric" *and* new keys | Pick one, and the codebase pattern is unambiguous: **new keys + `preferKeys`**, the `lm.attackAngle` shape. Adding a second route to `leadWristFlexExt` would make the pair *not* separately addressable, which is the one thing Phase G cannot do without. |
 | 7 | "requirement = a HackMotion binding" | ⚠ **`MetricRequirement` cannot express that.** It knows anatomical `imuRoles` plus fixed bools, so a HackMotion route is today indistinguishable from the Witmotion one. Needs a `hackMotion` bool mirroring `launchMonitor`, a matching `ShotContext::hasHackMotion`, a `missingForRequirement` clause and a `CaptureDevice` value. |
@@ -57,20 +62,28 @@ averaged anchor. Worth raising upstream if Phase D wants the poses themselves.
 ### Decisions taken since, which override the text below
 
 1. **Unit-keyed placement** — `imuPlacement` keys become `<deviceId>#lowerArm` / `<deviceId>#palm`
-   for a HackMotion; Witmotion keeps the bare device id. *(Phase C. Phase A pins a HackMotion to
-   slot A and locks the control as an interim, which under-describes it — one wG3 fills A **and**
-   B — and will collide if a Witmotion already holds A.)*
+   for a HackMotion; Witmotion keeps the bare device id. *(Phase C. Phase A pinned a HackMotion to
+   slot A and locked the control as an interim, which under-described it — one wG3 fills A **and**
+   B.)* ✅ **Done in Phase C, and the interim is retired**: one wG3 genuinely fills A and B, and
+   both paths now refuse and name the blocking slot if another sensor already holds one.
 2. **The device-native calibration routine is mandatory**, not optional: forearm horizontal →
    continuous raise across the chest. **But the presentation is reused** — `BodyVizView`'s guided
    avatar for the poses (it already animates between two override quaternions and signals when the
    motion finishes, which is what the device's *watched* raise needs), then `ArmVizView` for live
    free-movement confirmation.
+   ⚠ **HALF DONE. The `BodyVizView` guide shipped in Phase C; the `ArmVizView` confirmation did
+   NOT** — it was deferred because `HmUnit::anatQuat`/`anatCalibrated` were stubs until Phase D,
+   and nobody went back once Phase D made them live. **It is E2's first item**, and until then the
+   flow still tells a coach the frame "is still being solved" when it has been solved, measured
+   and committed.
 3. **`hm.*` keys, and HackMotion grades when present** — `preferKeys: ["hm.leadWristFlexExt"]`,
    the launch-monitor pattern. ⚠ Consequence, stated once: the graded corpus then mixes
    instruments depending on what was worn, which matters for norm-building. The *comparison* is
    unaffected — both series are produced on every dual-worn swing and compared at series level.
 4. **The frame constants are solved offline** from a `.hmwire` capture of single-axis motions,
-   baked into `pp_tuned_constants.h` and pinned by a unit test.
+   baked into `pp_tuned_constants.h` and pinned by a unit test. ✅ **Done in Phase D**:
+   `kCandidate = 1` (C2), mounting `wg3-mount1`, repeatability measured across three captures.
+   ⚠ It describes ONE strap position — move the strap and it must be re-selected.
 5. **One phase per session**, orchestrated: Opus decomposes, briefs and reviews; Opus/Sonnet
    agents implement. Opus for anything where being subtly wrong is invisible — frame conventions,
    threading, buffer contracts, clock alignment.
