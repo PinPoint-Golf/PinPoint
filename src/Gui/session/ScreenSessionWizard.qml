@@ -437,16 +437,27 @@ Item {
     // removed instead. The rows that DO need this resolve it inline from
     // imuManager.deviceIdForSlot(); see the CheckRow delegate's _dev below.)
 
-    // All required IMU slots assigned.
+    // All required IMU slots assigned AND their devices present. The presence
+    // half restores what the pre-Phase-C walk of imuDeviceList enforced for
+    // free: a placement entry whose sensor is dead, at home, or simply not
+    // discovered this session must not satisfy the step — the coach would sail
+    // past it into a Connect that can never succeed. (imuDeviceList is read in
+    // the binding, so re-scans re-evaluate this.)
     readonly property bool imusOk: {
         // deviceIdForSlot() is Q_INVOKABLE, not reactive on its own — this read
         // is the explicit dependency that used to come for free from walking
         // the placement map directly.
         var _dep = appSettings.imuPlacement
+        var list = imuManager.imuDeviceList
         var reqs = root.curImuReqs
         for (var i = 0; i < reqs.length; ++i) {
             if (!reqs[i].required) continue
-            if (imuManager.deviceIdForSlot(reqs[i].slot) === "") return false
+            var id = imuManager.deviceIdForSlot(reqs[i].slot)
+            if (id === "") return false
+            var present = false
+            for (var j = 0; j < list.length; ++j)
+                if (list[j].id === id) { present = true; break }
+            if (!present) return false
         }
         return reqs.some(function(r) { return r.required })
     }
@@ -522,12 +533,27 @@ Item {
             // deviceIdForSlot() is Q_INVOKABLE, not reactive on its own — keep
             // an explicit read of imuPlacement so this whole readinessIssues
             // binding still re-evaluates when placement changes, the way it
-            // used to for free by reading the map directly.
+            // used to for free by reading the map directly. imuDeviceList is
+            // read for the presence check and is reactive on its own.
             var _dep = appSettings.imuPlacement
+            var list = imuManager.imuDeviceList
             for (var i = 0; i < reqs.length; ++i) {
                 if (!reqs[i].required) continue
-                if (imuManager.deviceIdForSlot(reqs[i].slot) === "")
+                var id = imuManager.deviceIdForSlot(reqs[i].slot)
+                if (id === "") {
                     issues.push({ text: qsTr("IMU %1 — %2 not assigned")
+                                            .arg(reqs[i].slot).arg(reqs[i].placement),
+                                  panel: settingsPanelImus })
+                    continue
+                }
+                // Assigned, but the sensor was not found this session — the
+                // pre-Phase-C wizard called this "not assigned", which sent the
+                // coach to re-do a placement that was fine. Say what is wrong.
+                var present = false
+                for (var j = 0; j < list.length; ++j)
+                    if (list[j].id === id) { present = true; break }
+                if (!present)
+                    issues.push({ text: qsTr("IMU %1 — %2 assigned but the sensor was not found. Power it on and Scan.")
                                             .arg(reqs[i].slot).arg(reqs[i].placement),
                                   panel: settingsPanelImus })
             }
