@@ -171,6 +171,22 @@ public:
     // instances().
     Q_INVOKABLE QString  placementKeyForSlot(const QString &slot) const;
     Q_INVOKABLE QString  deviceIdForSlot(const QString &slot) const;
+
+    // ⚠ PUBLIC AND Q_INVOKABLE, AND BOTH HALVES ARE LOAD-BEARING. ArmVizView calls this to decide
+    // whether a slot gets the HackMotion reference pose — a wG3's anatQuat is zeroed at the
+    // DEVICE'S OWN calibration pose (forearm across the chest), a Witmotion's is not, and applying
+    // the wrong one crosses the two vendors' frames.
+    //
+    // ⚠ It lived in the private section when it was first made Q_INVOKABLE, which does NOT work:
+    // moc registers a private invokable and QML then refuses to call it, so the binding threw
+    // "Property 'isHackMotionDevice' ... is not a function" once per evaluation and the avatar
+    // silently kept its old, wrong pose. A Q_INVOKABLE that QML must reach has to be public.
+    //
+    // Answered from DeviceEnumerator, which never forgets a device it has registered, so this
+    // stays true for a connected wG3 that has stopped advertising. An id unknown to the
+    // enumerator answers false (i.e. "key it like a Witmotion"), which is the historical meaning
+    // of every persisted entry that predates the wG3.
+    Q_INVOKABLE bool isHackMotionDevice(const QString &deviceId) const;
     // "Lower arm" / "Palm" for a HackMotion unit key; "" for a Witmotion, whose
     // device IS the segment and has no sub-unit to name.
     Q_INVOKABLE QString  unitLabelForSlot(const QString &slot) const;
@@ -267,13 +283,6 @@ private:
     // slot B unfilled" — which is precisely the wrong picture Phase C exists to
     // correct. See the call sites in the constructor.
     void migrateHackMotionPlacement(const Device &device);
-
-    // Is this device id a HackMotion? Answered from DeviceEnumerator, which never
-    // forgets a device it has registered, so this stays true for a connected wG3
-    // that has stopped advertising. An id unknown to the enumerator answers false
-    // (i.e. "key it like a Witmotion"), which is the historical meaning of every
-    // persisted entry that predates the wG3.
-    bool isHackMotionDevice(const QString &deviceId) const;
 
     // True if the device appeared in the most recently completed BLE scan, OR is
     // currently selected (a connected device stops advertising, so it would

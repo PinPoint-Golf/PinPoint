@@ -1300,7 +1300,6 @@ Item {
                 HmStatusLabel  { width: parent.width }
                 HmReadouts     { width: parent.width }
                 HmFailText     { width: parent.width }
-                HmPhaseDNote   { width: parent.width }
 
                 PpButton {
                     visible: d.calibPhase > 0 || d.calibrationDone
@@ -1421,7 +1420,6 @@ Item {
                         HmStatusLabel { Layout.fillWidth: true }
                         HmReadouts    { Layout.fillWidth: true }
                         HmFailText    { Layout.fillWidth: true }
-                        HmPhaseDNote  { Layout.fillWidth: true }
                     }
                 }
             }
@@ -1824,24 +1822,5 @@ Item {
         font.pixelSize: Theme.fontSzMicro
         color:          d.hmFailKind === "warn" ? Theme.colorWarn : Theme.colorError
         text:           d.hmFailMsg
-    }
-
-    // ⚠ Said plainly rather than shown as a live avatar. The plan's table puts an
-    // ArmVizView free-movement confirmation here, but ArmVizView reads
-    // anatCalibrated + anatQuat and BOTH ARE STUBS ON AN HmUnit UNTIL PHASE D
-    // (false and identity), so the segment would park at rest — theatre that reads
-    // as a broken calibration. The relative-angle collapse above is the real
-    // confirmation; this is the honest note about what is still missing.
-    component HmPhaseDNote: Text {
-        visible:    d.isHackMotion && d.hmStep === 5
-        wrapMode:   Text.WordWrap
-        lineHeight: 1.5
-        font.family:    Theme.fontBody
-        font.pixelSize: Theme.fontSzMicro
-        color:          Theme.colorText3
-        text: qsTr("Live arm tracking from this sensor is not available yet — the sensor reports "
-                   + "angles in its own anatomical frame and the conversion to ours is still being "
-                   + "solved. Calibration and recording work; the on-screen arm does not follow it "
-                   + "yet.")
     }
 }

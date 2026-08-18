@@ -80,19 +80,21 @@ struct SlotSensor {
     ImuInstance *wt = nullptr;   // Witmotion — anatomical frame solved on the host
     HmUnit      *hm = nullptr;   // HackMotion unit — see anatCalibrated() below
 
-    // ⚠ A HACKMOTION IS UNCALIBRATED HERE THROUGHOUT PHASE C, AND THE "—" THAT
-    // RESULTS IS THE HONEST OUTCOME, NOT A BUG TO WORK AROUND. HmUnit::
-    // anatCalibrated() is false and anatQuat() is identity until Phase D solves the
-    // constant per-unit rotation from the device's own anatomical convention to ours
-    // (hm_instance.h:127-134). Phase C's device-native calibration makes the
-    // device's quaternions meaningful in ITS frame; it does not reconcile that frame
-    // with PinPoint's, so there is no lead-wrist angle to display yet.
+    // A HackMotion answers both of these for real: Phase D reconciled the device's own
+    // anatomical convention with ours, and HmInstance's display tick sets anatQuat from
+    // hm_frame::toAnatomical() with the selected candidate whenever the device reports itself
+    // calibrated. So a calibrated wG3 produces a lead-wrist readout here exactly as a Witmotion
+    // pair does, and this wrapper needs nothing but the two accessors it already forwards.
     //
-    // Do not "fix" this by feeding the raw quaternion through, and do not invent a
-    // transform: the wrist angle 2·acos|q_a·q_b| is convention-blind, so a wrong
-    // frame yields a perfectly plausible number with every decomposed sign free to
-    // be inverted, and the display is the one place nothing checks it. PHASE D is
-    // what unblocks this readout.
+    // ⚠ Throughout Phase C this said a HackMotion was uncalibrated here and the "—" was the
+    // honest outcome. That was true then and became false the day Phase D shipped, which is worth
+    // remembering: a comment pinned to a phase is a claim with an expiry date on it.
+    //
+    // The "—" is still what an UNCALIBRATED unit yields, and that is still deliberate. Do not
+    // "fix" it by feeding the raw quaternion through, and do not invent a transform: the wrist
+    // angle 2·acos|q_a·q_b| is convention-blind, so a wrong frame yields a perfectly plausible
+    // number with every decomposed sign free to be inverted, and the display is the one place
+    // nothing checks it.
     bool anatCalibrated() const
     {
         if (wt) return wt->anatCalibrated();
