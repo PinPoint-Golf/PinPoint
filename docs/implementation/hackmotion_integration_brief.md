@@ -935,16 +935,34 @@ mechanism.
   arithmetic. With one instrument per swing that is now a property of the CODE PATH — the
   HackMotion lane must go through the same `MetricExtractor` route as a Witmotion lane, not a
   parallel one — rather than something a dual-worn capture demonstrates.
-- **New metric keys, not overwritten ones** — `hm.leadWristFlexExt`, `hm.leadWristRadUln`,
-  ~~`hm.forearmPronation`~~ beside ours. ⚠ The names in the original text were wrong; see §0 #5.
-  ⚠⚠ **AND `hm.forearmPronation` MUST NOT BE EMITTED — TWO KEYS, NOT THREE.** ISB pronation is a
-  radioulnar angle read against the UPPER ARM, and a wG3 has no upper-arm unit, so the quantity is
-  **not available** and nothing may be published under its name (Phase D). What IS available from
-  the lower-arm unit alone is the RATE about the forearm long axis — a different quantity, already
-  surfaced display-only as "Rotation" by E2 item 1, against each vendor's own calibration neutral.
-  ⚠ It is display-only ON PURPOSE and must not acquire a metric key by the back door here: a
-  Witmotion "rotation" defined against the upper arm beside a forearm-alone wG3 one would publish
-  two different quantities under a single name.
+- **New metric keys, not overwritten ones** — `hm.leadWristFlexExt`, `hm.leadWristRadUln` and
+  `hm.forearmRotation` beside ours. ⚠ The names in the original text were wrong; see §0 #5.
+  ⚠⚠ **THE THIRD KEY IS `forearmRotation`, NOT `forearmPronation`, AND THE DISTINCTION IS THE
+  WHOLE POINT.** ISB pronation is a radioulnar angle defined against the HUMERUS; a wG3 has no
+  upper-arm unit, so that quantity is unavailable and nothing may be published under its name.
+  **`forearmRotation` is a different and simpler question — how far has the forearm turned since
+  Address — which one forearm sensor answers on its own**, and which the user identifies as a
+  powerful direct indicator of **flipping** through impact. It is wanted as a real metric, not as
+  the display-only row E2 item 1 shipped.
+  - **No exception to Rule 0 is required and none should be written.** `pinpoint_sign_conventions.md`
+    already carries a "what ISB does NOT govern" table for exactly this, and a **Segment axial
+    rotations** row now names it: ISB defines rotations BETWEEN two segment triads, and this is one
+    segment twisting about its own long axis. Rule 0 not applying means **Rule 1 applies** — follow
+    the outside world — so it is **pronation-positive, agreeing with the vendor**, where
+    `leadWristFlexExt` deliberately disagrees with them. That asymmetry is correct: bow/cup has a
+    standard that outranks a product and this does not. ⚠ `metric_catalogue_test` pins only the
+    FOUR named ISB angles, so nothing there needs changing either.
+  - ⚠⚠ **ADDRESS-REFERENCED, AND THAT IS LOAD-BEARING.** Each vendor zeroes at its own calibration
+    pose, so the ABSOLUTE angle compares across neither instruments nor two calibrations of one.
+    Referenced to Address the offset cancels and what remains is TRAVEL, which is exactly the
+    quantity wanted and is comparable. `wrist_angles.h` already has the shape — `wristRel` /
+    `elbowRel` are address-referenced builders and `twistAngleRad` is right there — so this is a
+    sibling of what exists, not new machinery. Publishing the un-referenced absolute would be
+    publishing the calibration pose.
+  - ⚠ **ONE definition across both vendors: slot A alone, identical maths.** A Witmotion rotation
+    defined against the upper arm beside a forearm-alone wG3 one would publish two quantities under
+    one name, and a P1→P7 or cross-instrument comparison would read the shoulder as sensor error.
+    This means `forearmRotation` is produced for a **Witmotion** mounting too, not only a wG3.
   The pair must stay separately addressable — that is what makes Phase G possible at all.
   `measure_vocabulary.h` says it directly: *"a measure still cannot validate itself."*
 - **Their own descriptors with a `RouteMethod::Device` route**, the `lm.attackAngle` shape — not a

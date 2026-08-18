@@ -140,10 +140,43 @@ fail review, not the absence of it.
 | **Turn magnitudes** | Unsigned magnitudes of turn from address, not signed axial rotations about a defined axis. A face-on camera or one IMU gives no bony-landmark triad. | `pelvisRotation`, `thoraxRotation`, `xFactor` |
 | **Image-plane body lines** | 2D *apparent* angles between two keypoints as one camera sees them. Not joint rotations at all. | `hipLineTilt`, `shoulderPlaneAngle`, `elbowAlignment`, `feetAlignment` |
 | **Normalised displacements** | Not angles. Fractions of stance or shoulder width, or centimetres. | `pelvisSway`, `headSway`, `ballPosition` |
+| **Segment axial rotations** | A signed twist of **one** segment about its own long axis, referenced to Address — not a rotation *between* two segment triads. ISB's radioulnar rotation is defined against the humerus; a forearm sensor on its own has no humerus to be defined against. | `forearmRotation` |
 | **Composites & timings** | Derived from other metrics, or durations. | `xFactorStretch`, `tempoRatio`, the scores |
 
 That is the honest reach of a face-on camera and a wrist IMU. Each of those metrics carries its own
 stated convention in the tables above and below.
+
+### `forearmRotation` — and why it is rule 1, not an exception to rule 0
+
+**Positive is pronation direction** — the lead forearm turning as if to face the palm downward —
+measured as the signed twist about the forearm's own long axis, **referenced to Address**.
+
+It is worth stating why this exists beside `forearmPronation` rather than replacing it, because the
+two look like the same quantity and are not. `forearmPronation` is the ISB radioulnar angle, defined
+between the forearm and the humerus; it requires an upper-arm sensor and is unavailable without one.
+`forearmRotation` asks a different and simpler question — *how far has the forearm turned since
+address* — which one sensor on the forearm can answer on its own, and which is the direct indicator
+of flipping through impact.
+
+**Rule 0 does not govern it, so rule 1 does, and rule 1 says follow the outside world.** There is no
+ISB angle for a single segment's axial rotation about itself, so nothing outranks the convention the
+instruments in this space already use — and the wG3's own sense of rotation is pronation-positive.
+⚠ **So this metric AGREES with the vendor where `leadWristFlexExt` deliberately disagrees**, and
+that is not an inconsistency: bow/cup has a published standard that outranks a product, and this
+does not. Anyone auditing the two side by side should expect exactly that asymmetry.
+
+⚠ **THE ADDRESS REFERENCE IS LOAD-BEARING AND IS WHAT MAKES THE NUMBER MEAN ANYTHING.** Each vendor
+zeroes at its own calibration pose — a wG3 at forearm-across-chest, palm down; a Witmotion at ours —
+so the ABSOLUTE angle is not comparable between instruments, or even between two calibrations of the
+same one. Referenced to Address the constant offset cancels, and what remains is travel, which is
+comparable. This is the same mechanism `wristRel` and `elbowRel` already use, and for the same
+reason. ⚠ A future reader tempted to publish the un-referenced absolute would be publishing the
+calibration pose.
+
+⚠ **One definition across both vendors, deliberately.** Slot A alone, both instruments, identical
+maths. A Witmotion rotation defined against the upper arm sitting beside a forearm-alone wG3 one
+would publish two different quantities under a single name, and any P1→P7 or cross-instrument
+comparison would read the shoulder as sensor error.
 
 ## Why this is written down at all
 
