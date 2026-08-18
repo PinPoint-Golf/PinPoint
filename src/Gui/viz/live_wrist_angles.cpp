@@ -20,6 +20,8 @@
 
 #include <QQuaternion>
 
+#include <cmath>
+
 #include "athlete_controller.h"
 #include "hm_instance.h"
 #include "imu_instance.h"
@@ -152,11 +154,42 @@ void LiveWristAngles::tick()
 
     m_rollValid = upper.anatCalibrated() && fore.anatCalibrated();
     if (m_rollValid) {
+        m_rollTitle = tr("Roll");
         const QQuaternion rel = (upper.anatQuat().conjugated() * fore.anatQuat()).normalized();
         const ForearmElbow ef = forearmPronElbowFlex(rel, leftArm);
         m_roll      = radToDeg(ef.pronRad);
         m_rollLabel = wristMetricLabel(QStringLiteral("forearmPronation"), m_roll);
+    } else if (fore.anatCalibrated()) {
+        // ⚠ THE NO-UPPER-ARM FALLBACK IS CALLED "Rotation", NEVER "Roll" AND NEVER
+        // forearmPronation — and it is VENDOR-AGNOSTIC on purpose. Our roll is an ISB
+        // radioulnar joint angle read against the UPPER ARM; a wG3 has no unit for one and a
+        // Witmotion worn A+B has none either, so both rigs land in the same place. What the
+        // slot-A sensor alone CAN answer — identically for both vendors — is the forearm's
+        // rotation about its own long axis versus the calibration pose: the same swing-twist
+        // this file already runs, with the upper arm as identity, and the quantity the wG3's
+        // vendor reports as its third wrist metric under the same name. ONE definition for
+        // both instruments is deliberate: defining Witmotion's rotation against the upper arm
+        // while the wG3's is forearm-alone would publish two different quantities under one
+        // name, and a cross-lane comparison (P1→P7 deltas, Phase G grading) would read the
+        // shoulder's contribution as sensor error. hm_frame.h's PRONATION RATE note is the
+        // authority; pinpoint_sign_conventions.md forbids implying ISB conformance we lack.
+        //
+        // ⚠ ZERO IS THE CALIBRATION POSE, NOT ANATOMICAL SQUARE — and the two vendors calibrate
+        // in DIFFERENT poses (wG3 palm-down across the chest, Witmotion arm-down), so absolute
+        // values are not comparable across vendors; deltas between swing positions are. This
+        // number says how far the forearm has TURNED since calibration, in the pronation(+)/
+        // supination(−) sense, not where it sits anatomically. That is why the label is a
+        // signed angle with no anatomical words, and why this value is display-only and must
+        // never feed a metric.
+        m_rollTitle = tr("Rotation");
+        m_rollValid = true;
+        const ForearmElbow ef = forearmPronElbowFlex(fore.anatQuat().normalized(), leftArm);
+        m_roll      = radToDeg(ef.pronRad);
+        const long r = std::lround(m_roll);
+        m_rollLabel = (r > 0 ? QStringLiteral("+") : QString())
+                      + QString::number(r) + QStringLiteral("°");
     } else {
+        m_rollTitle = tr("Roll");
         m_rollLabel = QStringLiteral("—");
     }
 

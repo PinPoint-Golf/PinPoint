@@ -49,6 +49,10 @@ class LiveWristAngles : public QObject
     Q_PROPERTY(QString hingeLabel READ hingeLabel NOTIFY changed)
     Q_PROPERTY(double  rollValue  READ rollValue  NOTIFY changed)
     Q_PROPERTY(QString rollLabel  READ rollLabel  NOTIFY changed)
+    // "Roll" when the value is ISB pronation (upper arm + forearm, Witmotion path);
+    // "Rotation" when it is the wG3 fallback below — the vendor's own name for its
+    // third wrist metric, chosen because it makes no ISB claim (see the .cpp note).
+    Q_PROPERTY(QString rollTitle  READ rollTitle  NOTIFY changed)
 
 public:
     LiveWristAngles(ImuManager *imu, AppSettings *settings, AthleteController *athlete,
@@ -65,6 +69,7 @@ public:
     QString hingeLabel() const { return m_hingeLabel; }
     double  rollValue()  const { return m_roll; }
     QString rollLabel()  const { return m_rollLabel; }
+    QString rollTitle()  const { return m_rollTitle; }
 
 signals:
     void activeChanged();
@@ -91,4 +96,5 @@ private:
     QString m_bowLabel  = QStringLiteral("—");
     QString m_hingeLabel = QStringLiteral("—");
     QString m_rollLabel  = QStringLiteral("—");
+    QString m_rollTitle  = QStringLiteral("Roll");
 };

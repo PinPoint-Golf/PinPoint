@@ -1758,7 +1758,7 @@ Item {
                                         Row {
                                             spacing: Theme.sp(10)
                                             Text {
-                                                text: qsTr("Roll"); width: Theme.sp(54)
+                                                text: liveWrist.rollTitle; width: Theme.sp(54)
                                                 font.family: Theme.fontBody; font.pixelSize: Theme.fontSzLabel
                                                 color: Theme.colorText3
                                             }
