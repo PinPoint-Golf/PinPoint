@@ -1385,7 +1385,12 @@ Item {
                 // Scan button — fixed width sized for the longer "Scanning…" label.
                 Rectangle {
                     id: scanBtn
-                    property bool scanning: false
+                    // Bound to the manager's authoritative scan state — NOT a
+                    // local 30 s timer. The discovery window is 90 s with
+                    // HackMotion enabled, and a local clock that ran out early
+                    // re-offered a Scan tap that the enumerator's re-entry guard
+                    // silently swallowed for the rest of the real window.
+                    readonly property bool scanning: imuManager.imuScanActive
 
                     width:  scanningMeasure.implicitWidth + Theme.sp(24)
                     height: Theme.sp(26)
@@ -1422,24 +1427,9 @@ Item {
                         Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                     }
 
-                    Timer {
-                        id: scanTimer
-                        interval: 30000
-                        onTriggered: scanBtn.scanning = false
-                    }
-
-                    Connections {
-                        target: imuManager
-                        function onImuEnumeratedCountChanged() { scanTimer.stop(); scanBtn.scanning = false }
-                    }
-
                     PpPressable {
                         id: scanPress
-                        onClicked: {
-                            scanBtn.scanning = true
-                            imuManager.rescanImu()
-                            scanTimer.restart()
-                        }
+                        onClicked: imuManager.rescanImu()
                     }
                 }
             }

@@ -334,9 +334,9 @@ void DeviceEnumerator::registerImuDevice(ImuBase::Transport transport,
     emit deviceAdded(dev);
 }
 
-void DeviceEnumerator::scanImu()
+bool DeviceEnumerator::scanImu()
 {
-    if (m_imuScanActive) return;
+    if (m_imuScanActive) return false;
     m_imuScanActive = true;
     // New scan generation — devices re-discovered below get stamped with it, so
     // anything left on an older generation was absent from this scan.
@@ -477,6 +477,7 @@ void DeviceEnumerator::scanImu()
     });
 
     m_imuScanThread->start();
+    return true;
 }
 
 #include "device_enumerator.moc"

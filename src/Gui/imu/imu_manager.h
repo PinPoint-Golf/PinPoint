@@ -78,6 +78,12 @@ class ImuManager : public QObject
     // so an empty list is distinguishable from "discovery couldn't run". Cleared
     // when a device is found or a fresh scan starts.
     Q_PROPERTY(QString imuScanError READ imuScanError NOTIFY imuScanErrorChanged)
+    // True while a BLE discovery window is open. The scan buttons bind their
+    // "Scanning…" state to THIS, not to a local 30 s timer — the window is 90 s
+    // with HackMotion discovery enabled, and a button whose local clock runs out
+    // early re-offers a Scan tap that scanImu()'s re-entry guard silently
+    // swallows. One authoritative flag, cleared when the scan actually finishes.
+    Q_PROPERTY(bool imuScanActive READ imuScanActive NOTIFY imuScanActiveChanged)
 
 public:
     explicit ImuManager(pinpoint::EventBuffer *buffer = nullptr,
@@ -120,6 +126,7 @@ public:
 
     // Trigger a new BLE scan to find devices.
     Q_INVOKABLE void rescanImu();
+    bool imuScanActive() const { return m_imuScanActive; }
 
     // Persist a user-visible alias for a device. key = description|id.
     // Pass empty alias to revert to default (device description).
@@ -218,6 +225,7 @@ signals:
     void imuDeviceListChanged();
     void sessionImuExcludedChanged();
     void imuScanErrorChanged();
+    void imuScanActiveChanged();
     // Aggregate battery state changed — a connected IMU reported a new level, or
     // the connected set changed. Backs the lowBatteryPercent property.
     void batteryChanged();
@@ -302,6 +310,12 @@ private:
     // instanceForSlot(). Mutable because that resolver is const and is called from
     // a ~30 Hz readout timer: without the memo the warning would be a log flood
     // rather than a message. One line per offending key is enough to act on.
+    // UI-facing scan state. Set only when scanImu() reports it actually armed,
+    // cleared on imuScanFinished — see the property comment for why the guard's
+    // swallowed calls must never set it (a true with no scan behind it would
+    // leave every Scan button saying "Scanning…" forever).
+    bool m_imuScanActive = false;
+
     mutable QSet<QString> m_warnedBarePlacementKeys;
     // Same once-only discipline for two enabled, present sensors claiming one
     // slot letter — a real conflict placementKeyForSlot() arbitrates

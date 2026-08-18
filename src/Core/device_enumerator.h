@@ -86,7 +86,11 @@ public:
     // button press is the only reason for the longer one.
     // Serial scan is a stub that finds nothing (TODO: probe serial ports).
     // Safe to call multiple times; ignored if a scan is already in progress.
-    void scanImu();
+    // Arms an asynchronous IMU scan. Returns false when one is already active
+    // (including the short tail between imuScanFinished and the worker thread
+    // fully stopping) — the caller's scan-state bookkeeping must not arm on a
+    // call that was swallowed, or it waits on a finished signal that never comes.
+    bool scanImu();
     bool isImuScanActive() const { return m_imuScanActive; }
 
     // Generation of the most recently COMPLETED IMU scan (0 before the first

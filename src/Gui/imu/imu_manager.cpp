@@ -98,6 +98,10 @@ ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, 
             this, [this]() {
         emit imuListChanged();
         emit imuDeviceListChanged();
+        if (m_imuScanActive) {
+            m_imuScanActive = false;
+            emit imuScanActiveChanged();
+        }
     });
 
     // Normalise any HackMotion placement persisted by Phase A's interim
@@ -119,7 +123,12 @@ ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, 
     // and the enumerator's own default (true) would make that look deliberate.
     DeviceEnumerator::instance()->setHackMotionEnabled(
         m_appSettings ? m_appSettings->hackmotionEnabled() : true);
-    DeviceEnumerator::instance()->scanImu();
+    // Recorded, not emitted: this runs before QML loads, so the property's
+    // first read picks the value up. isImuScanActive() may be true already if
+    // another manager instance armed a scan (tests); either way the flag
+    // reflects the enumerator's truth at construction.
+    m_imuScanActive = DeviceEnumerator::instance()->scanImu()
+                      || DeviceEnumerator::instance()->isImuScanActive();
 
     // Emit property-change signals when new devices are registered so QML
     // Repeaters rebuild their chips / rows.
@@ -478,7 +487,14 @@ void ImuManager::rescanImu()
     // on the old setting with nothing anywhere to say so.
     DeviceEnumerator::instance()->setHackMotionEnabled(
         m_appSettings ? m_appSettings->hackmotionEnabled() : true);
-    DeviceEnumerator::instance()->scanImu();
+    // Arm-aware: a call swallowed by the enumerator's re-entry guard must not
+    // touch the flag — setting it with no scan behind it leaves the buttons
+    // saying "Scanning…" forever, and clearing it while a scan IS running lies
+    // the other way.
+    if (DeviceEnumerator::instance()->scanImu() && !m_imuScanActive) {
+        m_imuScanActive = true;
+        emit imuScanActiveChanged();
+    }
 }
 
 void ImuManager::setImuScanError(const QString &msg)

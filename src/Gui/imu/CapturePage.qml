@@ -157,7 +157,12 @@ Item {
             // Scan button
             Rectangle {
                 id: scanChip
-                property bool scanning: false
+                // Bound to the manager's authoritative scan state — NOT a local
+                // 30 s timer. The discovery window is 90 s with HackMotion
+                // enabled, and a local clock that ran out early re-offered a
+                // Scan tap that the enumerator's re-entry guard silently
+                // swallowed for the rest of the real window.
+                readonly property bool scanning: imuManager.imuScanActive
 
                 width:  scanMeasure.implicitWidth + Theme.sp(20)
                 height: Theme.sp(24)
@@ -190,24 +195,9 @@ Item {
                     Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                 }
 
-                Timer {
-                    id: scanTimer
-                    interval: 30000
-                    onTriggered: scanChip.scanning = false
-                }
-
-                Connections {
-                    target: imuManager
-                    function onImuEnumeratedCountChanged() { scanTimer.stop(); scanChip.scanning = false }
-                }
-
                 TapHandler {
                     id: scanTap
-                    onTapped: {
-                        scanChip.scanning = true
-                        imuManager.rescanImu()
-                        scanTimer.restart()
-                    }
+                    onTapped: imuManager.rescanImu()
                 }
                 HoverHandler { id: scanHover; cursorShape: Qt.PointingHandCursor }
             }

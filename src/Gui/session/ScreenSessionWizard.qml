@@ -1391,7 +1391,13 @@ Item {
                                 // Scan button — mirrors ImusPanel.qml exactly
                                 Rectangle {
                                     id: imuWizScanBtn
-                                    property bool scanning: false
+                                    // Bound to the manager's authoritative scan
+                                    // state — NOT a local 30 s timer. The window
+                                    // is 90 s with HackMotion enabled, and a
+                                    // local clock that ran out early re-offered
+                                    // a Scan tap that the enumerator's re-entry
+                                    // guard silently swallowed.
+                                    readonly property bool scanning: imuManager.imuScanActive
 
                                     implicitWidth:  imuWizScanMeasure.implicitWidth + Theme.sp(24)
                                     implicitHeight: Theme.sp(28)
@@ -1420,25 +1426,9 @@ Item {
                                         color:          imuWizScanBtn.scanning ? Theme.colorAccent : Theme.colorText2
                                         Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                                     }
-                                    Timer {
-                                        id: imuWizScanTimer
-                                        interval: 30000
-                                        onTriggered: imuWizScanBtn.scanning = false
-                                    }
-                                    Connections {
-                                        target: imuManager
-                                        function onImuEnumeratedCountChanged() {
-                                            imuWizScanTimer.stop()
-                                            imuWizScanBtn.scanning = false
-                                        }
-                                    }
                                     PpPressable {
                                         id: imuWizScanArea
-                                        onClicked: {
-                                            imuWizScanBtn.scanning = true
-                                            imuManager.rescanImu()
-                                            imuWizScanTimer.restart()
-                                        }
+                                        onClicked: imuManager.rescanImu()
                                     }
                                 }
 
