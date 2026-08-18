@@ -936,7 +936,15 @@ mechanism.
   HackMotion lane must go through the same `MetricExtractor` route as a Witmotion lane, not a
   parallel one — rather than something a dual-worn capture demonstrates.
 - **New metric keys, not overwritten ones** — `hm.leadWristFlexExt`, `hm.leadWristRadUln`,
-  `hm.forearmPronation` beside ours. ⚠ The names in the original text were wrong; see §0 #5.
+  ~~`hm.forearmPronation`~~ beside ours. ⚠ The names in the original text were wrong; see §0 #5.
+  ⚠⚠ **AND `hm.forearmPronation` MUST NOT BE EMITTED — TWO KEYS, NOT THREE.** ISB pronation is a
+  radioulnar angle read against the UPPER ARM, and a wG3 has no upper-arm unit, so the quantity is
+  **not available** and nothing may be published under its name (Phase D). What IS available from
+  the lower-arm unit alone is the RATE about the forearm long axis — a different quantity, already
+  surfaced display-only as "Rotation" by E2 item 1, against each vendor's own calibration neutral.
+  ⚠ It is display-only ON PURPOSE and must not acquire a metric key by the back door here: a
+  Witmotion "rotation" defined against the upper arm beside a forearm-alone wG3 one would publish
+  two different quantities under a single name.
   The pair must stay separately addressable — that is what makes Phase G possible at all.
   `measure_vocabulary.h` says it directly: *"a measure still cannot validate itself."*
 - **Their own descriptors with a `RouteMethod::Device` route**, the `lm.attackAngle` shape — not a
