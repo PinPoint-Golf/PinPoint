@@ -670,6 +670,104 @@ void runDoubleRunParity(const RamSwing &ram, bool withCamera)
         std::fprintf(stderr, "  FIRST DIFF: %s\n", diff.toUtf8().constData());
 }
 
+
+// ── Test 5: burst-stamped lane must keep the grid on the floor ──────────────
+//
+// Witmotion samples are stamped at HOST arrival (WT9011DCL_Base::receiveData),
+// BLE delivers several per connection interval, and the EventBuffer merger
+// clamps non-monotonic stamps to +1µs — so a REAL Witmotion lane is clusters
+// of near-identical timestamps, not the even 5 ms spacing Tests 1-4 use. A
+// peak measured over a two-sample window inside such a burst reads as ~10^6 Hz
+// and would clamp the grid to kGridHzMax, nondeterministically per shot. This
+// is the gate for peakHzFor()'s min-span guard and gridHzForWindow()'s floor
+// slack: the burst shape must land on kGridHzMin exactly, while a genuinely
+// dense lane (a deferred pull) must still lift the grid.
+void testBurstStampedGrid()
+{
+    std::fprintf(stderr, "[Test 5] burst-stamped lane keeps the grid on the floor\n");
+
+    auto makeLane = [](EventBuffer& buf, const char* serial, int64_t dt) {
+        SourceDescriptor idesc;
+        idesc.name       = "Hand";
+        idesc.identifier = serial;
+        ImuFormat imf{};
+        imf.device         = DeviceKind::IMU_WitMotion;
+        imf.sample_rate_hz = 200;
+        imf.packet_bytes   = sizeof(ImuSample);
+        imf.packet_schema  = "imu_sample_v2";
+        idesc.format.device        = DeviceKind::IMU_WitMotion;
+        idesc.format.device_serial = serial;
+        idesc.format.format        = imf;
+        idesc.window_duration          = std::chrono::milliseconds(8000);
+        idesc.expected_interarrival_us = std::chrono::microseconds(dt);
+        return buf.registerSource(idesc);
+    };
+    auto push = [](EventBuffer& buf, SourceId id, int j, int64_t tUs) {
+        auto slot = buf.acquireWriteSlot(id);
+        if (!slot.valid) return;
+        const ImuSample s = makeSyntheticImu(j);
+        std::memcpy(slot.data, &s, sizeof s);
+        *slot.bytes_written = uint32_t(sizeof s);
+        *slot.timestamp_us  = tUs;
+        buf.publish(id, slot.sequence);
+    };
+    auto binding = [](SourceId id) {
+        ImuSegmentBinding b;
+        b.source     = id;
+        b.role       = SegmentRole::LeadHand;
+        b.calibrated = true;
+        return b;
+    };
+
+    // A 200 Hz-nominal lane delivered as bursts of three, 1 µs apart, one batch
+    // per 15 ms connection interval — the shape the production hosts actually
+    // record. Peak-over-any-window without the guard reads 10^6 Hz here.
+    {
+        EventBuffer buf;
+        const SourceId id = makeLane(buf, "WT-BURST", 5'000);
+        buf.start();
+        int64_t last = 0;
+        int j = 0;
+        for (int burst = 0; burst < 80; ++burst)
+            for (int k = 0; k < 3; ++k, ++j) {
+                last = kT0 + int64_t(burst) * 15'000 + k;   // mates 1 µs apart
+                push(buf, id, j, last);
+            }
+        buf.pause();
+        SwingWindow w = buf.captureSwingWindow(kT0 - 1, last + 1);
+
+        const double peak = ImuVisionFuser::peakHzFor(w, id, ImuVisionFuser::kProbeUs);
+        const double grid = ImuVisionFuser::gridHzForWindow(w, { binding(id) });
+        CHECK(peak > 0.0);
+        CHECK(peak < ImuVisionFuser::kGridHzMin * ImuVisionFuser::kGridHzFloorSlack);
+        CHECK(grid == ImuVisionFuser::kGridHzMin);
+        std::fprintf(stderr, "  bursty 200 Hz lane: peak=%.1f grid=%.1f (floor %.1f)\n",
+                     peak, grid, ImuVisionFuser::kGridHzMin);
+    }
+
+    // And the guard must not blind the measurement to a lane that is GENUINELY
+    // dense across the probe — the deferred-pull case the peak statistic exists
+    // to see. 800 Hz sustained for 600 ms must still reach kGridHzMax.
+    {
+        EventBuffer buf;
+        const SourceId id = makeLane(buf, "WT-DENSE", 1'250);
+        buf.start();
+        int64_t last = 0;
+        const int n = 480;   // 600 ms at 800 Hz
+        for (int j = 0; j < n; ++j) {
+            last = kT0 + int64_t(j) * 1'250;
+            push(buf, id, j, last);
+        }
+        buf.pause();
+        SwingWindow w = buf.captureSwingWindow(kT0 - 1, last + 1);
+
+        const double grid = ImuVisionFuser::gridHzForWindow(w, { binding(id) });
+        CHECK(grid == ImuVisionFuser::kGridHzMax);
+        std::fprintf(stderr, "  dense 800 Hz lane:  grid=%.1f (max %.1f)\n",
+                     grid, ImuVisionFuser::kGridHzMax);
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -717,6 +815,9 @@ int main(int argc, char** argv)
     // ── double-run analyzer determinism (Test 4) — over the RAM window ──
     runDoubleRunParity(ram, /*withCamera=*/false);   // 4a: IMU-only
     runDoubleRunParity(ram, /*withCamera=*/true);    // 4b: camera path
+
+    // ── burst-stamped grid invariant (Test 5) — standalone lanes ──
+    testBurstStampedGrid();
 
     std::fprintf(stderr, "\n%s — %d check failure(s)\n",
                  g_failures == 0 ? "PASS" : "FAIL", g_failures);

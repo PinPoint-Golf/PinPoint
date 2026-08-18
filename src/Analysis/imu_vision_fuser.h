@@ -97,6 +97,13 @@ public:
     // exactly 200 Hz and is bit-identical to what it was before this existed.
     // The floor never caps the device; it stops the corpus moving underneath us.
     static constexpr double  kGridHzMin = 200.0;
+    // ⚠ SLACK AT THE FLOOR. peakHzFor() measures finite windows of burst-stamped
+    // host arrivals, so a lane running AT the floor rate reads a few percent
+    // high (the min-span guard bounds the overshoot well under this). A peak
+    // inside the slack is measurement noise on an ordinary lane, not a faster
+    // one, and must land on the floor exactly — the corpus invariant above.
+    // Anything a deferred pull actually delivers (≥2x the floor) clears it.
+    static constexpr double  kGridHzFloorSlack = 1.25;
     static constexpr double  kGridHzMax = 800.0;
     // The sliding probe peakHzFor() uses. 250 ms is about a downswing, so a
     // dense span short enough to matter is still long enough to measure.

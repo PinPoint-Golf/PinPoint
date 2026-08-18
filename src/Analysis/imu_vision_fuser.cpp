@@ -123,6 +123,17 @@ double ImuVisionFuser::peakHzFor(const SwingWindow &window, SourceId source,
     // would size the grid to throw away exactly the dense span the pull was
     // performed to obtain. Sliding a short probe finds that span wherever it is,
     // without depending on the impact estimate being right.
+    // ⚠ A WINDOW NARROWER THAN HALF THE PROBE IS NOT RATE EVIDENCE. Witmotion
+    // samples are stamped at HOST arrival (WT9011DCL_Base::receiveData), BLE
+    // delivers several per connection interval, and the merger clamps
+    // non-monotonic stamps to +1µs — so a real lane carries clusters of
+    // near-identical timestamps, and at the lane head or after any delivery gap
+    // the sliding window can shrink to a single burst pair. Two mates 1µs apart
+    // read as ~10^6 Hz, clamp to kGridHzMax, and the grid then flips 200↔800
+    // per shot depending on where the window trim lands inside a burst. A
+    // genuinely dense lane (a deferred pull) is dense across the whole probe,
+    // so requiring the window to have real width costs it nothing.
+    const int64_t minSpanUs = probeUs / 2;
     size_t lo = 0;
     double best = 0.0;
     for (size_t hi = 0; hi < es.size(); ++hi) {
@@ -130,7 +141,7 @@ double ImuVisionFuser::peakHzFor(const SwingWindow &window, SourceId source,
             ++lo;
         if (hi == lo) continue;
         const int64_t span = es[hi].timestamp_us - es[lo].timestamp_us;
-        if (span <= 0) continue;
+        if (span < minSpanUs) continue;
         best = std::max(best, double(hi - lo) * 1.0e6 / double(span));
     }
     return best;
@@ -176,8 +187,11 @@ double ImuVisionFuser::gridHzForWindow(const SwingWindow &window,
     }
 
     // ⚠ Nothing measurable is NOT a reason to change the grid. A window with one
-    // sample per lane must produce what it always produced.
-    if (fastest <= 0.0)
+    // sample per lane must produce what it always produced. And a peak within
+    // the floor's slack band is an ordinary lane measured through bursty host
+    // stamps, not a faster lane — it lands on the floor EXACTLY, or the corpus
+    // moves by the width of the measurement noise.
+    if (fastest <= kGridHzMin * kGridHzFloorSlack)
         return kGridHzMin;
     return std::clamp(fastest, kGridHzMin, kGridHzMax);
 }
