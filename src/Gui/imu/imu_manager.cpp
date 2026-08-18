@@ -528,6 +528,57 @@ bool parseUnitKey(const QString &key, QString *deviceId, hm_unit *unit)
     return false;
 }
 
+// True when the enumerator can currently see this peripheral. The placement map
+// accretes keys over months — dead sensors, replaced ones — and only the
+// enumerator knows which owners still exist.
+bool isEnumeratedImu(const QString &deviceId)
+{
+    const QList<Device> devs = DeviceEnumerator::instance()->devices();
+    for (const Device &d : devs)
+        if (d.type == DeviceType::Imu && d.id == deviceId) return true;
+    return false;
+}
+
+// Removes every claim on `slot` owned by a device the enumerator CANNOT SEE,
+// returning what was removed. An explicit assignment is AUTHORITATIVE over
+// stale claims — a discarded sensor's key still naming the slot has no row in
+// the settings panel and nothing else ever prunes it, so if assignment cannot
+// displace it the slot is locked with no UI path out.
+//
+// ⚠ A PRESENT OWNER'S CLAIM IS SPARED, EVEN A DISABLED ONE. Present-and-enabled
+// conflicts are blocked upstream (the panel greys those choices), and a
+// present-but-disabled claim is a PARKED setup, not a stale one: keeping both
+// claims is how a coach flips between a HackMotion and a Witmotion on the same
+// letters with the enable toggles alone, and placementKeyForSlot()'s ladder
+// hands the slot to whichever is enabled. Deleting the parked claim here would
+// make every flip cost a re-assignment.
+//
+// ⚠ Displacing one of a wG3's unit keys strips BOTH: a half-assigned pair reads
+// as a unit that was never strapped, not as a conflict, and no consumer is
+// written for that state.
+QStringList stealSlotClaims(QVariantMap &map, const QString &slot, const QString &newOwner)
+{
+    QStringList doomed;
+    for (auto it = map.cbegin(); it != map.cend(); ++it) {
+        if (it.value().toString() != slot) continue;
+        QString devId;
+        hm_unit unit = HM_UNIT_LOWER_ARM;
+        const bool unitKey = parseUnitKey(it.key(), &devId, &unit);
+        const QString owner = unitKey ? devId : it.key();
+        if (owner == newOwner) continue;
+        if (isEnumeratedImu(owner)) continue;
+        doomed.append(it.key());
+        if (unitKey)
+            for (int u = 0; u < HM_UNIT_COUNT; ++u) {
+                const QString partner = hmUnitKey(devId, static_cast<hm_unit>(u));
+                if (map.contains(partner)) doomed.append(partner);
+            }
+    }
+    doomed.removeDuplicates();
+    for (const QString &k : doomed) map.remove(k);
+    return doomed;
+}
+
 }   // namespace
 
 QString ImuManager::placementKeyForSlot(const QString &slot) const
@@ -545,13 +596,56 @@ QString ImuManager::placementKeyForSlot(const QString &slot) const
     const QVariantMap placement = m_appSettings ? m_appSettings->imuPlacement()
                                                 : AppSettings().imuPlacement();
 
-    // QVariantMap iterates in KEY order, which matters only in the failure case:
-    // if two keys claim one letter (a hand-edited settings file, or a Witmotion
-    // left on "A" when a wG3 was assigned there), the same key wins every time
-    // instead of the readout flapping between two sensors from tick to tick.
-    for (auto it = placement.cbegin(); it != placement.cend(); ++it)
-        if (it.value().toString() == slot) return it.key();
-    return {};
+    // ⚠ A LIVE, ENABLED DEVICE BEATS EVERYTHING ELSE. The map accretes claims
+    // from sensors that no longer exist, and it deliberately KEEPS claims from
+    // sensors that exist but are switched off this session — that pair of claims
+    // is how a coach flips between a HackMotion and a Witmotion on the same
+    // letters without re-assigning anything. So resolution is a ladder, not a
+    // lookup:
+    //
+    //   1. enumerated AND session-enabled — the sensor actually in play;
+    //   2. enumerated but disabled — a parked setup, still a better answer
+    //      than a ghost (its device row exists, its state is inspectable);
+    //   3. any claimant at all — the wizard reads placement before the first
+    //      scan completes, and "assigned but not discovered yet" must keep
+    //      reading as assigned.
+    //
+    // Without the ladder, a dead sensor's key that happens to sort first takes
+    // the slot from a connected one — and the only symptom is a wrist readout
+    // that silently never appears. Within each rung, QVariantMap KEY order
+    // keeps the answer deterministic; two ENABLED, PRESENT claimants on one
+    // letter is a real conflict the coach has to resolve, so that one is warned
+    // about (once) rather than silently arbitrated.
+    QString     firstKey;      // rung 3 — any claimant
+    QString     presentKey;    // rung 2 — enumerated but disabled this session
+    QStringList enabledKeys;   // rung 1 — enumerated and enabled
+    for (auto it = placement.cbegin(); it != placement.cend(); ++it) {
+        if (it.value().toString() != slot) continue;
+        if (firstKey.isEmpty()) firstKey = it.key();
+        QString devId;
+        hm_unit unit = HM_UNIT_LOWER_ARM;
+        const QString owner = parseUnitKey(it.key(), &devId, &unit) ? devId : it.key();
+        if (!isEnumeratedImu(owner)) continue;
+        if (m_sessionExcluded.contains(owner)) {
+            if (presentKey.isEmpty()) presentKey = it.key();
+        } else {
+            enabledKeys.append(it.key());
+        }
+    }
+    if (enabledKeys.size() > 1) {
+        // Once per distinct conflict: this funnels a ~30 Hz readout timer.
+        const QString sig = slot + QLatin1Char('|') + enabledKeys.join(QLatin1Char(','));
+        if (!m_warnedSlotConflicts.contains(sig)) {
+            m_warnedSlotConflicts.insert(sig);
+            ppWarn() << "[ImuManager] slot" << slot << "is claimed by more than one enabled,"
+                        " present sensor (" << enabledKeys.join(QStringLiteral(", "))
+                     << ") — using" << enabledKeys.first()
+                     << ". Disable or unassign one in Settings → IMUs.";
+        }
+    }
+    if (!enabledKeys.isEmpty()) return enabledKeys.first();
+    if (!presentKey.isEmpty())  return presentKey;
+    return firstKey;
 }
 
 QString ImuManager::deviceIdForSlot(const QString &slot) const
@@ -673,30 +767,25 @@ void ImuManager::setPlacementForDevice(const QString &deviceId, const QString &s
             map.remove(deviceId);   // Phase A's interim pin, if still present
         } else if (slot == QLatin1String("A")) {
             // ⚠ AND IT TAKES TWO LETTERS, SO IT CAN COLLIDE TWICE. Filling A and B
-            // together is only expressible if nothing else holds either one: a
-            // coach with two Witmotions already on A and B has a working setup, and
-            // writing the wG3's keys on top of it would leave BOTH letters claimed
-            // by two keys each. Resolution then falls to placementKeyForSlot()'s
-            // key ordering — which is deterministic, deliberately, but arbitrary as
-            // an ANSWER — so the coach would get a wrist angle from whichever
-            // sensor sorted first and no indication that the other was dropped.
-            // That is the collision the plan says Phase C retires; unit keys make
-            // the two-slot device EXPRESSIBLE, they do not make a double claim
-            // mean anything. So refuse, say which letter is in the way, and leave
-            // the existing setup exactly as it was — reassigning the incumbent is
-            // the coach's decision, not a side effect of plugging in a wG3.
-            const QString holderA = deviceIdForSlot(QStringLiteral("A"));
-            const QString holderB = deviceIdForSlot(QStringLiteral("B"));
-            const bool clashA = !holderA.isEmpty() && holderA != deviceId;
-            const bool clashB = !holderB.isEmpty() && holderB != deviceId;
-            if (clashA || clashB) {
-                ppWarn() << "[ImuManager] refusing to place HackMotion" << deviceId
-                         << "— one wG3 fills slots A (lower arm) and B (palm) together, but"
-                         << (clashA ? "A" : "B") << "is already held by"
-                         << (clashA ? holderA : holderB)
-                         << ". Unassign that sensor in Settings → IMUs first. Placement unchanged.";
-                return;
-            }
+            // together displaces whatever held either letter — the assignment is
+            // an explicit choice in the settings panel (there is no auto-pin), so
+            // it is authoritative, and leaving a double claim would hand the
+            // answer to placementKeyForSlot()'s key ordering: deterministic,
+            // deliberately, but arbitrary as an ANSWER, with the dropped sensor
+            // never mentioned. Displacement only ever touches ABSENT owners
+            // (stealSlotClaims spares present ones): an enabled present holder
+            // greys this choice out in the panel, and a disabled present
+            // holder's claim is a parked setup that stays — the resolver's
+            // enabled-first ladder decides who drives the slot, so a coach
+            // flips between this wG3 and parked Witmotions with the enable
+            // toggles alone.
+            const QStringList displaced =
+                stealSlotClaims(map, QStringLiteral("A"), deviceId)
+                + stealSlotClaims(map, QStringLiteral("B"), deviceId);
+            if (!displaced.isEmpty())
+                ppWarn() << "[ImuManager] placing HackMotion" << deviceId
+                         << "on slots A+B displaced placement claim(s) from absent device(s):"
+                         << displaced.join(QStringLiteral(", "));
             map[lowerKey] = QStringLiteral("A");
             map[palmKey]  = QStringLiteral("B");
             map.remove(deviceId);
@@ -710,8 +799,20 @@ void ImuManager::setPlacementForDevice(const QString &deviceId, const QString &s
     } else {
         // Witmotion: the bare device id, exactly as before Phase C — one device,
         // one segment, one letter. Existing entries keep working untouched.
-        if (slot.isEmpty()) map.remove(deviceId);
-        else                map[deviceId] = slot;
+        // Assignment displaces ABSENT owners' claims on the letter only (see
+        // stealSlotClaims — an enabled present holder greys the choice in the
+        // panel, and a disabled present holder's claim is a parked setup the
+        // resolver's enabled-first ladder arbitrates).
+        if (slot.isEmpty()) {
+            map.remove(deviceId);
+        } else {
+            const QStringList displaced = stealSlotClaims(map, slot, deviceId);
+            if (!displaced.isEmpty())
+                ppWarn() << "[ImuManager] placing" << deviceId << "on slot" << slot
+                         << "displaced placement claim(s) from absent device(s):"
+                         << displaced.join(QStringLiteral(", "));
+            map[deviceId] = slot;
+        }
     }
 
     // ONE write, after the whole map is built. AppSettings::setImuPlacement guards

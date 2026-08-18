@@ -303,6 +303,10 @@ private:
     // a ~30 Hz readout timer: without the memo the warning would be a log flood
     // rather than a message. One line per offending key is enough to act on.
     mutable QSet<QString> m_warnedBarePlacementKeys;
+    // Same once-only discipline for two enabled, present sensors claiming one
+    // slot letter — a real conflict placementKeyForSlot() arbitrates
+    // deterministically but must not arbitrate silently.
+    mutable QSet<QString> m_warnedSlotConflicts;
 
     // Last BLE discovery error surfaced to QML (empty = healthy). Helper keeps the
     // set-and-notify in one place.
