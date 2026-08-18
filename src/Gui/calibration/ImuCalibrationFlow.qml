@@ -795,8 +795,31 @@ Item {
                 // starts from a known state.
                 _hmAbortIfActive()
                 _hmResetState()
-            } else if (leadImu) {
-                leadImu.clearCalibration()
+            } else {
+                // ⚠ EVERY CONNECTED SEGMENT, AND BOTH CALIBRATIONS. This cleared only leadImu, and
+                // only clearCalibration() — which resets the legacy transform and leaves the
+                // FUNCTIONAL one (m_anatCalibrated / m_alignA / m_mountM) exactly as the previous
+                // run left it. clearFunctionalCalibration() is the one that resets those.
+                //
+                // The consequence was a recalibration that RAN to completion and was then
+                // REJECTED, every time after the first: phase 2 derives φ from
+                // _phiFromAbduction(), which reads anatQuat — still anchored to the PREVIOUS
+                // run's reference — so φ is measured against a stale anchor. It then either trips
+                // refineMountAboutLongAxis()'s |φ| > 25° "precise refine REJECTED" guard or fails
+                // the mountDeviationDeg ≤ 15° gate, and the coach is told to re-seat a sensor that
+                // is mounted perfectly well.
+                //
+                // ⚠ slotB and slotC were never cleared at all, so their stale anchors outlived
+                // even a leadImu that had been cleared. Guarded by method existence rather than
+                // vendor: an HmUnit has neither method — its frame is the device's own, and the
+                // wG3's routine is what re-establishes it.
+                var toClear = [leadImu, slotB, slotC]
+                for (var ci = 0; ci < toClear.length; ++ci) {
+                    var seg = toClear[ci]
+                    if (!seg) continue
+                    if (seg.clearCalibration)           seg.clearCalibration()
+                    if (seg.clearFunctionalCalibration) seg.clearFunctionalCalibration()
+                }
             }
 
             introReadyTimer.stop()
