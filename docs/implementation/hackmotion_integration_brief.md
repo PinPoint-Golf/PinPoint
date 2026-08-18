@@ -50,7 +50,7 @@ this table, this table wins.**
 | 5 | Keys are `m_wristFlexExt`, `m_wristDeviation`, `m_wristRotation` | **None of those exist.** Real series keys: `leadWristFlexExt`, `leadWristRadUln`, `forearmPronation`, `leadArmFlexion`. Real measure ids: `m_leadWristFlexExt_p1..p8`, `m_leadWristRadUln_p*`, `m_leadForearmRot_p*` (note the measure stem differs from the metric key). |
 | 6 | "A new `MetricRoute` on each wrist metric" *and* new keys | Pick one, and the codebase pattern is unambiguous: **new keys + `preferKeys`**, the `lm.attackAngle` shape. Adding a second route to `leadWristFlexExt` would make the pair *not* separately addressable, which is the one thing Phase G cannot do without. |
 | 7 | "requirement = a HackMotion binding" | ⚠ **`MetricRequirement` cannot express that.** It knows anatomical `imuRoles` plus fixed bools, so a HackMotion route is today indistinguishable from the Witmotion one. Needs a `hackMotion` bool mirroring `launchMonitor`, a matching `ShotContext::hasHackMotion`, a `missingForRequirement` clause and a `CaptureDevice` value. |
-| 8 | *(unstated)* | ⚠ **`FusedStreams::streamFor(role)` returns the FIRST match.** Two bindings with the same role silently first-wins, so **wearing both instruments at once — the entire point — is not expressible today.** Fix this before any dual-worn capture. |
+| 8 | *(unstated)* | ⚠ **`FusedStreams::streamFor(role)` returns the FIRST match.** Two bindings with the same role silently first-wins, so wearing both instruments at once is not expressible today. ~~Fix this before any dual-worn capture.~~ **VOID as of 2026-08-18 — THE APP WILL NEVER RUN BOTH AT ONCE, and this is a permanent product decision with a physical reason, not a deferral.** Two sensors strapped close together on a wrist and hand *interfere*, and mounting both reliably is not practical — so the configuration this row exists to enable would produce bad data even if the code allowed it. It also buys a discriminator threaded through `ImuSegmentBinding` / `SegmentStream` / every `streamFor` call site: real risk, across the codebase, for a configuration nobody can wear. ⚠ **HM-vs-Witmotion validation still happens — in PYTHON HARNESSES outside the app, which is the whole reason Phase G is deferred to its own plan.** Slot A resolves to `LeadForearm` and B to `LeadHand`, and Phase C's placement resolver already refuses a second claimant, so no supported mounting can reach the first-match path at all. |
 | 10 | *(unstated)* | **The `0x84` sensor-count defect never reached our data, and this row exists so nobody re-derives that.** libhackmotion `f89cea4` found the count is the reply's **length**, not `data[1]`; `84 02 01` is two sensors because it carries two payload bytes, and the leading `02` is the first sensor's *location code*, which equals the count on this device **by coincidence**. The count sizes a record (header + one block per sensor), so a wrong one misplaces every field after the first block — but on this hardware both readings give 2, so every sample we have ever decoded was correct and **no capture is invalidated**. The byte that looked spare was the second sensor's location code; `sensor_map_undecoded` is now `sensor_location[]`. We read neither, so the API change cost us nothing. |
 | 9 | *(unstated)* | ⚠ **The library's digest ring defaults to OFF.** With it off, a history block reports `live_overlap_samples == 0`, which means *no evidence*, not agreement — and the stitch of §7 depends on that agreement. Set `digest_ring_capacity`. *(Done in Phase A.)* |
 
@@ -81,8 +81,16 @@ averaged anchor. Worth raising upstream if Phase D wants the poses themselves.
    and committed.
 3. **`hm.*` keys, and HackMotion grades when present** — `preferKeys: ["hm.leadWristFlexExt"]`,
    the launch-monitor pattern. ⚠ Consequence, stated once: the graded corpus then mixes
-   instruments depending on what was worn, which matters for norm-building. The *comparison* is
-   unaffected — both series are produced on every dual-worn swing and compared at series level.
+   instruments depending on what was worn, which matters for norm-building.
+   ⚠ ~~The *comparison* is unaffected — both series are produced on every dual-worn swing and
+   compared at series level.~~ **WRONG, corrected 2026-08-18: THERE ARE NO DUAL-WORN SWINGS AND
+   THERE NEVER WILL BE** (§0 #8 — the two sensors interfere and cannot both be mounted reliably).
+   No swing this app records will ever carry both series, so the comparison cannot live at series
+   level inside a capture. It happens in **Python harnesses outside the app**, on purpose-built
+   validation experiments, which is precisely why Phase G is deferred to its own plan rather than
+   being a step in this one. ⚠ **The separate `hm.*` keys are MORE important because of this, not
+   less** — they are what keeps "which instrument graded this swing" recoverable after the fact,
+   and across-session comparison is the only comparison available.
 4. **The frame constants are solved offline** from a `.hmwire` capture of single-axis motions,
    baked into `pp_tuned_constants.h` and pinned by a unit test. ✅ **Done in Phase D**:
    `kCandidate = 1` (C2), mounting `wg3-mount1`, repeatability measured across three captures.
@@ -373,7 +381,8 @@ type (`analysis_pipeline_developer_guide.md` §4).
 | **E** | Deferred history → SwingWindow | A shot produces a stitched **variable-rate** wrist lane — ~100 Hz over the still pre-roll, full rate through the swing (§0 #2) — with coverage, gaps and the fit in provenance. ⚠ Builds `deferred_sources_design.md`, does not consume it (§0 #4) | ✅ `0c7d128` + `b5ec45b` — **gate met on hardware in E3**: 1,066-1,159 samples/lane, the full ~799 Hz across impact ±125 ms. ⚠ The alignment budget shipped here was wrong and refused every pull; see E3 |
 | **E2** | Backlog: everything that needs no sensor | ⚠ **Scope narrowed 2026-08-18 by the user:** simultaneous HM+Witmotion arm mounting is NOT supported — either/or only — so the combination matrix (item 3) and the state-machine test (item 2) are DROPPED with it. What remains of the gate: the stale deferrals cleared (item 1) and the studio build reproducible (item 4) | ✅ item 1 `c467dce`/`732ad9a`/`0e0fc80`; items 2+3 dropped; item 4 done 2026-08-18 (sync + sidecar clone + verified build, see §11) |
 | **E3** | **Studio verification + first look at the data** | Built and run on the studio PC with a worn sensor: E's three gates, B's two unverified criteria, and a short findings note on what the wrist actually does at full rate. ⚠ **Keep the raw captures** — they become F's development fixture, so F needs no second trip | ✅ **2026-08-18, two sessions, 11 swings kept.** Windows Bluetooth closed; B's accel criterion PASSED; the stitched lane proved at full rate; the rate question ANSWERED. ⚠ Three gates still owed (disconnected shot, two balls < 3 s, stationary hold) and a **new defect found: a false data-integrity warning on every HackMotion shot** |
-| **F** | New `hm.*` keys + measure `preferKeys` | HackMotion wrist metrics produced and separately addressable; measures prefer them; corridors unchanged. ⚠ Blocked on `streamFor` (§0 #8) | ☐ |
+| **F** | New `hm.*` keys + measure `preferKeys` | HackMotion wrist metrics produced and separately addressable; measures prefer them; corridors unchanged. ⚠ ~~Blocked on `streamFor` (§0 #8)~~ — **NOT a blocker: the app will never run both instruments at once, so the first-match path is unreachable. §0 #8 is void and the discriminator is cut** | ☐ |
+| **W** | **Wash-up — unhappy paths and edge cases** | The deliberate acts nobody performs while chasing the happy path, plus the small defects parked to get the main build done. Deliberately LAST: none of it blocks F, and all of it needs the studio or a worn sensor | ☐ |
 | **G** | ~~Validation against Witmotion~~ | ⚠ **DEFERRED ENTIRELY — it needs its own plan, and it is NOT a gate on anything in this one.** See the Phase G section for why the deferral costs nothing here | ⏸ deferred |
 
 **Phase A, as shipped.** Explicit-UUID `BleImuTransport` + the first MTU plumbing in the tree;
@@ -909,13 +918,23 @@ contribution is the *pre*-impact half and uniformity, not the existence of fast 
 **Almost all of this already exists**, built for the launch monitor. Do not invent a parallel
 mechanism.
 
-- ⚠ **First, make both instruments bindable at once — §0 #8.** `FusedStreams::streamFor(role)`
-  returns the first match, so a swing wearing both silently drops one. Add an instrument
-  discriminator to `ImuSegmentBinding` / `SegmentStream` and make the lookup instrument-aware.
-  Then the comparison is nearly free: `ImuVisionFuser::fuse()` already takes a *binding vector* and
-  `MetricExtractor::extract()` already takes a `FusedStreams`, so partition the bindings by
-  instrument and run both through the **identical wrist maths**, emitting the second under an
-  `hm.` prefix. Any difference between the two series is then the instrument, not the arithmetic.
+- ⚠⚠ ~~**First, make both instruments bindable at once — §0 #8.**~~ **CUT FROM THIS PHASE,
+  2026-08-18, and the reason is physical rather than architectural.** Two sensors strapped close
+  together on a wrist and hand interfere, and neither can then be mounted reliably — so the
+  dual-worn swing this work exists to serve produces bad data whether or not the code allows it.
+  The app will therefore **never** run a wG3 and a Witmotion at once. Slot A resolves to
+  `LeadForearm` and B to `LeadHand`, and Phase C's placement resolver already refuses a second
+  claimant, so **no supported mounting can reach `streamFor`'s first-match path** and the
+  discriminator would be untestable code threaded through every call site — real risk across the
+  codebase for a configuration nobody can wear.
+  ⚠ **This does NOT cancel the validation, it relocates it.** HM-versus-Witmotion comparison runs
+  in **Python harnesses outside the app**, on purpose-built experiments, which is the actual reason
+  Phase G is deferred to its own plan. Do not re-derive the discriminator as a prerequisite for it.
+  ⚠ **What survives from this bullet, and it is the important half:** both series must still be
+  produced by the **identical wrist maths** so that any difference is the instrument and not the
+  arithmetic. With one instrument per swing that is now a property of the CODE PATH — the
+  HackMotion lane must go through the same `MetricExtractor` route as a Witmotion lane, not a
+  parallel one — rather than something a dual-worn capture demonstrates.
 - **New metric keys, not overwritten ones** — `hm.leadWristFlexExt`, `hm.leadWristRadUln`,
   `hm.forearmPronation` beside ours. ⚠ The names in the original text were wrong; see §0 #5.
   The pair must stay separately addressable — that is what makes Phase G possible at all.
@@ -941,6 +960,57 @@ mechanism.
   it must not grade". That inverts the relationship: the wG3 is the CRITERION, not the candidate.
   Deferring G defers what we know about **our own** wrist estimate, not what we know about the
   HackMotion. Enable the preference.
+
+### Phase W — wash-up: unhappy paths and edge cases
+
+**Added 2026-08-18 by the user, deliberately at the END of the plan.** None of it blocks F, and
+almost all of it needs the studio or a worn sensor. The reason it exists as a phase rather than a
+list of follow-ups: every item here is a thing that only gets exercised on purpose. Chasing the
+happy path never reaches any of them, which is exactly why E3 came back with three of its own gates
+unrun — the session went well, so nobody broke anything on purpose.
+
+**The three E3 gates that never ran.** All need a deliberate act with the sensor worn:
+1. **A shot with the device disconnected** — the window must come back byte-identical to a
+   pre-HackMotion one. This is the regression that says the deferred path costs nothing when there
+   is nothing to defer. ⚠ `ShotProcessor::beginGather()` calls this "the ORDINARY path, not an
+   error path"; nothing has ever confirmed it on hardware.
+2. **Two balls struck inside ~3 s** — the eviction warning must reach the coach at capture time.
+   ⚠ E3 measured the self-recording stall at **~1.1 s**, not the ~4.5 s `hm_instance.cpp`'s guard
+   comment assumes, so the collision window is narrower than designed for and this may now be hard
+   to provoke. Provoking it is the point: the guard refuses a second reservation while one is in
+   flight, and nobody has seen that refusal happen.
+3. **A five-minute stationary hold** — §6.2's relative-angle drift check, and §8.2's
+   correlated-error check, in OUR setup rather than the vendor's. ⚠ §12 of the specification says
+   plainly that *why* the drift cancels is not understood and must not be assumed outside the
+   vendor's configuration. ⚠ Watch the 5.0-minute idle disconnect: the hold is exactly as long as
+   the timer, and the library's keepalive is what should save it — which itself has never been
+   observed at the boundary.
+
+**The defects parked to get the main build done:**
+4. ⚠ **The composite keeps BOTH samples where live and retrieved nearly coincide.** E3 session 02
+   swing 6 carries **37 sample intervals of 751-758 µs** — faster than the device can physically
+   sample — all ~2 s before impact, in the swing that had the most live samples (50). The stitch is
+   per delivered interval (deferred inside, live outside), so a boundary instant appears to admit
+   both. Harmless where it landed and it corrupts nothing measured at impact, but it is wrong in
+   principle and would poison any rate derived from the lane — including `effectiveHz`, which the
+   grid-rate derivation reads. ⚠ **The fix is a boundary rule, not a dedupe pass**: `delivered[]`
+   is half-open and `swing_window_test` already pins the exact boundary instant, so start there.
+5. **Does the retry ceiling earn its stalls?** Every E3 pull hit `attempts: 3` and still returned
+   HOLED. Each attempt stalls the device's counter again and `self_recording_gap` is the envelope
+   over all of them. Nobody has checked whether attempts 2 and 3 recover any samples at all — if
+   they do not, we are paying two stalls per shot for nothing. Instrument, then decide.
+6. **The recalibrate-twice behavioural check on a worn Witmotion**, owed since `732ad9a`. The
+   mechanism was probed headless (4/4, null-safe through a double cycle); what has never been seen
+   is a second calibration being ACCEPTED after the stale-anchor fix.
+7. ⚠ **The significant-message toast.** `b5ec45b` put a `ppWarn` on a failed retrieval, and the
+   user's correction is that this is the wrong mechanism for significance: **one log, the app log,
+   and anything needing action in the moment is a toast on the session screen.** The `ppWarn` is
+   the record; the toast is the alert and does not exist. A shot that lost its high-rate lane is
+   exactly the case for one.
+
+**Not in here, deliberately:** the false data-integrity warning (§9) is on EVERY HackMotion shot,
+not an edge case, and it contaminates the fixture Phase F is built against. It belongs with F or
+before it — see the Phase F section.
 
 ### Phase G — DEFERRED ENTIRELY, and it needs its own plan
 
@@ -1054,6 +1124,16 @@ that as a real property, not as a glitch.
 ---
 
 ## 8. Validation design — using HackMotion as a criterion
+
+⚠ **THIS ENTIRE SECTION DESCRIBES WORK THAT HAPPENS OUTSIDE THE APP, and that is a 2026-08-18
+decision rather than an implementation detail.** The app will never run a wG3 and a Witmotion at
+once — the two interfere at wrist-and-hand spacing and neither mounts reliably beside the other
+(§0 #8) — so **no swing PinPointStudio records will ever carry both series**, and "on the same
+swing" below can only be produced by a deliberate validation experiment driven from **Python
+harnesses** talking to both devices directly, accepting the mounting compromise that a coaching
+session cannot. That is the substantive reason Phase G is deferred to its own plan: it is not a
+later step of this integration, it is a different piece of engineering. Nothing in this section is
+a gate on F.
 
 ### 8.1 What is being asked
 
