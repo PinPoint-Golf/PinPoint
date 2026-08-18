@@ -103,8 +103,16 @@ stays possible. HackMotion is the wrist's version of that.
 
 ⚠ **And the trap, named up front.** If both systems share a failure mode, agreement is
 *correlated error, not corroboration*. Both are magnetometer-free; both fuse per-unit. The
-0.58°/5 min figure is the evidence that they differ where it matters, and **Phase G exists to
-confirm that in our own captures before any HackMotion reading is allowed to grade anything.**
+0.58°/5 min figure is the evidence that they differ where it matters.
+
+⚠ **THIS PARAGRAPH USED TO END "…and Phase G exists to confirm that in our own captures before any
+HackMotion reading is allowed to grade anything." THAT SENTENCE READ THE COMPARISON BACKWARDS AND
+IS REMOVED** — it cost a planning session in August 2026, when it was quoted back as a reason to
+withhold grading after Phase G was deferred. **The wG3 is the CRITERION.** It is the best wrist
+measurement available to us, we accept its readings as relatively accurate, and it is what we
+grade AGAINST; assessing its accuracy is not this project's job. Phase G assesses **our Witmotion
+estimate** against it. The correlated-error caveat above still stands as a caveat on what an
+AGREEMENT between the two would prove — it is not a licence gate on the criterion.
 
 ---
 
@@ -344,12 +352,14 @@ session type (`analysis_pipeline_developer_guide.md` §4).
 | Phase | Deliverable | Gate to move on | Status |
 |---|---|---|---|
 | **A** | Transport + enumeration | A wG3 appears in Settings → IMUs and connects; explicit-UUID `BleImuTransport` lands with a Witmotion regression | ✅ `3b4980f` |
-| **B** | Live streaming → two EventBuffer sources | Two lanes in the data viewer at the right rates; no monotonicity violations. ⚠ *No "no-fit drops" — §0 #1* | ☐ |
-| **C** | Device-native calibration flow | A coach can calibrate end to end; presence angle recorded, never scored; reconnect invalidates. Includes unit-keyed placement (§0 decision 1) | ☐ |
-| **D** | **Frame reconciliation** — solve `R_unit` | A known single-axis wrist motion moves one PPS DOF and leaves the others near zero, from HackMotion data | ☐ |
-| **E** | Deferred history → SwingWindow | A shot produces a stitched **variable-rate** wrist lane — ~100 Hz over the still pre-roll, full rate through the swing (§0 #2) — with coverage, gaps and the fit in provenance. ⚠ Builds `deferred_sources_design.md`, does not consume it (§0 #4) | ⚙ mechanism built + tested; ⚠ **hardware gates outstanding** |
+| **B** | Live streaming → two EventBuffer sources | Two lanes in the data viewer at the right rates; no monotonicity violations. ⚠ *No "no-fit drops" — §0 #1* | ✅ shipped `9bc8aee`/`17ccca0`/`cdddefa` — ⚠ **two criteria never checked**, both need a worn sensor (see E3) |
+| **C** | Device-native calibration flow | A coach can calibrate end to end; presence angle recorded, never scored; reconnect invalidates. Includes unit-keyed placement (§0 decision 1) | ✅ verified on hardware — ⚠ leaves §12.3 (no state-machine test) and §12.4 (wizard matrix) open, plus the stale ArmVizView deferral (see E2) |
+| **D** | **Frame reconciliation** — solve `R_unit` | A known single-axis wrist motion moves one PPS DOF and leaves the others near zero, from HackMotion data ⚠ *superseded — the real gate is the SIGN of a directed motion; see the Phase D section* | ✅ `17b0c9c` — C2 selected, repeatability measured across three captures |
+| **E** | Deferred history → SwingWindow | A shot produces a stitched **variable-rate** wrist lane — ~100 Hz over the still pre-roll, full rate through the swing (§0 #2) — with coverage, gaps and the fit in provenance. ⚠ Builds `deferred_sources_design.md`, does not consume it (§0 #4) | ⚙ `0c7d128` — mechanism built and tested; ⚠ **three hardware gates deferred to E3** |
+| **E2** | Backlog: everything that needs no sensor | The stale Phase-D-era deferrals are cleared, the calibration state machine has a test, and the session wizard is exercised across the sensor combinations — so E3's studio time is spent on data, not on discovering a broken wizard | ☐ |
+| **E3** | **Studio verification + first look at the data** | Built and run on the studio PC with a worn sensor: E's three gates, B's two unverified criteria, and a short findings note on what the wrist actually does at full rate. ⚠ **Keep the raw captures** — they become F's development fixture, so F needs no second trip | ☐ |
 | **F** | New `hm.*` keys + measure `preferKeys` | HackMotion wrist metrics produced and separately addressable; measures prefer them; corridors unchanged. ⚠ Blocked on `streamFor` (§0 #8) | ☐ |
-| **G** | Validation against Witmotion | Corpus-scale agreement report; decision on whether HackMotion grades or only reports | ☐ |
+| **G** | ~~Validation against Witmotion~~ | ⚠ **DEFERRED ENTIRELY — it needs its own plan, and it is NOT a gate on anything in this one.** See the Phase G section for why the deferral costs nothing here | ⏸ deferred |
 
 **Phase A, as shipped.** Explicit-UUID `BleImuTransport` + the first MTU plumbing in the tree;
 `hm_looks_like_hackmotion()` discovery with the 90 s window; an `ImuVendor` discriminator on
@@ -619,6 +629,101 @@ to HackMotion:
 - **Persist the clock fit with the block.** `hm_clock_snapshot` by value into swing.json, so
   re-analysis a year later reproduces the day's alignment.
 
+### Phase E2 — the backlog that does not need a sensor
+
+**Why it exists.** Development has run away from the studio, and unverified work has piled up
+across three phases. E2 clears everything that can be cleared on a desk, so E3's studio time is
+spent collecting data rather than discovering that the session wizard refuses to start.
+
+1. ⚠ **The ArmVizView deferral is stale, and it is currently telling a coach something untrue.**
+   Phase C deliberately left out the live free-movement confirmation, with this reason
+   (`ImuCalibrationFlow.qml`): *"ArmVizView reads anatCalibrated + anatQuat and BOTH ARE STUBS ON
+   AN HmUnit UNTIL PHASE D"*. That was correct then. **Phase D shipped and made both live** —
+   `anatQuat` is now built from the selected frame whenever the device is calibrated, and
+   `kCandidate = 1` is baked in — and nobody went back. Three consequences:
+   - The flow still displays *"Live arm tracking from this sensor is not available yet — the
+     conversion to ours is still being solved."* ⚠ It is not still being solved. It was solved,
+     measured across three captures and committed. **This is visible in the product.**
+   - The free-movement confirmation step §4's decision 2 called for is still missing.
+   - Two code comments (`ArmVizView.qml`, `ImuCalibrationFlow.qml`) still describe the anatomical
+     frame as a stub and will mislead the next reader.
+
+   ⚠ **`ArmVizView` itself needs no work.** It already resolves the per-UNIT object for a
+   HackMotion slot and reads `anatCalibrated`/`anatQuat`, so a calibrated wG3 should already drive
+   the capture-page arm today. This is a text-and-wiring cleanup, not new machinery — but confirm
+   that claim by running it rather than by reading it.
+
+2. **Test the calibration state machine** — §12.3, raised by the user at the end of Phase C
+   ("not convinced the states are rock solid") with no direct evidence of a fault, which is still
+   the right level of confidence. That section lists what a test has to cover; all of it is
+   reachable by driving `HmInstance`'s signals with no device attached.
+
+3. **The session wizard across the sensor combinations** — §12.4's matrix. ⚠ **This one protects
+   the trip.** The studio session goes through that wizard, and only the HackMotion-only Wrist
+   path has ever been exercised on hardware; a combination that refuses to start would cost a day.
+
+4. **Make the studio build reproducible.** ⚠ The build prefers a sibling `../libhackmotion`
+   checkout and otherwise fetches the **`main` branch** from GitHub, so this Mac and the studio PC
+   can silently build against different library revisions and a studio result would not be
+   attributable. Check the About box provenance, or pin. Also confirm `hackmotion/enabled` — it
+   defaults OFF.
+
+### Phase E3 — studio verification, and the first real look at the data
+
+**Built and run on GOLFSIMPC, with the sensor worn.** ⚠ **Keep every raw capture.** They become
+Phase F's development fixture, which is what stops F needing a studio trip of its own.
+
+**The gates it clears.** Phase E's three:
+- a real shot producing a stitched variable-rate lane — ⚠ with density measured over **impact
+  ±125 ms**, NOT the block-level figure, which is the wrong scope (`history.h`);
+- a shot with the device disconnected, producing a window byte-identical to today's;
+- two balls struck inside ~3 s, raising the eviction warning at capture time.
+
+Plus Phase B's two, which have been outstanding since that phase shipped:
+- the two lanes appearing in the **data viewer** under their aliases;
+- the palm reading several g more than the lower arm through a downswing. ⚠ This is the Phase B
+  failure mode that looks entirely plausible when it is wrong.
+
+**Three risks to front-load, in this order:**
+
+1. ⚠ **WINDOWS BLUETOOTH HAS NEVER BEEN EXERCISED.** Everything from A to D was verified on the
+   Mac. There is no platform-specific code in `BleImuTransport`, which is encouraging, but Qt's
+   Bluetooth stack behaves differently on Windows and this path has never run there. **Check it
+   first** — if the sensor will not connect, nothing else in the trip happens.
+2. ⚠ **THE FRAME CONSTANT IS A PROPERTY OF THE STRAP POSITION.** `kCandidate = 1` describes
+   mounting `wg3-mount1` from the 18 Aug capture taken on the Mac, and the constant's own comment
+   says so: *"If the strap position changes, it changes."* Strap it differently and every wrist
+   angle is wrong **and looks entirely plausible**, which is Phase D's central lesson. Reproduce
+   the mounting — photograph it beforehand — or re-run `hm_frame_select.py` in the studio.
+3. **Part of Phase E cannot be verified here, and that is expected.** The binding loop still skips
+   `HmInstance` (Phase F's work), so the stitched lane never becomes a binding: the fuser never
+   sees it and the derived grid rate never rises. E3 proves the data ARRIVES and is RECORDED
+   honestly; it does not prove anything downstream consumes the density.
+
+#### The findings note — deliberately slim, and it answers an open question
+
+⚠ **THIS IS NOT AN ASSESSMENT OF THE DEVICE'S ACCURACY, and framing it as one would be a category
+error.** The wG3 is the CRITERION here — the best wrist measurement available to us and the thing
+our own estimate is judged against (§1). We are not here to check whether it is right. What is
+genuinely interesting is what it SHOWS, because nobody has been able to see a wrist at this rate
+before: the live link only ever gave a handful of samples through a downswing.
+
+1. **What does the wrist actually do through impact, at full rate?** Flexion, deviation and
+   rotation across the quarter-second that matters, at ~800 Hz against the ~100 Hz we would
+   otherwise have. ⚠ **This answers the question `deferred_sources_design.md` §4.3 is explicit
+   that landing the mechanism does NOT answer** — what rate the wrist metrics actually need. If
+   the values at the P-positions are indistinguishable between the two rates, the retrieval buys
+   less than assumed and we should say so; if they differ, that is the justification for
+   everything Phase E built.
+2. **Does the relative angle hold still?** §6.2 measured the two units drifting individually
+   (1.95° and 1.13° over five minutes) while the RELATIVE angle stayed within 0.58°. A stationary
+   hold reproduces that in our setup or does not. ⚠ §12 of the specification says plainly that
+   *why* it cancels so completely is not understood and should not be assumed outside the vendor's
+   configuration — so this is a property to check, not one to inherit.
+3. **Do the excursions look like a golf swing?** Plain plausibility on the measured flexion and
+   deviation ranges. Cheap, and it is the check that catches a mounting or frame problem that
+   every other number would carry silently.
+
 ### Phase F — metrics and measures
 
 **Almost all of this already exists**, built for the launch monitor. Do not invent a parallel
@@ -651,10 +756,34 @@ mechanism.
   decisions; they are simply both taken now. The consequence — a graded corpus that mixes
   instruments by what was worn — is recorded there, and does not affect the Phase G comparison,
   which happens at series level on swings carrying both.
+  ⚠ **AND PHASE G'S DEFERRAL DOES NOT CHANGE THIS — the question was raised and settled on
+  2026-08-18.** The temptation is to reason "G is deferred, so the instrument is unvalidated, so
+  it must not grade". That inverts the relationship: the wG3 is the CRITERION, not the candidate.
+  Deferring G defers what we know about **our own** wrist estimate, not what we know about the
+  HackMotion. Enable the preference.
 
-### Phase G — validation
+### Phase G — DEFERRED ENTIRELY, and it needs its own plan
 
-See §8.
+**Decided 2026-08-18.** This plan exists to add HackMotion support. Phase G is a different job —
+a corpus-scale instrument comparison with its own protocol, its own subject and mounting
+bookkeeping, and its own statistics — and folding it in here would swell a plan that is nearly
+finished. §8 stays as the design sketch for whoever picks it up.
+
+⚠ **AND IT IS NOT A GATE ON ANYTHING IN THIS PLAN — the reverse of what §1's original wording
+implies.** That wording ("Phase G exists to confirm that in our own captures before any HackMotion
+reading is allowed to grade anything") reads the comparison backwards, and §0's decision 3 already
+overrode it: **the wG3 IS the criterion for wrist measurement.** It is the best product available
+to us, we accept its readings as relatively accurate, and it is what we grade AGAINST. Phase G
+does not put the HackMotion on trial — **it assesses OUR Witmotion estimate against it**, which is
+a question about our own sensors and can wait.
+
+So Phase F enables `preferKeys` as §0 decision 3 says: HackMotion grades when present, our
+estimate grades when it is not. ⚠ The one consequence to keep carrying is the one recorded there —
+**the graded corpus then mixes instruments depending on what was worn**, which matters for
+norm-building. The separately-addressable `hm.*` keys are what make that recoverable after the
+fact, which is one more reason they must not be collapsed into the existing ones.
+
+See §8 for the design as sketched.
 
 ---
 
