@@ -152,6 +152,25 @@ public:
     SwingWindow captureSwingWindow(int64_t t_start_us, int64_t t_end_us);
     SwingWindow captureSwingWindow(std::chrono::milliseconds trailing_duration);
 
+    // Build the ring backing on its own, WITHOUT constructing a window —
+    // deferred_sources_design.md §3.2/§3.5. For a capture that must wait for a
+    // deferred source to report before the window can be built.
+    //
+    // ⚠ THE RESUME GUARD GOES UP THE MOMENT THIS RETURNS, and that is the whole
+    // reason it exists. swing_window_live_ is set by the ring source's
+    // CONSTRUCTOR, which in the ordinary captureSwingWindow() path is the same
+    // instant as window construction. Splitting the freeze from the construction
+    // opens a gap where the rings are frozen but the guard is not set — and
+    // `resume_clear_rings` is true, so a resume landing in that gap does not
+    // merely restart capture, it CLEARS THE RINGS WE ARE ABOUT TO SNAPSHOT.
+    // That turns a race into silent, total data loss for the shot.
+    //
+    // So: call this at PAUSE, hold the returned source across the gather, and
+    // move it into the composite when the window is finally constructed. The
+    // guard is released when the window (and hence the source) is destroyed,
+    // exactly as it is today.
+    std::unique_ptr<const SwingPayloadSource> makeRingPayloadSource();
+
     // --- Observability ---
     const SourceStats&    statsFor(SourceId id) const;
     std::vector<SourceId> stalledSources() const;

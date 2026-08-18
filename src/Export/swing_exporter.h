@@ -25,6 +25,8 @@
 #include <QQuaternion>
 #include <QRectF>
 #include <QString>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "types.h"
@@ -157,6 +159,73 @@ struct SwingImuDeviceInfo {
     // has no host time to attribute to a window. Should be 0 — the clock fit exists
     // from the first live frame — so a non-zero value is a symptom, not a rate.
     int  hmNoFitSkippedSession = 0;
+
+    // ── Deferred history provenance (Phase E) ────────────────────────────────
+    //
+    // ⚠ A STITCHED LANE CHANGES SAMPLE RATE PARTWAY THROUGH THE WINDOW, AND
+    // NOTHING IN THE SAMPLE DATA RECORDS THAT. A trace that is ~800 Hz for 2 s
+    // and ~100 Hz either side is byte-indistinguishable from one that is not, so
+    // without this block `effectiveHz` would be computed from a window whose
+    // provenance nobody can audit — and re-analysis could not reproduce the
+    // day's alignment. -1 means NOT MEASURED, never "fine".
+    int    hmHistoryStatus   = -1;   // hm_history_status; -1 = no pull attempted
+    int    hmHistoryAttempts = 0;    // how many `a1` requests were issued
+    // ⚠ When true the interval list is a SUPERSET and the two figures below are
+    // OPTIMISTIC. An optimistic gap list that does not say so reads as a clean pull.
+    bool   hmCoverageOverflowed = false;
+    double hmCoverageFraction   = -1.0;  // of what was ASKED FOR
+    double hmDensity            = -1.0;  // 1 / median delivered index step
+    double hmAchievedHz         = -1.0;  // AVERAGE rate across what arrived
+    // ⚠ THE NUMBER THAT DECIDES WHETHER IMPACT SURVIVED. Read beside the other
+    // three: none of them substitutes for another.
+    qint64 hmLargestGapUs       = -1;
+
+    // ⚠ READ AS A PAIR. Zero mismatches beside zero samples is NO EVIDENCE, not
+    // agreement — the stitch assumes history is a strict superset of live, and
+    // these two are that assumption measured rather than argued.
+    int    hmLiveOverlapSamples    = -1;
+    int    hmLiveOverlapMismatches = -1;
+
+    // ⚠ THE HOLE THE PULL ITSELF CAUSED, and it falls OUTSIDE the requested
+    // window by construction — the device stops counting samples while it
+    // replays them, so the cost lands in whatever comes next. Nothing on the
+    // wire marks it; this is the only artefact that survives. With more than one
+    // attempt it is the ENVELOPE over all of them, which over-claims on purpose.
+    qint64 hmSelfRecordingGapStartUs = 0;
+    qint64 hmSelfRecordingGapEndUs   = 0;
+
+    // The stitched lane's composition, so a reader can tell a dense pull from a
+    // window that mostly fell back to the live rate.
+    int    hmStitchedFromLive     = -1;
+    int    hmStitchedFromDeferred = -1;
+
+    // The clock fit THESE SAMPLES WERE DATED BY, carried by value. ⚠ The fit
+    // re-anchors at every bracket close, so the session's current fit is not
+    // this one — persisting it with the block is what lets a re-analysis a year
+    // later reproduce the day's alignment instead of re-deriving a different one.
+    bool    hmFitValid         = false;
+    quint32 hmFitFlags         = 0;
+    int     hmFitObservations  = -1;
+    double  hmFitRateHz        = 0.0;   // ~799.2, NOT 800
+    qint64  hmFitAnchorHostUs  = 0;
+    quint32 hmFitAnchorIndex   = 0;
+    double  hmFitSlopeUsPerIndex = 0.0;
+    qint64  hmFitOffsetUs      = 0;
+    qint64  hmFitSpanUs        = 0;
+    // ⚠ PRECISION, and while spanUs is 0 these carry the connection's LAST
+    // measurement rather than reading zero — a fit resting on one instant has no
+    // spread, and a zero there is absence of evidence, not absence of error.
+    // That is exactly the state a re-anchor leaves behind after every pull.
+    quint32 hmFitResidualMedianUs = 0;
+    quint32 hmFitResidualP90Us    = 0;
+    quint32 hmFitResidualMaxUs    = 0;
+    double  hmFitDriftUsPerS      = 0.0;
+
+    // Half-open [start,end) host-time intervals actually delivered, and the gaps
+    // with their kind. ⚠ The three gap kinds MAY OVERLAP — they are three
+    // independent statements about one index axis, not a partition of it.
+    std::vector<std::pair<qint64, qint64>>          hmDelivered;
+    std::vector<std::tuple<qint64, qint64, int>>    hmGaps;
 };
 
 // Host/app provenance recorded under capture.host — explains cross-host

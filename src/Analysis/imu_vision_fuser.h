@@ -76,6 +76,51 @@ public:
                              const std::vector<ImuSegmentBinding> &bindings,
                              double gridHz = 200.0,
                              const pinpoint::RefuseConfig *refusion = nullptr);
+
+    // ── The grid rate must follow the data (design §4.3) ─────────────────────
+    //
+    // A fixed 200 Hz discards most of what a deferred high-rate pull cost us to
+    // retrieve; raising it globally makes every ordinary capture pay 4x for
+    // nothing. So it is derived per window.
+    //
+    // ⚠ THE STATISTIC IS THE MAXIMUM OVER THE SWING SPAN, NOT THE MEDIAN OVER
+    // THE WINDOW, and the design's own wording was wrong about this. A stitched
+    // lane runs at ~100 Hz over a 3 s still pre-roll and ~800 Hz through the
+    // swing, so its median across the window is dominated by the pre-roll and
+    // would land near the base rate — throwing away precisely the dense span the
+    // pull was performed to obtain. The library makes the same point about its
+    // own `density` field: the block-level figure is the wrong scope, point the
+    // measurement at the sub-range you care about.
+    //
+    // ⚠ CLAMPED, AND THE FLOOR IS LOAD-BEARING. kGridHzMin is today's fixed
+    // rate, so a capture whose fastest lane is a 100 Hz Witmotion comes out at
+    // exactly 200 Hz and is bit-identical to what it was before this existed.
+    // The floor never caps the device; it stops the corpus moving underneath us.
+    static constexpr double  kGridHzMin = 200.0;
+    static constexpr double  kGridHzMax = 800.0;
+    // The sliding probe peakHzFor() uses. 250 ms is about a downswing, so a
+    // dense span short enough to matter is still long enough to measure.
+    static constexpr int64_t kProbeUs   = 250'000;
+
+    static double gridHzForWindow(const SwingWindow &window,
+                                  const std::vector<ImuSegmentBinding> &bindings);
+
+    // The AVERAGE rate one source achieved over [startUs, endUs) — the figure a
+    // stage gates on. 0 means NOT MEASURABLE, never "a rate of zero".
+    static double effectiveHzFor(const SwingWindow &window, SourceId source,
+                                 int64_t startUs, int64_t endUs);
+
+    // The PEAK local rate anywhere in the window, over a sliding probe. This is
+    // what sizes the grid: an average would be dragged down by the still
+    // pre-roll and discard the dense span the pull was performed to obtain.
+    static double peakHzFor(const SwingWindow &window, SourceId source,
+                            int64_t probeUs);
+
+    // The sub-span whose sample spacing implies a rate above thresholdHz —
+    // "where the pull actually delivered density", in host time. out[0] >= out[1]
+    // means there is none, which is the ordinary answer for a live-only lane.
+    static void highRateSpanFor(const SwingWindow &window, SourceId source,
+                                double thresholdHz, int64_t out[2]);
 };
 
 } // namespace pinpoint::analysis

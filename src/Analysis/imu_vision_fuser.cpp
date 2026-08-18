@@ -91,6 +91,97 @@ QQuaternion slerpAt(const std::vector<std::pair<int64_t, QQuaternion>> &seq, int
 
 } // namespace
 
+double ImuVisionFuser::effectiveHzFor(const SwingWindow &window, SourceId source,
+                                      int64_t startUs, int64_t endUs)
+{
+    if (endUs <= startUs)
+        return 0.0;
+
+    // ⚠ MEASURED OVER THE SPAN ASKED FOR, NOT OVER THE WHOLE WINDOW. A stitched
+    // lane's rate is not one number, and the figure that decides whether a
+    // metric AT IMPACT can be computed is the one measured around impact.
+    const std::vector<pinpoint::IndexEntry> es = window.entriesFor(source);
+    size_t n = 0;
+    for (const pinpoint::IndexEntry &e : es)
+        if (e.timestamp_us >= startUs && e.timestamp_us < endUs) ++n;
+
+    if (n < 2)
+        return 0.0;   // ⚠ NOT MEASURABLE, and never "a rate of zero"
+    return double(n) * 1.0e6 / double(endUs - startUs);
+}
+
+double ImuVisionFuser::peakHzFor(const SwingWindow &window, SourceId source,
+                                 int64_t probeUs)
+{
+    const std::vector<pinpoint::IndexEntry> es = window.entriesFor(source);
+    if (es.size() < 2 || probeUs <= 0)
+        return 0.0;
+
+    // ⚠ A PEAK, NOT AN AVERAGE, AND THAT IS THE WHOLE POINT. Averaging a
+    // stitched lane over the window mixes ~800 Hz through the swing with ~100 Hz
+    // over a 3 s still pre-roll and reports something near the base rate — which
+    // would size the grid to throw away exactly the dense span the pull was
+    // performed to obtain. Sliding a short probe finds that span wherever it is,
+    // without depending on the impact estimate being right.
+    size_t lo = 0;
+    double best = 0.0;
+    for (size_t hi = 0; hi < es.size(); ++hi) {
+        while (es[hi].timestamp_us - es[lo].timestamp_us > probeUs)
+            ++lo;
+        if (hi == lo) continue;
+        const int64_t span = es[hi].timestamp_us - es[lo].timestamp_us;
+        if (span <= 0) continue;
+        best = std::max(best, double(hi - lo) * 1.0e6 / double(span));
+    }
+    return best;
+}
+
+void ImuVisionFuser::highRateSpanFor(const SwingWindow &window, SourceId source,
+                                     double thresholdHz, int64_t out[2])
+{
+    out[0] = 0;
+    out[1] = 0;
+    if (thresholdHz <= 0.0)
+        return;
+
+    const std::vector<pinpoint::IndexEntry> es = window.entriesFor(source);
+    if (es.size() < 2)
+        return;
+
+    // The widest spacing that still counts as "above the threshold".
+    const int64_t maxStepUs = int64_t(1.0e6 / thresholdHz);
+
+    bool    found = false;
+    int64_t first = 0, last = 0;
+    for (size_t i = 1; i < es.size(); ++i) {
+        const int64_t step = es[i].timestamp_us - es[i - 1].timestamp_us;
+        if (step <= 0 || step > maxStepUs)
+            continue;
+        if (!found) { first = es[i - 1].timestamp_us; found = true; }
+        last = es[i].timestamp_us;
+    }
+    if (!found)
+        return;
+    out[0] = first;
+    out[1] = last;
+}
+
+double ImuVisionFuser::gridHzForWindow(const SwingWindow &window,
+                                       const std::vector<ImuSegmentBinding> &bindings)
+{
+    double fastest = 0.0;
+    for (const ImuSegmentBinding &b : bindings) {
+        if (b.role == SegmentRole::Unknown) continue;
+        fastest = std::max(fastest, peakHzFor(window, b.source, kProbeUs));
+    }
+
+    // ⚠ Nothing measurable is NOT a reason to change the grid. A window with one
+    // sample per lane must produce what it always produced.
+    if (fastest <= 0.0)
+        return kGridHzMin;
+    return std::clamp(fastest, kGridHzMin, kGridHzMax);
+}
+
 FusedStreams ImuVisionFuser::fuse(const SwingWindow &window,
                                   const std::vector<ImuSegmentBinding> &bindings,
                                   double gridHz,

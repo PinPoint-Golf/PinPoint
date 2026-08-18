@@ -24,6 +24,12 @@
 #include <QTimer>
 
 #include <hackmotion/sample.h>      // hm_unit — the cable-fixed unit ordering
+#include <hackmotion/clock.h>       // hm_clock_snapshot — carried WITH the data
+
+#include <utility>
+#include <vector>
+
+#include "imu_sample.h"             // pinpoint::ImuSample — the stitched lane's records
 
 #include "hm_capture_provenance.h"  // the pure window arithmetic behind Phase B′
 
@@ -448,6 +454,96 @@ public:
     // Window-scoped. Callable from any thread; the worker copies out under the
     // same mutex snapshot() uses.
     CaptureProvenance captureProvenance(qint64 windowStartUs, qint64 windowEndUs) const;
+
+    // ── Deferred history (Phase E) ──────────────────────────────────────────
+    //
+    // The device holds ~7.5 s internally and replays it at up to ~799 Hz against
+    // a live link carrying 25-100 Hz, so THE BEST DATA FOR A SWING ARRIVES AFTER
+    // THE SWING — seconds after the SwingWindow would once have been frozen.
+    // This is deferred_sources_design.md's first real consumer.
+    struct HistoryResult {
+        // A block materialised. ⚠ TRUE DOES NOT MEAN GOOD: a timed-out, holed or
+        // empty pull is an ordinary outcome and still produces a block carrying
+        // its own coverage. Read `status` and the coverage fields, never this.
+        bool valid = false;
+
+        int  status   = -1;      // hm_history_status
+        int  attempts = 0;       // how many `a1` requests were issued
+        // ⚠ The interval list is then a SUPERSET and coverageFraction /
+        // largestGapUs become OPTIMISTIC. Surfaced because an optimistic gap
+        // list that does not say so reads as a clean pull.
+        bool coverageOverflowed = false;
+
+        // ⚠ THREE NUMBERS ANSWERING THREE DIFFERENT QUESTIONS, and no one of
+        // them substitutes for another: how much of what we ASKED FOR arrived,
+        // how closely spaced what arrived was, and the AVERAGE rate across it.
+        double  coverageFraction = 0.0;
+        double  density          = 0.0;
+        double  achievedHz       = 0.0;
+        // ⚠ THE NUMBER THAT DECIDES WHETHER IMPACT SURVIVED.
+        quint32 largestGapUs     = 0;
+
+        // ⚠ READ AS A PAIR. A zero MISMATCH count beside a zero SAMPLE count is
+        // NO EVIDENCE, not agreement — either the pull covered a span live never
+        // reached, or the digest ring was off.
+        quint32 liveOverlapSamples    = 0;
+        quint32 liveOverlapMismatches = 0;
+
+        // ⚠ THE HOLE THIS PULL ITSELF CAUSED, and it falls OUTSIDE `requested`
+        // by construction: the device stops counting samples while it replays
+        // them, so the cost lands in whatever comes next. Nothing on the wire
+        // marks it, and the block is the only artefact that survives — so a
+        // consumer stitching a session has no other way to know a span was never
+        // RECORDED rather than merely never REQUESTED. Empty when unmeasured.
+        qint64 selfRecordingGapStartUs = 0;
+        qint64 selfRecordingGapEndUs   = 0;
+
+        qint64 requestedStartUs = 0;
+        qint64 requestedEndUs   = 0;
+
+        // ⚠ The three kinds MAY OVERLAP — read them as three independent
+        // statements about one index axis, not as a partition of it.
+        struct Gap { qint64 startUs; qint64 endUs; int kind; };
+        std::vector<Gap> gaps;
+
+        // Half-open, ascending, disjoint — what the pull actually delivered.
+        std::vector<std::pair<qint64, qint64>> delivered;
+
+        // ⚠ CARRIED BY VALUE so re-analysis a year later reproduces the day's
+        // alignment. The fit is persisted WITH the data and never queried
+        // afterwards — it re-anchors at every bracket close, so the session's
+        // current fit is not the one these samples were dated by.
+        hm_clock_snapshot fit{};
+
+        int   calStateAtStart     = -1;
+        int   calStateAtEnd       = -1;
+        bool  calSpansTransition  = false;
+        float presenceAngleDeg    = 0.0f;
+        int   configBits          = -1;
+
+        // One sample index is one mapped host time, so ONE tUs vector serves
+        // both lanes — the palm is NOT offset by skew_us (see skewUsMedian).
+        std::vector<qint64>              tUs;
+        std::vector<pinpoint::ImuSample> lowerArm;
+        std::vector<pinpoint::ImuSample> palm;
+
+        // ⚠ Samples dropped for having no mapped host time. NEVER falls back to
+        // arrival time: it is one-sidedly late and mixing two timebases inside
+        // one lane looks fine and corrupts the capture.
+        int noHostTimeSkipped = 0;
+    };
+
+    // Reserve at DETECTION (history.h C1) — retrieval then starts as soon as the
+    // window's last sample exists, so its ~4.5 s cost hides inside the post-roll
+    // the pipeline was taking anyway. One reservation per PERIPHERAL: one stream
+    // feeds both units. A refusal is logged and leaves nothing pending.
+    void reserveHistory(qint64 impactUs, qint64 deadlineUs);
+
+    // True while a reservation is outstanding. The gather polls this.
+    bool historyPending() const;
+
+    // The collected result, moved out — a second call returns an empty one.
+    HistoryResult takeHistoryResult();
 
     // ioThread is ImuManager's shared IMU I/O thread. Everything that touches
     // the hm_session lives there — see HmSessionWorker in the .cpp and the

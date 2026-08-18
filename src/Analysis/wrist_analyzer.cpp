@@ -304,7 +304,13 @@ struct ImuResampleStage : AnalysisStage {
         ctx.doRefuse = tuningWantsRefusion(ctx.job.tuningOverrides);
         if (ctx.doRefuse)
             refusion = refuseConfigFromTuning(ctx.job.tuningOverrides, ctx.job.impactUs);
-        ctx.streams = ImuVisionFuser::fuse(*ctx.window, ctx.job.imuBindings, 200.0,
+        // ⚠ THE GRID FOLLOWS THE DATA (design §4.3). Floored at what this stage
+        // used to hardcode, so a capture with no high-rate lane is bit-identical
+        // to what it produced before; raised only by a lane that actually
+        // carries more.
+        const double gridHz =
+            ImuVisionFuser::gridHzForWindow(*ctx.window, ctx.job.imuBindings);
+        ctx.streams = ImuVisionFuser::fuse(*ctx.window, ctx.job.imuBindings, gridHz,
                                            ctx.doRefuse ? &refusion : nullptr);
     }
 };
@@ -1327,7 +1333,7 @@ ShotAnalysisResult WristAnalyzer::analyze(const pinpoint::SwingWindow &window,
     // result. ctx.wall starts at the top of the work so timings.totalMs spans the whole
     // analyze() call. The "no fusable IMU" log fires gated on !hasImuStreams(), so it
     // still fires when the resample stage skipped for zero IMU bindings.
-    AnalysisContext ctx{ CaptureCapabilities::fromJob(job), job, &window };
+    AnalysisContext ctx{ CaptureCapabilities::fromJob(job, window), job, &window };
     ctx.detail = std::make_shared<SwingAnalysis>();
     ctx.wall.start();
 

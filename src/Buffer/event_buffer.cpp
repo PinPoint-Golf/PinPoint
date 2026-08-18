@@ -362,6 +362,15 @@ SwingWindow EventBuffer::captureSwingWindow(int64_t t_start_us,
                        std::move(entries), t_start_us, t_end_us);
 }
 
+std::unique_ptr<const SwingPayloadSource> EventBuffer::makeRingPayloadSource() {
+    assert(state_.load(std::memory_order_acquire) == BufferState::Paused
+           && "makeRingPayloadSource requires Paused state");
+    // Called immediately after the pause that froze the rings, so the interval
+    // in which they are frozen but unguarded is the width of these two calls
+    // rather than the width of a deferred gather.
+    return std::make_unique<RingPayloadSource>(this);   // sets swing_window_live_
+}
+
 SwingWindow EventBuffer::captureSwingWindow(
     std::chrono::milliseconds trailing_duration) {
     int64_t end_us   = nowMicros();

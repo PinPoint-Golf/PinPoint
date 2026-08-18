@@ -23,11 +23,15 @@
 #include <QObject>
 #include <QTimer>
 #include <QVariantMap>
+#include <QHash>
+#include <QVector>
+#include <memory>
 #include <optional>
 #include <vector>
 
 #include "swing_window.h"
 #include "shot_controller.h"
+#include "hm_instance.h"
 #include "../Analysis/club_length_fusion.h"
 #include "../Analysis/shot_analyzer.h"
 #include "../Export/swing_exporter.h"
@@ -86,7 +90,12 @@ class ShotProcessor : public QObject
     Q_PROPERTY(QString activeSessionDir READ activeSessionDir NOTIFY activeSessionDirChanged)
 
 public:
-    enum class State { Idle, PostRoll, Processing, Replaying };
+    // Gathering sits between PostRoll and Processing — deferred_sources_design.md
+    // §4.1. The rings freeze at the SAME instant as before; what moves is when
+    // the window is CONSTRUCTED, which now waits for any deferred source to
+    // report or time out. busy() is already `m_state != Idle`, so ShotController
+    // stays disarmed across it for free.
+    enum class State { Idle, PostRoll, Gathering, Processing, Replaying };
 
     ShotProcessor(pinpoint::EventBuffer *buffer,
                   CameraManager         *cameraManager,
@@ -206,7 +215,13 @@ private:
 
     void setState(State s);
     void setAnalysisProgress(double p);
-    void captureWindowAndLaunch();
+    // The two halves of what captureWindowAndLaunch() used to do in one breath.
+    // Every deferred source bound to this capture. One wG3 is ONE peripheral
+    // with one reservation, even though it feeds two lanes.
+    QVector<HmInstance *> deferredSources() const;
+    void beginGather();             // pause the rings, raise the guard, start the wait
+    void onGatherPoll();            // deferred sources reported, or the deadline passed
+    void finishGatherAndLaunch();   // compose the backing, construct the window, launch
     ShotAnalysisJob buildAnalysisJob();   // UI-thread value resolution
     void startAnalysis();
     void startSwingSave();
@@ -239,6 +254,30 @@ private:
     int     m_sessionType = -1;
     QString m_timestampLabel;   // wallclock "hh:mm:ss" at trigger
     QTimer  m_postRollTimer;    // single-shot post-trigger capture continuation
+
+    // ── Deferred gather (design §4.1) ───────────────────────────────────────
+    // ⚠ m_ringSource HOLDS THE RESUME GUARD from the pause instant until the
+    // window that adopts it dies. It is built at pause rather than at window
+    // construction because `resume_clear_rings` is true, so a resume landing in
+    // between would CLEAR THE RINGS THIS SHOT IS ABOUT TO SNAPSHOT (§3.5). Any
+    // path that abandons a gather must reset it, or the buffer can never resume.
+    std::unique_ptr<const pinpoint::SwingPayloadSource> m_ringSource;
+    QTimer  m_gatherTimer;          // polls the deferred sources during Gathering
+    qint64  m_gatherDeadlineMs = 0; // QDateTime msecs; the wait is bounded
+    // ⚠ FROZEN AT THE PAUSE INSTANT, NOT READ AFTER THE GATHER. The window is a
+    // TRAILING span, so computing it from a post-gather `now` would slide it
+    // several seconds forward — past the swing it is supposed to contain — and
+    // the snapshot would come back empty with nothing reporting an error.
+    int64_t m_windowStartUs = 0;
+    int64_t m_windowEndUs   = 0;
+    // What each pull actually delivered, keyed by device id — coverage, gaps,
+    // the fit and the overlap counters. Read by the exporter into swing.json's
+    // per-stream provenance, so a swing says a year later what it was built from.
+    QHash<QString, HmInstance::HistoryResult> m_historyProvenance;
+    // Per stitched lane: {live samples used, deferred samples used}. Keyed by
+    // source because the two units of one peripheral stitch independently — the
+    // palm can come back denser than the lower arm.
+    QHash<pinpoint::SourceId, std::pair<int, int>> m_stitchCounts;
 
     // Window + replay (migrated from CameraManager).
     std::optional<pinpoint::SwingWindow> m_swingWindow;

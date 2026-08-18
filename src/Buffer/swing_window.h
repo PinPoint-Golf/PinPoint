@@ -81,8 +81,28 @@ public:
                         std::byte* out, size_t out_bytes) const noexcept;
 
 private:
+    // Per-source lookup index, built once at construction — deferred_sources_
+    // design.md §4.2. entriesFor(), frameCount() and interpolateImu() used to
+    // scan every entry in the window on every call, and ImuVisionFuser calls
+    // interpolateImu once per grid point per binding, so the cost was
+    // gridPoints × bindings × totalEntries. A deferred high-rate source inflates
+    // both of the terms that matter.
+    //
+    // Each lane holds this source's entries in the window's own order, which is
+    // ascending by timestamp — so a bracketing pair is a binary search rather
+    // than a scan. Held by value rather than as indices into entries_ so that
+    // entriesFor() is one copy and the search touches one contiguous run.
+    struct Lane {
+        SourceId                id;
+        std::vector<IndexEntry> entries;
+    };
+
+    // The lane for a source, or nullptr if it contributed nothing to this window.
+    const std::vector<IndexEntry>* laneFor(SourceId id) const noexcept;
+
     std::unique_ptr<const SwingPayloadSource> source_;
     std::vector<IndexEntry>                   entries_;
+    std::vector<Lane>                         lanes_;
     int64_t                                   start_us_;
     int64_t                                   end_us_;
 };

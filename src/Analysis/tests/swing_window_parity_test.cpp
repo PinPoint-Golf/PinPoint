@@ -435,6 +435,29 @@ void testFuserParity(const RamSwing& ram, const SwingWindow& disk)
     CHECK(quatMismatch == 0);
     std::fprintf(stderr, "  grid=%zu segments=%zu quat mismatches=%zu\n",
                  sr.timeGrid.size(), sr.segments.size(), quatMismatch);
+
+    // ── The grid rate follows the data, and the FLOOR must bind here ─────────
+    //
+    // ⚠ THIS IS THE REGRESSION GATE FOR THE WHOLE CORPUS. This fixture is an
+    // ordinary Witmotion-shaped capture, so its fastest lane is nowhere near the
+    // deferred rates and gridHzForWindow() must return EXACTLY the rate this
+    // pipeline hardcoded before Phase E. If it ever returns something else,
+    // every existing swing's metrics move underneath us — silently, because
+    // nothing else in this suite would notice.
+    const double gridRam  = ImuVisionFuser::gridHzForWindow(*ram.window, { binding(ram.imuId) });
+    const double gridDisk = ImuVisionFuser::gridHzForWindow(disk, { binding(matchBySerial(disk, ram.imuSerial)) });
+    CHECK(gridRam  == ImuVisionFuser::kGridHzMin);
+    CHECK(gridDisk == ImuVisionFuser::kGridHzMin);
+    std::fprintf(stderr, "  gridHz ram=%.1f disk=%.1f (floor %.1f — corpus unmoved)\n",
+                 gridRam, gridDisk, ImuVisionFuser::kGridHzMin);
+
+    // And the peak measurement must actually SEE this lane, or the check above
+    // would pass for the entirely wrong reason — a lane it could not measure
+    // also lands on the floor.
+    const double peak = ImuVisionFuser::peakHzFor(*ram.window, ram.imuId,
+                                                  ImuVisionFuser::kProbeUs);
+    CHECK(peak > 0.0);
+    std::fprintf(stderr, "  measured peak rate on the fixture lane = %.1f Hz\n", peak);
 }
 
 // ── Test 3: MP4 fallback (tolerance) ────────────────────────────────────────

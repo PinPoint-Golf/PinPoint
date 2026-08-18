@@ -42,6 +42,7 @@
 #include "format_descriptor.h"
 #include "imu_sample.h"
 #include "pixel_format_names.h"
+#include "ram_payload_source.h"
 #include "source_ring.h"
 #include "swing_analysis.h"
 #include "swing_payload_source.h"
@@ -193,9 +194,15 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 class SwingDiskSource final : public SwingPayloadSource {
 public:
+    // ⚠ IMU LANES ARE SERVED BY THE SHARED RamPayloadSource, not by a private
+    // copy of the same code. That class was lifted out of THIS one
+    // (deferred_sources_design.md §3.2) so the live deferred path and this
+    // offline path resolve an IMU payload through one implementation —
+    // re-analysis determinism depends on the two agreeing, and two copies that
+    // drift would break it silently.
     void addImu(SourceId id, FormatDescriptor fd, std::vector<ImuSample> samples)
     {
-        imu_[id] = ImuStream{ std::move(fd), std::move(samples) };
+        ram_.addImu(id, std::move(fd), std::move(samples));
     }
     void addCamera(SourceId id, std::unique_ptr<CameraReader> reader)
     {
@@ -204,15 +211,8 @@ public:
 
     SourceRing::ReadHandle payloadOf(SourceId id, uint64_t sequence) const noexcept override
     {
-        if (auto it = imu_.find(id); it != imu_.end()) {
-            const ImuStream& s = it->second;
-            if (sequence >= s.samples.size())
-                return {};
-            SourceRing::ReadHandle h;
-            h.data  = reinterpret_cast<const std::byte*>(&s.samples[sequence]);
-            h.bytes = sizeof(ImuSample);
-            return h;
-        }
+        if (ram_.has(id))
+            return ram_.payloadOf(id, sequence);
         if (auto it = cam_.find(id); it != cam_.end())
             return it->second->read(sequence);
         return {};
@@ -220,8 +220,8 @@ public:
 
     const FormatDescriptor& formatOf(SourceId id) const noexcept override
     {
-        if (auto it = imu_.find(id); it != imu_.end())
-            return it->second.fd;
+        if (ram_.has(id))
+            return ram_.formatOf(id);
         if (auto it = cam_.find(id); it != cam_.end())
             return it->second->fd;
         static const FormatDescriptor kEmpty{};
@@ -234,11 +234,7 @@ public:
     }
 
 private:
-    struct ImuStream {
-        FormatDescriptor       fd;
-        std::vector<ImuSample> samples;
-    };
-    std::unordered_map<SourceId, ImuStream>                     imu_;
+    RamPayloadSource                                            ram_;
     std::unordered_map<SourceId, std::unique_ptr<CameraReader>> cam_;
 };
 

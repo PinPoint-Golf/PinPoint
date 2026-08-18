@@ -61,6 +61,22 @@ struct CaptureCapabilities {
         SegmentRole role        = SegmentRole::Unknown;
         bool        calibValid  = false;   // composite calibration gate (ImuSegmentBinding::calibrated)
         double      calibAgeSec = -1.0;    // age at shot time; -1 = never calibrated
+
+        // ── Deferred sources (design §4.4) ───────────────────────────────────
+        // ⚠ MEASURED OVER THIS WINDOW, NEVER TAKEN FROM A DEVICE DECLARATION.
+        // That is the whole point: a pull that silently under-delivered then
+        // gates exactly like no pull at all. The device HOLES an over-wide
+        // request rather than clamping it — 33-58 % coverage with no error — so
+        // a stage that trusted a declared rate would run on a window that is
+        // mostly absent and report a number for it.
+        //
+        // ⚠ AND THIS IS A RATE, NOT A COUNT. Coverage is intervals and density;
+        // a sample count cannot distinguish a dense span from a holed one.
+        double      effectiveHz = 0.0;
+        // The sub-span that exceeded the base rate, if any — empty when the lane
+        // is uniformly live-rate. A stage needing high-rate input can then land
+        // dark and skip with a reason until the data is actually present.
+        int64_t     highRateSpanUs[2]{};
     };
 
     QSet<CameraPlacement> cameras;
@@ -92,6 +108,34 @@ struct CaptureCapabilities {
         caps.imus.reserve(job.imuBindings.size());
         for (const ImuSegmentBinding &b : job.imuBindings)
             caps.imus.push_back(BoundImu{ b.role, b.calibrated, b.calibAgeSec });
+        return caps;
+    }
+
+    // As above, but with the rate fields MEASURED FROM THE WINDOW rather than
+    // left at zero (design §4.4) — so a stage gating on high-rate input sees
+    // what this capture actually carries, not what a device claimed.
+    static CaptureCapabilities fromJob(const ShotAnalysisJob &job,
+                                       const pinpoint::SwingWindow &window)
+    {
+        CaptureCapabilities caps = fromJob(job);
+        // ⚠ MEASURED AROUND IMPACT, not across the whole window. A stitched lane
+        // is ~100 Hz over the still pre-roll and full rate through the swing, so
+        // a window-wide average answers a question nobody asked: what gates a
+        // metric computed AT IMPACT is the density THERE. ±125 ms is the region
+        // the library's own guidance names for exactly this decision.
+        constexpr int64_t kImpactHalfSpanUs = 125'000;
+        if (job.impactUs <= 0)
+            return caps;   // no anchor to measure around — leave NOT MEASURED
+        const int64_t lo = job.impactUs - kImpactHalfSpanUs;
+        const int64_t hi = job.impactUs + kImpactHalfSpanUs;
+        for (size_t i = 0; i < caps.imus.size() && i < job.imuBindings.size(); ++i) {
+            const SourceId src = job.imuBindings[i].source;
+            caps.imus[i].effectiveHz =
+                ImuVisionFuser::effectiveHzFor(window, src, lo, hi);
+            ImuVisionFuser::highRateSpanFor(window, src,
+                                            ImuVisionFuser::kGridHzMin,
+                                            caps.imus[i].highRateSpanUs);
+        }
         return caps;
     }
 };

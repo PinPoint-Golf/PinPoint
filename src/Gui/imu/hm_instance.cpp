@@ -46,6 +46,7 @@
 #include <QThread>
 #include <QtMath>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -215,6 +216,20 @@ public:
     // Callable from any thread.
     Snapshot snapshot() const;
 
+    // ── Deferred history (Phase E) ──────────────────────────────────────────
+    // reserveHistory() must run ON the I/O thread (it is a hm_session_* call) and
+    // is posted there by HmInstance. The other two are read from the GUI thread
+    // while the gather polls, so they synchronise: an atomic flag and a
+    // mutex-held result, the same shape snapshot() already uses.
+    void reserveHistory(qint64 impactUs, qint64 deadlineUs);
+    bool historyPending() const {
+        return m_historyPending.load(std::memory_order_acquire);
+    }
+    HmInstance::HistoryResult takeHistoryResult() {
+        QMutexLocker lk(&m_mutex);
+        return std::move(m_historyResult);
+    }
+
     // ⚠ CALLED FROM HmInstance's CONSTRUCTOR, BEFORE moveToThread(), and that is
     // what makes it safe without a lock: at that instant this object still has
     // the constructing thread's affinity, nothing else holds a reference to it,
@@ -332,6 +347,8 @@ private:
     // Every path into the session ends here: drain what it produced, then
     // re-arm from the session's own idea of when it next wants attention.
     void pump();
+    // Runs on the I/O thread only, from pump().
+    void pollHistory();
     void rearm();
     void drainWrites();
     void drainEvents();
@@ -431,6 +448,14 @@ private:
     pinpoint::hm::CaptureProvenanceLog m_provenance;
 
     void noteProvenance(const hm_sample &s);   // I/O thread; needs a mapped host time
+
+    // ── Deferred history state, I/O thread unless noted ─────────────────────
+    uint64_t m_historyRequestId = 0;
+    // Read from the GUI thread by HmInstance::historyPending(), so atomic rather
+    // than mutex-held: it is polled every 50 ms during a gather.
+    std::atomic<bool> m_historyPending{ false };
+    // Written on the I/O thread, taken on the GUI thread — under m_mutex.
+    HmInstance::HistoryResult m_historyResult;
 
     mutable QMutex m_mutex;
     Snapshot       m_snap;
@@ -842,6 +867,168 @@ void HmSessionWorker::onTransportStateChanged(BleImuTransport::State state)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Deferred history — reserve at detection, collect at the gather (Phase E)
+// ---------------------------------------------------------------------------
+
+void HmSessionWorker::reserveHistory(qint64 impactUs, qint64 deadlineUs)
+{
+    if (!m_session)
+        return;
+
+    if (m_historyPending.load(std::memory_order_acquire)) {
+        // A previous shot's pull is still running. ⚠ THIS IS THE SECOND-BALL
+        // CASE and it is the failure mode worth naming: the buffer holds ~7.5 s
+        // and a pull costs ~4.5 s, so a second strike inside ~3 s can evict the
+        // range the first one is still fetching. The library warns through
+        // HM_EV_HISTORY_EVICTION_RISK; refusing here keeps the FIRST swing's
+        // data rather than trading it for a partial second.
+        emit logLine(QStringLiteral("history: reservation refused — a pull is "
+                                    "already in flight (second ball too soon)"));
+        return;
+    }
+
+    // §7.6's recommended 3 s pre / 1.5 s post around the event. NULL takes the
+    // library's own default rather than restating it here, so the two cannot
+    // drift apart.
+    hm_history_request req = hm_history_request_around(nullptr, hm_time_us(impactUs));
+
+    // ⚠ DEADLINE MUST BE PAST window.end_us OR THIS IS REFUSED AT THE CALL SITE
+    // (HM_ERR_INVALID_ARG), not four seconds later. The caller orders it inside
+    // the pipeline's own gather deadline so a slow pull materialises its own
+    // block instead of being cancelled by our timeout.
+    req.deadline_us = hm_time_us(deadlineUs);
+
+    // ⚠ Re-request the holes. The device HOLES an over-wide request rather than
+    // clamping it, and `a1` may be issued in place, so a partial result is
+    // exactly the thing worth asking for again. Cost: each attempt stalls the
+    // sample counter again, and self_recording_gap becomes the ENVELOPE over all
+    // of them — which is why `attempts` is recorded beside it.
+    req.refill_gaps  = true;
+    req.max_attempts = 0;               // library default (3)
+
+    // ⚠ REFUSE RATHER THAN MISALIGN. One 240 fps camera frame is 4,167 us; a fit
+    // whose PRECISION at the window is worse than that would place a wrist trace
+    // against video by more than a frame. The refusal costs no radio traffic and
+    // lands in provenance as HM_HIST_REFUSED_ALIGNMENT, which is the point —
+    // a recorded refusal beats a silently misaligned trace.
+    req.alignment_budget_us = 4167;
+
+    req.user_tag = uint64_t(impactUs);
+
+    uint64_t id = 0;
+    const hm_status st = hm_history_reserve(m_session, &req, &id);
+    if (st < HM_OK) {
+        // Every one of these is validated AT RESERVE rather than discovered at
+        // the deadline: an unsatisfiable window, no fit at all, a window wider
+        // than the gather area, or every slot taken.
+        emit logLine(QStringLiteral("history: reserve refused: %1")
+                         .arg(QString::fromLatin1(hm_status_str(st))));
+        return;
+    }
+
+    m_historyRequestId = id;
+    m_historyPending.store(true, std::memory_order_release);
+    pump();   // the rule for EVERY call into the session: re-arm from next_due_us
+}
+
+void HmSessionWorker::pollHistory()
+{
+    if (!m_session || !m_historyPending.load(std::memory_order_acquire))
+        return;
+
+    hm_history_block *block = nullptr;
+    const hm_status st = hm_history_collect(m_session, m_historyRequestId, &block);
+    if (st == HM_PENDING)
+        return;                       // still in flight — never blocks
+
+    m_historyPending.store(false, std::memory_order_release);
+
+    if (st < HM_OK || !block) {
+        emit logLine(QStringLiteral("history: collect failed: %1")
+                         .arg(QString::fromLatin1(hm_status_str(st))));
+        return;
+    }
+
+    HmInstance::HistoryResult r;
+    r.valid    = true;
+    r.status   = block->status;
+    r.attempts = block->attempts;
+    r.coverageOverflowed = block->coverage_overflowed != 0;
+
+    r.coverageFraction = block->coverage_fraction;
+    r.density          = block->density;
+    r.achievedHz       = block->achieved_hz;
+    r.largestGapUs     = block->largest_gap_us;
+
+    r.liveOverlapSamples    = block->live_overlap_samples;
+    r.liveOverlapMismatches = block->live_overlap_mismatches;
+
+    r.selfRecordingGapStartUs = qint64(block->self_recording_gap.start_us);
+    r.selfRecordingGapEndUs   = qint64(block->self_recording_gap.end_us);
+    r.requestedStartUs        = qint64(block->requested.start_us);
+    r.requestedEndUs          = qint64(block->requested.end_us);
+
+    r.delivered.reserve(block->delivered_count);
+    for (size_t i = 0; i < block->delivered_count; ++i)
+        r.delivered.emplace_back(qint64(block->delivered[i].start_us),
+                                 qint64(block->delivered[i].end_us));
+
+    r.gaps.reserve(block->gap_count);
+    for (size_t i = 0; i < block->gap_count; ++i)
+        r.gaps.push_back(HmInstance::HistoryResult::Gap{
+            qint64(block->gaps[i].span.start_us),
+            qint64(block->gaps[i].span.end_us),
+            int(block->gaps[i].kind) });
+
+    r.fit                = block->fit;
+    r.calStateAtStart    = block->calibration.state_at_start;
+    r.calStateAtEnd      = block->calibration.state_at_end;
+    r.calSpansTransition = block->calibration.spans_transition != 0;
+    r.presenceAngleDeg   = block->calibration.presence_angle_deg;
+    r.configBits         = int(block->config.bits);
+
+    r.tUs.reserve(block->sample_count);
+    r.lowerArm.reserve(block->sample_count);
+    r.palm.reserve(block->sample_count);
+    for (size_t i = 0; i < block->sample_count; ++i) {
+        const hm_sample &smp = block->samples[i];
+        // ⚠ SAME GATE AS THE LIVE PATH, AND FOR THE SAME REASON: never fall back
+        // to arrival time. For a retrieved block arrival time is meaningless
+        // twice over — these samples arrived thousands at a time, seconds after
+        // they were measured.
+        if (smp.host_time_us == HM_TIME_UNKNOWN || (smp.flags & HM_SAMPLE_NO_FIT)) {
+            ++r.noHostTimeSkipped;
+            continue;
+        }
+        r.tUs.push_back(qint64(smp.host_time_us));
+        r.lowerArm.push_back(pinpoint::hm::toImuSample(smp.lower_arm));
+        r.palm.push_back(pinpoint::hm::toImuSample(smp.palm));
+    }
+
+    emit logLine(QStringLiteral("history: %1 — %2 samples, coverage %3, "
+                                "density %4, achieved %5 Hz, largest gap %6 us, "
+                                "overlap %7/%8 mismatched, attempts %9")
+                     .arg(QString::fromLatin1(hm_history_status_name(
+                              hm_history_status(block->status))))
+                     .arg(r.tUs.size())
+                     .arg(r.coverageFraction, 0, 'f', 3)
+                     .arg(r.density, 0, 'f', 3)
+                     .arg(r.achievedHz, 0, 'f', 1)
+                     .arg(r.largestGapUs)
+                     .arg(r.liveOverlapMismatches)
+                     .arg(r.liveOverlapSamples)
+                     .arg(r.attempts));
+
+    // ⚠ EXACTLY ONCE, and only after everything above has been copied out: the
+    // block owns its samples, its intervals and its gaps, and releasing it runs
+    // the allocator. A second release is undefined exactly as a double free is.
+    hm_history_block_release(block);
+
+    QMutexLocker lk(&m_mutex);
+    m_historyResult = std::move(r);
+}
+
 void HmSessionWorker::pump()
 {
     if (!m_session) return;
@@ -851,6 +1038,11 @@ void HmSessionWorker::pump()
     drainEvents();
     drainWrites();
     drainLive();
+    // ⚠ AFTER drainLive(), not before. Collecting is what re-anchors the clock
+    // fit (§6.1.1 — the sample counter stops while the device replays, so one
+    // fit cannot span a pull), and the live samples drained above belong to the
+    // fit as it stood BEFORE that re-anchor.
+    pollHistory();
     rearm();
 }
 
@@ -2412,6 +2604,36 @@ bool HmInstance::calibrationActive() const
 // produced cannot travel back across a queued hop; it arrives as
 // calibrationCallRefused(status, call), which is the entire refusal channel. A UI
 // that waited on a return value here would wait forever.
+// ── Deferred history (Phase E) ───────────────────────────────────────────────
+//
+// ⚠ QueuedConnection for the reserve, exactly like the calibration entry points
+// above and for the same reason: hm_history_reserve() is a hm_session_* call and
+// must run on the thread that owns the session. It does not block and issues no
+// radio traffic, so there is nothing the GUI thread could usefully wait for —
+// and a refusal travels back as a log line, not as a return value.
+void HmInstance::reserveHistory(qint64 impactUs, qint64 deadlineUs)
+{
+    if (!m_worker)
+        return;
+    QMetaObject::invokeMethod(m_worker,
+                              [worker = m_worker, impactUs, deadlineUs]() {
+                                  worker->reserveHistory(impactUs, deadlineUs);
+                              },
+                              Qt::QueuedConnection);
+}
+
+bool HmInstance::historyPending() const
+{
+    return m_worker && m_worker->historyPending();
+}
+
+HmInstance::HistoryResult HmInstance::takeHistoryResult()
+{
+    if (!m_worker)
+        return {};
+    return m_worker->takeHistoryResult();
+}
+
 void HmInstance::beginCalibration()
 {
     QMetaObject::invokeMethod(m_worker, &HmSessionWorker::beginCalibration,

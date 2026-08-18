@@ -624,6 +624,96 @@ SwingExportResult SwingExporter::run(const SwingWindow& window, const SwingExpor
                         deviceObj[QStringLiteral("provenanceDropped")] = dev.hmProvenanceDropped;
                     if (dev.hmNoFitSkippedSession > 0)
                         deviceObj[QStringLiteral("noFitSkippedSession")] = dev.hmNoFitSkippedSession;
+
+                    // ── Deferred history (Phase E) ───────────────────────────
+                    // ⚠ WRITTEN ONLY WHEN A PULL WAS ATTEMPTED. A swing whose
+                    // wrist lane is purely live must carry NO history object at
+                    // all — an empty one with zeroed coverage would read as a
+                    // pull that returned nothing, which is a different and much
+                    // worse claim than "we never asked".
+                    if (dev.hmHistoryStatus >= 0) {
+                        QJsonObject hist;
+                        hist[QStringLiteral("status")]   = dev.hmHistoryStatus;
+                        hist[QStringLiteral("attempts")] = dev.hmHistoryAttempts;
+                        // ⚠ Only when true, and when true it downgrades the two
+                        // figures below from measurements to optimistic bounds.
+                        if (dev.hmCoverageOverflowed)
+                            hist[QStringLiteral("coverageOverflowed")] = true;
+                        if (dev.hmCoverageFraction >= 0.0)
+                            hist[QStringLiteral("coverageFraction")] = dev.hmCoverageFraction;
+                        if (dev.hmDensity >= 0.0)
+                            hist[QStringLiteral("density")] = dev.hmDensity;
+                        if (dev.hmAchievedHz >= 0.0)
+                            hist[QStringLiteral("achievedHz")] = dev.hmAchievedHz;
+                        if (dev.hmLargestGapUs >= 0)
+                            hist[QStringLiteral("largestGapUs")] = dev.hmLargestGapUs;
+
+                        // ⚠ BOTH OR NEITHER. Writing the mismatch count without
+                        // the sample count beside it is precisely how a zero gets
+                        // read as agreement when it means no evidence.
+                        if (dev.hmLiveOverlapSamples >= 0) {
+                            hist[QStringLiteral("liveOverlapSamples")]    = dev.hmLiveOverlapSamples;
+                            hist[QStringLiteral("liveOverlapMismatches")] = dev.hmLiveOverlapMismatches;
+                        }
+
+                        // Half-open, and outside `requested` by construction.
+                        if (dev.hmSelfRecordingGapEndUs > dev.hmSelfRecordingGapStartUs) {
+                            QJsonObject g;
+                            g[QStringLiteral("startUs")] = dev.hmSelfRecordingGapStartUs;
+                            g[QStringLiteral("endUs")]   = dev.hmSelfRecordingGapEndUs;
+                            hist[QStringLiteral("selfRecordingGap")] = g;
+                        }
+
+                        if (dev.hmStitchedFromLive >= 0) {
+                            hist[QStringLiteral("stitchedFromLive")]     = dev.hmStitchedFromLive;
+                            hist[QStringLiteral("stitchedFromDeferred")] = dev.hmStitchedFromDeferred;
+                        }
+
+                        if (!dev.hmDelivered.empty()) {
+                            QJsonArray iv;
+                            for (const auto &r : dev.hmDelivered) {
+                                QJsonObject o;
+                                o[QStringLiteral("startUs")] = r.first;
+                                o[QStringLiteral("endUs")]   = r.second;
+                                iv.append(o);
+                            }
+                            hist[QStringLiteral("delivered")] = iv;
+                        }
+                        if (!dev.hmGaps.empty()) {
+                            QJsonArray ga;
+                            for (const auto &g : dev.hmGaps) {
+                                QJsonObject o;
+                                o[QStringLiteral("startUs")] = std::get<0>(g);
+                                o[QStringLiteral("endUs")]   = std::get<1>(g);
+                                o[QStringLiteral("kind")]    = std::get<2>(g);
+                                ga.append(o);
+                            }
+                            hist[QStringLiteral("gaps")] = ga;
+                        }
+
+                        // ⚠ THE FIT THESE SAMPLES WERE DATED BY, not the session's
+                        // current one — it re-anchors at every bracket close.
+                        // Persisted WITH the block so a re-analysis reproduces the
+                        // day's alignment rather than deriving a different one.
+                        if (dev.hmFitValid) {
+                            QJsonObject fit;
+                            fit[QStringLiteral("flags")]           = double(dev.hmFitFlags);
+                            fit[QStringLiteral("observations")]    = dev.hmFitObservations;
+                            fit[QStringLiteral("fittedRateHz")]    = dev.hmFitRateHz;
+                            fit[QStringLiteral("anchorHostUs")]    = dev.hmFitAnchorHostUs;
+                            fit[QStringLiteral("anchorIndex")]     = double(dev.hmFitAnchorIndex);
+                            fit[QStringLiteral("slopeUsPerIndex")] = dev.hmFitSlopeUsPerIndex;
+                            fit[QStringLiteral("offsetUs")]        = dev.hmFitOffsetUs;
+                            fit[QStringLiteral("spanUs")]          = dev.hmFitSpanUs;
+                            fit[QStringLiteral("residualMedianUs")] = double(dev.hmFitResidualMedianUs);
+                            fit[QStringLiteral("residualP90Us")]    = double(dev.hmFitResidualP90Us);
+                            fit[QStringLiteral("residualMaxUs")]    = double(dev.hmFitResidualMaxUs);
+                            fit[QStringLiteral("driftUsPerS")]      = dev.hmFitDriftUsPerS;
+                            hist[QStringLiteral("clockFit")] = fit;
+                        }
+
+                        deviceObj[QStringLiteral("history")] = hist;
+                    }
                 }
                 s[QStringLiteral("device")] = deviceObj;
             }

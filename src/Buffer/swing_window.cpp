@@ -38,6 +38,42 @@ SwingWindow::SwingWindow(std::unique_ptr<const SwingPayloadSource> source,
     , start_us_(start_us)
     , end_us_(end_us)
 {
+    // Build the per-source lookup index once (§4.2). Linear in the number of
+    // lanes, which is the device count — two cameras and a handful of IMUs —
+    // so this is cheaper than hashing and keeps each lane contiguous.
+    for (const IndexEntry& e : entries_) {
+        Lane* lane = nullptr;
+        for (Lane& l : lanes_) {
+            if (l.id == e.source_id) { lane = &l; break; }
+        }
+        if (!lane) {
+            lanes_.push_back(Lane{ e.source_id, {} });
+            lane = &lanes_.back();
+        }
+        lane->entries.push_back(e);
+    }
+
+    // ⚠ ASCENDING BY TIMESTAMP IS MADE TRUE HERE, NOT ASSUMED. Both production
+    // paths already hand us sorted entries (TimelineIndex::snapshot sorts;
+    // SwingDiskLoader stable_sorts), so this is normally a no-op over data that
+    // is already ordered — but the constructor is public, and a binary search
+    // over an unsorted lane fails silently and plausibly where the old linear
+    // scan simply worked. stable_sort because the tie order is load-bearing:
+    // interpolateImu resolves equal timestamps by first-encountered, and that
+    // is only meaningful if the encounter order is the window's own.
+    for (Lane& l : lanes_) {
+        std::stable_sort(l.entries.begin(), l.entries.end(),
+                         [](const IndexEntry& a, const IndexEntry& b) {
+                             return a.timestamp_us < b.timestamp_us;
+                         });
+    }
+}
+
+const std::vector<IndexEntry>* SwingWindow::laneFor(SourceId id) const noexcept {
+    for (const Lane& l : lanes_) {
+        if (l.id == id) return &l.entries;
+    }
+    return nullptr;
 }
 
 SwingWindow::~SwingWindow() = default;
@@ -47,18 +83,13 @@ SwingWindow::SwingWindow(SwingWindow&& o) noexcept = default;
 SwingWindow& SwingWindow::operator=(SwingWindow&& o) noexcept = default;
 
 std::vector<IndexEntry> SwingWindow::entriesFor(SourceId id) const {
-    std::vector<IndexEntry> out;
-    for (const auto& e : entries_) {
-        if (e.source_id == id) out.push_back(e);
-    }
-    return out;
+    const std::vector<IndexEntry>* lane = laneFor(id);
+    return lane ? *lane : std::vector<IndexEntry>{};
 }
 
 size_t SwingWindow::frameCount(SourceId camera_id) const noexcept {
-    size_t n = 0;
-    for (const auto& e : entries_)
-        if (e.source_id == camera_id) ++n;
-    return n;
+    const std::vector<IndexEntry>* lane = laneFor(camera_id);
+    return lane ? lane->size() : 0;
 }
 
 size_t SwingWindow::imuSampleCount(SourceId imu_id) const noexcept {
@@ -78,20 +109,35 @@ bool SwingWindow::interpolateImu(SourceId imu_id, int64_t target_us,
                                   std::byte* out, size_t out_bytes) const noexcept {
     if (!out || out_bytes != sizeof(ImuSample)) return false;
 
-    // Find the nearest entry before and after target_us for this source.
-    const IndexEntry* prev = nullptr;
-    const IndexEntry* next = nullptr;
+    // Find the nearest entry before and after target_us for this source, by
+    // binary search over that source's lane (§4.2) rather than by scanning the
+    // whole window. The lane is ascending by timestamp, guaranteed by the ctor.
+    const std::vector<IndexEntry>* lane = laneFor(imu_id);
+    if (!lane || lane->empty()) return false;
 
-    for (const auto& e : entries_) {
-        if (e.source_id != imu_id) continue;
-        if (e.timestamp_us <= target_us) {
-            if (!prev || e.timestamp_us > prev->timestamp_us) prev = &e;
-        } else {
-            if (!next || e.timestamp_us < next->timestamp_us) next = &e;
-        }
-    }
+    // First entry strictly after the target. In a lane whose equal timestamps
+    // keep the window's own order this is also the FIRST of that timestamp's
+    // group, which is what the previous linear scan selected.
+    const auto after = std::upper_bound(
+        lane->begin(), lane->end(), target_us,
+        [](int64_t t, const IndexEntry& e) { return t < e.timestamp_us; });
 
-    if (!prev || !next) return false;
+    // No sample after the target, or none at or before it — nothing to bracket.
+    if (after == lane->end() || after == lane->begin()) return false;
+
+    // ⚠ NOT simply `after - 1`. Among entries sharing the largest timestamp <=
+    // target the old scan kept the FIRST encountered, and `after - 1` is the
+    // LAST. Duplicate timestamps within one source should not occur on the live
+    // path (the merger enforces per-source monotonicity), but they are
+    // expressible on the disk and stitched paths, where picking the other one
+    // silently changes the interpolation.
+    const int64_t prev_ts = (after - 1)->timestamp_us;
+    const auto    at      = std::lower_bound(
+        lane->begin(), after, prev_ts,
+        [](const IndexEntry& e, int64_t t) { return e.timestamp_us < t; });
+
+    const IndexEntry* prev = &*at;
+    const IndexEntry* next = &*after;
 
     SourceRing::ReadHandle prev_h = payloadOf(*prev);
     SourceRing::ReadHandle next_h = payloadOf(*next);

@@ -23,8 +23,11 @@
 #include "camera_instance.h"
 #include "camera_manager.h"
 #include "device_enumerator.h"
+#include "composite_payload_source.h"
+#include "deferred_stitch.h"
 #include "event_buffer.h"
 #include "hm_instance.h"
+#include "ram_payload_source.h"
 #include "imu_instance.h"
 #include "imu_manager.h"
 #include "session_controller.h"
@@ -50,6 +53,7 @@
 #include <QUrl>
 #include <QtConcurrent/QtConcurrentRun>
 #include <algorithm>
+#include <memory>
 #include <cmath>
 #include <variant>
 
@@ -67,6 +71,33 @@ constexpr int kPostRollImuMs      = 1250;
 constexpr int kPostRollPoseMs     = 1250;
 constexpr int kPostRollBallMs     = 1250;
 constexpr int kPostRollAcousticMs = 1250;
+
+// ── Deferred gather (deferred_sources_design.md §4.1, brief Phase E) ────────
+//
+// A pull takes about as long as its window spans and the library serialises
+// them, so a 3 s pre / 1.5 s post request costs ~4.5 s — and it cannot start
+// until the window's last sample exists, at impact + 1.5 s. Reserving at
+// DETECTION hides most of that inside the post-roll we were taking anyway.
+//
+// ⚠ THE TWO DEADLINES ARE ORDERED ON PURPOSE. The library's deadline sits just
+// INSIDE ours, so a slow pull materialises its own block — carrying whatever
+// arrived plus its coverage — rather than being cancelled by our timeout. A
+// cancelled request still produces a block, but one that says CANCELLED where
+// the honest answer was TIMED_OUT with 60 % coverage.
+constexpr qint64 kHistoryDeadlineUs = 7'000'000;   // past impact: library gives up here
+constexpr int    kGatherDeadlineMs  = 6'000;       // past pause:  we give up here
+constexpr int    kGatherPollMs      = 50;
+
+// The subset of a snapshot belonging to one source, ascending — the live half
+// of a stitch. Cheap: this runs once per deferred lane per shot.
+std::vector<pinpoint::IndexEntry> entriesForIn(
+    const std::vector<pinpoint::IndexEntry> &all, pinpoint::SourceId id)
+{
+    std::vector<pinpoint::IndexEntry> out;
+    for (const pinpoint::IndexEntry &e : all)
+        if (e.source_id == id) out.push_back(e);
+    return out;
+}
 
 int postRollMsFor(ShotController::Source s)
 {
@@ -460,6 +491,10 @@ ShotProcessor::ShotProcessor(pinpoint::EventBuffer *buffer,
 {
     m_postRollTimer.setSingleShot(true);
     connect(&m_postRollTimer, &QTimer::timeout, this, &ShotProcessor::onPostRollExpired);
+    // Repeating, not single-shot: the gather polls until every deferred source
+    // has reported or the deadline passes.
+    m_gatherTimer.setSingleShot(false);
+    connect(&m_gatherTimer, &QTimer::timeout, this, &ShotProcessor::onGatherPoll);
 
     // Worker completion is delivered on this (UI) thread, strictly after the
     // worker lambda has returned — the join in maybeJoin()/finishShot() relies
@@ -490,6 +525,7 @@ QString ShotProcessor::stateName() const
     switch (m_state) {
     case State::Idle:       return QStringLiteral("idle");
     case State::PostRoll:   return QStringLiteral("postroll");
+    case State::Gathering:  return QStringLiteral("gathering");
     case State::Processing: return QStringLiteral("processing");
     case State::Replaying:  return QStringLiteral("replaying");
     }
@@ -544,6 +580,16 @@ void ShotProcessor::onShotDetected(ShotController::Source source,
     m_sessionType    = sessionType;
     m_timestampLabel = QTime::currentTime().toString(QStringLiteral("hh:mm:ss"));
 
+    // ⚠ RESERVE AT DETECTION, COLLECT AT THE GATHER (history.h C1). Retrieval
+    // cannot begin until the window's last sample exists, and it then costs
+    // about as long as the window spans — so telling the deferred sources NOW
+    // what range we are going to want lets that cost hide inside the post-roll
+    // instead of being added after it. Reserving does not block and issues no
+    // radio traffic. A refusal is recorded by the source and changes nothing
+    // here: a shot with no deferred data is the ordinary path, not an error.
+    for (HmInstance *hm : deferredSources())
+        hm->reserveHistory(timestampUs, timestampUs + kHistoryDeadlineUs);
+
     setAnalysisProgress(0.0);   // the ANALYSING bar starts empty for each shot
     setState(State::PostRoll);
     m_postRollTimer.start(postRollMsFor(source));
@@ -553,14 +599,24 @@ void ShotProcessor::onPostRollExpired()
 {
     if (m_state != State::PostRoll)
         return;   // finishNowBlocking() raced the timer
-    captureWindowAndLaunch();
+    beginGather();
 }
 
 // ---------------------------------------------------------------------------
 // Window capture → concurrent analysis + export
 // ---------------------------------------------------------------------------
 
-void ShotProcessor::captureWindowAndLaunch()
+QVector<HmInstance *> ShotProcessor::deferredSources() const
+{
+    QVector<HmInstance *> out;
+    if (!m_imuManager) return out;
+    for (const QVariant &v : m_imuManager->instances())
+        if (auto *hm = qobject_cast<HmInstance *>(v.value<QObject *>()))
+            out.push_back(hm);
+    return out;
+}
+
+void ShotProcessor::beginGather()
 {
     // The user may have pressed Stop during the post-roll: the rings froze at
     // the pause instant, truncating the follow-through there — still a valid
@@ -573,7 +629,148 @@ void ShotProcessor::captureWindowAndLaunch()
     }
 
     Q_ASSERT(!m_swingWindow);   // state machine forbids a second shot while busy
-    m_swingWindow.emplace(m_buffer->captureSwingWindow(kWindowDuration));
+
+    // ⚠ THE WINDOW BOUNDS ARE FROZEN HERE, AT THE PAUSE. kWindowDuration is a
+    // TRAILING span, so resolving it against a post-gather `now` would slide the
+    // window several seconds past the swing it is meant to contain and the
+    // snapshot would come back empty — with nothing reporting an error.
+    m_historyProvenance.clear();   // per shot — never inherited from the last one
+    m_stitchCounts.clear();
+
+    m_windowEndUs   = pinpoint::EventBuffer::nowMicros();
+    m_windowStartUs = m_windowEndUs - kWindowDuration.count() * 1000LL;
+
+    // ⚠ AND THE RESUME GUARD GOES UP HERE, for the same instant's reason (§3.5):
+    // `resume_clear_rings` is true, so a resume arriving between the freeze and
+    // the window's construction would clear the very rings we are about to
+    // snapshot. CameraManager::resumeBuffer() is the hard backstop and it reads
+    // exactly this flag, so raising it now is what makes the backstop cover the
+    // whole gather.
+    m_ringSource = m_buffer->makeRingPayloadSource();
+
+    int pending = 0;
+    for (HmInstance *hm : deferredSources())
+        if (hm->historyPending()) ++pending;
+
+    if (pending == 0) {
+        // Nothing deferred — no HackMotion, no reservation, or it refused at the
+        // call site. Construct immediately, exactly as this pipeline did before
+        // deferred sources existed. ⚠ This is the ORDINARY path, not an error
+        // path, and it must stay byte-identical to the undeferred behaviour.
+        finishGatherAndLaunch();
+        return;
+    }
+
+    ppInfo() << "[ShotProcessor] gathering —" << pending << "deferred source(s)";
+    setState(State::Gathering);
+    m_gatherDeadlineMs = QDateTime::currentMSecsSinceEpoch() + kGatherDeadlineMs;
+    m_gatherTimer.start(kGatherPollMs);
+}
+
+void ShotProcessor::onGatherPoll()
+{
+    if (m_state != State::Gathering)
+        return;   // finishNowBlocking() raced the timer
+
+    int stillPending = 0;
+    for (HmInstance *hm : deferredSources())
+        if (hm->historyPending()) ++stillPending;
+
+    const bool timedOut = QDateTime::currentMSecsSinceEpoch() >= m_gatherDeadlineMs;
+    if (stillPending > 0 && !timedOut)
+        return;
+
+    if (timedOut && stillPending > 0) {
+        // ⚠ Not an error, and NOT a cancel. The library's own deadline sits
+        // inside ours, so a request still outstanding here has already
+        // materialised its block with whatever arrived; we simply stop waiting.
+        ppWarn() << "[ShotProcessor] gather deadline reached with"
+                 << stillPending << "deferred source(s) outstanding";
+    }
+
+    m_gatherTimer.stop();
+    finishGatherAndLaunch();
+}
+
+void ShotProcessor::finishGatherAndLaunch()
+{
+    m_gatherTimer.stop();
+
+    // Compose the window's backing: the frozen ring for everything, overridden
+    // by an in-RAM stitched lane for any source whose high-rate samples only
+    // arrived after the freeze (design §3.2). With nothing deferred the
+    // composite is a single catch-all route and the window is what it always was.
+    auto entries   = m_buffer->snapshot(m_windowStartUs, m_windowEndUs);
+    auto composite = std::make_unique<pinpoint::CompositePayloadSource>();
+    auto ram       = std::make_unique<pinpoint::RamPayloadSource>();
+    std::vector<pinpoint::SourceId> deferredIds;
+
+    for (HmInstance *hm : deferredSources()) {
+        HmInstance::HistoryResult hist = hm->takeHistoryResult();
+        if (!hist.valid)
+            continue;      // no block, or nothing usable in it — live lane stands
+
+        HmUnit *const units[2] = { hm->unitLowerArm(), hm->unitPalm() };
+        for (int u = 0; u < 2; ++u) {
+            HmUnit *unit = units[u];
+            if (!unit || unit->sourceId() == pinpoint::kInvalidSourceId)
+                continue;
+            const pinpoint::SourceId sid = unit->sourceId();
+
+            pinpoint::DeferredStitchInput in;
+            in.liveEntries     = entriesForIn(entries, sid);
+            in.liveSample      = [this, sid](const pinpoint::IndexEntry &e)
+                                     -> const pinpoint::ImuSample * {
+                const auto h = m_ringSource->payloadOf(sid, e.source_sequence);
+                if (!h.data || h.bytes != sizeof(pinpoint::ImuSample))
+                    return nullptr;
+                return reinterpret_cast<const pinpoint::ImuSample *>(h.data);
+            };
+            in.deferredTUs     = hist.tUs;
+            in.deferredSamples = (u == 0) ? hist.lowerArm : hist.palm;
+            in.delivered       = hist.delivered;
+
+            const pinpoint::DeferredStitchResult st =
+                pinpoint::stitchDeferredLane(in);
+            if (st.samples.empty())
+                continue;
+
+            // The stitched lane is served WHOLLY from RAM: one id cannot split
+            // its sequence space across two backings, so its ring entries are
+            // replaced rather than added to.
+            entries.erase(std::remove_if(entries.begin(), entries.end(),
+                              [sid](const pinpoint::IndexEntry &e) {
+                                  return e.source_id == sid;
+                              }),
+                          entries.end());
+            for (size_t i = 0; i < st.tUs.size(); ++i)
+                entries.push_back(pinpoint::IndexEntry{
+                    st.tUs[i], sid, uint64_t(i), 0, 0 });
+
+            ram->addImu(sid, m_ringSource->formatOf(sid), st.samples);
+            deferredIds.push_back(sid);
+
+            m_stitchCounts.insert(sid, { st.usedLive, st.usedDeferred });
+
+            ppInfo() << "[ShotProcessor] stitched lane" << sid
+                     << "— live" << st.usedLive
+                     << "deferred" << st.usedDeferred
+                     << "dropped" << st.droppedNonMonotonic;
+        }
+        m_historyProvenance.insert(hm->deviceId(), hist);
+    }
+
+    std::stable_sort(entries.begin(), entries.end(),
+                     [](const pinpoint::IndexEntry &a, const pinpoint::IndexEntry &b) {
+                         return a.timestamp_us < b.timestamp_us;
+                     });
+
+    if (!deferredIds.empty())
+        composite->add(std::move(ram), deferredIds);   // claimed first
+    composite->add(std::move(m_ringSource), {});       // catch-all: the ring
+
+    m_swingWindow.emplace(std::move(composite), std::move(entries),
+                          m_windowStartUs, m_windowEndUs);
 
     // One replay track per live camera with captured frames.
     m_replayTracks.clear();
@@ -660,7 +857,9 @@ void ShotProcessor::captureWindowAndLaunch()
         [bindings = m_analysisJob.imuBindings, impactUs = m_impactUs, win] {
             try {
                 const pinpoint::analysis::FusedStreams streams =
-                    pinpoint::analysis::ImuVisionFuser::fuse(*win, bindings);
+                    pinpoint::analysis::ImuVisionFuser::fuse(
+                        *win, bindings,
+                        pinpoint::analysis::ImuVisionFuser::gridHzForWindow(*win, bindings));
                 return pinpoint::analysis::PhaseSegmenter::segment(streams, impactUs);
             } catch (...) {
                 return pinpoint::analysis::Segmentation{};   // conf 0 → full window
@@ -1299,6 +1498,50 @@ pinpoint::SwingExportJob ShotProcessor::buildSwingExportJob()
                             }
                         }
                     }
+                    // ── Deferred history provenance (Phase E) ───────────
+                    // ⚠ Keyed by DEVICE, applied to BOTH units: one wG3 is one
+                    // peripheral with one stream and one pull, so the coverage,
+                    // the gaps and the fit describe both lanes equally. The
+                    // stitch COUNTS differ per lane and are set below.
+                    const auto hIt = m_historyProvenance.constFind(hm->deviceId());
+                    if (hIt != m_historyProvenance.constEnd() && hIt->valid) {
+                        const HmInstance::HistoryResult &h = *hIt;
+                        hmInfo.hmHistoryStatus      = h.status;
+                        hmInfo.hmHistoryAttempts    = h.attempts;
+                        hmInfo.hmCoverageOverflowed = h.coverageOverflowed;
+                        hmInfo.hmCoverageFraction   = h.coverageFraction;
+                        hmInfo.hmDensity            = h.density;
+                        hmInfo.hmAchievedHz         = h.achievedHz;
+                        hmInfo.hmLargestGapUs       = qint64(h.largestGapUs);
+                        hmInfo.hmLiveOverlapSamples    = int(h.liveOverlapSamples);
+                        hmInfo.hmLiveOverlapMismatches = int(h.liveOverlapMismatches);
+                        hmInfo.hmSelfRecordingGapStartUs = h.selfRecordingGapStartUs;
+                        hmInfo.hmSelfRecordingGapEndUs   = h.selfRecordingGapEndUs;
+                        hmInfo.hmDelivered = h.delivered;
+                        for (const auto &g : h.gaps)
+                            hmInfo.hmGaps.emplace_back(g.startUs, g.endUs, g.kind);
+
+                        hmInfo.hmFitValid            = true;
+                        hmInfo.hmFitFlags            = h.fit.flags;
+                        hmInfo.hmFitObservations     = h.fit.observations;
+                        hmInfo.hmFitRateHz           = h.fit.fitted_rate_hz;
+                        hmInfo.hmFitAnchorHostUs     = qint64(h.fit.anchor_host_us);
+                        hmInfo.hmFitAnchorIndex      = h.fit.anchor_index;
+                        hmInfo.hmFitSlopeUsPerIndex  = h.fit.slope_us_per_index;
+                        hmInfo.hmFitOffsetUs         = qint64(h.fit.offset_us);
+                        hmInfo.hmFitSpanUs           = qint64(h.fit.span_us);
+                        hmInfo.hmFitResidualMedianUs = h.fit.residual_median_us;
+                        hmInfo.hmFitResidualP90Us    = h.fit.residual_p90_us;
+                        hmInfo.hmFitResidualMaxUs    = h.fit.residual_max_us;
+                        hmInfo.hmFitDriftUsPerS      = h.fit.accuracy_drift_us_per_s;
+
+                        const auto sIt = m_stitchCounts.constFind(unit->sourceId());
+                        if (sIt != m_stitchCounts.constEnd()) {
+                            hmInfo.hmStitchedFromLive     = sIt->first;
+                            hmInfo.hmStitchedFromDeferred = sIt->second;
+                        }
+                    }
+
                     job.imuDeviceBySerial.insert(unitId, hmInfo);
                 }
                 break;
@@ -1751,12 +1994,19 @@ void ShotProcessor::finishShot()
 void ShotProcessor::abortToIdle()
 {
     m_postRollTimer.stop();
+    m_gatherTimer.stop();
+    // ⚠ RELEASING THIS IS NOT OPTIONAL. It holds the resume guard from the pause
+    // instant, and CameraManager::resumeBuffer() refuses while the guard is up —
+    // so an abandoned gather that kept it would leave the buffer unable to
+    // resume for the rest of the session, with capture silently dead.
+    m_ringSource.reset();
     setState(State::Idle);
 }
 
 void ShotProcessor::finishNowBlocking()
 {
     m_postRollTimer.stop();   // a pending shot is forfeited — acceptable on teardown
+    m_gatherTimer.stop();
 
     if (m_state == State::Replaying)
         stopReplay(false);
@@ -1778,6 +2028,9 @@ void ShotProcessor::finishNowBlocking()
 
     m_swingWindow.reset();
     m_replayTracks.clear();
+    // A gather abandoned on teardown: release the guard the window never adopted
+    // (a no-op once the window exists, which took ownership of it).
+    m_ringSource.reset();
 
     // Deliberately no applyCaptureIntent(): callers (setSelected, destructors)
     // own the buffer-state sequence around source registration.

@@ -91,7 +91,7 @@ public:
             return stubResult(window, job, {});
 
         // Enabled ⇒ run the shared camera profile to produce the real kinematic series.
-        AnalysisContext ctx{ CaptureCapabilities::fromJob(job), job, &window };
+        AnalysisContext ctx{ CaptureCapabilities::fromJob(job, window), job, &window };
         ctx.detail = std::make_shared<SwingAnalysis>();
         ctx.wall.start();
         runStages(cameraKinematicsProfile(), ctx);

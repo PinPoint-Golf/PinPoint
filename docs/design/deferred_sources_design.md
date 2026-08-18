@@ -1,6 +1,11 @@
 # Deferred sources — folding late-arriving samples into a read-only SwingWindow
 
-**Status:** design note. Nothing built. Written 2026-08-14.
+**Status:** **AS BUILT.** Written 2026-08-14 as a design note; implemented 2026-08-18 as
+HackMotion Phase E, its first real consumer. Every §6 open item is closed below.
+⚠ Three things in the original text were WRONG and are corrected in place — §4.3's statistic,
+§4.7's single-span stitch, and §3.3's reserved-id allocator, which turned out not to be needed
+at all. Each correction says what it replaced and why, because the wrong version is the one a
+reader would otherwise re-derive.
 **Scope:** a PinPoint capture/analysis concern. The motivating case is a wrist sensor whose
 high-rate record can only be retrieved after the swing, but **nothing here is specific to that
 device**, and the protocol work behind it belongs to a separate team and is deliberately not
@@ -118,6 +123,17 @@ Deferred ids must not collide with ring ids, and `SourceId` is used as a direct 
 `sources_[id]` with `slot_hwm_` bounding the merger's sweep. The offline path sidesteps this
 entirely (all its ids are synthetic, starting at 0, with no EventBuffer in the process), which is
 why it never had to answer it.
+
+> ⚠ **AS BUILT: NONE OF THIS WAS NEEDED, AND THE REASON IS WORTH KEEPING.** This section assumes
+> a deferred source has no ring. The motivating one does: a HackMotion registers its two
+> EventBuffer sources at construction and records live into them all session, and the pull is a
+> DENSER VERSION OF A LANE THAT ALREADY EXISTS. So the stitched lane reuses the id it already
+> has, and the composite simply routes that id to RAM instead of to the ring. No allocator, no
+> ring-less identity, no special case in the exporter or the resource monitor.
+>
+> The reserved-id question returns the day a deferred source arrives that was NEVER live — a
+> force plate, a phone-hosted sensor, a camera burst. Until then, building it would have been
+> machinery with no caller, and open item 4 below is closed on that basis rather than answered.
 
 Recommend **`EventBuffer::reserveSourceId(SourceDescriptor)`**: allocates an id and stores the
 descriptor, allocates **no ring**, and is never swept by the merger. Not a "virtual source" that
@@ -244,6 +260,50 @@ of regression that surfaces months later as "re-analysis got slower" with no obv
 table once at construction** and binary-search it. O(log n) per call, no API change, and it makes
 today's path faster too. This should land *with* deferred sources, not after them.
 
+> **AS BUILT — MEASURED, and it landed first and alone.** `SwingWindow` builds a per-source lane
+> vector in its constructor; `interpolateImu`, `entriesFor` and `frameCount` all binary-search it.
+> RelWithDebInfo on an M4, both implementations timed **in the same run on the same window** —
+> see the method note below, because the first version of this measurement was not:
+>
+> | window shape | entries | calls | linear scan | indexed | speed-up |
+> |---|---|---|---|---|---|
+> | deferred (high-rate span) | 5,520 | 6,402 | 16.6-27.1 ms | 0.23-0.30 ms | **73-91×** |
+> | ordinary (2 cams, 2 IMUs @100 Hz, 200 Hz grid) | 2,720 | 1,602 | 1.8-2.4 ms | 0.05-0.07 ms | **~36×** |
+>
+> ⚠ **THE SECOND ROW IS THE ONE WORTH NOTICING.** It contains no deferred source at all — it is
+> what every swing already in the library looks like. `interpolateImu` sits on the pre-stage that
+> EVERY inertial capture runs through, so this was never a high-rate optimisation: it is a fix to
+> the existing pipeline that this phase happened to force. Live captures and corpus re-analysis
+> both get it, with or without a HackMotion. (The ordinary row is conservative: the indexed column
+> also performs the full interpolation, while the scan column only finds the bracketing pair.)
+>
+> `swing_window_parity_test` reports `interpolateImu: 187 agree, 0 mismatch` across the RAM and
+> disk backings, so the two construction paths still agree exactly.
+>
+> ⚠ **METHOD NOTE, and it is the same lesson twice in one phase.** The first version of this
+> measurement compared a number from the old build against a number from the new one, written down
+> separately. Machine load moves these timings by a factor of three between runs — comfortably
+> enough to invent or erase a speed-up. Both implementations are now timed in ONE run on ONE
+> window, and the reference scan is kept in the test permanently for that purpose.
+>
+> ⚠ **TWO THINGS THE IMPLEMENTATION FOUND THAT THIS SECTION DID NOT SAY.**
+>
+> 1. **`after - 1` is the wrong `prev`.** Among entries sharing the largest timestamp `<=` target
+>    the old linear scan kept the FIRST encountered; `upper_bound() - 1` is the LAST. Duplicate
+>    timestamps cannot occur on the live path — the merger enforces per-source monotonicity — but
+>    they are expressible on the disk and stitched paths, where the other pick silently changes
+>    the interpolated value. The lane is searched with a second `lower_bound` to preserve it.
+> 2. **The ascending invariant is now made true rather than assumed.** Both production paths sort,
+>    but the `SwingWindow` constructor is public and a binary search over an unsorted lane fails
+>    plausibly where the scan simply worked. Each lane is `stable_sort`ed at construction — a
+>    no-op on already-ordered data, and `stable_` because the tie order is load-bearing per (1).
+>
+> ⚠ **AND A METHOD NOTE, BECAUSE IT IS THE FAILURE THIS PHASE KEEPS REPEATING.** The first
+> performance gate written for this was `EXPECT_LT(us, 150'000)`, from an estimate that a linear
+> scan would take "hundreds of milliseconds". It takes 14 ms — so the check meant to catch the
+> regression **passed for the unfixed code**. The threshold is now derived from the two measured
+> numbers. A gate whose failing case you have not measured is not a gate.
+
 ### 4.3 The master grid rate must follow the data
 
 `ImuVisionFuser::fuse(..., double gridHz = 200.0, ...)` resamples every bound segment onto one
@@ -253,6 +313,32 @@ us to retrieve; raising it globally makes every ordinary capture pay 4× for not
 Recommend deriving the grid rate from the bound sources' **actual median sample interval over this
 window**, clamped to a sane range, rather than a constant. That keeps a webcam-plus-two-IMUs
 capture exactly where it is today and lets a high-rate capture use what it has.
+
+> ⚠ **AS BUILT — THE MEDIAN IS THE WRONG STATISTIC, AND IT WOULD HAVE THROWN AWAY THE PULL.**
+>
+> A stitched lane runs at ~100 Hz over a 3 s still pre-roll and up to ~799 Hz through the swing.
+> Its median interval across a 4 s window is therefore dominated by the PRE-ROLL, so a
+> median-derived grid lands near the base rate and discards precisely the dense span the ~4.5 s
+> pull was performed to obtain. The library makes the identical point about its own `density`
+> field: the block-level figure is the wrong scope, and a consumer should point the measurement
+> at the sub-range it actually cares about (`history.h`, `hm_sample_step_density`).
+>
+> **What shipped:** `ImuVisionFuser::gridHzForWindow()` takes the **PEAK local rate**, measured by
+> sliding a 250 ms probe (about a downswing) across each bound lane and taking the maximum. That
+> finds the dense span wherever it is, without depending on the impact estimate being right.
+> Clamped to **[200, 800] Hz**.
+>
+> ⚠ **THE FLOOR IS LOAD-BEARING AND IT IS NOT A ROUNDING CHOICE.** 200 Hz is what both call sites
+> hardcoded before this existed. Deriving with no floor would take an ordinary Witmotion capture
+> — whose lanes run at 100 Hz — DOWN to 100, changing every existing swing's metrics and moving
+> the whole graded corpus underneath us. The floor never caps the device; it stops the corpus
+> moving. `swing_window_parity_test` asserts `gridHzForWindow() == kGridHzMin` on an ordinary
+> fixture, so a future change that moves it fails a test instead of quietly re-scoring the corpus.
+>
+> ⚠ **AND THE GRID MUST STAY UNIFORM.** A variable-density grid — dense through the swing, sparse
+> either side — is the theoretically better answer and is ruled out: `phase_segmenter.cpp:224`
+> derives its sample rate as `1e6 / (grid[1] - grid[0])`, i.e. it assumes uniform spacing. A
+> non-uniform grid would hand it a wrong `fsHz` with nothing reporting an error.
 
 ⚠ **What rate the wrist metrics actually need is an open analysis question, not a plumbing one.**
 Landing the mechanism does not answer it, and the mechanism should not pretend to.
@@ -323,6 +409,33 @@ the same span — which is the case when the live lane is a decimation of the sa
 If a supplier ever delivers a *different* measurement rather than a denser one, that is two lanes,
 not one, and the choice has to be revisited.
 
+> ⚠ **AS BUILT — THE THREE-PART PICTURE IS TOO SIMPLE, BECAUSE THE HOLED PULL IS THE NORMAL CASE.**
+>
+> `[live prefix] + [high-rate span] + [live suffix]` assumes the retrieval is ONE contiguous span.
+> It usually is not: the device **holes** an over-wide request rather than clamping it — 33-58 %
+> coverage with **no error reported** — so what comes back is several disjoint intervals with
+> live-rate gaps between them.
+>
+> The shipped rule is therefore **per delivered interval**: take deferred samples INSIDE the
+> block's `delivered[]` intervals and live samples OUTSIDE them. That is the same code for a clean
+> pull and a holed one, and it fills the holes from the live lane instead of leaving them empty. A
+> stitch written to the original picture would look perfect on a clean pull and silently drop the
+> live samples that should have covered the holes.
+>
+> ⚠ **`delivered[]` IS HALF-OPEN, AND THAT IS WHERE THE OFF-BY-ONE IS BORN** — the library's own
+> header says so. A sample exactly at an interval's `end_us` is OUTSIDE it and is served from
+> live. `deferred_stitch.h`'s test asserts that specific instant rather than a sample count, so
+> the boundary cannot drift unnoticed.
+>
+> ⚠ **STRICT ASCENDING IS ENFORCED LOCALLY.** These bytes never passed through the ring, so
+> `MergerState::enforceMonotonicity` never saw them and the window's binary search would fail
+> plausibly on a duplicate. A deferred and a live sample can legitimately land on one instant at
+> an interval edge; the later one is dropped and **counted**, never silently interleaved.
+>
+> ⚠ **AND THE WHOLE LANE MOVES TO RAM, NOT JUST THE DENSE PART.** One `SourceId` cannot split its
+> sequence space across two backings without the sequences colliding, so the stitched lane is
+> served wholly from the RAM block and its ring entries are REPLACED, not added to.
+
 ---
 
 ## 5. Requirements this places on any deferred source
@@ -345,12 +458,34 @@ folded in at all:
 
 ---
 
-## 6. Open
+## 6. Open — all four closed 2026-08-18 (HackMotion Phase E)
 
-1. **`interpolateImu` indexing (4.2)** — should land with, or before, the first deferred source.
-2. **Grid rate policy (4.3)** — derive from data; the analysis question of what rate the metrics
-   need is separate and unanswered.
-3. **Gather deadline and request width** — both depend on measured supplier behaviour and should be
-   set from real captures, not guessed.
-4. **Reserved-id ergonomics (3.3)** — confirm the resource monitor and exporter paths read cleanly
-   against a ring-less id before committing to it.
+1. ~~**`interpolateImu` indexing (4.2)**~~ — **DONE, and it landed first and alone.** 14,385 µs →
+   210 µs, a 68× reduction, on a window of the post-deferred shape. See the measured block in §4.2.
+2. ~~**Grid rate policy (4.3)**~~ — **DONE, with the statistic corrected**: peak local rate over a
+   250 ms sliding probe, clamped to [200, 800] Hz. The median this document originally recommended
+   would have discarded the pull; see §4.3. ⚠ **The separate question it names remains genuinely
+   open**: what rate the wrist metrics actually NEED is an analysis question, and landing the
+   mechanism has not answered it.
+3. ~~**Gather deadline and request width**~~ — **DONE, from the library's measured behaviour.**
+   Request: §7.6's 3 s pre / 1.5 s post (the library's own default, taken by passing NULL rather
+   than restating it). Gather deadline: **6 s past the pause**. ⚠ **The two deadlines are ordered
+   deliberately** — the library's own deadline sits just INSIDE ours, so a slow pull materialises
+   its block carrying whatever arrived, instead of being cancelled by our timeout and recording
+   `CANCELLED` where the honest answer was `TIMED_OUT` with partial coverage.
+4. ~~**Reserved-id ergonomics (3.3)**~~ — **CLOSED AS NOT NEEDED**, not answered. The motivating
+   deferred source was already a live ring producer, so the stitched lane reuses its existing id
+   and the composite reroutes it. The question returns for a deferred source that was never live.
+   See the note in §3.3.
+
+## 7. What Phase E did NOT deliver, stated plainly
+
+- **No metric changed.** `shot_processor.cpp`'s binding loop casts to `ImuInstance*` and skips
+  `HmInstance`, so no HackMotion lane is bound into analysis yet. That is Phase F, gated behind
+  the `FusedStreams::streamFor` fix. A HackMotion-only capture still halts with "no IMU and no
+  pose data in window" — expected, not a defect.
+- **What rate the wrist metrics need** is still unanswered (open item 2 above).
+- **Wire-byte recording** — `HM_BUILD_RECORD` is forced on and `hackmotion_record` is linked, but
+  nothing calls it and no recording is ever opened, so every app-driven calibration has discarded
+  its payload. Deliberately left out of this phase and recorded as a follow-up rather than drifted
+  past.
