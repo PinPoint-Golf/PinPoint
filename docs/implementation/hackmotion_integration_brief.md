@@ -369,7 +369,7 @@ session type (`analysis_pipeline_developer_guide.md` §4).
 | **C** | Device-native calibration flow | A coach can calibrate end to end; presence angle recorded, never scored; reconnect invalidates. Includes unit-keyed placement (§0 decision 1) | ✅ verified on hardware — ⚠ leaves §12.3 (no state-machine test) and §12.4 (wizard matrix) open, plus the stale ArmVizView deferral (see E2) |
 | **D** | **Frame reconciliation** — solve `R_unit` | A known single-axis wrist motion moves one PPS DOF and leaves the others near zero, from HackMotion data ⚠ *superseded — the real gate is the SIGN of a directed motion; see the Phase D section* | ✅ `17b0c9c` — C2 selected, repeatability measured across three captures |
 | **E** | Deferred history → SwingWindow | A shot produces a stitched **variable-rate** wrist lane — ~100 Hz over the still pre-roll, full rate through the swing (§0 #2) — with coverage, gaps and the fit in provenance. ⚠ Builds `deferred_sources_design.md`, does not consume it (§0 #4) | ⚙ `0c7d128` — mechanism built and tested; ⚠ **three hardware gates deferred to E3** |
-| **E2** | Backlog: everything that needs no sensor | The stale Phase-D-era deferrals are cleared, the calibration state machine has a test, and the session wizard is exercised across the sensor combinations — so E3's studio time is spent on data, not on discovering a broken wizard | ☐ |
+| **E2** | Backlog: everything that needs no sensor | ⚠ **Scope narrowed 2026-08-18 by the user:** simultaneous HM+Witmotion arm mounting is NOT supported — either/or only — so the combination matrix (item 3) and the state-machine test (item 2) are DROPPED with it. What remains of the gate: the stale deferrals cleared (item 1) and the studio build reproducible (item 4) | ⚙ item 1 ✅ `c467dce`/`732ad9a`/`0e0fc80`; items 2+3 dropped; item 4 open — see `phase_e2_item4_prompt.txt` |
 | **E3** | **Studio verification + first look at the data** | Built and run on the studio PC with a worn sensor: E's three gates, B's two unverified criteria, and a short findings note on what the wrist actually does at full rate. ⚠ **Keep the raw captures** — they become F's development fixture, so F needs no second trip | ☐ |
 | **F** | New `hm.*` keys + measure `preferKeys` | HackMotion wrist metrics produced and separately addressable; measures prefer them; corridors unchanged. ⚠ Blocked on `streamFor` (§0 #8) | ☐ |
 | **G** | ~~Validation against Witmotion~~ | ⚠ **DEFERRED ENTIRELY — it needs its own plan, and it is NOT a gate on anything in this one.** See the Phase G section for why the deferral costs nothing here | ⏸ deferred |
@@ -677,14 +677,20 @@ spent collecting data rather than discovering that the session wizard refuses to
    the capture-page arm today. This is a text-and-wiring cleanup, not new machinery — but confirm
    that claim by running it rather than by reading it.
 
-2. **Test the calibration state machine** — §12.3, raised by the user at the end of Phase C
-   ("not convinced the states are rock solid") with no direct evidence of a fault, which is still
-   the right level of confidence. That section lists what a test has to cover; all of it is
-   reachable by driving `HmInstance`'s signals with no device attached.
+2. ❌ **DROPPED 2026-08-18, by the user, alongside item 3** — the either/or mounting decision.
+   For the record: this item's own rationale (state-machine confidence, raised with no direct
+   evidence of a fault at the end of Phase C) was independent of device mixing, so the drop is a
+   priority call, not a logical consequence — recorded so a future fault in the calibration
+   states is read as "the test was dropped", never "the test existed and missed it". The
+   follow-ups §3 spec survives below if it is ever wanted. Original: test the calibration state
+   machine by driving `HmInstance`'s signals with no device attached.
 
-3. **The session wizard across the sensor combinations** — §12.4's matrix. ⚠ **This one protects
-   the trip.** The studio session goes through that wizard, and only the HackMotion-only Wrist
-   path has ever been exercised on hardware; a combination that refuses to start would cost a day.
+3. ❌ **DROPPED 2026-08-18, by the user: simultaneous HM+Witmotion arm mounting is NOT a
+   supported configuration — mounting is EITHER a wG3 OR Witmotions.** The §12.4 8-case matrix
+   collapses to three live cases: HackMotion-only (exercised on hardware, repeatedly, including
+   the whole of the E2-item-1 session), Witmotion-only (the pre-HackMotion path, in production
+   use), and no-sensors. The abandoned-E2 stash (`stash@{0}`) still holds a
+   `imu_placement_matrix_test` if the matrix ever comes back.
 
 4. **Make the studio build reproducible.** ⚠ The build prefers a sibling `../libhackmotion`
    checkout and otherwise fetches the **`main` branch** from GitHub, so this Mac and the studio PC
@@ -1044,6 +1050,10 @@ use a real window.
 
 ### 3. Test the HackMotion calibration state machine
 
+⚠ **DROPPED 2026-08-18 by the user (with the either/or mounting decision — see Phase E2 item 2
+for the honest note that this item's own rationale was independent of mixing).** Kept below as
+the spec of record in case the confidence question is ever reopened.
+
 **Raised by the user at the end of Phase C: "not convinced the states for the calibration flows are
 rock solid — you had issues with this in the past", with no direct evidence of a fault.** That is
 the right level of confidence to record, because nothing currently justifies more.
@@ -1091,6 +1101,11 @@ new surface, which is why it did not ride along with a phase already touching th
 pipeline and the exporter.
 
 ### 4. The start-session wizard path, across the IMU/HackMotion combination matrix
+
+⚠ **DROPPED 2026-08-18 by the user: simultaneous HM+Witmotion arm mounting is not supported —
+either/or only — so the matrix collapses to HackMotion-only / Witmotion-only / none, the first
+two of which run on hardware regularly.** Kept below as the spec of record; the abandoned-E2
+stash (`stash@{0}`) holds a matrix test if this ever returns.
 
 **Raised by the user at the end of Phase C: the wizard path has not been tried, and it is complex
 given the combinations we might encounter.** Phase C rewrote six resolution sites in
