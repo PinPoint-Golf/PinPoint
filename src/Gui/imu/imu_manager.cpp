@@ -60,6 +60,19 @@ ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, 
         // in Settings → IMUs: globally disabling a device disables it for this
         // session too (and disconnects it), and vice versa. Deliberate session
         // overrides of UNCHANGED devices are preserved (diff-based).
+        //
+        // ⚠ QUEUED, NOT DIRECT. The signal is emitted from inside the QML write
+        // `appSettings.imuExcluded = list` (the Enable pill's handler), and a
+        // direct connection runs the whole disconnect → instance teardown →
+        // imuDeviceListChanged → Repeater row-rebuild cascade NESTED inside that
+        // write. Tearing down the very row whose handler is mid-statement makes
+        // the engine report a spurious "ReferenceError: appSettings is not
+        // defined" against the write line on every first exclusion change — the
+        // write itself lands, so the noise reads as a broken toggle when nothing
+        // is broken. One tick later, the handler has returned and the same
+        // cascade is ordinary. The diff below reads current state at run time,
+        // so queued coalescing of rapid changes is safe: a no-op diff does
+        // nothing.
         connect(m_appSettings, &AppSettings::imuExcludedChanged, this, [this]() {
             const QStringList now  = m_appSettings->imuExcluded();
             const QStringList prev = m_lastGlobalExcluded;
@@ -68,7 +81,7 @@ ImuManager::ImuManager(pinpoint::EventBuffer *buffer, AppSettings *appSettings, 
             for (const QString &id : prev)
                 if (!now.contains(id)) setSessionImuEnabled(id, true);
             m_lastGlobalExcluded = now;
-        });
+        }, Qt::QueuedConnection);
     }
 
     // Surface BLE discovery errors (Bluetooth off / no adapter) so the IMU UI can
