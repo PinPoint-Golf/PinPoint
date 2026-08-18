@@ -44,6 +44,10 @@ class AppInfo : public QObject
     Q_PROPERTY(QString architecture  READ architecture  CONSTANT)   // e.g. "x86_64" / "arm64"
     Q_PROPERTY(QString qtVersion     READ qtVersion     CONSTANT)   // actually-linked Qt (qVersion())
     Q_PROPERTY(QString iconSource    READ iconSource    CONSTANT)   // qrc path for the app icon
+    // False only when configured with -DPP_SHIPPING_BUILD=ON — the distributable
+    // artefact. Gates dev-only affordances (the Main.qml --probe-qml hook) so they
+    // are compiled out of anything handed to a coach.
+    Q_PROPERTY(bool    devBuild      READ devBuild      CONSTANT)
     // Ordered list of { "name": <lib>, "version": <string> } maps — the About box
     // renders one row per entry. Built once in the constructor.
     Q_PROPERTY(QVariantList dependencies READ dependencies CONSTANT)
@@ -59,6 +63,14 @@ public:
     QString architecture() const;
     QString qtVersion() const;
     QString iconSource() const;
+    bool devBuild() const
+    {
+#ifdef PP_SHIPPING_BUILD
+        return false;
+#else
+        return true;
+#endif
+    }
     QVariantList dependencies() const { return m_dependencies; }
 
 private:

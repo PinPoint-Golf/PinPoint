@@ -858,4 +858,35 @@ ApplicationWindow {
             shotTing.play()
         }
     }
+
+    // ── The probe hook — the standing verify-by-probing tool, dark by default ────────────────
+    //
+    // `--probe-qml /abs/path/probe.qml` loads that file over the whole window with the FULL app
+    // context (imuManager, appSettings, athleteController, liveWrist, ...), so a behavioural
+    // question about the UI can be answered by a scratchpad QML file that drives the real
+    // objects and console.warn()s what it finds — no rebuild per iteration. Established during
+    // the Aug 2026 E2 reinstatement, where it verified ArmVizView's frame math, the calibration
+    // reset, and a 6.5-minute render-persistence soak; kept because that class of question
+    // recurs.
+    //
+    // ⚠ DARK TWICE OVER. Without the argument the Loader never activates and costs nothing. In
+    // a shipping build (appInfo.devBuild false, -DPP_SHIPPING_BUILD=ON) it is inert even WITH
+    // the argument — an app handed to a coach must not load arbitrary QML into a context that
+    // holds their settings and devices.
+    //
+    // ⚠ Probes run over the live UI, not instead of it: offscreen, View3D renders nothing (no
+    // RHI), and an OCCLUDED window stops the render loop AND every animation-driver-backed QML
+    // Timer — a probe that "hangs" on another virtual desktop is starved, not broken.
+    Loader {
+        id: _probeLoader
+        anchors.fill: parent
+        z: 10000
+        source: {
+            var f = Qt.application.arguments.indexOf("--probe-qml")
+            if (f >= 0 && f + 1 < Qt.application.arguments.length)
+                return "file://" + Qt.application.arguments[f + 1]
+            return ""
+        }
+        active: appInfo.devBuild && source !== ""
+    }
 }

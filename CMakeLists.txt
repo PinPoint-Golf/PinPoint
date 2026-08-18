@@ -85,6 +85,13 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
         "  -DCMAKE_BUILD_TYPE=Release   for anything you intend to ship")
 endif()
 
+# The option must reach the SOURCES, not just this file: AppInfo::devBuild gates the
+# dev-only QML probe hook on it, and an option that is only a configure-time assertion
+# leaves every #ifdef PP_SHIPPING_BUILD in the tree silently dead-false.
+if(PP_SHIPPING_BUILD)
+    add_compile_definitions(PP_SHIPPING_BUILD)
+endif()
+
 if(PP_SHIPPING_BUILD AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
     message(FATAL_ERROR
         "PP_SHIPPING_BUILD=ON but CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}, not Release.\n"
