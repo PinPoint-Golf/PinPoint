@@ -450,6 +450,10 @@ private:
     void noteProvenance(const hm_sample &s);   // I/O thread; needs a mapped host time
 
     // ── Deferred history state, I/O thread unless noted ─────────────────────
+    // The session's policy, kept from initialise() so reserveHistory() can hand
+    // it to hm_history_request_around() — which is the only way the pre/post
+    // roll fields set there reach a request.
+    hm_session_policy m_policy{};
     uint64_t m_historyRequestId = 0;
     // Read from the GUI thread by HmInstance::historyPending(), so atomic rather
     // than mutex-held: it is polled every 50 ms during a gather.
@@ -589,6 +593,25 @@ void HmSessionWorker::initialise()
     // library's legible HM_CAL_ABORT_RAISE_TOO_SLOW instead, and the coach re-runs
     // a 3 s routine.
     cfg.policy = hm_session_policy_default();
+
+    // ⚠ THE RETRIEVAL WINDOW IS SIZED FROM THE WINDOW WE KEEP, not from §7.6's
+    // recommended 3 s / 1.5 s — because a pull costs about as long as the span
+    // it asks for AND stalls the device's own sample counter for 90-99 % of that
+    // (§0 row 3, six measured pulls), so every extra second asked for is a second
+    // the NEXT shot is not being recorded.
+    //
+    // ShotProcessor freezes a 4 s trailing window (kWindowDuration) and the
+    // analyser never reads further back than impact − 1.75 s (the onset clamp in
+    // shaft_track_assembly.h). Measured across the 2026-08-18 studio swings, the
+    // frozen window held 1.56-2.41 s after impact. So ±2 s covers everything that
+    // is kept and everything that is read, and the default's extra 0.5 s of
+    // pre-roll would be fetched, paid for in stall, and then discarded.
+    cfg.policy.history_pre_roll_us  = hm_time_us(2'000'000);
+    cfg.policy.history_post_roll_us = hm_time_us(2'000'000);
+
+    // Kept so reserveHistory() can pass it to hm_history_request_around(): the
+    // two fields above only exist if something reads them.
+    m_policy = cfg.policy;
 
     // The observed 0x7e. Under it the RELATIVE angle stayed within 0.58° over
     // five minutes while the two units individually drifted 1.95° and 1.13°
@@ -888,10 +911,10 @@ void HmSessionWorker::reserveHistory(qint64 impactUs, qint64 deadlineUs)
         return;
     }
 
-    // §7.6's recommended 3 s pre / 1.5 s post around the event. NULL takes the
-    // library's own default rather than restating it here, so the two cannot
-    // drift apart.
-    hm_history_request req = hm_history_request_around(nullptr, hm_time_us(impactUs));
+    // ±2 s around the event, from the policy set in initialise() — sized to the
+    // window ShotProcessor actually freezes rather than to §7.6's recommendation.
+    // Passing the policy rather than NULL is what makes those fields reachable.
+    hm_history_request req = hm_history_request_around(&m_policy, hm_time_us(impactUs));
 
     // ⚠ DEADLINE MUST BE PAST window.end_us OR THIS IS REFUSED AT THE CALL SITE
     // (HM_ERR_INVALID_ARG), not four seconds later. The caller orders it inside
@@ -907,12 +930,37 @@ void HmSessionWorker::reserveHistory(qint64 impactUs, qint64 deadlineUs)
     req.refill_gaps  = true;
     req.max_attempts = 0;               // library default (3)
 
-    // ⚠ REFUSE RATHER THAN MISALIGN. One 240 fps camera frame is 4,167 us; a fit
-    // whose PRECISION at the window is worse than that would place a wrist trace
-    // against video by more than a frame. The refusal costs no radio traffic and
-    // lands in provenance as HM_HIST_REFUSED_ALIGNMENT, which is the point —
-    // a recorded refusal beats a silently misaligned trace.
-    req.alignment_budget_us = 4167;
+    // ⚠⚠ NO ALIGNMENT GATE. TAKE THE DATA AND SAY WHAT IT IS WORTH.
+    //
+    // This was 4167 µs — one 240 fps camera frame — on the reasoning that a trace
+    // placed against video by more than a frame is worse than no trace. It was
+    // wrong three times over, and the 2026-08-18 studio session is what proved it:
+    // all five swings came back HM_HIST_REFUSED_ALIGNMENT, attempts 0, no radio
+    // traffic, and the whole of Phase E never ran.
+    //
+    //  - The camera is 150 fps, not 240. A frame is 6,636 µs, so the limit was
+    //    stricter than its OWN stated rationale.
+    //  - It could never have passed. The link's fit reported a p90 residual of
+    //    16,145 µs (median 6,520, max 49,219) over a 56 s baseline — that is
+    //    Bluetooth notification jitter, measured at 20-25 ms back in Phase B,
+    //    BEFORE this limit was chosen. A gate that cannot open is not a guard,
+    //    it is the feature switched off.
+    //  - It refused the deferred lane over an error the LIVE lane already carries
+    //    ungated: both are dated through the same fit.
+    //
+    // Zero is the library's own default and its header says exactly why: "we could
+    // not date these, and here they are anyway, clearly marked" — never "we could
+    // not date these, so you get nothing". The block still carries every
+    // sample_index, the per-unit device_time_us, coverage, density, and the fit
+    // with its flags. Event-anchored analysis wants precisely that, and impact is
+    // identifiable in both the wrist trace and the video independently.
+    //
+    // ⚠ This disables the QUALITY gate ONLY. A window on the far side of a
+    // retrieval is still refused with the same status code, and must stay refused:
+    // there the mapping does not exist, so the pull would hand back the WRONG
+    // samples rather than undated ones. Do not read a future REFUSED_ALIGNMENT as
+    // this line having come back.
+    req.alignment_budget_us = 0;
 
     req.user_tag = uint64_t(impactUs);
 
@@ -1019,6 +1067,19 @@ void HmSessionWorker::pollHistory()
                      .arg(r.liveOverlapMismatches)
                      .arg(r.liveOverlapSamples)
                      .arg(r.attempts));
+
+    // ⚠ AND INTO THE APP LOG, because logLine() above reaches only the device
+    // panel in Settings. The 2026-08-18 studio session recorded five swings with
+    // this whole path refusing on every one of them, and the only trace was a
+    // status code inside a 28 MB swing.json — found days later, by reading it.
+    // A retrieval that returns nothing has cost the shot its high-rate lane, and
+    // that has to be legible while the athlete is still on the mat.
+    if (block->status != HM_HIST_COMPLETE || r.tUs.empty()) {
+        ppWarn() << "[HmInstance]" << m_deviceId << "— history retrieval"
+                 << hm_history_status_name(hm_history_status(block->status))
+                 << "—" << r.tUs.size() << "samples, coverage" << r.coverageFraction
+                 << "attempts" << r.attempts;
+    }
 
     // ⚠ EXACTLY ONCE, and only after everything above has been copied out: the
     // block owns its samples, its intervals and its gaps, and releasing it runs
