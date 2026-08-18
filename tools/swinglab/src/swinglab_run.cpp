@@ -454,7 +454,14 @@ int main(int argc, char **argv)
 
     // ── Trace (re-runs the shaft stages with the sinks) ──────────────────────
     if (cli.isSet(optTrace) && job.faceOnCameraCount > 0) {
-        const FusedStreams streams = ImuVisionFuser::fuse(window, job.imuBindings);
+        // Same data-driven grid as the live PhaseSegmenter fuse in
+        // shot_processor.cpp — the default 200 here silently diverged from the
+        // app the moment the live side started asking gridHzForWindow(), so a
+        // trace re-run of a high-rate capture segmented differently offline
+        // than it did live, which is the one thing a trace must never do.
+        const FusedStreams streams = ImuVisionFuser::fuse(
+            window, job.imuBindings,
+            ImuVisionFuser::gridHzForWindow(window, job.imuBindings));
         const Segmentation seg = PhaseSegmenter::segment(streams, job.impactUs);
         ShotAnalysisRunnerOptions opt;
         opt.impactUs   = job.impactUs;
