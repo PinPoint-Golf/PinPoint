@@ -1052,14 +1052,16 @@ honest IMU streams and no wrist metric of any kind.
   and the fused grid is no longer pinned at the 200 Hz floor. This is the first time E3's retrieved
   density reaches a metric at all.
 
-**Still owed from this phase.** ⚠ The E3 findings note's open item is NOT done: the 800 Hz-vs-100 Hz
+**Still owed from this phase — all three are filed as §12 items 5, 6 and 7.** ⚠ The E3 findings note's open item is NOT done: the 800 Hz-vs-100 Hz
 comparison (flexion at impact moved 1.8–8.9°) still needs re-running through the product's own
 decomposition rather than the ad-hoc one E3 used — the machinery to do it now exists. ⚠ And the
 Witmotion "byte-identical" gate could not be measured against real data: **every Witmotion swing in
 the corpus has `bindings: 0`**, so there is no bound Witmotion wrist lane to regress against. What
 was checked instead: identical metric key lists on a re-analysed camera-only swing, the full
 directly-affected test suite green with zero new failures, and every HackMotion branch gated on a
-field that defaults to false.
+field that defaults to false. ⚠ And the live-capture confirmation of the data-integrity fix cannot
+be done by re-analysis at all — `swinglab_run` does not emit that block — so it needs a worn-sensor
+shot. See §12.5.
 
 
 ### Phase W — wash-up: unhappy paths and edge cases
@@ -1343,7 +1345,9 @@ to coaching doctrine; an instrument comparison is evidence about *instruments*.
 Deferred deliberately — none of these blocks a phase from landing. Items 1 and 2 are here
 because the cost of *not* doing them has already been paid twice; items 3 and 4 are gaps in
 what has been **verified**, recorded at the confidence the evidence actually supports rather
-than talked up or waved away.
+than talked up or waved away. Items 5-7 arrived with Phase F and are the same kind of thing:
+two checks that phase could not run from a desk, and one absence in the corpus that it was the
+first work to actually need.
 
 ### 1. Replace `BodyVizView`'s arm-animation protocol with one explicit call
 
@@ -1502,3 +1506,57 @@ the calibrate step, for a right- and a left-handed athlete:
    connects 2 s apart.
 7. Nothing assigned at all.
 8. *(Only once a second session type is implemented — see the coupling above.)*
+
+### 5. Confirm the data-integrity fix on a LIVE capture, and clear the fixture's stale badges
+
+**Raised by Phase F, which fixed the producer and could not exercise it.**
+
+Every HackMotion shot used to get a data-warning badge because `imuIntegrity` re-fuses Madgwick
+from the recorded accel+gyro and compares to the stored quaternion — a comparison that is
+meaningless for a device streaming its own calibrated orientation off gravity-removed accel.
+Phase F excluded HackMotion lanes **per-source** inside `checkImuRefusion`, so a window holding a
+checkable lane beside an uncheckable one is still checked on the half that can be, and
+`sourcesChecked` stays honest.
+
+⚠ **Not exercised, and the reason is structural rather than an oversight.** The block is written
+by `ShotProcessor` on live capture; `swinglab_run` emits only `analysis`, `schema` and `source`,
+so **no amount of re-analysis can test this**. It needs one recorded shot with the wG3 worn.
+
+⚠ **And fixing the producer does NOT clean the eleven E3 fixture swings.** `refusionOk: false` is
+already on disk in each of them and `swing_doc.cpp` re-raises the badge on every reload. They
+clear only when re-captured or re-exported — so a stale badge on those specific swings is
+expected and is not evidence the fix failed.
+
+### 6. Re-run the 800 Hz-vs-100 Hz comparison through the product's own decomposition
+
+**Owed since Phase E3, and now unblocked — the machinery to do it exists.**
+
+E3 measured that resampling the retrieved lane to 100 Hz moves peak flexion by 0.5-1.6° and peak
+deviation by 2.5-3.2°, but moves **flexion READ AT IMPACT by 1.8-8.9°** — and reading a value at
+an instant is exactly what a P-position measure does, against corridors graded in degrees. That is
+the whole justification for what Phase E built.
+
+⚠ **Those figures came from an ad-hoc decomposition, not from `wrist_angles.h`**, which E3's own
+note flags twice. Phase F bound the lane, so the fused grid now follows the data up to the 800 Hz
+ceiling instead of sitting on the 200 Hz floor, and the comparison can finally be run through the
+same code the product grades on. Until it is, the rate justification rests on a calculation the
+product does not use.
+
+### 7. ⚠ NO SWING IN THE CORPUS HAS A BOUND WITMOTION WRIST LANE, and that blocks more than it looks
+
+**Surfaced by Phase F when it tried to prove it had broken nothing.**
+
+Every Witmotion swing in the library carries `bindings: 0`. There is therefore **no recorded swing
+against which a Witmotion wrist regression can be measured at all** — Phase F's "the Witmotion path
+is byte-identical" gate could not be run, and was recorded as unverified rather than assumed. What
+was checked instead: an identical metric key list on a re-analysed camera-only swing, the
+directly-affected test targets green with zero new failures against a stock baseline built at
+`eb8ad57`, and every HackMotion branch gated on a field that defaults to false.
+
+⚠ **This is not a Phase F problem and predates it** (it is the same gap recorded when the IMU
+ladder was found never to have run on real data). It is filed here because Phase F is the first
+work that actually needed the data and found it absent, and because the consequence generalises:
+**any future comparison of our own wrist estimate against the wG3 criterion needs Witmotion swings
+with bound, calibrated lanes, and none exist.** Capturing a set is a prerequisite for that
+comparison, not a nicety — and with dual-wear ruled out physically, the two instruments can only
+ever be compared ACROSS sessions, which raises the bar on how carefully those sessions are matched.
