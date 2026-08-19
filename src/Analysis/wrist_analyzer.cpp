@@ -48,6 +48,7 @@
 #include "positions_ladder.h"
 #include "pose_runner.h"
 #include "pose_smoother.h"
+#include "stream_trim.h"
 #include "pose_synthesis.h"
 #include "shaft_plane.h"
 #include "shaft_tracker.h"
@@ -153,39 +154,9 @@ SegmentationConfig segConfigFor(const QVariantMap &ov)
     return c;
 }
 
-// Copy of the fused streams restricted to [fromUs, toUs] — the metric grid
-// spans the detected swing, not the raw 4 s ring. Timestamps stay absolute.
-FusedStreams trimStreams(const FusedStreams &in, int64_t fromUs, int64_t toUs)
-{
-    const auto lo = std::lower_bound(in.timeGrid.begin(), in.timeGrid.end(), fromUs);
-    const auto hi = std::upper_bound(in.timeGrid.begin(), in.timeGrid.end(), toUs);
-    const size_t a = size_t(lo - in.timeGrid.begin());
-    const size_t b = size_t(hi - in.timeGrid.begin());
-    if (a >= b)
-        return in;   // degenerate bounds — keep the full grid
-    FusedStreams out;
-    out.timeGrid.assign(in.timeGrid.begin() + long(a), in.timeGrid.begin() + long(b));
-    for (const SegmentStream &s : in.segments) {
-        if (s.qAnat.size() != in.timeGrid.size())
-            continue;   // malformed stream — drop rather than misalign
-        SegmentStream t;
-        t.role = s.role;
-        // ⚠ COPY EVERY NON-SAMPLE FIELD, not just the ones this function was written
-        // with. Trimming is a window operation: it changes how many samples a stream
-        // carries and nothing else about it. `hackMotion` was silently dropped here
-        // when it was added — the binding was right, the fuser was right, and the
-        // metric still came out keyed as a Witmotion because this field-by-field copy
-        // is the one place provenance can fall off between them.
-        t.hackMotion = s.hackMotion;
-        t.qAnat.assign(s.qAnat.begin() + long(a), s.qAnat.begin() + long(b));
-        if (s.gyroDps.size() == in.timeGrid.size())
-            t.gyroDps.assign(s.gyroDps.begin() + long(a), s.gyroDps.begin() + long(b));
-        if (s.accelG.size() == in.timeGrid.size())
-            t.accelG.assign(s.accelG.begin() + long(a), s.accelG.begin() + long(b));
-        out.segments.push_back(std::move(t));
-    }
-    return out;
-}
+// trimStreams() moved to stream_trim.h so it can be tested: it was a field-by-field
+// copy in here, unreachable from any test, and it silently dropped SegmentStream's
+// `hackMotion` the day that field was added. See the note in that header.
 
 double phaseValue(const MetricSeries &m, Phase p)
 {

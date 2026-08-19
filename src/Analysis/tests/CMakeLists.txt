@@ -144,6 +144,42 @@ pp_add_test(live_wrist_angles_test SOURCES live_wrist_angles_test.cpp) # live ti
 pp_add_test(imu_sample_test       SOURCES imu_sample_test.cpp)         # exported swing.json vector frame
 pp_add_test(viz_frame_test        SOURCES viz_frame_test.cpp)         # worldToScene + ArmVizView bone math
 
+# The COMPOSITION site's half of the HackMotion contract, which hm_frame_test above
+# does not cover: it pins the frame, this pins that imu_vision_fuser conjugates the
+# raw quaternion before the shared A·q·M and does so in exactly one place. Its
+# central section proves the wrist ANGLE is identical with and without the
+# conjugate — exactly, for every input — which is why no plausibility check
+# downstream can catch a mirrored pipeline and why this has to be asserted at the
+# site. Header-only (hm_frame.h + imu_calibration.h + wrist_angles.h).
+pp_add_test(hm_conjugate_test     SOURCES hm_conjugate_test.cpp)
+
+# Rebuilding a wG3 binding when a recorded swing is RE-ANALYSED. A Witmotion
+# binding is read back from the persisted A/M solve; a HackMotion one cannot be,
+# because the device calibrates itself and no such solve is written. Extracted from
+# SwingDiskLoader::load into hm_binding_recon.h so it can be tested without the
+# analyzer, OpenCV or a swing folder — every input is a value out of swing.json.
+# ⚠ Every failure it guards is silent: an unbound lane still re-analyses fine and
+# simply holds no wrist metric.
+pp_add_test(hm_binding_recon_test SOURCES hm_binding_recon_test.cpp)
+
+# Trimming the fused streams to the swing span must change how many samples a
+# stream carries and NOTHING else about it. `hackMotion` was silently dropped by
+# this field-by-field copy the day it was added, so a wG3 swing came out keyed as a
+# Witmotion with a correct curve and a wrong name. Moved out of wrist_analyzer.cpp's
+# anonymous namespace into stream_trim.h to be reachable at all; the test carries a
+# structured-binding tripwire that makes ADDING a field to SegmentStream a compile
+# error here, because the defect is a field nobody remembered.
+pp_add_test(stream_trim_test      SOURCES stream_trim_test.cpp)
+
+# "hm.<key>" first, then "<key>" — and the same anatomical DOF either way.
+# findSeriesByLadder (swing_analysis.h) replaced four hand-rolled copies of a bare
+# `m.key == key` loop, all four of which went QUIET on a wG3 swing: no wrist score,
+# no resemblance, no interval, no trace, not because the wrist was unmeasured but
+# because it was measured by the better instrument. dofForMetricKey strips the same
+# prefix one layer down so the assessment grid does not report a naming decision as
+# missing anatomy. Both header-only; nine lines between them.
+pp_add_test(series_key_ladder_test SOURCES series_key_ladder_test.cpp)
+
 # --- Segmentation v2/v3 + metric extraction ----------------------------------
 pp_add_test(phase_signals_test
     SOURCES phase_signals_test.cpp ${ANALYSIS}/phase_signals.cpp)
@@ -289,6 +325,26 @@ pp_add_test(metric_catalogue_test
             ${ANALYSIS}/reference_bands.cpp ${NORM_SRC}
     INCLUDE ${DIAG} ${SRC}/Metrics ${SRC}/LaunchMonitor ${ANALYSIS})
 pp_norm_env(metric_catalogue_test)
+
+# The `hackMotion` requirement axis, exercised rather than declared. Same link set
+# as metric_catalogue_test above and deliberately a separate binary: that test
+# covers the three hm.* DESCRIPTORS (they exist, right type, right group, right
+# count) and never sets ShotContext::hasHackMotion, so the one line in
+# metric_provider.h that reads the axis had never run under a test. Both directions
+# are silent — a gate stuck closed hides a measurement the golfer is wearing the
+# sensor for, and a gate stuck open offers measured rungs a shot cannot fill, which
+# is the same silence the four hand-rolled key loops produced from the other end
+# (series_key_ladder_test).
+pp_add_test(hackmotion_gate_test
+    SOURCES hackmotion_gate_test.cpp
+            ${SRC}/Metrics/metric_catalogue.cpp
+            ${SRC}/Metrics/metric_resolver.cpp
+            ${SRC}/Metrics/metric_catalogue_manifest.cpp
+            ${SRC}/Metrics/metric_providers.cpp
+            ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
+            ${ANALYSIS}/reference_bands.cpp ${NORM_SRC}
+    INCLUDE ${DIAG} ${SRC}/Metrics ${SRC}/LaunchMonitor ${ANALYSIS})
+pp_norm_env(hackmotion_gate_test)
 
 # WB4 shared hand geometry (hand_axis.h): handCentroid (byte-identical to the
 # pose_runner original), computeGripAnchors (the pose.gripFromSmoothedHands

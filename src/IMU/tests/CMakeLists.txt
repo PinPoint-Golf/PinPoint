@@ -130,3 +130,23 @@ pp_add_test(hm_skew_stats_test
     INCLUDE ${IMU}
     NO_QT
     STD 20)
+
+# The per-unit identifier "<deviceId>#lowerArm" / "#palm". ONE spelling, persisted
+# three times over — as the EventBuffer SourceDescriptor::identifier, as the
+# AppSettings::imuPlacement key, and as source.serial in every exported swing.json
+# — and it is the only route back from a recorded lane to the segment it measured,
+# because a wG3 carries no per-user calibration to rebuild a binding from.
+#
+# ⚠ A second spelling would not FAIL, it would ORPHAN: no placement found for a
+# connected device, no unit found for a recorded lane, nothing raised in either
+# case. The other half is parse() refusing to guess — it regenerates and compares
+# rather than matching suffix text, so an unrecognised suffix stays unresolved
+# instead of defaulting to lowerArm and binding a palm stream to the forearm.
+#
+# NOT NO_QT: the id is a QString (it has to be — it is a settings key and a JSON
+# field). But no hackmotion link — the header takes the unit as an int precisely so
+# the analysis layer, which does not link the vendor library, can include it.
+pp_add_test(hm_unit_id_test
+    SOURCES hm_unit_id_test.cpp
+    INCLUDE ${IMU}
+    STD 20)

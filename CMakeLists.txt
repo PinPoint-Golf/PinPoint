@@ -2616,6 +2616,8 @@ target_sources(PinPointStudio PRIVATE
     src/Analysis/metric_extractor.cpp
     src/Analysis/imu_vision_fuser.h
     src/Analysis/imu_vision_fuser.cpp
+    src/Analysis/stream_trim.h
+    src/Analysis/hm_binding_recon.h
     src/Analysis/phase_segmenter.h
     src/Analysis/phase_segmenter.cpp
     src/Analysis/phase_signals.h
