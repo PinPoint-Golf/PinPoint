@@ -128,8 +128,9 @@ namespace pinpoint::analysis {
 
 // Fusion knobs. Defaults track the frozen constants (pp_tuned_constants.h
 // refine::); SwingLab sweeps them via "refine.*" dotted keys without a rebuild.
-// V1 lands with `enabled` FALSE — the default flips in its own commit citing the
-// corpus gate, exactly as refine.positionsLadder did on 2026-08-09.
+// `enabled` has been ON since the 2026-08-19 corpus gate
+// (docs/implementation/timeline_fusion_impl.md); false still darks the stage
+// entirely, the byte- and code-path-identical soak baseline.
 struct TimelineFusionConfig {
     bool enabled   = tuned::refine::kFusion;          // refine.fusion (master gate)
     bool p1        = tuned::refine::kFusionP1;        // refine.fusionP1 (Phase 2, dark)

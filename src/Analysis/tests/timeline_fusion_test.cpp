@@ -375,7 +375,8 @@ int main()
         std::printf("-- dark gate --\n");
         Segmentation seg = imuLadder();
         const Segmentation before = seg;
-        TimelineFusionConfig dark;   // frozen defaults
+        TimelineFusionConfig dark;
+        dark.enabled = false;        // the soak baseline, whatever the frozen default is
         const TimelineFusionResult r = fuseTimeline(seg, clubLadder(), dark);
         check(!r.emitted && r.decisions.empty() && sameLadder(seg, before),
               "disabled ⇒ nothing decided, nothing touched");
@@ -458,20 +459,24 @@ int main()
         check(r.retained == 1, "only the Impact slot was contested");
     }
 
-    // 12. Key mapping + dark defaults (the tuning_overrides_test contract, local
-    //     to this module). V1 lands OFF — the override direction is LIGHT-UP.
+    // 12. Key mapping + frozen defaults (the tuning_overrides_test contract,
+    //     local to this module). refine.fusion is ON since the 2026-08-19 corpus
+    //     gate, so ITS override direction is DARK-OUT — false restores the soak
+    //     baseline. refine.fusionP1 is still dark, awaiting its own Phase-2 gate.
     {
         std::printf("-- refine.fusion* keys --\n");
-        check(TimelineFusionConfig::fromOverrides({}).enabled == false
-                  && TimelineFusionConfig::fromOverrides({}).p1 == false,
-              "empty map → both gates dark (V1 lands OFF, flips on the corpus gate)");
+        check(TimelineFusionConfig::fromOverrides({}).enabled == true,
+              "empty map → frozen ON default (2026-08-19 corpus gate)");
+        check(TimelineFusionConfig::fromOverrides({}).p1 == false,
+              "refine.fusionP1 stays dark until the Phase-2 Address gate");
         check(TimelineFusionConfig::fromOverrides({}).disputeMs == 300, "dispute cap default 300 ms");
         QVariantMap ov;
-        ov["refine.fusion"]          = true;
+        ov["refine.fusion"]          = false;
         ov["refine.fusionP1"]        = true;
         ov["refine.fusionDisputeMs"] = 120;
         const TimelineFusionConfig c = TimelineFusionConfig::fromOverrides(ov);
-        check(c.enabled && c.p1 && c.disputeMs == 120, "all three dotted keys map");
+        check(!c.enabled && c.p1 && c.disputeMs == 120,
+              "all three dotted keys map (fusion=false restores the soak baseline)");
     }
 
     std::printf("%s (%d failures)\n", g_fail ? "FAILED" : "OK", g_fail);

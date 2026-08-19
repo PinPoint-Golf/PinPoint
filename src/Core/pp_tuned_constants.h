@@ -578,12 +578,17 @@ inline constexpr bool   kPositionsLadder   = true;  // refine.positionsLadder �
 // (TimingClass) and estimand OWNERSHIP instead, so a measurement displaces a
 // proxy and a proxy never displaces a measurement.
 //
-// LANDS DEFAULT OFF (V1). refine.fusion=false ⇒ TimelineFusionStage never runs,
-// PositionsLadderStage runs exactly as today ⇒ byte- AND code-path-identical to
-// the pre-fusion pipeline (the parity baseline, timeline-fusion.md §8 gate 2).
-// The default flips in its own commit citing the corpus gate, exactly as
-// refine.positionsLadder did on 2026-08-09.
-inline constexpr bool   kFusion            = false; // refine.fusion — arbitrate the ladder
+// ON since the 2026-08-19 corpus gate (docs/implementation/timeline_fusion_impl.md).
+// Evidence: OFF parity 61/61 byte-identical vs the pre-fusion binary; camera-only
+// ON moved zero events and produced zero residual diffs; on the eleven truth-marked
+// 2026-08-18 swings the hi-res stratum went P6 −39→+6 ms, P8 +96→+7 ms, P10
+// +1686→−0 ms against the hand markup, while every retained slot (P1–P5, P7) moved
+// by exactly 0 ms; no measure regressed on coverage; the blast radius was the
+// predicted set only (phase samples at the moved rungs, the 32 flipped events, and
+// the wrist grid — no curve, score, bound or tempo). false still darks the stage
+// entirely ⇒ PositionsLadderStage runs exactly as before ⇒ byte- AND
+// code-path-identical to the pre-fusion pipeline (the soak baseline).
+inline constexpr bool   kFusion            = true;  // refine.fusion — arbitrate the ladder
                                                     //   (V1 flips P6/P8/P10 on IMU-bound swings)
 inline constexpr bool   kFusionP1          = false; // refine.fusionP1 — Address/P1 arbitration.
                                                     //   Implemented but DARK: Address is the
