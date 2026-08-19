@@ -41,6 +41,11 @@ static void checkNear(const char *label, double got, double want, double tol)
                 ok ? "PASS" : "FAIL", label, got, want, tol);
     if (!ok) ++g_fail;
 }
+static void checkTrue(const char *label, bool ok)
+{
+    std::printf("  [%s] %s\n", ok ? "PASS" : "FAIL", label);
+    if (!ok) ++g_fail;
+}
 static void checkLabel(const char *label, const QString &got, const char *want)
 {
     const bool ok = (got == QString::fromUtf8(want));
@@ -64,7 +69,10 @@ static LiveResult liveCompute(const QQuaternion &fore, const QQuaternion &hand,
 
     const QQuaternion relRoll = (upper.conjugated() * fore).normalized();      // :92
     const ForearmElbow ef = forearmPronElbowFlex(relRoll, leftArm);           // :93
-    r.roll       = radToDeg(ef.pronRad);
+    // principalAngleRad mirrors the live path: this readout holds one instant, so it folds
+    // twistAngleRad's (−2π, 2π] into (−π, π] rather than unwrapping against neighbours it
+    // does not have. Drop it here and the mirror stops mirroring.
+    r.roll       = radToDeg(principalAngleRad(ef.pronRad));
     r.rollLabel  = wristMetricLabel(QStringLiteral("forearmPronation"), r.roll);
     return r;
 }
@@ -100,6 +108,34 @@ int main()
         checkNear ("pron roll°", pr.roll, 40.0, 0.4);
         checkLabel("pron bowLabel",  pr.bowLabel,  "flat");
         checkLabel("pron rollLabel", pr.rollLabel, "40° pronated");
+    }
+
+    // -- B2. the ±180° cut: one instant has no neighbours, so it reports principal --
+    //    twistAngleRad returns (−2π, 2π] and flips a whole turn as the quaternion changes
+    //    sign, which put −282° on the chart for a forearm at +78°. The series path unwraps
+    //    against its neighbours; this page has none and must fold instead. It matters most
+    //    HERE: a wG3 zeroes palm-down across the chest, already near full pronation, so a
+    //    normal address posture sits near the cut rather than comfortably away from it.
+    std::printf("\n-- B2. principal value across the ±180° branch cut --\n");
+    {
+        // Just past the cut either way. The reading must stay in (−180, 180] and must be
+        // CONTINUOUS across it: ±179 and ∓179, not ±179 and a full turn away.
+        const LiveResult a = liveCompute(R(Yc,  179), R(Yc,  179), I, kLiveDefaultLeftArm);
+        const LiveResult b = liveCompute(R(Yc,  181), R(Yc,  181), I, kLiveDefaultLeftArm);
+        const LiveResult c = liveCompute(R(Yc, -179), R(Yc, -179), I, kLiveDefaultLeftArm);
+        checkNear("just under +180",  a.roll,  179.0, 0.4);
+        checkNear("just over +180",   b.roll, -179.0, 0.4);   // folded, not +181 and not −539
+        checkNear("just under −180",  c.roll, -179.0, 0.4);
+        checkTrue("stays inside ±180", std::abs(b.roll) <= 180.0 && std::abs(c.roll) <= 180.0);
+
+        // 282° of turn is the number the chart used to show as −282°; principal is −78°.
+        const LiveResult d = liveCompute(R(Yc, 282), R(Yc, 282), I, kLiveDefaultLeftArm);
+        checkNear("282° of turn reads −78", d.roll, -78.0, 0.5);
+
+        // A full turn is indistinguishable from none for a single sample, and saying so is
+        // honest: only a series can tell them apart, which is why the series path unwraps.
+        const LiveResult e = liveCompute(R(Yc, 360), R(Yc, 360), I, kLiveDefaultLeftArm);
+        checkNear("a full turn reads 0", e.roll, 0.0, 0.5);
     }
 
     // -- C. leftArm is a no-op across the live (true) vs offline (false) source split --
@@ -138,9 +174,17 @@ int main()
         const ForearmElbow offE = forearmPronElbowFlex(elbowRel(upper, fore, /*addr=*/I), false);
         // wristRel/elbowRel re-normalize (and multiply by an identity address), so the
         // two paths agree only to quaternion float round-off, not bit-for-bit.
+        //
+        // ⚠ THIS ASSERTS THE REL CONSTRUCTION AGREES, NOT THAT THE PUBLISHED NUMBERS DO.
+        // The poses here sit far from ±180°, where principal and unwrapped coincide. They
+        // are DIFFERENT presentations by design and diverge near the cut: the live tick
+        // folds a lone sample into (−π, π], while the offline series unwraps against its
+        // neighbours and may legitimately leave that range. Do not "restore parity" by
+        // dropping the fold from liveCompute — B2 is the test that would catch it, and the
+        // 360° cliff on the chart is what it would put back.
         checkNear("bow  == offline", live.bow,  radToDeg(offW.feRad),  1e-3);
         checkNear("hinge== offline", live.hinge,radToDeg(offW.rudRad), 1e-3);
-        checkNear("roll == offline", live.roll, radToDeg(offE.pronRad),1e-3);
+        checkNear("roll == offline", live.roll, radToDeg(principalAngleRad(offE.pronRad)), 1e-3);
     }
 
     std::printf("\n=== %s (%d assert failures) ===\n",

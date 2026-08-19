@@ -157,7 +157,12 @@ void LiveWristAngles::tick()
         m_rollTitle = tr("Roll");
         const QQuaternion rel = (upper.anatQuat().conjugated() * fore.anatQuat()).normalized();
         const ForearmElbow ef = forearmPronElbowFlex(rel, leftArm);
-        m_roll      = radToDeg(ef.pronRad);
+        // ⚠ PRINCIPAL VALUE, because this readout holds ONE instant. twistAngleRad returns
+        // (−2π, 2π] and jumps a full turn as the quaternion changes sign, so the raw number
+        // can read −282° for a forearm sitting at +78°. The series path answers this by
+        // unwrapping against neighbouring samples; a live tick has no neighbours, so the
+        // only defensible answer is the principal one. See wrist_angles.h.
+        m_roll      = radToDeg(principalAngleRad(ef.pronRad));
         m_rollLabel = wristMetricLabel(QStringLiteral("forearmPronation"), m_roll);
     } else if (fore.anatCalibrated()) {
         // ⚠ THE NO-UPPER-ARM FALLBACK IS CALLED "Rotation", NEVER "Roll" AND NEVER
@@ -183,8 +188,15 @@ void LiveWristAngles::tick()
         // never feed a metric.
         m_rollTitle = tr("Rotation");
         m_rollValid = true;
+        //
+        // ⚠ AND IT IS THE PRINCIPAL VALUE — see the Roll branch above. This one matters more
+        // than its neighbour rather than less: a wG3 calibrates palm-down across the chest,
+        // already near full pronation, so a forearm in a normal address posture sits a long
+        // way from zero and lands near the ±180° cut where the raw value flips sign. Reading
+        // −282° on the check page for +78° of turn is exactly the confusion this page exists
+        // to prevent.
         const ForearmElbow ef = forearmPronElbowFlex(fore.anatQuat().normalized(), leftArm);
-        m_roll      = radToDeg(ef.pronRad);
+        m_roll      = radToDeg(principalAngleRad(ef.pronRad));
         const long r = std::lround(m_roll);
         m_rollLabel = (r > 0 ? QStringLiteral("+") : QString())
                       + QString::number(r) + QStringLiteral("°");

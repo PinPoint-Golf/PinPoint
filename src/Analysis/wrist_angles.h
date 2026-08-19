@@ -121,6 +121,19 @@ inline double twistAngleRad(const QQuaternion &twist, const QVector3D &axis)
 // the deltas unambiguous. At the rates these lanes run — ~800 Hz from a wG3, ~200 Hz
 // fused — a 2,000 °/s forearm covers 2.5°/sample and 10°/sample respectively, so the
 // margin is more than an order of magnitude. A sparse or gapped lane would NOT be safe.
+// The single-sample counterpart: fold one angle into (−π, π]. For a caller holding ONE
+// instant there are no neighbours and therefore no path to follow, so the principal value
+// is the only defensible presentation — a live readout showing −282° for a forearm sitting
+// at +78° is reporting the branch, not the wrist.
+//
+// ⚠ NOT A SUBSTITUTE FOR unwrapAngleSeries(). Applied per sample down a series this is the
+// bug, not the fix: it is exactly what re-introduces the 360° cliff. Use it only where
+// there is genuinely no neighbouring sample.
+inline double principalAngleRad(double rad)
+{
+    return std::remainder(rad, 2.0 * M_PI);
+}
+
 inline void unwrapAngleSeries(std::vector<double> &rad, int anchor = 0)
 {
     const int n = static_cast<int>(rad.size());
