@@ -570,6 +570,38 @@ inline constexpr bool   kPositionsLadder   = true;  // refine.positionsLadder �
                                                     //   the club-track P6 crossing firing ~120 ms early vs
                                                     //   truth is a DETECTOR finding, tracked separately.
                                                     //   false darks the stage (the soak baseline).
+// ── Timeline fusion (timeline_fusion.h, docs/design/timeline-fusion.md) ──────
+// The positions ladder's occupancy test — "whoever got there first wins" — hands
+// an IMU-bound swing a conf-0.35 hand-orientation PROXY at P6, a conf-0.35
+// forearm proxy at P8 and a conf-0.20 window-edge CLAMP at P10, discarding the
+// camera's measured value in each slot. Fusion arbitrates on measurement CLASS
+// (TimingClass) and estimand OWNERSHIP instead, so a measurement displaces a
+// proxy and a proxy never displaces a measurement.
+//
+// LANDS DEFAULT OFF (V1). refine.fusion=false ⇒ TimelineFusionStage never runs,
+// PositionsLadderStage runs exactly as today ⇒ byte- AND code-path-identical to
+// the pre-fusion pipeline (the parity baseline, timeline-fusion.md §8 gate 2).
+// The default flips in its own commit citing the corpus gate, exactly as
+// refine.positionsLadder did on 2026-08-09.
+inline constexpr bool   kFusion            = false; // refine.fusion — arbitrate the ladder
+                                                    //   (V1 flips P6/P8/P10 on IMU-bound swings)
+inline constexpr bool   kFusionP1          = false; // refine.fusionP1 — Address/P1 arbitration.
+                                                    //   Implemented but DARK: Address is the
+                                                    //   reference instant for tempo, every
+                                                    //   Address-referenced pose metric and the
+                                                    //   replay trim, so it gets its own Phase-2
+                                                    //   gate (timeline-fusion.md §4.4, §9.1).
+inline constexpr int    kFusionDisputeMs   = 300;   // refine.fusionDisputeMs — a replacement is
+                                                    //   refused (and counted `disputed`) when the
+                                                    //   two witnesses disagree by more than this
+                                                    //   AND the incumbent is itself Measured. A
+                                                    //   PROXY incumbent gets NO cap: its class
+                                                    //   already says the time is a stand-in, so no
+                                                    //   magnitude of disagreement rehabilitates it
+                                                    //   (Wrist_01/0003, where the capped draft would
+                                                    //   have preserved a 667 ms error — §4.3).
+                                                    //   Generous by design: a different-SWING level
+                                                    //   of disagreement, never a consistent bias.
 } // namespace refine
 
 // ── Kinematics display series (kinematic_series.*) ───────────────────────────

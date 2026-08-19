@@ -1123,6 +1123,8 @@ Segmentation phasesToSegmentation(const PhaseModel& pm, const std::vector<int64_
     const int nf = int(tUs.size());
     if (nf < 2) return seg;
     auto tAt = [&](int f) { return tUs[std::clamp(f, 0, nf - 1)]; };
+    // TimingClass stays the default Measured on every event here: they are all
+    // located phase-model frames, not proxies or clamps (timeline-fusion.md §4.2).
     auto add = [&](Phase p, int f) { PhaseEvent e; e.phase = p; e.t_us = tAt(f); e.conf = conf; seg.events.push_back(e); };
     // Address = the hold end when the caller located one (addressHoldEndFrame,
     // camera-first P1 fix); bs0 — the TAKEAWAY-start frame — is the legacy value
@@ -2142,6 +2144,18 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
         // Sample the emitted track at t: linear-interpolate grip/θ between the two
         // straddling samples; conf/length come from the NEARER sample; the drawn
         // head follows grip + len·dir(θ).
+        // How the P-TIME was located, for timeline arbitration (timeline_fusion.h,
+        // timeline-fusion.md §4.2). NOT a restatement of conf: conf says how well
+        // the club was SEEN in that frame (BAND/RAY/WEDGE/RECON/PRED tier), this
+        // says whether the instant rests on a real vision measurement at all. A
+        // crossing resolved on a coasted, IMU-bridged or model-predicted sample is
+        // a Proxy — it can still be the best available time, it just must not
+        // displace someone else's measurement.
+        auto classOf = [](const ShaftSample2D& s) {
+            return ((s.flags & (ShaftMeasured | ShaftWedge)) && !(s.flags & ShaftCoasted))
+                       ? TimingClass::Measured
+                       : TimingClass::Proxy;
+        };
         auto sampleTrackAt = [&](int64_t t, ShaftPosition& pos) {
             const std::vector<ShaftSample2D>& S = out.samples;
             size_t b = 0;
@@ -2151,6 +2165,7 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                 pos.gripPx   = s.gripPx;
                 pos.thetaRad = s.thetaRad;
                 pos.conf     = s.conf;
+                pos.timing   = classOf(s);
                 pos.lenPx    = std::hypot(s.headPx.x() - s.gripPx.x(), s.headPx.y() - s.gripPx.y());
             } else {
                 const ShaftSample2D& a = S[b - 1];
@@ -2164,6 +2179,10 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                 pos.gripPx   = QPointF(gxp, gyp);
                 pos.thetaRad = a.thetaRad + dth * frac;
                 pos.conf     = near.conf;
+                // Both straddling samples carry the instant; it is only Measured
+                // when neither of them was a coast/predict fill.
+                pos.timing   = (timingRank(classOf(a)) <= timingRank(classOf(c)))
+                                   ? classOf(a) : classOf(c);
                 pos.lenPx    = std::hypot(near.headPx.x() - near.gripPx.x(),
                                           near.headPx.y() - near.gripPx.y());
             }
@@ -2353,6 +2372,10 @@ ShaftTrack2D decideTrack(const FrameSource& frameAt, const std::vector<int64_t>&
                     }
                     pos.stackN        = fr.stackN;
                     pos.source        = uint8_t(PositionSource::MilestoneFit);
+                    // An accepted milestone fit re-measures the geometry from the
+                    // pixels themselves (the P1 stack fit included), so it upgrades
+                    // a position the DP had only predicted to a real measurement.
+                    pos.timing        = TimingClass::Measured;
                 }
             }
         }

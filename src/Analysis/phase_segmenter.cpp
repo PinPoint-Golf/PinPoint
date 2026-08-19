@@ -27,11 +27,17 @@ namespace pinpoint::analysis {
 namespace ps = phase_signals;
 namespace {
 
-// A detector candidate: a refined instant + shaped confidence.
+// A detector candidate: a refined instant + shaped confidence + how the instant
+// was OBTAINED. `cls` says in data what the capped conf constants below have
+// always said in comments — 0.35 "hand-orientation PROXY", 0.30 "continuous
+// waggle" fallback, 0.20 "window-edge clamp, visibly so" — so timeline_fusion.h
+// can arbitrate on it instead of guessing from conf magnitudes. Measured is the
+// default because most detectors here genuinely measure their quantity.
 struct Cand {
-    bool    ok   = false;
-    int64_t tUs  = 0;
-    float   conf = 0.f;
+    bool        ok   = false;
+    int64_t     tUs  = 0;
+    float       conf = 0.f;
+    TimingClass cls  = TimingClass::Measured;
 };
 
 int nearestIndex(const std::vector<int64_t> &grid, int64_t t)
@@ -126,13 +132,18 @@ TopDetect detectTop(const SegmentStream &s, const std::vector<int64_t> &grid,
 // Hand/forearm voting (A.5 multi-segment rule): agreement within the window
 // averages instants and boosts confidence; disagreement prefers the first
 // (hand) and lowers it.
+// A vote is no better than its worse witness: averaging a measurement with a
+// fallback produces a time that is still part placeholder, so the class of the
+// combined candidate is the LOWER-ranked of the two.
 Cand vote(const Cand &hand, const Cand &fore, int64_t agreeUs)
 {
     if (hand.ok && fore.ok) {
+        const TimingClass cls =
+            timingRank(hand.cls) <= timingRank(fore.cls) ? hand.cls : fore.cls;
         if (std::llabs(hand.tUs - fore.tUs) <= agreeUs)
             return { true, (hand.tUs + fore.tUs) / 2,
-                     std::min(0.98f, std::max(hand.conf, fore.conf) + 0.05f) };
-        return { true, hand.tUs, hand.conf * 0.7f };
+                     std::min(0.98f, std::max(hand.conf, fore.conf) + 0.05f), cls };
+        return { true, hand.tUs, hand.conf * 0.7f, hand.cls };
     }
     return hand.ok ? hand : fore;
 }
@@ -198,10 +209,12 @@ Cand detectTakeaway(const std::vector<double> &env, const std::vector<int64_t> &
             return out;
         }
     }
-    // Never went quiet inside the window — continuous pre-shot motion.
+    // Never went quiet inside the window — continuous pre-shot motion. The
+    // window edge is a placeholder, not an estimate of the takeaway.
     out.ok   = true;
     out.tUs  = grid.front();
     out.conf = 0.3f;
+    out.cls  = TimingClass::Fallback;
     return out;
 }
 
@@ -233,9 +246,12 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
     // "bounds are just the window" (A.2.6: refuse the ladder, never guess it).
     const auto clampFallback = [&] {
         out.events.clear();
-        out.events.push_back({ Phase::Address, grid.front(),  0.3f });
-        out.events.push_back({ Phase::Impact,  clampedImpact, 1.0f });
-        out.events.push_back({ Phase::Finish,  grid.back(),   0.2f });
+        out.events.push_back({ Phase::Address, grid.front(),  0.3f, SegmentRole::Unknown,
+                               TimingClass::Fallback });
+        out.events.push_back({ Phase::Impact,  clampedImpact, 1.0f, SegmentRole::Unknown,
+                               TimingClass::Anchor });
+        out.events.push_back({ Phase::Finish,  grid.back(),   0.2f, SegmentRole::Unknown,
+                               TimingClass::Fallback });
         out.conf = 0.0f;
         return out;
     };
@@ -305,7 +321,10 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
         cfg.voteAgreeUs);
 
     // ── 4. Address — end of the last sustained stillness before Takeaway ────
-    Cand address{ true, takeaway.tUs, 0.3f };   // fallback: continuous waggle
+    // Fallback: continuous waggle — Address co-timed to Takeaway because no
+    // sustained stillness was ever found. This is the branch that held Address on
+    // 11/11 wG3 swings, ~97 ms from the club's own P1 (timeline-fusion.md §2).
+    Cand address{ true, takeaway.tUs, 0.3f, TimingClass::Fallback };
     {
         const std::vector<uint8_t> still =
             ps::stillMask(streams, cfg.stillGyroDps, cfg.stillAccelTolG);
@@ -319,7 +338,8 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
             if (b < 0)
                 b = i;
             if (grid[size_t(b)] - grid[size_t(i)] >= cfg.addressStillMinUs) {
-                address = { true, grid[size_t(b)], 0.9f };   // END of the stillness
+                // END of the stillness — a real measurement of address.
+                address = { true, grid[size_t(b)], 0.9f, TimingClass::Measured };
                 break;
             }
         }
@@ -354,8 +374,8 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
         for (int i = idxImpact; i + 1 < int(N); ++i)
             if (incl[size_t(i)] < 0.0 && incl[size_t(i) + 1] >= 0.0) {
                 const int64_t tUs = refineCrossingUs(grid, incl, i, 0.0);
-                if (++post == 1) shaftParThrough = { true, tUs, 0.35f };
-                else { followThrough = { true, tUs, 0.65f }; break; }
+                if (++post == 1) shaftParThrough = { true, tUs, 0.35f, TimingClass::Proxy };
+                else { followThrough = { true, tUs, 0.65f, TimingClass::Measured }; break; }
             }
     }
     if (hand) {
@@ -366,7 +386,8 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
         const int from = armParDown.ok ? idxAtOrBelow(grid, armParDown.tUs) : idxTop;
         for (int i = from; i < idxImpact && i + 1 < int(N); ++i)
             if (incl[size_t(i)] > 0.0 && incl[size_t(i) + 1] <= 0.0) {
-                delivery = { true, refineCrossingUs(grid, incl, i, 0.0), 0.35f };
+                delivery = { true, refineCrossingUs(grid, incl, i, 0.0), 0.35f,
+                             TimingClass::Proxy };
                 break;
             }
     }
@@ -384,7 +405,9 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
     }
 
     // ── 7. Finish — relaxed quiet sustained after impact ────────────────────
-    Cand finish{ true, grid.back(), 0.2f };   // window-edge clamp, visibly so
+    // Window-edge clamp, visibly so — and now sayably so: Fallback is what stops
+    // it wearing the P10 label over the club's measured finish.
+    Cand finish{ true, grid.back(), 0.2f, TimingClass::Fallback };
     {
         const std::vector<uint8_t> quiet =
             ps::stillMask(streams, cfg.finishGyroDps, 2.0 * cfg.stillAccelTolG);
@@ -401,7 +424,8 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
             if (grid[size_t(i)] - grid[size_t(runStart)] >= cfg.finishSustainUs) {
                 finish = { true, grid[size_t(runStart)],
                            0.8f * gateConf(grid[size_t(runStart)] - clampedImpact,
-                                           cfg.finishMinUs, cfg.finishMaxUs) };
+                                           cfg.finishMinUs, cfg.finishMaxUs),
+                           TimingClass::Measured };   // the quiet-run detector found a real finish
                 break;
             }
         }
@@ -411,7 +435,7 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
     const SegmentRole foreRole = fore ? SegmentRole::LeadForearm : refRole;
     const auto addEvent = [&out](Phase ph, const Cand &c, SegmentRole prov) {
         if (c.ok)
-            out.events.push_back({ ph, c.tUs, c.conf, prov });
+            out.events.push_back({ ph, c.tUs, c.conf, prov, c.cls });
     };
     // P5/P8 go out under the names the diagnostics vocabulary uses —
     // ArmParallelDown/ShaftParallelThrough, not the v1 Downswing/Release. They
@@ -424,7 +448,8 @@ Segmentation PhaseSegmenter::segment(const FusedStreams &streams, int64_t impact
     addEvent(Phase::ArmParallelDown,      armParDown,      foreRole);
     addEvent(Phase::Delivery,             delivery,        SegmentRole::LeadHand);
     addEvent(Phase::MaxSpeed,             maxSpeed,        refRole);
-    addEvent(Phase::Impact,               { true, clampedImpact, 1.0f }, SegmentRole::Unknown);
+    addEvent(Phase::Impact,               { true, clampedImpact, 1.0f, TimingClass::Anchor },
+             SegmentRole::Unknown);
     addEvent(Phase::ShaftParallelThrough, shaftParThrough, foreRole);
     addEvent(Phase::FollowThrough,        followThrough,   foreRole);
     addEvent(Phase::Finish,               finish,          refRole);

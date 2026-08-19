@@ -505,6 +505,16 @@ pp_add_test(impact_geom_test SOURCES impact_geom_test.cpp NO_QT)
 # Header-only, Qt-only, no fixture.
 pp_add_test(positions_ladder_test SOURCES positions_ladder_test.cpp)
 
+# Timeline arbitration (timeline_fusion.h): the §4.3 decision table — class
+# precedence (Anchor > Measured > Proxy > Fallback), estimand ownership breaking
+# equal classes, ties retaining the incumbent — plus the window/neighbour guards,
+# the Measured-only dispute cap, the Impact invariant, the all-abstain
+# byte-identity contract, camera-only parity with emitPositionsLadder, and the
+# dark refine.fusion / refine.fusionP1 defaults. Fixtures shaped from the eleven
+# 2026-08-18 wG3 swings and the Wrist_01/0003 degenerate. Header-only, Qt-only,
+# no fixture.
+pp_add_test(timeline_fusion_test SOURCES timeline_fusion_test.cpp)
+
 # Phase-1 motion-overlay pose smoother (pose_smoother.{h,cpp}): offline non-causal
 # RTS smoother for the 17 COCO keypoints — a 3-state [p,v,a] white-jerk sibling of
 # the clubhead HeadKf1D + runHeadTemporal, with variable dt + pixel-domain +

@@ -124,12 +124,24 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
     }
     o[QStringLiteral("metrics")] = metrics;
 
+    // `timing` (TimingClass — how the instant was OBTAINED, orthogonal to conf)
+    // is written ONLY on a fusion-arbitrated ladder (segmentation.version >= 5).
+    // Every producer stamps the field in memory regardless, but emitting it
+    // unconditionally would put a new key on every phase of every swing and
+    // break the refine.fusion=false parity baseline the corpus gate rests on
+    // (timeline-fusion.md §8 gate 2). Absent ⇒ Measured, which is what the
+    // pre-fusion producers all effectively claimed.
+    const bool fused = a.segmentation.version >= 5;
     QJsonArray phases;
-    for (const PhaseEvent &e : a.phases)
-        phases.append(QJsonObject{ { QStringLiteral("phase"),   int(e.phase) },
-                                   { QStringLiteral("t_us"),    rel(e.t_us) },
-                                   { QStringLiteral("conf"),    e.conf },
-                                   { QStringLiteral("segment"), int(e.provenance) } });
+    for (const PhaseEvent &e : a.phases) {
+        QJsonObject po{ { QStringLiteral("phase"),   int(e.phase) },
+                        { QStringLiteral("t_us"),    rel(e.t_us) },
+                        { QStringLiteral("conf"),    e.conf },
+                        { QStringLiteral("segment"), int(e.provenance) } };
+        if (fused)
+            po.insert(QStringLiteral("timing"), int(e.timing));
+        phases.append(po);
+    }
     o[QStringLiteral("phases")] = phases;
 
     // Additive "assessment" block = the AI-COACH feedback feed (design §B.0): lead-wrist
@@ -179,12 +191,33 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
 
     // Additive segmentation block (v3 G2, design A.7): the swing bounds +
     // ladder meta. Missing block on reload = full-window bounds.
-    if (a.segmentation.swingEndUs > a.segmentation.swingStartUs)
-        o[QStringLiteral("segmentation")] = QJsonObject{
+    if (a.segmentation.swingEndUs > a.segmentation.swingStartUs) {
+        QJsonObject seg{
             { QStringLiteral("swingStartUs"), rel(a.segmentation.swingStartUs) },
             { QStringLiteral("swingEndUs"),   rel(a.segmentation.swingEndUs) },
             { QStringLiteral("conf"),    double(a.segmentation.conf) },
             { QStringLiteral("version"), a.segmentation.version } };
+        // Additive fusion audit trail (timeline_fusion.h): one entry per
+        // arbitrated P-slot, RETENTIONS INCLUDED — the club-vs-IMU delta on a
+        // slot that did NOT flip is exactly the calibration data the V2 σ path
+        // needs (timeline-fusion.md §5, §9.2), and discarding it would repeat the
+        // mistake this design exists to fix. Present only when a fusion pass
+        // emitted something, so a fusion-dark or all-abstain run writes nothing.
+        // `phase` is the Phase enum int (as phases[].phase), NOT the coaching
+        // P-index; winner/loser are SegmentRole; reason is FusionReason.
+        if (!a.segmentation.fusion.empty()) {
+            QJsonArray fusion;
+            for (const analysis::FusionDecision &d : a.segmentation.fusion)
+                fusion.append(QJsonObject{
+                    { QStringLiteral("phase"),  int(d.phase) },
+                    { QStringLiteral("winner"), int(d.winner) },
+                    { QStringLiteral("loser"),  int(d.loser) },
+                    { QStringLiteral("dtUs"),   qint64(d.deltaUs) },
+                    { QStringLiteral("reason"), int(d.reason) } });
+            seg.insert(QStringLiteral("fusion"), fusion);
+        }
+        o[QStringLiteral("segmentation")] = seg;
+    }
 
     // Additive IMU-binding snapshot (SwingLab): the per-device calibration
     // (A/M) keyed by device serial, so the offline runner can re-fuse a

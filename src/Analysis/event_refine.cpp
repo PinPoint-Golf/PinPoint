@@ -275,6 +275,8 @@ EventRefineResult refineEvents(Segmentation &seg, ShaftTrack2D &shaft,
             takeEv->t_us      = takeUs;
             takeEv->conf      = conf;
             takeEv->provenance = SegmentRole::Club;
+            takeEv->timing     = TimingClass::Measured;   // relocated on the club's own departure
+
             res.takeawayRefined = true;
             res.takeawayUs      = takeUs;
         }
@@ -296,6 +298,7 @@ EventRefineResult refineEvents(Segmentation &seg, ShaftTrack2D &shaft,
             addrEv->t_us       = addrUs;
             addrEv->conf       = conf;
             addrEv->provenance = SegmentRole::Club;
+            addrEv->timing     = TimingClass::Measured;   // the grip-stillness walk-back measured it
             seg.swingStartUs   = std::min(seg.swingStartUs, addrUs);
             res.addressRefined = true;
             res.addressUs      = addrUs;

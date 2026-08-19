@@ -139,6 +139,52 @@ enum class Phase {
     ShaftParallelThrough = 14,  // P8 — shaft parallel (follow-through); image-plane
 };
 
+// HOW an event's (or position's) TIME was obtained — the arbitration currency of
+// timeline_fusion.h (docs/design/timeline-fusion.md §4.2). ORTHOGONAL to `conf`,
+// which stays the producer-local, display-oriented quality hint it has always
+// been: four incommensurable scales share that float (segmenter gate shaping,
+// club per-frame detection tier, the flat vision 0.5, event_refine's tier score),
+// so comparing two producers' conf is close to arbitrary. This field is
+// comparable ACROSS producers because each producer DECLARES it about its own
+// emission, converting what today are magic capped constants (0.35 "proxy",
+// 0.30 "fallback", 0.20 "clamp") into data.
+//
+// The INTEGER VALUES ARE NOT THE PRECEDENCE ORDER — use timingRank(). They are a
+// persisted append-only encoding chosen so Measured == 0: a swing.json written
+// before this field existed reads back as Measured, which is what the old
+// producers all effectively claimed.
+enum class TimingClass : uint8_t {
+    Measured = 0,   // located from a direct observation of the defining quantity
+    Anchor   = 1,   // externally anchored (acoustic impact). Never displaced.
+    Proxy    = 2,   // located from a correlated stand-in (the producer says so itself)
+    Fallback = 3,   // a clamp or default; the time is a placeholder, not an estimate
+};
+
+// Precedence, high wins: Anchor > Measured > Proxy > Fallback. Deliberately a
+// function rather than the enum's own ordering — see the numbering note above.
+inline int timingRank(TimingClass c)
+{
+    switch (c) {
+    case TimingClass::Anchor:   return 3;
+    case TimingClass::Measured: return 2;
+    case TimingClass::Proxy:    return 1;
+    case TimingClass::Fallback: break;
+    }
+    return 0;
+}
+
+// Stable short name for logs/diagnostics (never persisted — the int is).
+inline QString timingClassName(TimingClass c)
+{
+    switch (c) {
+    case TimingClass::Anchor:   return QStringLiteral("Anchor");
+    case TimingClass::Measured: return QStringLiteral("Measured");
+    case TimingClass::Proxy:    return QStringLiteral("Proxy");
+    case TimingClass::Fallback: break;
+    }
+    return QStringLiteral("Fallback");
+}
+
 // A detected swing-phase event on the shared phase timeline.
 struct PhaseEvent {
     Phase   phase = Phase::Address;
@@ -147,6 +193,39 @@ struct PhaseEvent {
     // Which segment the event was measured from (provenance, design A.2.5);
     // Club once the shaft refinement lands. Unknown for anchors (Impact).
     SegmentRole provenance = SegmentRole::Unknown;
+    // How the time above was obtained (timeline-fusion.md §4.2). Producers label
+    // their own emissions; the arbiter decides on this plus estimand ownership,
+    // never on conf. Serialized only on a fusion-arbitrated segmentation
+    // (version >= 5) — see the Segmentation::fusion note.
+    TimingClass timing = TimingClass::Measured;
+};
+
+// Why one witness won (or did not win) a contested P-slot — the audit trail of a
+// fuseTimeline pass (timeline_fusion.h). APPEND-ONLY: persisted as raw ints in
+// analysis.segmentation.fusion[].
+enum class FusionReason : uint8_t {
+    Inserted       = 0,   // slot was empty; the club candidate filled it
+    ClassBeat      = 1,   // candidate outranks the incumbent's class ⇒ replaced
+    ClassHeld      = 2,   // incumbent outranks the candidate's class ⇒ retained
+    OwnerBeat      = 3,   // classes equal; the candidate owns the estimand ⇒ replaced
+    OwnerHeld      = 4,   // classes equal; the incumbent owns the estimand ⇒ retained
+    AnchorHeld     = 5,   // Impact, or any Anchor-class incumbent — never displaced
+    TieHeld        = 6,   // same class, no owner edge, or identical times ⇒ stability wins
+    Disputed       = 7,   // Measured-vs-Measured gap exceeded the dispute cap ⇒ retained
+    GuardWindow    = 8,   // winner fell outside the slot's anchor window ⇒ abstained
+    GuardNeighbour = 9,   // winner would break strict time ordering ⇒ abstained
+};
+
+// One arbitrated slot, kept whether or not anything moved: the deltas of the
+// slots that did NOT flip are exactly the calibration data the V2 σ path needs
+// (timeline-fusion.md §5, §9.2), so a retention is recorded as deliberately as a
+// replacement. deltaUs is winner − loser; 0 for an uncontested insert.
+struct FusionDecision {
+    Phase        phase   = Phase::Address;
+    SegmentRole  winner  = SegmentRole::Unknown;
+    SegmentRole  loser   = SegmentRole::Unknown;   // Unknown ⇒ uncontested insert
+    int64_t      deltaUs = 0;
+    FusionReason reason  = FusionReason::Inserted;
 };
 
 // The segmentation result (design addendum A.6/C.5): the event ladder plus
@@ -162,7 +241,15 @@ struct Segmentation {
     float   conf         = 0.0f;           // min over {Address, Top, Impact, Finish}
     int     version      = 2;              // 3 = shaft refinement ran (event_refine.h);
                                            // 4 = positions ladder emitted (positions_ladder.h
-                                           // inserted club P-events). Persisted and read back.
+                                           // inserted club P-events); 5 = the timeline was
+                                           // FUSION-ARBITRATED (timeline_fusion.h — a slot was
+                                           // inserted or replaced on class + estimand ownership).
+                                           // Persisted and read back.
+    // The arbitration audit trail, populated ONLY by a fuseTimeline pass that
+    // actually emitted something (version 5). Empty on every other path, so a
+    // fusion-dark or all-abstain run leaves this struct — and swing.json —
+    // byte-identical. Persisted as analysis.segmentation.fusion[].
+    std::vector<FusionDecision> fusion;
 
     const PhaseEvent *eventFor(Phase p) const {
         for (const PhaseEvent &e : events)
@@ -549,6 +636,14 @@ struct ShaftPosition {
     float    sigmaLenPx    = -1.f;    // length posterior σ (px); −1 = not fitted (B1)
     int      stackN        = 0;       // shift-and-stack frame count (B2); 0 = track sample
     uint8_t  source        = 0;       // PositionSource
+    // How the TIME was located, for timeline arbitration (timeline-fusion.md
+    // §4.2): Measured when the crossing/milestone sat on a real vision sample
+    // (BAND/RAY/WEDGE tier), Proxy when it was resolved on a coasted, IMU-bridged
+    // or model-predicted sample. IN-MEMORY ONLY — never serialized (the same
+    // same-pass conduit ShaftTrack2D::onsetFloorFrame is), so adding it keeps
+    // swing.json byte-identical; the class that survives into the file is the one
+    // stamped on the PhaseEvent fusion published.
+    TimingClass timing     = TimingClass::Measured;
 };
 
 struct ShaftTrack2D {

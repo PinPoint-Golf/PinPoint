@@ -52,6 +52,7 @@
 #include "shaft_plane.h"
 #include "shaft_tracker.h"
 #include "tempo_metrics.h"
+#include "timeline_fusion.h"
 #include "wrist_resemblance.h"
 #include "score_uncertainty.h"
 #include "wrist_angles.h"
@@ -611,11 +612,17 @@ struct EventRefineStage : AnalysisStage {
 //     refine.positionsLadder gate lives in canRun (mirroring EventRefineStage):
 //     dark ⇒ the stage is SKIPPED, not a no-op run, so ctx.seg is
 //     code-path-identical when off.
+//
+//     SUPERSEDED BY TimelineFusionStage when refine.fusion is on — the two are
+//     mutually exclusive by canRun (insertion into an empty slot is just
+//     arbitration against an absent incumbent, so the ladder's behaviour is a
+//     strict subset of fusion's). This stage retires when that flag freezes ON.
 struct PositionsLadderStage : AnalysisStage {
     QString name() const override { return QStringLiteral("PositionsLadder"); }
     bool canRun(const AnalysisContext &ctx) const override
     {
         return PositionsLadderConfig::fromOverrides(ctx.job.tuningOverrides).enabled
+            && !TimelineFusionConfig::fromOverrides(ctx.job.tuningOverrides).enabled
             && !ctx.detail->shaft.positions.empty() && !ctx.seg.events.empty();
     }
     void run(AnalysisContext &ctx) override
@@ -625,6 +632,43 @@ struct PositionsLadderStage : AnalysisStage {
         ppInfo() << "[WristAnalysis] positionsLadder → version" << ctx.seg.version
                  << "inserted" << r.inserted << "abstained" << r.abstained
                  << "duplicate" << r.duplicate;
+    }
+};
+
+// 10c′. TimelineFusion — the same pipeline slot, arbitrating instead of
+//     back-filling (timeline_fusion.h; docs/design/timeline-fusion.md). Takes
+//     PositionsLadderStage's place when refine.fusion is on, so exactly one of
+//     the two ever mutates ctx.seg. Same gating discipline: DATA only (positions
+//     present, a resolved ladder present) plus the flag, and dark ⇒ SKIPPED, not
+//     a no-op run, so ctx.seg is code-path-identical with fusion off — the
+//     parity baseline the corpus gate measures against.
+struct TimelineFusionStage : AnalysisStage {
+    QString name() const override { return QStringLiteral("TimelineFusion"); }
+    bool canRun(const AnalysisContext &ctx) const override
+    {
+        return TimelineFusionConfig::fromOverrides(ctx.job.tuningOverrides).enabled
+            && !ctx.detail->shaft.positions.empty() && !ctx.seg.events.empty();
+    }
+    void run(AnalysisContext &ctx) override
+    {
+        const TimelineFusionConfig cfg =
+            TimelineFusionConfig::fromOverrides(ctx.job.tuningOverrides);
+        const TimelineFusionResult r =
+            fuseTimeline(ctx.seg, ctx.detail->shaft.positions, cfg);
+        ppInfo() << "[WristAnalysis] timelineFusion → version" << ctx.seg.version
+                 << "inserted" << r.inserted << "replaced" << r.replaced
+                 << "retained" << r.retained << "disputed" << r.disputed
+                 << "abstained" << r.abstained;
+        // One line per slot that actually FLIPPED — the retentions are persisted
+        // (seg.fusion) rather than logged, since they are calibration data, not
+        // news. Δ is winner − loser in ms.
+        for (const FusionDecision &d : r.decisions)
+            if (d.reason == FusionReason::ClassBeat || d.reason == FusionReason::OwnerBeat)
+                ppInfo() << "[WristAnalysis]   fusion phase" << int(d.phase)
+                         << "→" << segmentRoleName(d.winner)
+                         << "over" << segmentRoleName(d.loser)
+                         << "Δms" << qint64(d.deltaUs / 1000)
+                         << "reason" << int(d.reason);
     }
 };
 
@@ -1298,7 +1342,10 @@ SessionProfile wristProfile()
     p.stages.push_back(std::make_unique<ShaftLeanStage>());
     p.stages.push_back(std::make_unique<RequireProductsStage>());
     p.stages.push_back(std::make_unique<EventRefineStage>());
+    // Slot 10c, one of two: PositionsLadder back-fills, TimelineFusion
+    // arbitrates, and refine.fusion decides which one canRun lets through.
     p.stages.push_back(std::make_unique<PositionsLadderStage>());
+    p.stages.push_back(std::make_unique<TimelineFusionStage>());
     p.stages.push_back(std::make_unique<BindDetailStage>());
     appendBodyMetricStages(p);
     p.stages.push_back(std::make_unique<KinematicsStage>());
@@ -1373,8 +1420,11 @@ SessionProfile cameraKinematicsProfile()
     p.stages.push_back(std::make_unique<SegResolveStage>());
     // PositionsLadder is data-gated (positions + ladder present), not
     // session-gated, so it runs here too — the club P-events are a property of
-    // the camera, not of the session type.
+    // the camera, not of the session type. Same for its fusion successor: on a
+    // camera-only ladder every interior slot is a pure insertion and every anchor
+    // slot ties, so arbitration reproduces the ladder and adds the audit trail.
     p.stages.push_back(std::make_unique<PositionsLadderStage>());
+    p.stages.push_back(std::make_unique<TimelineFusionStage>());
     p.stages.push_back(std::make_unique<BindDetailStage>());
     // The same body-metric block the Wrist profile runs. It used to be absent here, which is what
     // made a face-on metric look like a property of the session rather than of the camera — see

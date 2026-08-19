@@ -464,16 +464,25 @@ strict subset of `fuseTimeline`'s and the old function retires when the flag fre
 
 - `PhaseEvent` gains `TimingClass timing` (persisted as an int field on
   `analysis.phases[]`; absent on old files ⇒ `Measured` is assumed on reload, which is
-  only ever read for display).
+  only ever read for display). *Implementation note (2026-08-19): it is written only when
+  `segmentation.version >= 5`. Producers stamp the field in memory unconditionally, but
+  emitting it unconditionally would put a new key on every phase of every swing and break
+  gate 2's `refine.fusion=false` byte-parity baseline. The enum numbers `Measured = 0` so
+  an absent field reads back as `Measured` structurally rather than by convention.*
 - `ShaftPosition` gains the same field, set at assembly time from the sample tier at the
-  located instant.
+  located instant. *Implementation note: in-memory only — a same-pass conduit into the
+  arbiter, like `ShaftTrack2D::onsetFloorFrame`, so `club.positions[]` stays
+  byte-identical. The class that survives into the file is the one fusion stamps on the
+  `PhaseEvent` it publishes.*
 - `phase_segmenter.cpp` sets it at each emission site (it already knows which branch it
   took; this converts comments into data).
 - `Segmentation.version = 5` ⇒ "fusion arbitrated" (append-only; `version` currently has
   no logic readers, only a diagnostics row and tests).
 
 **Persistence of decisions**: the `FusionDecision` list is persisted compactly as
-`analysis.segmentation.fusion[]` — `{p, winner, loser, dtUs, reason}`. This is cheap, and
+`analysis.segmentation.fusion[]` — `{phase, winner, loser, dtUs, reason}` (`phase` is the
+`Phase` enum int, as `phases[].phase`; the draft called it `p`, which would have collided
+with the coaching index `club.positions[].p` means). This is cheap, and
 it matters: the Part I diagnosis was conducted entirely from `swing.json`,
 and the *retained*-slot deltas (club P3 +15 ms, P4/P5 corroborations) are precisely the
 calibration data V2 needs. The arbitration that didn't happen is as much evidence as the
