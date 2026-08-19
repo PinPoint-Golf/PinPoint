@@ -102,6 +102,27 @@ struct ImuSegmentBinding {
     double      mountGravityErrorDeg = 0.0;
     QString     calibratedAtUtc;       // ISO8601 wallclock; empty = never calibrated
     double      calibAgeSec = -1.0;    // age at shot time; -1 = never calibrated
+
+    // ⚠ THIS IS NOT THE INSTRUMENT DISCRIMINATOR §0 #8 ASKED FOR, AND PHASE F CUT.
+    // That one existed to let two instruments claim ONE role simultaneously, so that
+    // streamFor(role) could pick between them. The app will never run a wG3 and a
+    // Witmotion at once — they interfere at wrist-and-hand spacing — so that problem
+    // does not exist and its solution was deleted rather than built.
+    //
+    // This flag exists for an unrelated and much smaller reason: ONE INSTRUMENT'S RAW
+    // QUATERNION NEEDS CONJUGATING BEFORE THE SHARED COMPOSITION. A wG3 streams
+    // world->body, our pipeline composes A·q_raw·M expecting body->world, and
+    // hm_frame.h's contract is q_anat = q_hm* ⊗ R_ph — i.e. toAnatomical() with the
+    // raw quaternion ALREADY conjugated. imu_calibration::toAnatomical does not
+    // conjugate and must not learn to; hm_sample_convert.h refuses to conjugate at
+    // storage time and that refusal is correct. So the one site that composes has to
+    // be told which convention it is holding, and this is how it is told.
+    //
+    // ⚠ Getting this wrong is INVISIBLE. Every four-candidate frame and both
+    // composition orders score exactly zero cross-talk (hm_frame.h:69-108); the
+    // wrist ANGLE is convention-blind. A missing conjugate produces a quaternion
+    // that tracks the wrist convincingly with every sign inverted.
+    bool        hackMotion = false;
 };
 
 // APPEND-ONLY: phases persist as raw ints in swing.json and QML compares the
@@ -175,6 +196,32 @@ struct MetricSeries {
     std::optional<double> sigma;
     bool flexPositive = true;             // stored-sign polarity (flip only at the label)
 };
+
+// Find a series by anatomical key, BEST INSTRUMENT FIRST.
+//
+// ⚠ THE ONE PLACE THE ORDER IS EXPRESSED for the analysis layer, and it exists because four files
+// had each grown their own copy of a bare `m.key == key` loop. A wG3 publishes `hm.leadWristFlexExt`
+// and never the bare key — new keys, never overwritten ones, so which instrument measured a swing
+// stays recoverable — and every one of those loops would therefore have gone quiet on a HackMotion
+// swing: no wrist score, no resemblance, no uncertainty interval, no review trace. Not because the
+// wrist was not measured, but because it was measured by the better instrument.
+//
+// Same shape and same reasoning as Measure::preferKeys one layer up (measure_vocabulary.h), and
+// deliberately NOT the same mechanism: that one is authored per measure in the diagnostics pack
+// because which instrument is better is a per-quantity judgement. This one is a fixed two-rung
+// ladder because the analysis layer has exactly one question — "did anything measure this axis" —
+// and no place to author an answer.
+//
+// ⚠ Pass the BARE key. Passing "hm.x" would look for "hm.hm.x" first and quietly fall through.
+inline const MetricSeries *findSeriesByLadder(const std::vector<MetricSeries> &v, const QString &key)
+{
+    const QString preferred = QStringLiteral("hm.") + key;
+    for (const MetricSeries &m : v)
+        if (m.key == preferred) return &m;
+    for (const MetricSeries &m : v)
+        if (m.key == key) return &m;
+    return nullptr;
+}
 
 // A metric scored against its reference band.
 struct ScoredMetric {
@@ -572,6 +619,13 @@ struct BindingRecord {
     double      mountGravityErrorDeg = 0.0;
     QString     calibratedAtUtc;
     double      calibAgeSec = -1.0;
+    // ⚠ PERSISTED, AND IT HAS TO BE. analysis.bindings[] takes PRECEDENCE over the
+    // per-stream device.* fallback when a swing is re-analysed (swing_reanalyzer.cpp),
+    // so a HackMotion swing that lost this flag on the way to disk would come back
+    // with hackMotion = false, skip the conjugate, and produce a wrist curve with
+    // every sign inverted — on the SECOND analysis only, and looking entirely
+    // plausible. See ImuSegmentBinding::hackMotion.
+    bool        hackMotion = false;
 };
 
 // Per-stage analyzer wall times (plan §2 telemetry — swing_span_bounding_plan.md):

@@ -154,12 +154,19 @@ QVariantMap ShotReplayController::shotContext(int sessionType) const
     // analysisDetail and this is the only document view we hold here. It is also the more
     // honest test: what makes the readings resolve is that they are in `metrics[]`, so
     // asking the same question the resolver will ask cannot disagree with it.
-    bool hasLm = false;
+    // A HackMotion measured this shot's wrist — same test, same reason. `bindings[]`
+    // above carries roles but not instruments, and a wG3's roles are indistinguishable
+    // from a pair of Witmotions'; the `hm.` prefix is what says which. Asking the
+    // question the resolver will ask keeps the two from disagreeing.
+    bool hasLm = false, hasHm = false;
     for (const QVariant &sv : d.value(QStringLiteral("series")).toList()) {
-        if (sv.toMap().value(QStringLiteral("key")).toString()
-              .startsWith(QStringLiteral("lm."))) { hasLm = true; break; }
+        const QString key = sv.toMap().value(QStringLiteral("key")).toString();
+        if (key.startsWith(QStringLiteral("lm."))) hasLm = true;
+        if (key.startsWith(QStringLiteral("hm."))) hasHm = true;
+        if (hasLm && hasHm) break;
     }
     ctx.insert(QStringLiteral("hasLaunchMonitor"), hasLm);
+    ctx.insert(QStringLiteral("hasHackMotion"),    hasHm);
 
     ctx.insert(QStringLiteral("sessionType"), sessionType);
     // archetype/club/shape: not derivable from swing.json today → catalogue defaults.

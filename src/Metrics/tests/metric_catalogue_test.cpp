@@ -67,7 +67,10 @@ int main()
         // 87 -> 88 with balanceHeelToe, the depth-axis partner to comOverLeadFoot. Balance was
         // measured along the stance line only, so a golfer sat on their heels — which is one of
         // the setup causes of early extension — had no metric to be sat on their heels IN.
-        checkEqI(static_cast<int>(cat.all().size()), 90, "descriptor count == 90");   // 71 + 26 lm. - 9 renamed, + transitionPlaneDelta, + compoundMiss
+        // 90 -> 94 with Phase F: forearmRotation (a segment axial rotation, which no
+        // existing key expressed) plus the three HackMotion rungs hm.leadWristFlexExt,
+        // hm.leadWristRadUln and hm.forearmRotation.
+        checkEqI(static_cast<int>(cat.all().size()), 94, "descriptor count == 94");   // 71 + 26 lm. - 9 renamed, + transitionPlaneDelta, + compoundMiss, + 4 wrist/HM
         const char *live[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                "leadArmFlexion",  "clubheadSpeed",   "handSpeed", "lagAngle",
                                "impactShaftLean", "stanceWidth",     "leadFootFlare",
@@ -85,7 +88,13 @@ int main()
                                "shaftAngleVsHorizontal", "attackAngle", "lowPointAhead",
                                "trailWristFlexExt",
                                // The face-on swing-plane transition delta (shaft_plane.h).
-                               "transitionPlaneDelta" };
+                               "transitionPlaneDelta",
+                               // Phase F. forearmRotation is produced from the lead-forearm
+                               // binding alone, for EITHER vendor; the hm. rungs are produced
+                               // when a wG3 measured the swing.
+                               "forearmRotation",
+                               "hm.leadWristFlexExt", "hm.leadWristRadUln",
+                               "hm.forearmRotation" };
         bool allPresent = true;
         for (const char *k : live)
             if (!cat.descriptor(QString::fromLatin1(k))) { allPresent = false;
@@ -98,15 +107,19 @@ int main()
 
     // 2. Type / group / scored filtering.
     {
-        checkEqI(countType(cat, MetricType::TimeSeries),  39, "TimeSeries count");   // +balanceHeelToe
+        checkEqI(countType(cat, MetricType::TimeSeries),  43, "TimeSeries count");   // +balanceHeelToe, +forearmRotation, +3 hm.
         // 26, not 28: `shoulderAlignment` and `hipAlignment` were both PointInTime and both retired
         // as duplicates of a series the catalogue already carries.
         checkEqI(countType(cat, MetricType::PointInTime), 45, "PointInTime count");   // +17: a monitor reports one number per shot; +transitionPlaneDelta, +compoundMiss
         checkEqI(countType(cat, MetricType::Summary),      5, "Summary count");
         checkEqI(countType(cat, MetricType::Sequence),     1, "Sequence count (kinematicSequence)");
 
+        // 5 -> 9: forearmRotation and the three HackMotion rungs all belong to the wrist
+        // group. ⚠ The HackMotion rungs are DELIBERATELY in the same group as the keys
+        // they shadow — they are the same quantity by a better instrument, and filing
+        // them apart would read as four extra things to buy rather than one.
         MetricQuery gq; gq.group = QStringLiteral("Wrist & forearm");
-        checkEqI(static_cast<int>(cat.query(gq).size()), 5, "group 'Wrist & forearm' == 5");
+        checkEqI(static_cast<int>(cat.query(gq).size()), 9, "group 'Wrist & forearm' == 9");
 
         MetricQuery scq; scq.group = QStringLiteral("Score");
         checkEqI(static_cast<int>(cat.query(scq).size()), 3, "group 'Score' == 3");
@@ -810,7 +823,10 @@ int main()
         // forearm+hand, no camera, no club → bow/cup + hinge + wristScore +
         // wristResemblance + both tempo metrics (tempo needs no devices beyond
         // whatever segmented the swing, which an IMU pair does).
-        checkEqI(static_cast<int>(avail.size()), 6, "availableOnly (forearm+hand only) → 6");
+        // 6 -> 7 with forearmRotation, and the increment is the point of it: a segment axial
+        // rotation needs the FOREARM ALONE, so it is the first wrist-group metric a two-sensor
+        // rig can produce that the three-sensor `forearmPronation` cannot stand in for.
+        checkEqI(static_cast<int>(avail.size()), 7, "availableOnly (forearm+hand only) → 7");
         check(cat.query(aq, nullptr).empty(), "availableOnly without ctx → empty");
     }
 

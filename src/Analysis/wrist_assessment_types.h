@@ -119,8 +119,21 @@ inline double mirrorSign(PpJointDof dof)
 // Map a producer metric key → DOF. Accepts both the metric_extractor spelling
 // (leadArmFlexion / forearmPronation) and the mockup spelling (leadElbowFlex / leadForearmRot /
 // trailWristExt). Returns nullopt for an unknown key. Used by the Phase-3 adapter.
-inline std::optional<PpJointDof> dofForMetricKey(const QString &key)
+//
+// ⚠ THE INSTRUMENT PREFIX IS STRIPPED FIRST, and this one line is what keeps the whole
+// DOF × P-position assessment grid working on a HackMotion swing. A DOF is an anatomical axis —
+// which instrument measured it is not part of its identity, and a grid that went blank because
+// the series arrived as `hm.leadWristFlexExt` would be reporting a naming decision as missing
+// anatomy. This is the same best-first idea as Measure::preferKeys one layer up, in the one place
+// the join from key to DOF happens.
+inline std::optional<PpJointDof> dofForMetricKey(const QString &rawKey)
 {
+    const QString key = rawKey.startsWith(QLatin1String("hm.")) ? rawKey.mid(3) : rawKey;
+    // ⚠ `forearmRotation` DELIBERATELY MAPS TO NOTHING. The grid's LeadForearmRot row is the ISB
+    // radioulnar angle, fed by `forearmPronation`; forearm rotation is a different quantity that
+    // happens to concern the same bone. Routing it here would put two different measurements in
+    // one cell on a three-sensor rig — last writer wins, silently — and would let a wG3 fill a row
+    // for an angle it cannot measure at all. An empty row is the honest answer.
     if (key == QLatin1String("leadWristFlexExt")) return PpJointDof::LeadWristFlexExt;
     if (key == QLatin1String("leadWristRadUln"))  return PpJointDof::LeadWristRadUln;
     if (key == QLatin1String("forearmPronation") || key == QLatin1String("leadForearmRot"))

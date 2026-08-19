@@ -32,8 +32,26 @@ namespace pinpoint::analysis {
 // handedness: 0 unknown / 1 right / 2 left — selects lead-arm sign mirroring (provisional
 // until verified on the wizard "check your sensors" page).
 //
-// leadWristFlexExt + leadWristRadUln need only forearm + hand. forearmPronation +
-// leadArmFlexion (IMU elbow) are emitted only when the LeadUpperArm binding is present.
+// leadWristFlexExt + leadWristRadUln need only forearm + hand. forearmRotation needs
+// only the FOREARM — it is a segment axial rotation rather than a joint angle, so it
+// is emitted whether or not an upper arm is worn. forearmPronation + leadArmFlexion
+// (IMU elbow) are emitted only when the LeadUpperArm binding is present, so a
+// three-sensor Witmotion rig produces both forearmPronation and forearmRotation and
+// they are different quantities.
+//
+// ⚠ KEYS CARRY THE INSTRUMENT. A HackMotion-measured series is keyed `hm.` —
+// `hm.leadWristFlexExt`, `hm.leadWristRadUln`, `hm.forearmRotation` — beside, never
+// over, the bare keys, which always mean our own Witmotion estimate. The maths is
+// identical either way and deliberately shares this one code path; the prefix decides
+// a name and nothing else. Measures state which rung they prefer in
+// `Measure::preferKeys`, authored rather than inferred.
+//
+// ⚠ THE SERIES ARE NEUTRAL-RELATIVE, WITH ONE EXCEPTION. leadWristFlexExt,
+// leadWristRadUln, forearmPronation and leadArmFlexion are absolute joint postures vs
+// the calibration neutral and the UI derives Δ-from-address from the Address phase
+// sample. forearmRotation is ADDRESS-REFERENCED IN QUATERNION SPACE at source,
+// because each vendor zeroes at its own pose and only the travel compares — see
+// wrist_angles.h's forearmRel().
 class MetricExtractor {
 public:
     static std::vector<MetricSeries> extract(const FusedStreams &streams,

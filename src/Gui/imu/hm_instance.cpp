@@ -28,6 +28,7 @@
 // verbatim; it is unit-agnostic, so both blocks go through the same call.
 #include "hm_frame.h"
 #include "hm_sample_convert.h"
+#include "hm_unit_id.h"
 // The skew median and the §10.3 half-split stability test — pure, and pure so that
 // the statistic gating a "not stable" warning can be tested without hardware.
 #include "hm_skew_stats.h"
@@ -1796,10 +1797,18 @@ void HmSessionWorker::writeSample(const hm_sample &s)
 // "#palm" literal at each site, and that is the one drift nothing here would
 // catch — two spellings would not fail, they would silently orphan a device's
 // entire placement and its recorded lanes with it.
+// ⚠ The literals moved to src/IMU/hm_unit_id.h so the offline re-analyzer can go the
+// other way — recorded `source.serial` back to which segment that lane measured —
+// without the GUI layer or the vendor SDK. This stays the name everything in the GUI
+// calls; it is no longer the place the string is spelled. Still exactly one spelling.
+static_assert(pinpoint::hm_unit_id::kLowerArm == HM_UNIT_LOWER_ARM
+              && pinpoint::hm_unit_id::kPalm == HM_UNIT_PALM
+              && pinpoint::hm_unit_id::kCount == HM_UNIT_COUNT,
+              "hm_unit_id's SDK-free unit indices must track hm_unit");
+
 QString HmUnit::unitIdFor(const QString &deviceId, hm_unit unit)
 {
-    return deviceId + (unit == HM_UNIT_PALM ? QStringLiteral("#palm")
-                                            : QStringLiteral("#lowerArm"));
+    return pinpoint::hm_unit_id::unitIdFor(deviceId, static_cast<int>(unit));
 }
 
 // Display only, so this one IS translated.

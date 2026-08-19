@@ -404,6 +404,7 @@ QStringList deviceLabels(const std::vector<CaptureDevice> &devices)
         case CaptureDevice::FaceOnCamera:  out << QObject::tr("Face-on camera");       break;
         case CaptureDevice::DtlCamera:     out << QObject::tr("Down-the-line camera"); break;
         case CaptureDevice::WristImus:     out << QObject::tr("Wrist IMUs");           break;
+        case CaptureDevice::HackMotion:    out << QObject::tr("HackMotion");           break;
         case CaptureDevice::BodyImus:      out << QObject::tr("Body IMUs");            break;
         case CaptureDevice::ClubTrack:     out << QObject::tr("Club tracking");        break;
         case CaptureDevice::ClubSensor:    out << QObject::tr("Club sensor");          break;

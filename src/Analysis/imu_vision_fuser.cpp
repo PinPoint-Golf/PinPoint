@@ -221,7 +221,16 @@ FusedStreams ImuVisionFuser::fuse(const SwingWindow &window,
         gridStart = std::max(gridStart, entries.front().timestamp_us);
         gridEnd   = std::min(gridEnd,   entries.back().timestamp_us);
         Bound bb{ &b, {} };
-        if (refusion)
+        // ⚠ NEVER RE-FUSE A HACKMOTION LANE. refuseSource() re-runs Madgwick from the
+        // recorded accel+gyro, but a wG3's accel column is GRAVITY-REMOVED linear
+        // acceleration (hm_sample_convert.h:36-42), not the raw accelerometer vector
+        // Madgwick's gravity reference needs — and the stored quaternion is the
+        // device's own calibrated orientation, not a host-side fusion of those
+        // vectors at all. The re-fused trajectory is therefore meaningless here, and
+        // it would then be conjugated below as if it were the device's own output.
+        // Same reasoning imu_refusion_check.h applies to this device, for the same
+        // physical reason.
+        if (refusion && !b.hackMotion)
             bb.refused = refuseSource(window, b.source, *refusion);
         bound.push_back(std::move(bb));
     }
@@ -236,13 +245,24 @@ FusedStreams ImuVisionFuser::fuse(const SwingWindow &window,
 
     for (const Bound &bd : bound) {
         SegmentStream s;
-        s.role = bd.b->role;
+        s.role       = bd.b->role;
+        s.hackMotion = bd.b->hackMotion;
         s.qAnat.reserve(out.timeGrid.size());
         s.gyroDps.reserve(out.timeGrid.size());
         s.accelG.reserve(out.timeGrid.size());
         // ImuSample vectors are RAW sensor-frame (imu_sample.h v2); rotate them
         // into the anatomical segment frame (v_anat = M⁻¹·v_sensor) so they share
         // qAnat's body frame. M is unit, so conjugated() is its inverse.
+        //
+        // ⚠ AND THIS LINE IS ALREADY CORRECT FOR A HACKMOTION — it needs no
+        // instrument branch, which is worth stating because the quaternion path a
+        // dozen lines below DOES. For a wG3, M is hm_frame::mountM() = R_ph, so
+        // mountInv = R_ph* = frameMap(candidate) — character-for-character what
+        // hm_frame::pronationRateDps already rotates its gyro by (hm_frame.h:281).
+        // The device's gyro shares its quaternion's frame and its calibration
+        // re-references both together, so only the constant map is needed and no
+        // conjugate arises. The asymmetry (vectors fine, orientation not) is exactly
+        // what makes the missing conjugate below so easy to walk past.
         const QQuaternion mountInv = bd.b->mountM.conjugated();
         QQuaternion last;            // hold-last fallback for a momentary gap
         QVector3D   lastGyro, lastAccel;
@@ -254,9 +274,29 @@ FusedStreams ImuVisionFuser::fuse(const SwingWindow &window,
             if (window.interpolateImu(bd.b->source, t,
                                       reinterpret_cast<std::byte *>(&smp), sizeof(smp))) {
                 // q_raw: the re-fused orientation when filter.refuse is on, else the stored quat.
-                const QQuaternion qRaw = bd.refused.empty()
+                QQuaternion qRaw = bd.refused.empty()
                     ? QQuaternion(smp.quat_w, smp.quat_x, smp.quat_y, smp.quat_z)
                     : slerpAt(bd.refused, t);
+                // ⚠⚠ THE CONJUGATE, AND IT IS THE ONE PLACE BEING WRONG IS INVISIBLE.
+                // A wG3 streams WORLD->BODY; toAnatomical() composes A·q_raw·M and
+                // wrist_angles.h's qFore⁻¹·qHand only typechecks for body->world. The
+                // contract is q_anat = q_hm* ⊗ R_ph (hm_frame.h:130) — that is
+                // toAnatomical(A = identity, q_raw = q_hm*, M = R_ph), with the raw
+                // quaternion ALREADY conjugated. So it is conjugated here, once.
+                //
+                // ⚠ Not in hm_sample_convert.h, which stores the streamed quaternion
+                // verbatim and explains at length why it refuses — that refusal is
+                // correct, and conjugating in two places is the same as conjugating in
+                // none. Not inside imu_calibration::toAnatomical either: that is the
+                // shared composition site for every device and knows about none of them.
+                //
+                // ⚠ Nothing downstream can catch this if it is dropped. The wrist ANGLE
+                // is convention-blind, all four frame candidates and both composition
+                // orders score exactly zero cross-talk, and the result tracks the wrist
+                // convincingly with every decomposed sign inverted. Only a motion whose
+                // direction was recorded distinguishes them (hm_frame.h:69-108).
+                if (bd.b->hackMotion)
+                    qRaw = qRaw.conjugated();
                 qAnat     = imu_calibration::toAnatomical(bd.b->alignA, qRaw, bd.b->mountM);
                 gyro      = mountInv.rotatedVector(QVector3D(smp.gyro_x, smp.gyro_y, smp.gyro_z));
                 accel     = mountInv.rotatedVector(QVector3D(smp.accel_x, smp.accel_y, smp.accel_z));

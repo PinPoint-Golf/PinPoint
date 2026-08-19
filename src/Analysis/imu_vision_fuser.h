@@ -41,6 +41,24 @@ struct SegmentStream {
     // °/s and g. Same length as qAnat (hold-last across momentary gaps).
     std::vector<QVector3D>   gyroDps;
     std::vector<QVector3D>   accelG;
+
+    // WHICH INSTRUMENT MEASURED THIS SEGMENT — provenance, not selection. Carried
+    // from ImuSegmentBinding::hackMotion (see the long note there for why that flag
+    // is NOT the discriminator §0 #8 asked for). Nothing in this header dispatches
+    // on it: qAnat is already in our anatomical convention whichever device filled
+    // it, because the conjugate was applied upstream at the composition site.
+    //
+    // MetricExtractor reads it for ONE purpose — to decide whether the series it
+    // emits is keyed `hm.leadWristFlexExt` or `leadWristFlexExt`. The arithmetic
+    // either side of that choice is identical and deliberately so: with one
+    // instrument per swing, "both instruments measured by the same maths" is a
+    // property of the CODE PATH rather than something a dual-worn capture could
+    // demonstrate, so the two must never fork into parallel producers.
+    //
+    // ⚠ It also marks a lane whose accelG is GRAVITY-REMOVED linear acceleration
+    // rather than a raw accelerometer vector (hm_sample_convert.h:36-42). Anything
+    // that thresholds or pools accelG across lanes has to look here first.
+    bool                     hackMotion = false;
 };
 
 // The orientation slice of the fusion layer: every bound IMU resampled onto one

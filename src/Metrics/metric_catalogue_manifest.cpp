@@ -331,6 +331,163 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("characteristic:locked_lead_arm") },
     });
 
+    // ── Forearm rotation — ONE SEGMENT, and not an ISB joint angle ───────────────────────────────
+    //
+    // ⚠ THIS IS NOT `forearmPronation` AND THE DISTINCTION IS THE WHOLE POINT. That one is the ISB
+    // radioulnar angle, defined against the HUMERUS, and it needs an upper-arm sensor. This asks
+    // the different and simpler question a lone forearm sensor can answer — how far has the forearm
+    // TURNED since address — which the user identifies as the direct indicator of flipping through
+    // impact. A rig wearing all three sensors produces both, and they are different quantities.
+    //
+    // ⚠ NO EXCEPTION TO RULE 0 IS INVOLVED HERE AND NONE SHOULD BE WRITTEN. ISB defines rotations
+    // BETWEEN two segment triads; this is one segment twisting about its own long axis, which
+    // pinpoint_sign_conventions.md's "what ISB does NOT govern" table names as a family in its
+    // "Segment axial rotations" row. Rule 0 not applying means Rule 1 applies — follow the outside
+    // world — so this metric is PRONATION-POSITIVE, AGREEING with the wG3's vendor exactly where
+    // `leadWristFlexExt` deliberately disagrees with them. That asymmetry looks like a bug beside
+    // the two of them and is not one: bow/cup has a published standard that outranks a product, and
+    // a single segment's axial rotation does not.
+    cat.addDescriptor({
+        .key = QStringLiteral("forearmRotation"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead forearm — rotation from address"),
+        .shortLabel = QStringLiteral("Rotation"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Wrist & forearm"),
+        .description = QStringLiteral(
+            "How far the lead forearm has turned about its own long axis SINCE ADDRESS — the signed "
+            "twist of q_address⁻¹·q_forearm about the elbow-to-wrist axis. It is a whole-segment "
+            "rotation, not a joint angle: it needs only the forearm sensor and makes no claim about "
+            "the elbow. Read the address-to-impact travel, which is the direct indicator of "
+            "flipping — a hand-driven release turns the forearm through impact where a body-driven "
+            "one carries it."),
+        .howToRead = QStringLiteral(
+            "0° is address, whatever posture address happened to be. + is the pronation direction "
+            "(rolling toward palm-down), − is supination. Read the change between P1 and P7 rather "
+            "than any single value: a large, late pronation into impact is flipping. ⚠ The ABSOLUTE "
+            "value is meaningless across sessions or across instruments, because each sensor zeroes "
+            "at its own calibration pose — that is exactly why this is stated from address, and why "
+            "the travel is comparable when the raw angle is not. Needs the lead-forearm IMU only."),
+        .flexPositive = true,
+        .signPositive = QStringLiteral("pronation — the lead forearm rolled toward face-down, "
+                                       "measured as travel from address"),
+        .signNegative = QStringLiteral("supination — the lead forearm rolled toward face-up"),
+        .phases = { P::Top, P::Impact },
+        .routes = {
+            via("wristImus", RM::Inertial, Direct, { .imuRoles = { R::LeadForearm } },
+                QStringLiteral("the axial twist of the forearm about its own long axis, referenced "
+                               "to address, from one forearm IMU")) },
+    });
+
+    // ── The HackMotion rungs ────────────────────────────────────────────────────────────────────
+    //
+    // ⚠ NEW KEYS, NEVER OVERWRITTEN ONES, AND NOT A SECOND ROUTE ON THE EXISTING METRIC. A second
+    // route would make the pair NOT separately addressable, and separate addressability is the only
+    // thing that keeps "which instrument graded this swing" recoverable after the fact. The bare
+    // keys always mean our own estimate; these always mean the device's. `Measure::preferKeys` is
+    // where a measure states which it would rather have — authored, not inferred.
+    //
+    // ⚠ THESE PUBLISH IN ISB POLARITY, AND THAT IS NOT A COPY-PASTE SLIP. The wG3 reports the
+    // INVERSE of ISB on bow/cup, but the frame map applied upstream (hm_frame.h, candidate C2)
+    // already inverts the device's own sense, so what arrives at this key is ISB-conformant. A
+    // reader comparing our number against the vendor's app will see opposite signs on bow/cup and
+    // agreeing signs on rotation, and both of those are correct.
+    //
+    // ⚠ THE ARITHMETIC IS THE SAME ARITHMETIC. Both instruments run one MetricExtractor path
+    // (metric_extractor.cpp) so any difference between them is the instrument and not the maths.
+    // With one instrument per swing that is a property of the code and nothing else can demonstrate
+    // it, which is why it is stated here as well as there.
+    cat.addDescriptor({
+        .key = QStringLiteral("hm.leadWristFlexExt"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead wrist — bow / cup (measured)"),
+        .shortLabel = QStringLiteral("Bow/cup (HM)"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Wrist & forearm"),
+        .description = QStringLiteral(
+            "The bow/cup axis of the lead wrist, measured by a HackMotion wG3 rather than by our "
+            "own forearm-and-hand IMUs. The twin of `leadWristFlexExt`, computed by the identical "
+            "decomposition from the device's two units, and the reference that says whether our own "
+            "wrist estimate is right."),
+        .howToRead = QStringLiteral(
+            "Read exactly as `leadWristFlexExt`: + is bowed/flexed, − is cupped/extended, and impact "
+            "should sit meaningfully more flexed than address. ⚠ Reported in ISB polarity, which is "
+            "the INVERSE of what the wG3's own application shows on this axis — a correct reading "
+            "here looks wrong beside their screen, deliberately. Needs a HackMotion wG3."),
+        .flexPositive = true,
+        .signPositive = QStringLiteral("flexion — the lead wrist bowed"),
+        .signNegative = QStringLiteral("extension — the lead wrist cupped"),
+        .phases = { P::Top, P::Impact },
+        .routes = {
+            via("hackMotion", RM::Device, Direct, { .hackMotion = true },
+                QStringLiteral("the bow/cup axis of the wrist, read from a HackMotion wG3")) },
+        // The measured rung of the m_leadWristFlexExt_* family, which prefers this over our own
+        // `leadWristFlexExt`, and so carries the same names.
+        .usedBy = { QStringLiteral("assessment:wrist"),
+                    QStringLiteral("chart:review"),
+                    QStringLiteral("score:wrist"),
+                    QStringLiteral("characteristic:scooping"),
+                    QStringLiteral("characteristic:bowed_lead_wrist") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("hm.leadWristRadUln"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead wrist — hinge (measured)"),
+        .shortLabel = QStringLiteral("Hinge (HM)"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Wrist & forearm"),
+        .description = QStringLiteral(
+            "The hinge (or 'cock') of the lead wrist, measured by a HackMotion wG3 rather than by "
+            "our own forearm-and-hand IMUs. The twin of `leadWristRadUln`, computed by the identical "
+            "decomposition from the device's two units."),
+        .howToRead = QStringLiteral(
+            "Read exactly as `leadWristRadUln`: + is ulnar (hinged/cocked), − is radial. This is our "
+            "least reliable axis on our own sensors, so the device's reading of it is the more "
+            "interesting of the two. Needs a HackMotion wG3."),
+        .flexPositive = true,
+        .signPositive = QStringLiteral("ulnar deviation — the wrist hinged or cocked"),
+        .signNegative = QStringLiteral("radial deviation"),
+        .phases = { P::Top, P::Impact },
+        .routes = {
+            via("hackMotion", RM::Device, Direct, { .hackMotion = true },
+                QStringLiteral("the hinge axis of the wrist, read from a HackMotion wG3")) },
+        .usedBy = { QStringLiteral("assessment:wrist"),
+                    QStringLiteral("chart:review"),
+                    QStringLiteral("score:wrist"),
+                    QStringLiteral("characteristic:insufficient_set"),
+                    QStringLiteral("characteristic:over_set") },
+    });
+
+    cat.addDescriptor({
+        .key = QStringLiteral("hm.forearmRotation"),
+        .type = MetricType::TimeSeries,
+        .label = QStringLiteral("Lead forearm — rotation from address (measured)"),
+        .shortLabel = QStringLiteral("Rotation (HM)"),
+        .unit = QStringLiteral("°"),
+        .group = QStringLiteral("Wrist & forearm"),
+        .description = QStringLiteral(
+            "How far the lead forearm has turned about its own long axis since address, measured by "
+            "a HackMotion wG3's lower-arm unit. The twin of `forearmRotation`, by the identical "
+            "definition — one segment, referenced to address, and never the ISB radioulnar angle, "
+            "which this device cannot measure at all for want of an upper-arm unit."),
+        .howToRead = QStringLiteral(
+            "Read exactly as `forearmRotation`: 0° is address, + is the pronation direction, and the "
+            "P1-to-P7 travel is the flipping indicator. ⚠ Unlike the bow/cup axis, this one AGREES "
+            "in sign with the wG3's own application — there is no published standard for a single "
+            "segment's axial rotation, so we follow the convention the instruments already use. "
+            "Needs a HackMotion wG3."),
+        .flexPositive = true,
+        .signPositive = QStringLiteral("pronation — the lead forearm rolled toward face-down, "
+                                       "measured as travel from address"),
+        .signNegative = QStringLiteral("supination — the lead forearm rolled toward face-up"),
+        .phases = { P::Top, P::Impact },
+        .routes = {
+            via("hackMotion", RM::Device, Direct, { .hackMotion = true },
+                QStringLiteral("the axial twist of the forearm since address, read from a "
+                               "HackMotion wG3's lower-arm unit")) },
+    });
+
     cat.addDescriptor({
         .key = QStringLiteral("trailWristFlexExt"),
         .type = MetricType::TimeSeries,

@@ -77,6 +77,13 @@ struct CaptureCapabilities {
         // is uniformly live-rate. A stage needing high-rate input can then land
         // dark and skip with a reason until the data is actually present.
         int64_t     highRateSpanUs[2]{};
+
+        // WHICH INSTRUMENT, carried from ImuSegmentBinding::hackMotion. `role` says
+        // which segment; this says what measured it. Nothing gates on it here — the
+        // conjugate is applied at the composition site and qAnat arrives in our
+        // convention either way — it exists so the shot's route context can state
+        // that a wG3 was worn, which `imuRoles` alone cannot express.
+        bool        hackMotion  = false;
     };
 
     QSet<CameraPlacement> cameras;
@@ -106,9 +113,23 @@ struct CaptureCapabilities {
         if (job.faceOnCameraCount > 0 && !job.cameraSources.empty())
             caps.cameras.insert(CameraPlacement::FaceOn);
         caps.imus.reserve(job.imuBindings.size());
-        for (const ImuSegmentBinding &b : job.imuBindings)
-            caps.imus.push_back(BoundImu{ b.role, b.calibrated, b.calibAgeSec });
+        for (const ImuSegmentBinding &b : job.imuBindings) {
+            BoundImu bi{};
+            bi.role        = b.role;
+            bi.calibValid  = b.calibrated;
+            bi.calibAgeSec = b.calibAgeSec;
+            bi.hackMotion  = b.hackMotion;
+            caps.imus.push_back(bi);
+        }
         return caps;
+    }
+
+    // Did a HackMotion measure any segment on this shot? Gates the `hm.*` routes,
+    // and gates nothing else.
+    bool hasHackMotion() const {
+        for (const BoundImu &b : imus)
+            if (b.hackMotion) return true;
+        return false;
     }
 
     // As above, but with the rate fields MEASURED FROM THE WINDOW rather than

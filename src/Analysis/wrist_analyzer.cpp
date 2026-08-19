@@ -112,11 +112,11 @@ MetricSeries buildShaftLeanSeries(const ShaftTrack2D &shaft, int handedness,
     return m;
 }
 
+// Instrument ladder: a HackMotion swing publishes `hm.<key>` and never the bare key.
+// See swing_analysis.h's findSeriesByLadder for why this is not four separate loops.
 const MetricSeries *find(const std::vector<MetricSeries> &v, const QString &key)
 {
-    for (const MetricSeries &m : v)
-        if (m.key == key) return &m;
-    return nullptr;
+    return findSeriesByLadder(v, key);
 }
 
 // SwingLab tuning: SegmentationConfig with "seg.*" overrides applied.
@@ -169,6 +169,13 @@ FusedStreams trimStreams(const FusedStreams &in, int64_t fromUs, int64_t toUs)
             continue;   // malformed stream — drop rather than misalign
         SegmentStream t;
         t.role = s.role;
+        // ⚠ COPY EVERY NON-SAMPLE FIELD, not just the ones this function was written
+        // with. Trimming is a window operation: it changes how many samples a stream
+        // carries and nothing else about it. `hackMotion` was silently dropped here
+        // when it was added — the binding was right, the fuser was right, and the
+        // metric still came out keyed as a Witmotion because this field-by-field copy
+        // is the one place provenance can fall off between them.
+        t.hackMotion = s.hackMotion;
         t.qAnat.assign(s.qAnat.begin() + long(a), s.qAnat.begin() + long(b));
         if (s.gyroDps.size() == in.timeGrid.size())
             t.gyroDps.assign(s.gyroDps.begin() + long(a), s.gyroDps.begin() + long(b));
@@ -1158,6 +1165,7 @@ struct BindingsStage : AnalysisStage {
             rec.mountGravityErrorDeg = b.mountGravityErrorDeg;
             rec.calibratedAtUtc      = b.calibratedAtUtc;
             rec.calibAgeSec          = b.calibAgeSec;
+            rec.hackMotion           = b.hackMotion;
             ctx.detail->bindings.push_back(std::move(rec));
         }
     }

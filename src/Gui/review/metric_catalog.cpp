@@ -70,6 +70,7 @@ ShotContext contextFromMap(const QVariantMap &m)
     c.hasClubTrack = m.value(QStringLiteral("hasClubTrack")).toBool();
     c.hasBallTrack = m.value(QStringLiteral("hasBallTrack")).toBool();
     c.hasLaunchMonitor = m.value(QStringLiteral("hasLaunchMonitor")).toBool();
+    c.hasHackMotion    = m.value(QStringLiteral("hasHackMotion")).toBool();
     for (const QVariant &v : m.value(QStringLiteral("imuRoles")).toList()) {
         const SegmentRole r = roleFromName(v.toString());
         if (r != SegmentRole::Unknown)

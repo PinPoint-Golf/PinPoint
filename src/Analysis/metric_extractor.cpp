@@ -61,6 +61,28 @@ MetricSeries buildSeries(const QString &key, const QString &label, const QString
     return m;
 }
 
+// WHICH INSTRUMENT MEASURED IT, IN THE KEY. A wG3's wrist angles publish as
+// `hm.leadWristFlexExt`; a Witmotion's as the bare `leadWristFlexExt`. New keys,
+// never overwritten ones — the bare key therefore always means OUR estimate, and
+// which instrument graded a swing stays recoverable after the fact. That is the
+// entire point of the split, and it matters more rather than less now that no swing
+// can ever carry both: an across-session comparison is the only comparison there is.
+//
+// ⚠ THE ARITHMETIC EITHER SIDE OF THIS CHOICE IS IDENTICAL AND MUST STAY SO. With
+// one instrument per swing, "both instruments are measured by the same maths" is a
+// property of THIS CODE PATH rather than something a dual-worn capture could
+// demonstrate. So the prefix decides a name and nothing else; a parallel producer
+// for the HackMotion lane would quietly make every instrument difference
+// uninterpretable.
+//
+// ⚠ Mirrors the `lm.` convention (metric_catalogue_manifest.cpp:2213) — a prefix
+// means "this device said it", and the ladder in Measure::preferKeys is where a
+// measure states which rung it would rather have.
+QString instrumentKey(const QString &bare, bool hackMotion)
+{
+    return hackMotion ? QStringLiteral("hm.") + bare : bare;
+}
+
 } // namespace
 
 std::vector<MetricSeries> MetricExtractor::extract(const FusedStreams &s,
@@ -93,6 +115,9 @@ std::vector<MetricSeries> MetricExtractor::extract(const FusedStreams &s,
     // --- wrist flex/ext + radial/ulnar (forearm + hand) ---
     if (fore && hand && static_cast<int>(fore->qAnat.size()) == N
                      && static_cast<int>(hand->qAnat.size()) == N) {
+        // Both units of a wrist joint come from one peripheral, so the two agree by
+        // construction; requiring both says so rather than trusting it.
+        const bool hmWrist = fore->hackMotion && hand->hackMotion;
         std::vector<double> fe(N), rud(N);
         for (int i = 0; i < N; ++i) {
             const QQuaternion rel = (fore->qAnat[i].conjugated() * hand->qAnat[i]).normalized();
@@ -100,12 +125,53 @@ std::vector<MetricSeries> MetricExtractor::extract(const FusedStreams &s,
             fe[i]  = radToDeg(wa.feRad);
             rud[i] = radToDeg(wa.rudRad);
         }
-        out.push_back(buildSeries(QStringLiteral("leadWristFlexExt"),
+        out.push_back(buildSeries(instrumentKey(QStringLiteral("leadWristFlexExt"), hmWrist),
                                   QStringLiteral("Lead wrist (bow/cup)"), QStringLiteral("°"),
                                   grid, std::move(fe), phases));
-        out.push_back(buildSeries(QStringLiteral("leadWristRadUln"),
+        out.push_back(buildSeries(instrumentKey(QStringLiteral("leadWristRadUln"), hmWrist),
                                   QStringLiteral("Lead wrist hinge"), QStringLiteral("°"),
                                   grid, std::move(rud), phases));
+    }
+
+    // --- forearm rotation: ONE SEGMENT, address-referenced (forearm alone) ---
+    //
+    // ⚠ THIS IS NOT forearmPronation AND MUST NOT BE READ AS ONE. That is the ISB
+    // radioulnar angle, defined against the HUMERUS, and it is emitted below only
+    // when an upper-arm unit exists. This asks the different and simpler question a
+    // lone forearm sensor CAN answer — how far has the forearm turned since Address
+    // — and the address-to-impact travel is the direct indicator of flipping.
+    //
+    // ⚠ SO IT IS PRODUCED WHENEVER THE FOREARM IS BOUND, INDEPENDENTLY OF THE UPPER
+    // ARM. A Witmotion rig wearing A+B+C delivers BOTH: forearmPronation, which is
+    // the joint angle, and this, which is the segment's own travel. Gating it on the
+    // upper arm being absent would make the same name mean one thing on a two-sensor
+    // rig and nothing on a three-sensor one, and would leave a P1→P7 comparison
+    // between two of this golfer's own sessions undefined.
+    //
+    // ⚠ ONE DEFINITION ACROSS BOTH VENDORS — slot A alone, identical maths, which is
+    // why it is computed here rather than per-instrument. Defining a Witmotion's
+    // rotation against the upper arm while a wG3's is forearm-alone would publish two
+    // different quantities under one name, and any cross-instrument comparison would
+    // read the shoulder's contribution as sensor error.
+    //
+    // Rule 0 does not govern a single segment's axial rotation (ISB defines rotations
+    // BETWEEN two segment triads), so Rule 1 does: positive is the pronation
+    // direction, AGREEING with the vendor exactly where leadWristFlexExt deliberately
+    // disagrees with them. That asymmetry is correct and is written down in
+    // docs/design/pinpoint_sign_conventions.md.
+    if (fore && static_cast<int>(fore->qAnat.size()) == N) {
+        const int addrIdx = nearestIndex(grid, phaseTime(phases, Phase::Address, grid.front()));
+        const QQuaternion qAddr = fore->qAnat[addrIdx];
+        std::vector<double> rot(N);
+        for (int i = 0; i < N; ++i) {
+            const ForearmElbow ef = forearmPronElbowFlex(forearmRel(fore->qAnat[i], qAddr),
+                                                         leftArm);
+            rot[i] = radToDeg(ef.pronRad);
+        }
+        out.push_back(buildSeries(instrumentKey(QStringLiteral("forearmRotation"),
+                                                fore->hackMotion),
+                                  QStringLiteral("Lead forearm rotation"), QStringLiteral("°"),
+                                  grid, std::move(rot), phases));
     }
 
     // --- forearm pronation + elbow flexion (upper arm + forearm) ---

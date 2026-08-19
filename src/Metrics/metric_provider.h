@@ -52,6 +52,11 @@ struct ShotContext {
     bool                     hasClubTrack = false;   // ShaftTrack2D valid
     bool                     hasBallTrack = false;   // BallTrack2D present
     bool                     hasLaunchMonitor = false;   // a launch monitor supplied readings for this shot
+    // A HackMotion wG3 measured the lead wrist on this shot. Separate from `imuRoles` because that
+    // list says which SEGMENTS were bound and is blind to what bound them — a wG3 and a pair of
+    // Witmotions both report LeadForearm + LeadHand — and the whole point of the `hm.*` keys is
+    // that the two stay distinguishable.
+    bool                     hasHackMotion    = false;
     int                      sessionType  = -1;      // SessionController::Type; -1 = none
     BandContext              band;                   // archetype/club/shape for normative resolution
 
@@ -107,6 +112,8 @@ inline QStringList missingForRequirement(const MetricRequirement &req, const Sho
         missing << QStringLiteral("ball tracking");
     if (req.launchMonitor && !ctx.hasLaunchMonitor)
         missing << QStringLiteral("a launch monitor");
+    if (req.hackMotion && !ctx.hasHackMotion)
+        missing << QStringLiteral("a HackMotion wrist sensor");
 
     QStringList roles;
     for (SegmentRole r : req.imuRoles)

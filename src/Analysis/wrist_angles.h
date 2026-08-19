@@ -106,6 +106,32 @@ inline QQuaternion elbowRel(const QQuaternion &qUpperAnat, const QQuaternion &qF
     return (qElbowAddr.conjugated() * qElbow).normalized();
 }
 
+// The forearm relative to its OWN Address pose — the input to `forearmRotation`.
+//
+// ⚠ ONE SEGMENT, NOT A JOINT, and that is the whole distinction. Its two siblings
+// above take a rotation BETWEEN two segments and re-reference it; this takes one
+// segment's own orientation. There is no second triad because there is no second
+// sensor: this is what a lone forearm unit can answer, and it is a segment axial
+// rotation rather than an ISB joint angle. Fed through forearmPronElbowFlex() the
+// twist component is the quantity; the swing component is the forearm's change of
+// POINTING, which is not what this metric is about.
+//
+// ⚠ THE ADDRESS REFERENCE IS LOAD-BEARING AND IS WHAT MAKES THE NUMBER MEAN
+// ANYTHING. Each vendor zeroes at its own calibration pose — a wG3 at
+// forearm-across-chest palm-down, which is already near full pronation; a Witmotion
+// at ours, arm hanging — so the ABSOLUTE angle compares across neither two
+// instruments nor two calibrations of the same one. Referenced to Address that
+// constant offset cancels and what remains is TRAVEL, which is comparable and is
+// the quantity actually wanted: how far the forearm turned between address and
+// impact is the direct indicator of flipping. Publishing the un-referenced absolute
+// would be publishing the calibration pose. See docs/design/pinpoint_sign_conventions.md,
+// "Segment axial rotations", and hm_frame.h's note on why the RATE needs no such
+// reference but an ANGLE does.
+inline QQuaternion forearmRel(const QQuaternion &qForeAnat, const QQuaternion &qForeAddr)
+{
+    return (qForeAddr.conjugated() * qForeAnat).normalized();
+}
+
 // --- wrist flex/ext + radial/ulnar (cross-talk-safe: swing-twist then Cardan) ---
 
 struct WristAngles {

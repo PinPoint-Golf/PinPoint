@@ -50,6 +50,13 @@
 // under ESKF cannot be re-fused exactly, so the caller should only run this when
 // the live orientation filter is Madgwick (else a false warning would fire).
 //
+// ⚠ AND HOST-FUSED LANES ONLY. The whole check rests on the stored quaternion being
+// a fusion OF the stored vectors. A device that streams its own calibrated
+// orientation — a HackMotion wG3 — breaks that premise outright, so its lanes are
+// skipped per-source inside the loop below rather than checked and failed. See the
+// note there; the distinction between "not checkable" and "checked and wrong" is the
+// entire value of this file.
+//
 // Header-only and free of Qt so it is reusable by the GUI (ShotProcessor) and the
 // offline tools alike.
 namespace pinpoint {
@@ -83,6 +90,30 @@ inline ImuRefusionVerdict checkImuRefusion(const SwingWindow &window,
             imuIds.push_back(e.source_id);
 
     for (const SourceId sid : imuIds) {
+        // ⚠ A HACKMOTION LANE IS NOT CHECKABLE, AND FAILS SPECTACULARLY IF ASKED.
+        // Same reasoning as the ESKF exclusion above, for a different reason: this
+        // check assumes the stored quaternion IS a host-side Madgwick fusion of the
+        // stored accel+gyro, so re-running that fusion must reproduce it. A wG3
+        // streams its own calibrated ANATOMICAL orientation, and its accel column is
+        // gravity-removed linear acceleration (≈0 at rest) rather than the gravity
+        // vector Madgwick needs as a reference. Re-fusing those inputs produces
+        // something unrelated: 179.8-180.0° disagreement, saturated rather than
+        // marginal, on every HackMotion shot ever captured — a warning badge on the
+        // shot card (PpShotCard.qml) saying the recording is inconsistent, when it is
+        // perfectly consistent and merely not a host-side fusion.
+        //
+        // ⚠ PER-SOURCE, NOT WHOLE-CHECK, WHICH IS WHERE THIS DIFFERS FROM ESKF. That
+        // one is a property of the session's filter setting and the caller reads it
+        // once; this one is a property of an individual lane, so a window holding a
+        // checkable lane beside an uncheckable one still gets checked on the half
+        // that can be. Skipping here rather than at the caller also keeps
+        // sourcesChecked honest: a window with only HackMotion lanes reports zero
+        // checked, warns() is false, and no imuIntegrity block is written at all —
+        // which is the truthful outcome, since nothing was in fact checked.
+        if (const auto *imf = std::get_if<ImuFormat>(&window.formatOf(sid).format))
+            if (imf->device == DeviceKind::IMU_HackMotion)
+                continue;
+
         const std::vector<IndexEntry> entries = window.entriesFor(sid);
         if (entries.size() < 2)
             continue;

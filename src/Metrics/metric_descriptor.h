@@ -55,6 +55,13 @@ struct MetricRequirement {
     // user without one gets "needs a launch monitor" through the same path a missing face-on camera
     // takes, and the day a connector lands the same metric resolves Measured with no content change.
     bool                     launchMonitor = false;
+    // A HackMotion wG3 on the lead wrist. Mirrors launchMonitor exactly, and for the same reason:
+    // `imuRoles` says which anatomical segments a route needs and is blind to WHICH INSTRUMENT
+    // supplied them, so without this a HackMotion route and the Witmotion route it sits beside are
+    // indistinguishable — both would read `{ LeadForearm, LeadHand }` and both would resolve
+    // Measured on a rig carrying neither. The `hm.*` keys exist precisely to keep the two
+    // separately addressable, so their routes have to be separable too.
+    bool                     hackMotion  = false;
     ReconstructionTier       minTier     = ReconstructionTier::Angles2D;
 };
 
@@ -73,6 +80,11 @@ struct MetricRequirement {
 enum class CaptureDevice {
     // ── IMUs ────────────────────────────────────────────────────────────────
     WristImus,        // LeadForearm / LeadHand / LeadUpperArm — the wrist-motion kit
+    // A HackMotion wG3. A SEPARATE CHIP FROM WristImus, not a variant of it, because it answers a
+    // different buying question: it is one peripheral a golfer either owns or does not, filling the
+    // forearm and hand slots on its own, and a reader shopping for it is not shopping for our
+    // strap-on kit. Listed next to WristImus because it is worn in the same place.
+    HackMotion,
     BodyImus,         // Pelvis / Thorax / T12 / thighs — the trunk-and-legs kit
     // A shaft-mounted IMU. SEPARATE from ClubTrack and it must stay separate: the design's
     // `ClubInstrumented` tier is an upgrade axis ORTHOGONAL to the second camera — "a one-camera
@@ -93,7 +105,8 @@ enum class CaptureDevice {
 inline const std::vector<CaptureDevice> &allCaptureDevices()
 {
     static const std::vector<CaptureDevice> kAll = {
-        CaptureDevice::WristImus,    CaptureDevice::BodyImus,   CaptureDevice::ClubSensor,
+        CaptureDevice::WristImus,    CaptureDevice::HackMotion, CaptureDevice::BodyImus,
+        CaptureDevice::ClubSensor,
         CaptureDevice::FaceOnCamera, CaptureDevice::DtlCamera,  CaptureDevice::ClubTrack,
         CaptureDevice::BallTrack,    CaptureDevice::LaunchMonitor,
     };
@@ -108,6 +121,7 @@ inline QString captureDeviceId(CaptureDevice d)
     case CaptureDevice::FaceOnCamera:  return QStringLiteral("faceOn");
     case CaptureDevice::DtlCamera:     return QStringLiteral("dtl");
     case CaptureDevice::WristImus:     return QStringLiteral("wristImus");
+    case CaptureDevice::HackMotion:    return QStringLiteral("hackMotion");
     case CaptureDevice::BodyImus:      return QStringLiteral("bodyImus");
     case CaptureDevice::ClubTrack:     return QStringLiteral("clubTrack");
     case CaptureDevice::ClubSensor:    return QStringLiteral("clubSensor");
@@ -123,6 +137,7 @@ inline QString captureDeviceLabel(CaptureDevice d)
     case CaptureDevice::FaceOnCamera:  return QStringLiteral("Face-on camera");
     case CaptureDevice::DtlCamera:     return QStringLiteral("Down-the-line camera");
     case CaptureDevice::WristImus:     return QStringLiteral("Wrist IMUs");
+    case CaptureDevice::HackMotion:    return QStringLiteral("HackMotion");
     case CaptureDevice::BodyImus:      return QStringLiteral("Body IMUs");
     case CaptureDevice::ClubTrack:     return QStringLiteral("Club tracking");
     case CaptureDevice::ClubSensor:    return QStringLiteral("Club sensor");
@@ -153,9 +168,15 @@ inline std::vector<CaptureDevice> captureDevicesFor(const MetricRequirement &r)
         bool needed = false;
         switch (d) {
         case CaptureDevice::WristImus:
-            needed = hasImu({ SegmentRole::LeadUpperArm, SegmentRole::LeadForearm,
-                              SegmentRole::LeadHand });
+            // ⚠ A HACKMOTION ROUTE DOES NOT ALSO NEED OUR STRAP-ON WRIST KIT. The wG3 fills the
+            // forearm and hand slots itself, so a route stating both `hackMotion` and those roles
+            // would read on the directory as "you need a wG3 AND a pair of Witmotions", which is
+            // both wrong and the one configuration the product refuses to run.
+            needed = !r.hackMotion
+                     && hasImu({ SegmentRole::LeadUpperArm, SegmentRole::LeadForearm,
+                                 SegmentRole::LeadHand });
             break;
+        case CaptureDevice::HackMotion:    needed = r.hackMotion;                   break;
         case CaptureDevice::BodyImus:
             needed = hasImu({ SegmentRole::Pelvis, SegmentRole::Thorax, SegmentRole::T12,
                               SegmentRole::TrailThigh, SegmentRole::LeadThigh });

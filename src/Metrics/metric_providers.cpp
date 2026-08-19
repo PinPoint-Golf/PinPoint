@@ -35,8 +35,20 @@ namespace pinpoint::analysis {
 
 std::vector<QString> WristMetricProvider::provides() const
 {
+    // ONE PROVIDER FOR BOTH INSTRUMENTS, because there is one producer: MetricExtractor runs the
+    // same arithmetic over the same fused streams whichever device filled them, and only the key it
+    // writes differs. A second provider for the `hm.` keys would say in the architecture that there
+    // are two producers, which is the exact thing the identical-maths rule exists to prevent.
     return { QStringLiteral("leadWristFlexExt"), QStringLiteral("leadWristRadUln"),
-             QStringLiteral("forearmPronation"), QStringLiteral("leadArmFlexion") };
+             QStringLiteral("forearmPronation"), QStringLiteral("leadArmFlexion"),
+             // A segment axial rotation from the forearm alone — produced for either vendor, and
+             // for a three-sensor rig BESIDE forearmPronation rather than instead of it.
+             QStringLiteral("forearmRotation"),
+             // The HackMotion rungs. Claimed here so a wG3 swing's metrics resolve Measured rather
+             // than reporting Unavailable while sitting in the document — the failure mode
+             // stanceWidthMm shipped with, and the reason this list is checked at all.
+             QStringLiteral("hm.leadWristFlexExt"), QStringLiteral("hm.leadWristRadUln"),
+             QStringLiteral("hm.forearmRotation") };
 }
 
 // ------------------------------------------------------------------------- KinematicSeriesProvider

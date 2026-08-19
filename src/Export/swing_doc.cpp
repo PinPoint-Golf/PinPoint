@@ -207,7 +207,13 @@ QJsonObject serializeAnalysis(const analysis::SwingAnalysis &a, qint64 windowT0)
                 { QStringLiteral("mountDeviationDeg"),    b.mountDeviationDeg },
                 { QStringLiteral("mountGravityErrorDeg"), b.mountGravityErrorDeg },
                 { QStringLiteral("calibratedAt"),         b.calibratedAtUtc },
-                { QStringLiteral("calibAgeSec"),          b.calibAgeSec } });
+                { QStringLiteral("calibAgeSec"),          b.calibAgeSec },
+                // ⚠ WHICH INSTRUMENT, and it is load-bearing on re-analysis rather
+                // than merely informative. This array takes precedence over the
+                // per-stream fallback when a swing is re-read, so without this key a
+                // re-analysed HackMotion swing would skip the raw-quaternion conjugate
+                // and invert every wrist sign. See BindingRecord::hackMotion.
+                { QStringLiteral("hackMotion"),           b.hackMotion } });
         o[QStringLiteral("bindings")] = binds;
     }
 

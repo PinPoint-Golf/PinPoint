@@ -35,11 +35,11 @@ namespace {
 
 namespace tr = pinpoint::tuned::scoring::resemblance;
 
+// Instrument ladder: a HackMotion swing publishes `hm.<key>` and never the bare key.
+// See swing_analysis.h's findSeriesByLadder for why this is not four separate loops.
 const MetricSeries *findSeries(const std::vector<MetricSeries> &v, const QString &key)
 {
-    for (const MetricSeries &m : v)
-        if (m.key == key) return &m;
-    return nullptr;
+    return findSeriesByLadder(v, key);
 }
 
 // FE value at a scored phase: the labelled phaseSample if present, else the last curve sample.

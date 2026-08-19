@@ -49,6 +49,8 @@
 #include "types.h"
 
 #include "../Core/pp_debug.h"
+#include "../IMU/hm_frame.h"      // the wG3 frame constant — a binding needs no calibration
+#include "../IMU/hm_unit_id.h"    // "<deviceId>#lowerArm" / "#palm" -> which segment
 
 using namespace pinpoint;
 
@@ -87,6 +89,16 @@ ImuSegmentBinding parseBinding(const QJsonObject& b, SourceId source)
     bind.mountGravityErrorDeg  = b[QStringLiteral("mountGravityErrorDeg")].toDouble();
     bind.calibratedAtUtc       = b[QStringLiteral("calibratedAt")].toString();
     bind.calibAgeSec           = b[QStringLiteral("calibAgeSec")].toDouble(-1.0);
+    // ⚠ WHICH INSTRUMENT — and the fallback is not belt-and-braces, it is the only
+    // answer for swings analysed before this key was written. Getting it wrong is
+    // silent: the conjugate is skipped and every wrist sign inverts while the curve
+    // still tracks the wrist convincingly.
+    //
+    // A unit-suffixed serial can only be a wG3 — "<deviceId>#lowerArm" / "#palm" is
+    // that device's own identifier format and nothing else in the tree registers a
+    // source that way — so the serial carries the answer whenever the flag does not.
+    bind.hackMotion = b[QStringLiteral("hackMotion")].toBool(
+        pinpoint::hm_unit_id::parse(b[QStringLiteral("serial")].toString(), nullptr, nullptr));
     return bind;
 }
 
@@ -440,11 +452,24 @@ LoadedSwing SwingDiskLoader::load(const QString& swingDir, const SwingLoadOption
             if (s[QStringLiteral("device")].toObject()[QStringLiteral("outputRateHz")].toInt() > 0)
                 rateHz = s[QStringLiteral("device")].toObject()[QStringLiteral("outputRateHz")].toInt();
 
+            // ⚠ THE INSTRUMENT IS RECORDED, SO READ IT RATHER THAN ASSUMING WITMOTION.
+            // The exporter tags a HackMotion lane `"instrument": "hackmotion"`
+            // (swing_exporter.cpp:731) precisely because the two lanes share the
+            // imu_sample_v2 byte layout while meaning different things by it — accel is
+            // gravity-removed here and raw there, and the quaternion runs world->body
+            // here and body->world there. Hardcoding WitMotion threw that away on every
+            // replay, which is why a re-analysed wG3 capture could not have produced a
+            // correct wrist metric even once the live binding was fixed.
+            const bool isHackMotion =
+                s[QStringLiteral("instrument")].toString() == QLatin1String("hackmotion");
+            const DeviceKind devKind = isHackMotion ? DeviceKind::IMU_HackMotion
+                                                    : DeviceKind::IMU_WitMotion;
+
             FormatDescriptor fd;
-            fd.device        = DeviceKind::IMU_WitMotion;
+            fd.device        = devKind;
             fd.device_serial = serial.toStdString();
             ImuFormat imf{};
-            imf.device         = DeviceKind::IMU_WitMotion;
+            imf.device         = devKind;
             imf.sample_rate_hz = uint32_t(rateHz);
             imf.packet_bytes   = sizeof(ImuSample);
             imf.packet_schema  = "imu_sample_v2";
@@ -464,7 +489,57 @@ LoadedSwing SwingDiskLoader::load(const QString& swingDir, const SwingLoadOption
             // Fallback binding from the stream's device.* calibration (present only
             // when the exporter baked it in — every capture since corpus support).
             const QJsonObject deviceObj = s[QStringLiteral("device")].toObject();
-            if (deviceObj[QStringLiteral("alignA")].toArray().size() == 4
+            if (isHackMotion) {
+                // ⚠ A HACKMOTION BINDING IS RECONSTRUCTED, NOT READ BACK, AND IT IS
+                // FULLY DETERMINED. The device applies its own calibration and streams
+                // the result, so there is no per-user A/M solve to persist — the
+                // exporter writes no alignA/mountM for this lane (it gates on
+                // dev.hasCalibration) and the branch below would find nothing. What
+                // decides the binding instead is the constant frame plus which unit
+                // this lane is, and both are recoverable here: A is identity by
+                // definition, M is the frame constant, and the unit is in the serial.
+                //
+                // ⚠ ROLE COMES FROM THE UNIT, NOT FROM sessionType. Which arm segment a
+                // wG3's lower-arm board measured is a fact about the hardware; asking
+                // the capture's declared intent would make a re-analysis depend on a
+                // flag the golfer set, and would silently produce nothing for a
+                // capture recorded under any other session type.
+                //
+                // ⚠ Without this, re-analysing the eleven E3 fixture swings produces no
+                // binding at all, because the live binding never ran when they were
+                // captured — their device.role is 0 and roleName empty.
+                QString unitDevId;
+                int     unitIdx = pinpoint::hm_unit_id::kLowerArm;
+                if (!hm_frame::isSelected()) {
+                    ppWarn() << "[Reanalysis]" << swingDir
+                             << "carries a HackMotion lane but no frame candidate is"
+                                " selected — the lane is loaded but not bound, so no"
+                                " wrist metric will come from it.";
+                } else if (!pinpoint::hm_unit_id::parse(serial, &unitDevId, &unitIdx)) {
+                    ppWarn() << "[Reanalysis]" << swingDir
+                             << "HackMotion lane serial" << serial
+                             << "does not name a unit — cannot tell which segment it"
+                                " measured, so it is not bound.";
+                } else {
+                    ImuSegmentBinding hb;
+                    hb.source     = id;
+                    hb.role       = unitIdx == pinpoint::hm_unit_id::kPalm
+                                        ? SegmentRole::LeadHand
+                                        : SegmentRole::LeadForearm;
+                    hb.alignA     = QQuaternion();              // identity, by design
+                    hb.mountM     = hm_frame::mountM();         // the frame constant
+                    hb.hackMotion = true;
+                    // The device's own calibration state at capture, recorded by Phase
+                    // B′. 2 == HM_CAL_CALIBRATED; anything else means the lane was
+                    // streaming board placement rather than anatomy, and a binding
+                    // would publish that as a measurement.
+                    const bool devCal =
+                        deviceObj[QStringLiteral("calibrationStateAtStart")].toInt(-1) == 2;
+                    hb.anatCalibrated = devCal;
+                    hb.calibrated     = devCal;
+                    deviceBindings.push_back(hb);
+                }
+            } else if (deviceObj[QStringLiteral("alignA")].toArray().size() == 4
                 && deviceObj[QStringLiteral("mountM")].toArray().size() == 4)
                 deviceBindings.push_back(parseBinding(deviceObj, id));
 

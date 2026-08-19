@@ -381,7 +381,7 @@ type (`analysis_pipeline_developer_guide.md` §4).
 | **E** | Deferred history → SwingWindow | A shot produces a stitched **variable-rate** wrist lane — ~100 Hz over the still pre-roll, full rate through the swing (§0 #2) — with coverage, gaps and the fit in provenance. ⚠ Builds `deferred_sources_design.md`, does not consume it (§0 #4) | ✅ `0c7d128` + `b5ec45b` — **gate met on hardware in E3**: 1,066-1,159 samples/lane, the full ~799 Hz across impact ±125 ms. ⚠ The alignment budget shipped here was wrong and refused every pull; see E3 |
 | **E2** | Backlog: everything that needs no sensor | ⚠ **Scope narrowed 2026-08-18 by the user:** simultaneous HM+Witmotion arm mounting is NOT supported — either/or only — so the combination matrix (item 3) and the state-machine test (item 2) are DROPPED with it. What remains of the gate: the stale deferrals cleared (item 1) and the studio build reproducible (item 4) | ✅ item 1 `c467dce`/`732ad9a`/`0e0fc80`; items 2+3 dropped; item 4 done 2026-08-18 (sync + sidecar clone + verified build, see §11) |
 | **E3** | **Studio verification + first look at the data** | Built and run on the studio PC with a worn sensor: E's three gates, B's two unverified criteria, and a short findings note on what the wrist actually does at full rate. ⚠ **Keep the raw captures** — they become F's development fixture, so F needs no second trip | ✅ **2026-08-18, two sessions, 11 swings kept.** Windows Bluetooth closed; B's accel criterion PASSED; the stitched lane proved at full rate; the rate question ANSWERED. ⚠ Three gates still owed (disconnected shot, two balls < 3 s, stationary hold) and a **new defect found: a false data-integrity warning on every HackMotion shot** |
-| **F** | New `hm.*` keys + measure `preferKeys` | HackMotion wrist metrics produced and separately addressable; measures prefer them; corridors unchanged. ⚠ ~~Blocked on `streamFor` (§0 #8)~~ — **NOT a blocker: the app will never run both instruments at once, so the first-match path is unreachable. §0 #8 is void and the discriminator is cut** | ☐ |
+| **F** | New `hm.*` keys + measure `preferKeys` | **DONE 2026-08-18.** The lane had never bound once — `shot_processor` cast to `ImuInstance` and an `HmInstance` is its PEER — so no wG3 capture had ever produced a wrist metric. Now: binding, the conjugate (proved by a disabled-conjugate control run, which inverts every sign and still looks plausible), `hm.leadWristFlexExt` / `hm.leadWristRadUln` / `hm.forearmRotation` + a bare vendor-agnostic `forearmRotation`, the `hackMotion` requirement axis, `preferKeys` on 18 measures, the false integrity badge, and ⚠ **re-analysis, which was a second blocker nobody had named**. Corridors untouched | ✅ |
 | **W** | **Wash-up — unhappy paths and edge cases** | The deliberate acts nobody performs while chasing the happy path, plus the small defects parked to get the main build done. Deliberately LAST: none of it blocks F, and all of it needs the studio or a worn sensor | ☐ |
 | **G** | ~~Validation against Witmotion~~ | ⚠ **DEFERRED ENTIRELY — it needs its own plan, and it is NOT a gate on anything in this one.** See the Phase G section for why the deferral costs nothing here | ⏸ deferred |
 
@@ -915,77 +915,152 @@ contribution is the *pre*-impact half and uniformity, not the existence of fast 
 
 ### Phase F — metrics and measures
 
-**Almost all of this already exists**, built for the launch monitor. Do not invent a parallel
-mechanism.
+**DONE 2026-08-18, and the headline is that the lane had never bound once.** Everything Phase E
+proved about retrieval was true and none of it reached a metric, because
+`shot_processor.cpp:1053` casts to `ImuInstance *` and an `HmInstance` is a PEER of that class, not
+a subclass. The cast returned null, no `ImuSegmentBinding` was ever produced, `ImuVisionFuser` never
+saw the lane, and `MetricExtractor` never ran on it. Every wG3 capture in the library carries two
+honest IMU streams and no wrist metric of any kind.
 
-- ⚠⚠ ~~**First, make both instruments bindable at once — §0 #8.**~~ **CUT FROM THIS PHASE,
-  2026-08-18, and the reason is physical rather than architectural.** Two sensors strapped close
-  together on a wrist and hand interfere, and neither can then be mounted reliably — so the
-  dual-worn swing this work exists to serve produces bad data whether or not the code allows it.
-  The app will therefore **never** run a wG3 and a Witmotion at once. Slot A resolves to
-  `LeadForearm` and B to `LeadHand`, and Phase C's placement resolver already refuses a second
-  claimant, so **no supported mounting can reach `streamFor`'s first-match path** and the
-  discriminator would be untestable code threaded through every call site — real risk across the
-  codebase for a configuration nobody can wear.
-  ⚠ **This does NOT cancel the validation, it relocates it.** HM-versus-Witmotion comparison runs
-  in **Python harnesses outside the app**, on purpose-built experiments, which is the actual reason
-  Phase G is deferred to its own plan. Do not re-derive the discriminator as a prerequisite for it.
-  ⚠ **What survives from this bullet, and it is the important half:** both series must still be
-  produced by the **identical wrist maths** so that any difference is the instrument and not the
-  arithmetic. With one instrument per swing that is now a property of the CODE PATH — the
-  HackMotion lane must go through the same `MetricExtractor` route as a Witmotion lane, not a
-  parallel one — rather than something a dual-worn capture demonstrates.
-- **New metric keys, not overwritten ones** — `hm.leadWristFlexExt`, `hm.leadWristRadUln` and
-  `hm.forearmRotation` beside ours. ⚠ The names in the original text were wrong; see §0 #5.
-  ⚠⚠ **THE THIRD KEY IS `forearmRotation`, NOT `forearmPronation`, AND THE DISTINCTION IS THE
-  WHOLE POINT.** ISB pronation is a radioulnar angle defined against the HUMERUS; a wG3 has no
-  upper-arm unit, so that quantity is unavailable and nothing may be published under its name.
-  **`forearmRotation` is a different and simpler question — how far has the forearm turned since
-  Address — which one forearm sensor answers on its own**, and which the user identifies as a
-  powerful direct indicator of **flipping** through impact. It is wanted as a real metric, not as
-  the display-only row E2 item 1 shipped.
-  - **No exception to Rule 0 is required and none should be written.** `pinpoint_sign_conventions.md`
-    already carries a "what ISB does NOT govern" table for exactly this, and a **Segment axial
-    rotations** row now names it: ISB defines rotations BETWEEN two segment triads, and this is one
-    segment twisting about its own long axis. Rule 0 not applying means **Rule 1 applies** — follow
-    the outside world — so it is **pronation-positive, agreeing with the vendor**, where
-    `leadWristFlexExt` deliberately disagrees with them. That asymmetry is correct: bow/cup has a
-    standard that outranks a product and this does not. ⚠ `metric_catalogue_test` pins only the
-    FOUR named ISB angles, so nothing there needs changing either.
-  - ⚠⚠ **ADDRESS-REFERENCED, AND THAT IS LOAD-BEARING.** Each vendor zeroes at its own calibration
-    pose, so the ABSOLUTE angle compares across neither instruments nor two calibrations of one.
-    Referenced to Address the offset cancels and what remains is TRAVEL, which is exactly the
-    quantity wanted and is comparable. `wrist_angles.h` already has the shape — `wristRel` /
-    `elbowRel` are address-referenced builders and `twistAngleRad` is right there — so this is a
-    sibling of what exists, not new machinery. Publishing the un-referenced absolute would be
-    publishing the calibration pose.
-  - ⚠ **ONE definition across both vendors: slot A alone, identical maths.** A Witmotion rotation
-    defined against the upper arm beside a forearm-alone wG3 one would publish two quantities under
-    one name, and a P1→P7 or cross-instrument comparison would read the shoulder as sensor error.
-    This means `forearmRotation` is produced for a **Witmotion** mounting too, not only a wG3.
-  The pair must stay separately addressable — that is what makes Phase G possible at all.
-  `measure_vocabulary.h` says it directly: *"a measure still cannot validate itself."*
-- **Their own descriptors with a `RouteMethod::Device` route**, the `lm.attackAngle` shape — not a
-  second route on the existing metric (§0 #6). ⚠ The requirement axis does not exist yet (§0 #7).
-- **`preferKeys` on the affected measures**, HackMotion first. Authored, not inferred: the
-  loader walks a list somebody wrote, best first, and takes the first key the swing carries.
-  ⚠ **Every key in a ladder must carry the measure's unit** — the pack validator's
-  `measureKeyUnit` enforces it; a corridor authored in degrees must mean degrees whichever
-  rung answered.
-- **No corridor changes.** The corridors grade a quantity, not an instrument. If HackMotion
-  says the corridor is wrong, that is a Phase G finding to act on deliberately — not a thing
-  to tune while wiring a route.
-- ⚠ ~~**Land dark.** The `preferKeys` entries stay empty until Phase G says the instrument is
-  trustworthy.~~ **Overridden — see §0 decision 3.** HackMotion grades when present, following the
-  launch monitor exactly. Landing the route and landing the preference remain two different
-  decisions; they are simply both taken now. The consequence — a graded corpus that mixes
-  instruments by what was worn — is recorded there, and does not affect the Phase G comparison,
-  which happens at series level on swings carrying both.
-  ⚠ **AND PHASE G'S DEFERRAL DOES NOT CHANGE THIS — the question was raised and settled on
-  2026-08-18.** The temptation is to reason "G is deferred, so the instrument is unvalidated, so
-  it must not grade". That inverts the relationship: the wG3 is the CRITERION, not the candidate.
-  Deferring G defers what we know about **our own** wrist estimate, not what we know about the
-  HackMotion. Enable the preference.
+**Verified by re-analysing the E3 fixture on the studio PC** — the six `Wrist_02` swings, Release
+`swinglab_run`, `--session-type 1`. What follows is what those runs MEASURED.
+
+- **The lane binds.** A second pass over `instances()` casts to `HmInstance *` and walks its two
+  `HmUnit`s. ⚠ Placement is unit-keyed for a wG3 (`<deviceId>#lowerArm` / `#palm`, Phase C), so the
+  bare `placement.value(deviceId)` lookup the Witmotion path uses cannot work; rather than respell
+  that format the slot is resolved by asking `ImuManager::instanceForSlot()` which object holds each
+  slot and matching on identity. A is identity and M is the frame constant, both read off the unit;
+  the mount deviations stay 0.0 because **there is no mount solve for this device**, and
+  `anatCalibrated` is the real gate. ⚠ No frame candidate selected ⇒ **no binding at all**, rather
+  than a binding whose `toAnatomical` returns identity.
+
+- ⚠⚠ **THE CONJUGATE, AND IT WAS PROVED BY EXPERIMENT RATHER THAN BY READING.** The fuser composes
+  `imu_calibration::toAnatomical(A, q_raw, M)` and does NOT conjugate; the contract is
+  `q_anat = q_hm* ⊗ R_ph`, i.e. the same helper with the raw quaternion ALREADY conjugated. The fix
+  is a `bool hackMotion` on `ImuSegmentBinding`, carried to `SegmentStream`, with the conjugate
+  applied at the one composition site.
+  - ⚠ **This is NOT the instrument discriminator §0 #8 asked for and this phase CUT.** That one
+    existed to let two instruments claim one role simultaneously, which will never happen. This one
+    exists because one instrument's raw quaternion needs conjugating before the shared composition.
+    Different reason, different size; conflating them will confuse the next reader.
+  - **The control experiment, because a check that passes for the unfixed code is not a check.** The
+    same swing was re-analysed with the conjugate disabled. Measured, swing 1 of `Wrist_02`:
+
+    | series | with conjugate (P1 / Top / P7) | conjugate DISABLED |
+    |---|---|---|
+    | `hm.leadWristFlexExt` | −8.76 / **−16.32** / −4.76 | −34.40 / **+6.60** / −34.09 |
+    | `hm.forearmRotation`  | 0 / **−190.01** / **+19.47** | 0 / **+199.83** / **−4.55** |
+
+    Correct reads as a golf swing: the lead wrist is **cupped ~16° at the top** and moves toward
+    flat into impact, and the lead forearm **supinates to the top then pronates through impact**.
+    Disabled inverts both — a wrist BOWED at the top and 34° CUPPED at impact, and a forearm that
+    pronates going back and supinates through the ball. ⚠ **Neither output looks broken.** Ranges
+    are plausible either way and the curve tracks the wrist either way; only the DIRECTION separates
+    them, exactly as `hm_frame.h` warns. The resemblance score moved 66 → 46 with it off.
+  - ⚠ **THE OTHER `mountM.conjugated()` SITE NEEDED NO CHANGE, and that is provable rather than
+    assumed.** `imu_vision_fuser.cpp`'s `mountInv` rotates the raw gyro/accel into the anatomical
+    frame; for a wG3 `mountInv = R_ph* = frameMap(candidate)`, which is character-for-character what
+    `hm_frame::pronationRateDps` already does. **The vector path was already right and the
+    orientation path was wrong** — and that asymmetry is what makes the missing conjugate so easy to
+    walk past.
+  - ⚠ **A THIRD SITE THE ORIGINAL PLAN DID NOT NAME:** offline re-fusion. `refuseSource()` re-runs
+    Madgwick from the recorded accel+gyro, which for this device is gravity-removed linear
+    acceleration — the re-fused quaternion is meaningless and would then be conjugated on top. A
+    HackMotion binding is now excluded from refusion.
+
+- **Three keys, and the third is a new metric.** `hm.leadWristFlexExt`, `hm.leadWristRadUln`,
+  `hm.forearmRotation` — new keys beside ours, never overwritten ones. ⚠ **On a wG3 capture the bare
+  keys are NOT emitted at all**, so a bare key always means our own estimate and the ladder in
+  `Measure::preferKeys` is what chooses. Both instruments run **one** `MetricExtractor` path and the
+  prefix decides a name and nothing else; with one instrument per swing that is a property of the
+  CODE, and nothing else could demonstrate it.
+  - `forearmRotation` **also exists as a bare key**, produced from **slot A alone for either
+    vendor**, and — decided by the user 2026-08-18 — **whether or not slot C is mounted**. So a
+    three-sensor Witmotion rig delivers `forearmPronation` (the ISB joint angle) **and**
+    `forearmRotation` (the segment's own travel), and they are different quantities.
+  - Built as a sibling of what existed: `wrist_angles.h` gained `forearmRel()` beside `wristRel` /
+    `elbowRel`, fed to the same `forearmPronElbowFlex`. ⚠ Address-referenced in quaternion space,
+    which is what makes it mean anything — measured P1 = 0.00 on every swing by construction.
+  - Rule 0 does not govern a single segment's axial rotation, so Rule 1 does: **pronation-positive,
+    agreeing with the vendor** where `leadWristFlexExt` deliberately disagrees.
+
+- **The requirement axis (§0 #7) now exists**: `MetricRequirement::hackMotion`,
+  `ShotContext::hasHackMotion`, a `missingForRequirement` clause, and `CaptureDevice::HackMotion`.
+  ⚠ A HackMotion route does NOT also demand our strap-on wrist kit — the wG3 fills both slots
+  itself, and stating both would advertise a configuration the product refuses to run.
+
+- **Descriptors + `preferKeys`, enabled now.** Four new descriptors on the `lm.attackAngle` shape
+  (`RouteMethod::Device`, `{ .hackMotion = true }`), and `preferKeys: ["hm.…"]` on **18** measures —
+  the sixteen `m_leadWristFlexExt_p*` / `m_leadWristRadUln_p*` plus ⚠ `m_leadWristAtTop` and
+  `m_leadWristAtImpact`, which sit outside the `_p*` naming family and are easy to miss.
+  `m_leadForearmRot_p*` still reads `forearmPronation` and was deliberately left alone — repointing
+  it changes which quantity a corridor grades. **Corridors untouched.**
+
+- **Two corrections this phase had to make to its own brief**, both worth keeping:
+  - ⚠ **`measureKeyUnit` does not exist under that name.** The rule is real; the enforcing check is
+    unnamed check 5b in `diagnostics_catalogue_integrity_test.cpp`, NOT the pack validator — which
+    says in its own comment that it cannot see the catalogue. It requires each rung to exist AND to
+    match both the measure's unit and the fallback descriptor's unit.
+  - ⚠ **`metric_catalogue_test` DOES need changing.** The claim that it "pins only the FOUR named
+    ISB angles" is true of the Rule 0 pin and of nothing else: the same file carries hard counts
+    (descriptor count, TimeSeries count, `Wrist & forearm` group size, the produced-key list) that
+    four new descriptors break. Also `metric_providers.cpp` must claim the new keys, or they resolve
+    Unavailable while sitting in the document — the failure `stanceWidthMm` shipped with.
+
+- **The false data-integrity warning is fixed** at `imu_refusion_check.h`, per-source rather than
+  whole-check: a window holding a checkable lane beside an uncheckable one still gets checked on the
+  half that can be, and `sourcesChecked` stays honest. ⚠ **Not exercised by this phase's
+  verification** — the block is written by `ShotProcessor` on live capture and `swinglab_run` does
+  not emit it — and ⚠ **fixing the producer does not clean the fixture**: all eleven swings already
+  carry `refusionOk: false` on disk and `swing_doc.cpp` re-raises the badge on every reload.
+
+- ⚠⚠ **RE-ANALYSIS WAS A SECOND BLOCKER NOBODY HAD NAMED, and without it the phase's own definition
+  of done was unreachable.** `swing_reanalyzer.cpp` hardcoded `DeviceKind::IMU_WitMotion` for every
+  replayed IMU lane, discarding the `instrument: "hackmotion"` tag the exporter writes; and the
+  fixture swings carry no baked A/M and `role: 0`, because the live binding never ran when they were
+  captured. Fixing only the live path would have helped future captures and left the eleven E3
+  swings silent. The re-analyzer now reads the instrument tag and reconstructs the binding — role
+  from the `#lowerArm` / `#palm` suffix, A identity, M the frame constant, gated on the device's own
+  recorded calibration state. ⚠ Role comes from the UNIT, not from `sessionType`.
+  - The unit-id spelling moved to `src/IMU/hm_unit_id.h` so the analysis layer can read it;
+    `HmUnit::unitIdFor` delegates there, so there is still exactly one spelling.
+  - ⚠ `analysis.bindings[]` **takes precedence** over the per-stream fallback on re-analysis, so
+    `hackMotion` is persisted there too — without it a re-analysed wG3 swing would drop the
+    conjugate and invert every sign **on the second pass only**. `parseBinding` also infers it from
+    a unit-suffixed serial, which is the only answer for swings analysed before the key existed.
+
+- ⚠ **A silent field-copy nearly ate the whole thing.** `trimStreams()` in `wrist_analyzer.cpp`
+  rebuilds each `SegmentStream` field by field, and dropped `hackMotion`. The binding was right, the
+  fuser was right, the conjugate was applied — and the metric still came out keyed as a Witmotion.
+  It was caught only because the first fixture run produced bare keys; nothing else would have said
+  so. **Trimming is a window operation and must copy every non-sample field.**
+
+- **What the five bare-key consumers do now.** `swing_scorer`, `wrist_resemblance`,
+  `score_uncertainty` and `wrist_analyzer`'s trace each had their own copy of a
+  `m.key == key` loop and would all have gone quiet on a wG3 swing — no wrist score, no resemblance,
+  no interval, no review trace — not because the wrist was unmeasured but because it was measured by
+  the better instrument. One shared `findSeriesByLadder` (hm. first, then bare) in
+  `swing_analysis.h` replaces all four, and `dofForMetricKey` strips the prefix so the whole
+  DOF × P-position grid keeps working. **Measured on the fixture: resemblance 66, pattern
+  "neutral", and a populated findings list (`open_face_top`, `cast`) — all resolved from `hm.`
+  series.**
+  - ⚠ `forearmRotation` deliberately maps to **no** DOF. The grid's `LeadForearmRot` row is the ISB
+    angle; routing rotation there would put two different measurements in one cell on a
+    three-sensor rig, and would let a wG3 fill a row for an angle it cannot measure.
+
+- ⚠ **The grid rate finally rises.** With the lane bound, `gridHzForWindow` sees the ~799 Hz span
+  and the fused grid is no longer pinned at the 200 Hz floor. This is the first time E3's retrieved
+  density reaches a metric at all.
+
+**Still owed from this phase.** ⚠ The E3 findings note's open item is NOT done: the 800 Hz-vs-100 Hz
+comparison (flexion at impact moved 1.8–8.9°) still needs re-running through the product's own
+decomposition rather than the ad-hoc one E3 used — the machinery to do it now exists. ⚠ And the
+Witmotion "byte-identical" gate could not be measured against real data: **every Witmotion swing in
+the corpus has `bindings: 0`**, so there is no bound Witmotion wrist lane to regress against. What
+was checked instead: identical metric key lists on a re-analysed camera-only swing, the full
+directly-affected test suite green with zero new failures, and every HackMotion branch gated on a
+field that defaults to false.
+
 
 ### Phase W — wash-up: unhappy paths and edge cases
 
@@ -1258,6 +1333,7 @@ to coaching doctrine; an instrument comparison is evidence about *instruments*.
 | 2026-08-18 | Phase E2 item 4 — studio build reproducible | **DONE, build ready — prep, not the full pin.** GOLFSIMPC's `PinPointStudio` was 36 commits behind on a HEAD that predated the sibling-checkout mechanism entirely (`ce94d20` and four follow-ups); fast-forwarded clean (`git merge --ff-only`, 0 local-only commits, verified before merging — the machine's own Aug-10 "diverged, never pull" note was stale, not this check). It now has `C:\Users\developer\Projects\libhackmotion`, an `origin`-tracked clone sibling to `PinPointStudio`, mirroring this Mac's own sidecar setup, tracking `main` rather than pinned. Reconfigured + built `Desktop_Qt_6_11_0_MSVC2022_64bit-Debug` clean (`jom PinPointStudio`, exit 0); the CMake provenance line confirms the sibling was actually linked: `libhackmotion: 0.1.0 (4545952, local) - local C:/Users/developer/Projects/libhackmotion`, surfaced to the About box (`app_info.cpp:76`, already shipped, untouched this session). **Two mistakes made and corrected in the same session, worth recording because both were "trust a note instead of checking":** (1) first assumed `Desktop_Qt_6_11_0_MSVC2022_64bit-Debug` was the dead pre-VS18-upgrade cache the `golfsimpc-studio-build` memory names — it wasn't; that note was itself stale, the cache had been reconfigured to the VS18 toolset (`CMAKE_CXX_COMPILER`/`CMAKE_LINKER` both `.../18/.../14.50.35717/...`) and last built successfully days earlier. (2) Tried to verify the binary launches by reusing the Mac's offscreen `--probe-qml` technique over SSH; the process started, Quick3D logged the expected no-RHI warnings, but the probe's `Qt.quit()` never fired and CPU climbed for 45+ seconds before it was force-killed — inconclusive, not a proven hang, and not attempted again: launching a Qt GUI app headless over SSH on Windows was never a reliable test to begin with, unlike the Mac where the technique was established. **So "ready to run" here means the build succeeds and links against the correct, attributable library revision — not an interactively-verified launch on the studio's own display**, which is what actually answers that question and hasn't happened yet. ⚠ **Deliberately not done:** no `GIT_TAG` sha pin in CMakeLists.txt — the already-shipped provenance plus a live sibling on both machines makes divergence attributable rather than impossible, and a hard pin would fight the sibling-checkout workflow this Mac uses for day-to-day library development; revisit only if attributability stops being enough. `hackmotion/enabled` confirmed defaulting **ON** (`app_settings.h:461`,`:1685`) — the brief's old "lands dark / defaults OFF" framing (§5, and this item's own text) was stale from the moment it was written: the flag and the "lands dark" sentence landed in the SAME commit (`49a346a`, 2026-08-17) already contradicting each other, and the user confirmed the code is the intended behavior (testing runs before G on purpose) — both stale claims removed from the brief rather than left to mislead the next reader. |
 | 2026-08-18 | Phase E2 item 1 — ArmVizView, reinstated | **DONE, salvaged from the abandoned-E2 stash rather than rebuilt.** The full E2 attempt was abandoned earlier the same day (work preserved as `stash@{0}`); this session reinstated ONLY item 1, under two decisions that narrow it: the wizard KEEPS its two separate pages — Calibrate, then "Check your sensor" — instead of the stash's merged two-pass flow, and arm mounting is EITHER a wG3 OR Witmotions, never both, so none of the stash's pairing machinery (`vendorMode`, second calibrate step, paired-placement allowance) came back. **Taken whole from the stash:** `ArmVizView.qml` — elbow-centred framing (the pivot that holds for ANY orientation, which a free-movement check requires), `hmReferenceQuat` (a wG3's anatQuat is zeroed at the DEVICE'S OWN calibration pose, forearm across the chest, ~90° of elevation from this avatar's rest pose — the reason a calibrated arm used to hang at the side while tracking correctly), per-slot vendor selection so only HackMotion slots get the reference left-multiply, and `upperArmKnown` — an unsensored upper arm is NOT drawn, because drawing it asserts an arm position nobody measured AND pins the elbow (hence the whole forearm) in the wrong place. Also taken: the `live_wrist_angles.cpp` stale-comment fix. **Hand-done:** `isHackMotionDevice` moved to PUBLIC Q_INVOKABLE (⚠ a private Q_INVOKABLE registers with moc but QML refuses the call — "is not a function" once per evaluation and the avatar silently keeps its old pose); the "still being solved" note DELETED at source with both usage sites. ⚠ NOT taken: the stash's `placementKeyForSlot` presence rewrite (superseded at HEAD by the a439cea ladder) and everything pairing-shaped. **Verified by probing, not reading:** 14/14 checks in the running app via a temporary `--probe-qml` loader (uncommitted) — invokable reachable, `hmReferenceQuat` matches the measured constant and is genuinely left-multiplied on the HM path only, Witmotion path bit-identical, absent segments park at rest, upper-arm mesh `visible === false` with forearm+hand still drawn (confirmed in a rendered grab); `qml_reactivity_test` green. **The render-disappearance regression the user gated this on** (cube + ArmVizView went blank < 5 min into the abandoned session, cause never confirmed): no new View3D is constructed anywhere in this change, and a 13-cycle / 6.5-minute windowed soak — grabs of arm, body-guide and cube views every 30 s beside a deliberately blank control — held pixel std 24–60 on every cycle with the control at exactly 0.0, so the detector demonstrably tells blank from rendered in the same run. ⚠ **Measured on the way, and worth keeping:** a fully static scene stops the render loop and QML Timers with it; display sleep does NOT stall rendering (caffeinate changed nothing) but OCCLUSION does — switching virtual desktops froze the soak twice, reproducibly. Occlusion → starved render loop → bad re-expose is now the leading hypothesis for the original blanking; a lead, not a root cause. **Follow-up the hardware check surfaced, verified on the wG3 the same day:** the overlay's Roll row read "—" for a HackMotion — roll is ISB pronation (slots C+A) and a wG3 has no upper-arm unit; a Witmotion worn A+B has the same hole. The row now falls back to **"Rotation"** — the forearm's signed long-axis angle vs the calibration neutral, from slot A alone, IDENTICALLY for both vendors (the vendor's own name and quantity for its third wrist metric; sign confirmed on hardware — pronation positive, and rotation agrees with the vendor's sign while bow/cup stays ISB-inverted as Phase D measured). ⚠ ONE definition across vendors is deliberate: a Witmotion rotation defined against the upper arm beside a forearm-alone wG3 rotation would publish two quantities under one name and a P1→P7 or Phase-G comparison would read the shoulder as sensor error. Zero is each vendor's OWN calibration pose, so absolute values do not compare across vendors — deltas between swing positions do. Display-only; never feeds a metric; "Roll" (true ISB pronation) still shows whenever an upper-arm sensor is actually worn and calibrated. ⚠ Still owed from this narrowing: E2 items 2–4 untouched; the `_reset()` stale-anchor recalibration fix landed in its own follow-up commit — every segment now gets BOTH `clearCalibration()` and `clearFunctionalCalibration()` (guarded by method existence, so HmUnits are naturally skipped), where before only leadImu's legacy transform was cleared and phase 2 measured φ against the previous run's anchor, rejecting every recalibration after the first; mechanism probed headless (4/4, null-safe through a double Recalibrate cycle), ⚠ the behavioural half — a second calibration ACCEPTED — still needs a worn Witmotion; live wG3 confirmation on the check page needs the studio (E3). |
 | 2026-08-18 | **Phase E3 — studio verification, two sessions** | **DONE, and the first session's entire value was finding that Phase E had never run.** Session 01 (5 swings, 7-iron, `2026-08-18_..._Wrist_01`): every lane `HM_HIST_REFUSED_ALIGNMENT`, `attempts: 0`, no radio traffic. ⚠ **The user called it a bug and was right, though not by the mechanism proposed** — the hypothesis was a blocked GUI thread, and the code disproves that: the reserve is the first thing `onShotDetected` does, before the post-roll timer starts, and reaches the session by `QueuedConnection` on the I/O thread. The refusal is arithmetic inside `hm_history_reserve`, before any radio traffic: precision at the window = the fit's p90 residual = **16,145 µs** (median 6,520, max 49,219, over 1,814 observations spanning 56 s) against our 4,167 µs budget. **No latency could have changed the answer.** ⚠ **And the 4.5 s that looked like a delay was the request WIDTH** (3 s pre + 1.5 s post) coming back undelivered — `largestGapUs` is not a wait, and reading it as one is what made the first diagnosis look like a timeout. **Three reasons the budget was wrong, every one of them knowable beforehand:** the camera is **150 fps not 240**, so 4,167 µs was stricter than its own rationale (a frame is 6,636 µs); the link's jitter had been MEASURED at 20-25 ms in Phase B, before the budget was picked, so it could never open; and it refused the deferred lane over an error **the live lane already carries ungated**, both being dated through the same fit. A gate that cannot open is not a guard, it is the feature switched off — and it failed SILENTLY, because `HmInstance::logLine()` reaches only the device panel in Settings, which nobody has open while an athlete is hitting balls. Five swings were recorded believing the feature was live. **Shipped `b5ec45b`:** budget → **0** (the library's own default, whose header states the intent — *"we could not date these, and here they are anyway, clearly marked"*, never *"so you get nothing"*); request 3.0/1.5 → **±2 s** through the `history_pre_roll_us`/`_post_roll_us` policy fields nothing had been reading (the old shape reached past the onset clamp at impact − 1.75 s while stopping short of what the frozen 4 s window keeps); and a `ppWarn` on any non-COMPLETE retrieval. ⚠ **Zero disables the QUALITY gate ONLY** — a window on the far side of a retrieval still refuses with the same status code and must, because there the pull returns the WRONG samples rather than undated ones. ⚠ **The user rejected the added warning's SHAPE, and the correction is architectural:** there is ONE log, the app log — no device- or panel-specific channels — and anything the user must act on in the moment is a **toast on the session screen**, which is the established mechanism. Left in place for now by decision, to be revisited. **Session 02 (6 swings, `..._Wrist_02`) is the proof:** 1,066-1,159 samples per lane against 228-256; `HM_HIST_HOLED`, `attempts: 3`; 1,047-1,109 samples from the DEFERRED pull against 12-50 live; coverage 0.38-0.41 (⚠ inside §0 #2's correct 16-50 % band — the missing part is the still pre-roll the device replays sparsely by design), density 0.5, `achieved_hz` 264-280. ✅ **The gate, at the right scope: 199-200 samples across impact ±125 ms out of a theoretical 200** — the full ~799 Hz on BOTH sides of the strike, where session 01 had ~100 Hz before impact and a burst arriving 9-16 ms AFTER it. ✅ **The stitch is clean and this was the likeliest thing to be quietly wrong:** strictly monotonic, zero duplicate timestamps, and the library's own overlap check reports **0 mismatches over 218-257 samples** where retrieved and live describe the same instants — the Phase A digest ring finally producing evidence rather than silence. The largest orientation step between neighbouring samples near impact is 1,464-1,991 °/s, matching the independently-reported gyro; a fabricated seam would show precisely there. **The self-recording stall measured ~1.1 s**, not the ~4.5 s `hm_instance.cpp`'s own guard comment predicts for a window this wide, so the second-ball risk is smaller than that comment implies. ⚠⚠ **THE FINDINGS-NOTE QUESTION IS ANSWERED AND THE ANSWER IS NOT "MORE RATE IS BETTER".** Resampling the ~799 Hz data to 100 Hz across all eight phase offsets: peak flexion moves 0.5-1.6°, peak deviation 2.5-3.2° — but **flexion READ AT IMPACT moves 1.8-8.9°** on nothing but where the grid falls. Peaks and ranges barely need the rate; a value read at an INSTANT does, and that is exactly what a P-position measure reads, against corridors graded in degrees. That is a sharper justification for Phase E than the brief originally offered. ⚠ From an ad-hoc decomposition, not `wrist_angles.h` — the conclusion is a property of signal and rate and does not depend on it, but re-run the absolute numbers through the product's own convention in F. ✅ **Phase B's accel criterion PASSES and §6.3 is confirmed on our hardware** — palm peak acceleration beats lower arm on all five session-01 swings (23.5/17.7, 25.0/22.4, 25.3/19.5, 24.2/21.2, 24.3/22.3 g), peak angular rate agreeing. ✅ **Calibration provenance on all 11 swings:** state 2 at start AND end, config 126, zero pinned, zero quat-suspect, no `provenanceDropped` — the B′ ring's sizing assumption survives its first real test. ✅ **Windows Bluetooth worked first time**, closing risk 1 at no cost. ⚠ **NEW DEFECT, NOT FIXED: a false data-integrity warning on EVERY HackMotion shot.** `imuIntegrity` re-fuses Madgwick from recorded accel+gyro and compares to the stored quaternion — but the wG3 streams its own calibrated ANATOMICAL orientation, not a host-side fusion of those vectors. 179.8-180.0° disagreement, `refusionOk: false`, on all 11 swings, and `swing_doc.cpp:1152` turns it into `dataWarning` → a badge on the shot card (`PpShotCard.qml:291`). `imu_refusion_check.h` already makes exactly this exclusion for ESKF. Every capture in Phase F's fixture carries it. ⚠ **Two smaller ones:** every pull hits the retry ceiling (`attempts: 3`, still HOLED) and nobody has checked whether attempts 2 and 3 recover anything to justify their stalls; and swing 6 carries 37 sample intervals of 751-758 µs — faster than the device can sample — all ~2 s pre-impact in the swing with the most live samples (50), so the composite appears to keep BOTH the live and the retrieved sample when they nearly coincide rather than choosing one. ⚠ **Still owed, each needing a deliberate act:** the disconnected-device shot, two balls inside ~3 s, and the five-minute stationary hold for §6.2's drift check — none happened in either session. ⚠ The launch monitor was left on **driver** for every 7-iron swing in session 01. **Studio is now a RELEASE build by user decision** (Debug post-shot analysis too slow; no development happens there): `build\Desktop_Qt_6_11_0_MSVC2022_64bit-Release`, wired identically to the Debug dir including the sibling libhackmotion, with `configure-release.bat` / `build-release.bat` / `run-release.bat` on the machine. ⚠ The run script exists because **neither build directory deploys Qt's DLLs and Qt is not on the machine PATH**, so the executable does not start when launched directly. |
+| 2026-08-18 | **Phase F — metrics and measures** | **DONE, and the first thing it found is that the HackMotion lane had never bound once.** `shot_processor.cpp:1053` casts to `ImuInstance *` and an `HmInstance` is a PEER of that class, not a subclass — so the cast returned null, no `ImuSegmentBinding` was ever built, the fuser never saw the lane and `MetricExtractor` never ran on it. Every wG3 capture in the library holds two honest IMU streams and **no wrist metric of any kind**; E3 proved the data arrives and is recorded, and this phase found that nothing consumed it. ⚠⚠ **The conjugate was settled by EXPERIMENT, not by reading**, which is the only thing that could have settled it: the same fixture swing re-analysed with the conjugate disabled gives `hm.leadWristFlexExt` Top **+6.60°** and P7 −34.09° against the correct **−16.32°** / −4.76°, and `hm.forearmRotation` Top **+199.83°** against **−190.01°** — every sign inverted, every range still plausible, the curve still tracking the wrist. Correct reads as a golf swing (lead wrist cupped ~16° at the top moving toward flat into impact; lead forearm supinating to the top then pronating through the ball); disabled reads as a wrist bowed at the top and 34° cupped at impact. Resemblance 66 → 46 with it off. ⚠ **The second `mountM.conjugated()` site needed NO change and that is provable**: for a wG3 `mountInv = R_ph* = frameMap(candidate)`, character-for-character what `hm_frame::pronationRateDps` already does — the vector path was already right and only the orientation path was wrong, which is exactly why the bug is easy to walk past. ⚠ **A third site the plan never named**: offline re-fusion re-runs Madgwick from gravity-removed accel, so a HackMotion binding is now excluded from it. ⚠⚠ **RE-ANALYSIS WAS A SECOND BLOCKER, AND WITHOUT IT THE PHASE'S OWN DEFINITION OF DONE WAS UNREACHABLE** — `swing_reanalyzer.cpp` hardcoded `IMU_WitMotion` for every replayed lane and threw the `instrument: "hackmotion"` tag away, and the fixture swings carry no baked A/M and `role: 0` precisely BECAUSE the live binding never ran. Fixing only the live path would have helped future captures and left the eleven E3 swings silent. ⚠ **A silent field-copy nearly ate the whole thing**: `trimStreams()` rebuilds each `SegmentStream` field by field and dropped `hackMotion`, so the binding was right, the fuser was right, the conjugate was applied — and the metric still came out keyed as a Witmotion. Caught only because the first fixture run produced bare keys. ✅ **Measured on the E3 fixture** (six `Wrist_02` swings, studio PC, Release `swinglab_run`, `--session-type 1`): all three `hm.*` series on all six, no bare wrist keys anywhere, `forearmRotation` P1 = 0.00 by construction, and the five bare-key consumers now resolve through one shared `findSeriesByLadder` — resemblance 66 with pattern `neutral` and a populated findings list (`open_face_top`, `cast`) all fed from `hm.` series. ✅ 18 measures carry the ladder — the sixteen `_p*` plus `m_leadWristAtTop` / `m_leadWristAtImpact`, which sit outside that naming family. ✅ Corridors untouched. **Two corrections to the brief's own text**: ⚠ `measureKeyUnit` does not exist under that name (the check is unnamed 5b in `diagnostics_catalogue_integrity_test`, not the pack validator, which says itself that it cannot see the catalogue), and ⚠ `metric_catalogue_test` DOES need changing — the four-ISB-angle claim is true of the Rule 0 pin only, while the same file's hard counts break on four new descriptors. ⚠ **NOT done**: the E3 findings note's 800-vs-100 Hz re-run through the product's own decomposition — the machinery for it now exists. ⚠ **Could not be measured**: the Witmotion byte-identical gate, because **every Witmotion swing in the corpus has `bindings: 0`** and there is no bound Witmotion wrist lane to regress against; what was checked instead is an identical metric key list on a re-analysed camera-only swing, the directly-affected test suite green with zero new failures, and every HackMotion branch gated on a field defaulting to false. ⚠ **Not exercised**: the false data-integrity badge fix — `swinglab_run` does not emit `imuIntegrity` — and fixing the producer does not clean the fixture, whose eleven swings already carry `refusionOk: false` on disk. ⚠ **Machine note**: the studio PC's `vcvars64.bat` stopped putting the Windows SDK on `INCLUDE` mid-session, so `swinglab_run` will not build until `INCLUDE`/`LIB` are extended with `Windows Kits\10\...\10.0.26100.0` by hand. |
 
 
 ---

@@ -37,6 +37,7 @@
 #include "../Analysis/imu_vision_fuser.h"
 #include "../Analysis/phase_segmenter.h"
 #include "../Analysis/swing_analysis.h"
+#include "../IMU/hm_frame.h"          // isSelected() — no frame, no binding
 #include "../Export/swing_doc.h"
 #include "../Core/club_vocabulary.h"
 #include "../Core/pp_debug.h"
@@ -1073,6 +1074,89 @@ ShotAnalysisJob ShotProcessor::buildAnalysisJob()
             }
             job.imuBindings.push_back(b);
         }
+
+        // ── HackMotion, which the loop above cannot see ──────────────────────────
+        //
+        // An HmInstance is a PEER of ImuInstance, not a subclass — both derive
+        // ImuDeviceBase (hm_instance.h:229-235) — so the qobject_cast above returns
+        // null for it and always has. That is why no wG3 has ever produced a wrist
+        // metric: no binding, so the fuser never sees the lane and MetricExtractor
+        // never runs on it. Phase E3 proved the samples arrive and are recorded
+        // honestly; it proved nothing downstream consumed them, because nothing did.
+        //
+        // Written as a second pass rather than folded into the first so the Witmotion
+        // path above is untouched, byte for byte.
+        for (const QVariant &v : insts) {
+            auto *hm = qobject_cast<HmInstance *>(v.value<QObject *>());
+            if (!hm) continue;
+
+            // ⚠ NO FRAME, NO BINDING. Until a directed capture has selected a
+            // candidate, hm_frame::toAnatomical() returns identity by design — a lane
+            // with no anatomical frame must drive nothing rather than drive a plausible
+            // guess. Binding it anyway would feed identity quaternions to the wrist
+            // decomposition and publish the result as a measurement.
+            if (!pinpoint::hm_frame::isSelected()) {
+                ppWarn() << "[ShotProcessor]" << hm->deviceDescription()
+                         << "— no HackMotion frame candidate selected, so this device's"
+                            " lanes are recorded but not bound; no wrist metric will be"
+                            " produced from them.";
+                continue;
+            }
+
+            HmUnit *const units[] = { hm->unitLowerArm(), hm->unitPalm() };
+            for (HmUnit *const unit : units) {
+                if (!unit) continue;
+                const pinpoint::SourceId sid = unit->sourceId();
+                if (sid == pinpoint::kInvalidSourceId)
+                    continue;   // this unit never registered a lane
+                if (std::find(job.imuSources.begin(), job.imuSources.end(), sid)
+                    == job.imuSources.end())
+                    continue;   // this unit is not a source in the captured window
+
+                // ⚠ PLACEMENT IS UNIT-KEYED FOR A HACKMOTION, so the bare
+                // placement.value(deviceId) lookup the Witmotion path uses cannot work
+                // here: a wG3's keys are "<deviceId>#lowerArm" / "<deviceId>#palm"
+                // (Phase C). Rather than respell that format — the parser for it is
+                // file-static inside imu_manager.cpp, and a second copy of the spelling
+                // is precisely the drift that would silently orphan a device's
+                // placement — ask the canonical resolver which object holds each slot
+                // and match on identity. instanceForSlot() returns the HmUnit for a
+                // HackMotion, which is the whole reason HmUnit exists.
+                QString slot;
+                for (const QString &s : { QStringLiteral("A"), QStringLiteral("B"),
+                                          QStringLiteral("C") }) {
+                    if (m_imuManager->instanceForSlot(s) == static_cast<QObject *>(unit)) {
+                        slot = s;
+                        break;
+                    }
+                }
+                if (slot.isEmpty())
+                    continue;   // unassigned unit — recorded, but bound to no segment
+
+                pinpoint::analysis::ImuSegmentBinding b;
+                b.source     = sid;
+                b.role       = segmentRoleForSlot(m_sessionType, slot);
+                b.hackMotion = true;
+                // A is IDENTITY for this lane by design, not as a placeholder: the
+                // device referenced the pair at its own calibration pose, so there is
+                // no per-session world->anatomical solve to record. M carries the frame
+                // constant. Both are read off the unit rather than recomputed here, so
+                // the binding and the live readout cannot diverge.
+                b.alignA = unit->alignA();
+                b.mountM = unit->mountM();
+                // ⚠ THE MOUNT DEVIATIONS STAY 0.0 BECAUSE THERE IS NO MOUNT SOLVE FOR
+                // THIS DEVICE, not because nobody filled them in. A Witmotion earns
+                // those two numbers from our own two-pose calibration; a wG3 applies
+                // its own and streams the result, so there is no residual to report and
+                // any value here would be an invention. anatCalibrated is the real gate
+                // — it is false unless the device says CALIBRATED and a frame is
+                // selected — and CaptureCapabilities reads `calibrated`, so the two
+                // carry the same honest answer rather than a fabricated composite.
+                b.anatCalibrated = unit->anatCalibrated();
+                b.calibrated     = unit->anatCalibrated();
+                job.imuBindings.push_back(b);
+            }
+        }
     }
 
     // Worker → UI progress marshalling: queued invoke with `this` as context
@@ -1733,6 +1817,12 @@ void ShotProcessor::maybeJoin()
                 { QStringLiteral("worstMaxDeg"),    v.worstMaxDeg },
                 { QStringLiteral("sourcesChecked"), v.sourcesChecked },
                 { QStringLiteral("thresholdDeg"),   v.thresholdDeg },
+                // ⚠ "madgwick" describes the sources that WERE checked, not every IMU
+                // lane in the window. checkImuRefusion now skips HackMotion lanes
+                // per-source (they stream their own orientation and cannot be
+                // re-fused), so a mixed window would report on the checkable half
+                // only. `sourcesChecked` is the field that says how many that was,
+                // and the whole block is omitted when it is zero.
                 { QStringLiteral("filter"),         QStringLiteral("madgwick") } };
             if (imuDataWarning)
                 ppInfo() << "[ShotProcessor] IMU re-fusion parity FAILED — worst"
