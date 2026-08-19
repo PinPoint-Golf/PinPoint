@@ -172,5 +172,67 @@ Item {
             compare(probe.keysOf(chart._visible), "lagAngle")
             compare(probe.keysOf(chart._legendSeries), "lagAngle")
         }
+
+        function test_011_the_panel_title_follows_the_preset() {
+            // The title is the combo's answer said out loud at display size, so it has to track
+            // the same state the combo does — including the fallbacks, which is where a title
+            // computed independently would drift out of step with the control beneath it.
+            chart.seriesList = probe.wristAndSpeed
+            chart._applyPreset("Wrist & forearm", true)
+            compare(chart._presetTitle, "Wrist & forearm")
+
+            // …and it is actually ON the panel, showing that string. Asserting only the
+            // property would pass just as happily with the title element deleted.
+            var titleItem = findChild(chart, "presetTitle")
+            verify(titleItem !== null)
+            verify(titleItem.visible)
+            compare(titleItem.text, "Wrist & forearm")
+
+            // ⚠ AND IT IS SIZED TO ITS TEXT, WHICH IS A GRADIENT ASSERTION WEARING A LAYOUT
+            // DISGUISE. PpDisplayText paints the brand sweep across a Rectangle anchored to its
+            // glyphs, so a title stretched to the panel width spreads warm→cool over 900px and
+            // shows the words in the first fifth of it — near-flat warm, indistinguishable from
+            // the gradient being switched off. That is what Layout.fillWidth did here, and it is
+            // invisible to every other assertion in this file. The panel is 900 wide and these
+            // words are not, so width must still be the natural glyph width.
+            //
+            // waitForRendering first: implicitWidth follows the new text immediately, but the
+            // ColumnLayout re-polishes on the next frame, so without it this reads the width
+            // the title had under the PREVIOUS test's preset and fails on a correct layout.
+            waitForRendering(chart)
+            verify(titleItem.width < chart.width)
+            // Within a pixel, not exactly: the layout hands out whole pixels and the glyph run is
+            // fractional (221 against 220.125). The claim is "sized to its text", and a rounding
+            // pixel does not weaken it — a filled title would be out by hundreds.
+            fuzzyCompare(titleItem.width, titleItem.implicitWidth, 1.0)
+
+            chart._applyPreset("All", true)
+            compare(chart._presetTitle, "All metrics")   // not the bare word "All"
+
+            // A swing that lacks the named group falls back, and the title follows the fallback
+            // rather than the request — the plot is Body rotation, so the title must be too.
+            chart._applyPreset("Wrist & forearm", true)
+            chart.seriesList = probe.rotationOnly
+            compare(chart.preset, "Body rotation")
+            compare(chart._presetTitle, "Body rotation")
+        }
+
+
+        function test_012_a_hand_picked_selection_is_not_titled_as_its_group() {
+            // The combo drops to "Custom" so it stops claiming a group the selection has left.
+            // The title is four times the size, so it must not re-tell that lie — it names the
+            // vocabulary being edited AND says the selection is hand-picked.
+            chart.seriesList = probe.wristAndSpeed
+            chart._applyPreset("Wrist & forearm", true)
+            chart._toggle("leadWristRadUln")
+            compare(chart.preset, "Custom")
+            compare(chart._presetTitle, "Wrist & forearm · custom")
+
+            // Hand-picking from "All" has no group to name, so it says only that it is custom.
+            chart._applyPreset("All", true)
+            chart._toggle("handSpeed")
+            compare(chart.preset, "Custom")
+            compare(chart._presetTitle, "Custom metrics")
+        }
     }
 }

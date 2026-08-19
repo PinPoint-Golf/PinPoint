@@ -211,6 +211,28 @@ Item {
         root.enabledKeys = e
         if (persist) root._persistPref("series", e)
     }
+    // What the panel's title says. The combo names the preset in a 10px gutter control; the
+    // title says the same thing in the display face, so a reader who glances at the panel knows
+    // which vocabulary the curves belong to without hunting for the control.
+    //
+    // ⚠ UNDER "Custom" IT NAMES THE GROUP AND ADMITS THE SELECTION LEFT IT, rather than naming
+    // the group outright. The combo already drops to "Custom" for exactly this reason — a label
+    // claiming a group the hand-picked selection no longer matches would lie about what is on
+    // screen — and a title in twice the point size would tell that lie twice as loudly. The
+    // group is still worth naming because it is the vocabulary being edited, and it is what the
+    // legend below is listing (see _legendSeries).
+    readonly property string _presetTitle: {
+        if (root.preset === "Custom")
+            return (root._presetBase === "" || root._presetBase === "All")
+                   ? qsTr("Custom metrics")
+                   : qsTr("%1 · custom").arg(root._presetBase)
+        // "" is the pre-resolution state — _syncPreset has not run, or this swing produced no
+        // groups at all. Reading as "All" matches what enabledKeys actually is at that moment
+        // (empty ⇒ every series on), so the title is never briefly wrong on the way in.
+        if (root.preset === "" || root.preset === "All") return qsTr("All metrics")
+        return root.preset          // a catalogue group name — manifest data, not a UI string
+    }
+
     // Re-resolve against the swing on screen. Called when the groups change (a new swing) and
     // after prefs are restored. A remembered preset is re-APPLIED rather than trusted, because
     // the enabledKeys restored alongside it were computed for a different swing's series.
@@ -431,6 +453,40 @@ Item {
         anchors.fill: parent
         spacing: Theme.sp(8)
         visible: root._hasAny
+
+        // ── Panel title ───────────────────────────────────────────────────────────
+        // PpDisplayText is the app's one display-title component — brand warm→cool gradient
+        // fill, Theme.fontSzDisplay, flat fallback under reduce-motion — the same call the
+        // Metric Library and the metric detail sheet make. Not a Text with a gradient bolted
+        // on: the mask/MultiEffect machinery lives in that component precisely so no caller
+        // reimplements it.
+        //
+        // Outside the collapsible sections, and above CONTROLS, because it titles the PANEL
+        // rather than any one section — collapsing all three must not take the panel's name
+        // with them. Hidden in compact, which is plot-only by definition.
+        PpDisplayText {
+            objectName: "presetTitle"        // tst_chart_presets reaches it by name
+            visible: !root.compact
+            text: root._presetTitle
+            // ⚠ CAPPED, NEVER Layout.fillWidth — the gradient is why. PpDisplayText paints the
+            // brand sweep across a Rectangle anchored to its GLYPHS, and the glyphs track the
+            // item's width. Filled to a 900px panel, "Wrist & forearm" occupies the first fifth
+            // of that sweep and renders in near-flat warm: the gradient is still there and looks
+            // switched off. Sized to its text it spans warm→cool over the words, which is what
+            // every other caller gets by simply not stretching (MetricLibrary sizes naturally;
+            // MetricDetail caps, like this).
+            //
+            // Capped against root.width rather than the enclosing ColumnLayout: the layout's own
+            // width is derived from its children, so capping a child against it is a cycle Qt
+            // gives up on after two passes. root's width comes from the panel above it.
+            //
+            // The group names are short, but "Tempo & sequence · custom" at display size in a
+            // narrow split panel is not: elide rather than wrap, so the title can never push
+            // the plot down a line.
+            Layout.maximumWidth: root.width
+            elide: Text.ElideRight
+            maximumLineCount: 1
+        }
 
         // ── CONTROLS section ──────────────────────────────────────────────────────
         SectionHeader {
