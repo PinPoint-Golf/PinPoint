@@ -2384,6 +2384,14 @@
       "direction": "low"
     },
     {
+      "id": "sig_bowedAtTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadWristFlexExt_p4"
+      ],
+      "direction": "high"
+    },
+    {
       "id": "sig_openFaceTop",
       "test": "outsideCorridor",
       "measures": [
@@ -4578,11 +4586,38 @@
         "sig_cuppedAtTop"
       ],
       "state": "draft",
-      "consequence": "The lead wrist cups on the way back, so it arrives at the top extended rather than flat, and a cupped lead wrist points the face open. This is the WRIST view of a face open at the top and `open_face_top` is the FOREARM view — two measures on two axes reading one event, which is why they corroborate rather than cause each other. Either can happen without the other: a golfer can cup the wrist with the forearm rolling normally, and can roll the face open with a flat wrist. Both leave the downswing the same job, which is to square a face that starts further open than it should. Only the LOW tail of this corridor is watched, deliberately: a bowed lead wrist at the top is an archetype rather than a fault, and the norm set carries `archetype_bowed` and `archetype_cupped` contexts precisely so a golfer is graded against the shape they play.",
+      "consequence": "The lead wrist cups on the way back, so it arrives at the top extended rather than flat, and a cupped lead wrist points the face open. This is the WRIST view of a face open at the top and `open_face_top` is the FOREARM view — two measures on two axes reading one event, which is why they corroborate rather than cause each other. Either can happen without the other: a golfer can cup the wrist with the forearm rolling normally, and can roll the face open with a flat wrist. Both leave the downswing the same job, which is to square a face that starts further open than it should. `bowed_at_top` takes the other end of this same corridor; read either against the corridor the golfer's own archetype selects, because `archetype_bowed` and `archetype_cupped` re-centre it before either tail is judged.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-08-19",
         "searchTerms": "cupped lead wrist at the top extension open clubface slice golf backswing"
+      },
+      "axis": "lead_wrist_top"
+    },
+    {
+      "id": "bowed_at_top",
+      "label": "Lead wrist bowed at the top",
+      "aliases": [
+        "bowed at the top",
+        "bowing at the top",
+        "wrist bow at the top",
+        "flexed lead wrist at the top",
+        "hooded wrist at the top"
+      ],
+      "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "uncommon",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_bowedAtTop"
+      ],
+      "state": "draft",
+      "consequence": "The lead wrist flexes on the way back, so it arrives at the top bowed rather than flat, and a bowed lead wrist points the face down. The mirror of `cupped_at_top` on the same corridor, and it costs the opposite way: there is nothing left to square on the way down, so an ordinary release keeps turning the face through square and the ball turns left. This is the WRIST view of a face shut at the top and `shut_face_top` is the FOREARM view — two measures on two axes reading one event, which is why they corroborate rather than cause each other. ⚠ A BOWED LEAD WRIST IS NOT A FAULT IN ITSELF; many strong players own one. What this reads is bow BEYOND the corridor the golfer's own archetype selects — `archetype_bowed` re-centres that corridor before this tail is judged, so a naturally bowed player is measured against their own shape and only genuine excess is reported.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "bowed lead wrist at the top flexion closed clubface hook golf backswing"
       },
       "axis": "lead_wrist_top"
     },
@@ -4603,7 +4638,7 @@
         "sig_openFaceTop"
       ],
       "state": "draft",
-      "consequence": "The lead forearm has not rolled back to where the backswing normally leaves it, so the face points more skyward at the top than the swing wants. This is the middle link of the rolling-open chain and the one that decides what the downswing has to be: the face has to be squared from further away, and there are only two ways to do it — turn the body and run out of time, or use the hands. That is why an open face at the top shows up at impact either as a face still open (`face_held_open_impact`, and the slice behind it) or as a last-moment save (`flipping`). Read on the ROTATION axis, the same measure as `early_face_roll` one phase later; the wrist's own contribution to a face open at the top is cup, which is a different axis and not yet watched at P4.",
+      "consequence": "The lead forearm has not rolled back to where the backswing normally leaves it, so the face points more skyward at the top than the swing wants. This is the middle link of the rolling-open chain and the one that decides what the downswing has to be: the face has to be squared from further away, and there are only two ways to do it — turn the body and run out of time, or use the hands. That is why an open face at the top shows up at impact either as a face still open (`face_held_open_impact`, and the slice behind it) or as a last-moment save (`flipping`). Read on the ROTATION axis, the same measure as `early_face_roll` one phase later; the wrist's own contribution to a face open at the top is cup, a different axis, read at P4 by `cupped_at_top`.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-08-19",
@@ -10115,6 +10150,39 @@
         "tier": "practice",
         "searchedOn": "2026-08-19",
         "searchTerms": "cupped lead wrist open clubface at the top wrist versus forearm golf"
+      }
+    },
+    {
+      "from": "grip_strong",
+      "to": "bowed_at_top",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "strong grip bowed lead wrist at the top closed clubface golf"
+      }
+    },
+    {
+      "from": "bowed_at_top",
+      "to": "closed_face_to_path",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "bowed lead wrist at the top closed clubface impact hook golf"
+      }
+    },
+    {
+      "from": "bowed_at_top",
+      "to": "shut_face_top",
+      "type": "corroborates",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "bowed lead wrist hooded clubface at the top wrist versus forearm golf"
       }
     },
     {

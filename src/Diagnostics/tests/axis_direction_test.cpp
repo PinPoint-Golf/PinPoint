@@ -317,9 +317,13 @@ static const Expect kExpected[] = {
       "face opening in the takeaway'; a face held shut is less of that rotation, the low end" },
     { "sig_cuppedAtTop",            Direction::Low,
       "m_leadWristFlexExt_p4 highMeans 'the lead wrist gained BOW between address and the top'; cup "
-      "gained on the way back is the other way, so cupped at the top is the low end. The high tail "
-      "is deliberately unclaimed — a bowed lead wrist at the top is an archetype the norm set "
-      "contexts for, not a fault" },
+      "gained on the way back is the other way, so cupped at the top is the low end, where "
+      "sig_bowedAtTop takes the high" },
+    { "sig_bowedAtTop",             Direction::High,
+      "m_leadWristFlexExt_p4 highMeans 'the lead wrist gained BOW between address and the top'; "
+      "bowed at the top IS that high end, where sig_cuppedAtTop takes the low. ⚠ It reads bow "
+      "beyond the corridor the golfer's OWN archetype selects — archetype_bowed re-centres the "
+      "corridor before this tail is judged, so this is not a signal that a bowed player is bowed" },
     { "sig_openFaceTop",            Direction::High,
       "m_leadForearmRot_p4 highMeans 'the lead forearm rolled further away from the target by the "
       "top — the face pointing more skyward, open'; open at the top IS that high end, where "

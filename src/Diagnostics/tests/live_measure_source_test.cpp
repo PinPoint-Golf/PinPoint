@@ -163,14 +163,14 @@ static Coverage runFixture(const QString &dir, const CharacteristicPack &pack,
 
     std::printf("  club %s -> context %s (session %s)\n", qPrintable(d.club),
                 qPrintable(d.contextId), qPrintable(src.sessionId()));
-    std::printf("  COVERAGE: %d of 152 conditions assessable on %s"
+    std::printf("  COVERAGE: %d of 157 conditions assessable on %s"
                 "  (%d evaluated, %d fired, %d unavailable)\n",
                 cov.assessable, label, cov.findings, cov.fired, cov.unavailable);
     std::printf("  MEASURES: %d of 109 live measures resolved\n", cov.measures);
 
     check(shapeOk, "every finding is assessed WITH evidence or unavailable WITHOUT it");
-    check(cov.findings == 125,
-          "detect() asked all 125 non-latent, non-withdrawn conditions (the shipped pack binds none)");
+    check(cov.findings == 130,
+          "detect() asked all 130 non-latent, non-withdrawn conditions (the shipped pack binds none)");
 
     // (d) Where a norm resolved, the corridor on the evidence is a real band and z is finite.
     bool corridorsOk = true;
@@ -206,7 +206,7 @@ int main(int argc, char **argv)
     const std::shared_ptr<const INormProvider> norms{ makeResourceNormProvider().release() };
 
     std::printf("\ncontent\n");
-    check(pack.conditions.size() == 152, "the shipped pack carries 152 conditions");
+    check(pack.conditions.size() == 157, "the shipped pack carries 157 conditions");
     check(pack.measures.size() == 130, "…and 130 measures");
     check(!norms->norms().norms.empty(), "the shipped norm set loaded");
 
@@ -363,7 +363,7 @@ int main(int argc, char **argv)
     // it has an attack angle, and an attack angle of -4° is not the upward strike a top requires.
     // "Definitely not a top" is a real answer, and the conjunction reaches it from evidence no
     // single one of its terms could.
-    check(cRich.assessable == 53, "rich_7iron: 53 of 152 conditions assessable (observed)");
+    check(cRich.assessable == 54, "rich_7iron: 54 of 157 conditions assessable (observed)");
     check(cRich.measures   == 38, "rich_7iron: 38 of 109 live measures resolved (observed)");
     // 12 → 14 on 2026-08-09: sig_launchLow/sig_launchHigh moved onto m_lmLaunchAngle (the
     // measured key this fixture actually carries), so launch_low and launch_high became
@@ -388,9 +388,9 @@ int main(int argc, char **argv)
     // and `attack_too_steep` and `attack_too_shallow` were therefore unanswerable on a swing whose
     // launch monitor had reported the attack angle outright, -2.73°, sitting in the document read
     // by nothing. Those two conditions plus `top` and `sky` are the four.
-    check(cLm.assessable   == 21, "lm_7iron: 21 of 152 conditions assessable (observed)");
+    check(cLm.assessable   == 21, "lm_7iron: 21 of 157 conditions assessable (observed)");
     check(cLm.measures     == 26, "lm_7iron: 26 of 109 live measures resolved (observed)");
-    check(cSparse.assessable == 2, "sparse_noclub: 2 of 152 conditions assessable (observed)");
+    check(cSparse.assessable == 2, "sparse_noclub: 2 of 157 conditions assessable (observed)");
     check(cSparse.measures   == 1, "sparse_noclub: 1 of 109 live measures resolved (observed)");
     check(cRich.assessable > cSparse.assessable,
           "a richer capture assesses strictly more than a degraded one");
