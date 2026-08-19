@@ -393,6 +393,8 @@ qt_add_executable(PinPointStudio
     src/IMU/ble_imu_transport.h src/IMU/ble_imu_transport.cpp
     src/IMU/wt9011dcl_ble.h   src/IMU/wt9011dcl_ble.cpp
     src/IMU/imu_io_worker.h   src/IMU/imu_io_worker.cpp
+    src/IMU/hm_session_types.h
+    src/IMU/hm_session_worker.h  src/IMU/hm_session_worker.cpp
     src/LaunchMonitor/launch_monitor_reading.h   src/LaunchMonitor/launch_monitor_reading.cpp
     src/LaunchMonitor/launch_monitor_base.h      src/LaunchMonitor/launch_monitor_base.cpp
     src/LaunchMonitor/launch_monitor_factory.h   src/LaunchMonitor/launch_monitor_factory.cpp
