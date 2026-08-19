@@ -212,7 +212,20 @@ QVariantList WristDiagnosticsModel::positions() const
         QVariantMap m;
         m[QStringLiteral("phase")]     = cps[c].phase;
         m[QStringLiteral("name")]      = m_labels.phaseFullName(cps[c].phase);
-        m[QStringLiteral("tag")]       = m_labels.phaseShortTag(cps[c].phase);
+        // ⚠ TAGGED FROM THE CHECKPOINT'S OWN P-POSITION, NOT FROM THE PHASE IT SAMPLES,
+        // and the two genuinely differ. wristCheckpoints() places P2 on phase 1
+        // (Takeaway) — "the phase the segmenter actually emits for that position", written
+        // when the segmenter did not yet emit ShaftParallelBack (phase 12), which the
+        // Phase enum calls P2 and which every wG3 swing now carries. So asking the PHASE
+        // for its tag returned "" here and blanked a column that is P2 by definition of
+        // this very table.
+        //
+        // ⚠ THIS RELABELS NOTHING AND MOVES NO MEASUREMENT. The column still samples the
+        // instant it always sampled; only its header stops being derived through a phase
+        // that disagrees. Whether P2 should sample phase 12 instead is a real question
+        // about WHERE the wrist is read and would change grades — it is not a labelling
+        // question and is deliberately not answered here.
+        m[QStringLiteral("tag")]       = QStringLiteral("P%1").arg(static_cast<int>(cps[c].pos) + 1);
         m[QStringLiteral("note")]      = QString::fromLatin1(cps[c].note);
         m[QStringLiteral("available")] = m_timeline.positions[c].present;
         out.append(m);
@@ -317,10 +330,13 @@ QVariantMap WristDiagnosticsModel::findingMap(const PpWristFinding &f) const
     m[QStringLiteral("ballFlight")]    = f.ballFlight;
     m[QStringLiteral("corroboratedBy")] = f.corroboratedBy;
 
-    const WristCheckpoint *cps = wristCheckpoints();
+    const WristCheckpoint *cps = wristCheckpoints();   // still needed for the seek/phase below
+
+    // Same reasoning as positions(): a finding names the P-positions it was found AT, and
+    // that is the checkpoint's own identity, not the tag of whichever phase it samples.
     QVariantList tags;
     for (PpSwingPosition p : f.positions)
-        tags.append(m_labels.phaseShortTag(cps[static_cast<int>(p)].phase));
+        tags.append(QStringLiteral("P%1").arg(static_cast<int>(p) + 1));
     m[QStringLiteral("positions")] = tags;
 
     // Seek target = the primary (first) contributing checkpoint's timeline timestamp,

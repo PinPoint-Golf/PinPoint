@@ -278,9 +278,38 @@ int main(int argc, char **argv)
         checkStr("full 13", t.phaseFullName(13), "Arm-parallel down");
         checkStr("full 14", t.phaseFullName(14), "Shaft-parallel through");
         checkStr("full oob", t.phaseFullName(15), "P15");
-        checkStr("tag 5", t.phaseShortTag(5), "IMP");
-        checkStr("tag 8", t.phaseShortTag(8), "MBK");
-        checkStr("tag 13", t.phaseShortTag(13), "APD");
+        // The compact tag is the COACHING P-POSITION wherever the phase is one. "SPB" and
+        // "APD" were this codebase's own jargon for P2 and P5; a golfer reads the numbers.
+        // Every P-position, pinned against the mapping the Phase enum documents, because a
+        // silent renumbering here would relabel the axis, the chips, the brush and the
+        // wrist grid all at once and every one of them would still look plausible.
+        checkStr("P1  = Address",              t.phaseShortTag(0),  "P1");
+        checkStr("P2  = ShaftParallelBack",    t.phaseShortTag(12), "P2");
+        checkStr("P3  = MidBackswing",         t.phaseShortTag(8),  "P3");
+        checkStr("P4  = Top",                  t.phaseShortTag(2),  "P4");
+        checkStr("P5  = ArmParallelDown",      t.phaseShortTag(13), "P5");
+        checkStr("P6  = Delivery",             t.phaseShortTag(9),  "P6");
+        checkStr("P7  = Impact",               t.phaseShortTag(5),  "P7");
+        checkStr("P8  = ShaftParallelThrough", t.phaseShortTag(14), "P8");
+        checkStr("P9  = FollowThrough",        t.phaseShortTag(11), "P9");
+        checkStr("P10 = Finish",               t.phaseShortTag(7),  "P10");
+
+        // The five the P-system does not name carry NO tag. The mnemonics they used to
+        // carry (TKW/TRN/DWN/REL/SPD) are gone by decision: a chart mixing the shared
+        // vocabulary with a private one reads as neither.
+        checkStr("Takeaway   untagged", t.phaseShortTag(1),  "");
+        checkStr("Transition untagged", t.phaseShortTag(3),  "");
+        checkStr("Downswing  untagged", t.phaseShortTag(4),  "");
+        checkStr("Release    untagged", t.phaseShortTag(6),  "");
+        checkStr("Max speed  untagged", t.phaseShortTag(10), "");
+
+        // hasPositionTag is the predicate anything that PAIRS tags must ask first — the
+        // difference between a "P4→P6" chip and a "→P6" one.
+        checkTrue("P-position has a tag",  t.hasPositionTag(0)  && t.hasPositionTag(5));
+        checkTrue("Takeaway has none",     !t.hasPositionTag(1));
+        checkTrue("Max speed has none",    !t.hasPositionTag(10));
+        checkTrue("out of range has none", !t.hasPositionTag(99) && !t.hasPositionTag(-1));
+
         checkStr("tag oob", t.phaseShortTag(99), "P99");
     }
 

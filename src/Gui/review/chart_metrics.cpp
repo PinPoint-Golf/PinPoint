@@ -19,6 +19,7 @@
 #include "chart_metrics.h"
 
 #include "../Analysis/dashboard_reductions.h"   // barDomain
+#include "timeline_labels.h"                    // the one phase-tag vocabulary (hasPositionTag)
 
 #include <QHash>
 #include <QSet>
@@ -72,12 +73,20 @@ QVariantList ChartMetrics::segments(const QVariantList &phases, qint64 spanUs) c
     }
 
     // Adjacent phase pairs, ordered by time — mirrors swing_data_source.cpp.
+    //
+    // ⚠ P-POSITIONS ONLY. A chip is labelled "P1→P2" from the two phases it spans, so a
+    // phase with no P-position cannot be an endpoint — it would read "→P2". Skipping those
+    // events also makes the chips the coaching windows a golfer already talks in (P1→P2,
+    // P4→P5) instead of segments bounded by Takeaway and Max speed. The events themselves
+    // are untouched: they still tick on the plot, they just do not bound a chip.
+    const TimelineLabels tags;
     QVector<QPair<qint64, int>> ev;   // (t_us, phase)
     ev.reserve(phases.size());
     for (const QVariant &pv : phases) {
         const QVariantMap p = pv.toMap();
-        ev.append({ p.value(QStringLiteral("t_us")).toLongLong(),
-                    p.value(QStringLiteral("phase")).toInt() });
+        const int ph = p.value(QStringLiteral("phase")).toInt();
+        if (!tags.hasPositionTag(ph)) continue;
+        ev.append({ p.value(QStringLiteral("t_us")).toLongLong(), ph });
     }
     std::sort(ev.begin(), ev.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
@@ -184,12 +193,20 @@ QVariantList ChartMetrics::timeTicksMs(qint64 domStartUs, qint64 domEndUs,
 
 int ChartMetrics::nearestPhase(const QVariantList &phases, qint64 us) const
 {
+    // ⚠ P-POSITIONS ONLY, for the same reason segments() skips them: the single caller
+    // composes the free-drag window's name as "<near start>→<near end>", so an untagged
+    // nearest phase would render "→P4" under the chart. Naming the window by the nearest
+    // P-position instead is also the more useful answer — "the window is about P4→P6" is
+    // what a reader wants, not that its edge happened to land beside Max speed.
+    const TimelineLabels tags;
     int    best = -1;
     qint64 bestD = std::numeric_limits<qint64>::max();
     for (const QVariant &pv : phases) {
         const QVariantMap m = pv.toMap();
+        const int ph = m.value(QStringLiteral("phase")).toInt();
+        if (!tags.hasPositionTag(ph)) continue;
         const qint64 d = qAbs(m.value(QStringLiteral("t_us")).toLongLong() - us);
-        if (d < bestD) { bestD = d; best = m.value(QStringLiteral("phase")).toInt(); }
+        if (d < bestD) { bestD = d; best = ph; }
     }
     return best;
 }

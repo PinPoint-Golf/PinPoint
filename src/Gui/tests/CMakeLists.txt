@@ -48,6 +48,9 @@ pp_add_test(timeline_labels_test
 pp_add_test(chart_metrics_test
     SOURCES chart_metrics_test.cpp
             ${GUI}/review/chart_metrics.cpp
+            # segments()/nearestPhase() ask TimelineLabels which phases are P-positions, so
+            # the chips can never be labelled "→P2" from an untagged endpoint.
+            ${GUI}/review/timeline_labels.cpp
             ${SRC}/Metrics/metric_catalogue.cpp
             ${SRC}/Metrics/metric_resolver.cpp
             ${SRC}/Metrics/metric_catalogue_manifest.cpp

@@ -101,5 +101,17 @@ public:
     // 0 Address … 7 Finish, 8 MidBackswing, 9 Delivery, 10 MaxSpeed, 11 FollowThrough,
     // 12 ShaftParallelBack, 13 ArmParallelDown, 14 ShaftParallelThrough).
     Q_INVOKABLE QString phaseFullName(int phase) const;   // "Address" … "Shaft-parallel through"
-    Q_INVOKABLE QString phaseShortTag(int phase) const;   // "ADR" … "SPT"
+
+    // The compact tag: the phase's COACHING P-POSITION ("P1" … "P10"), or "" for the five
+    // detected events the P-system does not name (Takeaway, Transition, Downswing,
+    // Release, Max speed). Read by the chart axis, the segment chips, the segment brush
+    // and the wrist grid, which is why the P-system is applied here and not per surface.
+    //
+    // ⚠ "" IS A VALID ANSWER. Draw it and you lose a label; COMPOSE it into a pair and you
+    // get "→P4". Ask hasPositionTag() before pairing.
+    Q_INVOKABLE QString phaseShortTag(int phase) const;
+
+    // Whether this phase is a coaching P-position at all — the predicate for anything that
+    // pairs, sorts or windows by tag rather than merely drawing one.
+    Q_INVOKABLE bool hasPositionTag(int phase) const;
 };

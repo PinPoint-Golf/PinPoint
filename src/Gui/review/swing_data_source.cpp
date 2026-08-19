@@ -20,6 +20,7 @@
 
 #include "swing_coverage_model.h"
 #include "swing_series_model.h"
+#include "timeline_labels.h"              // the one phase-tag vocabulary (P1…P10 + mnemonics)
 #include "../Analysis/swing_analysis.h"   // SegmentRole + segmentRoleForSlot/Name
 
 #include <QDir>
@@ -65,28 +66,13 @@ QString phaseLabel(int p)
     }
 }
 
-// Three-letter abbreviation for a phase label, used in segment chips.
-QString phaseAbbrev(const QString &label)
-{
-    static const QHash<QString, QString> m = {
-        { QStringLiteral("Address"),    QStringLiteral("ADR") },
-        { QStringLiteral("Takeaway"),   QStringLiteral("TKA") },
-        { QStringLiteral("Top"),        QStringLiteral("TOP") },
-        { QStringLiteral("Transition"), QStringLiteral("TRN") },
-        { QStringLiteral("Downswing"),  QStringLiteral("DSW") },
-        { QStringLiteral("Impact"),     QStringLiteral("IMP") },
-        { QStringLiteral("Release"),    QStringLiteral("REL") },
-        { QStringLiteral("Finish"),     QStringLiteral("FIN") },
-        { QStringLiteral("Mid-BS"),     QStringLiteral("MBS") },
-        { QStringLiteral("Delivery"),               QStringLiteral("DLV") },
-        { QStringLiteral("Max Speed"),               QStringLiteral("SPD") },
-        { QStringLiteral("Follow-Through"),          QStringLiteral("FLW") },
-        { QStringLiteral("Shaft-Parallel Back"),     QStringLiteral("SPB") },
-        { QStringLiteral("Arm-Parallel Down"),       QStringLiteral("APD") },
-        { QStringLiteral("Shaft-Parallel Through"),  QStringLiteral("SPT") },
-    };
-    return m.value(label, label.left(3).toUpper());
-}
+// ⚠ phaseAbbrev() USED TO LIVE HERE — a QHash from phase LABEL to a three-letter tag, and
+// the third copy of a vocabulary TimelineLabels already owned. It had drifted, as a copy
+// does: "TKA"/"DSW"/"MBS" against the other copy's "TKW"/"DWN"/"MBK", so the table's chips
+// and the chart's chips disagreed about the same swing. The table now calls
+// TimelineLabels::phaseShortTag on the phase INDEX, which is why the index is carried into
+// m_phases rather than thrown away after being turned into a label — keying a lookup on
+// display text is what made a second table necessary in the first place.
 
 // Short, column-friendly header for a metric key.
 QString metricHeader(const QString &key)
@@ -593,7 +579,9 @@ void SwingDataSource::reload()
     for (const QJsonValue &pv : phases) {
         const QJsonObject po = pv.toObject();
         QVariantMap p;
-        p[QStringLiteral("label")] = phaseLabel(po.value(QStringLiteral("phase")).toInt());
+        const int phaseIdx = po.value(QStringLiteral("phase")).toInt();
+        p[QStringLiteral("label")] = phaseLabel(phaseIdx);
+        p[QStringLiteral("phase")] = phaseIdx;   // kept so the chips can tag by index, not by text
         p[QStringLiteral("t_us")]  = toRel(po.value(QStringLiteral("t_us")).toDouble());
         p[QStringLiteral("kind")]  = QStringLiteral("phase");
         m_phases.append(p);
@@ -613,17 +601,23 @@ void SwingDataSource::reload()
         full[QStringLiteral("startUs")] = qint64(0);
         full[QStringLiteral("endUs")]   = m_spanUs;
         m_segments.append(full);
-        QVector<QPair<qint64, QString>> ev;
+        // Stateless and const — one on the stack rather than a member, the same way the
+        // QML surfaces declare one inline.
+        // P-positions only, matching ChartMetrics::segments — an untagged endpoint would
+        // render "→P2", and the two panels must offer the same windows for the same swing.
+        const TimelineLabels tags;
+        QVector<QPair<qint64, int>> ev;
         for (const QVariant &pv : m_phases) {
             const QVariantMap p = pv.toMap();
-            ev.append({ p.value(QStringLiteral("t_us")).toLongLong(),
-                        p.value(QStringLiteral("label")).toString() });
+            const int ph = p.value(QStringLiteral("phase")).toInt();
+            if (!tags.hasPositionTag(ph)) continue;
+            ev.append({ p.value(QStringLiteral("t_us")).toLongLong(), ph });
         }
         std::sort(ev.begin(), ev.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
         for (int i = 0; i + 1 < ev.size(); ++i) {
             QVariantMap seg;
-            seg[QStringLiteral("label")]   = phaseAbbrev(ev[i].second) + QStringLiteral("→")
-                                           + phaseAbbrev(ev[i + 1].second);
+            seg[QStringLiteral("label")]   = tags.phaseShortTag(ev[i].second) + QStringLiteral("→")
+                                           + tags.phaseShortTag(ev[i + 1].second);
             seg[QStringLiteral("startUs")] = ev[i].first;
             seg[QStringLiteral("endUs")]   = ev[i + 1].first;
             m_segments.append(seg);

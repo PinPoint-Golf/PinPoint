@@ -34,11 +34,35 @@ const char *const kFullNames[] = {
     "Release", "Finish", "Mid-backswing", "Delivery", "Max speed", "Follow-through",
     "Shaft-parallel back", "Arm-parallel down", "Shaft-parallel through"
 };
-const char *const kShortTags[] = {
-    "ADR", "TKW", "TOP", "TRN", "DWN", "IMP", "REL", "FIN", "MBK", "DLV", "SPD", "FLW",
-    "SPB", "APD", "SPT"
+// The coaching P-position each phase IS, where it is one — the vocabulary a golfer and
+// every coaching text already use, against which "SPB" and "APD" were private jargon this
+// codebase invented for its own axis. The numbers are NOT assigned here: they are the
+// mapping the Phase enum already documents against its own members (swing_analysis.h),
+// and shaft_positions.h §1 is the definition of the P-system itself.
+//
+//   P1 Address · P2 Shaft parallel back · P3 Lead arm parallel back · P4 Top
+//   P5 Lead arm parallel down · P6 Shaft parallel down · P7 Impact
+//   P8 Shaft parallel through · P9 Lead arm parallel through · P10 Finish
+//
+// ⚠ FIVE PHASES HAVE NO P-POSITION AND ARE NOT TAGGED AT ALL. Takeaway, Transition,
+// Downswing, Release and Max speed are events this pipeline detects that the coaching
+// system does not name — Max speed is a peak in a signal, not a posture. They used to
+// carry three-letter mnemonics (TKW, TRN, DWN, REL, SPD); those are gone by decision,
+// because a chart that mixes a shared vocabulary with a private one reads as neither.
+// Inventing P-numbers for them instead would have been worse: a coaching claim on the
+// axis that no coaching text would recognise.
+//
+// ⚠ SO "" IS A REAL ANSWER FROM phaseShortTag(), NOT AN ERROR. Callers that DRAW one tag
+// draw nothing and lose only a label. Callers that COMPOSE a pair ("P1→P4") must skip
+// untagged phases rather than render "→P4" — hasPositionTag() is how they ask, and
+// ChartMetrics::segments/nearestPhase and SwingDataSource's chips all do.
+const char *const kPositionTags[] = {
+    "P1",  "",    "P4",  "",    "",    "P7",  "",    "P10", "P3",  "P6",  "",    "P9",
+    "P2",  "P5",  "P8"
 };
 constexpr int kPhaseCount = int(sizeof(kFullNames) / sizeof(kFullNames[0]));
+static_assert(int(sizeof(kPositionTags) / sizeof(kPositionTags[0])) == kPhaseCount,
+              "kPositionTags must cover every Phase — use \"\" for a phase with no P-position");
 
 constexpr int kImpactPhase = 5;   // Phase::Impact — the emphasised station
 
@@ -269,8 +293,22 @@ QString TimelineLabels::phaseFullName(int phase) const
     return QStringLiteral("P%1").arg(phase);
 }
 
+bool TimelineLabels::hasPositionTag(int phase) const
+{
+    return phase >= 0 && phase < kPhaseCount && kPositionTags[phase][0] != '\0';
+}
+
 QString TimelineLabels::phaseShortTag(int phase) const
 {
-    if (phase >= 0 && phase < kPhaseCount) return QString::fromLatin1(kShortTags[phase]);
+    // Changed here rather than at the call sites on purpose: this function is the one
+    // vocabulary the chart axis, the segment chips, the brush and the wrist grid all read,
+    // and a P-system that reached only the axis would leave "ADR→SPB" on the chips beside
+    // "P1" on the plot below them.
+    if (phase >= 0 && phase < kPhaseCount)
+        return QString::fromLatin1(kPositionTags[phase]);   // "" where there is no P-position
+    // ⚠ Out of range reads "P99" for phase 99, which is a phase INDEX and not a
+    // P-position — the one place the two numberings collide. Kept because it is
+    // unreachable for any Phase the enum defines and it is what the test pins; it is a
+    // diagnostic for a value that should not exist, not a label anyone is meant to read.
     return QStringLiteral("P%1").arg(phase);
 }
