@@ -37,10 +37,15 @@
 //   would either mask real failures or invent ones. The REAL AppSettings is used rather than a stub,
 //   so it cannot drift from what the app hands the same singleton, with its QSettings redirected to
 //   a scratch directory first so a test run cannot write to the developer's own preferences.
+//
+//   THE BUNDLED FONTS, and this suite ran for months without them. See loadBundledFonts() below —
+//   a layout test that measures a fallback face is measuring a font the application never renders
+//   with, and it reached two different wrong answers on two platforms.
 
 #include <QtQuickTest>
 
 #include <QDir>
+#include <QFontDatabase>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QSettings>
@@ -50,6 +55,40 @@
 #include "chart_metrics.h"
 #include "timeline_labels.h"
 
+// ⚠ THE FONTS ARE THE UNITS THIS SUITE MEASURES IN, AND IT USED TO RUN WITHOUT THEM.
+//
+// Theme.qml names families — "Geist Mono", "Hanken Grotesk" — and notes that it "falls back to the
+// system default if the font file is not installed". main.cpp loads the bundled faces at startup
+// (QFontDatabase::addApplicationFont over :/fonts) precisely so those names resolve everywhere. This
+// binary does not run main.cpp, so it never did.
+//
+// That is not a cosmetic difference for a suite whose central assertion is "no annotation escapes
+// its card": a fallback face has different advance widths, so the text being measured is not the
+// text the application draws. And because the fallback is chosen by the HOST, the suite reached two
+// different wrong answers — neither this Mac nor the studio PC has Geist Mono installed, macOS fell
+// back to something narrow and passed, Windows fell back to something wider and failed four
+// containment assertions in tst_lm_graphics. The failures were real; the cause was here, not in
+// PpLmGraphicsBody.
+//
+// ENUMERATED, NOT LISTED. The faces come from the same cmake/PinPointFonts.cmake list the app
+// compiles into :/fonts, and reading the directory back means adding a face does not require
+// remembering this file. A missing directory is a hard failure rather than a warning: silently
+// measuring the wrong font is the exact failure being fixed, so it must never be the quiet path.
+static void loadBundledFonts()
+{
+    const QDir dir(QStringLiteral(":/fonts"));
+    const QStringList faces = dir.entryList({ QStringLiteral("*.ttf") }, QDir::Files, QDir::Name);
+    if (faces.isEmpty())
+        qFatal("qml_ui_test: no fonts under :/fonts — the layout assertions would measure a "
+               "host-chosen fallback face rather than the faces the app ships. Check that the "
+               "target compiles in the app_fonts resource (cmake/PinPointFonts.cmake).");
+
+    for (const QString &face : faces) {
+        if (QFontDatabase::addApplicationFont(dir.filePath(face)) < 0)
+            qFatal("qml_ui_test: failed to load bundled font %s", qPrintable(face));
+    }
+}
+
 class QmlUiTestSetup : public QObject
 {
     Q_OBJECT
@@ -57,6 +96,10 @@ class QmlUiTestSetup : public QObject
 public slots:
     void qmlEngineAvailable(QQmlEngine *engine)
     {
+        // Before anything renders — a face registered after a component has laid out does not
+        // re-measure it.
+        loadBundledFonts();
+
         // Redirected BEFORE the first AppSettings is constructed — its constructor reads every key
         // through ppSettings(), and QSettings::setPath only affects instances made after it. A test
         // that quietly rewrote ui/themeIndex in the developer's own ini would be a poor trade for

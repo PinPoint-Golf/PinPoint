@@ -969,39 +969,14 @@ qt_add_resources(PinPointStudio "app_keys"
         src/Resources/keys/pinpoint_release_win_eddsa.pub
 )
 
+# The font list lives in cmake/PinPointFonts.cmake because qml_ui_test needs the SAME
+# faces compiled into it — a layout test measuring a fallback face is measuring a font
+# this application never renders with. See that file.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PinPointFonts.cmake)
 qt_add_resources(PinPointStudio "app_fonts"
     PREFIX "/fonts"
     BASE "src/Resources/fonts"
-    FILES
-        src/Resources/fonts/Georgia.ttf
-        src/Resources/fonts/Georgiab.ttf
-        src/Resources/fonts/Georgiai.ttf
-        src/Resources/fonts/Georgiaz.ttf
-        src/Resources/fonts/DMSans-Variable.ttf
-        src/Resources/fonts/DMSans-Italic-Variable.ttf
-        src/Resources/fonts/DMMono-Regular.ttf
-        src/Resources/fonts/DMMono-Medium.ttf
-        src/Resources/fonts/DMSerifDisplay-Regular.ttf
-        src/Resources/fonts/Fraunces-Variable.ttf
-        src/Resources/fonts/Fraunces-Italic-Variable.ttf
-        src/Resources/fonts/Fraunces-Regular.ttf
-        src/Resources/fonts/Fraunces-SemiBold.ttf
-        src/Resources/fonts/SourceSerif4-Variable.ttf
-        src/Resources/fonts/SourceSerif4-Italic-Variable.ttf
-        src/Resources/fonts/HankenGrotesk-Variable.ttf
-        src/Resources/fonts/HankenGrotesk-Italic-Variable.ttf
-        src/Resources/fonts/Literata-Variable.ttf
-        src/Resources/fonts/Literata-Italic-Variable.ttf
-        src/Resources/fonts/Literata-Regular.ttf
-        src/Resources/fonts/Literata-Medium.ttf
-        src/Resources/fonts/InstrumentSans-Variable.ttf
-        src/Resources/fonts/JetBrainsMono-Variable.ttf
-        src/Resources/fonts/PlayfairDisplay-Variable.ttf
-        src/Resources/fonts/Geist-Variable.ttf
-        src/Resources/fonts/GeistMono-Variable.ttf
-        src/Resources/fonts/SpaceGrotesk-Variable.ttf
-        src/Resources/fonts/SpaceMono-Regular.ttf
-        src/Resources/fonts/SpaceMono-Bold.ttf
+    FILES ${PP_FONT_FILES}
 )
 
 qt_add_resources(PinPointStudio "app_tiles"
@@ -3170,6 +3145,16 @@ if(PINPOINT_BUILD_QML_TESTS)
             src/Diagnostics/merged_norm_provider.cpp)
         add_dependencies(qml_ui_test pinpoint_qml_test_imports)
         set_target_properties(qml_ui_test PROPERTIES AUTOMOC ON MACOSX_BUNDLE OFF)
+
+        # THE SAME FACES THE APP SHIPS, for the reason spelled out in loadBundledFonts()
+        # (src/Gui/tests/qml/qml_ui_test.cpp): every containment assertion in this suite is a
+        # text measurement, and without these it measures whatever the HOST falls back to —
+        # which differs per platform and is a font the app never renders with.
+        qt_add_resources(qml_ui_test "test_fonts"
+            PREFIX "/fonts"
+            BASE "src/Resources/fonts"
+            FILES ${PP_FONT_FILES}
+        )
         target_include_directories(qml_ui_test PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/app"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/Gui/review"
