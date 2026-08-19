@@ -188,6 +188,33 @@ int main()
                  "aaaAlsoNotAMetric,zzzNotAMetric");
     }
 
+    // ── shortLabel reads the manifest, so a new metric is short-named on arrival ──
+    {
+        std::printf("shortLabel — served from the catalogue\n");
+        // This was a hand-maintained QHash of seven keys duplicating the descriptors' own
+        // shortLabel, and it went stale the moment Phase F added four wrist metrics: they had
+        // short names authored in the manifest and still drew their full labels in the chart's
+        // split-mode gutter. The four that exposed it, pinned here.
+        checkStr("forearm rotation",  cm.shortLabel(QStringLiteral("forearmRotation")),     "Rotation");
+        checkStr("hm bow/cup",        cm.shortLabel(QStringLiteral("hm.leadWristFlexExt")), "Bow/cup (HM)");
+        checkStr("hm hinge",          cm.shortLabel(QStringLiteral("hm.leadWristRadUln")),  "Hinge (HM)");
+        checkStr("hm rotation",       cm.shortLabel(QStringLiteral("hm.forearmRotation")),  "Rotation (HM)");
+
+        // The seven the old table carried, unchanged — this was a de-duplication and must not
+        // have moved a single word the chart already displayed.
+        checkStr("bow/cup",     cm.shortLabel(QStringLiteral("leadWristFlexExt")), "Bow/cup");
+        checkStr("hinge",       cm.shortLabel(QStringLiteral("leadWristRadUln")),  "Hinge");
+        checkStr("roll",        cm.shortLabel(QStringLiteral("forearmPronation")), "Roll");
+        checkStr("elbow",       cm.shortLabel(QStringLiteral("leadArmFlexion")),   "Elbow");
+        checkStr("club speed",  cm.shortLabel(QStringLiteral("clubheadSpeed")),    "Club speed");
+        checkStr("hand speed",  cm.shortLabel(QStringLiteral("handSpeed")),        "Hand speed");
+        checkStr("lag",         cm.shortLabel(QStringLiteral("lagAngle")),         "Lag");
+
+        // An uncatalogued key still returns "" — PpMetricChart._name falls back to series.label,
+        // and a series the manifest has never heard of must keep the name its producer gave it.
+        checkStr("uncatalogued → \"\"", cm.shortLabel(QStringLiteral("zzzNotAMetric")), "");
+    }
+
     std::printf("\n%s — %d failure(s)\n", g_fail ? "FAILED" : "OK", g_fail);
     return g_fail ? 1 : 0;
 }

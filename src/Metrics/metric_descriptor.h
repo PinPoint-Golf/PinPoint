@@ -271,7 +271,7 @@ struct MetricDescriptor {
     QString    key;                        // == MetricSeries.key (stable identity)
     MetricType type = MetricType::TimeSeries;
     QString    label;                      // "Lead wrist — bow / cup"
-    QString    shortLabel;                 // "Bow/cup" (mirrors ChartMetrics::shortLabel)
+    QString    shortLabel;                 // "Bow/cup" — what ChartMetrics::shortLabel serves
     QString    unit;                       // "°", "mph", "×frame", …
     QString    group;                      // "Wrist & forearm" | "Club & speed" | "Setup" | …
 

@@ -208,18 +208,18 @@ QString ChartMetrics::bandAtNearest(const QVariantList &phaseSamples, qint64 us)
 
 QString ChartMetrics::shortLabel(const QString &key) const
 {
-    // Compact names for the metric keys that need them in tight gutters/cards/tooltips.
-    // Unknown keys return "" so the caller falls back to the series' full label.
-    static const QHash<QString, QString> kShort = {
-        { QStringLiteral("leadWristFlexExt"), QStringLiteral("Bow/cup") },
-        { QStringLiteral("leadWristRadUln"),  QStringLiteral("Hinge")   },
-        { QStringLiteral("forearmPronation"), QStringLiteral("Roll")    },
-        { QStringLiteral("leadArmFlexion"),   QStringLiteral("Elbow")   },
-        { QStringLiteral("clubheadSpeed"),    QStringLiteral("Club speed")},
-        { QStringLiteral("handSpeed"),        QStringLiteral("Hand speed")},
-        { QStringLiteral("lagAngle"),         QStringLiteral("Lag")     },
-    };
-    return kShort.value(key);
+    // Compact names for the tight gutters/cards/tooltips, read from the MANIFEST rather than
+    // from a table here. This was a seven-entry QHash whose every value was character-for-
+    // character the descriptor's own `shortLabel`, and a duplicate of authored data only
+    // stays correct while nobody adds a metric: `forearmRotation` and the three `hm.*` rungs
+    // landed in the catalogue with short names already written and drew their full labels in
+    // the split-mode gutter, because the copy here had never heard of them.
+    //
+    // A key the catalogue does not know, or one whose descriptor leaves shortLabel empty,
+    // returns "" so the caller falls back to the series' full label — the previous contract,
+    // unchanged.
+    const pinpoint::analysis::MetricDescriptor *d = m_catalogue.descriptor(key);
+    return d ? d->shortLabel : QString();
 }
 
 // ── Corridor-bar backing — marshalling only; the maths is dashboard_reductions.h ─

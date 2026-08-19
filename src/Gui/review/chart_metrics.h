@@ -38,8 +38,8 @@
 //
 // Phase names/tags are NOT duplicated here — the chart composes segment labels in QML from
 // phaseA/phaseB via TimelineLabels.phaseShortTag, and the crosshair value-at-cursor reuses
-// TimelineLabels.valueAtNearest. This class owns only the segment vocabulary, the
-// per-window summary statistics, and the metric-key → short-name map.
+// TimelineLabels.valueAtNearest. This class owns only the segment vocabulary and the
+// per-window summary statistics; short names are the catalogue's, read through shortLabel().
 class ChartMetrics : public QObject
 {
     Q_OBJECT
@@ -67,8 +67,10 @@ public:
                                     qint64 startUs, qint64 endUs) const;
 
     // Compact display name for a metric key (e.g. "leadWristFlexExt" → "Bow/cup"), or ""
-    // when the key has no short form — the caller then falls back to series.label. Single
-    // source of truth for metric short names, mirroring TimelineLabels::phaseShortTag.
+    // when the key is uncatalogued or its descriptor names no short form — the caller then
+    // falls back to series.label. This is a straight read of MetricDescriptor::shortLabel,
+    // so the chart, the Metric Library and the summary cards all say the same word for the
+    // same metric, and a metric added to the manifest is short-named everywhere at once.
     Q_INVOKABLE QString shortLabel(const QString &key) const;
 
     // "Nice" Y-axis tick values across [lo, hi] at a 1/2/5×10ⁿ step chosen so there are
