@@ -162,12 +162,23 @@ std::vector<MetricSeries> MetricExtractor::extract(const FusedStreams &s,
     if (fore && static_cast<int>(fore->qAnat.size()) == N) {
         const int addrIdx = nearestIndex(grid, phaseTime(phases, Phase::Address, grid.front()));
         const QQuaternion qAddr = fore->qAnat[addrIdx];
-        std::vector<double> rot(N);
-        for (int i = 0; i < N; ++i) {
-            const ForearmElbow ef = forearmPronElbowFlex(forearmRel(fore->qAnat[i], qAddr),
-                                                         leftArm);
-            rot[i] = radToDeg(ef.pronRad);
-        }
+        // ⚠ UNWRAP BEFORE CONVERTING, AND ANCHOR ON ADDRESS. twistAngleRad returns
+        // (−2π, 2π] and jumps a full turn wherever the quaternion changes sign. The lead
+        // forearm reaches 150-180° of travel by the top, so that cut falls INSIDE the
+        // swing rather than off in the still frames, and the raw per-sample value crossed
+        // it twice on every Wrist_02 capture — out and back. The chart drew a vertical
+        // cliff either side of the top, a −282° "peak" the forearm never reached, and a
+        // 28,758 °/100 ms peak rate in the summary card.
+        //
+        // The anchor is Address because that is where this metric is DEFINED to be zero:
+        // forearmRel(qAnat[addrIdx], qAddr) is identity, so the anchored unwrap keeps
+        // P1 = 0.00 exactly rather than at some ±360k.
+        std::vector<double> rotRad(N), rot(N);
+        for (int i = 0; i < N; ++i)
+            rotRad[i] = forearmPronElbowFlex(forearmRel(fore->qAnat[i], qAddr), leftArm).pronRad;
+        unwrapAngleSeries(rotRad, addrIdx);
+        for (int i = 0; i < N; ++i)
+            rot[i] = radToDeg(rotRad[i]);
         out.push_back(buildSeries(instrumentKey(QStringLiteral("forearmRotation"),
                                                 fore->hackMotion),
                                   QStringLiteral("Lead forearm rotation"), QStringLiteral("°"),
@@ -177,13 +188,26 @@ std::vector<MetricSeries> MetricExtractor::extract(const FusedStreams &s,
     // --- forearm pronation + elbow flexion (upper arm + forearm) ---
     if (upper && fore && static_cast<int>(upper->qAnat.size()) == N
                       && static_cast<int>(fore->qAnat.size()) == N) {
-        std::vector<double> pron(N), elbow(N);
+        // Same branch cut, same unwrap — this is the OTHER caller of twistAngleRad that
+        // builds a series, and leaving it out would fix the flip on one wrist metric and
+        // leave it armed on its neighbour. Anchored at 0 rather than on Address: this one
+        // is an absolute joint posture, not travel from a reference, so there is no
+        // defining zero to hold and the first sample is simply made principal.
+        // (Anatomically radioulnar rotation stays far from ±180°, so this is a guard
+        // rather than an observed defect — a three-sensor Witmotion rig is the only rig
+        // that produces it, and none of the corpus has one bound.)
+        // `leadArmFlexion` needs none of this: flexRad is a swing MAGNITUDE, already
+        // non-negative and continuous.
+        std::vector<double> pronRad(N), pron(N), elbow(N);
         for (int i = 0; i < N; ++i) {
             const QQuaternion rel = (upper->qAnat[i].conjugated() * fore->qAnat[i]).normalized();
             const ForearmElbow ef = forearmPronElbowFlex(rel, leftArm);
-            pron[i]  = radToDeg(ef.pronRad);
-            elbow[i] = radToDeg(ef.flexRad);
+            pronRad[i] = ef.pronRad;
+            elbow[i]   = radToDeg(ef.flexRad);
         }
+        unwrapAngleSeries(pronRad);
+        for (int i = 0; i < N; ++i)
+            pron[i] = radToDeg(pronRad[i]);
         out.push_back(buildSeries(QStringLiteral("forearmPronation"),
                                   QStringLiteral("Lead forearm roll"), QStringLiteral("°"),
                                   grid, std::move(pron), phases));

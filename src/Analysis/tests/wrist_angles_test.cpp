@@ -11,8 +11,10 @@
 
 #include <QQuaternion>
 #include <QVector3D>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 using namespace pinpoint::analysis;
 
@@ -39,6 +41,25 @@ static QQuaternion R(const QVector3D &axis, float deg) { return QQuaternion::fro
         const bool ok = (g == QString::fromUtf8(want));                                \
         std::printf("  [%s] %-30s got \"%s\"  want \"%s\"\n",                          \
                     ok ? "PASS" : "FAIL", label, g.toUtf8().constData(), want);        \
+        if (!ok) ++g_fail;                                                             \
+    } while (0)
+
+// Plain-boolean and already-in-degrees variants — the unwrap block asserts about the
+// SHAPE of a series (is there a cliff, does it accumulate), not about one pose's angle,
+// so CHECK_NEAR's radians-in/degrees-out signature does not fit it.
+#define CHECK_TRUE(label, cond)                                                         \
+    do {                                                                               \
+        const bool ok = (cond);                                                        \
+        std::printf("  [%s] %s\n", ok ? "PASS" : "FAIL", label);                       \
+        if (!ok) ++g_fail;                                                             \
+    } while (0)
+
+#define CHECK_NEAR_D(label, gotDeg, wantDeg, tolDeg)                                    \
+    do {                                                                               \
+        const double g = (gotDeg), w = (wantDeg);                                      \
+        const bool ok = std::abs(g - w) <= (tolDeg);                                   \
+        std::printf("  [%s] %-30s got %7.2f°  want %7.2f°\n",                          \
+                    ok ? "PASS" : "FAIL", label, g, w);                                \
         if (!ok) ++g_fail;                                                             \
     } while (0)
 
@@ -165,6 +186,59 @@ int main()
         CHECK_LABEL("deadband −1° → flat",   wristMetricLabel("leadWristFlexExt", radToDeg(fe(R(Z, -1)))), "flat");
         CHECK_LABEL("deadband +2° → bowed",  wristMetricLabel("leadWristFlexExt", radToDeg(fe(R(Z,  2)))), "2° bowed");
         CHECK_LABEL("deadband −2° → cupped", wristMetricLabel("leadWristFlexExt", radToDeg(fe(R(Z, -2)))), "2° cupped");
+    }
+
+    // ── The 180° flip: twistAngleRad's branch cut, and the unwrap that closes it ──
+    {
+        std::printf("\nunwrapAngleSeries — the 360° cliff in a plotted twist\n");
+        auto pron = [](const QQuaternion &q){ return forearmPronElbowFlex(q).pronRad; };
+
+        // The defect as it reached the chart: sweep one segment about its own long axis
+        // through a full turn, in 4° steps, and read the axial twist each step. Half a
+        // turn in, the quaternion changes sign and twistAngleRad's output falls off a
+        // cliff — which is what drew a curve reaching −282° on a wrist that never left
+        // ±110°, and a 28,758 °/100 ms "peak rate" beside it.
+        std::vector<double> raw;
+        for (int deg = 0; deg <= 360; deg += 4)
+            raw.push_back(pron(R(Y, float(deg))));
+
+        double worstRawJump = 0.0;
+        for (size_t i = 1; i < raw.size(); ++i)
+            worstRawJump = std::max(worstRawJump, std::abs(radToDeg(raw[i] - raw[i - 1])));
+        CHECK_TRUE("raw series HAS a >300° cliff", worstRawJump > 300.0);
+
+        std::vector<double> up = raw;
+        unwrapAngleSeries(up);
+        double worstJump = 0.0;
+        for (size_t i = 1; i < up.size(); ++i)
+            worstJump = std::max(worstJump, std::abs(radToDeg(up[i] - up[i - 1])));
+        CHECK_TRUE("unwrapped is continuous (<8°/step)", worstJump < 8.0);
+        // …and continuous means it keeps counting: a full turn ends a full turn away.
+        CHECK_NEAR_D("full turn accumulates", radToDeg(up.back() - up.front()), 360.0, 1.0);
+
+        // The anchor is what keeps an address-referenced metric's defining zero. Anchored
+        // on the sample that IS address, that sample stays exactly 0 however far the
+        // unwrap has travelled by then; anchored at 0 it would sit at some ±360k.
+        std::vector<double> anchored = raw;
+        const int addrIdx = 60;                       // 240° into the sweep, past the cut
+        for (double &v : anchored) v -= raw[addrIdx];  // re-reference, as forearmRel does
+        unwrapAngleSeries(anchored, addrIdx);
+        CHECK_NEAR_D("anchored sample is exactly 0", radToDeg(anchored[addrIdx]), 0.0, 1e-9);
+        // Unwrapping runs BOTH ways from the anchor, so the samples before it stay
+        // continuous too — a one-directional pass would leave the cliff on that side.
+        double worstBack = 0.0;
+        for (int i = 1; i <= addrIdx; ++i)
+            worstBack = std::max(worstBack, std::abs(radToDeg(anchored[i] - anchored[i - 1])));
+        CHECK_TRUE("continuous BEFORE the anchor too", worstBack < 8.0);
+
+        // Degenerate inputs must not walk off the end.
+        std::vector<double> empty;
+        unwrapAngleSeries(empty);
+        CHECK_TRUE("empty series survives", empty.empty());
+        std::vector<double> one{ 7.0 };
+        unwrapAngleSeries(one, 5);                    // anchor out of range → falls back to 0
+        CHECK_NEAR_D("out-of-range anchor clamped", radToDeg(one[0]),
+                     radToDeg(std::remainder(7.0, 2.0 * M_PI)), 1e-9);
     }
 
     std::printf("\n=== %s (%d assert failures) ===\n", g_fail ? "FAILURES PRESENT" : "ALL ASSERTS PASS", g_fail);

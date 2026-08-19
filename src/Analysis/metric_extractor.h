@@ -52,6 +52,20 @@ namespace pinpoint::analysis {
 // sample. forearmRotation is ADDRESS-REFERENCED IN QUATERNION SPACE at source,
 // because each vendor zeroes at its own pose and only the travel compares — see
 // wrist_angles.h's forearmRel().
+//
+// ⚠ THE TWO AXIAL SERIES ARE CONTINUOUS, NOT PRINCIPAL, AND ARE NOT CONFINED TO ±180°.
+// forearmRotation and forearmPronation come from twistAngleRad, whose output jumps a
+// full turn wherever the quaternion changes sign, so both are run through
+// unwrapAngleSeries() before they are published.
+//
+// The lead forearm sits RIGHT ON that cut at the top of the backswing — across the six
+// wG3 swings of 2026-08-18 Wrist_02 the unwrapped travel reaches +152° to +180° at P4 —
+// which is why this surfaced as a defect rather than staying theoretical, and why the
+// unwrap must not be "simplified" to a fold back into ±180°. A swing that turned a few
+// degrees further would report >180° and that would be the honest number.
+//
+// Everything that reduces these series (peak, range, rate, Δ) depends on the unwrap, and
+// anything that re-derives them elsewhere must unwrap too.
 class MetricExtractor {
 public:
     static std::vector<MetricSeries> extract(const FusedStreams &streams,

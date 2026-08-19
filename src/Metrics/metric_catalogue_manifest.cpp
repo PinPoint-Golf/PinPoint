@@ -367,7 +367,11 @@ void installMetricManifest(MetricCatalogue &cat)
             "than any single value: a large, late pronation into impact is flipping. ⚠ The ABSOLUTE "
             "value is meaningless across sessions or across instruments, because each sensor zeroes "
             "at its own calibration pose — that is exactly why this is stated from address, and why "
-            "the travel is comparable when the raw angle is not. Needs the lead-forearm IMU only."),
+            "the travel is comparable when the raw angle is not. ⚠ This is TRAVEL along the path the "
+            "forearm actually took, so it is NOT confined to ±180° and a reading past half a turn is "
+            "not an error. The top of the backswing lands close to that half turn — around 150–180° "
+            "on our own captures — so a swing that turns a little further reads 190°, and folding "
+            "that back to −170° would be the mistake. Needs the lead-forearm IMU only."),
         .flexPositive = true,
         .signPositive = QStringLiteral("pronation — the lead forearm rolled toward face-down, "
                                        "measured as travel from address"),

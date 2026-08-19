@@ -24,6 +24,7 @@
 #include <QVector3D>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 // Pure lead-arm joint-angle extraction from per-segment ANATOMICAL quaternions
 // (q_anat = A·q_raw·M; design: docs/implementation/shot_analyzer_m1_wrist.md §4; frame & joint-DOF
@@ -79,13 +80,61 @@ inline SwingTwist swingTwistDecompose(const QQuaternion &q, const QVector3D &axi
     return { swing, twist };
 }
 
-// Signed angle (rad) of a twist quaternion about +axis, in (-π, π].
+// Signed angle (rad) of a twist quaternion about +axis.
+//
+// ⚠⚠ THE RANGE IS (−2π, 2π], NOT (−π, π], AND THIS COMMENT USED TO SAY OTHERWISE.
+// The body is 2·atan2(…), and atan2 alone is what returns (−π, π]; doubling it doubles
+// the range. That mis-stated range is most of the reason the 180° flip keeps being
+// rediscovered: a reader checking whether a caller needs unwrapping reads "(−π, π]",
+// concludes the value is already principal, and moves on.
+//
+// ⚠ A SINGLE SAMPLE FROM THIS FUNCTION IS NOT CONTINUOUS WITH ITS NEIGHBOURS. A unit
+// quaternion double-covers SO(3) — q and −q are the same rotation — so as the physical
+// twist passes ±180° the scalar changes sign and this result jumps by exactly 2π. On a
+// still frame that is invisible; on a plotted TIME SERIES it draws a vertical cliff, and
+// any peak/rate/Δ reduced from the series is then nonsense (a 28,758 °/100 ms "peak rate"
+// is the signature).
+//
+// ⚠ SO EVERY CALLER THAT BUILDS A SERIES MUST RUN unwrapAngleSeries() OVER IT. Callers
+// that read ONE instant (the live check-sensors readout) cannot unwrap — they have no
+// neighbours — and should present the principal value instead.
 inline double twistAngleRad(const QQuaternion &twist, const QVector3D &axis)
 {
     const QVector3D v(twist.x(), twist.y(), twist.z());
     const double s = QVector3D::dotProduct(v, axis.normalized());
     return 2.0 * std::atan2(std::copysign(static_cast<double>(v.length()), s),
                             static_cast<double>(twist.scalar()));
+}
+
+// Make a sampled angle sequence CONTINUOUS across the branch cut, in place (np.unwrap):
+// wrap each inter-sample DELTA into (−π, π] and accumulate, rather than wrapping every
+// sample independently. This is the same treatment buildShaftLeanSeries applies to the
+// shaft's atan2 angle, for the same reason and against the same failure.
+//
+// `anchor` is the index whose value is held canonical — normalised into (−π, π] and then
+// unwrapped away from in BOTH directions. For an address-referenced metric pass the
+// Address index: `forearmRotation` is defined as travel FROM address and is 0 there by
+// construction, and unwrapping from sample 0 instead would leave that defining zero
+// sitting at some ±2πk. For an absolute posture pass 0.
+//
+// ⚠ Correct only while the true angle moves < 180° BETWEEN SAMPLES, which is what makes
+// the deltas unambiguous. At the rates these lanes run — ~800 Hz from a wG3, ~200 Hz
+// fused — a 2,000 °/s forearm covers 2.5°/sample and 10°/sample respectively, so the
+// margin is more than an order of magnitude. A sparse or gapped lane would NOT be safe.
+inline void unwrapAngleSeries(std::vector<double> &rad, int anchor = 0)
+{
+    const int n = static_cast<int>(rad.size());
+    if (n == 0) return;
+    if (anchor < 0 || anchor >= n) anchor = 0;
+
+    constexpr double kTwoPi = 2.0 * M_PI;
+    const std::vector<double> raw = rad;
+
+    rad[anchor] = std::remainder(raw[anchor], kTwoPi);
+    for (int i = anchor + 1; i < n; ++i)
+        rad[i] = rad[i - 1] + std::remainder(raw[i] - raw[i - 1], kTwoPi);
+    for (int i = anchor - 1; i >= 0; --i)
+        rad[i] = rad[i + 1] + std::remainder(raw[i] - raw[i + 1], kTwoPi);
 }
 
 // --- relative-quaternion builders (address-referenced in quaternion space) ----
