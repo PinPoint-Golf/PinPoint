@@ -58,8 +58,13 @@ static const Expect kExpected[] = {
     { "sig_cPosture",         Direction::High,  "thoracicFlexion: 'higher means more rounded'" },
 
     // ── backswing / top ─────────────────────────────────────────────────────
-    { "sig_reverseSpine",     Direction::Low,
-      "secondaryAxisTilt: players 'set roughly 6-8 deg at address and increase it'; reverse is too little" },
+    { "sig_reverseSpineP4",   Direction::Low,
+      "m_axisTiltAtTop highMeans 'more tilt away from the target at the top'; a reverse spine angle "
+      "leans TOWARD the target, so it is too little of that tilt and takes the low end, where "
+      "sig_excessiveAxisTiltTop takes the high. Read by TWO conditions: reverse_spine_p4 owns this "
+      "tail of axis_tilt_top alone, and reverse_pivot reads it with sig_axisTiltImpactLow under "
+      "detection 'all' — the conjunction needs both ends of the swing wrong before it fires, which "
+      "is why this signal names its phase" },
     { "sig_lossOfWidth",      Direction::Low,   "leadHandWidth: 'lower means narrower'" },
     { "sig_flatShoulderPlane",Direction::Low,   "shoulderPlaneAngle: 'lower means flatter'" },
     { "sig_flyingElbow",      Direction::High,
@@ -261,7 +266,7 @@ static const Expect kExpected[] = {
       "where sig_flatShoulderPlane takes the low" },
     { "sig_excessiveAxisTiltTop",   Direction::High,
       "m_axisTiltAtTop highMeans 'more tilt away from the target at the top'; excessive tilt is the "
-      "high end, where sig_reverseSpine (too little) takes the low" },
+      "high end, where sig_reverseSpineP4 (too little) takes the low" },
     { "sig_backingOffTheBall",      Direction::Low,
       "m_pelvisThrustDown highMeans 'the pelvis further toward the ball during the downswing'; "
       "backing away is the pelvis going the other way, the low end" },
