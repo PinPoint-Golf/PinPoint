@@ -592,7 +592,8 @@
       },
       "status": "live",
       "label": "Lead wrist bow / cup — change from address at P4",
-      "unit": "°"
+      "unit": "°",
+      "highMeans": "the lead wrist gained BOW between address and the top — flatter, or bowed; the low end is CUP gained on the way back, which points the face open at the top"
     },
     {
       "id": "m_leadWristFlexExt_p5",
@@ -649,7 +650,8 @@
       },
       "status": "live",
       "label": "Lead wrist bow / cup — change from address at P7",
-      "unit": "°"
+      "unit": "°",
+      "highMeans": "the lead wrist gained BOW between address and impact — it arrives flatter or more bowed than it started; the low end is cup gained on the way down, which is scooping"
     },
     {
       "id": "m_leadWristFlexExt_p8",
@@ -878,7 +880,8 @@
       },
       "status": "live",
       "label": "Lead forearm roll — change from address at P4",
-      "unit": "°"
+      "unit": "°",
+      "highMeans": "the lead forearm rolled further away from the target by the top — the face pointing more skyward, open; the low end is a face hooded at the top"
     },
     {
       "id": "m_leadForearmRot_p5",
@@ -2264,7 +2267,7 @@
       "id": "sig_scooping",
       "test": "outsideCorridor",
       "measures": [
-        "m_leadWristAtImpact"
+        "m_leadWristFlexExt_p7"
       ],
       "direction": "low"
     },
@@ -2371,6 +2374,30 @@
         "m_leadForearmRot_p2"
       ],
       "direction": "high"
+    },
+    {
+      "id": "sig_cuppedAtTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadWristFlexExt_p4"
+      ],
+      "direction": "low"
+    },
+    {
+      "id": "sig_openFaceTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadForearmRot_p4"
+      ],
+      "direction": "high"
+    },
+    {
+      "id": "sig_shutFaceTop",
+      "test": "outsideCorridor",
+      "measures": [
+        "m_leadForearmRot_p4"
+      ],
+      "direction": "low"
     },
     {
       "id": "sig_steepBackswingPlane",
@@ -2959,7 +2986,7 @@
       "id": "sig_bowedLeadWrist",
       "test": "outsideCorridor",
       "measures": [
-        "m_leadWristAtImpact"
+        "m_leadWristFlexExt_p7"
       ],
       "direction": "high"
     },
@@ -3020,7 +3047,7 @@
       "direction": "low"
     },
     {
-      "id": "sig_faceRolledShutImpact",
+      "id": "sig_flipping",
       "test": "outsideCorridor",
       "measures": [
         "m_leadForearmRot_p7"
@@ -3802,9 +3829,8 @@
       "id": "scooping",
       "label": "Scooping",
       "aliases": [
-        "flip",
-        "flipping",
         "scoop",
+        "cupping through impact",
         "breakdown through impact",
         "adding loft",
         "hands behind the ball"
@@ -3818,7 +3844,7 @@
         "sig_scooping"
       ],
       "state": "active",
-      "consequence": "Adding loft through impact with the lead wrist means the club is rising at the ball, costing compression and distance control. `Flipping` is the same fault under the commoner name — the field uses the two interchangeably and so does this, rather than splitting a term coaches do not split. What IS separate is the axis beside it: the forearms rolling the face shut is a rotation, not a loft, and it has its own condition on its own measure.",
+      "consequence": "The trail wrist straightens and the lead wrist cups, tilting the face back to help the ball up. The club is rising at the ball rather than compressing it, the low point moves behind it, and distance control goes with the compression. Measured as the CUP the lead wrist GAINS between address and impact, not the angle it happens to arrive at — a golfer who addresses cupped and holds that shape is not scooping, and a golfer who cups twenty degrees on the way down is, whatever they started from. This is the LOFT axis. `flipping` is the rotation axis beside it and a different fault: the forearms rolling the face through the ball. The two travel together often enough that coaches use the names interchangeably, but they are two measures and either can fire without the other — a golfer can scoop with the face square, and can flip with the shaft leaning correctly forward.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
@@ -4511,7 +4537,10 @@
       "id": "early_face_roll",
       "label": "Face rolled open early",
       "aliases": [
+        "rolling open",
+        "rolling it open",
         "fanning it open",
+        "fanning the face",
         "rolling the face"
       ],
       "group": "armsAndClub",
@@ -4523,13 +4552,89 @@
         "sig_earlyFaceRoll"
       ],
       "state": "draft",
-      "consequence": "The lead forearm rotates the face open in the takeaway, which has to be undone before impact. The face arrives late unless the hands do something about it on the way down.",
+      "consequence": "The lead forearm rolls the face open between address and shaft-parallel, which has to be undone before impact. Measured as the ROTATION the lead forearm gains from address to P2: the normal takeaway supinates a little, and rolling open is the forearm going the other way. Where it goes from there is the chain: the roll is usually still there at the top (`open_face_top`), and a face open at the top is a face open at impact unless something on the way down undoes it — either the hands (`flipping`) or nothing at all (`face_held_open_impact`), which is where the slice comes from.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
         "searchTerms": "swing plane shaft position backswing top of swing golf"
       },
       "axis": "takeaway_face_roll"
+    },
+    {
+      "id": "cupped_at_top",
+      "label": "Lead wrist cupped at the top",
+      "aliases": [
+        "cupped at the top",
+        "cupping at the top",
+        "wrist cup at the top",
+        "extended lead wrist at the top"
+      ],
+      "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_cuppedAtTop"
+      ],
+      "state": "draft",
+      "consequence": "The lead wrist cups on the way back, so it arrives at the top extended rather than flat, and a cupped lead wrist points the face open. This is the WRIST view of a face open at the top and `open_face_top` is the FOREARM view — two measures on two axes reading one event, which is why they corroborate rather than cause each other. Either can happen without the other: a golfer can cup the wrist with the forearm rolling normally, and can roll the face open with a flat wrist. Both leave the downswing the same job, which is to square a face that starts further open than it should. Only the LOW tail of this corridor is watched, deliberately: a bowed lead wrist at the top is an archetype rather than a fault, and the norm set carries `archetype_bowed` and `archetype_cupped` contexts precisely so a golfer is graded against the shape they play.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "cupped lead wrist at the top extension open clubface slice golf backswing"
+      },
+      "axis": "lead_wrist_top"
+    },
+    {
+      "id": "open_face_top",
+      "label": "Face open at the top",
+      "aliases": [
+        "open at the top",
+        "open clubface at the top",
+        "face open at the top of the backswing"
+      ],
+      "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "common",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_openFaceTop"
+      ],
+      "state": "draft",
+      "consequence": "The lead forearm has not rolled back to where the backswing normally leaves it, so the face points more skyward at the top than the swing wants. This is the middle link of the rolling-open chain and the one that decides what the downswing has to be: the face has to be squared from further away, and there are only two ways to do it — turn the body and run out of time, or use the hands. That is why an open face at the top shows up at impact either as a face still open (`face_held_open_impact`, and the slice behind it) or as a last-moment save (`flipping`). Read on the ROTATION axis, the same measure as `early_face_roll` one phase later; the wrist's own contribution to a face open at the top is cup, which is a different axis and not yet watched at P4.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "open clubface at the top lead forearm rotation backswing slice golf"
+      },
+      "axis": "face_roll_top"
+    },
+    {
+      "id": "shut_face_top",
+      "label": "Face shut at the top",
+      "aliases": [
+        "shut at the top",
+        "closed clubface at the top",
+        "face hooded at the top"
+      ],
+      "group": "armsAndClub",
+      "kind": "fault",
+      "prominence": "uncommon",
+      "observability": "observable",
+      "confirmedBy": "measured",
+      "detectedBy": [
+        "sig_shutFaceTop"
+      ],
+      "state": "draft",
+      "consequence": "The lead forearm has rolled further than the backswing needs, so the face is hooded at the top. The mirror of `open_face_top` on the same corridor, and it costs the opposite way: nothing has to be squared on the way down, so a normal release keeps turning the face through square and the ball turns left.",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "shut clubface at the top hooded face backswing hook golf"
+      },
+      "axis": "face_roll_top"
     },
     {
       "id": "steep_backswing_plane",
@@ -6234,9 +6339,10 @@
     },
     {
       "id": "bowed_lead_wrist",
-      "label": "Lead wrist bowed at impact",
+      "label": "Lead wrist bows too far into impact",
       "aliases": [
         "bowed wrist",
+        "bowed at impact",
         "too much forward bow"
       ],
       "group": "impact",
@@ -6248,7 +6354,7 @@
         "sig_bowedLeadWrist"
       ],
       "state": "active",
-      "consequence": "A lead wrist bowed further than the shot needs takes loft off the face and closes it at the same time. The flight comes out low and turning left, and the margin for a slightly early strike disappears.",
+      "consequence": "A lead wrist bowed further than the shot needs takes loft off the face and closes it at the same time. The flight comes out low and turning left, and the margin for a slightly early strike disappears. Measured as the BOW the wrist GAINS between address and impact — the high tail of the same corridor `scooping` takes the low end of — so a golfer who addresses bowed and holds that shape into the ball does not fire this; adding the bow on the way down is what does.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-28",
@@ -6453,9 +6559,11 @@
       "axis": "pelvis_rotation_top"
     },
     {
-      "id": "face_rolled_shut_impact",
-      "label": "Face rolled shut through impact",
+      "id": "flipping",
+      "label": "Flipping",
       "aliases": [
+        "flip",
+        "face rolled shut through impact",
         "rolling the hands over",
         "hands turning it over",
         "over-releasing",
@@ -6463,14 +6571,14 @@
       ],
       "group": "release",
       "kind": "fault",
-      "prominence": "uncommon",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
-        "sig_faceRolledShutImpact"
+        "sig_flipping"
       ],
       "state": "active",
-      "consequence": "The forearms roll the face shut through the ball rather than the body carrying it round, so the face is still turning when it meets the ball and arrives closed. This is the ROTATION axis and not the loft one: a golfer can roll it shut with the shaft leaning correctly forward, and can scoop with the face square. Squaring the face with the hands is a timing window measured in milliseconds; squaring it by continuing to turn is not.",
+      "consequence": "The forearms roll the face through the ball rather than the body carrying it round, so the face is still turning when it meets the ball and arrives closed. Usually a save: the face is open coming down and the hands turn it over at the last moment to square it, which is an active wrist flick where a passive, body-driven rotation belongs. Measured as the ROTATION the lead forearm GAINS between address and impact, which makes it a different axis from the loft one beside it — a golfer can flip with the shaft leaning correctly forward, and can scoop (`scooping`) with the face square. The two share causes and often travel together, so the names get used interchangeably; here they are two measures and either can fire without the other. Squaring the face with the hands is a timing window measured in milliseconds; squaring it by continuing to turn is not.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-08-01",
@@ -6497,7 +6605,7 @@
         "sig_faceHeldOpenImpact"
       ],
       "state": "active",
-      "consequence": "The lead forearm has not rotated back to where it started by impact, so the face arrives open. A BAND-AID when it is the standard swing: holding the face off is how a hook gets managed without fixing what is turning it over, and it is bought with release speed and distance every swing, not just the ones where it was wanted. That is why it is reported rather than excused — a golfer who does this on every shot is paying for a compensation they may not know they have made. Shaping a fade with it on a given shot is a choice, and so is bending a hook round a tree; the model reads one swing at a time and cannot tell either from a habit, which is the same reason `slice` and `hook` are conditions here and not styles. The mirror of the face being rolled shut on the same axis, and the two share a cause: the face is being squared by the arms rather than carried round by the body.",
+      "consequence": "The lead forearm has not rotated back to where it started by impact, so the face arrives open. A BAND-AID when it is the standard swing: holding the face off is how a hook gets managed without fixing what is turning it over, and it is bought with release speed and distance every swing, not just the ones where it was wanted. That is why it is reported rather than excused — a golfer who does this on every shot is paying for a compensation they may not know they have made. Shaping a fade with it on a given shot is a choice, and so is bending a hook round a tree; the model reads one swing at a time and cannot tell either from a habit, which is the same reason `slice` and `hook` are conditions here and not styles. The mirror of `flipping` on the same axis, and the two share a cause: the face is being squared by the arms rather than carried round by the body.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-08-01",
@@ -9923,7 +10031,7 @@
     },
     {
       "from": "hip_stall",
-      "to": "face_rolled_shut_impact",
+      "to": "flipping",
       "type": "causes",
       "strength": "strong",
       "provenance": {
@@ -9933,7 +10041,7 @@
       }
     },
     {
-      "from": "face_rolled_shut_impact",
+      "from": "flipping",
       "to": "closed_face_to_path",
       "type": "causes",
       "strength": "strong",
@@ -9941,6 +10049,127 @@
         "tier": "practice",
         "searchedOn": "2026-08-01",
         "searchTerms": "hands rolling over clubface shuts closed at impact hook duck hook golf"
+      }
+    },
+    {
+      "from": "early_face_roll",
+      "to": "flipping",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "open clubface downswing hands flip to square face last second golf release"
+      }
+    },
+    {
+      "from": "grip_weak",
+      "to": "flipping",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "weak grip open face compensation hands turn over through impact golf"
+      }
+    },
+    {
+      "from": "grip_weak",
+      "to": "cupped_at_top",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "weak grip cupped lead wrist at the top open clubface golf"
+      }
+    },
+    {
+      "from": "limited_wrist_mobility",
+      "to": "cupped_at_top",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "wrist flexion range of motion cupped at the top backswing golf"
+      }
+    },
+    {
+      "from": "cupped_at_top",
+      "to": "face_held_open_impact",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "cupped lead wrist at the top face open at impact slice golf"
+      }
+    },
+    {
+      "from": "cupped_at_top",
+      "to": "open_face_top",
+      "type": "corroborates",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "cupped lead wrist open clubface at the top wrist versus forearm golf"
+      }
+    },
+    {
+      "from": "early_face_roll",
+      "to": "open_face_top",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "rolling the face open takeaway open clubface at the top backswing golf"
+      }
+    },
+    {
+      "from": "open_face_top",
+      "to": "face_held_open_impact",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "open face at the top open at impact slice golf downswing"
+      }
+    },
+    {
+      "from": "open_face_top",
+      "to": "flipping",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "open face at the top hands square it late flip through impact golf"
+      }
+    },
+    {
+      "from": "face_held_shut_takeaway",
+      "to": "shut_face_top",
+      "type": "causes",
+      "strength": "strong",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "face held shut takeaway hooded clubface at the top golf"
+      }
+    },
+    {
+      "from": "shut_face_top",
+      "to": "closed_face_to_path",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-19",
+        "searchTerms": "shut face at the top closed clubface impact hook golf"
       }
     },
     {

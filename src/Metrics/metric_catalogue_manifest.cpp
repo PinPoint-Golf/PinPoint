@@ -225,7 +225,8 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("chart:review"),
                     QStringLiteral("score:wrist"),
                     QStringLiteral("characteristic:scooping"),
-                    QStringLiteral("characteristic:bowed_lead_wrist") },
+                    QStringLiteral("characteristic:bowed_lead_wrist"),
+                    QStringLiteral("characteristic:cupped_at_top") },
     });
 
     cat.addDescriptor({
@@ -294,7 +295,9 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("score:wrist"),
                     QStringLiteral("characteristic:early_face_roll"),
                     QStringLiteral("characteristic:face_held_shut_takeaway"),
-                    QStringLiteral("characteristic:face_rolled_shut_impact"),
+                    QStringLiteral("characteristic:open_face_top"),
+                    QStringLiteral("characteristic:shut_face_top"),
+                    QStringLiteral("characteristic:flipping"),
                     QStringLiteral("characteristic:face_held_open_impact") },
     });
 
@@ -431,7 +434,8 @@ void installMetricManifest(MetricCatalogue &cat)
                     QStringLiteral("chart:review"),
                     QStringLiteral("score:wrist"),
                     QStringLiteral("characteristic:scooping"),
-                    QStringLiteral("characteristic:bowed_lead_wrist") },
+                    QStringLiteral("characteristic:bowed_lead_wrist"),
+                    QStringLiteral("characteristic:cupped_at_top") },
     });
 
     cat.addDescriptor({

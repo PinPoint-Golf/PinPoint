@@ -310,6 +310,18 @@ static const Expect kExpected[] = {
     { "sig_faceHeldShutTakeaway",   Direction::Low,
       "m_leadForearmRot_p2 highMeans 'the lead forearm rotated further away from the target — the "
       "face opening in the takeaway'; a face held shut is less of that rotation, the low end" },
+    { "sig_cuppedAtTop",            Direction::Low,
+      "m_leadWristFlexExt_p4 highMeans 'the lead wrist gained BOW between address and the top'; cup "
+      "gained on the way back is the other way, so cupped at the top is the low end. The high tail "
+      "is deliberately unclaimed — a bowed lead wrist at the top is an archetype the norm set "
+      "contexts for, not a fault" },
+    { "sig_openFaceTop",            Direction::High,
+      "m_leadForearmRot_p4 highMeans 'the lead forearm rolled further away from the target by the "
+      "top — the face pointing more skyward, open'; open at the top IS that high end, where "
+      "sig_shutFaceTop takes the low. The P2 pair one phase later, same convention" },
+    { "sig_shutFaceTop",            Direction::Low,
+      "m_leadForearmRot_p4 highMeans the face open at the top; a face hooded at the top is the "
+      "forearm rolled the other way, so it is the low end, where sig_openFaceTop takes the high" },
     { "sig_armsOverConnected",      Direction::Low,
       "m_leadUpperArmToChest highMeans 'the lead arm running further from the chest — less "
       "connected'; arms pinned to the chest is the low end, where sig_disconnection takes the high" },
@@ -325,8 +337,9 @@ static const Expect kExpected[] = {
       "m_leadWristRadUln_p4 highMeans 'more wrist set at the top, the club hinged further up from "
       "address'; over-set is the high end, where sig_insufficientSet takes the low" },
     { "sig_bowedLeadWrist",         Direction::High,
-      "m_leadWristAtImpact highMeans 'a more bowed lead wrist at impact, less cupped'; bowed is the "
-      "high end, where sig_scooping (cupped) takes the low" },
+      "m_leadWristFlexExt_p7 reads leadWristFlexExt, whose high end is a more bowed lead wrist, less "
+      "cupped; the pair reads the CHANGE from address, so gaining bow into impact is the high end "
+      "and sig_scooping (gaining cup) takes the low" },
     { "sig_excessiveShaftLean",     Direction::High,
       "m_impactShaftLean highMeans 'the hands further ahead of the clubhead at impact — more "
       "forward lean'; too much lean is the high end, where sig_insufficientShaftLean takes the low" },
@@ -345,10 +358,9 @@ static const Expect kExpected[] = {
     { "sig_faceHeldOpenImpact",     Direction::High,
       "m_leadForearmRot_p7 highMeans 'the face arriving open'; holding it off IS that high end, "
       "where sig_flipping takes the low — the impact-side mirror of the P2 pair" },
-    { "sig_faceRolledShutImpact",   Direction::Low,
+    { "sig_flipping",               Direction::Low,
       "m_leadForearmRot_p7 highMeans 'the lead forearm rotated further away from the target at "
-      "impact — the face arriving open'; rolling the hands over turns it the other way, so the face "
-      "arriving SHUT "
+      "impact — the face arriving open'; flipping turns it the other way, so the face arriving SHUT "
       "is the low end. Same convention its P2 sibling uses, where sig_earlyFaceRoll takes the high "
       "and sig_faceHeldShutTakeaway the low" },
     { "sig_hipsUnderRotatedTop",    Direction::Low,
