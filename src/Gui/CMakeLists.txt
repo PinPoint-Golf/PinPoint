@@ -130,5 +130,14 @@ else()
     # Offscreen is set on the TEST, not asked of whoever runs it, so headless CI and a developer's
     # desk do the same thing and neither steals focus.
     add_test(NAME qml_ui COMMAND qml_ui_test)
-    set_tests_properties(qml_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # ⚠ RUN_SERIAL, AND IT IS ABOUT STARVATION RATHER THAN TIDINESS. This is the only suite
+    # that renders: it drives a real scene graph offscreen and presses live components, so
+    # unlike every other target here its results depend on frames actually being produced.
+    # Under `ctest -j` alongside 145 compute-bound tests on a loaded machine the render loop
+    # is starved, a frame lands against half-settled geometry, and what should be a layout
+    # assertion becomes an intermittent process-level crash. Serialised it is deterministic;
+    # it was the only test in the suite that ever varied by how it was scheduled.
+    set_tests_properties(qml_ui PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        RUN_SERIAL TRUE)
 endif()

@@ -115,6 +115,27 @@ Item {
 
     anchors.fill: parent
 
+    // ⚠ EVERY COORDINATE GOES THROUGH fin(), AND `visible: false` IS NOT A GUARD.
+    //
+    // A hidden Shape still evaluates its ShapePath bindings and still builds the path, so
+    // the `halfAngle > 0` test below stops this being DRAWN and does nothing to stop a
+    // non-finite value reaching QPainterPath. When one does, a release build logs
+    //     QPainterPath::arcTo: Adding point with invalid coordinates, ignoring call
+    // and carries on, while a DEBUG Qt asserts `!std::isnan(value)` (qnumeric.h) — which is
+    // qFatal, which on MSVC is __fastfail and takes the whole process down with
+    // STATUS_STACK_BUFFER_OVERRUN (0xc0000409). The test binary reports that as a crash with
+    // no failing assertion, which is a long way from "an angle was NaN".
+    //
+    // Where a NaN comes from: these inputs are `<value> * <the card's gain>` and
+    // `<design px> * s`, and `s` is the diagram's scale from its own geometry. Before the
+    // first layout settles that geometry can be zero, and a scale derived from it
+    // non-finite — so this is a STARTUP and RESIZE window, not a data problem. It surfaced
+    // as an intermittent crash in the offscreen UI suite only under parallel load, where
+    // the render loop is starved and a frame gets drawn against half-settled sizes.
+    //
+    // fin() is a no-op for every finite value, so nothing about the drawing changes.
+    function fin(v) { return (typeof v === "number" && isFinite(v)) ? v : 0 }
+
     // A sector from the pivot: out along one edge, round the arc, back. PathAngleArc
     // takes the screen convention already (degrees clockwise from +x, y down), so the
     // angles arrive here needing no conversion beyond the card's own gain.
@@ -126,18 +147,18 @@ Item {
             fillColor: root._fill
             strokeColor: root._edge
             strokeWidth: 1
-            startX: root.pivotX * root.s
-            startY: root.pivotY * root.s
+            startX: root.fin(root.pivotX * root.s)
+            startY: root.fin(root.pivotY * root.s)
             PathAngleArc {
-                centerX: root.pivotX * root.s
-                centerY: root.pivotY * root.s
-                radiusX: root.radius * root.s
-                radiusY: root.radius * root.s
-                startAngle: root.meanAngle - root.halfAngle
-                sweepAngle: 2 * root.halfAngle
+                centerX: root.fin(root.pivotX * root.s)
+                centerY: root.fin(root.pivotY * root.s)
+                radiusX: root.fin(root.radius * root.s)
+                radiusY: root.fin(root.radius * root.s)
+                startAngle: root.fin(root.meanAngle - root.halfAngle)
+                sweepAngle: root.fin(2 * root.halfAngle)
                 moveToStart: false
             }
-            PathLine { x: root.pivotX * root.s; y: root.pivotY * root.s }
+            PathLine { x: root.fin(root.pivotX * root.s); y: root.fin(root.pivotY * root.s) }
         }
     }
 
@@ -148,9 +169,9 @@ Item {
         // Tilt is applied as a transform about the centre rather than baked into the
         // arc, because PathAngleArc has no rotation of its own.
         transform: Rotation {
-            origin.x: root.centreX * root.s
-            origin.y: root.centreY * root.s
-            angle: root.tiltDeg
+            origin.x: root.fin(root.centreX * root.s)
+            origin.y: root.fin(root.centreY * root.s)
+            angle: root.fin(root.tiltDeg)
         }
 
         ShapePath {
@@ -158,10 +179,12 @@ Item {
             strokeColor: root._edge
             strokeWidth: 1
             PathAngleArc {
-                centerX: root.centreX * root.s
-                centerY: root.centreY * root.s
-                radiusX: Math.max(0.5, root.radiusX * root.s)
-                radiusY: Math.max(0.5, root.radiusY * root.s)
+                centerX: root.fin(root.centreX * root.s)
+                centerY: root.fin(root.centreY * root.s)
+                // ⚠ Math.max does NOT filter a NaN — Math.max(0.5, NaN) is NaN, so the
+                // existing floor here was never the guard it looks like. fin() first.
+                radiusX: Math.max(0.5, root.fin(root.radiusX * root.s))
+                radiusY: Math.max(0.5, root.fin(root.radiusY * root.s))
                 startAngle: 0
                 sweepAngle: 360
             }
