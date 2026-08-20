@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 using namespace pinpoint::analysis;
@@ -68,6 +69,40 @@ static PoseTrack2D buildTrack(int gapLo = 1000, int gapHi = -1)
         t.frames.push_back(f);
     }
     return t;
+}
+
+// The same 41 frames, but frames spikeLo..spikeHi carry `spikeFe` on BOTH arms at full
+// confidence — the detector-failure shape the plausibility limit exists for: a confident
+// reading of an angle no wrist can reach.
+static PoseTrack2D buildSpikedTrack(int spikeLo, int spikeHi, double spikeFe)
+{
+    PoseTrack2D t = buildTrack();
+    for (int i = spikeLo; i <= spikeHi && i < int(t.frames.size()); ++i) {
+        setArm(t.frames[size_t(i)], 7, 9, kLeftHandFirstKp,   spikeFe, rudAt(i), 0.9f);
+        setArm(t.frames[size_t(i)], 8, 10, kRightHandFirstKp, spikeFe, rudAt(i), 0.9f);
+    }
+    return t;
+}
+
+// Alternating ±`ampDeg` on top of the ramp: noise at the frame rate, which is as far above
+// a 6 Hz cutoff as this 200 Hz track can put it.
+static PoseTrack2D buildNoisyTrack(double ampDeg)
+{
+    PoseTrack2D t = buildTrack();
+    for (int i = 0; i <= 40; ++i) {
+        const double fe = feAt(i) + ((i % 2) ? ampDeg : -ampDeg);
+        setArm(t.frames[size_t(i)], 7, 9, kLeftHandFirstKp,   fe, rudAt(i), 0.9f);
+        setArm(t.frames[size_t(i)], 8, 10, kRightHandFirstKp, fe, rudAt(i), 0.9f);
+    }
+    return t;
+}
+
+// The trail curve's value at time t, straight off the emitted series.
+static double trailAt(const MetricSeries &m, int64_t t)
+{
+    for (size_t i = 0; i < m.t_us.size(); ++i)
+        if (m.t_us[i] == t) return m.value[i];
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 static std::vector<PhaseEvent> phases()
@@ -132,6 +167,79 @@ int main()
         const PpWristAngleSet set = WristAngleSampler::sample(src);
         check(set.cell(PpJointDof::LeadWristFlexExt, PpSwingPosition::P1).status == PpCellStatus::Gap,
               "empty track ⇒ Gap");
+    }
+
+    // ── plausibility limit: a CONFIDENT impossible FE is refused, not carried ────
+    //
+    // The frames are posed at 170°, which is the detector-failure lobe the corpus shows
+    // (a real reading has p90 near 60°). Confidence is 0.9, so the conf gate lets them
+    // straight through — this is the case that gate was assumed to cover and does not.
+    std::printf("-- plausibility limit --\n");
+    {
+        const PoseTrack2D t = buildSpikedTrack(/*spikeLo=*/16, /*spikeHi=*/24, /*spikeFe=*/170.0);
+
+        const PoseWristAngleSource gated(t, ph, 1, W, H, cfg);
+        const PpWristAngleSet gset = WristAngleSampler::sample(gated);
+        check(gset.cell(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4).status == PpCellStatus::Gap,
+              "lead: impossible FE at full confidence ⇒ Gap");
+        check(gset.cell(PpJointDof::LeadWristFlexExt, PpSwingPosition::P7).available(),
+              "lead: an unaffected position is untouched by the limit");
+        // RUD is deliberately NOT gated — different geometry, unmeasured distribution.
+        check(gset.cell(PpJointDof::LeadWristRadUln, PpSwingPosition::P4).available(),
+              "lead: the FE limit does not gate RUD");
+
+        PoseWristAngleConfig off = cfg; off.feLimitDeg = 0.0;   // 0 disables the test
+        const PoseWristAngleSource ungated(t, ph, 1, W, H, off);
+        const PpWristAngleCell &raw =
+            WristAngleSampler::sample(ungated).cell(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4);
+        check(raw.available() && near(raw.valueDeg, 170.0, 0.3),
+              "lead: feLimitDeg 0 keeps the impossible value (the pre-gate behaviour)");
+    }
+
+    // ── the trail series: the same limit, and it never fabricates over the hole ──
+    {
+        const PoseTrack2D t = buildSpikedTrack(16, 24, 170.0);
+        const std::vector<MetricSeries> got = buildTrailWristSeries(t, ph, 1, W, H, cfg);
+        check(got.size() == 1 && got[0].key == QStringLiteral("trailWristFlexExt"),
+              "trail: one series emitted");
+        if (got.size() == 1) {
+            // Frame 20 (Top) was refused; interpChannel bridges 15↔25, both on the ramp.
+            const double v = trailAt(got[0], 100000);
+            check(v > 20.0 && v < 40.0, "trail: refused span is BRIDGED across the ramp, not 170°");
+            check(near(trailAt(got[0], 185000), feAt(37), 0.3),
+                  "trail: an unaffected frame keeps its measured value");
+        }
+
+        PoseWristAngleConfig off = cfg; off.feLimitDeg = 0.0;
+        const std::vector<MetricSeries> ungated = buildTrailWristSeries(t, ph, 1, W, H, off);
+        check(ungated.size() == 1 && near(trailAt(ungated[0], 100000), 170.0, 0.3),
+              "trail: feLimitDeg 0 is the pre-gate curve exactly");
+    }
+
+    // ── σ: the out-of-band residual, and the refusals that withhold it ──────────
+    std::printf("-- out-of-band sigma --\n");
+    {
+        const std::vector<MetricSeries> clean = buildTrailWristSeries(buildTrack(), ph, 1, W, H, cfg);
+        const std::vector<MetricSeries> noisy = buildTrailWristSeries(buildNoisyTrack(3.0), ph, 1, W, H, cfg);
+        check(clean.size() == 1 && noisy.size() == 1, "sigma: both tracks produced a series");
+        if (clean.size() == 1 && noisy.size() == 1) {
+            // A linear ramp is its own analytic continuation, so the reflection padding
+            // extends it exactly and a zero-phase pass leaves nothing behind.
+            check(!clean[0].sigma || *clean[0].sigma < 0.5,
+                  "sigma: a noiseless ramp leaves no out-of-band content");
+            check(noisy[0].sigma && *noisy[0].sigma > 1.0,
+                  "sigma: frame-rate noise is measured and carried");
+            check(!noisy[0].value.empty() && noisy[0].value.size() == noisy[0].t_us.size(),
+                  "sigma: the curve is still full length — sigma widens, it does not smooth");
+        }
+
+        PoseWristAngleConfig nofilt = cfg; nofilt.fcHz = 0.0;
+        const std::vector<MetricSeries> dark = buildTrailWristSeries(buildNoisyTrack(3.0), ph, 1, W, H, nofilt);
+        check(dark.size() == 1 && !dark[0].sigma,
+              "sigma: fcHz 0 withholds sigma (absent = not characterised)");
+        if (dark.size() == 1 && noisy.size() == 1)
+            check(dark[0].value == noisy[0].value,
+                  "sigma: the emitted curve is IDENTICAL with and without the sigma pass");
     }
 
     std::printf("%s (%d failures)\n", g_fail ? "FAILED" : "OK", g_fail);

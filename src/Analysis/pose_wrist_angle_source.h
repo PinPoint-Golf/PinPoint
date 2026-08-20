@@ -59,6 +59,11 @@ struct PoseWristAngleConfig {
     bool   enabled         = tuned::pose::wristAngles::kEnabled;         // pose.wristAngles.enabled
     double confMin         = tuned::pose::wristAngles::kConfMin;         // per-endpoint conf gate
     double apparentPenalty = tuned::pose::wristAngles::kApparentPenalty; // × min endpoint conf (0.5)
+    // |apparent FE| above this is a detector failure, not a wrist — the frame is
+    // REFUSED rather than clamped (see the constant). ≤ 0 disables the gate.
+    double feLimitDeg      = tuned::pose::wristAngles::kFeLimitDeg;      // pose.wristAngles.feLimitDeg
+    // Zero-phase low-pass cutoff for the σ estimate. ≤ 0 ⇒ no filter and NO σ.
+    double fcHz            = tuned::pose::wristAngles::kFcHz;            // pose.wristAngles.fcHz
 
     static PoseWristAngleConfig fromOverrides(const QVariantMap &ov)
     {
@@ -67,6 +72,8 @@ struct PoseWristAngleConfig {
         apply(ov, "pose.wristAngles.enabled",         c.enabled);
         apply(ov, "pose.wristAngles.confMin",         c.confMin);
         apply(ov, "pose.wristAngles.apparentPenalty", c.apparentPenalty);
+        apply(ov, "pose.wristAngles.feLimitDeg",      c.feLimitDeg);
+        apply(ov, "pose.wristAngles.fcHz",            c.fcHz);
         return c;
     }
 };
@@ -74,10 +81,15 @@ struct PoseWristAngleConfig {
 // An IWristAngleSource whose LeadWristFlexExt / LeadWristRadUln series are the
 // apparent camera-plane angles above, sampled once per pose frame (smoothed track
 // preferred), with the P1–P8 timeline resolved from `phases` via the shared
-// wristCheckpoints() map. Frames whose required endpoints fall below cfg.confMin
-// yield a sample with `available == false` (a gap the sampler bridges — never a
-// fabricated value). `handedness` is the repo int convention (1 right / 2 left).
+// wristCheckpoints() map. Frames whose required endpoints fall below cfg.confMin —
+// or whose FE exceeds cfg.feLimitDeg, which is the gate that actually fires — yield a
+// sample with `available == false` (a gap the sampler bridges — never a fabricated
+// value). `handedness` is the repo int convention (1 right / 2 left).
 // frameW/frameH de-normalize the kp so the image-plane angles are isotropic.
+//
+// The FE limit is NOT applied to apparentRadUln. That angle is a different geometry
+// (knuckle line against the forearm normal) whose corpus distribution has never been
+// measured, and a limit chosen by analogy would be a guess wearing a number's clothes.
 class PoseWristAngleSource : public InMemoryWristAngleSource {
 public:
     PoseWristAngleSource(const PoseTrack2D &pose,
@@ -109,6 +121,22 @@ public:
 // REQUIRES THE WHOLEBODY HAND KEYPOINTS. A legacy 17-keypoint track has no knuckles, so this
 // returns empty rather than substituting the wrist joint for the hand axis — a hand axis measured
 // from a point that is not on the hand is a confident number about nothing.
+//
+// CARRIES A σ, and the σ is a NOISE FLOOR ONLY. It is the out-of-band content — the robust scale of
+// what a cfg.fcHz zero-phase low-pass would remove — so it answers "how much of this curve is the
+// hand keypoints jittering" and nothing else. The larger error on this measure is the PROJECTION:
+// graded against HackMotion on the lead hand (the only wrist a criterion instrument is ever worn
+// on), the same geometry explains 31% of the criterion's variance under a fixed correction and 47%
+// under one refitted per swing, with the fitted scale ranging −0.09 to −0.32 across swings of one
+// golfer in one session. No σ can carry that, so a consumer must not read this field as a full
+// error budget. MetricSeries::sigma is absent when cfg.fcHz ≤ 0 or the channel is too short to
+// filter — absent means "not characterised", never "zero error".
+//
+// THE CURVE ITSELF IS NOT FILTERED. The low-pass exists here only to separate the noise for σ.
+// Filtering the emitted curve moves 25% of the graded m_trailWristFlexExt_p1..p7 readings between
+// bands while barely changing the grade distribution, and those corridors have a seating problem of
+// their own (p6 fires Action on 66% of readings, p7 on 56%), so the curve must not move until that
+// is resolved. Emitting the filtered vector instead is then a one-line change here.
 std::vector<MetricSeries> buildTrailWristSeries(const PoseTrack2D &pose,
                                                 const std::vector<PhaseEvent> &phases,
                                                 int handedness, int frameW, int frameH,

@@ -354,10 +354,13 @@ pp_add_test(hand_axis_test SOURCES hand_axis_test.cpp)
 
 # WB4 pose-derived wrist-angle source (pose_wrist_angle_source.{h,cpp}): apparent
 # camera-plane lead-wrist FE/RUD through the windowed-median sampler, the
-# left-handed image mirror, gap handling, default-OFF. Qt-only (contract +
-# sampler headers), no OpenCV; synthetic pose track, no fixture.
+# left-handed image mirror, gap handling, default-OFF, the anatomical plausibility
+# limit and the out-of-band σ. Qt-only (contract + sampler headers), no OpenCV;
+# synthetic pose track, no fixture. phase_signals.cpp comes along for
+# lowpassZeroPhase, which the σ estimate splits the band with.
 pp_add_test(pose_wrist_angle_source_test
-    SOURCES pose_wrist_angle_source_test.cpp ${ANALYSIS}/pose_wrist_angle_source.cpp)
+    SOURCES pose_wrist_angle_source_test.cpp ${ANALYSIS}/pose_wrist_angle_source.cpp
+            ${ANALYSIS}/phase_signals.cpp)
 
 # --- Header-only review/shot helpers -----------------------------------------
 pp_add_test(session_summary_test SOURCES session_summary_test.cpp)   # session_summary.h

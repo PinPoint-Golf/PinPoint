@@ -24,6 +24,7 @@
 
 #include "hand_axis.h"                 // kHand*Mcp / kLeftHandFirstKp / kRightHandFirstKp
 #include "metric_channel.h"            // MetricChannel / buildChannelSeries (trail-wrist series)
+#include "phase_signals.h"             // lowpassZeroPhase — the σ estimate's band split
 #include "wrist_analysis_adapter.h"    // wristCheckpoints() — shared checkpoint→Phase map
 
 namespace pinpoint::analysis {
@@ -45,6 +46,86 @@ double signedAngleDeg(double ax, double ay, double bx, double by)
     if ((ax == 0.0 && ay == 0.0) || (bx == 0.0 && by == 0.0))
         return std::numeric_limits<double>::quiet_NaN();
     return std::atan2(ax * by - ay * bx, ax * bx + ay * by) * kRad2Deg;
+}
+
+// Is this FE reading anatomically possible? A limit of 0 or less disables the test —
+// the frame is then kept whatever it says, which is the pre-gate behaviour exactly.
+bool fePlausible(double deg, double limitDeg)
+{
+    return !(limitDeg > 0.0) || std::abs(deg) <= limitDeg;
+}
+
+// Zero-phase low-pass of an IRREGULARLY sampled channel, returned at the ORIGINAL
+// timestamps. The resample is not a nicety: the pose grid is not uniform even inside
+// the swing (21% of frames sit at more than 1.5× the median spacing, and the widest
+// gap runs to 4× the median and beyond), so handing the samples to a fixed-rate filter
+// as if they were evenly spaced would give a cutoff that wandered across the swing.
+//
+// Empty on refusal — fewer than 3 samples, a non-positive cutoff, a degenerate spacing,
+// or a cutoff at or above Nyquist for this track. Refusal is how σ is withheld, so
+// every caller must treat an empty return as "not characterised".
+std::vector<double> lowpassIrregular(const std::vector<int64_t> &tUs,
+                                     const std::vector<double> &v, double fcHz)
+{
+    const size_t n = tUs.size();
+    if (n < 3 || v.size() != n || !(fcHz > 0.0))
+        return {};
+
+    // Median spacing — robust to the gaps, unlike a mean over the same samples.
+    std::vector<double> dts;
+    dts.reserve(n - 1);
+    for (size_t i = 1; i < n; ++i)
+        dts.push_back(double(tUs[i] - tUs[i - 1]));
+    const double dtUs = medianOfCopy(std::move(dts));
+    if (!(dtUs > 0.0))
+        return {};
+
+    const double fsHz = 1.0e6 / dtUs;
+    if (fcHz >= 0.5 * fsHz)
+        return {};                       // lowpassZeroPhase would pass it through unchanged,
+                                         // and a "filter" that filtered nothing would report
+                                         // a σ of zero — a confident claim of no error.
+
+    const double span = double(tUs.back() - tUs.front());
+    const size_t m    = size_t(span / dtUs) + 1;
+    // A uniform grid should be about the size of the channel that generated it. Needing
+    // many times more says the median spacing does not describe this track — a dense
+    // burst beside a long silence, say — and the resample would be mostly invention.
+    // Refuse rather than allocate: a σ from a grid like that would not mean anything.
+    if (m < 3 || m > 64 * n)
+        return {};
+
+    std::vector<int64_t> uni(m);
+    std::vector<double>  x(m);
+    for (size_t i = 0; i < m; ++i) {
+        uni[i] = tUs.front() + int64_t(double(i) * dtUs);
+        x[i]   = interpChannel(tUs, v, uni[i]);
+    }
+
+    const std::vector<double> y = phase_signals::lowpassZeroPhase(x, fsHz, fcHz);
+    if (y.size() != m)
+        return {};
+
+    std::vector<double> out;
+    out.reserve(n);
+    for (const int64_t t : tUs)
+        out.push_back(interpChannel(uni, y, t));
+    return out;
+}
+
+// Robust 1σ of the content the filter removed: 1.4826 × MAD, the normal-consistent
+// scale. Median-based because the residual is exactly where the outliers live — a
+// plain RMS would let one surviving bad frame set the error bar for the whole swing.
+// Returns 0 when nothing can be said, which the caller reads as "leave σ unset".
+double outOfBandSigmaDeg(const std::vector<double> &raw, const std::vector<double> &smooth)
+{
+    if (raw.size() != smooth.size() || raw.size() < 3)
+        return 0.0;
+    std::vector<double> resid;
+    resid.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i)
+        resid.push_back(std::abs(raw[i] - smooth[i]));
+    return 1.4826 * medianOfCopy(std::move(resid));
 }
 
 } // namespace
@@ -116,7 +197,12 @@ PoseWristAngleSource::PoseWristAngleSource(const PoseTrack2D &pose,
 
         PpJointAngleSample fe;
         fe.t_us          = f.t_us;
-        fe.available     = (feMin >= gate) && !std::isnan(apparentFlexExt);
+        // The plausibility limit joins the confidence gate rather than replacing it:
+        // they refuse different things, and the confidence gate is nearly inert here
+        // (it turns down 0.2% of lead frames, and what it turns down is uncorrelated
+        // with what is actually wrong). A refused frame is a GAP the sampler bridges.
+        fe.available     = (feMin >= gate) && !std::isnan(apparentFlexExt)
+                        && fePlausible(apparentFlexExt, cfg.feLimitDeg);
         fe.valueDeg      = fe.available ? apparentFlexExt : 0.0;
         fe.confidence    = fe.available ? float(feMin * pen) : 0.f;
         fe.pitchProxyDeg = 0.0;   // no gimbal proxy for a planar projection (never Indeterminate)
@@ -197,12 +283,35 @@ std::vector<MetricSeries> buildTrailWristSeries(const PoseTrack2D &pose,
                                         std::min(f.conf[wristRoot], f.conf[middleMcp]));
         if (minConf < cfg.confMin)
             continue;
+        // …and the same plausibility limit. This is the one that fires: the confidence gate turns
+        // down 2.6% of trail frames and does not know which ones are wrong, while |FE| beyond the
+        // limit is a hand-keypoint collapse that used to walk the curve across the atan2 branch cut
+        // and leave a 360° step behind it. Refused, not clamped — a clamp would put a value the
+        // detector never supported at exactly the moment it failed.
+        if (!fePlausible(v, cfg.feLimitDeg))
+            continue;
         ch.push(f.t_us, v);
     }
 
-    appendIfProduced(out, buildChannelSeries(grid, ch, QStringLiteral("trailWristFlexExt"),
-                                             QStringLiteral("Trail wrist — bow / cup"),
-                                             QStringLiteral("°"), phases));
+    MetricSeries m = buildChannelSeries(grid, ch, QStringLiteral("trailWristFlexExt"),
+                                        QStringLiteral("Trail wrist — bow / cup"),
+                                        QStringLiteral("°"), phases);
+    if (m.key.isEmpty())
+        return out;                      // refused upstream — nothing to characterise
+
+    // σ from the band split, on the SURVIVING channel samples rather than the bridged curve: a
+    // bridge is an interpolation between two measurements, so its smoothness is an artefact of the
+    // drawing and counting it would flatter the estimate. Carried only when the filter had
+    // something to say — MetricSeries::sigma absent means "not characterised", not "no error", and
+    // the field's own contract is explicit that confidence must WIDEN the bar rather than nudge
+    // the value, which is why nothing here touches m.value.
+    const std::vector<double> smooth = lowpassIrregular(ch.t_us, ch.value, cfg.fcHz);
+    if (!smooth.empty()) {
+        const double sigmaDeg = outOfBandSigmaDeg(ch.value, smooth);
+        if (sigmaDeg > 0.0)
+            m.sigma = sigmaDeg;
+    }
+    out.push_back(std::move(m));
     return out;
 }
 

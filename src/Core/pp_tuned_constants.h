@@ -260,9 +260,38 @@ inline constexpr bool kFromSmoothedHands = false;   // pose.gripFromSmoothedHand
 namespace wristAngles {
 inline constexpr bool   kEnabled         = false;   // pose.wristAngles.enabled — IMU-less pose source
 inline constexpr double kConfMin         = 0.30;    // per-keypoint conf gate (codebase-wide)
+                                                    //   ⚠ THIS GATE DOES NOT FILTER THE HAND. Measured
+                                                    //   over 83 swings it rejects 0.2% of lead and 2.6%
+                                                    //   of trail frames, and the reported confidence
+                                                    //   correlates with the frame's ACTUAL error at
+                                                    //   −0.00 / +0.06. For hand keypoints, confidence
+                                                    //   is not optimistic — it is uninformative, so
+                                                    //   nothing downstream may treat this as a
+                                                    //   guarantee that bad frames were excluded.
+                                                    //   kFeLimitDeg below is what actually fires.
 inline constexpr double kApparentPenalty = 0.5;     // camera-plane apparent-angle confidence factor
                                                     //   (× min endpoint conf) — these are PROJECTED,
                                                     //   not anatomical, angles so trust is halved
+// An |apparent FE| this large is not a wrist. The corpus distribution is cleanly
+// BIMODAL: a real lobe (median 34–38°, p90 55–64°) and a detector-failure lobe at
+// 167–180° where the hand root and middle-MCP collapse or invert. Frames in the
+// second lobe used to reach the curve, and because the angle is an atan2 result they
+// carried it across the ±180 branch cut — 22 of 83 trail swings held a 360° step in a
+// series that is displayed and graded. Dropping them costs 2.7% of lead and 3.3% of
+// trail frames; the lobes are separated widely enough that any limit from 90° to 150°
+// selects near-identical frames, so this is a threshold in a gap, not a tuned edge.
+inline constexpr double kFeLimitDeg      = 120.0;   // pose.wristAngles.feLimitDeg
+// The band a wrist can actually produce. Measured on the CRITERION instrument rather
+// than assumed: the HackMotion lead-wrist series over P1→P7 holds 95% of its energy
+// below 1.9 Hz, 99% below 2.7 Hz and 99.9% below 3.7 Hz, so 6 Hz keeps all of the real
+// signal with ~1.6× headroom and everything above it is keypoint noise.
+//
+// USED ONLY FOR THE σ ESTIMATE TODAY — the emitted curve is unfiltered (see
+// buildTrailWristSeries). Filtering the curve itself moves 25% of the graded
+// m_trailWristFlexExt_* readings between bands, which must not land before the p6/p7
+// corridor seating is resolved. 0 disables the filter entirely (lowpassZeroPhase
+// returns its input unchanged), which also withdraws σ.
+inline constexpr double kFcHz            = 6.0;     // pose.wristAngles.fcHz
 } // namespace wristAngles
 } // namespace pose
 
