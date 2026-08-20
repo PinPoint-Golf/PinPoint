@@ -109,114 +109,17 @@ pp_add_test(qml_reactivity_test
     LINK    Qt6::Core
     COMPILE_OPTIONS -DPP_QML_ROOT="${GUI}")
 
+
 # ── The offscreen QML UI suite ────────────────────────────────────────────────
 #
-# 11 tst_*.qml files that load real components, render them offscreen and press them. This is the
-# ONLY coverage of the QML↔C++ seam and of the layouts themselves.
+# 11 tst_*.qml that load real components, render them offscreen and press them — the only coverage
+# of the QML↔C++ seam and of the layouts themselves. It used to live in the APP build, borrowing the
+# app's QML module through a staged, prefer-stripped copy, which is why it ran in no release gate on
+# any platform. It now declares that module itself.
 #
-# ⚠ IT DECLARES THE APP'S QML MODULE RATHER THAN BORROWING IT. Previously the module was attached to
-# the PinPointStudio executable, so the test could only import it via a staged copy with its
-# `prefer` line stripped (cmake/StripQmlPrefer.cmake, now deleted) and could only run from an app
-# build. That is why it was in no release gate on any platform, and why a 19-hour-stale app build
-# on the studio PC was silently running current tests against yesterday's UI — QUICK_TEST_SOURCE_DIR
-# reads the tst_*.qml live from the source tree while the module came from a build artifact.
-#
-# Declaring the module here compiles the same .qml into THIS binary's resources, so `prefer` points
-# at resources it actually has, the staging step is unnecessary, and nothing depends on the app.
-#
-# ⚠ AND IT NOW RUNS AOT-COMPILED rather than interpreted. The staged-copy arrangement loaded the
-# .qml from disk, which meant qmlcachegen's output was never what the suite exercised. It now runs
-# the way the app runs. That is the fidelity gain; it does NOT make qml_reactivity_test redundant,
-# which reads source to catch the dead statements the compiler drops (and the interpreter keeps).
-if(NOT TARGET Qt6::QuickTest)
-    find_package(Qt6 QUIET COMPONENTS Quick QuickTest Multimedia GuiPrivate)
-endif()
-
-if(NOT Qt6QuickTest_FOUND)
-    message(STATUS "Gui tests: Qt6::QuickTest not found — offscreen QML UI suite skipped")
-else()
-    # Not called by tests/cmake/PinPointTests.cmake (which finds only Core + Gui and uses plain
-    # add_executable); the QML macros need it.
-    #
-    # ⚠ REQUIRES 6.10 MATCHES THE ROOT CMakeLists EXACTLY (line 147), and that is the point rather
-    # than housekeeping: the argument selects which Qt QML policies are NEW, and QTP0004 among them
-    # governs how a module spanning many directories is assembled. Two modules built from one set of
-    # lists under two different policy sets are two different modules, which would quietly undo the
-    # reason this suite declares the app's module rather than an approximation of it.
-    qt_standard_project_setup(REQUIRES 6.10)
-
-    include(${SRC}/../cmake/PinPointQmlModule.cmake)
-    include(${SRC}/../cmake/PinPointFonts.cmake)
-    set(PP_ROOT ${SRC}/..)
-
-    # pp_add_test cannot express this target: it hardcodes add_executable + Qt6::Core/Gui and has no
-    # hook for a test ENVIRONMENT. So this one is spelled out.
-    qt_add_executable(qml_ui_test
-        qml/qml_ui_test.cpp
-        ${GUI}/app/app_settings.cpp
-        # Beyond the module's own SOURCES: the link closure those types reach into. Every one of
-        # these is already compiled by another suite in this umbrella, so nothing new is dragged in.
-        ${SRC}/Metrics/metric_catalogue.cpp
-        ${SRC}/Metrics/metric_resolver.cpp
-        ${SRC}/Metrics/metric_catalogue_manifest.cpp
-        ${SRC}/Metrics/metric_providers.cpp
-        ${SRC}/LaunchMonitor/launch_monitor_reading.cpp
-        ${SRC}/LaunchMonitor/launch_monitor_base.cpp
-        ${SRC}/LaunchMonitor/launch_monitor_factory.cpp
-        ${SRC}/LaunchMonitor/gcquad_monitor.cpp
-        ${SRC}/LaunchMonitor/gcquad_csv_parser.cpp
-        ${SRC}/Export/swing_doc.cpp
-        ${SRC}/Export/swing_paths.cpp
-        ${GUI}/shot/shot_list_model.cpp
-        ${SRC}/Core/tests/pp_log_stub.cpp)
-
-    # ⚠ RESOURCE ALIASES ARE MANDATORY HERE, unlike in the app. The app declares the module from the
-    # repo root, so each .qml is already a relative path and Qt derives the alias from it. These
-    # files sit outside THIS directory, so without an explicit alias Qt refuses them outright
-    # ("specified with an absolute path and is used in a Qt resource"). Setting the alias to the
-    # repo-relative path is what makes the generated qmldir identical to the app's.
-    set(_pp_qml_abs "")
-    foreach(_f IN LISTS PP_QML_FILES)
-        set(_abs "${PP_ROOT}/${_f}")
-        set_source_files_properties("${_abs}" PROPERTIES QT_RESOURCE_ALIAS "${_f}")
-        list(APPEND _pp_qml_abs "${_abs}")
-    endforeach()
-    foreach(_s IN LISTS PP_QML_SINGLETONS)
-        set_source_files_properties("${PP_ROOT}/${_s}" PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-    endforeach()
-    list(TRANSFORM PP_QML_SOURCES PREPEND "${PP_ROOT}/")
-
-    qt_add_qml_module(qml_ui_test
-        URI PinPointStudio
-        VERSION 1.0
-        QML_FILES ${_pp_qml_abs}
-        SOURCES   ${PP_QML_SOURCES})
-
-    # The faces the app ships. Without these every containment assertion measures whatever the HOST
-    # falls back to — see loadBundledFonts() in qml/qml_ui_test.cpp for the two different wrong
-    # answers that produced.
-    list(TRANSFORM PP_FONT_FILES PREPEND "${PP_ROOT}/")
-    qt_add_resources(qml_ui_test "test_fonts"
-        PREFIX "/fonts"
-        BASE "${PP_ROOT}/src/Resources/fonts"
-        FILES ${PP_FONT_FILES})
-
-    set_target_properties(qml_ui_test PROPERTIES AUTOMOC ON MACOSX_BUNDLE OFF)
-    target_include_directories(qml_ui_test PRIVATE
-        ${SRC} ${SRC}/Core ${SRC}/Buffer ${SRC}/Metrics ${SRC}/Analysis ${SRC}/Diagnostics
-        ${SRC}/Export ${SRC}/LaunchMonitor ${SRC}/Audio ${SRC}/Video
-        ${GUI} ${GUI}/app ${GUI}/review ${GUI}/viz ${GUI}/shot ${GUI}/launchmonitor
-        ${GUI}/diagnosticmodel ${GUI}/diagnostics)
-    target_compile_definitions(qml_ui_test PRIVATE
-        QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
-    # NOT linked against QuickShapes, deliberately — PpLmGraphicsBody's FLIGHT card draws with
-    # Shape/ShapePath and that plugin resolves off the QML import path at run time exactly as it
-    # does for the app, which also links only Qt6::Quick.
-    target_link_libraries(qml_ui_test PRIVATE
-        Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickTest Qt6::Multimedia Qt6::GuiPrivate)
-
-    # Offscreen is set on the TEST, not asked of whoever runs it, so headless CI and a developer's
-    # desk do the same thing and neither steals focus.
-    add_test(NAME qml_ui COMMAND qml_ui_test)
-    set_tests_properties(qml_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-endif()
+# ⚠ DECLARED FROM src/Gui, NOT FROM HERE, AND THAT IS FORCED RATHER THAN STYLISTIC. Qt derives each
+# file's qmlcachegen output directory from its path relative to CMAKE_CURRENT_SOURCE_DIR, so from
+# THIS directory every one of the 157 QML files is reached by going up and the cache directory comes
+# out as "qml_ui_test_../theme" — which macOS resolves and Windows ninja refuses. src/Gui is an
+# ancestor of all of them, so the paths come out clean. See src/Gui/CMakeLists.txt.
+add_subdirectory(${GUI} ${CMAKE_CURRENT_BINARY_DIR}/qmlui)
