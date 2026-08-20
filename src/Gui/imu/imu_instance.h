@@ -165,6 +165,23 @@ public:
     // detector config and recorded in swing.json, never hard-coded in math.
     static constexpr qint64 kImuBleLatencyUs = 30'000;
 
+    // ⚠ A SIZING CEILING AT REGISTRATION, NOT A CLAIM ABOUT THE RATE — the rate
+    // is not known until the device connects and setOutputRateHz() runs.
+    // SourceDescriptor::computeSlotCount() is next-pow2(rate × window), and it
+    // runs ONCE, at registerSource(). Sizing from the 100 Hz default gave 512
+    // slots, i.e. 2.56 s of ring on a device configured for 200 Hz — half the
+    // five-second swing window, silently overwritten from the front. Sizing from
+    // the fastest selectable rate costs 1,024 × 40 B = 40 KB and is always enough.
+    // Once the rate IS known, setOutputRateHz() corrects the descriptor to the
+    // negotiated cadence via EventBuffer::updateSourceFormat (ring memory is
+    // already allocated, so the correction is metadata only) — the same
+    // register-provisional-then-correct pattern CameraInstance uses for
+    // resolution. That correction is what the offline re-fusion readers
+    // (imu_refusion_check.h, imu_vision_fuser.cpp) integrate at, and it must
+    // match ImuBase::fuseRawImu's nominal dt exactly or parity fails for reasons
+    // that have nothing to do with the data.
+    static constexpr uint32_t kRingSizingRateHz = 200;
+
     // Lifecycle — called by ImuManager
     void start()               override; // begin BLE connection
     void stop()                override; // disconnect and cancel any retry

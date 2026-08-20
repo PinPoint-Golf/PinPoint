@@ -5,6 +5,7 @@
 #include "../swing_doc.h"
 #include "../swing_paths.h"
 #include "../../LaunchMonitor/gcquad_csv_parser.h"
+#include "../../Analysis/imu_refusion_check.h"   // ImuRefusionVerdict (header-only)
 #include "../../Analysis/swing_analysis.h"
 
 // Stub — avoids linking swing_paths.cpp (which pulls in the PpLogStream logging deps).
@@ -27,6 +28,15 @@ static void check(bool c, const char *label)
 {
     std::printf("  [%s] %s\n", c ? "PASS" : "FAIL", label);
     if (!c) ++g_fail;
+}
+
+// The document as it sits on disk — what a re-analysis re-reads and hands back to
+// writeSwingJson as its manifest.
+static QJsonObject readManifest(const QString &swingDir)
+{
+    QFile f(swingDir + QStringLiteral("/swing.json"));
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(f.readAll()).object();
 }
 
 int main()
@@ -956,6 +966,76 @@ int main()
         check(!sum.hasVideo, "…and it agrees there is no video");
 
         QDir(d5).removeRecursively();
+    }
+
+    // ── The IMU data-integrity block: written, read, and — the point — REMOVED ──
+    //
+    // This block used to be write-once. ShotProcessor put it in at capture and
+    // nothing ever revisited it: writeSwingJson replaces only schema/review/
+    // analysis, so a verdict reached by a build that could not yet tell a
+    // host-fused lane from a wG3 rode through every re-analysis forever. That is
+    // what badged eleven good wrist swings ⚠. applyImuIntegrity is the seam that
+    // makes a re-analysis able to withdraw a claim, so removal is tested first.
+    {
+        std::printf("\n-- imuIntegrity: verdict lifecycle --\n");
+        const QString d6 = dir + QStringLiteral("/integrity");
+        QDir().mkpath(d6);
+
+        ImuRefusionVerdict pass;                        // defaults: ok, nothing checked
+        pass.sourcesChecked = 1;
+        pass.worstMaxDeg    = 0.02;
+
+        ImuRefusionVerdict fail;
+        fail.ok             = false;
+        fail.sourcesChecked = 1;
+        fail.worstMaxDeg    = 17.5;
+
+        // A wG3-only window: the check ran and found nothing it could ask.
+        ImuRefusionVerdict notCheckable;                // sourcesChecked stays 0
+        check(!notCheckable.warns(), "a verdict with nothing checked does not warn");
+
+        // A failing verdict round-trips into the reader's dataWarning.
+        QJsonObject m1 = manifest;
+        applyImuIntegrity(m1, &fail);
+        check(m1.contains(QStringLiteral("imuIntegrity")), "a failing verdict writes the block");
+        QString e6;
+        check(SwingDocWriter::writeSwingJson(d6, m1, &a, &e6), "…and the document writes");
+        check(SwingDocReader::readSwingJson(d6).dataWarning, "…and reads back as a data warning");
+
+        // Re-analysis reaches a PASS on the same swing: the warning must clear.
+        QJsonObject m2 = readManifest(d6);
+        check(m2.contains(QStringLiteral("imuIntegrity")), "the stale block is there to be replaced");
+        applyImuIntegrity(m2, &pass);
+        check(SwingDocWriter::writeSwingJson(d6, m2, &a, &e6), "the re-analysis writes back");
+        check(!SwingDocReader::readSwingJson(d6).dataWarning, "…and the warning is gone");
+
+        // Re-analysis that could NOT establish a verdict must withdraw the claim
+        // entirely, not leave the old one standing and not fabricate a pass.
+        QJsonObject m3 = readManifest(d6);
+        applyImuIntegrity(m3, &fail);
+        check(SwingDocWriter::writeSwingJson(d6, m3, &a, &e6), "a failing verdict is written again");
+        check(SwingDocReader::readSwingJson(d6).dataWarning, "…and warns again");
+
+        QJsonObject m4 = readManifest(d6);
+        applyImuIntegrity(m4, nullptr);
+        check(!m4.contains(QStringLiteral("imuIntegrity")), "nullptr REMOVES the block");
+        check(SwingDocWriter::writeSwingJson(d6, m4, &a, &e6), "…the document writes without it");
+        check(!SwingDocReader::readSwingJson(d6).dataWarning, "…and no warning survives");
+
+        // sourcesChecked == 0 is the same no-claim outcome as nullptr — a wG3-only
+        // swing must not persist as "checked and passed".
+        QJsonObject m5 = manifest;
+        applyImuIntegrity(m5, &fail);
+        applyImuIntegrity(m5, &notCheckable);
+        check(!m5.contains(QStringLiteral("imuIntegrity")),
+              "a verdict with sourcesChecked==0 removes it too");
+
+        // A legacy document that never carried the block stays clean.
+        QJsonObject m6 = manifest;
+        applyImuIntegrity(m6, nullptr);
+        check(!m6.contains(QStringLiteral("imuIntegrity")), "removal on an absent key is a no-op");
+
+        QDir(d6).removeRecursively();
     }
 
     std::printf("\n=== %s (%d failures) ===\n", g_fail ? "FAILURES" : "ALL PASS", g_fail);

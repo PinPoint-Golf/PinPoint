@@ -280,6 +280,9 @@ LoadedSwing SwingDiskLoader::load(const QString& swingDir, const SwingLoadOption
     int64_t  tMin   = INT64_MAX, tMax = INT64_MIN;
     SourceId nextId = 0;
     bool     anyRaw = false;
+    // Distinguishes "no host-fused lane has been seen yet" from "one was seen and
+    // recorded an empty filter" — only the second is a refusal to be preserved.
+    bool     sawHostFusedLane = false;
 
     struct VidTmp { SourceId id; bool faceOn; };
     std::vector<VidTmp> vids;
@@ -464,6 +467,20 @@ LoadedSwing SwingDiskLoader::load(const QString& swingDir, const SwingLoadOption
                 s[QStringLiteral("instrument")].toString() == QLatin1String("hackmotion");
             const DeviceKind devKind = isHackMotion ? DeviceKind::IMU_HackMotion
                                                     : DeviceKind::IMU_WitMotion;
+
+            // Which host filter produced the stored quaternions — host-fused lanes
+            // only (see LoadedSwing::hostOrientationFilter). Lanes that disagree
+            // collapse to empty: with no single answer there is no safe one, and
+            // the only consumer refuses rather than guesses.
+            if (!isHackMotion) {
+                const QString filt = s[QStringLiteral("device")].toObject()
+                                        [QStringLiteral("orientationFilter")].toString();
+                if (!sawHostFusedLane)
+                    out.hostOrientationFilter = filt;
+                else if (out.hostOrientationFilter.compare(filt, Qt::CaseInsensitive) != 0)
+                    out.hostOrientationFilter.clear();
+                sawHostFusedLane = true;
+            }
 
             FormatDescriptor fd;
             fd.device        = devKind;
@@ -776,6 +793,25 @@ ReanalyzeResult reanalyzeSwingDir(const QString& swingDir, const ReanalyzeOption
     } catch (...) {
         out.error = QStringLiteral("analyzer threw an unknown exception");
     }
+
+    // ── A FRESH DATA-INTEGRITY VERDICT, NOT THE ONE CAPTURE REACHED ─────────────
+    //
+    // The window is still alive here and its IMU payloads are pure RAM
+    // (RamPayloadSource), so this is one Madgwick pass per host-fused lane and no
+    // disk IO. It runs after analyze() only because there is nothing to gain by
+    // running it earlier; it does not depend on the analysis.
+    //
+    // ⚠ ONLY WHEN THE RECORDING SAYS MADGWICK. Parity is a claim about whether the
+    // stored quaternion is reproducible from the stored vectors, which is a
+    // question one can only ask of a Madgwick host fusion — the sole filter that
+    // warm-starts exactly. Under ESKF, or when the recording does not say, we leave
+    // this nullopt and the write-back REMOVES the block: no claim beats a fabricated
+    // one. A wG3-only swing reaches checkImuRefusion and comes back with
+    // sourcesChecked == 0, which applyImuIntegrity also treats as no claim.
+    if (ls.window
+        && ls.hostOrientationFilter.compare(QStringLiteral("madgwick"), Qt::CaseInsensitive) == 0)
+        out.imuIntegrity = pinpoint::checkImuRefusion(*ls.window);
+
     return out;
 }
 

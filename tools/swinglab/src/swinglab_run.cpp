@@ -313,6 +313,10 @@ int main(int argc, char **argv)
         }
         if (manifest.isEmpty())
             return fail("swing.json missing/unreadable — not overwriting");
+        // Same as the in-app controller: the data-integrity verdict is re-reached by
+        // this pass rather than inherited from capture, and is REMOVED when this pass
+        // could not reach one. See swing_doc.h.
+        pinpoint::applyImuIntegrity(manifest, r.imuIntegrity ? &*r.imuIntegrity : nullptr);
         QString werr;
         if (!pinpoint::SwingDocWriter::writeSwingJson(swingDir, manifest,
                                                       r.analysis.detail.get(), &werr))

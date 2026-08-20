@@ -45,4 +45,9 @@ bool SwingDocWriter::writeSwingJson(const QString & /*swingDir*/, const QJsonObj
     return true;   // unreached: onWorkerFinished needs an event loop the test never runs
 }
 
+void applyImuIntegrity(QJsonObject & /*manifest*/, const ImuRefusionVerdict * /*v*/)
+{
+    // Same seam, same reason — onWorkerFinished is never reached by this test.
+}
+
 } // namespace pinpoint

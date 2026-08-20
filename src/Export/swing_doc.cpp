@@ -30,11 +30,38 @@
 #include <cmath>
 
 #include "swing_paths.h"
+#include "../Analysis/imu_refusion_check.h"
 #include "../Analysis/lm_inferred_reads.h"
 #include "../Analysis/swing_analysis.h"
 #include "../Core/club_vocabulary.h"
 
 namespace pinpoint {
+
+QJsonObject imuIntegrityJson(const ImuRefusionVerdict &v)
+{
+    return QJsonObject{
+        { QStringLiteral("refusionOk"),     v.ok },
+        { QStringLiteral("worstMaxDeg"),    v.worstMaxDeg },
+        { QStringLiteral("sourcesChecked"), v.sourcesChecked },
+        { QStringLiteral("thresholdDeg"),   v.thresholdDeg },
+        // ⚠ "madgwick" describes the sources that WERE checked, not every IMU lane
+        // in the window. checkImuRefusion skips HackMotion lanes per-source (they
+        // stream their own orientation and cannot be re-fused), so a mixed window
+        // reports on the checkable half only. `sourcesChecked` is the field that
+        // says how many that was, and the block is omitted when it is zero.
+        { QStringLiteral("filter"),         QStringLiteral("madgwick") } };
+}
+
+void applyImuIntegrity(QJsonObject &manifest, const ImuRefusionVerdict *v)
+{
+    // sourcesChecked == 0 is "nothing checkable was present" — a wG3-only window,
+    // say — which is a no-claim outcome exactly as nullptr is, not a pass.
+    if (v && v->sourcesChecked > 0)
+        manifest[QStringLiteral("imuIntegrity")] = imuIntegrityJson(*v);
+    else
+        manifest.remove(QStringLiteral("imuIntegrity"));
+}
+
 namespace {
 
 // Serialise the score breakdown into the "score" object (schema /3+, design §B.0/§B.7).

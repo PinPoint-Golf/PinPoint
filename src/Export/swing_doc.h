@@ -29,6 +29,31 @@ namespace pinpoint::analysis { struct SwingAnalysis; }
 
 namespace pinpoint {
 
+struct ImuRefusionVerdict;   // Analysis/imu_refusion_check.h — by pointer, so this
+                             // header need not drag the filter/refuser chain in.
+
+// ── The swing.json "imuIntegrity" block ──────────────────────────────────────
+//
+// Two producers write this block — the live capture join (ShotProcessor) and the
+// re-analysis write-back — so it is spelled ONCE here rather than inline at each.
+// The block's fields are subtle enough that two hand-rolled copies would drift:
+// `filter` describes the sources that WERE checked, not every IMU lane in the
+// window, and `sourcesChecked` is the field that says how many that was.
+QJsonObject imuIntegrityJson(const ImuRefusionVerdict &v);
+
+// Patch a manifest that is about to be written back so its "imuIntegrity" block
+// reflects THIS pass rather than whatever capture concluded.
+//
+// ⚠ nullptr REMOVES THE KEY, AND THAT IS THE WHOLE POINT. Before this existed the
+// block was written once at capture and then rode through every re-analysis
+// verbatim (writeSwingJson replaces only schema/review/analysis), so a verdict
+// reached by a build that could not yet tell a host-fused lane from a wG3 became
+// permanent — the ⚠ badge on eleven perfectly good 2026-08-18 wrist swings. A
+// caller that could not establish the capture-time filter, or found no checkable
+// lane, passes nullptr and the document then makes NO claim. "Not checkable" must
+// never be persisted as "checked and passed".
+void applyImuIntegrity(QJsonObject &manifest, const ImuRefusionVerdict *v);
+
 // The single, unified per-shot document. Raw capture manifest and derived analysis
 // live in ONE swing.json — no separate analysis.json. Written once, on the GUI thread,
 // at the analyzer∥exporter join (ShotProcessor::maybeJoin), so the two concurrent

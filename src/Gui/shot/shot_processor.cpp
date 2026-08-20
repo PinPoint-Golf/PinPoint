@@ -1812,18 +1812,9 @@ void ShotProcessor::maybeJoin()
         const pinpoint::ImuRefusionVerdict v = pinpoint::checkImuRefusion(*m_swingWindow);
         if (v.sourcesChecked > 0) {
             imuDataWarning = v.warns();
-            m_exportManifest[QStringLiteral("imuIntegrity")] = QJsonObject{
-                { QStringLiteral("refusionOk"),     v.ok },
-                { QStringLiteral("worstMaxDeg"),    v.worstMaxDeg },
-                { QStringLiteral("sourcesChecked"), v.sourcesChecked },
-                { QStringLiteral("thresholdDeg"),   v.thresholdDeg },
-                // ⚠ "madgwick" describes the sources that WERE checked, not every IMU
-                // lane in the window. checkImuRefusion now skips HackMotion lanes
-                // per-source (they stream their own orientation and cannot be
-                // re-fused), so a mixed window would report on the checkable half
-                // only. `sourcesChecked` is the field that says how many that was,
-                // and the whole block is omitted when it is zero.
-                { QStringLiteral("filter"),         QStringLiteral("madgwick") } };
+            // Shared with the re-analysis write-back (swing_doc.h) so the two
+            // producers of this block cannot drift.
+            m_exportManifest[QStringLiteral("imuIntegrity")] = pinpoint::imuIntegrityJson(v);
             if (imuDataWarning)
                 ppInfo() << "[ShotProcessor] IMU re-fusion parity FAILED — worst"
                          << v.worstMaxDeg << "deg over" << v.sourcesChecked

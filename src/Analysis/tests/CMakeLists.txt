@@ -385,6 +385,15 @@ pp_add_test(orientation_refuse_test
     SOURCES orientation_refuse_test.cpp ${SRC}/IMU/eskf_orientation_filter.cpp
     INCLUDE ${SRC}/IMU ${PP_THIRD}/imu_ekf_compat ${PP_THIRD}/imu_ekf ${EIGEN_DIR})
 
+# The data-integrity check ON TOP of that refuser: which lanes may be asked the
+# parity question at all. Needs a real SwingWindow (built over RamPayloadSource,
+# no EventBuffer), so it compiles swing_window.cpp; std::span there → C++20.
+# Madgwick is header-only and no ESKF path is exercised, so no Eigen.
+pp_add_test(imu_refusion_check_test
+    SOURCES imu_refusion_check_test.cpp ${SRC}/Buffer/swing_window.cpp
+    INCLUDE ${SRC}/IMU
+    STD 20)
+
 # --- IMU driver frame-parse + WT901BLE67 eulerToQuat override (Phase 0.3) -----
 # Exercises the REAL driver stack. imu_test_stubs.cpp supplies EventBuffer::nowMicros
 # and PpLogStream so we link neither the Buffer library nor pp_debug.cpp. The

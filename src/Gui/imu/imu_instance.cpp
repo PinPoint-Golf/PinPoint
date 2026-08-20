@@ -37,6 +37,32 @@
 #include <chrono>
 #include <cstring>
 
+namespace {
+
+// The IMU lane's format descriptor, spelled ONCE so registration and the
+// post-negotiation correction cannot drift apart. rateHz means two different
+// things at the two call sites — a ring-sizing ceiling at registerSource(), the
+// negotiated nominal cadence afterwards — which is why it is a parameter rather
+// than baked in. device_serial is deliberately left empty: registerSource()
+// normalises it to the identifier, and updateSourceFormat() preserves the
+// registered one when a re-stamp carries none (event_buffer.cpp:279-283).
+pinpoint::FormatDescriptor imuFormatDescriptor(uint32_t rateHz)
+{
+    pinpoint::ImuFormat fmt{};
+    fmt.device         = pinpoint::DeviceKind::IMU_WitMotion;
+    fmt.sample_rate_hz = rateHz;
+    // One decoded ImuSample per quaternion update — 40 bytes, quaternion-only rotation.
+    fmt.packet_bytes   = sizeof(pinpoint::ImuSample);
+    fmt.packet_schema  = "imu_sample_v2";   // raw sensor-frame vectors (see imu_sample.h)
+
+    pinpoint::FormatDescriptor fd;
+    fd.device = pinpoint::DeviceKind::IMU_WitMotion;
+    fd.format = fmt;
+    return fd;
+}
+
+} // namespace
+
 ImuInstance::ImuInstance(const Device &device,
                          pinpoint::EventBuffer *buffer,
                          QThread *ioThread,
@@ -65,16 +91,17 @@ ImuInstance::ImuInstance(const Device &device,
                            ? device.id
                            : device.imuCapabilities.serialNumber).toStdString();
 
-        pinpoint::ImuFormat fmt{};
-        fmt.device         = pinpoint::DeviceKind::IMU_WitMotion;
-        fmt.sample_rate_hz = 100;
-        // One decoded ImuSample per quaternion update — 40 bytes, quaternion-only rotation.
-        fmt.packet_bytes   = sizeof(pinpoint::ImuSample);
-        fmt.packet_schema  = "imu_sample_v2";   // raw sensor-frame vectors (see imu_sample.h)
-
-        desc.format.device            = pinpoint::DeviceKind::IMU_WitMotion;
-        desc.format.format            = fmt;
+        // Provisional: the device has not connected yet, so its rate is unknown.
+        // Register at the ceiling so the ring is big enough for any of them, then
+        // correct to the negotiated cadence in setOutputRateHz(). See
+        // kRingSizingRateHz for why the two numbers are different jobs.
+        desc.format                   = imuFormatDescriptor(kRingSizingRateHz);
         desc.window_duration          = std::chrono::milliseconds(5000);
+        // ⚠ DELIBERATELY NOT kRingSizingRateHz'S PERIOD, and the two must not be
+        // "fixed" to match. This feeds ONLY the stall watchdog, which wants the SLOW
+        // end (a device configured for 10 Hz is healthy at 100 ms between samples);
+        // the sizing rate above wants the fast end. Each number is right for its own
+        // job — same split hm_instance.h documents for the wG3.
         desc.expected_interarrival_us = std::chrono::microseconds(10000); // 100 Hz
         desc.sync_source              = pinpoint::SyncSource::SoftwareTimestamp;
 
@@ -679,6 +706,21 @@ void ImuInstance::setOutputRateHz(int hz)
     }
     m_outputRateHz = hz;
     emit outputRateHzChanged();
+
+    // ⚠ THE BUFFER HAS TO BE TOLD TOO, or the offline re-fusion readers integrate
+    // at a rate the live fusion never used. registerSource() could only record a
+    // provisional ceiling (kRingSizingRateHz) because the rate is chosen here, on
+    // connect; setNominalSampleRateHz() below keeps the LIVE filter's dt right,
+    // and this keeps the recorded descriptor's in lockstep with it. Without the
+    // pair, a 200 Hz device fuses at 1/200 live while imu_refusion_check.h and
+    // imu_vision_fuser.cpp re-fuse at the stale rate — and orientation_refuser.h
+    // is explicit that a dt mismatch fails parity for reasons unrelated to the
+    // data under test. Metadata only, no ring resize (event_buffer.h:148-150), and
+    // synchronous on the caller's thread exactly as CameraInstance stamps its
+    // negotiated resolution; every caller of this is GUI-thread.
+    if (m_eventBuffer && m_imuSourceId != pinpoint::kInvalidSourceId)
+        m_eventBuffer->updateSourceFormat(m_imuSourceId, imuFormatDescriptor(uint32_t(hz)));
+
     // Always sync the driver's internal rate register so initializeDevice() uses
     // the right value from the first connection. writeToDevice() is a no-op when
     // disconnected so this is safe to call at any time. Driver state — I/O thread.

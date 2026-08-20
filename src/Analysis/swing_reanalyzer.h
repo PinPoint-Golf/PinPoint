@@ -24,6 +24,7 @@
 
 #include "swing_window.h"
 #include "shot_analyzer.h"
+#include "imu_refusion_check.h"
 
 // SwingReanalyzer — reconstruct a SwingWindow from an exported swing folder and
 // re-run the production analyzer OFFLINE, the same disk → SwingWindow → analyzer
@@ -56,6 +57,18 @@ struct LoadedSwing {
     std::optional<pinpoint::SwingWindow> window;   // disk-backed; streams on demand
     ShotAnalysisJob                      job;
     bool                                 usedRaw = false;  // any camera used the raw sidecar
+
+    // The host-side orientation filter in force when this swing was CAPTURED, read
+    // from streams[].device.orientationFilter of the host-fused lanes (a wG3 fuses
+    // on-device and records none, so its lanes are not consulted). Empty when the
+    // recording does not say, or when host-fused lanes disagree with each other.
+    //
+    // Only the re-fusion parity check needs this, and only to refuse: that check
+    // re-runs Madgwick and compares to the STORED quaternion, so it is meaningful
+    // only if the stored quaternion is itself a Madgwick fusion. Under ESKF — or
+    // when the recording is silent — re-fusing proves nothing about the data, and
+    // an assumed "probably Madgwick" would be a fabricated provenance claim.
+    QString hostOrientationFilter;
 };
 
 class SwingDiskLoader {
@@ -82,6 +95,13 @@ struct ReanalyzeResult {
     QString            error;
     ShotAnalysisResult analysis;            // score / metrics / trace / detail
     bool               usedRaw = false;
+
+    // A FRESH IMU data-integrity verdict for this pass, or nullopt when the swing
+    // was not checkable — which is why this is an optional and not a plain verdict.
+    // The caller writing swing.json back must pass it to pinpoint::applyImuIntegrity,
+    // which removes the block on nullopt. Carrying the capture-time block forward
+    // instead is what made a false ⚠ permanent; see swing_doc.h.
+    std::optional<pinpoint::ImuRefusionVerdict> imuIntegrity;
 };
 
 // Convenience for the app: load + run makeShotAnalyzer(sessionType)->analyze().

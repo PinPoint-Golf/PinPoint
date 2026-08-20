@@ -128,8 +128,19 @@ void ReanalysisController::onWorkerFinished()
             m_lastError = QStringLiteral("This shot's swing.json could not be read, so it was left untouched.");
             ppWarn() << "[Reanalysis] write-back skipped —" << dir
                      << "swing.json missing/unreadable (not overwriting)";
-        } else if (pinpoint::SwingDocWriter::writeSwingJson(dir, manifest,
-                                                            r.analysis.detail.get(), &err)) {
+            startNext();
+            return;
+        }
+
+        // The IMU data-integrity block is the one manifest key that must NOT simply
+        // ride through: it is a verdict about this recording, and re-analysis has
+        // just re-reached it (or established that it cannot be reached at all, in
+        // which case this removes it). Carrying the capture-time block forward is
+        // what made a false ⚠ survive every re-analysis. See swing_doc.h.
+        pinpoint::applyImuIntegrity(manifest, r.imuIntegrity ? &*r.imuIntegrity : nullptr);
+
+        if (pinpoint::SwingDocWriter::writeSwingJson(dir, manifest,
+                                                     r.analysis.detail.get(), &err)) {
             ++m_succeeded;
             emit reanalysed(dir);   // host refreshes the row in the active model
             ppInfo() << "[Reanalysis] re-analysed" << dir << "— score" << r.analysis.score;
