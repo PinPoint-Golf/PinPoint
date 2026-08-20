@@ -43,7 +43,7 @@
 //     through the phases.
 //
 //   • HackMotion (`d.hmStep` 0→1→…→5) — the DEVICE's routine, driven through
-//     libhackmotion: forearm horizontal → one continuous ~30° raise across the
+//     libwrist: forearm horizontal → one continuous ~30° raise across the
 //     chest → the device applies its own transform → reference pose → presence
 //     check. The order is fixed and enforced BY THE LIBRARY; we issue markers and
 //     read state. There is nothing to solve host-side, nothing to store, and no
@@ -206,7 +206,7 @@ Item {
             return imuManager.instanceForSlot("C")
         }
 
-        // The PERIPHERAL behind slot A — the object every hm_calibration_* call
+        // The PERIPHERAL behind slot A — the object every wr_calibration_* call
         // goes to. For a Witmotion it is the same ImuInstance leadImu resolves to;
         // for a HackMotion it is the HmInstance that OWNS leadImu.
         readonly property QtObject leadDevice: {
@@ -338,41 +338,41 @@ Item {
 
         // ═══ HackMotion — the device-native routine ════════════════════════════
         //
-        // Library enum values, from libhackmotion's hackmotion/event.h and
-        // hackmotion/types.h. QML cannot see the C enums, so the integers are
+        // Library enum values, from libwrist's wrist/event.h and
+        // wrist/types.h. QML cannot see the C enums, so the integers are
         // named ONCE here rather than spelled at each comparison.
         // ⚠ QML forbids a property name beginning with a capital, so these cannot
         // carry the library's own spelling; it is in the trailing comment on every
         // line so the mapping stays greppable both ways.
-        readonly property int calpIdle:            0   // HM_CALP_IDLE
-        readonly property int calpAwaitHorizontal: 1   // HM_CALP_AWAIT_HORIZONTAL
-        readonly property int calpMarkingPose0:    2   // HM_CALP_MARKING_POSE0
-        readonly property int calpObservingRaise:  3   // HM_CALP_OBSERVING_RAISE
-        readonly property int calpMarkingPose1:    4   // HM_CALP_MARKING_POSE1
-        readonly property int calpApplying:        5   // HM_CALP_APPLYING
-        readonly property int calpVerifying:       6   // HM_CALP_VERIFYING
-        readonly property int calpComplete:        7   // HM_CALP_COMPLETE
-        readonly property int calpAborted:         8   // HM_CALP_ABORTED
+        readonly property int calpIdle:            0   // WR_CALP_IDLE
+        readonly property int calpAwaitHorizontal: 1   // WR_CALP_AWAIT_HORIZONTAL
+        readonly property int calpMarkingPose0:    2   // WR_CALP_MARKING_POSE0
+        readonly property int calpObservingRaise:  3   // WR_CALP_OBSERVING_RAISE
+        readonly property int calpMarkingPose1:    4   // WR_CALP_MARKING_POSE1
+        readonly property int calpApplying:        5   // WR_CALP_APPLYING
+        readonly property int calpVerifying:       6   // WR_CALP_VERIFYING
+        readonly property int calpComplete:        7   // WR_CALP_COMPLETE
+        readonly property int calpAborted:         8   // WR_CALP_ABORTED
 
-        readonly property int calUnknown:      0   // HM_CAL_UNKNOWN
-        readonly property int calUncalibrated: 1   // HM_CAL_UNCALIBRATED
-        readonly property int calCalibrated:   2   // HM_CAL_CALIBRATED
-        readonly property int calLost:         3   // HM_CAL_LOST — never appears live
+        readonly property int calUnknown:      0   // WR_CAL_UNKNOWN
+        readonly property int calUncalibrated: 1   // WR_CAL_UNCALIBRATED
+        readonly property int calCalibrated:   2   // WR_CAL_CALIBRATED
+        readonly property int calLost:         3   // WR_CAL_LOST — never appears live
 
-        // hm_calibration_abort_reason. Read off the header rather than any summary:
+        // wr_calibration_abort_reason. Read off the header rather than any summary:
         // it has exactly SIX enumerators, so NO_RESULT — the last one — is 5.
-        readonly property int abortNone:         0   // HM_CAL_ABORT_NONE
-        readonly property int abortCaller:       1   // HM_CAL_ABORT_CALLER
-        readonly property int abortRaiseTooSlow: 2   // HM_CAL_ABORT_RAISE_TOO_SLOW
-        readonly property int abortStreamLost:   3   // HM_CAL_ABORT_STREAM_LOST
-        readonly property int abortLinkLost:     4   // HM_CAL_ABORT_LINK_LOST
-        readonly property int abortNoResult:     5   // HM_CAL_ABORT_NO_RESULT
+        readonly property int abortNone:         0   // WR_CAL_ABORT_NONE
+        readonly property int abortCaller:       1   // WR_CAL_ABORT_CALLER
+        readonly property int abortRaiseTooSlow: 2   // WR_CAL_ABORT_RAISE_TOO_SLOW
+        readonly property int abortStreamLost:   3   // WR_CAL_ABORT_STREAM_LOST
+        readonly property int abortLinkLost:     4   // WR_CAL_ABORT_LINK_LOST
+        readonly property int abortNoResult:     5   // WR_CAL_ABORT_NO_RESULT
 
-        // hm_status, the few a calibration call can be refused with.
-        readonly property int errInvalidState:  -2   // HM_ERR_INVALID_STATE
-        readonly property int errLinkDown:     -12   // HM_ERR_LINK_DOWN
-        readonly property int errNoStream:     -14   // HM_ERR_NO_STREAM
-        readonly property int errBusy:         -18   // HM_ERR_BUSY
+        // wr_status, the few a calibration call can be refused with.
+        readonly property int errInvalidState:  -2   // WR_ERR_INVALID_STATE
+        readonly property int errLinkDown:     -12   // WR_ERR_LINK_DOWN
+        readonly property int errNoStream:     -14   // WR_ERR_NO_STREAM
+        readonly property int errBusy:         -18   // WR_ERR_BUSY
 
         // Our step in the choreography. The DEVICE's phase is the authority on
         // where the library is; this only distinguishes the sub-steps a phase
@@ -419,7 +419,7 @@ Item {
         //
         // ⚠ DO NOT RAISE THAT LIMIT AND DO NOT ADD A WALL-CLOCK FALLBACK that
         // confirms the raise anyway. If a stalled renderer overruns it the library
-        // aborts with HM_CAL_ABORT_RAISE_TOO_SLOW, and a legible failure the coach
+        // aborts with WR_CAL_ABORT_RAISE_TOO_SLOW, and a legible failure the coach
         // can repeat is worth more than a marker fired at an arm that never moved —
         // which is precisely the attempt that scores BEST on the presence check
         // (0.70°, §8.2). The device imposes no deadline of its own: one measured
@@ -440,7 +440,7 @@ Item {
         // axis, and 0.70° — the BEST score of the three — for pose 1 marked without
         // moving at all. The check tests the ZEROING, which cannot fail; the raise is
         // what determines the anatomical axis, and the presence angle is blind to it.
-        // So hm_session_calibration_state() reaches HM_CAL_CALIBRATED for a routine
+        // So wr_session_calibration_state() reaches WR_CAL_CALIBRATED for a routine
         // the athlete never performed, and a UI that pings on that alone tells a coach
         // their sensor is calibrated when its frame is undetermined.
         //
@@ -535,8 +535,8 @@ Item {
             calibrationDone    = false
         }
 
-        // ── Step 1 — preconditions, then `hm_calibration_begin()` ─────────────
-        // ⚠ hm_calibration_begin() returns HM_ERR_NO_STREAM when no stream is
+        // ── Step 1 — preconditions, then `wr_calibration_begin()` ─────────────
+        // ⚠ wr_calibration_begin() returns WR_ERR_NO_STREAM when no stream is
         // running, and there is DELIBERATELY no AWAIT_STREAM phase in the library:
         // the device observes a continuous raise, which two static samples cannot
         // supply. Under our one-stream cycle the stream comes up just after connect
@@ -619,7 +619,7 @@ Item {
                 // PRESENCE CHECK IS NOT YET MEASURED. It is not success: no tick,
                 // no Continue, nothing written. It is the cue for the reference
                 // pose, which is NOT OPTIONAL — skipping it leaves the recording at
-                // HM_CAL_UNKNOWN, and it also yields the anchor Phase D needs.
+                // WR_CAL_UNKNOWN, and it also yields the anchor Phase D needs.
                 hmStep = 4
                 if (flow._bvv) {
                     flow._bvv.resetArmAnimation(flow._bvv.hmCalUpperArmQuat,
@@ -633,7 +633,7 @@ Item {
                 }
 
             } else if (p === calpComplete) {
-                // ⚠ COMPLETE is not calibrated, and HM_CAL_ABORT_CALLER is carried
+                // ⚠ COMPLETE is not calibrated, and WR_CAL_ABORT_CALLER is carried
                 // on a transition to COMPLETE as well as to ABORTED — so
                 // "abort_reason != NONE" is NOT "the routine failed". The verdict
                 // is computed in _hmEvaluate() from the STATE.
@@ -650,7 +650,7 @@ Item {
         // ── The verdict ───────────────────────────────────────────────────────
         // Called on every calibration state change and on COMPLETE, and idempotent
         // by construction. ⚠ calibrationDone comes from calibrationState ===
-        // HM_CAL_CALIBRATED and from nothing else: never from phase === COMPLETE
+        // WR_CAL_CALIBRATED and from nothing else: never from phase === COMPLETE
         // (the device applies its transform for every attempt, including rejected
         // ones), and never from the presence angle being small (it INVERTS — the
         // attempt with no axis information scored best).
@@ -700,7 +700,7 @@ Item {
                 return
             }
             // ⚠ THE MEASUREMENT NEVER HAPPENED. The library collected too few live
-            // samples at the reference pose to average one (HM_WARN_PRESENCE_NOT_
+            // samples at the reference pose to average one (WR_WARN_PRESENCE_NOT_
             // MEASURED), and the phase reaches COMPLETE either way — so without this
             // flag a check that never ran would read as a success. Its own outcome,
             // distinct from "measured and passed" and from "declined".
@@ -737,7 +737,7 @@ Item {
                                   + "routine once the sensor is back."))
         }
 
-        // ⚠ Every hm_calibration_* call is queued onto the I/O thread and returns
+        // ⚠ Every wr_calibration_* call is queued onto the I/O thread and returns
         // nothing; a refusal arrives ONLY here. NO_STREAM and BUSY must not collapse
         // into one generic error — they ask the coach for different things.
         function _hmRefused(status, call) {
@@ -1201,7 +1201,7 @@ Item {
     }
 
     // Back at the reference pose and still, so the presence check may be measured.
-    // ⚠ confirmReferencePose() RETURNS BEFORE THE MEASUREMENT EXISTS — HM_OK only
+    // ⚠ confirmReferencePose() RETURNS BEFORE THE MEASUREMENT EXISTS — WR_OK only
     // means the run started — so what follows is a wait on the presence values, not
     // on the call, bounded by hmPresenceWaitTimer.
     Timer {

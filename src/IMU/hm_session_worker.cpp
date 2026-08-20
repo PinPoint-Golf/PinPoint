@@ -22,7 +22,7 @@
 #include "ble_adapter_pool.h"
 #include "event_buffer.h"
 #include "imu_sample.h"
-// The pure hm_unit_sample → ImuSample converter. It owns the m/s² → g conversion
+// The pure wr_unit_sample → ImuSample converter. It owns the m/s² → g conversion
 // from the raw mg counts and passes gyro and the quaternion through verbatim; it
 // is unit-agnostic, so both blocks go through the same call.
 #include "hm_frame.h"
@@ -47,14 +47,14 @@
 // Local helpers
 // ---------------------------------------------------------------------------
 
-// libhackmotion hands out UUIDs as 16 raw bytes and owns their formatting; Qt
+// libwrist hands out UUIDs as 16 raw bytes and owns their formatting; Qt
 // wants a string. Marshal through the library's own formatter rather than
 // reordering the bytes here — the same division of labour device_enumerator.cpp
-// uses in the opposite direction with hm_uuid_parse().
-static QBluetoothUuid toQtUuid(const hm_uuid &uuid)
+// uses in the opposite direction with wr_uuid_parse().
+static QBluetoothUuid toQtUuid(const wr_uuid &uuid)
 {
-    char text[HM_UUID_STRING_SIZE];
-    hm_uuid_format(&uuid, text, sizeof text);
+    char text[WR_UUID_STRING_SIZE];
+    wr_uuid_format(&uuid, text, sizeof text);
     return QBluetoothUuid(QString::fromLatin1(text));
 }
 
@@ -115,7 +115,7 @@ HmSessionWorker::HmSessionWorker(const QString &deviceId)
     m_dueTimer->setSingleShot(true);
     connect(m_dueTimer, &QTimer::timeout, this, [this]() {
         if (!m_session) return;
-        hm_session_tick(m_session, nowUs());
+        wr_session_tick(m_session, nowUs());
         pump();
     });
 
@@ -124,13 +124,13 @@ HmSessionWorker::HmSessionWorker(const QString &deviceId)
     // not sit under the service's UUID base, so the fragment form BleImuTransport
     // uses for Witmotion cannot express this device at all. Explicit UUIDs,
     // matched by equality, with a null write so it resolves onto the notify
-    // characteristic. HM_MIN_ATT_MTU is a diagnosis rather than a knob: no Qt
+    // characteristic. WR_MIN_ATT_MTU is a diagnosis rather than a knob: no Qt
     // platform lets an application request an MTU.
     const BleImuTransport::UuidConfig uuids = BleImuTransport::explicitUuids(
-        toQtUuid(HM_UUID_TRANSPARENT_UART_SERVICE),
-        toQtUuid(HM_UUID_DATA_CHARACTERISTIC),
+        toQtUuid(WR_UUID_TRANSPARENT_UART_SERVICE),
+        toQtUuid(WR_UUID_DATA_CHARACTERISTIC),
         QBluetoothUuid(),
-        HM_MIN_ATT_MTU);
+        WR_MIN_ATT_MTU);
 
     m_transport = new BleImuTransport(uuids, this);
 
@@ -145,13 +145,13 @@ HmSessionWorker::HmSessionWorker(const QString &deviceId)
             [this](int negotiated, int required) {
         // The transport's own gate fires before the library ever sees the link.
         // Both are wired up because they can fail independently: this one on
-        // UuidConfig::minAttMtu, HM_EV_MTU_REJECTED on the value we pass into
-        // hm_session_on_link_up().
+        // UuidConfig::minAttMtu, WR_EV_MTU_REJECTED on the value we pass into
+        // wr_session_on_link_up().
         emit mtuTooSmall(negotiated, required);
     });
     connect(m_transport, &BleImuTransport::mtuChanged, this, [this](int mtu) {
         emit logLine(QStringLiteral("ATT MTU negotiated: %1 bytes (device needs %2)")
-                         .arg(mtu).arg(HM_MIN_ATT_MTU));
+                         .arg(mtu).arg(WR_MIN_ATT_MTU));
     });
     connect(m_transport, &BleImuTransport::errorOccurred, this, [this](const QString &msg) {
         emit logLine(QStringLiteral("ERROR: ") + msg);
@@ -165,19 +165,19 @@ HmSessionWorker::~HmSessionWorker()
 {
     // Runs on the I/O thread: HmInstance deleteLater()s us onto it, and
     // ImuManager joins the thread only after the instances are gone, so the
-    // deferred delete always runs. hm_session_destroy() is a hm_session_* call
+    // deferred delete always runs. wr_session_destroy() is a wr_session_* call
     // like any other and obeys the same one-thread contract.
     if (m_session) {
-        hm_session_destroy(m_session);
+        wr_session_destroy(m_session);
         m_session = nullptr;
     }
 }
 
 void HmSessionWorker::attachBuffer(pinpoint::EventBuffer *buffer,
-                                   const pinpoint::SourceId ids[HM_UNIT_COUNT])
+                                   const pinpoint::SourceId ids[WR_UNIT_COUNT])
 {
     m_buffer = buffer;
-    for (int u = 0; u < HM_UNIT_COUNT; ++u)
+    for (int u = 0; u < WR_UNIT_COUNT; ++u)
         m_sourceIds[u] = ids[u];
 }
 
@@ -185,7 +185,7 @@ void HmSessionWorker::initialise()
 {
     if (m_session) return;
 
-    hm_session_config cfg = hm_session_config_default();
+    wr_session_config cfg = wr_session_config_default();
 
     // ⚠ ONE LINE NOW, NOTHING AT RUNTIME. The digest ring defaults to OFF, and
     // with it off a Phase-E history block reports live_overlap_samples == 0 —
@@ -194,15 +194,15 @@ void HmSessionWorker::initialise()
     // [live suffix] into one lane depends on that agreement, and a seam where it
     // does not hold looks exactly like a real wrist movement. The pointer stays
     // NULL so the library allocates it inside its single create-time allocation.
-    cfg.memory.digest_ring_capacity = HM_DIGEST_RING_RECOMMENDED;
+    cfg.memory.digest_ring_capacity = WR_DIGEST_RING_RECOMMENDED;
 
     // ⚠ THE LIVE RING IS LEFT AT ITS RECOMMENDED DEFAULT ON PURPOSE, and that is
     // worth a line precisely because "there is no live rate ceiling" makes an
-    // untouched default look like an oversight. HM_LIVE_RING_RECOMMENDED is
+    // untouched default look like an oversight. WR_LIVE_RING_RECOMMENDED is
     // documented as sized from HOW OFTEN THE HOST DRAINS rather than from a rate,
     // and we drain on every notification AND every timer tick — which is the
     // condition it assumes. Raising it would buy nothing a faster drain does not
-    // already give; hm_session_dropped_live() is the number that would say
+    // already give; wr_session_dropped_live() is the number that would say
     // otherwise, and it is in the 10 s summary.
 
     // ⚠ UNMODIFIED, and keepalive_period_us above all. §9.2: a silent connection
@@ -220,9 +220,9 @@ void HmSessionWorker::initialise()
     // attempt took 15.6 s and was still applied — which means the only thing
     // raising it can buy is the silent acceptance of a raise the athlete did not
     // actually perform smoothly. A stalled renderer that overruns must produce the
-    // library's legible HM_CAL_ABORT_RAISE_TOO_SLOW instead, and the coach re-runs
+    // library's legible WR_CAL_ABORT_RAISE_TOO_SLOW instead, and the coach re-runs
     // a 3 s routine.
-    cfg.policy = hm_session_policy_default();
+    cfg.policy = wr_session_policy_default();
 
     // ⚠ THE RETRIEVAL WINDOW IS SIZED FROM THE WINDOW WE KEEP, not from §7.6's
     // recommended 3 s / 1.5 s — because a pull costs about as long as the span
@@ -236,40 +236,40 @@ void HmSessionWorker::initialise()
     // frozen window held 1.56-2.41 s after impact. So ±2 s covers everything that
     // is kept and everything that is read, and the default's extra 0.5 s of
     // pre-roll would be fetched, paid for in stall, and then discarded.
-    cfg.policy.history_pre_roll_us  = hm_time_us(2'000'000);
-    cfg.policy.history_post_roll_us = hm_time_us(2'000'000);
+    cfg.policy.history_pre_roll_us  = wr_time_us(2'000'000);
+    cfg.policy.history_post_roll_us = wr_time_us(2'000'000);
 
-    // Kept so reserveHistory() can pass it to hm_history_request_around(): the
+    // Kept so reserveHistory() can pass it to wr_history_request_around(): the
     // two fields above only exist if something reads them.
     m_policy = cfg.policy;
 
     // The observed 0x7e. Under it the RELATIVE angle stayed within 0.58° over
     // five minutes while the two units individually drifted 1.95° and 1.13°
     // (§6.2) — and the relative rotation is the entire point of the device.
-    cfg.stream_config = hm_stream_config_default();
+    cfg.stream_config = wr_stream_config_default();
 
     // ⚠ NEVER A MAC. macOS CoreBluetooth never exposes one, so the enumerator's
     // id is a per-host UUID there and an address elsewhere; the library only
     // ever labels events and log lines with it.
     const QByteArray idUtf8 = m_deviceId.toUtf8();
-    const int idLen = qMin(static_cast<int>(idUtf8.size()), HM_DEVICE_ID_MAX - 1);
+    const int idLen = qMin(static_cast<int>(idUtf8.size()), WR_DEVICE_ID_MAX - 1);
     std::memcpy(cfg.device_id, idUtf8.constData(), size_t(idLen));
     cfg.device_id[idLen] = '\0';
 
-    const hm_status st = hm_session_create(&cfg, &m_session);
-    if (st < HM_OK) {
+    const wr_status st = wr_session_create(&cfg, &m_session);
+    if (st < WR_OK) {
         m_session = nullptr;
-        emit logLine(QStringLiteral("ERROR: hm_session_create failed: %1")
-                         .arg(QString::fromLatin1(hm_status_str(st))));
-        ppError() << "[HmInstance]" << m_deviceId << "— hm_session_create failed:"
-                  << hm_status_str(st);
+        emit logLine(QStringLiteral("ERROR: wr_session_create failed: %1")
+                         .arg(QString::fromLatin1(wr_status_str(st))));
+        ppError() << "[HmInstance]" << m_deviceId << "— wr_session_create failed:"
+                  << wr_status_str(st);
         return;
     }
 
-    // hm_version_string() rather than the HM_VERSION_STRING macro: the log
+    // wr_version_string() rather than the WR_VERSION_STRING macro: the log
     // should name the library that was LINKED, not the header we compiled with.
-    emit logLine(QStringLiteral("libhackmotion session created (%1)")
-                     .arg(QString::fromLatin1(hm_version_string())));
+    emit logLine(QStringLiteral("libwrist session created (%1)")
+                     .arg(QString::fromLatin1(wr_version_string())));
     pump();
 }
 
@@ -305,27 +305,27 @@ void HmSessionWorker::shutdown()
     // null, which is correct: they finish EVENT work, not sample work.
     m_buffer = nullptr;
 
-    if (m_session && hm_session_is_streaming(m_session)) {
+    if (m_session && wr_session_is_streaming(m_session)) {
         // Best effort only, and deliberately not waited on: session.h asks the
         // host to write the `83` from stop_stream() for a clean stop, but a stop
         // barrier must never block on a device reply. The link teardown below
         // may well overtake the write — in which case nothing is worse than not
         // having tried, because a disconnect ends the stream anyway.
-        const hm_status st = hm_session_stop_stream(m_session);
-        if (st < HM_OK)
+        const wr_status st = wr_session_stop_stream(m_session);
+        if (st < WR_OK)
             emit logLine(QStringLiteral("Stream stop refused: %1")
-                             .arg(QString::fromLatin1(hm_status_str(st))));
+                             .arg(QString::fromLatin1(wr_status_str(st))));
         drainWrites();
     }
 
     // Drives onTransportStateChanged(Disconnected) synchronously on this thread,
     // which is what tells the session the link went down — and it is ours, so it
-    // is classified HM_LINK_DOWN_LOCAL_REQUEST.
+    // is classified WR_LINK_DOWN_LOCAL_REQUEST.
     if (m_transport)
         m_transport->disconnectFromDevice();
 
     if (m_session) {
-        hm_session_close(m_session);
+        wr_session_close(m_session);
         // ⚠ CLOSE FINISHES WORK, IT DOES NOT DISCARD IT. Events (and, from Phase
         // E, history blocks) stay collectable until destroy(), so one last drain
         // puts the closing classification in the log ring rather than dropping it.
@@ -345,38 +345,38 @@ pinpoint::hm::ReferenceAnchor HmSessionWorker::referenceAnchor() const
     return m_anchor;
 }
 
-void HmSessionWorker::calibrationCall(hm_status (*fn)(hm_session *), const char *name)
+void HmSessionWorker::calibrationCall(wr_status (*fn)(wr_session *), const char *name)
 {
     const QString call = QString::fromLatin1(name);
 
     if (!m_session) {
         // Not a library refusal — there is nothing to refuse it. Reported through
         // the same channel so a UI has exactly one place to handle "that did not
-        // happen", and HM_ERR_INVALID_STATE is the honest code for it.
-        emit calibrationCallRefused(HM_ERR_INVALID_STATE, call);
+        // happen", and WR_ERR_INVALID_STATE is the honest code for it.
+        emit calibrationCallRefused(WR_ERR_INVALID_STATE, call);
         return;
     }
 
-    const hm_status st = fn(m_session);
+    const wr_status st = fn(m_session);
 
     // ⚠ THE RETURN VALUE CANNOT GO BACK TO THE CALLER. The GUI thread posted this
     // and moved on (see the Q_INVOKABLEs on HmInstance for why it must), so a
     // refusal is a signal or it is nothing.
     //
-    // ⚠ AND A REFUSAL IS NEVER QUEUED FOR LATER OR RETRIED HERE. HM_ERR_NO_STREAM
+    // ⚠ AND A REFUSAL IS NEVER QUEUED FOR LATER OR RETRIED HERE. WR_ERR_NO_STREAM
     // has no waiting state to fall into by design — the device observes a
     // CONTINUOUS raise between the markers, so calibration is not a standalone
-    // transaction — and HM_ERR_BUSY wants the coach to try again a second later
+    // transaction — and WR_ERR_BUSY wants the coach to try again a second later
     // with the athlete still standing still, which is a decision for the UI and
     // not for a hidden retry that would fire while nobody was in the pose.
-    if (st < HM_OK) {
+    if (st < WR_OK) {
         emit calibrationCallRefused(st, call);
         emit logLine(QStringLiteral("%1 refused: %2")
-                         .arg(call, QString::fromLatin1(hm_status_str(st))));
+                         .arg(call, QString::fromLatin1(wr_status_str(st))));
     }
 
     // Unconditional, and on the refusal path too: pump() re-arms the drain timer
-    // from hm_session_next_due_us(), which is the rule for EVERY call into the
+    // from wr_session_next_due_us(), which is the rule for EVERY call into the
     // session. On the success path it is also what gets the `a2 00` / `a2 01` write
     // out to the transport on this pass instead of waiting for a timer.
     pump();
@@ -384,18 +384,18 @@ void HmSessionWorker::calibrationCall(hm_status (*fn)(hm_session *), const char 
 
 void HmSessionWorker::beginCalibration()
 {
-    // ⚠ RETURNS HM_ERR_NO_STREAM IF NO STREAM IS RUNNING, and this does not check
-    // first. Under the one-stream cycle the stream is opened on HM_EV_READY and
+    // ⚠ RETURNS WR_ERR_NO_STREAM IF NO STREAM IS RUNNING, and this does not check
+    // first. Under the one-stream cycle the stream is opened on WR_EV_READY and
     // left open, so it is normally up — but a pre-check here would be a second
     // opinion about the library's own state, and the library's is the one that
     // decides. Surface the refusal; do not queue the call for later and do not
     // retry it.
-    calibrationCall(&hm_calibration_begin, "hm_calibration_begin");
+    calibrationCall(&wr_calibration_begin, "wr_calibration_begin");
 }
 
 void HmSessionWorker::confirmHorizontal()
 {
-    calibrationCall(&hm_calibration_confirm_horizontal, "hm_calibration_confirm_horizontal");
+    calibrationCall(&wr_calibration_confirm_horizontal, "wr_calibration_confirm_horizontal");
 }
 
 void HmSessionWorker::confirmRaise()
@@ -405,24 +405,24 @@ void HmSessionWorker::confirmRaise()
     // two markers, which is why the guide animation is functional rather than
     // decorative: it paces the athlete so the motion the device sees is one smooth
     // sweep.
-    calibrationCall(&hm_calibration_confirm_raise, "hm_calibration_confirm_raise");
+    calibrationCall(&wr_calibration_confirm_raise, "wr_calibration_confirm_raise");
 }
 
 void HmSessionWorker::confirmReferencePose()
 {
     // ⚠ NOT OPTIONAL IN OUR FLOW, AND IT RETURNS BEFORE THE MEASUREMENT EXISTS.
-    // HM_OK means the run has STARTED; the library then averages the next live
-    // samples at the declared pose and reports HM_EV_CALIBRATION_PRESENCE, or
-    // HM_WARN_PRESENCE_NOT_MEASURED when too few arrived. The phase reaches
-    // HM_CALP_COMPLETE either way, so the outcome is the event and never this call.
+    // WR_OK means the run has STARTED; the library then averages the next live
+    // samples at the declared pose and reports WR_EV_CALIBRATION_PRESENCE, or
+    // WR_WARN_PRESENCE_NOT_MEASURED when too few arrived. The phase reaches
+    // WR_CALP_COMPLETE either way, so the outcome is the event and never this call.
     //
     // And this is the step that decides whether the recording can claim anything:
-    // skip it and hm_session_calibration_state() stays HM_CAL_UNKNOWN — because the
+    // skip it and wr_session_calibration_state() stays WR_CAL_UNKNOWN — because the
     // device applies the transform for every `a2 01`, including attempts we would
     // reject, so "we issued the markers" is not evidence that calibration took. It
     // is also the only source of the reference anchor Phase D's frame solve needs.
-    calibrationCall(&hm_calibration_confirm_reference_pose,
-                    "hm_calibration_confirm_reference_pose");
+    calibrationCall(&wr_calibration_confirm_reference_pose,
+                    "wr_calibration_confirm_reference_pose");
 }
 
 void HmSessionWorker::abortCalibration()
@@ -434,13 +434,13 @@ void HmSessionWorker::abortCalibration()
     // no way out until a pull completed.
     //
     // ⚠ IT HAS TWO OUTCOMES AND ONLY ONE OF THEM IS "ABORTED". Before `0x94`
-    // nothing has been applied and the routine ends at HM_CALP_ABORTED. At
-    // HM_CALP_VERIFYING the transform is ALREADY APPLIED and no command reverses
+    // nothing has been applied and the routine ends at WR_CALP_ABORTED. At
+    // WR_CALP_VERIFYING the transform is ALREADY APPLIED and no command reverses
     // that, so aborting there DECLINES THE PRESENCE CHECK: the phase goes to
-    // HM_CALP_COMPLETE carrying HM_CAL_ABORT_CALLER, the angle stays NaN and the
-    // state stays HM_CAL_UNKNOWN. Reporting that as aborted would tell a consumer
+    // WR_CALP_COMPLETE carrying WR_CAL_ABORT_CALLER, the angle stays NaN and the
+    // state stays WR_CAL_UNKNOWN. Reporting that as aborted would tell a consumer
     // nothing happened to a stream whose frame had just changed underneath it.
-    calibrationCall(&hm_calibration_abort, "hm_calibration_abort");
+    calibrationCall(&wr_calibration_abort, "wr_calibration_abort");
 }
 
 void HmSessionWorker::onBytes(const QByteArray &data)
@@ -452,9 +452,9 @@ void HmSessionWorker::onBytes(const QByteArray &data)
     // one, never split. The protocol has no length field, no sequence number and
     // no checksum (§3), so a coalesced byte stream cannot be resynchronised —
     // there is nothing to synchronise TO — and the library does not try. It
-    // raises HM_WARN_TRAILING_BYTES on the first frame that is not a whole
+    // raises WR_WARN_TRAILING_BYTES on the first frame that is not a whole
     // number of records, which is how a coalescing transport announces itself.
-    hm_session_on_bytes(m_session,
+    wr_session_on_bytes(m_session,
                         reinterpret_cast<const uint8_t *>(data.constData()),
                         size_t(data.size()),
                         nowUs());
@@ -474,14 +474,14 @@ void HmSessionWorker::onTransportStateChanged(BleImuTransport::State state)
         const int mtu = m_transport->mtu();
         if (mtu <= 0) {
             // ⚠ 0 means "unknown, proceed", which the library treats as a warning
-            // (HM_WARN_MTU_UNKNOWN) rather than a failure. Passing a wrong number
+            // (WR_WARN_MTU_UNKNOWN) rather than a failure. Passing a wrong number
             // instead would be a real failure: it is the only thing standing
             // between a 93-byte frame and a truncation that parses as garbage.
             emit logLine(QStringLiteral("ATT MTU not reported by this platform — "
                                         "proceeding unchecked"));
         }
         m_linkUp = true;
-        hm_session_on_link_up(m_session, mtu > 0 ? mtu : 0, nowUs());
+        wr_session_on_link_up(m_session, mtu > 0 ? mtu : 0, nowUs());
         pump();
         break;
     }
@@ -498,17 +498,17 @@ void HmSessionWorker::onTransportStateChanged(BleImuTransport::State state)
         // else is UNKNOWN. The library classifies far better than a guess would,
         // from how long the link was idle and whether the device is still
         // advertising, and a fabricated cause would poison exactly that.
-        const hm_link_down_cause cause =
-            m_localStop ? HM_LINK_DOWN_LOCAL_REQUEST
+        const wr_link_down_cause cause =
+            m_localStop ? WR_LINK_DOWN_LOCAL_REQUEST
                         : (state == BleImuTransport::State::Error
-                               ? HM_LINK_DOWN_TRANSPORT_ERROR
-                               : HM_LINK_DOWN_UNKNOWN);
+                               ? WR_LINK_DOWN_TRANSPORT_ERROR
+                               : WR_LINK_DOWN_UNKNOWN);
 
         // ⚠ This ALWAYS invalidates calibration, deliberately. §8.3 measured
         // 0.70° immediately before dropping a link and 18.80° at the same pose
         // after reconnecting, strap untouched — a reconnect that resumed as
         // calibrated would be the worst bug this integration could ship.
-        hm_session_on_link_down(m_session, cause, nowUs());
+        wr_session_on_link_down(m_session, cause, nowUs());
         pump();
         break;
     }
@@ -534,7 +534,7 @@ void HmSessionWorker::reserveHistory(qint64 impactUs, qint64 deadlineUs)
         // CASE and it is the failure mode worth naming: the buffer holds ~7.5 s
         // and a pull costs ~4.5 s, so a second strike inside ~3 s can evict the
         // range the first one is still fetching. The library warns through
-        // HM_EV_HISTORY_EVICTION_RISK; refusing here keeps the FIRST swing's
+        // WR_EV_HISTORY_EVICTION_RISK; refusing here keeps the FIRST swing's
         // data rather than trading it for a partial second.
         emit logLine(QStringLiteral("history: reservation refused — a pull is "
                                     "already in flight (second ball too soon)"));
@@ -544,13 +544,13 @@ void HmSessionWorker::reserveHistory(qint64 impactUs, qint64 deadlineUs)
     // ±2 s around the event, from the policy set in initialise() — sized to the
     // window ShotProcessor actually freezes rather than to §7.6's recommendation.
     // Passing the policy rather than NULL is what makes those fields reachable.
-    hm_history_request req = hm_history_request_around(&m_policy, hm_time_us(impactUs));
+    wr_history_request req = wr_history_request_around(&m_policy, wr_time_us(impactUs));
 
     // ⚠ DEADLINE MUST BE PAST window.end_us OR THIS IS REFUSED AT THE CALL SITE
-    // (HM_ERR_INVALID_ARG), not four seconds later. The caller orders it inside
+    // (WR_ERR_INVALID_ARG), not four seconds later. The caller orders it inside
     // the pipeline's own gather deadline so a slow pull materialises its own
     // block instead of being cancelled by our timeout.
-    req.deadline_us = hm_time_us(deadlineUs);
+    req.deadline_us = wr_time_us(deadlineUs);
 
     // ⚠ Re-request the holes. The device HOLES an over-wide request rather than
     // clamping it, and `a1` may be issued in place, so a partial result is
@@ -565,7 +565,7 @@ void HmSessionWorker::reserveHistory(qint64 impactUs, qint64 deadlineUs)
     // This was 4167 µs — one 240 fps camera frame — on the reasoning that a trace
     // placed against video by more than a frame is worse than no trace. It was
     // wrong three times over, and the 2026-08-18 studio session is what proved it:
-    // all five swings came back HM_HIST_REFUSED_ALIGNMENT, attempts 0, no radio
+    // all five swings came back WR_HIST_REFUSED_ALIGNMENT, attempts 0, no radio
     // traffic, and the whole of Phase E never ran.
     //
     //  - The camera is 150 fps, not 240. A frame is 6,636 µs, so the limit was
@@ -595,13 +595,13 @@ void HmSessionWorker::reserveHistory(qint64 impactUs, qint64 deadlineUs)
     req.user_tag = uint64_t(impactUs);
 
     uint64_t id = 0;
-    const hm_status st = hm_history_reserve(m_session, &req, &id);
-    if (st < HM_OK) {
+    const wr_status st = wr_history_reserve(m_session, &req, &id);
+    if (st < WR_OK) {
         // Every one of these is validated AT RESERVE rather than discovered at
         // the deadline: an unsatisfiable window, no fit at all, a window wider
         // than the gather area, or every slot taken.
         emit logLine(QStringLiteral("history: reserve refused: %1")
-                         .arg(QString::fromLatin1(hm_status_str(st))));
+                         .arg(QString::fromLatin1(wr_status_str(st))));
         return;
     }
 
@@ -615,16 +615,16 @@ void HmSessionWorker::pollHistory()
     if (!m_session || !m_historyPending.load(std::memory_order_acquire))
         return;
 
-    hm_history_block *block = nullptr;
-    const hm_status st = hm_history_collect(m_session, m_historyRequestId, &block);
-    if (st == HM_PENDING)
+    wr_history_block *block = nullptr;
+    const wr_status st = wr_history_collect(m_session, m_historyRequestId, &block);
+    if (st == WR_PENDING)
         return;                       // still in flight — never blocks
 
     m_historyPending.store(false, std::memory_order_release);
 
-    if (st < HM_OK || !block) {
+    if (st < WR_OK || !block) {
         emit logLine(QStringLiteral("history: collect failed: %1")
-                         .arg(QString::fromLatin1(hm_status_str(st))));
+                         .arg(QString::fromLatin1(wr_status_str(st))));
         return;
     }
 
@@ -670,12 +670,12 @@ void HmSessionWorker::pollHistory()
     r.lowerArm.reserve(block->sample_count);
     r.palm.reserve(block->sample_count);
     for (size_t i = 0; i < block->sample_count; ++i) {
-        const hm_sample &smp = block->samples[i];
+        const wr_sample &smp = block->samples[i];
         // ⚠ SAME GATE AS THE LIVE PATH, AND FOR THE SAME REASON: never fall back
         // to arrival time. For a retrieved block arrival time is meaningless
         // twice over — these samples arrived thousands at a time, seconds after
         // they were measured.
-        if (smp.host_time_us == HM_TIME_UNKNOWN || (smp.flags & HM_SAMPLE_NO_FIT)) {
+        if (smp.host_time_us == WR_TIME_UNKNOWN || (smp.flags & WR_SAMPLE_NO_FIT)) {
             ++r.noHostTimeSkipped;
             continue;
         }
@@ -687,8 +687,8 @@ void HmSessionWorker::pollHistory()
     emit logLine(QStringLiteral("history: %1 — %2 samples, coverage %3, "
                                 "density %4, achieved %5 Hz, largest gap %6 us, "
                                 "overlap %7/%8 mismatched, attempts %9")
-                     .arg(QString::fromLatin1(hm_history_status_name(
-                              hm_history_status(block->status))))
+                     .arg(QString::fromLatin1(wr_history_status_name(
+                              wr_history_status(block->status))))
                      .arg(r.tUs.size())
                      .arg(r.coverageFraction, 0, 'f', 3)
                      .arg(r.density, 0, 'f', 3)
@@ -704,9 +704,9 @@ void HmSessionWorker::pollHistory()
     // status code inside a 28 MB swing.json — found days later, by reading it.
     // A retrieval that returns nothing has cost the shot its high-rate lane, and
     // that has to be legible while the athlete is still on the mat.
-    if (block->status != HM_HIST_COMPLETE || r.tUs.empty()) {
+    if (block->status != WR_HIST_COMPLETE || r.tUs.empty()) {
         ppWarn() << "[HmInstance]" << m_deviceId << "— history retrieval"
-                 << hm_history_status_name(hm_history_status(block->status))
+                 << wr_history_status_name(wr_history_status(block->status))
                  << "—" << r.tUs.size() << "samples, coverage" << r.coverageFraction
                  << "attempts" << r.attempts;
     }
@@ -714,7 +714,7 @@ void HmSessionWorker::pollHistory()
     // ⚠ EXACTLY ONCE, and only after everything above has been copied out: the
     // block owns its samples, its intervals and its gaps, and releasing it runs
     // the allocator. A second release is undefined exactly as a double free is.
-    hm_history_block_release(block);
+    wr_history_block_release(block);
 
     QMutexLocker lk(&m_mutex);
     m_historyResult = std::move(r);
@@ -724,7 +724,7 @@ void HmSessionWorker::pump()
 {
     if (!m_session) return;
 
-    // Events first: HM_EV_READY starts the stream, and the write it queues is
+    // Events first: WR_EV_READY starts the stream, and the write it queues is
     // then picked up by the very next drain rather than waiting for a timer.
     drainEvents();
     drainWrites();
@@ -744,19 +744,19 @@ void HmSessionWorker::rearm()
     // ⚠ RE-ARMED AFTER EVERY CALL INTO THE SESSION, not only after ticks: bytes
     // arriving, a link coming up and a stream starting all move the next
     // deadline, and the session is the only thing that knows where it went.
-    const hm_time_us due = hm_session_next_due_us(m_session);
-    if (due == HM_TIME_NEVER) {
-        // ⚠ "Nothing pending" — stop the timer. Not "fire now": HM_TIME_NEVER is
+    const wr_time_us due = wr_session_next_due_us(m_session);
+    if (due == WR_TIME_NEVER) {
+        // ⚠ "Nothing pending" — stop the timer. Not "fire now": WR_TIME_NEVER is
         // INT64_MAX, so an unsigned or clamped subtraction reads it as due in the
         // past and spins the drain loop at full tilt.
         m_dueTimer->stop();
         return;
     }
 
-    const hm_time_us delayUs = due - nowUs();
+    const wr_time_us delayUs = due - nowUs();
     const int delayMs = delayUs <= 0
         ? 0
-        : int(qMin<hm_time_us>((delayUs + 999) / 1000, kMaxDueDelayMs));
+        : int(qMin<wr_time_us>((delayUs + 999) / 1000, kMaxDueDelayMs));
     m_dueTimer->start(delayMs);
 }
 
@@ -766,9 +766,9 @@ void HmSessionWorker::drainWrites()
     // (Phase E). That is the deliberate write quiet period, not a stall — the
     // `a1` that opened the bracket already reset the device's idle timer — so
     // there is nothing here to watchdog and nothing to "recover".
-    hm_write_request reqs[kWriteBatch];
+    wr_write_request reqs[kWriteBatch];
     for (;;) {
-        const size_t n = hm_session_poll_writes(m_session, reqs, kWriteBatch);
+        const size_t n = wr_session_poll_writes(m_session, reqs, kWriteBatch);
         for (size_t i = 0; i < n; ++i) {
             const QByteArray payload(reinterpret_cast<const char *>(reqs[i].data),
                                      int(reqs[i].length));
@@ -783,52 +783,52 @@ void HmSessionWorker::drainWrites()
 
 void HmSessionWorker::drainEvents()
 {
-    hm_event evs[kEventBatch];
+    wr_event evs[kEventBatch];
     for (;;) {
-        const size_t n = hm_session_poll_events(m_session, evs, kEventBatch);
+        const size_t n = wr_session_poll_events(m_session, evs, kEventBatch);
         for (size_t i = 0; i < n; ++i)
             handleEvent(evs[i]);
         if (n < kEventBatch) break;
     }
 }
 
-void HmSessionWorker::handleEvent(const hm_event &ev)
+void HmSessionWorker::handleEvent(const wr_event &ev)
 {
-    // ⚠ PERSONAL DATA NEVER REACHES THE LOG RING. HM_EV_IDENTITY carries the
+    // ⚠ PERSONAL DATA NEVER REACHES THE LOG RING. WR_EV_IDENTITY carries the
     // device's MAC and serial, which name a specific unit and a specific owner;
-    // hm_event_is_sensitive() identifies exactly those events so a log sink does
+    // wr_event_is_sensitive() identifies exactly those events so a log sink does
     // not have to think about it. They are dropped here rather than redacted,
     // because a log line saying an identity arrived is worth nothing to a coach.
-    if (hm_event_is_sensitive(&ev))
+    if (wr_event_is_sensitive(&ev))
         return;
 
-    const hm_event_type type = static_cast<hm_event_type>(ev.type);
+    const wr_event_type type = static_cast<wr_event_type>(ev.type);
 
     char text[192];
-    hm_event_format(&ev, text, sizeof text, /*include_identifiers=*/false);
+    wr_event_format(&ev, text, sizeof text, /*include_identifiers=*/false);
     QString line = QString::fromUtf8(text);
     bool log = true;
 
     switch (type) {
-    case HM_EV_READY: {
+    case WR_EV_READY: {
         // ONE STREAM, OPENED ONCE, LEFT OPEN (api-request B8): calibration needs
         // it open, the clock fit needs it continuous, and history works in place,
         // so nothing ever requires stopping it. Phase A wants the cubes moving.
-        const hm_status st = hm_session_start_stream(m_session);
-        if (st < HM_OK)
+        const wr_status st = wr_session_start_stream(m_session);
+        if (st < WR_OK)
             line += QStringLiteral("  — start_stream failed: %1")
-                        .arg(QString::fromLatin1(hm_status_str(st)));
+                        .arg(QString::fromLatin1(wr_status_str(st)));
         break;
     }
 
-    case HM_EV_MTU_REJECTED:
+    case WR_EV_MTU_REJECTED:
         // The library's own gate, on the value we passed to on_link_up().
-        emit mtuTooSmall(ev.u.mtu, HM_MIN_ATT_MTU);
+        emit mtuTooSmall(ev.u.mtu, WR_MIN_ATT_MTU);
         break;
 
-    case HM_EV_DEVICE_INFO: {
-        const hm_device_info &info = ev.u.device_info;
-        if (info.valid & HM_INFO_VERSIONS) {
+    case WR_EV_DEVICE_INFO: {
+        const wr_device_info &info = ev.u.device_info;
+        if (info.valid & WR_INFO_VERSIONS) {
             emit deviceVersions(QStringLiteral("fw %1.%2 · proto %3.%4 · hw %5.%6")
                                     .arg(info.firmware_major).arg(info.firmware_minor)
                                     .arg(info.protocol_major).arg(info.protocol_minor)
@@ -837,85 +837,85 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         break;
     }
 
-    case HM_EV_BATTERY:
+    case WR_EV_BATTERY:
         emit batteryPercent(int(ev.u.battery.percent));
         break;
 
-    case HM_EV_STREAM_STARTED:
+    case WR_EV_STREAM_STARTED:
         // ⚠ The first 0x90 FRAME, not the `a0 01 7e` acknowledgement — data is
         // genuinely flowing by the time this arrives.
         emit streamingChanged(true);
         break;
 
-    case HM_EV_STREAM_STOPPED:
+    case WR_EV_STREAM_STOPPED:
         emit streamingChanged(false);
         break;
 
-    case HM_EV_STREAM_RESTARTED:
+    case WR_EV_STREAM_RESTARTED:
         // ⚠ Reported, never silent (api-request B8): a restart drops
-        // HM_CAL_CALIBRATED to HM_CAL_UNKNOWN, so a calibration does not survive
+        // WR_CAL_CALIBRATED to WR_CAL_UNKNOWN, so a calibration does not survive
         // it and the routine has to be re-run.
         //
         // ⚠ UNKNOWN, NOT UNCALIBRATED, AND THE DIFFERENCE IS READ RATHER THAN
         // ASSERTED. Whether a restart costs the device its transform is untested
         // where a disconnect demonstrably does, so the library says "I no longer
         // know" rather than "it is gone" — two different claims, and the state comes
-        // from hm_session_calibration_state() precisely so we make neither of them
+        // from wr_session_calibration_state() precisely so we make neither of them
         // ourselves.
         ppWarn() << "[HmInstance]" << m_deviceId << "— stream restarted; calibration is no longer known";
-        emit calibrationLost(int(hm_session_calibration_state(m_session)),
+        emit calibrationLost(int(wr_session_calibration_state(m_session)),
                              QStringLiteral("the stream restarted"));
         break;
 
-    case HM_EV_LINK_DOWN: {
-        const hm_recovery_advice advice =
-            static_cast<hm_recovery_advice>(ev.u.link_down.advice);
+    case WR_EV_LINK_DOWN: {
+        const wr_recovery_advice advice =
+            static_cast<wr_recovery_advice>(ev.u.link_down.advice);
         line += QStringLiteral("  [%1 → %2]")
-                    .arg(QString::fromLatin1(hm_link_down_cause_name(
-                             static_cast<hm_link_down_cause>(ev.u.link_down.cause))))
-                    .arg(QString::fromLatin1(hm_recovery_advice_name(advice)));
+                    .arg(QString::fromLatin1(wr_link_down_cause_name(
+                             static_cast<wr_link_down_cause>(ev.u.link_down.cause))))
+                    .arg(QString::fromLatin1(wr_recovery_advice_name(advice)));
 
         // Three advices mean a retry cannot help at any interval: the device
         // slept and only a physical button press wakes it, another application
         // holds the one connection the device accepts, or we powered it off
         // ourselves. Retrying against any of them burns battery, occupies the
         // adapter and shows the user a spinner for a problem only they can fix.
-        if (advice == HM_RECOVER_NEEDS_BUTTON_PRESS
-            || advice == HM_RECOVER_NEEDS_OTHER_APP_CLOSED
-            || advice == HM_RECOVER_DO_NOT_RETRY) {
-            emit retryUseless(QString::fromLatin1(hm_recovery_advice_name(advice)));
+        if (advice == WR_RECOVER_NEEDS_BUTTON_PRESS
+            || advice == WR_RECOVER_NEEDS_OTHER_APP_CLOSED
+            || advice == WR_RECOVER_DO_NOT_RETRY) {
+            emit retryUseless(QString::fromLatin1(wr_recovery_advice_name(advice)));
         }
 
         // ⚠ calibration_invalidated IS ALWAYS 1 AND IT IS NOT CHECKED, because a
         // check would imply the other branch exists. §8.3 measured 0.70°
         // immediately before dropping a link and 18.80° at the same pose after
         // reconnecting, strap untouched and never removed — RECONNECT IS NOT
-        // RESUME. hm_session_on_link_down() has already driven the library's state
+        // RESUME. wr_session_on_link_down() has already driven the library's state
         // to UNCALIBRATED by the time this event surfaces, which is why the value
         // is read rather than assumed even here.
-        emit calibrationLost(int(hm_session_calibration_state(m_session)),
+        emit calibrationLost(int(wr_session_calibration_state(m_session)),
                              QStringLiteral("the link went down"));
         break;
     }
 
-    case HM_EV_WARNING: {
-        // hm_event_format already renders the code; the ppWarn gets it into the
+    case WR_EV_WARNING: {
+        // wr_event_format already renders the code; the ppWarn gets it into the
         // application log too, where a support bundle will find it.
-        const hm_warning_code code = static_cast<hm_warning_code>(ev.u.warning.code);
+        const wr_warning_code code = static_cast<wr_warning_code>(ev.u.warning.code);
         // ⚠ detail_i32 IS LOGGED FOR EVERY CODE, INCLUDING THE ONES WE DO NOT KNOW.
         // For most warnings it is a supporting number; for at least one it is the
-        // ENTIRE content — HM_WARN_CALIBRATION_STATUS_FORM carries the status byte of
+        // ENTIRE content — WR_WARN_CALIBRATION_STATUS_FORM carries the status byte of
         // a `0x94` short form that has never been observed and whose values mean
         // nothing to anyone yet. If this application is ever the first to see one,
         // logging the name alone would discard the single byte that would let
         // somebody work out what it meant. Cheap here, unrecoverable if omitted.
         ppWarn() << "[HmInstance]" << m_deviceId << "— warning:"
-                 << hm_warning_code_name(code)
+                 << wr_warning_code_name(code)
                  << "detail" << ev.u.warning.detail_i32;
 
         // ⚠ THREE OF THESE ARE CALIBRATION OUTCOMES, NOT DIAGNOSTICS, and folding
         // them into the generic warning line would leave the UI claiming success
-        // for two of them: the phase reaches HM_CALP_COMPLETE regardless.
+        // for two of them: the phase reaches WR_CALP_COMPLETE regardless.
         switch (code) {
         // ⚠ FIRST, AND DELIBERATELY NOT NEXT TO THE CALIBRATION CASES BELOW — two of
         // those share a fallthrough, and a case inserted between them silently
@@ -923,7 +923,7 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         //
         // ⚠ THIS IS NOT A DIAGNOSTIC. IT SAYS THIS DEVICE IS NOT THE ONE WE MODEL.
         // §6.3's record is a header followed by one block PER SENSOR, and the count
-        // comes from the 0x84 reply's LENGTH (libhackmotion f89cea4 — reading it as a
+        // comes from the 0x84 reply's LENGTH (libwrist f89cea4 — reading it as a
         // byte gave the right answer on this hardware by coincidence). This fires
         // when that count is one the library's two-block layout cannot carry, which
         // means the whole two-lane model — two sources, "#lowerArm" and "#palm", one
@@ -932,7 +932,7 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         // It reaches the coach's device log rather than only ppWarn, because the
         // alternative is a session that records two lanes of something else and looks
         // entirely normal doing it. detail_i32 is the count the device reported.
-        case HM_WARN_SENSOR_COUNT_UNSUPPORTED:
+        case WR_WARN_SENSOR_COUNT_UNSUPPORTED:
             emit logLine(QStringLiteral("ERROR: this device reports %1 sensors. This "
                                        "integration models exactly two — a lower-arm "
                                        "unit and a palm unit — so the recorded lanes "
@@ -944,28 +944,28 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
                       << "— the two-lane model does not describe this device";
             break;
 
-        case HM_WARN_PRESENCE_NOT_MEASURED:
+        case WR_WARN_PRESENCE_NOT_MEASURED:
             // The check was ASKED FOR and could not be taken — too few live samples
             // reached the run. detail_i32 is how many were collected. The angle
-            // stays NaN and the state stays HM_CAL_UNKNOWN, so this is the only
+            // stays NaN and the state stays WR_CAL_UNKNOWN, so this is the only
             // thing that distinguishes "we could not check" from "we checked and it
             // was fine".
             emit calibrationPresenceUnmeasured(ev.u.warning.detail_i32,
-                                               int(hm_session_calibration_state(m_session)));
+                                               int(wr_session_calibration_state(m_session)));
             break;
 
-        case HM_WARN_CALIBRATION_ABSENT:
+        case WR_WARN_CALIBRATION_ABSENT:
             // The angle sits in the uncalibrated population (§8.2: 15.01° after a
             // power cycle, 18.80° after a plain disconnect) and the library has
             // driven the state to UNCALIBRATED. The routine ran and the transform is
             // absent or was lost — which is the ONE verdict this angle can carry,
             // because there the gap is an order of magnitude.
-        case HM_WARN_CALIBRATION_INDETERMINATE:
+        case WR_WARN_CALIBRATION_INDETERMINATE:
             // The angle landed BETWEEN the two populations §8.2 measured. It is
             // evidence of neither state, so the library leaves the state exactly as
             // it was — and so do we. Guessing here is how a presence check becomes a
             // quality score.
-            emit calibrationStateRefreshed(int(hm_session_calibration_state(m_session)));
+            emit calibrationStateRefreshed(int(wr_session_calibration_state(m_session)));
             break;
 
         default:
@@ -974,31 +974,31 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         break;
     }
 
-    case HM_EV_CALIBRATION_PHASE: {
-        const hm_calibration_phase_event &p = ev.u.calibration_phase;
+    case WR_EV_CALIBRATION_PHASE: {
+        const wr_calibration_phase_event &p = ev.u.calibration_phase;
         // ⚠ THE STATE IS RE-READ, NEVER INFERRED FROM THE PHASE. They are
         // deliberately different questions: the phase says where the routine is, the
         // state says what is known about the device's transform, and
-        // HM_CALP_COMPLETE with HM_CAL_UNKNOWN is the ordinary outcome of a routine
+        // WR_CALP_COMPLETE with WR_CAL_UNKNOWN is the ordinary outcome of a routine
         // whose presence check was skipped or could not be taken. Deriving one from
-        // the other is the exact mistake the library's comment at HM_CALP_COMPLETE
+        // the other is the exact mistake the library's comment at WR_CALP_COMPLETE
         // warns against.
         emit calibrationPhaseEvent(p.phase, p.previous_phase, p.abort_reason,
-                                   int(hm_session_calibration_state(m_session)),
+                                   int(wr_session_calibration_state(m_session)),
                                    qint64(p.elapsed_us));
         break;
     }
 
-    case HM_EV_CALIBRATION_PRESENCE: {
-        const hm_calibration_presence_event &pe = ev.u.calibration_presence;
+    case WR_EV_CALIBRATION_PRESENCE: {
+        const wr_calibration_presence_event &pe = ev.u.calibration_presence;
 
         pinpoint::hm::ReferenceAnchor a;
         a.valid = true;
         // (2) THE AVERAGED POSE — the one a Phase D frame solve must use.
         a.qLowerArmMean   = toQQuaternion(pe.q_lower_arm_mean);
         a.qPalmMean       = toQQuaternion(pe.q_palm_mean);
-        a.poseSpreadDeg[HM_UNIT_LOWER_ARM] = pe.pose_spread_deg[HM_UNIT_LOWER_ARM];
-        a.poseSpreadDeg[HM_UNIT_PALM]      = pe.pose_spread_deg[HM_UNIT_PALM];
+        a.poseSpreadDeg[WR_UNIT_LOWER_ARM] = pe.pose_spread_deg[WR_UNIT_LOWER_ARM];
+        a.poseSpreadDeg[WR_UNIT_PALM]      = pe.pose_spread_deg[WR_UNIT_PALM];
         // (1) The medoid record — kept for the angle and its provenance only.
         // ⚠ It is NOT an alternative anchor: it is selected on the RELATIVE
         // rotation, which is blind to a whole-arm movement carrying both units
@@ -1015,15 +1015,15 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         }
 
         // ⚠ pe.state IS DELIBERATELY NOT THE VALUE CARRIED. It is the state at the
-        // measurement; hm_session_calibration_state() is the state now, and a
+        // measurement; wr_session_calibration_state() is the state now, and a
         // warning refining it (ABSENT / INDETERMINATE) may already have been applied
         // by the time this event is drained. Reading the library twice costs nothing
         // and keeps one answer for the question rather than two.
-        emit calibrationPresenceMeasured(int(hm_session_calibration_state(m_session)));
+        emit calibrationPresenceMeasured(int(wr_session_calibration_state(m_session)));
         break;
     }
 
-    case HM_EV_CLOCK_DEGRADED: {
+    case WR_EV_CLOCK_DEGRADED: {
         // ⚠ EVERY ONE OF THESE STAYS IN THE DEVICE LOG RING (log is left true) —
         // only the APPLICATION log is rate-limited. Measured on this Mac: seven
         // reports in six minutes, all saying the same thing, which is how a
@@ -1038,7 +1038,7 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         // signal that belongs in provenance rather than a fault to act on. Note
         // what it does NOT touch: each unit's device_time_us is derived from the
         // frame alone, so it is unaffected by any fit state.
-        const hm_clock_snapshot &clk = ev.u.clock;
+        const wr_clock_snapshot &clk = ev.u.clock;
         const bool  first  = !m_clockDegradedLogged || clk.stream_id != m_clockDegradedStreamId;
         // Re-report only on a material worsening, so a slow drift into a genuinely
         // bad link is still visible while a steady one is not repeated.
@@ -1061,14 +1061,14 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
         break;
     }
 
-    case HM_EV_DEVICE_ERROR:
-        ppWarn() << "[HmInstance]" << m_deviceId << "—" << hm_event_type_name(type)
+    case WR_EV_DEVICE_ERROR:
+        ppWarn() << "[HmInstance]" << m_deviceId << "—" << wr_event_type_name(type)
                  << ":" << text;
         break;
 
-    case HM_EV_CLOCK_UPDATED:
+    case WR_EV_CLOCK_UPDATED:
         // Periodic housekeeping at 1 Hz. It would fill the log ring a coach
-        // reads with the one event that never needs acting on; HM_EV_CLOCK_DEGRADED
+        // reads with the one event that never needs acting on; WR_EV_CLOCK_DEGRADED
         // is the half that matters and is logged above.
         log = false;
         break;
@@ -1083,15 +1083,15 @@ void HmSessionWorker::handleEvent(const hm_event &ev)
 
 void HmSessionWorker::drainLive()
 {
-    hm_sample samples[kLiveBatch];
+    wr_sample samples[kLiveBatch];
     quint64   decoded = 0;
     bool      haveLatest = false;
-    hm_sample latest{};
+    wr_sample latest{};
 
     const qint64 nowMs = nowUs() / 1000;
 
     for (;;) {
-        const size_t n = hm_session_poll_live(m_session, samples, kLiveBatch);
+        const size_t n = wr_session_poll_live(m_session, samples, kLiveBatch);
         for (size_t i = 0; i < n; ++i) {
             // Rolling 1 s rate window, on ARRIVAL rather than on the sample's
             // mapped host time: the mapped time is what the clock fit says, and
@@ -1131,9 +1131,9 @@ void HmSessionWorker::drainLive()
     // notifications a second at the GUI thread — so nothing is emitted from here
     // at all. The 60 Hz display tick on the GUI thread reads this snapshot.
     Snapshot next;
-    const hm_unit_sample *const blocks[HM_UNIT_COUNT] = { &latest.lower_arm, &latest.palm };
-    for (int u = 0; u < HM_UNIT_COUNT; ++u) {
-        const hm_unit_sample &b = *blocks[u];
+    const wr_unit_sample *const blocks[WR_UNIT_COUNT] = { &latest.lower_arm, &latest.palm };
+    for (int u = 0; u < WR_UNIT_COUNT; ++u) {
+        const wr_unit_sample &b = *blocks[u];
         UnitState &s = next.unit[u];
 
         // ⚠ EXACTLY AS IT ARRIVES. q_world_to_body is the conjugate of what most
@@ -1175,12 +1175,12 @@ void HmSessionWorker::drainLive()
     next.skewCount    = m_skewCount;
     next.skewMinUs    = m_skewMinUs;
     next.skewMaxUs    = m_skewMaxUs;
-    next.relAngleNowDeg = hm_relative_angle_deg(&latest);
+    next.relAngleNowDeg = wr_relative_angle_deg(&latest);
     next.relAngleCount  = m_relAngleCount;
     next.relAngleSumDeg = m_relAngleSumDeg;
     next.relAngleMinDeg = m_relAngleMinDeg;
     next.relAngleMaxDeg = m_relAngleMaxDeg;
-    for (int u = 0; u < HM_UNIT_COUNT; ++u) {
+    for (int u = 0; u < WR_UNIT_COUNT; ++u) {
         next.written[u]       = m_written[u];
         next.nonMonotonic[u]  = m_nonMonotonic[u];
         next.maxBackStepUs[u] = m_maxBackStepUs[u];
@@ -1191,7 +1191,7 @@ void HmSessionWorker::drainLive()
     next.rateHz      = rateHz;
     // Non-zero means the host did not keep up and live samples were lost. It is
     // surfaced in the 10 s summary rather than swallowed.
-    next.droppedLive = hm_session_dropped_live(m_session);
+    next.droppedLive = wr_session_dropped_live(m_session);
     m_snap = next;
 }
 
@@ -1199,9 +1199,9 @@ void HmSessionWorker::drainLive()
 // past the no-fit gate. Provenance that described samples the window does not
 // contain would be worse than none: it would attribute a clip to a swing that never
 // saw it.
-void HmSessionWorker::noteProvenance(const hm_sample &s)
+void HmSessionWorker::noteProvenance(const wr_sample &s)
 {
-    // ⚠ pinned_mask, the PER-UNIT field, rather than HM_SAMPLE_PINNED, which is the
+    // ⚠ pinned_mask, the PER-UNIT field, rather than WR_SAMPLE_PINNED, which is the
     // record-level summary of the same condition. Keying off the mask is what keeps
     // one saturation from being reported once per unit, and it is also the only form
     // that says WHICH channel clipped.
@@ -1209,7 +1209,7 @@ void HmSessionWorker::noteProvenance(const hm_sample &s)
     m_provenance.noteSample(qint64(s.host_time_us),
                             s.lower_arm.pinned_mask,
                             s.palm.pinned_mask,
-                            (s.flags & HM_SAMPLE_QUAT_NORM_SUSPECT) != 0,
+                            (s.flags & WR_SAMPLE_QUAT_NORM_SUSPECT) != 0,
                             int(s.calibration),
                             int(s.config_bits));
 }
@@ -1242,7 +1242,7 @@ HmSessionWorker::SkewStats HmSessionWorker::skewStats() const
     return st;
 }
 
-void HmSessionWorker::writeSample(const hm_sample &s)
+void HmSessionWorker::writeSample(const wr_sample &s)
 {
     // ⚠ skew_us IS ACCUMULATED BEFORE ANY GATE, because it does not come from the
     // clock fit: it is the difference of the two units' own tick counters, so a
@@ -1252,7 +1252,7 @@ void HmSessionWorker::writeSample(const hm_sample &s)
     // field would fold a meaningless 0 into the mean and make the export claim a
     // 0 µs skew it never measured. We ask for `7e`, so this branch should not be
     // reachable; it costs one test and it stops a silent lie if it ever is.
-    if ((s.flags & (HM_SAMPLE_TICKS_MISSING | HM_SAMPLE_NOT_TIME_ALIGNABLE)) == 0) {
+    if ((s.flags & (WR_SAMPLE_TICKS_MISSING | WR_SAMPLE_NOT_TIME_ALIGNABLE)) == 0) {
         if (m_skewCount == 0) {
             m_skewMinUs = s.skew_us;
             m_skewMaxUs = s.skew_us;
@@ -1267,7 +1267,7 @@ void HmSessionWorker::writeSample(const hm_sample &s)
 
     // ⚠ THE ONE NUMBER THAT SAYS WHETHER THE TWO UNITS ARE WHERE THEY SHOULD BE,
     // and it is accumulated before the capture gate because it describes the
-    // DEVICE, not the recording. hm_relative_angle_deg() is the library's own
+    // DEVICE, not the recording. wr_relative_angle_deg() is the library's own
     // 2·acos|q_palm · q_arm| — deliberately convention-blind, which makes it
     // useless for anything needing a sign and exactly right here.
     //
@@ -1275,10 +1275,10 @@ void HmSessionWorker::writeSample(const hm_sample &s)
     // how it gets mistaken for a fault. Measured by replaying the library's own
     // fixtures through this same decode path — every sample in both is
     // UNCALIBRATED:
-    //   tests/fixtures/smoke.hmwire   first 200 samples (still) mean 14.96°,
+    //   tests/fixtures/smoke.wrwire   first 200 samples (still) mean 14.96°,
     //                                 matching §8.3's 15.01° for a straight wrist,
     //                                 then up to 173° once the hand moves
-    //   tests/fixtures/swings.hmwire  modal band 170-180° (28 % of samples),
+    //   tests/fixtures/swings.wrwire  modal band 170-180° (28 % of samples),
     //                                 max 180.00°, across five real golf swings
     // So the bands are:
     //   0.4-0.8°   calibration applied and holding (§8.3). The COLLAPSE to under 1°
@@ -1303,8 +1303,8 @@ void HmSessionWorker::writeSample(const hm_sample &s)
     //
     // Samples whose decode may be misaligned are excluded: a suspect quaternion
     // norm makes the angle meaningless rather than merely noisy.
-    if ((s.flags & HM_SAMPLE_QUAT_NORM_SUSPECT) == 0) {
-        const float relDeg = hm_relative_angle_deg(&s);
+    if ((s.flags & WR_SAMPLE_QUAT_NORM_SUSPECT) == 0) {
+        const float relDeg = wr_relative_angle_deg(&s);
         if (m_relAngleCount == 0) {
             m_relAngleMinDeg = relDeg;
             m_relAngleMaxDeg = relDeg;
@@ -1323,9 +1323,9 @@ void HmSessionWorker::writeSample(const hm_sample &s)
     // what the fit is built FROM; mixing two timebases inside one source looks
     // fine and corrupts the capture. A sample with no mapped time is skipped and
     // counted instead — and the count matters, because the fit exists from the
-    // first live frame (brief §0 #1), so HM_SAMPLE_NO_FIT arriving here is a
+    // first live frame (brief §0 #1), so WR_SAMPLE_NO_FIT arriving here is a
     // symptom rather than the expected start-up condition it once was.
-    if (s.host_time_us == HM_TIME_UNKNOWN || (s.flags & HM_SAMPLE_NO_FIT)) {
+    if (s.host_time_us == WR_TIME_UNKNOWN || (s.flags & WR_SAMPLE_NO_FIT)) {
         // ⚠ COUNTED TWICE, INTO TWO DIFFERENT AUDIENCES, and neither is redundant:
         // m_noFitSkipped feeds the 10 s device summary a coach's support bundle
         // carries, while the provenance log is what reaches swing.json so that a
@@ -1352,9 +1352,9 @@ void HmSessionWorker::writeSample(const hm_sample &s)
     // carried as provenance instead (skewUsMean()), and the fit-independent
     // per-unit device_time_us is what Phase E/G anchor on when sub-millisecond
     // pairing genuinely matters.
-    const hm_unit_sample *const blocks[HM_UNIT_COUNT] = { &s.lower_arm, &s.palm };
+    const wr_unit_sample *const blocks[WR_UNIT_COUNT] = { &s.lower_arm, &s.palm };
 
-    for (int u = 0; u < HM_UNIT_COUNT; ++u) {
+    for (int u = 0; u < WR_UNIT_COUNT; ++u) {
         const pinpoint::SourceId id = m_sourceIds[u];
         if (id == pinpoint::kInvalidSourceId)
             continue;   // this unit's registration failed — it does not record
@@ -1379,7 +1379,7 @@ void HmSessionWorker::writeSample(const hm_sample &s)
         // same order); they diverge exactly when one registration failed.
         if (s.host_time_us <= m_lastWrittenUs[u]) {
             ++m_nonMonotonic[u];
-            const hm_time_us step = m_lastWrittenUs[u] - s.host_time_us;
+            const wr_time_us step = m_lastWrittenUs[u] - s.host_time_us;
             if (step > m_maxBackStepUs[u])
                 m_maxBackStepUs[u] = step;
         }
@@ -1404,7 +1404,7 @@ void HmSessionWorker::writeSample(const hm_sample &s)
         // correct behaviour, and this is the line that says when that changed.
         if (m_written[u] == 1) {
             ppInfo() << "[HmInstance]" << m_deviceId << "— recording started on the"
-                     << hm_unit_name(static_cast<hm_unit>(u)) << "lane, source" << id;
+                     << wr_unit_name(static_cast<wr_unit>(u)) << "lane, source" << id;
         }
     }
 }

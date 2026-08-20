@@ -3,8 +3,8 @@
 # Copyright (C) 2026 Mark Liversedge
 """hm_frame_select.py — pick the HackMotion frame candidate from a directed capture.
 
-    ./tools/hm_frame_select.py ~/Desktop/singleaxis.hmwire
-    ./tools/hm_frame_select.py capture.hmwire --expect bow,ulnar
+    ./tools/hm_frame_select.py ~/Desktop/singleaxis.wrwire
+    ./tools/hm_frame_select.py capture.wrwire --expect bow,ulnar
 
 Phase D reduces the HackMotion→PinPoint anatomical map to one of four candidates
 (src/IMU/hm_frame.h explains why there are exactly four).  This tool reads a
@@ -45,14 +45,14 @@ from pathlib import Path
 
 # The library owns every byte of wire knowledge; this tool owns only the frame
 # maths.  Nothing here parses a frame, a scale or a counter.
-LIBHM = Path(__file__).resolve().parent.parent.parent / "libhackmotion"
-sys.path.insert(0, str(LIBHM / "python"))
+LIBWRIST = Path(__file__).resolve().parent.parent.parent / "libwrist"
+sys.path.insert(0, str(LIBWRIST / "python"))
 
 try:
-    import hackmotion as hm
-    from hackmotion import _types as T
+    import wrist as wr
+    from wrist import _types as T
 except ImportError as exc:  # pragma: no cover - environment problem, not logic
-    sys.exit(f"⛔ cannot import the hackmotion binding from {LIBHM}/python: {exc}")
+    sys.exit(f"⛔ cannot import the wrist binding from {LIBWRIST}/python: {exc}")
 
 
 # --- the candidate table, mirroring src/IMU/hm_frame.h -----------------------
@@ -127,7 +127,7 @@ def pps_wrist_deg(q_rel):
 
 def decompose(q_arm, q_palm, R):
     """Both units' streamed quaternions -> our (flexion, deviation) in degrees."""
-    # ⚠ q_arm ⊗ q_palm*, which is the CONJUGATE of the library's hm_quat_relative.
+    # ⚠ q_arm ⊗ q_palm*, which is the CONJUGATE of the library's wr_quat_relative.
     # Both are correct in their own convention; only this one feeds a
     # decomposition.  Getting it backwards leaves the ANGLE right and every sign
     # inverted, and nothing downstream would notice.
@@ -145,7 +145,7 @@ def pronation_dps(gyro_arm, R):
 # --- reading the capture ------------------------------------------------------
 
 def load_samples(path: Path, relax_us: int = 15_000_000):
-    """Replay a .hmwire through a session and return its CALIBRATED live samples.
+    """Replay a .wrwire through a session and return its CALIBRATED live samples.
 
     ⚠ Only calibrated samples are of any use here.  Before the device applies its
     own routine the streamed quaternions carry board placement rather than
@@ -154,7 +154,7 @@ def load_samples(path: Path, relax_us: int = 15_000_000):
     ⚠ THE PER-SAMPLE CALIBRATION FLAG IS NOT USABLE ON A REPLAYED CAPTURE, AND
     THE REASON IS WORTH KNOWING.  That flag is stamped from the session's own
     calibration state machine, which advances because the LIBRARY issued the
-    pose markers and saw the replies.  `hm_capture.py` is a standalone recorder
+    pose markers and saw the replies.  `wr_capture.py` is a standalone recorder
     — it writes `a2 00` / `a2 01` itself and drives no session — so a session
     replaying those bytes never issued them, never leaves its idle phase, and
     stamps every sample UNCALIBRATED no matter how good the capture is.  Reading
@@ -168,7 +168,7 @@ def load_samples(path: Path, relax_us: int = 15_000_000):
     angle across the boundary is the independent evidence that the transform was
     APPLIED rather than merely emitted — see `relative_angle_deg`.
     """
-    session = hm.Session("frame-select", policy={"stream_start_timeout_us": relax_us})
+    session = wr.Session("frame-select", policy={"stream_start_timeout_us": relax_us})
     out = []
     before = []
     seen_94 = False
@@ -195,8 +195,8 @@ def load_samples(path: Path, relax_us: int = 15_000_000):
                     # docstring calls this the blessed path, and the quantity is
                     # the library's presence discriminator rather than anything
                     # this tool is entitled to define. Taken here because it
-                    # needs the hm_sample, which does not outlive the drain.
-                    "rel_deg": hm.relative_angle_deg(s),
+                    # needs the wr_sample, which does not outlive the drain.
+                    "rel_deg": wr.relative_angle_deg(s),
                 }
                 if s.calibration == T.CalibrationState.CALIBRATED:
                     flagged += 1
@@ -205,9 +205,9 @@ def load_samples(path: Path, relax_us: int = 15_000_000):
     # ⚠ THE META CHUNKS ARE NOT DECORATION. A session that was never told the
     # link came up, and never told to start its stream, silently yields nothing
     # at all — which reads exactly like a capture with no samples in it. This is
-    # tools/hm_replay_py.py's driving pattern, and it is the same one for the
+    # tools/wr_replay_py.py's driving pattern, and it is the same one for the
     # same reason.
-    with hm.Replay(path) as replay:
+    with wr.Replay(path) as replay:
         for chunk in replay:
             payload = bytes(chunk.data[:chunk.length])
             if chunk.direction == T.WireDirection.META:
@@ -433,8 +433,8 @@ PROTOCOL = """
 PHASE D CAPTURE PROTOCOL — what the recording has to contain
 ================================================================================
 
-⚠ IGNORE THE PROMPT hm_capture.py PRINTS WHILE RECORDING. That list — hold
-  still, a fast flick, a few swings — is libhackmotion's own agenda for
+⚠ IGNORE THE PROMPT wr_capture.py PRINTS WHILE RECORDING. That list — hold
+  still, a fast flick, a few swings — is libwrist's own agenda for
   reconciling its protocol spec against a sensor. It is a DIFFERENT JOB and it
   produces a capture that cannot select a frame candidate. This is the list that
   matters for Phase D.
@@ -442,8 +442,8 @@ PHASE D CAPTURE PROTOCOL — what the recording has to contain
 RUN, with PinPoint disconnected (the device allows one connection):
 
     ~/Projects/.venv-hackmotion/bin/python \\
-        ../libhackmotion/tools/hm_capture.py --calibrate --duration 180 \\
-        --out ~/Desktop/singleaxis.hmwire --device-id wg3-mount1
+        ../libwrist/tools/wr_capture.py --calibrate --duration 180 \\
+        --out ~/Desktop/singleaxis.wrwire --device-id wg3-mount1
 
 --calibrate runs the two-marker routine first, with prompts. The routine is:
     pose 0 = forearm ACROSS THE CHEST, palm down
@@ -493,7 +493,7 @@ WORTH CAPTURING IN THE SAME SESSION, while the rig is on:
 THEN:
 
     ~/Projects/.venv-hackmotion/bin/python tools/hm_frame_select.py \\
-        ~/Desktop/singleaxis.hmwire --expect bow,ulnar,pronate \\
+        ~/Desktop/singleaxis.wrwire --expect bow,ulnar,pronate \\
         --mounting "<strap position, board orientation>"
 
 ⚠ AND DO NOT CHECK THE ANSWER AGAINST THE VENDOR'S APP — it reports the inverse

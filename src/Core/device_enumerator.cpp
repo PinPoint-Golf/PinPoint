@@ -28,30 +28,30 @@
 #include <QBluetoothUuid>
 #include <QTimer>
 
-#include <hackmotion/device.h>
-#include <hackmotion/types.h>
+#include <wrist/device.h>
+#include <wrist/types.h>
 
 // ---------------------------------------------------------------------------
 // Converts the service UUIDs Qt discovered off an advertisement into the
-// hm_uuid array hm_looks_like_hackmotion() wants. The library owns UUID
-// parsing (hm_uuid_parse), not us — we only marshal Qt's type into it.
+// wr_uuid array wr_looks_like_sensor() wants. The library owns UUID
+// parsing (wr_uuid_parse), not us — we only marshal Qt's type into it.
 //
 // QBluetoothUuid::toString() renders the canonical 8-4-4-4-12 form wrapped in
-// braces ("{xxxxxxxx-...}"); hm_uuid_parse() accepts that form with or
+// braces ("{xxxxxxxx-...}"); wr_uuid_parse() accepts that form with or
 // without braces, so no stripping is required here (contrast the
 // BleImuTransport::.mid(1, 36) callsite, which feeds a parser that does not).
 // ---------------------------------------------------------------------------
-static QList<hm_uuid> toHmUuids(const QList<QBluetoothUuid> &qtUuids)
+static QList<wr_uuid> toHmUuids(const QList<QBluetoothUuid> &qtUuids)
 {
-    QList<hm_uuid> out;
+    QList<wr_uuid> out;
     out.reserve(qtUuids.size());
     for (const QBluetoothUuid &u : qtUuids) {
-        hm_uuid parsed;
+        wr_uuid parsed;
         const QByteArray text = u.toString().toUtf8();
-        if (hm_uuid_parse(text.constData(), &parsed) == HM_OK)
+        if (wr_uuid_parse(text.constData(), &parsed) == WR_OK)
             out.append(parsed);
         // Anything unparsable (shouldn't happen for a QBluetoothUuid) is
-        // silently skipped — hm_looks_like_hackmotion() just sees one fewer
+        // silently skipped — wr_looks_like_sensor() just sees one fewer
         // candidate service, not a crash.
     }
     return out;
@@ -64,7 +64,7 @@ static QList<hm_uuid> toHmUuids(const QList<QBluetoothUuid> &qtUuids)
 //   - WT901 (WitMotion): name starts with "WT901" OR service UUID contains
 //     "ffe5". This is the ONLY WT901 discovery filter in the codebase, and it
 //     is unconditional — the hackmotion/enabled flag never touches it.
-//   - HackMotion (wG3): hm_looks_like_hackmotion(), owned by libhackmotion so
+//   - HackMotion (wG3): wr_looks_like_sensor(), owned by libwrist so
 //     the match logic lives in one place instead of being hand-rolled here.
 //     Skipped entirely when HackMotion discovery is disabled — see
 //     m_hackMotionEnabled below.
@@ -128,9 +128,9 @@ private slots:
             return;
         }
 
-        // HackMotion wG3 accept filter, owned by libhackmotion. Gated on the
+        // HackMotion wG3 accept filter, owned by libwrist. Gated on the
         // flag captured at scan-arm time: when discovery is disabled,
-        // hm_looks_like_hackmotion() is not even consulted, so no wG3 is
+        // wr_looks_like_sensor() is not even consulted, so no wG3 is
         // offered — this is discovery-only, and does not touch a wG3 that is
         // already connected or persisted in placement settings.
         if (!m_hackMotionEnabled) return;
@@ -139,8 +139,8 @@ private slots:
         // (many stacks don't report service UUIDs in the advertisement) — the
         // library handles both, matching on name alone when services are absent.
         const QByteArray nameUtf8 = device.name().toUtf8();
-        const QList<hm_uuid> services = toHmUuids(device.serviceUuids());
-        if (hm_looks_like_hackmotion(nameUtf8.isEmpty() ? nullptr : nameUtf8.constData(),
+        const QList<wr_uuid> services = toHmUuids(device.serviceUuids());
+        if (wr_looks_like_sensor(nameUtf8.isEmpty() ? nullptr : nameUtf8.constData(),
                                      services.isEmpty() ? nullptr : services.constData(),
                                      static_cast<size_t>(services.size()))) {
             ppInfo() << "[IMU] BLE candidate (HackMotion):" << device.name()
@@ -207,12 +207,12 @@ private:
     const bool m_hackMotionEnabled;
 
     // The HackMotion wG3 only advertises for a few seconds after a physical
-    // button press (see HM_RECOMMENDED_SCAN_WINDOW_US in hackmotion/device.h),
+    // button press (see WR_RECOMMENDED_SCAN_WINDOW_US in wrist/device.h),
     // so a short window routinely misses the button-press race entirely. 90 s
     // is the library's own recommended scan window; it costs nothing when a
     // device (of either vendor) appears immediately, and it also improves
     // WT901 discovery odds versus the old 30 s.
-    static constexpr int kHackMotionScanWindowMs = HM_RECOMMENDED_SCAN_WINDOW_US / 1000;
+    static constexpr int kHackMotionScanWindowMs = WR_RECOMMENDED_SCAN_WINDOW_US / 1000;
     // Historical Witmotion-only window. With HackMotion discovery disabled
     // there is no button-press race to win, so a Witmotion-only user should
     // not be made to wait three times as long for a scan they cannot benefit
@@ -380,13 +380,13 @@ bool DeviceEnumerator::scanImu()
 
                 if (vendor == ImuVendor::HackMotion) {
                     name = info.name().isEmpty()
-                        ? QStringLiteral(HM_ADVERTISED_LOCAL_NAME) : info.name();
+                        ? QStringLiteral(WR_ADVERTISED_LOCAL_NAME) : info.name();
 
                     caps.vendorName = QStringLiteral("HackMotion");
-                    caps.modelName  = QStringLiteral(HM_ADVERTISED_LOCAL_NAME);
+                    caps.modelName  = QStringLiteral(WR_ADVERTISED_LOCAL_NAME);
                     caps.transport  = ImuBase::Transport::Ble;
                     // The device reports battery every 30 s as a side effect of
-                    // its mandatory keepalive (HM_KEEPALIVE_PERIOD_US) — always
+                    // its mandatory keepalive (WR_KEEPALIVE_PERIOD_US) — always
                     // readable, unlike everything below.
                     caps.hasBattery = true;
                     // Both units carry an accelerometer and a gyroscope, and the

@@ -25,7 +25,7 @@
 // A wG3 carries no per-user calibration to rebuild a binding from, so the serial
 // IS the provenance — see hm_binding_recon.h, which parses exactly these strings.
 //
-// Pure and header-only: the unit is an int, not an `hm_unit`, so this needs
+// Pure and header-only: the unit is an int, not an `wr_unit`, so this needs
 // neither the vendor SDK nor a device.
 
 #include <QString>
@@ -137,7 +137,7 @@ void test_null_outputs_are_allowed()
 
 void test_the_unit_constants_match_the_vendor_enum_positions()
 {
-    // hackmotion/sample.h: HM_UNIT_LOWER_ARM = 0, HM_UNIT_PALM = 1. This header is
+    // wrist/sample.h: WR_UNIT_LOWER_ARM = 0, WR_UNIT_PALM = 1. This header is
     // deliberately free of the SDK so the analysis layer can include it, so the
     // values are asserted against the enum at the one site that has both
     // (hm_instance.cpp) and stated here.

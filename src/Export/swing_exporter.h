@@ -137,7 +137,7 @@ struct SwingImuDeviceInfo {
     //
     // -1 throughout means NOT MEASURED, never "fine". The exporter omits the keys
     // rather than writing a default that reads as a clean bill of health.
-    int  hmCalibrationStateAtStart = -1;  // hm_calibration_state at the window start
+    int  hmCalibrationStateAtStart = -1;  // wr_calibration_state at the window start
     int  hmCalibrationStateAtEnd   = -1;  // ...and at its end
     bool hmCalibrationSpansTransition = false;  // it changed INSIDE the window
     int  hmConfigBits = -1;               // the `a0 01 <cfg>` byte behind these samples
@@ -168,7 +168,7 @@ struct SwingImuDeviceInfo {
     // without this block `effectiveHz` would be computed from a window whose
     // provenance nobody can audit — and re-analysis could not reproduce the
     // day's alignment. -1 means NOT MEASURED, never "fine".
-    int    hmHistoryStatus   = -1;   // hm_history_status; -1 = no pull attempted
+    int    hmHistoryStatus   = -1;   // wr_history_status; -1 = no pull attempted
     int    hmHistoryAttempts = 0;    // how many `a1` requests were issued
     // ⚠ When true the interval list is a SUPERSET and the two figures below are
     // OPTIMISTIC. An optimistic gap list that does not say so reads as a clean pull.

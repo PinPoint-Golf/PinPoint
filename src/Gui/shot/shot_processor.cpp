@@ -1577,8 +1577,8 @@ pinpoint::SwingExportJob ShotProcessor::buildSwingExportJob()
                         hmInfo.hmNoFitSkippedSession  = int(prov.noFitSkipped);
 
                         const quint8 thisUnit =
-                            quint8(unit == hm->unitPalm() ? HM_UNIT_PALM
-                                                          : HM_UNIT_LOWER_ARM);
+                            quint8(unit == hm->unitPalm() ? WR_UNIT_PALM
+                                                          : WR_UNIT_LOWER_ARM);
                         for (const HmInstance::SampleException &e : prov.exceptions) {
                             switch (e.reason) {
                             case HmInstance::SampleException::Pinned:

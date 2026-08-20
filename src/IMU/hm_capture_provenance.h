@@ -9,11 +9,11 @@
 // survive that intact: accel is raw counts × 0.001 exactly, the quaternion is
 // i16/16384 which is exact in float32, and gyro comes from the library's
 // config-aware scaled field rather than a guessed divisor. What does NOT survive
-// is every field of hm_sample that says whether to trust those numbers. Two of
+// is every field of wr_sample that says whether to trust those numbers. Two of
 // them are load-bearing and neither can be reconstructed afterwards:
 //
 //   CALIBRATION STATE. The device applies its own anatomical transform, and
-//     hackmotion/sample.h is explicit about the cost of dropping the flag: it
+//     wrist/sample.h is explicit about the cost of dropping the flag: it
 //     "is applied ON-DEVICE and is not recoverable later, so if the recording
 //     does not carry this flag the mistake is permanent and invisible."
 //     Pre-calibration quaternions are valid geometry and meaningless anatomy —
@@ -62,25 +62,25 @@ namespace pinpoint::hm {
 // claim or disclaim it.
 struct SampleException {
     enum Reason : uint8_t {
-        Pinned          = 0,  // hm_unit_sample::pinned_mask — a channel saturated
-        QuatNormSuspect = 1   // HM_SAMPLE_QUAT_NORM_SUSPECT — decode may be misaligned
+        Pinned          = 0,  // wr_unit_sample::pinned_mask — a channel saturated
+        QuatNormSuspect = 1   // WR_SAMPLE_QUAT_NORM_SUSPECT — decode may be misaligned
     };
     int64_t hostTimeUs = 0;
-    // hm_unit for Pinned. ⚠ kSampleLevel for QuatNormSuspect, which is a property
+    // wr_unit for Pinned. ⚠ kSampleLevel for QuatNormSuspect, which is a property
     // of the RECORD rather than of one unit — reporting it per unit would count one
     // condition twice and imply the decode located one block and not the other.
     uint8_t unit        = 0;
     uint8_t reason      = Pinned;
-    uint8_t channelMask = 0;   // hm_unit_sample::pinned_mask; 0 unless Pinned
+    uint8_t channelMask = 0;   // wr_unit_sample::pinned_mask; 0 unless Pinned
 };
 
 inline constexpr uint8_t kSampleLevel = 0xFF;
 
-// Mirrors the library's own hm_calibration_span, and for its reason: "calibrated
+// Mirrors the library's own wr_calibration_span, and for its reason: "calibrated
 // at the start and gone by the end" is a different fact from "never calibrated",
 // and a single state value cannot express both.
 struct CalibrationSpan {
-    int  stateAtStart    = -1;   // hm_calibration_state; -1 = no sample in the window
+    int  stateAtStart    = -1;   // wr_calibration_state; -1 = no sample in the window
     int  stateAtEnd      = -1;
     bool spansTransition = false;
 };
@@ -132,10 +132,10 @@ public:
                     int     configBits)
     {
         if (pinnedMaskLowerArm != 0)
-            pushException({ hostTimeUs, 0 /*HM_UNIT_LOWER_ARM*/,
+            pushException({ hostTimeUs, 0 /*WR_UNIT_LOWER_ARM*/,
                             SampleException::Pinned, pinnedMaskLowerArm });
         if (pinnedMaskPalm != 0)
-            pushException({ hostTimeUs, 1 /*HM_UNIT_PALM*/,
+            pushException({ hostTimeUs, 1 /*WR_UNIT_PALM*/,
                             SampleException::Pinned, pinnedMaskPalm });
         if (quatNormSuspect)
             pushException({ hostTimeUs, kSampleLevel,

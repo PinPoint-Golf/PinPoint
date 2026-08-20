@@ -65,21 +65,21 @@ pp_add_test(eskf_gyro_units_test
             ${PP_THIRD}/imu_ekf          # ESKF.h, Quaternion.h
     STD 20)
 
-# ── libhackmotion link + ABI smoke test ──────────────────────────────────────
+# ── libwrist link + ABI smoke test ──────────────────────────────────────
 # The dependency is linked into the app but nothing references a HackMotion
 # symbol until the integration lands, so a library that compiles and fails to
 # LINK would otherwise go unnoticed. This target is what makes "added for Linux,
-# macOS and Windows" a claim rather than an expectation, and hm_abi_check()
+# macOS and Windows" a claim rather than an expectation, and wr_abi_check()
 # additionally catches headers and archive coming from different builds — the
 # characteristic failure of a dependency that tracks a branch.
 #
 # NO_QT: the library is C11 with no Qt anywhere near it, and the test is a
-# self-contained main(). pp_require_hackmotion() resolves the source the same way
+# self-contained main(). pp_require_wrist() resolves the source the same way
 # the app does (sibling checkout, app build's _deps, else fetch main).
-pp_require_hackmotion()
+pp_require_wrist()
 pp_add_test(hackmotion_link_test
     SOURCES hackmotion_link_test.cpp
-    LINK    hackmotion
+    LINK    wrist
     NO_QT
     STD 20)
 
@@ -95,12 +95,12 @@ pp_add_test(hackmotion_link_test
 #
 # The header is pure and header-only, so there is nothing to compile alongside
 # it: ImuSample comes from ${PP_BUFFER}, which pp_add_test puts on the include
-# path for every target. We LINK hackmotion only to inherit its PUBLIC include
+# path for every target. We LINK wrist only to inherit its PUBLIC include
 # directory — the test calls no library symbol and would link without it.
 pp_add_test(hm_sample_convert_test
     SOURCES hm_sample_convert_test.cpp
     INCLUDE ${IMU}
-    LINK    hackmotion
+    LINK    wrist
     NO_QT
     STD 20)
 
@@ -109,7 +109,7 @@ pp_add_test(hm_sample_convert_test
 # reaches swing.json as ten floats, so a sample taken before calibration and one
 # taken after are byte-identical there and the device's transform cannot be
 # recovered afterwards — which makes these rules the only thing standing between a
-# reader and a confident wrong answer. No hackmotion link: the header takes its
+# reader and a confident wrong answer. No wrist link: the header takes its
 # three state integers as ints rather than depending on the library enum, so this
 # runs anywhere.
 pp_add_test(hm_capture_provenance_test
@@ -144,7 +144,7 @@ pp_add_test(hm_skew_stats_test
 # instead of defaulting to lowerArm and binding a palm stream to the forearm.
 #
 # NOT NO_QT: the id is a QString (it has to be — it is a settings key and a JSON
-# field). But no hackmotion link — the header takes the unit as an int precisely so
+# field). But no wrist link — the header takes the unit as an int precisely so
 # the analysis layer, which does not link the vendor library, can include it.
 pp_add_test(hm_unit_id_test
     SOURCES hm_unit_id_test.cpp

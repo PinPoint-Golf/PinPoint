@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 //
 // ⚠ THE FAILURE THIS GUARDS AGAINST HAS ALREADY HAPPENED ONCE. Our first version
-// warned when the min/max SPREAD of `skew_us` exceeded 2 ms. libhackmotion's 0x90
+// warned when the min/max SPREAD of `skew_us` exceeded 2 ms. libwrist's 0x90
 // analysis then showed that a single record's difference is dominated by ±½-sample
 // pairing jitter — ~1250 µs of scatter at the device's internal rate on a perfectly
 // healthy unit — so that threshold fired on noise. The spread measures the jitter;
@@ -66,7 +66,7 @@ void test_even_count_averages_the_two_middles()
 void test_median_ignores_the_jitter_a_mean_would_absorb()
 {
     // The real case: a stable 921 µs offset (§10.3's 59 ticks) with two big
-    // single-record outliers of the kind libhackmotion measured (89 and 99 ticks).
+    // single-record outliers of the kind libwrist measured (89 and 99 ticks).
     std::vector<int32_t> v = run(100, 921, 5);
     v.push_back(1390);
     v.push_back(1546);

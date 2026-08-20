@@ -72,8 +72,8 @@ AppInfo::AppInfo(QObject *parent)
     addDep(m_dependencies, QStringLiteral("whisper.cpp"), QStringLiteral(PP_WHISPER_VERSION));
     addDep(m_dependencies, QStringLiteral("Eigen"), QStringLiteral(PP_EIGEN_VERSION));
     addDep(m_dependencies, QStringLiteral("libsamplerate"), QStringLiteral(PP_SAMPLERATE_VERSION));
-#ifdef HAVE_HACKMOTION
-    addDep(m_dependencies, QStringLiteral("libhackmotion"), QStringLiteral(PP_HACKMOTION_VERSION));
+#ifdef HAVE_WRIST
+    addDep(m_dependencies, QStringLiteral("libwrist"), QStringLiteral(PP_LIBWRIST_VERSION));
 #endif
 #ifdef HAVE_ESPEAK_NG
     addDep(m_dependencies, QStringLiteral("espeak-ng"), QStringLiteral(PP_ESPEAK_VERSION));

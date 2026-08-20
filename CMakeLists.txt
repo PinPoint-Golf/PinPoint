@@ -65,7 +65,7 @@ option(PINPOINT_INSTALLED "Mark this as a packaged/installed build" OFF)
 # effect whatsoever: it exists so a configure can be told "the output of this
 # build is going to be handed to someone", and be checked.
 #
-# What it guards is a dependency we do not compile ourselves. libhackmotion is
+# What it guards is a dependency we do not compile ourselves. libwrist is
 # embedded (§ the block before qt_add_executable), so it is built with THIS
 # project's CMAKE_BUILD_TYPE — there is no separate library build to get right,
 # and its own `release` preset cannot apply to an add_subdirectory. Release is
@@ -79,7 +79,7 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     message(FATAL_ERROR
         "No CMAKE_BUILD_TYPE set.\n"
         "A single-config generator with an empty build type compiles everything — this "
-        "project AND the embedded libhackmotion — with no optimisation and no NDEBUG, "
+        "project AND the embedded libwrist — with no optimisation and no NDEBUG, "
         "and nothing downstream reports it. Pass one explicitly:\n"
         "  -DCMAKE_BUILD_TYPE=Debug     for development\n"
         "  -DCMAKE_BUILD_TYPE=Release   for anything you intend to ship")
@@ -96,10 +96,10 @@ if(PP_SHIPPING_BUILD AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
     message(FATAL_ERROR
         "PP_SHIPPING_BUILD=ON but CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}, not Release.\n"
         "This build is packaged and handed to someone, so it must be Release: that is "
-        "what builds the embedded libhackmotion the way its `release` preset does "
+        "what builds the embedded libwrist the way its `release` preset does "
         "(-O3 -DNDEBUG, no -g). RelWithDebInfo ships the library's full DWARF and the "
         "source layout of this machine, and does so silently.\n"
-        "To debug an optimised libhackmotion, build the LIBRARY on its own with its "
+        "To debug an optimised libwrist, build the LIBRARY on its own with its "
         "`rel` preset — do not change the build type of a shipping configure.")
 endif()
 
@@ -246,15 +246,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(eigen)
 
-# ── libhackmotion — C11 sans-I/O driver for the HackMotion wG3 wrist sensor ───
-# github.com/PinPoint-Golf/libhackmotion, LGPL-2.1-or-later. A sister project:
+# ── libwrist — C11 sans-I/O driver for the HackMotion wG3 wrist sensor ───
+# github.com/PinPoint-Golf/libwrist, MIT. A sister project:
 # it owns no radio, thread, timer or clock — PinPoint supplies the BLE transport
 # (BleImuTransport) and the host clock, and drains the library. See
 # docs/implementation/hackmotion_integration_brief.md for what consumes it.
 #
 # Static, like whisper/samplerate/espeak-ng, courtesy of the global
 # BUILD_SHARED_LIBS OFF above — so nothing has to be bundled by any of the three
-# packaging paths. Placed here (before qt_add_executable) so hackmotion_SOURCE_DIR
+# packaging paths. Placed here (before qt_add_executable) so wrist_SOURCE_DIR
 # is resolved for the provenance block and the offline-target function below.
 #
 # ⚠ BUILD TYPE: the library's own CMakePresets.json — including its `release`
@@ -272,31 +272,31 @@ FetchContent_MakeAvailable(eigen)
 # / 15 compile units and the failure is silent. Build the LIBRARY standalone with
 # its `rel` preset instead — that is the question that preset exists to answer.
 #
-# ⚠ SOURCE RESOLUTION: a sibling ../libhackmotion checkout WINS over GitHub.
+# ⚠ SOURCE RESOLUTION: a sibling ../libwrist checkout WINS over GitHub.
 # The library is under active co-development and its fixes are made and pushed
 # from that clone, so the build follows it directly — CMake performs no download
-# and no checkout when FETCHCONTENT_SOURCE_DIR_HACKMOTION is set, which is the
+# and no checkout when FETCHCONTENT_SOURCE_DIR_WRIST is set, which is the
 # mechanism its own documentation points developers at. NEVER edit the fetched
-# copy under build/*/_deps/hackmotion-src: it is a shallow clone, the update step
+# copy under build/*/_deps/wrist-src: it is a shallow clone, the update step
 # overwrites local changes on reconfigure, and `rm -rf build` destroys them.
-option(PP_HACKMOTION_LOCAL "Prefer a sibling ../libhackmotion checkout over GitHub" ON)
+option(PP_LIBWRIST_LOCAL "Prefer a sibling ../libwrist checkout over GitHub" ON)
 
-set(_hm_local "${CMAKE_CURRENT_SOURCE_DIR}/../libhackmotion")
-if(PP_HACKMOTION_LOCAL AND EXISTS "${_hm_local}/CMakeLists.txt")
-    get_filename_component(_hm_local "${_hm_local}" ABSOLUTE)
-    set(FETCHCONTENT_SOURCE_DIR_HACKMOTION "${_hm_local}" CACHE PATH
-        "Local libhackmotion checkout to build against instead of fetching" FORCE)
-    set(_hm_origin "local ${_hm_local}")
+set(_wrist_local "${CMAKE_CURRENT_SOURCE_DIR}/../libwrist")
+if(PP_LIBWRIST_LOCAL AND EXISTS "${_wrist_local}/CMakeLists.txt")
+    get_filename_component(_wrist_local "${_wrist_local}" ABSOLUTE)
+    set(FETCHCONTENT_SOURCE_DIR_WRIST "${_wrist_local}" CACHE PATH
+        "Local libwrist checkout to build against instead of fetching" FORCE)
+    set(_wrist_origin "local ${_wrist_local}")
 else()
     # Clear the cache entry rather than merely not setting it. It was written
     # FORCE above, so a build dir that once resolved the sibling checkout still
     # carries the path — and FetchContent would keep honouring it, making
-    # -DPP_HACKMOTION_LOCAL=OFF a silent no-op on an existing build dir. That
+    # -DPP_LIBWRIST_LOCAL=OFF a silent no-op on an existing build dir. That
     # switch exists to check a local fix against upstream main, so it has to
     # actually reach upstream main.
-    unset(FETCHCONTENT_SOURCE_DIR_HACKMOTION CACHE)
-    unset(_hm_local)
-    set(_hm_origin "github main")
+    unset(FETCHCONTENT_SOURCE_DIR_WRIST CACHE)
+    unset(_wrist_local)
+    set(_wrist_origin "github main")
 endif()
 
 # Nothing to switch off: the library's tests, tools, FFI object, -Werror and
@@ -304,54 +304,54 @@ endif()
 # the library and nothing else. Asking for the record module is the one positive
 # statement we make — the offline targets below link it, so say so rather than
 # inherit it.
-set(HM_BUILD_RECORD ON CACHE BOOL "" FORCE)
+set(WR_BUILD_RECORD ON CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
-  hackmotion
+  wrist
   # ⚠ Deliberately tracking a BRANCH, not a tag: bugs are expected while the
   # integration lands, and FETCHCONTENT_UPDATES_DISCONNECTED is OFF by default so
   # every reconfigure picks up the latest main. Revert to a tag pin (GIT_TAG
   # v0.x.0) once the library stabilises — and note GIT_SHALLOW works with
   # branches and tags but NOT with a raw commit hash, so it must go if a SHA is
   # ever pinned. Ignored entirely when a sibling checkout was found above.
-  GIT_REPOSITORY https://github.com/PinPoint-Golf/libhackmotion.git
+  GIT_REPOSITORY https://github.com/PinPoint-Golf/libwrist.git
   GIT_TAG        main
   GIT_SHALLOW    TRUE
   EXCLUDE_FROM_ALL
 )
 
-FetchContent_MakeAvailable(hackmotion)
+FetchContent_MakeAvailable(wrist)
 
 # Provenance. With a branch tracked upstream and a local checkout able to win,
-# "which libhackmotion built this?" is a question the About box has to answer —
+# "which libwrist built this?" is a question the About box has to answer —
 # it is how a capture gets traced back to a library build while chasing a bug.
-file(STRINGS "${hackmotion_SOURCE_DIR}/include/hackmotion/version.h" _hm_ver_line
-     REGEX "^#define[ \t]+HM_VERSION_STRING")
-string(REGEX REPLACE ".*\"([^\"]+)\".*" "\\1" PP_HACKMOTION_VERSION "${_hm_ver_line}")
+file(STRINGS "${wrist_SOURCE_DIR}/include/wrist/version.h" _wrist_ver_line
+     REGEX "^#define[ \t]+WR_VERSION_STRING")
+string(REGEX REPLACE ".*\"([^\"]+)\".*" "\\1" PP_LIBWRIST_VERSION "${_wrist_ver_line}")
 execute_process(
     COMMAND git rev-parse --short HEAD
-    WORKING_DIRECTORY "${hackmotion_SOURCE_DIR}"
-    OUTPUT_VARIABLE _hm_sha OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    WORKING_DIRECTORY "${wrist_SOURCE_DIR}"
+    OUTPUT_VARIABLE _wrist_sha OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 execute_process(
     COMMAND git status --porcelain
-    WORKING_DIRECTORY "${hackmotion_SOURCE_DIR}"
-    OUTPUT_VARIABLE _hm_dirty OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-if(_hm_sha)
-    if(_hm_dirty)
-        string(APPEND _hm_sha "-dirty")
+    WORKING_DIRECTORY "${wrist_SOURCE_DIR}"
+    OUTPUT_VARIABLE _wrist_dirty OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(_wrist_sha)
+    if(_wrist_dirty)
+        string(APPEND _wrist_sha "-dirty")
     endif()
-    if(_hm_local)
-        string(APPEND PP_HACKMOTION_VERSION " (${_hm_sha}, local)")
+    if(_wrist_local)
+        string(APPEND PP_LIBWRIST_VERSION " (${_wrist_sha}, local)")
     else()
-        string(APPEND PP_HACKMOTION_VERSION " (${_hm_sha})")
+        string(APPEND PP_LIBWRIST_VERSION " (${_wrist_sha})")
     endif()
 endif()
-message(STATUS "libhackmotion: ${PP_HACKMOTION_VERSION} — ${_hm_origin}")
-unset(_hm_ver_line)
-unset(_hm_sha)
-unset(_hm_dirty)
-unset(_hm_local)
-unset(_hm_origin)
+message(STATUS "libwrist: ${PP_LIBWRIST_VERSION} — ${_wrist_origin}")
+unset(_wrist_ver_line)
+unset(_wrist_sha)
+unset(_wrist_dirty)
+unset(_wrist_local)
+unset(_wrist_origin)
 
 # EventBuffer library — lock-free ring-buffer capture store
 add_subdirectory(src/Buffer)
@@ -928,11 +928,11 @@ else()
     message(STATUS "AssemblyAI: no API key configured")
 endif()
 
-target_link_libraries(PinPointStudio PRIVATE whisper samplerate hackmotion)
-# No include directory needed — libhackmotion's include/ is PUBLIC on the target,
-# so <hackmotion/hackmotion.h> resolves through the link. HAVE_HACKMOTION means
+target_link_libraries(PinPointStudio PRIVATE whisper samplerate wrist)
+# No include directory needed — libwrist's include/ is PUBLIC on the target,
+# so <wrist/wrist.h> resolves through the link. HAVE_WRIST means
 # only "the library is linked"; the runtime feature gate is a separate setting.
-target_compile_definitions(PinPointStudio PRIVATE HAVE_HACKMOTION)
+target_compile_definitions(PinPointStudio PRIVATE HAVE_WRIST)
 target_include_directories(PinPointStudio PRIVATE
     ${whisper_SOURCE_DIR}/include
     ${whisper_SOURCE_DIR}/ggml/include
@@ -2776,13 +2776,13 @@ if(PINPOINT_BUILD_TOOLS)
         target_link_libraries(${tgt} PRIVATE
             Qt6::Core Qt6::Gui Qt6::Multimedia
             pinpoint_buffer whisper
-            # hackmotion_record is the .hmwire wire container and the reconciliation
+            # wrist_record is the .wrwire wire container and the reconciliation
             # that reads a capture back — what an offline target needs to replay a
             # recorded HackMotion session. Nothing offline CALLS it yet, so the
             # linker drops the code and the binaries do not grow; what it buys is
             # that the day swinglab_run replays one, the link does not fail. Same
             # argument as screen_pack/drill_pack above.
-            hackmotion hackmotion_record
+            wrist wrist_record
             ${PP_OPENCV_LIBS}   # same core/imgproc/imgcodecs subset — no viz/VTK (see above)
             # The offline tools read recorded MP4s via cv::VideoCapture — pull in
             # opencv_videoio (no-op on monolithic opencv_world via TARGET_NAME_IF_EXISTS).

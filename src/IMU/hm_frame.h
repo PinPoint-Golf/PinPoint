@@ -140,7 +140,7 @@
 // that refusal is correct and must stay. Conjugating in two places is the same as
 // conjugating in none.
 //
-// ⚠ hm_quat_relative() RETURNS THE OTHER ORDER. The library gives
+// ⚠ wr_quat_relative() RETURNS THE OTHER ORDER. The library gives
 // q_palm ⊗ q_arm*, which is a correct relative ATTITUDE in the device's own
 // world->body convention and the conjugate of what this path needs. It is fit for
 // the presence check (an angle, convention-blind) and unfit as a decomposition

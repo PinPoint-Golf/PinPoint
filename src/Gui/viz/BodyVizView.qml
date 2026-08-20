@@ -126,7 +126,7 @@ Item {
 
     // ── Device-native (HackMotion) calibration guide poses ────────────────────
     // The wG3 computes its own calibration ON-DEVICE from a two-pose routine
-    // (libhackmotion specification.md §8.2), performed as ONE CONTINUOUS motion
+    // (libwrist specification.md §8.2), performed as ONE CONTINUOUS motion
     // because the device watches the whole travel rather than sampling two static
     // poses:
     //

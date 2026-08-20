@@ -38,14 +38,14 @@
 // because a wG3 capture carries no per-user calibration to rebuild a binding from.
 // HmUnit::unitIdFor() now delegates here, so there is still exactly one spelling.
 //
-// ⚠ DELIBERATELY FREE OF THE HACKMOTION SDK. The unit is an int, not an `hm_unit`,
+// ⚠ DELIBERATELY FREE OF THE HACKMOTION SDK. The unit is an int, not an `wr_unit`,
 // so this header is includable from the analysis layer, which does not link the
 // vendor library. The values match the enum and are asserted against it at the one
 // site that has both (hm_instance.cpp).
 
 namespace pinpoint::hm_unit_id {
 
-// Matching hackmotion/sample.h's hm_unit: HM_UNIT_LOWER_ARM = 0, HM_UNIT_PALM = 1.
+// Matching wrist/sample.h's wr_unit: WR_UNIT_LOWER_ARM = 0, WR_UNIT_PALM = 1.
 inline constexpr int kLowerArm = 0;
 inline constexpr int kPalm     = 1;
 inline constexpr int kCount    = 2;

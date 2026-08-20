@@ -526,19 +526,19 @@ namespace {
 // drift nothing would catch: the two spellings would not fail, they would silently
 // orphan one device's entire placement. These are thin wrappers rather than direct
 // calls only so the resolver below reads in terms of keys.
-QString hmUnitKey(const QString &deviceId, hm_unit unit)
+QString hmUnitKey(const QString &deviceId, wr_unit unit)
 {
     return HmUnit::unitIdFor(deviceId, unit);
 }
 
-QString hmUnitLabel(hm_unit unit)
+QString hmUnitLabel(wr_unit unit)
 {
     return HmUnit::unitLabelFor(unit);
 }
 
 // Splits a placement key into device id + unit. False for a bare device id —
 // a Witmotion, or a wG3 whose interim Phase A entry has not been migrated.
-bool parseUnitKey(const QString &key, QString *deviceId, hm_unit *unit)
+bool parseUnitKey(const QString &key, QString *deviceId, wr_unit *unit)
 {
     const int sep = key.lastIndexOf(QLatin1Char('#'));
     if (sep <= 0) return false;
@@ -546,8 +546,8 @@ bool parseUnitKey(const QString &key, QString *deviceId, hm_unit *unit)
     // Regenerate and compare rather than matching the suffix text: the spelling
     // stays owned by HmUnit, and a suffix this build does not recognise stays
     // UNRESOLVED instead of being guessed at.
-    for (int u = 0; u < HM_UNIT_COUNT; ++u) {
-        const hm_unit candidate = static_cast<hm_unit>(u);
+    for (int u = 0; u < WR_UNIT_COUNT; ++u) {
+        const wr_unit candidate = static_cast<wr_unit>(u);
         if (key == hmUnitKey(id, candidate)) {
             *deviceId = id;
             *unit     = candidate;
@@ -591,15 +591,15 @@ QStringList stealSlotClaims(QVariantMap &map, const QString &slot, const QString
     for (auto it = map.cbegin(); it != map.cend(); ++it) {
         if (it.value().toString() != slot) continue;
         QString devId;
-        hm_unit unit = HM_UNIT_LOWER_ARM;
+        wr_unit unit = WR_UNIT_LOWER_ARM;
         const bool unitKey = parseUnitKey(it.key(), &devId, &unit);
         const QString owner = unitKey ? devId : it.key();
         if (owner == newOwner) continue;
         if (isEnumeratedImu(owner)) continue;
         doomed.append(it.key());
         if (unitKey)
-            for (int u = 0; u < HM_UNIT_COUNT; ++u) {
-                const QString partner = hmUnitKey(devId, static_cast<hm_unit>(u));
+            for (int u = 0; u < WR_UNIT_COUNT; ++u) {
+                const QString partner = hmUnitKey(devId, static_cast<wr_unit>(u));
                 if (map.contains(partner)) doomed.append(partner);
             }
     }
@@ -652,7 +652,7 @@ QString ImuManager::placementKeyForSlot(const QString &slot) const
         if (it.value().toString() != slot) continue;
         if (firstKey.isEmpty()) firstKey = it.key();
         QString devId;
-        hm_unit unit = HM_UNIT_LOWER_ARM;
+        wr_unit unit = WR_UNIT_LOWER_ARM;
         const QString owner = parseUnitKey(it.key(), &devId, &unit) ? devId : it.key();
         if (!isEnumeratedImu(owner)) continue;
         if (m_sessionExcluded.contains(owner)) {
@@ -682,7 +682,7 @@ QString ImuManager::deviceIdForSlot(const QString &slot) const
     const QString key = placementKeyForSlot(slot);
     if (key.isEmpty()) return {};
     QString devId;
-    hm_unit unit = HM_UNIT_LOWER_ARM;
+    wr_unit unit = WR_UNIT_LOWER_ARM;
     // Both key shapes name the peripheral unambiguously — it is only the UNIT that
     // a bare key fails to name.
     return parseUnitKey(key, &devId, &unit) ? devId : key;
@@ -692,7 +692,7 @@ QString ImuManager::unitLabelForSlot(const QString &slot) const
 {
     const QString key = placementKeyForSlot(slot);
     QString devId;
-    hm_unit unit = HM_UNIT_LOWER_ARM;
+    wr_unit unit = WR_UNIT_LOWER_ARM;
     if (key.isEmpty() || !parseUnitKey(key, &devId, &unit)) return {};
     return hmUnitLabel(unit);
 }
@@ -703,7 +703,7 @@ QObject *ImuManager::instanceForSlot(const QString &slot) const
     if (key.isEmpty()) return nullptr;
 
     QString devId;
-    hm_unit unit = HM_UNIT_LOWER_ARM;
+    wr_unit unit = WR_UNIT_LOWER_ARM;
     const bool unitKey = parseUnitKey(key, &devId, &unit);
     if (!unitKey) devId = key;
 
@@ -725,7 +725,7 @@ QObject *ImuManager::instanceForSlot(const QString &slot) const
         // created in. A consumer that swaps the two produces a plausible-looking
         // wrist angle that is simply MIRRORED, which every plausibility check
         // passes.
-        return unit == HM_UNIT_PALM ? hm->unitPalmObject() : hm->unitLowerArmObject();
+        return unit == WR_UNIT_PALM ? hm->unitPalmObject() : hm->unitLowerArmObject();
     }
 
     if (hm) {
@@ -773,8 +773,8 @@ void ImuManager::setPlacementForDevice(const QString &deviceId, const QString &s
     QVariantMap map = s->imuPlacement();
 
     if (isHackMotionDevice(deviceId)) {
-        const QString lowerKey = hmUnitKey(deviceId, HM_UNIT_LOWER_ARM);
-        const QString palmKey  = hmUnitKey(deviceId, HM_UNIT_PALM);
+        const QString lowerKey = hmUnitKey(deviceId, WR_UNIT_LOWER_ARM);
+        const QString palmKey  = hmUnitKey(deviceId, WR_UNIT_PALM);
 
         // ⚠ A HACKMOTION'S ASSIGNMENT IS NOT A CHOICE OF ONE LETTER, AND THE COACH
         // DOES NOT GET TO PICK WHICH SEGMENTS IT COVERS. One wG3 is a single BLE
@@ -1010,8 +1010,8 @@ void ImuManager::migrateHackMotionPlacement(const Device &device)
     AppSettings *s = m_appSettings ? m_appSettings : &fallback;
     QVariantMap map = s->imuPlacement();
 
-    const QString lowerKey = hmUnitKey(device.id, HM_UNIT_LOWER_ARM);
-    const QString palmKey  = hmUnitKey(device.id, HM_UNIT_PALM);
+    const QString lowerKey = hmUnitKey(device.id, WR_UNIT_LOWER_ARM);
+    const QString palmKey  = hmUnitKey(device.id, WR_UNIT_PALM);
     const bool alreadyUnitKeyed = map.contains(lowerKey) || map.contains(palmKey);
 
     if (!map.contains(device.id)) {

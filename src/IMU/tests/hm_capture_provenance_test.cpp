@@ -25,12 +25,12 @@ using namespace pinpoint::hm;
 
 namespace {
 
-// Channel masks are hm_channel bits; the values are arbitrary here and only have
+// Channel masks are wr_channel bits; the values are arbitrary here and only have
 // to survive the round trip.
 constexpr uint8_t kAccelX = 1u << 0;
 constexpr uint8_t kGyroZ  = 1u << 5;
 
-// hm_calibration_state, spelled locally so the test does not depend on the
+// wr_calibration_state, spelled locally so the test does not depend on the
 // library header for three integers.
 constexpr int kUnknown      = 0;
 constexpr int kUncalibrated = 1;
@@ -42,8 +42,8 @@ void test_absent_is_not_clean()
 {
     // ⚠ THE LOAD-BEARING CASE. A log that has seen nothing must not answer as
     // though it had seen good data: -1 is "not measured" and the exporter omits
-    // the key entirely, whereas a 0 would be read as hm_calibration_state's
-    // HM_CAL_UNKNOWN — a positive claim about a device that never streamed.
+    // the key entirely, whereas a 0 would be read as wr_calibration_state's
+    // WR_CAL_UNKNOWN — a positive claim about a device that never streamed.
     const CaptureProvenanceLog log;
     const CaptureProvenance p = log.inWindow(0, 1'000'000);
 
@@ -84,7 +84,7 @@ void test_pinning_is_attributed_to_the_unit_that_clipped()
 
     const CaptureProvenance p = log.inWindow(0, 10'000);
     assert(p.exceptions.size() == 1);
-    assert(p.exceptions[0].unit == 1);              // HM_UNIT_PALM
+    assert(p.exceptions[0].unit == 1);              // WR_UNIT_PALM
     assert(p.exceptions[0].reason == SampleException::Pinned);
     assert(p.exceptions[0].channelMask == kGyroZ);  // WHICH channel, not merely that one did
 }

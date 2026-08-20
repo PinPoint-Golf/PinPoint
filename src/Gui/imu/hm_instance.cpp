@@ -25,12 +25,12 @@
 #include "imu_sample.h"
 #include "hm_frame.h"
 #include "hm_unit_id.h"
-// The session itself — every hm_session_* call, on the I/O thread. It lives in
+// The session itself — every wr_session_* call, on the I/O thread. It lives in
 // src/IMU because it is device-layer code: this class only marshals its output
 // across the thread boundary and onto properties QML can bind.
 #include "hm_session_worker.h"
 
-#include <hackmotion/hackmotion.h>
+#include <wrist/wrist.h>
 
 #include <QBluetoothAddress>
 #include <QBluetoothDeviceInfo>
@@ -67,23 +67,23 @@
 // other way — recorded `source.serial` back to which segment that lane measured —
 // without the GUI layer or the vendor SDK. This stays the name everything in the GUI
 // calls; it is no longer the place the string is spelled. Still exactly one spelling.
-static_assert(pinpoint::hm_unit_id::kLowerArm == HM_UNIT_LOWER_ARM
-              && pinpoint::hm_unit_id::kPalm == HM_UNIT_PALM
-              && pinpoint::hm_unit_id::kCount == HM_UNIT_COUNT,
-              "hm_unit_id's SDK-free unit indices must track hm_unit");
+static_assert(pinpoint::hm_unit_id::kLowerArm == WR_UNIT_LOWER_ARM
+              && pinpoint::hm_unit_id::kPalm == WR_UNIT_PALM
+              && pinpoint::hm_unit_id::kCount == WR_UNIT_COUNT,
+              "hm_unit_id's SDK-free unit indices must track wr_unit");
 
-QString HmUnit::unitIdFor(const QString &deviceId, hm_unit unit)
+QString HmUnit::unitIdFor(const QString &deviceId, wr_unit unit)
 {
     return pinpoint::hm_unit_id::unitIdFor(deviceId, static_cast<int>(unit));
 }
 
 // Display only, so this one IS translated.
-QString HmUnit::unitLabelFor(hm_unit unit)
+QString HmUnit::unitLabelFor(wr_unit unit)
 {
-    return unit == HM_UNIT_PALM ? tr("Palm") : tr("Lower arm");
+    return unit == WR_UNIT_PALM ? tr("Palm") : tr("Lower arm");
 }
 
-HmUnit::HmUnit(const QString &deviceId, hm_unit unit, QObject *parent)
+HmUnit::HmUnit(const QString &deviceId, wr_unit unit, QObject *parent)
     : QObject(parent)
     , m_unit(unit)
     , m_unitId(unitIdFor(deviceId, unit))
@@ -106,8 +106,8 @@ HmInstance::HmInstance(const Device &device,
     , m_device(device)
     , m_deviceId(device.id)
     , m_deviceDescription(device.description)
-    , m_lowerArm(new HmUnit(device.id, HM_UNIT_LOWER_ARM, this))
-    , m_palm(new HmUnit(device.id, HM_UNIT_PALM, this))
+    , m_lowerArm(new HmUnit(device.id, WR_UNIT_LOWER_ARM, this))
+    , m_palm(new HmUnit(device.id, WR_UNIT_PALM, this))
 {
     // ⚠ NaN, not 0. Zero is a real presence angle — the best one §8.2 ever
     // measured, in fact, from the calibration that carried no axis information
@@ -118,12 +118,12 @@ HmInstance::HmInstance(const Device &device,
     m_presenceAngleDeg = std::numeric_limits<double>::quiet_NaN();
     m_poseSpreadMaxDeg = std::numeric_limits<double>::quiet_NaN();
     m_relativeAngleDeg = std::numeric_limits<double>::quiet_NaN();
-    // At rest, before any routine has been run. ⚠ HM_CAL_UNKNOWN is not
-    // HM_CAL_UNCALIBRATED: "nobody has checked" and "there is demonstrably no
+    // At rest, before any routine has been run. ⚠ WR_CAL_UNKNOWN is not
+    // WR_CAL_UNCALIBRATED: "nobody has checked" and "there is demonstrably no
     // transform" are different claims, and only a link-down licenses the second.
-    m_calibrationPhase       = HM_CALP_IDLE;
-    m_calibrationState       = HM_CAL_UNKNOWN;
-    m_calibrationAbortReason = HM_CAL_ABORT_NONE;
+    m_calibrationPhase       = WR_CALP_IDLE;
+    m_calibrationState       = WR_CAL_UNKNOWN;
+    m_calibrationAbortReason = WR_CAL_ABORT_NONE;
 
     // ── TWO SOURCES, ONE DEVICE ──────────────────────────────────────────────
     //
@@ -133,11 +133,11 @@ HmInstance::HmInstance(const Device &device,
     // Paused. This device is nonetheless the first thing in the tree to take TWO
     // slots at once, which is why the failure below is handled rather than
     // assumed away.
-    HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
-    pinpoint::SourceId ids[HM_UNIT_COUNT] =
+    HmUnit *const units[WR_UNIT_COUNT] = { m_lowerArm, m_palm };
+    pinpoint::SourceId ids[WR_UNIT_COUNT] =
         { pinpoint::kInvalidSourceId, pinpoint::kInvalidSourceId };
 
-    for (int u = 0; m_eventBuffer && u < HM_UNIT_COUNT; ++u) {
+    for (int u = 0; m_eventBuffer && u < WR_UNIT_COUNT; ++u) {
         HmUnit *const unit = units[u];
 
         pinpoint::SourceDescriptor desc;
@@ -272,7 +272,7 @@ HmInstance::HmInstance(const Device &device,
         // ⚠ THE PROPERTY IS SET BEFORE THE CONNECTED GUARD BELOW, ON PURPOSE. A
         // stream stopping BECAUSE the link went away must still clear `streaming`,
         // or the UI keeps offering "Calibrate" for a session that would refuse it
-        // with HM_ERR_NO_STREAM. Only the LABEL is guarded, because that is the part
+        // with WR_ERR_NO_STREAM. Only the LABEL is guarded, because that is the part
         // that would otherwise overwrite "Disconnected" with "Connected".
         if (m_streaming != streaming) {
             m_streaming = streaming;
@@ -289,17 +289,17 @@ HmInstance::HmInstance(const Device &device,
     connect(m_worker, &HmSessionWorker::calibrationPhaseEvent, this,
             [this](int phase, int previousPhase, int abortReason,
                    int libraryState, qint64 elapsedUs) {
-        const QString from = QString::fromLatin1(hm_calibration_phase_name(
-                                 static_cast<hm_calibration_phase>(previousPhase)));
-        const QString to   = QString::fromLatin1(hm_calibration_phase_name(
-                                 static_cast<hm_calibration_phase>(phase)));
+        const QString from = QString::fromLatin1(wr_calibration_phase_name(
+                                 static_cast<wr_calibration_phase>(previousPhase)));
+        const QString to   = QString::fromLatin1(wr_calibration_phase_name(
+                                 static_cast<wr_calibration_phase>(phase)));
 
         // ⚠ A NEW ROUTINE CLEARS THE PREVIOUS ATTEMPT'S PRESENCE FIGURES. Leaving
         // them on screen beside the next attempt's is precisely the comparison §8.2
         // shows would prefer the WORST calibration available — the no-raise attempt
         // scored 0.70° against the correct routine's 1.96° — so the numbers do not
         // survive into an attempt they do not describe.
-        if (phase == HM_CALP_AWAIT_HORIZONTAL)
+        if (phase == WR_CALP_AWAIT_HORIZONTAL)
             clearPresenceSurface();
 
         m_calibrationPhase       = phase;
@@ -314,15 +314,15 @@ HmInstance::HmInstance(const Device &device,
         ppInfo() << "[HmInstance]" << m_deviceId << "— calibration" << from << "→" << to
                  << "after" << elapsedUs / 1000 << "ms, library state" << libraryState;
 
-        // ⚠ abort_reason != NONE IS NOT "ABORTED". HM_CAL_ABORT_CALLER is carried on
-        // a transition to COMPLETE as well, because aborting at HM_CALP_VERIFYING
+        // ⚠ abort_reason != NONE IS NOT "ABORTED". WR_CAL_ABORT_CALLER is carried on
+        // a transition to COMPLETE as well, because aborting at WR_CALP_VERIFYING
         // declines the presence check on a transform the device HAS ALREADY APPLIED
         // — the routine finished, the check was declined, and reporting that as
         // aborted would claim nothing happened to a stream whose frame had just
         // changed underneath it. So the phase decides the wording and the reason only
         // qualifies it.
-        if (abortReason != HM_CAL_ABORT_NONE) {
-            const QString reason = phase == HM_CALP_COMPLETE
+        if (abortReason != WR_CAL_ABORT_NONE) {
+            const QString reason = phase == WR_CALP_COMPLETE
                 ? QStringLiteral("  Calibration finished, but the presence check was "
                                  "declined — the device applied its transform and "
                                  "nothing has verified it. Recorded as unverified.")
@@ -346,8 +346,8 @@ HmInstance::HmInstance(const Device &device,
         // ⚠ THE WORSE OF THE TWO UNITS, not a mean of them: this is evidence about
         // whether the athlete HELD the pose, and one unit drifting is enough to
         // contaminate the anchor a Phase D solve would bake into every reading.
-        m_poseSpreadMaxDeg = double(qMax(m_anchor.poseSpreadDeg[HM_UNIT_LOWER_ARM],
-                                         m_anchor.poseSpreadDeg[HM_UNIT_PALM]));
+        m_poseSpreadMaxDeg = double(qMax(m_anchor.poseSpreadDeg[WR_UNIT_LOWER_ARM],
+                                         m_anchor.poseSpreadDeg[WR_UNIT_PALM]));
         emit calibrationStateChanged();
 
         // ⚠ REPORTED, NEVER RANKED. Both numbers go to the log as state: the angle
@@ -357,8 +357,8 @@ HmInstance::HmInstance(const Device &device,
         ppInfo() << "[HmInstance]" << m_deviceId << "— reference pose measured:"
                  << "presence angle" << m_presenceAngleDeg << "° over"
                  << m_presenceSamplesUsed << "samples, pose spread"
-                 << m_anchor.poseSpreadDeg[HM_UNIT_LOWER_ARM] << "/"
-                 << m_anchor.poseSpreadDeg[HM_UNIT_PALM] << "° (lowerArm/palm), library"
+                 << m_anchor.poseSpreadDeg[WR_UNIT_LOWER_ARM] << "/"
+                 << m_anchor.poseSpreadDeg[WR_UNIT_PALM] << "° (lowerArm/palm), library"
                     " state" << libraryState << ". ⚠ The angle is a PRESENCE check and"
                     " it inverts — §8.2 measured a no-raise calibration scoring BEST on"
                     " it — so it is never a quality score and attempts are never ranked"
@@ -374,9 +374,9 @@ HmInstance::HmInstance(const Device &device,
 
     connect(m_worker, &HmSessionWorker::calibrationPresenceUnmeasured, this,
             [this](int samplesCollected, int libraryState) {
-        // ⚠ THE PHASE STILL REACHES HM_CALP_COMPLETE, so this flag is the only thing
+        // ⚠ THE PHASE STILL REACHES WR_CALP_COMPLETE, so this flag is the only thing
         // standing between "we could not check" and a UI that claims success. The
-        // angle stays NaN and the state stays HM_CAL_UNKNOWN — the recording must say
+        // angle stays NaN and the state stays WR_CAL_UNKNOWN — the recording must say
         // we did not check rather than imply we did.
         m_presenceNotMeasured = true;
         m_presenceSamplesUsed = samplesCollected;
@@ -420,12 +420,12 @@ HmInstance::HmInstance(const Device &device,
         // spelled out here rather than folded into one "calibration error".
         QString advice;
         switch (status) {
-        case HM_ERR_NO_STREAM:
+        case WR_ERR_NO_STREAM:
             advice = QStringLiteral("the sensor is not streaming, and calibration "
                                     "cannot be done without it — the device watches a "
                                     "continuous raise. Reconnect and try again.");
             break;
-        case HM_ERR_BUSY:
+        case WR_ERR_BUSY:
             // ⚠ Not reachable until Phase E opens a history bracket. Carried legibly
             // NOW rather than discovered THEN: a retrieval suspends live delivery and
             // the presence check is measured FROM live samples, so the honest answer
@@ -433,18 +433,18 @@ HmInstance::HmInstance(const Device &device,
             advice = QStringLiteral("the sensor is busy replaying its buffer for the "
                                     "last shot. Wait a second and try again.");
             break;
-        case HM_ERR_INVALID_STATE:
+        case WR_ERR_INVALID_STATE:
             advice = QStringLiteral("there is no calibration routine at that step.");
             break;
         default:
-            advice = QString::fromLatin1(hm_status_str(static_cast<hm_status>(status)));
+            advice = QString::fromLatin1(wr_status_str(static_cast<wr_status>(status)));
             break;
         }
         appendLog(timestamp()
                   + QStringLiteral("  Calibration step refused (%1): %2")
                         .arg(call, advice));
         ppWarn() << "[HmInstance]" << m_deviceId << "—" << call << "refused:"
-                 << hm_status_str(static_cast<hm_status>(status)) << "—" << advice;
+                 << wr_status_str(static_cast<wr_status>(status)) << "—" << advice;
         emit calibrationCallRefused(status, call);
     });
 
@@ -490,8 +490,8 @@ HmInstance::HmInstance(const Device &device,
         // data is flowing; only these say it is being RECORDED, and the pair
         // diverges precisely when a registration failed.
         const QString written = QStringLiteral("  WROTE=%1/%2")
-                                    .arg(snap.written[HM_UNIT_LOWER_ARM])
-                                    .arg(snap.written[HM_UNIT_PALM]);
+                                    .arg(snap.written[WR_UNIT_LOWER_ARM])
+                                    .arg(snap.written[WR_UNIT_PALM]);
 
         // Provenance, not a correction: the two blocks are never paired as
         // simultaneous and this is never applied to a timestamp. §10.3 measures a
@@ -567,7 +567,7 @@ HmInstance::HmInstance(const Device &device,
             }
             // ⚠ THIS USED TO WARN ON THE MIN/MAX SPREAD, AND THAT WAS WRONG. The two
             // units share a sample index by construction but run two free-running MCU
-            // timers, so single-record values scatter by ±½ sample — libhackmotion
+            // timers, so single-record values scatter by ±½ sample — libwrist
             // measured 89 and 99 ticks on consecutive records against a session median
             // of 59 — which is ~1250 µs of entirely healthy scatter at the internal
             // rate. A spread threshold therefore fires on noise, on a good device.
@@ -605,24 +605,24 @@ HmInstance::HmInstance(const Device &device,
         }
         m_lastNoFitSkipped = snap.noFitSkipped;
 
-        const quint64 backSteps = snap.nonMonotonic[HM_UNIT_LOWER_ARM]
-                                + snap.nonMonotonic[HM_UNIT_PALM];
+        const quint64 backSteps = snap.nonMonotonic[WR_UNIT_LOWER_ARM]
+                                + snap.nonMonotonic[WR_UNIT_PALM];
         QString nonMono;
         if (backSteps > 0) {
             // ⚠ MEASURED, NOT CLAMPED HERE — the merger clamps, and the count it
             // keeps is what a support bundle carries. This line says the same thing
             // per lane, with the size of the worst step the merger had to absorb.
             nonMono = QStringLiteral("  HOST-TIME-BACKSTEPS=%1/%2 (worst %3/%4 µs)")
-                          .arg(snap.nonMonotonic[HM_UNIT_LOWER_ARM])
-                          .arg(snap.nonMonotonic[HM_UNIT_PALM])
-                          .arg(snap.maxBackStepUs[HM_UNIT_LOWER_ARM])
-                          .arg(snap.maxBackStepUs[HM_UNIT_PALM]);
+                          .arg(snap.nonMonotonic[WR_UNIT_LOWER_ARM])
+                          .arg(snap.nonMonotonic[WR_UNIT_PALM])
+                          .arg(snap.maxBackStepUs[WR_UNIT_LOWER_ARM])
+                          .arg(snap.maxBackStepUs[WR_UNIT_PALM]);
             if (backSteps > m_lastNonMonotonic) {
                 ppWarn() << "[HmInstance]" << m_deviceDescription
                          << "— host_time_us stepped backwards; the merger clamped it. Total"
                          << backSteps << "worst step (µs) lowerArm"
-                         << snap.maxBackStepUs[HM_UNIT_LOWER_ARM]
-                         << "palm" << snap.maxBackStepUs[HM_UNIT_PALM];
+                         << snap.maxBackStepUs[WR_UNIT_LOWER_ARM]
+                         << "palm" << snap.maxBackStepUs[WR_UNIT_PALM];
             }
         }
         m_lastNonMonotonic = backSteps;
@@ -658,8 +658,8 @@ HmInstance::HmInstance(const Device &device,
         m_totalSamples    += snap.seq - m_lastSeq;
         m_lastSeq          = snap.seq;
 
-        HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
-        for (int u = 0; u < HM_UNIT_COUNT; ++u) {
+        HmUnit *const units[WR_UNIT_COUNT] = { m_lowerArm, m_palm };
+        for (int u = 0; u < WR_UNIT_COUNT; ++u) {
             const HmSessionWorker::UnitState &s = snap.unit[u];
             HmUnit *unit = units[u];
 
@@ -682,7 +682,7 @@ HmInstance::HmInstance(const Device &device,
             // SELECTED a frame candidate (before that we do not know which way
             // its axes point). Either one alone produces a quaternion that moves
             // convincingly and means nothing.
-            const bool deviceCalibrated = (m_calibrationState == HM_CAL_CALIBRATED);
+            const bool deviceCalibrated = (m_calibrationState == WR_CAL_CALIBRATED);
             const bool anat = deviceCalibrated && pinpoint::hm_frame::isSelected();
 
             if (anat != unit->m_anatCalibrated) {
@@ -764,11 +764,11 @@ HmInstance::~HmInstance()
     m_logTimer.stop();
     m_displayTimer.stop();
 
-    // The worker (and the transport that is its child, and the hm_session it
+    // The worker (and the transport that is its child, and the wr_session it
     // owns) lives on the I/O thread — destroy it there. The thread outlives the
     // instances (ImuManager joins it after deleting them), so this deferred
     // delete always runs, and the worker's destructor makes the
-    // hm_session_destroy() call on the one thread allowed to make it.
+    // wr_session_destroy() call on the one thread allowed to make it.
     if (m_worker)
         m_worker->deleteLater();
 }
@@ -781,8 +781,8 @@ std::vector<pinpoint::SourceId> HmInstance::sourceIds() const
     // represented by kInvalidSourceId, so the vector never hands a caller an id
     // it must remember to test.
     std::vector<pinpoint::SourceId> ids;
-    ids.reserve(HM_UNIT_COUNT);
-    const HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
+    ids.reserve(WR_UNIT_COUNT);
+    const HmUnit *const units[WR_UNIT_COUNT] = { m_lowerArm, m_palm };
     for (const HmUnit *unit : units)
         if (unit->sourceId() != pinpoint::kInvalidSourceId)
             ids.push_back(unit->sourceId());
@@ -794,7 +794,7 @@ QStringList HmInstance::sourceLabels() const
     // Same order, same skips, same length as sourceIds() — the resource monitor
     // pairs them by position.
     QStringList labels;
-    const HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
+    const HmUnit *const units[WR_UNIT_COUNT] = { m_lowerArm, m_palm };
     for (const HmUnit *unit : units)
         if (unit->sourceId() != pinpoint::kInvalidSourceId)
             labels.append(unit->unitLabel());
@@ -886,7 +886,7 @@ void HmInstance::stop()
 
     // ⚠ THE PRODUCER STOP BARRIER, on the I/O thread and blocking. The worker
     // stops the drain timer, severs dataReceived, drops the link and calls
-    // hm_session_close(); when this returns nothing the library owns can produce
+    // wr_session_close(); when this returns nothing the library owns can produce
     // another sample or event — structurally, because the library never pushes
     // and the host has stopped draining. Only after this may the caller pause
     // the EventBuffer and deregister the sources (Phase B).
@@ -907,7 +907,7 @@ void HmInstance::deregisterFromBuffer()
     // itself a no-op on an unknown id, so a second call does nothing.
     if (!m_eventBuffer) return;
 
-    HmUnit *const units[HM_UNIT_COUNT] = { m_lowerArm, m_palm };
+    HmUnit *const units[WR_UNIT_COUNT] = { m_lowerArm, m_palm };
     for (HmUnit *unit : units) {
         if (unit->sourceId() == pinpoint::kInvalidSourceId) continue;
         m_eventBuffer->deregisterSource(unit->sourceId());
@@ -919,31 +919,31 @@ bool HmInstance::calibrationActive() const
 {
     // ⚠ "A ROUTINE IS IN FLIGHT", WHICH IS NOT "SOMETHING IS CALIBRATED". Both
     // terminal phases are excluded and COMPLETE is one of them — a completed
-    // routine can still leave the state at HM_CAL_UNKNOWN, which is what
+    // routine can still leave the state at WR_CAL_UNKNOWN, which is what
     // calibrationState is for.
-    return m_calibrationPhase != HM_CALP_IDLE
-        && m_calibrationPhase != HM_CALP_COMPLETE
-        && m_calibrationPhase != HM_CALP_ABORTED;
+    return m_calibrationPhase != WR_CALP_IDLE
+        && m_calibrationPhase != WR_CALP_COMPLETE
+        && m_calibrationPhase != WR_CALP_ABORTED;
 }
 
 // ── The five entry points. Each is one queued hop and nothing else ───────────
 //
 // ⚠ QueuedConnection, NEVER BlockingQueuedConnection. The library's contract puts
-// every hm_calibration_* call on the thread that owns the session, and blocking
+// every wr_calibration_* call on the thread that owns the session, and blocking
 // the GUI thread for one would freeze the guide animation that is PACING the
 // athlete — the raise is watched continuously, so a stalled renderer is a failed
-// calibration. hm_calibration_confirm_reference_pose() returns before its
+// calibration. wr_calibration_confirm_reference_pose() returns before its
 // measurement exists in any case, so there is nothing a caller could usefully
 // wait for.
 //
-// ⚠ AND THAT IS WHY NONE OF THEM RETURNS A STATUS. The hm_status the library
+// ⚠ AND THAT IS WHY NONE OF THEM RETURNS A STATUS. The wr_status the library
 // produced cannot travel back across a queued hop; it arrives as
 // calibrationCallRefused(status, call), which is the entire refusal channel. A UI
 // that waited on a return value here would wait forever.
 // ── Deferred history (Phase E) ───────────────────────────────────────────────
 //
 // ⚠ QueuedConnection for the reserve, exactly like the calibration entry points
-// above and for the same reason: hm_history_reserve() is a hm_session_* call and
+// above and for the same reason: wr_history_reserve() is a wr_session_* call and
 // must run on the thread that owns the session. It does not block and issues no
 // radio traffic, so there is nothing the GUI thread could usefully wait for —
 // and a refusal travels back as a log line, not as a return value.
@@ -1017,7 +1017,7 @@ void HmInstance::invalidateCalibration(int libraryState, const QString &why)
     // PAPERING OVER IT. §8.3 measured 0.70° immediately before dropping a link and
     // 18.80° at the same pose after reconnecting, strap untouched and never
     // removed. The library makes resume un-expressible — link-down drives every
-    // subsequent sample to HM_CAL_UNCALIBRATED — so every last thing the routine
+    // subsequent sample to WR_CAL_UNCALIBRATED — so every last thing the routine
     // produced goes back to nothing here, including the reference anchor: an anchor
     // is a measurement of a transform that no longer exists.
     //
@@ -1028,9 +1028,9 @@ void HmInstance::invalidateCalibration(int libraryState, const QString &why)
     // plausible, permanently wrong and unfalsifiable from the recording. The
     // library refuses to express it; so do we.
     //
-    // ⚠ libraryState IS READ, NOT CHOSEN. Link-down gives HM_CAL_UNCALIBRATED
+    // ⚠ libraryState IS READ, NOT CHOSEN. Link-down gives WR_CAL_UNCALIBRATED
     // ("there is demonstrably no transform"); a stream restart gives
-    // HM_CAL_UNKNOWN ("I no longer know"), because whether a restart costs the
+    // WR_CAL_UNKNOWN ("I no longer know"), because whether a restart costs the
     // device its transform is untested where a disconnect demonstrably does. Those
     // are different claims and it is not ours to pick between them.
     //
@@ -1039,13 +1039,13 @@ void HmInstance::invalidateCalibration(int libraryState, const QString &why)
     // goes on claiming a calibration that is gone, which is the failure this whole
     // path exists to prevent, and "we told you twice" costs nothing against it.
     const bool hadSomething = m_anchor.valid
-                           || m_calibrationState == HM_CAL_CALIBRATED
+                           || m_calibrationState == WR_CAL_CALIBRATED
                            || calibrationActive()
                            || !std::isnan(m_presenceAngleDeg);
 
-    m_calibrationPhase       = HM_CALP_IDLE;
+    m_calibrationPhase       = WR_CALP_IDLE;
     m_calibrationState       = libraryState;
-    m_calibrationAbortReason = HM_CAL_ABORT_NONE;
+    m_calibrationAbortReason = WR_CAL_ABORT_NONE;
     clearPresenceSurface();
     emit calibrationStateChanged();
     emit calibrationInvalidated();
@@ -1096,7 +1096,7 @@ void HmInstance::resetStreamingState()
     if (m_dataRateHz != 0.0)    { m_dataRateHz = 0.0; emit dataRateHzChanged(); }
     if (m_batteryPercent != -1) { m_batteryPercent = -1; emit batteryPercentChanged(); }
     // ⚠ The UI must not offer "calibrate" against a link that has gone: the call
-    // would be refused with HM_ERR_NO_STREAM. HM_EV_STREAM_STOPPED normally clears
+    // would be refused with WR_ERR_NO_STREAM. WR_EV_STREAM_STOPPED normally clears
     // this on its own, but a link that simply vanished may never produce one.
     if (m_streaming) { m_streaming = false; emit streamingChanged(); }
     // Back to NaN rather than left at its last value: this readout is only
@@ -1107,7 +1107,7 @@ void HmInstance::resetStreamingState()
         emit relativeAngleChanged();
     }
     // ⚠ The CALIBRATION surface is deliberately NOT cleared here. It is driven from
-    // the library's own HM_EV_LINK_DOWN, which is the only thing that also knows
+    // the library's own WR_EV_LINK_DOWN, which is the only thing that also knows
     // WHICH state to move to — see invalidateCalibration().
 }
 
@@ -1215,9 +1215,9 @@ void HmInstance::onTransportState(int state)
     switch (static_cast<BleImuTransport::State>(state)) {
     case BleImuTransport::State::Disconnected:
         // ⚠ Whatever the display said, the device's calibration did not survive
-        // this. The library drives every subsequent sample to HM_CAL_UNCALIBRATED
+        // this. The library drives every subsequent sample to WR_CAL_UNCALIBRATED
         // on link-down and the routine must be re-run (§8.3), and the UI is now
-        // driven to match: the worker's HM_EV_LINK_DOWN handler emits
+        // driven to match: the worker's WR_EV_LINK_DOWN handler emits
         // calibrationLost() and invalidateCalibration() empties the whole surface.
         //
         // ⚠ IT IS NOT DONE FROM HERE, and that is deliberate rather than lazy. This
@@ -1249,7 +1249,7 @@ void HmInstance::onTransportState(int state)
 
     case BleImuTransport::State::Ready:
         // GATT is up. The library's bring-up runs from here and announces itself
-        // with HM_EV_READY, at which point the worker starts the stream.
+        // with WR_EV_READY, at which point the worker starts the stream.
         setStateLabel(QStringLiteral("Connected"));
         m_attemptingConn  = false;
         m_connecting      = false;

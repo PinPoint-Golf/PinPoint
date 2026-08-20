@@ -58,7 +58,7 @@
 namespace pinpoint::analysis::hm_binding {
 
 // The device's own calibration state at capture, recorded by Phase B′ as
-// `device.calibrationStateAtStart`. 2 == HM_CAL_CALIBRATED; anything else means
+// `device.calibrationStateAtStart`. 2 == WR_CAL_CALIBRATED; anything else means
 // the lane was streaming board placement rather than anatomy, and a binding would
 // publish that as a measurement.
 inline constexpr int kCalibratedState = 2;

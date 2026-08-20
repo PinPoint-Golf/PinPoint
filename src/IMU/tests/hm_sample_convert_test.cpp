@@ -21,7 +21,7 @@
 // says so, which is why the assertions name the wrong value explicitly rather
 // than merely confirming the right one.
 //
-// Everything here is hardware-free: hm_unit_sample and hm_sample are PODs, so a
+// Everything here is hardware-free: wr_unit_sample and wr_sample are PODs, so a
 // block is built by hand and no session, link or device is involved.
 
 #include "hm_sample_convert.h"
@@ -48,17 +48,17 @@ namespace {
 // The library's own scaling, reproduced so a hand-built block is INTERNALLY
 // CONSISTENT — otherwise "the converter ignored linear_accel_mps2" would pass
 // for the trivial reason that the field was left at zero.
-constexpr float kHmAccelLsbMps2 = 0.0098f;   // spec §6.4, == HM_ACCEL_LSB_MPS2
+constexpr float kHmAccelLsbMps2 = 0.0098f;   // spec §6.4, == WR_ACCEL_LSB_MPS2
 constexpr float kStandardG      = 9.80665f;  // the divisor the shortcut would use
 
 // One wire block. `gyroRawInconsistent` is set deliberately at odds with the
 // scaled gyro so a converter that re-derives °/s from counts cannot pass.
-hm_unit_sample makeBlock(const int16_t accelRaw[3],
+wr_unit_sample makeBlock(const int16_t accelRaw[3],
                          const float   gyroDps[3],
                          const int16_t gyroRawInconsistent[3],
                          const float   quatWxyz[4])
 {
-    hm_unit_sample b;
+    wr_unit_sample b;
     std::memset(&b, 0, sizeof(b));
 
     for (int i = 0; i < 3; ++i) {
@@ -69,7 +69,7 @@ hm_unit_sample makeBlock(const int16_t accelRaw[3],
     }
     for (int i = 0; i < 4; ++i) {
         b.q_world_to_body[i]     = quatWxyz[i];
-        b.q_world_to_body_raw[i] = static_cast<int16_t>(quatWxyz[i] * HM_QUAT_SCALE);
+        b.q_world_to_body_raw[i] = static_cast<int16_t>(quatWxyz[i] * WR_QUAT_SCALE);
     }
     b.has_ticks = 1;
     return b;
@@ -105,7 +105,7 @@ int main()
         const int16_t accelRaw[3] = { 1000, -1000, 0 };
         const float   gyroDps[3]  = { 0.0f, 0.0f, 0.0f };
         const int16_t gyroRaw[3]  = { 0, 0, 0 };
-        const hm_unit_sample b = makeBlock(accelRaw, gyroDps, gyroRaw, q);
+        const wr_unit_sample b = makeBlock(accelRaw, gyroDps, gyroRaw, q);
         const ImuSample s = toImuSample(b);
 
         CHECK("+1000 counts -> +1.000000 g exactly", near(s.accel_x,  1.0f, 1e-6f));
@@ -206,12 +206,12 @@ int main()
     // the lower arm, consistently, across five golf swings (§6.4). That is the
     // physical signal, not an error to be reconciled: the ~4 g gap below is
     // squarely inside the measured band. A converter that averaged the pair, or
-    // that reached into the enclosing hm_sample for "the device's" acceleration,
+    // that reached into the enclosing wr_sample for "the device's" acceleration,
     // would produce two smoother and entirely fictitious lanes. This function
     // therefore takes ONE block and the caller names the unit.
     {
         std::printf("\nPer-block conversion: the two units stay separate\n");
-        hm_sample all;
+        wr_sample all;
         std::memset(&all, 0, sizeof(all));
 
         const int16_t armRaw[3]  = {  500, -200,  100 };   // 0.5 / -0.2 / 0.1 g

@@ -321,7 +321,7 @@ capture exactly where it is today and lets a high-rate capture use what it has.
 > median-derived grid lands near the base rate and discards precisely the dense span the ~4.5 s
 > pull was performed to obtain. The library makes the identical point about its own `density`
 > field: the block-level figure is the wrong scope, and a consumer should point the measurement
-> at the sub-range it actually cares about (`history.h`, `hm_sample_step_density`).
+> at the sub-range it actually cares about (`history.h`, `wr_sample_step_density`).
 >
 > **What shipped:** `ImuVisionFuser::gridHzForWindow()` takes the **PEAK local rate**, measured by
 > sliding a 250 ms probe (about a downswing) across each bound lane and taking the maximum. That
@@ -485,7 +485,7 @@ folded in at all:
   the `FusedStreams::streamFor` fix. A HackMotion-only capture still halts with "no IMU and no
   pose data in window" — expected, not a defect.
 - **What rate the wrist metrics need** is still unanswered (open item 2 above).
-- **Wire-byte recording** — `HM_BUILD_RECORD` is forced on and `hackmotion_record` is linked, but
+- **Wire-byte recording** — `WR_BUILD_RECORD` is forced on and `wrist_record` is linked, but
   nothing calls it and no recording is ever opened, so every app-driven calibration has discarded
   its payload. Deliberately left out of this phase and recorded as a follow-up rather than drifted
   past.

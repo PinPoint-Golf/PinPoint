@@ -25,7 +25,7 @@
 #include <QString>
 #include <QTimer>
 
-#include <hackmotion/hackmotion.h>
+#include <wrist/wrist.h>
 
 #include <atomic>
 #include <deque>
@@ -46,8 +46,8 @@
 // ---------------------------------------------------------------------------
 //
 // ⚠ THE LIBRARY'S THREADING CONTRACT IS ABSOLUTE (session.h:6-21): every
-// hm_session_* call must come from ONE thread for the session's whole life.
-// libhackmotion contains no locks, no atomics and no threads, so this is not
+// wr_session_* call must come from ONE thread for the session's whole life.
+// libwrist contains no locks, no atomics and no threads, so this is not
 // advice. Everything that touches the session — creation, bytes in, ticks,
 // every drain, close and destroy — happens here, on ImuManager's shared IMU I/O
 // thread. The only thing that crosses the boundary is snapshot(), which is a
@@ -55,10 +55,10 @@
 //
 // The host loop this implements is the one at the top of session.h:
 //
-//     on transport bytes ......... hm_session_on_bytes(s, p, n, now)
-//     on link up/down ............ hm_session_on_link_up / _on_link_down
-//     arm one timer to ........... hm_session_next_due_us(s)
-//     when it fires .............. hm_session_tick(s, now)
+//     on transport bytes ......... wr_session_on_bytes(s, p, n, now)
+//     on link up/down ............ wr_session_on_link_up / _on_link_down
+//     arm one timer to ........... wr_session_next_due_us(s)
+//     when it fires .............. wr_session_tick(s, now)
 //     then always ................ drain poll_writes / poll_events / poll_live
 //
 // That is the whole integration. The library never pushes; the host drains.
@@ -67,7 +67,7 @@ class HmSessionWorker : public QObject
     Q_OBJECT
 
 public:
-    // One unit's display state. Deliberately not hm_unit_sample: the display
+    // One unit's display state. Deliberately not wr_unit_sample: the display
     // needs a dozen floats and copying the full 190-byte sample under the
     // snapshot mutex for every GUI tick would be paying for the raw counts,
     // the tick counters and the pinned masks that nothing here reads.
@@ -88,28 +88,28 @@ public:
         // when it has not moved, so a still device costs no notifications at all.
         quint64   seq = 0;
         double    rateHz = 0.0;
-        quint64   droppedLive = 0;   // hm_session_dropped_live — never silent
-        UnitState unit[HM_UNIT_COUNT];
+        quint64   droppedLive = 0;   // wr_session_dropped_live — never silent
+        UnitState unit[WR_UNIT_COUNT];
 
         // ── Ring-write accounting, copied out of the worker's own counters ────
-        quint64 written[HM_UNIT_COUNT] = { 0, 0 };
+        quint64 written[WR_UNIT_COUNT] = { 0, 0 };
         // Samples the ring never saw because they carried no mapped host time.
         // ⚠ NOT the obsolete "drop the first two seconds" rule: the clock fit
-        // exists from the first live frame (brief §0 #1) and HM_SAMPLE_NO_FIT
+        // exists from the first live frame (brief §0 #1) and WR_SAMPLE_NO_FIT
         // fires only before it, so a non-zero count here means something is
         // wrong — which is exactly why it is counted rather than assumed zero.
         quint64 noFitSkipped = 0;
         // Samples whose host_time_us did not advance past the last one written to
         // that source, and the largest such backward step. MEASUREMENT ONLY — the
         // merger owns the clamping (see writeSample()).
-        quint64 nonMonotonic[HM_UNIT_COUNT]  = { 0, 0 };
-        qint64  maxBackStepUs[HM_UNIT_COUNT] = { 0, 0 };
+        quint64 nonMonotonic[WR_UNIT_COUNT]  = { 0, 0 };
+        qint64  maxBackStepUs[WR_UNIT_COUNT] = { 0, 0 };
         // skew_us provenance: min / MEDIAN / max of palm − lower_arm over the
         // session. Never applied to a timestamp — see HmInstance::skewUsMedian().
         //
         // ⚠ A MEDIAN, NOT A MEAN, AND THAT IS THE WHOLE POINT OF THIS FIELD. A
         // single record's tick difference is dominated by ±½-sample PAIRING JITTER
-        // — libhackmotion measured 89 and 99 ticks on two consecutive records of
+        // — libwrist measured 89 and 99 ticks on two consecutive records of
         // one capture against a session median of 59 (§10.3) — so the stable
         // 0.92 ms is a session-level figure that only appears after aggregating,
         // and a mean carries every one of those outliers into the answer.
@@ -144,7 +144,7 @@ public:
     Snapshot snapshot() const;
 
     // ── Deferred history (Phase E) ──────────────────────────────────────────
-    // reserveHistory() must run ON the I/O thread (it is a hm_session_* call) and
+    // reserveHistory() must run ON the I/O thread (it is a wr_session_* call) and
     // is posted there by HmInstance. The other two are read from the GUI thread
     // while the gather polls, so they synchronise: an atomic flag and a
     // mutex-held result, the same shape snapshot() already uses.
@@ -165,7 +165,7 @@ public:
     // later in the life cycle for the same reason there is no detach one: the
     // buffer pointer is only ever cleared from shutdown(), on the I/O thread.
     void attachBuffer(pinpoint::EventBuffer *buffer,
-                      const pinpoint::SourceId ids[HM_UNIT_COUNT]);
+                      const pinpoint::SourceId ids[WR_UNIT_COUNT]);
 
     // The reference-pose anchor of the most recent presence measurement, copied
     // out from under the same mutex snapshot() uses — so it is callable from any
@@ -213,7 +213,7 @@ public:
     // ── The calibration routine — I/O thread only, reached by QueuedConnection ─
     //
     // ⚠ THE ORDER IS FIXED BY THE LIBRARY and is not enforced again here: it
-    // refuses an out-of-order step with HM_ERR_INVALID_STATE, and duplicating that
+    // refuses an out-of-order step with WR_ERR_INVALID_STATE, and duplicating that
     // check would give us a second, divergent state machine to keep in step with
     // the first. Every one of these therefore does the same three things — call,
     // surface a refusal, pump — and the library owns the sequencing.
@@ -237,21 +237,21 @@ signals:
     // ── Calibration, GUI-bound ───────────────────────────────────────────────
     //
     // ⚠ EVERY ONE OF THESE CARRIES `libraryState`, READ BACK FROM
-    // hm_session_calibration_state() AT THE MOMENT THE EVENT WAS DRAINED. The
+    // wr_session_calibration_state() AT THE MOMENT THE EVENT WAS DRAINED. The
     // phase and the state answer different questions and neither is derivable from
-    // the other — HM_CALP_COMPLETE with HM_CAL_UNKNOWN is the ordinary outcome of a
+    // the other — WR_CALP_COMPLETE with WR_CAL_UNKNOWN is the ordinary outcome of a
     // routine whose presence check was skipped — so the state is always read and
     // never inferred from the phase.
     void calibrationPhaseEvent(int phase, int previousPhase, int abortReason,
                                int libraryState, qint64 elapsedUs);
     // A presence measurement landed. The values are in referenceAnchor().
     void calibrationPresenceMeasured(int libraryState);
-    // HM_WARN_PRESENCE_NOT_MEASURED: the check was ASKED FOR and could not be
-    // taken. ⚠ Its own signal because the phase still reaches HM_CALP_COMPLETE and
+    // WR_WARN_PRESENCE_NOT_MEASURED: the check was ASKED FOR and could not be
+    // taken. ⚠ Its own signal because the phase still reaches WR_CALP_COMPLETE and
     // "we could not check" must never end up in the same recording as "we checked
     // and it was fine". `samplesCollected` is how many arrived.
     void calibrationPresenceUnmeasured(int samplesCollected, int libraryState);
-    // HM_WARN_CALIBRATION_ABSENT / _INDETERMINATE. Both arrive alongside a presence
+    // WR_WARN_CALIBRATION_ABSENT / _INDETERMINATE. Both arrive alongside a presence
     // measurement and only refine what the library knows — ABSENT drives the state
     // to UNCALIBRATED, INDETERMINATE leaves it exactly as it was — so this carries
     // the state and nothing else. Order against the presence event does not matter:
@@ -259,7 +259,7 @@ signals:
     void calibrationStateRefreshed(int libraryState);
     // ⚠ THE CALIBRATION IS GONE. Link-down (always) or a stream restart.
     void calibrationLost(int libraryState, const QString &why);
-    // The hm_status of a refused hm_calibration_* call, with the call's name. The
+    // The wr_status of a refused wr_calibration_* call, with the call's name. The
     // queued hop means this is the ONLY way a refusal can reach the GUI thread.
     void calibrationCallRefused(int status, const QString &call);
 
@@ -269,7 +269,7 @@ private:
 
     // The shared body of the five calibration entry points: make the call, turn a
     // refusal into calibrationCallRefused(), then pump.
-    void calibrationCall(hm_status (*fn)(hm_session *), const char *name);
+    void calibrationCall(wr_status (*fn)(wr_session *), const char *name);
 
     // Every path into the session ends here: drain what it produced, then
     // re-arm from the session's own idea of when it next wants attention.
@@ -280,12 +280,12 @@ private:
     void drainWrites();
     void drainEvents();
     void drainLive();
-    void writeSample(const hm_sample &s);   // one hm_sample → two ring writes
-    void handleEvent(const hm_event &ev);
+    void writeSample(const wr_sample &s);   // one wr_sample → two ring writes
+    void handleEvent(const wr_event &ev);
 
-    static hm_time_us nowUs() { return pinpoint::EventBuffer::nowMicros(); }
+    static wr_time_us nowUs() { return pinpoint::EventBuffer::nowMicros(); }
 
-    // Batch sizes for the drains. hm_event is 280 bytes and hm_sample ~190, so
+    // Batch sizes for the drains. wr_event is 280 bytes and wr_sample ~190, so
     // these are ~9 KB and ~12 KB of stack respectively — drained in a loop until
     // a poll comes back short, so a burst is never left sitting in a ring.
     static constexpr size_t kWriteBatch = 16;
@@ -293,15 +293,15 @@ private:
     static constexpr size_t kLiveBatch  = 64;
 
     // Upper bound on how long the drain timer is allowed to sleep, however
-    // distant hm_session_next_due_us() says the next deadline is. The keepalive
+    // distant wr_session_next_due_us() says the next deadline is. The keepalive
     // poll is 30 s away for most of a session, and a single no-op tick per
     // second is far cheaper than the failure mode this bounds: a host clock that
     // jumps, or a due time computed from one, cannot park the session for
-    // minutes. hm_session_tick() is documented as cheap and idempotent when
+    // minutes. wr_session_tick() is documented as cheap and idempotent when
     // nothing is due, which is exactly what these extra wakes hit.
     static constexpr int kMaxDueDelayMs = 1'000;
 
-    hm_session      *m_session   = nullptr;
+    wr_session      *m_session   = nullptr;
     BleImuTransport *m_transport = nullptr;   // child of this worker — migrates with it
     QTimer          *m_dueTimer  = nullptr;   // child of this worker, for the same reason
 
@@ -322,23 +322,23 @@ private:
     // GUI thread). One id per unit; kInvalidSourceId means that unit's
     // registration failed and its lane simply does not record.
     pinpoint::EventBuffer *m_buffer = nullptr;
-    pinpoint::SourceId     m_sourceIds[HM_UNIT_COUNT] =
+    pinpoint::SourceId     m_sourceIds[WR_UNIT_COUNT] =
         { pinpoint::kInvalidSourceId, pinpoint::kInvalidSourceId };
 
     // Cumulative counters. They live here rather than in m_snap because
     // drainLive() rebuilds the snapshot from scratch each pass and would
     // otherwise reset them; the snapshot carries a copy out.
-    quint64 m_written[HM_UNIT_COUNT] = { 0, 0 };
+    quint64 m_written[WR_UNIT_COUNT] = { 0, 0 };
     quint64 m_noFitSkipped = 0;
 
     // Per-unit last host time actually written, for the monotonicity measurement.
-    // HM_TIME_UNKNOWN (INT64_MIN) is the "nothing written yet" sentinel and can
+    // WR_TIME_UNKNOWN (INT64_MIN) is the "nothing written yet" sentinel and can
     // never be a real mapped time, so no first-sample special case is needed.
-    hm_time_us m_lastWrittenUs[HM_UNIT_COUNT] = { HM_TIME_UNKNOWN, HM_TIME_UNKNOWN };
-    quint64    m_nonMonotonic[HM_UNIT_COUNT]  = { 0, 0 };
-    hm_time_us m_maxBackStepUs[HM_UNIT_COUNT] = { 0, 0 };
+    wr_time_us m_lastWrittenUs[WR_UNIT_COUNT] = { WR_TIME_UNKNOWN, WR_TIME_UNKNOWN };
+    quint64    m_nonMonotonic[WR_UNIT_COUNT]  = { 0, 0 };
+    wr_time_us m_maxBackStepUs[WR_UNIT_COUNT] = { 0, 0 };
 
-    // ⚠ THE VALUES ARE KEPT, BECAUSE A MEDIAN CANNOT BE STREAMED. libhackmotion's
+    // ⚠ THE VALUES ARE KEPT, BECAUSE A MEDIAN CANNOT BE STREAMED. libwrist's
     // own reconciler keeps them for the same reason and caps the store the same
     // way. 16384 int32 is 64 KB and covers ~20 s of the device's full ≈799 Hz
     // internal rate, or hours of the 25 Hz live rate.
@@ -359,7 +359,7 @@ private:
     float   m_relAngleMinDeg = 0.0f;
     float   m_relAngleMaxDeg = 0.0f;
 
-    // HM_EV_CLOCK_DEGRADED application-log rate limiting — see handleEvent().
+    // WR_EV_CLOCK_DEGRADED application-log rate limiting — see handleEvent().
     // The device log ring keeps every report regardless.
     bool     m_clockDegradedLogged   = false;
     uint64_t m_clockDegradedStreamId = 0;
@@ -374,13 +374,13 @@ private:
     // what they protect.
     pinpoint::hm::CaptureProvenanceLog m_provenance;
 
-    void noteProvenance(const hm_sample &s);   // I/O thread; needs a mapped host time
+    void noteProvenance(const wr_sample &s);   // I/O thread; needs a mapped host time
 
     // ── Deferred history state, I/O thread unless noted ─────────────────────
     // The session's policy, kept from initialise() so reserveHistory() can hand
-    // it to hm_history_request_around() — which is the only way the pre/post
+    // it to wr_history_request_around() — which is the only way the pre/post
     // roll fields set there reach a request.
-    hm_session_policy m_policy{};
+    wr_session_policy m_policy{};
     uint64_t m_historyRequestId = 0;
     // Read from the GUI thread by HmInstance::historyPending(), so atomic rather
     // than mutex-held: it is polled every 50 ms during a gather.

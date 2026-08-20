@@ -156,7 +156,7 @@ void test_a_serial_that_names_no_unit_is_not_guessed_at()
 
 void test_the_device_calibration_state_is_carried_not_assumed()
 {
-    // ⚠ 2 == HM_CAL_CALIBRATED. Anything else means the lane was streaming BOARD
+    // ⚠ 2 == WR_CAL_CALIBRATED. Anything else means the lane was streaming BOARD
     // PLACEMENT rather than anatomy, and a binding that claimed calibrated would
     // publish the strap's position as a wrist measurement.
     const auto cal = good(kLowerArmSerial, hm_binding::kCalibratedState);

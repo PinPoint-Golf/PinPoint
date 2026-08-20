@@ -33,7 +33,7 @@
 #include <QQuaternion>
 #include <QtGlobal>
 
-#include <hackmotion/clock.h>       // hm_clock_snapshot — carried WITH the data
+#include <wrist/clock.h>       // wr_clock_snapshot — carried WITH the data
 
 #include <utility>
 #include <vector>
@@ -45,7 +45,7 @@ namespace hm {
 
 // ── The reference-pose anchor, kept for Phase D's frame solve ─────────────
 //
-// Every field of hm_calibration_presence_event that cannot be re-derived once
+// Every field of wr_calibration_presence_event that cannot be re-derived once
 // the pose has passed. C++ only: Phase D consumes it, QML has no business
 // with it, and nothing here derives anything from it — the solve is Phase D's
 // and this is the raw measurement the library already took.
@@ -77,7 +77,7 @@ struct ReferenceAnchor {
     QQuaternion qLowerArmMedoid, qPalmMedoid;
     quint32     sampleIndex = 0;   // which record the medoid pair came from
     // ⚠ ONE RECORD'S DIFFERENCE, AND IT IS MOSTLY JITTER — NOT "the skew".
-    // libhackmotion's 0x90 analysis measured 89 and 99 ticks on two consecutive
+    // libwrist's 0x90 analysis measured 89 and 99 ticks on two consecutive
     // records of one capture against a session median of 59: a single reading is
     // dominated by ±½-sample pairing jitter, because the two units share a
     // sample index by construction (one record header) but run two free-running
@@ -101,7 +101,7 @@ struct HistoryResult {
     // its own coverage. Read `status` and the coverage fields, never this.
     bool valid = false;
 
-    int  status   = -1;      // hm_history_status
+    int  status   = -1;      // wr_history_status
     int  attempts = 0;       // how many `a1` requests were issued
     // ⚠ The interval list is then a SUPERSET and coverageFraction /
     // largestGapUs become OPTIMISTIC. Surfaced because an optimistic gap
@@ -147,7 +147,7 @@ struct HistoryResult {
     // alignment. The fit is persisted WITH the data and never queried
     // afterwards — it re-anchors at every bracket close, so the session's
     // current fit is not the one these samples were dated by.
-    hm_clock_snapshot fit{};
+    wr_clock_snapshot fit{};
 
     int   calStateAtStart     = -1;
     int   calStateAtEnd       = -1;

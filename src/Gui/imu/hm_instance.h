@@ -23,8 +23,8 @@
 #include <QStringList>
 #include <QTimer>
 
-#include <hackmotion/sample.h>      // hm_unit — the cable-fixed unit ordering
-#include <hackmotion/clock.h>       // hm_clock_snapshot — carried WITH the data
+#include <wrist/sample.h>      // wr_unit — the cable-fixed unit ordering
+#include <wrist/clock.h>       // wr_clock_snapshot — carried WITH the data
 
 #include <utility>
 #include <vector>
@@ -48,7 +48,7 @@ namespace pinpoint { class EventBuffer; }
 // ---------------------------------------------------------------------------
 //
 // The wG3 is ONE BLE peripheral carrying TWO sensor units on a cable: wire
-// block 0 is the lower arm, block 1 is the palm (hm_unit / spec §6.3). The
+// block 0 is the lower arm, block 1 is the palm (wr_unit / spec §6.3). The
 // order is fixed by the wiring and is not configurable — a consumer that swaps
 // them produces a plausible-looking wrist angle that is simply MIRRORED, which
 // every plausibility check passes.
@@ -107,7 +107,7 @@ class HmUnit : public QObject
 public:
     // deviceId is the enumerator's id for the peripheral; `unit` picks which of
     // its two blocks this object represents.
-    HmUnit(const QString &deviceId, hm_unit unit, QObject *parent = nullptr);
+    HmUnit(const QString &deviceId, wr_unit unit, QObject *parent = nullptr);
 
     // ⚠ "<deviceId>#lowerArm" / "<deviceId>#palm", and the exact string matters:
     // it is the EventBuffer SourceDescriptor::identifier (Phase B) and the
@@ -120,10 +120,10 @@ public:
     // live HmUnit: ImuManager resolves and migrates placement keys for a wG3 that
     // has been enumerated but never connected. Ask for the string; do not build a
     // throwaway HmUnit to read one off, and do not respell the suffix.
-    static QString unitIdFor(const QString &deviceId, hm_unit unit);
-    static QString unitLabelFor(hm_unit unit);           // "Lower arm" / "Palm"
+    static QString unitIdFor(const QString &deviceId, wr_unit unit);
+    static QString unitLabelFor(wr_unit unit);           // "Lower arm" / "Palm"
 
-    hm_unit unit()      const { return m_unit; }
+    wr_unit unit()      const { return m_unit; }
     QString unitId()    const { return m_unitId; }
     QString unitLabel() const { return m_unitLabel; }
 
@@ -201,7 +201,7 @@ signals:
 private:
     friend class HmInstance;   // the 60 Hz display tick writes these members
 
-    hm_unit m_unit;
+    wr_unit m_unit;
     QString m_unitId;
     QString m_unitLabel;
 
@@ -231,13 +231,13 @@ private:
 // A PEER of ImuInstance, not a subclass of it and not a subclass of ImuBase.
 // The two share a shape — I/O-thread ownership of the link, a 60 Hz display
 // tick that is the only emitter of the high-rate signals, retry with backoff,
-// a log ring — and share almost no mechanism: libhackmotion owns framing,
+// a log ring — and share almost no mechanism: libwrist owns framing,
 // decode and fusion; the device owns calibration; and one peripheral produces
 // two units. Both kinds are held through ImuDeviceBase, which is the
 // device-kind-agnostic slice ImuManager actually calls.
 //
 // PHASE B SCOPE. This registers TWO EventBuffer sources — one per unit, keyed
-// on HmUnit::unitId() — and every drained hm_sample becomes two ImuSample ring
+// on HmUnit::unitId() — and every drained wr_sample becomes two ImuSample ring
 // writes, both stamped with the sample's mapped host time. The display path
 // (60 Hz tick, two orientation cubes) is unchanged and still shows only the
 // newest sample; the RING gets every one of them, because the ring is the
@@ -257,10 +257,10 @@ private:
 //     `a2 01`, including attempts an application goes on to reject, so its
 //     arrival tells us the frame under the stream CHANGED and nothing about
 //     whether it changed correctly. Success is never inferred from it.
-//   - THE REFERENCE-POSE STEP IS NOT OPTIONAL. HM_CALP_COMPLETE means the
+//   - THE REFERENCE-POSE STEP IS NOT OPTIONAL. WR_CALP_COMPLETE means the
 //     device applied a transform; only a passed presence measurement makes
-//     hm_session_calibration_state() read HM_CAL_CALIBRATED. Skipping it leaves
-//     every recorded sample flagged HM_CAL_UNKNOWN — and it is also the step
+//     wr_session_calibration_state() read WR_CAL_CALIBRATED. Skipping it leaves
+//     every recorded sample flagged WR_CAL_UNKNOWN — and it is also the step
 //     that yields the reference anchor Phase D's frame solve needs.
 //   - RECONNECT IS NOT RESUME. §8.3 measured 0.70° immediately before dropping
 //     a link and 18.80° at the same pose after reconnecting, strap untouched.
@@ -305,19 +305,19 @@ class HmInstance : public ImuDeviceBase
     Q_PROPERTY(int    calibrationPhase READ calibrationPhase NOTIFY calibrationStateChanged)
 
     // ⚠ THE PHASE AND THE STATE ARE TWO DIFFERENT QUESTIONS AND NEITHER IS
-    // DERIVABLE FROM THE OTHER. `calibrationPhase` (hm_calibration_phase) is
-    // WHERE THE ROUTINE IS; `calibrationState` (hm_calibration_state) is WHAT IS
-    // KNOWN ABOUT THE DEVICE'S TRANSFORM. HM_CALP_COMPLETE with
-    // HM_CAL_UNKNOWN is an ordinary, expected combination — the device applied
+    // DERIVABLE FROM THE OTHER. `calibrationPhase` (wr_calibration_phase) is
+    // WHERE THE ROUTINE IS; `calibrationState` (wr_calibration_state) is WHAT IS
+    // KNOWN ABOUT THE DEVICE'S TRANSFORM. WR_CALP_COMPLETE with
+    // WR_CAL_UNKNOWN is an ordinary, expected combination — the device applied
     // something and nobody checked it — which is exactly the mistake the
-    // library's own comment at HM_CALP_COMPLETE warns against. So this is read
-    // back from hm_session_calibration_state() on every phase event rather than
+    // library's own comment at WR_CALP_COMPLETE warns against. So this is read
+    // back from wr_session_calibration_state() on every phase event rather than
     // inferred here.
     Q_PROPERTY(int calibrationState READ calibrationState NOTIFY calibrationStateChanged)
 
-    // hm_calibration_abort_reason. ⚠ NOT A SYNONYM FOR "ABORTED":
-    // HM_CAL_ABORT_CALLER is carried on a transition to COMPLETE as well, because
-    // aborting at HM_CALP_VERIFYING declines the presence check on a transform the
+    // wr_calibration_abort_reason. ⚠ NOT A SYNONYM FOR "ABORTED":
+    // WR_CAL_ABORT_CALLER is carried on a transition to COMPLETE as well, because
+    // aborting at WR_CALP_VERIFYING declines the presence check on a transform the
     // device HAS ALREADY APPLIED. Read it with the phase, never instead of it.
     Q_PROPERTY(int calibrationAbortReason READ calibrationAbortReason NOTIFY calibrationStateChanged)
 
@@ -332,12 +332,12 @@ class HmInstance : public ImuDeviceBase
     Q_PROPERTY(int    presenceSamplesUsed READ presenceSamplesUsed NOTIFY calibrationStateChanged)
 
     // ⚠ "WE COULD NOT CHECK", WHICH IS NOT "WE CHECKED AND IT WAS FINE" AND NOT
-    // "WE DECLINED TO CHECK". HM_WARN_PRESENCE_NOT_MEASURED means the reference
+    // "WE DECLINED TO CHECK". WR_WARN_PRESENCE_NOT_MEASURED means the reference
     // pose was asked for and too few live samples reached the run to average, and
-    // the phase reaches HM_CALP_COMPLETE anyway — so a UI keyed only on the phase
+    // the phase reaches WR_CALP_COMPLETE anyway — so a UI keyed only on the phase
     // would claim success. Latched for the current attempt and cleared when the
     // next routine begins. (A DECLINED check — abort at VERIFYING — leaves this
-    // false and puts HM_CAL_ABORT_CALLER in calibrationAbortReason instead.)
+    // false and puts WR_CAL_ABORT_CALLER in calibrationAbortReason instead.)
     Q_PROPERTY(bool presenceNotMeasured READ presenceNotMeasured NOTIFY calibrationStateChanged)
 
     // A routine is in flight: the phase is neither IDLE, COMPLETE nor ABORTED.
@@ -345,17 +345,17 @@ class HmInstance : public ImuDeviceBase
     // reach; it is NOT a claim that anything has been calibrated.
     Q_PROPERTY(bool calibrationActive READ calibrationActive NOTIFY calibrationStateChanged)
 
-    // ⚠ THE UI MUST NOT OFFER "CALIBRATE" WITHOUT THIS. hm_calibration_begin()
-    // returns HM_ERR_NO_STREAM when no stream is running and there is deliberately
+    // ⚠ THE UI MUST NOT OFFER "CALIBRATE" WITHOUT THIS. wr_calibration_begin()
+    // returns WR_ERR_NO_STREAM when no stream is running and there is deliberately
     // no AWAIT_STREAM phase to fall into — the device observes a CONTINUOUS raise
     // between the two markers, which two static samples cannot supply, so
     // calibration is not a standalone transaction. Under our one-stream cycle the
-    // stream is up from just after HM_EV_READY and stays up, so this is normally
+    // stream is up from just after WR_EV_READY and stays up, so this is normally
     // true whenever the device is connected — which is a reason to bind it, not a
     // reason to assume it.
     Q_PROPERTY(bool streaming READ streaming NOTIFY streamingChanged)
 
-    // hm_relative_angle_deg() of the newest sample — the readout that PROVES a
+    // wr_relative_angle_deg() of the newest sample — the readout that PROVES a
     // calibration took, because it is a rotation magnitude and therefore
     // independent of both units' unreconciled frames.
     //
@@ -387,7 +387,7 @@ public:
     // ⚠ WHY THIS EXISTS. A HackMotion reading reaches swing.json as ten floats
     // (pinpoint::ImuSample) plus a host timestamp. The NUMBERS survive intact —
     // accel is raw counts × 0.001 exactly, the quaternion is i16/16384 exact in
-    // float32 — but every field of hm_sample that says WHETHER TO TRUST THEM
+    // float32 — but every field of wr_sample that says WHETHER TO TRUST THEM
     // stops at writeSample(). Two of those are load-bearing and neither can be
     // reconstructed from the recording afterwards:
     //
@@ -448,8 +448,8 @@ public:
     HistoryResult takeHistoryResult();
 
     // ioThread is ImuManager's shared IMU I/O thread. Everything that touches
-    // the hm_session lives there — see src/IMU/hm_session_worker.h and the
-    // threading contract at the top of hackmotion/session.h.
+    // the wr_session lives there — see src/IMU/hm_session_worker.h and the
+    // threading contract at the top of wrist/session.h.
     explicit HmInstance(const Device &device,
                         pinpoint::EventBuffer *buffer,
                         QThread *ioThread,
@@ -477,7 +477,7 @@ public:
     // stay translated.
     QStringList sourceLabels() const override;
 
-    // MEDIAN of hm_sample.skew_us over this session, NaN until a sample has been
+    // MEDIAN of wr_sample.skew_us over this session, NaN until a sample has been
     // seen. ⚠ PROVENANCE, NOT A CORRECTION: the two units' blocks are NOT paired as
     // simultaneous and this value is never applied to a timestamp. §10.3 measures a
     // stable 59 ticks (0.92 ms) whose physical meaning is unresolved — real sampling
@@ -485,7 +485,7 @@ public:
     // apart from the counters alone — so the honest thing is to carry it into
     // swing.json and let the analysis decide.
     //
-    // ⚠ A MEDIAN, AND IT USED TO BE A MEAN. libhackmotion's 0x90 analysis showed a
+    // ⚠ A MEDIAN, AND IT USED TO BE A MEAN. libwrist's 0x90 analysis showed a
     // single record's tick difference is dominated by ±½-sample PAIRING JITTER — 89
     // and 99 ticks on two consecutive records of one capture against a session
     // median of 59 — so the stable figure is session-level and only appears after
@@ -518,15 +518,15 @@ public:
     //
     // ⚠ EVERY ONE OF THESE IS MARSHALLED ONTO THE I/O THREAD AND RETURNS
     // IMMEDIATELY, SO NONE OF THEM CAN REPORT A REFUSAL BY RETURNING ONE. The
-    // library's threading contract puts every hm_calibration_* call on the one
+    // library's threading contract puts every wr_calibration_* call on the one
     // thread that owns the session, and the hop is a QueuedConnection rather than
     // a BlockingQueuedConnection deliberately: a calibration call must never block
     // the GUI thread, whose renderer is PACING the athlete through a raise the
-    // device watches continuously. hm_calibration_confirm_reference_pose() is
+    // device watches continuously. wr_calibration_confirm_reference_pose() is
     // documented as returning BEFORE the measurement exists in any case, so there
     // is nothing useful to wait for.
     //
-    // ⚠ A UI THAT WAITS ON A RETURN VALUE HERE WILL HANG. The hm_status the
+    // ⚠ A UI THAT WAITS ON A RETURN VALUE HERE WILL HANG. The wr_status the
     // library produced reaches the GUI thread ONLY as
     // calibrationCallRefused(status, call) — that signal is the entire refusal
     // channel. Everything else arrives as a phase or presence event.
@@ -550,17 +550,17 @@ signals:
     // carried through raw rather than folded into a generic error because the
     // three reachable values want three different things from the coach:
     //
-    //   HM_ERR_NO_STREAM     the stream is not running. Nothing to wait for and
+    //   WR_ERR_NO_STREAM     the stream is not running. Nothing to wait for and
     //                        nothing to retry — there is no AWAIT_STREAM phase on
     //                        purpose. Reconnect.
-    //   HM_ERR_BUSY          a history bracket is open (Phase E). The presence
+    //   WR_ERR_BUSY          a history bracket is open (Phase E). The presence
     //                        check is measured FROM live samples and a retrieval
     //                        suspends them, so the right answer is "try again in a
     //                        second" — the athlete is standing still either way.
     //                        ⚠ Not reachable today; Phase E makes it reachable,
     //                        which is why it is carried legibly now rather than
     //                        discovered then.
-    //   HM_ERR_INVALID_STATE no routine is running (abort), or the step is out of
+    //   WR_ERR_INVALID_STATE no routine is running (abort), or the step is out of
     //                        order. A UI bug, not a device condition.
     void calibrationCallRefused(int status, const QString &call);
 
@@ -571,7 +571,7 @@ signals:
     // and this signal is how our UI matches that rather than papering over it.
     void calibrationInvalidated();
 
-    // The negotiated ATT MTU is below HM_MIN_ATT_MTU (96), so the library
+    // The negotiated ATT MTU is below WR_MIN_ATT_MTU (96), so the library
     // refuses to run. ⚠ Its own error, deliberately not folded into a generic
     // connect failure: everything up to this point SUCCEEDED, no Qt platform
     // lets an application request an MTU, and therefore nothing a retry does
@@ -599,7 +599,7 @@ private:
     // ⚠ AND IT STORES NOTHING, ANYWHERE. There is no save, no load and no "reuse
     // last session", and none may ever be added. §8.3: a calibration is lost by a
     // power cycle, by remounting AND by a plain disconnect, and the library
-    // deliberately ships no hm_calibration_save()/_load() because such a
+    // deliberately ships no wr_calibration_save()/_load() because such a
     // convenience produces confidently wrong data with no error anywhere. Anything
     // persisted here would be re-applied to a device whose transform is gone, and
     // the resulting wrist angles would be plausible, permanently wrong, and
@@ -640,7 +640,7 @@ private:
     int    m_retryCount     = 0;
     bool   m_connecting     = false;
     bool   m_attemptingConn = false;
-    // Set from HM_EV_LINK_DOWN's recovery advice when the library classifies the
+    // Set from WR_EV_LINK_DOWN's recovery advice when the library classifies the
     // drop as one no retry can fix — the device slept and needs a physical
     // button press, another application holds the single allowed connection, or
     // we powered it off ourselves. It only ever CANCELS a pending retry, which
@@ -661,7 +661,7 @@ private:
     QTimer  m_displayTimer;
     quint64 m_lastSeq        = 0;
     double  m_lastSentRateHz = 0.0;
-    float   m_lastSentVelDps[HM_UNIT_COUNT] = { 0.0f, 0.0f };
+    float   m_lastSentVelDps[WR_UNIT_COUNT] = { 0.0f, 0.0f };
     double  m_lastSentRelAngleDeg = 0.0;
 
     // 10 s log summary.
@@ -688,13 +688,13 @@ private:
 
     // ── The calibration surface. Written only from the worker's queued
     // calibration signals and from invalidateCalibration(); the enums live in
-    // <hackmotion/event.h> and are held as int here so this header stays the
+    // <wrist/event.h> and are held as int here so this header stays the
     // light one it is. Every default is established in the constructor, where
     // that header is in scope, rather than spelled twice.
     double m_presenceAngleDeg = 0.0;   // set to NaN in the constructor
-    int    m_calibrationPhase = 0;     // HM_CALP_IDLE
-    int    m_calibrationState = 0;     // HM_CAL_UNKNOWN
-    int    m_calibrationAbortReason = 0;   // HM_CAL_ABORT_NONE
+    int    m_calibrationPhase = 0;     // WR_CALP_IDLE
+    int    m_calibrationState = 0;     // WR_CAL_UNKNOWN
+    int    m_calibrationAbortReason = 0;   // WR_CAL_ABORT_NONE
     double m_poseSpreadMaxDeg = 0.0;   // set to NaN in the constructor
     int    m_presenceSamplesUsed = 0;
     bool   m_presenceNotMeasured = false;

@@ -112,62 +112,62 @@ function(pp_find_eigen out_var)
     set(${out_var} "${eigen_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
-# --- libhackmotion (lazy; defines the `hackmotion` target) --------------------
+# --- libwrist (lazy; defines the `wrist` target) --------------------
 # Shaped like pp_require_gtest rather than pp_find_eigen because what a suite
 # needs here is a TARGET, not an include dir. The umbrella deliberately pulls in
 # none of the app's dependencies (see the header above), so it resolves its own.
 #
 # Resolution order mirrors the app's, with one extra step: explicit
-# -DPP_HACKMOTION_DIR; a sibling ../libhackmotion checkout; any app build's
-# FetchContent copy (build/*/_deps/hackmotion-src); else fetch main from GitHub.
+# -DPP_LIBWRIST_DIR; a sibling ../libwrist checkout; any app build's
+# FetchContent copy (build/*/_deps/wrist-src); else fetch main from GitHub.
 # Everything routes through FetchContent even when the source is already on disk,
 # so an out-of-tree source still gets a binary dir inside this build.
-set(PP_HACKMOTION_DIR "" CACHE PATH "libhackmotion source root (dir containing CMakeLists.txt)")
-function(pp_require_hackmotion)
-    if(TARGET hackmotion)
+set(PP_LIBWRIST_DIR "" CACHE PATH "libwrist source root (dir containing CMakeLists.txt)")
+function(pp_require_wrist)
+    if(TARGET wrist)
         return()
     endif()
 
-    set(_hm_src "")
-    if(PP_HACKMOTION_DIR AND EXISTS "${PP_HACKMOTION_DIR}/CMakeLists.txt")
-        set(_hm_src "${PP_HACKMOTION_DIR}")
-    elseif(EXISTS "${PP_REPO_ROOT}/../libhackmotion/CMakeLists.txt")
-        get_filename_component(_hm_src "${PP_REPO_ROOT}/../libhackmotion" ABSOLUTE)
+    set(_wrist_src "")
+    if(PP_LIBWRIST_DIR AND EXISTS "${PP_LIBWRIST_DIR}/CMakeLists.txt")
+        set(_wrist_src "${PP_LIBWRIST_DIR}")
+    elseif(EXISTS "${PP_REPO_ROOT}/../libwrist/CMakeLists.txt")
+        get_filename_component(_wrist_src "${PP_REPO_ROOT}/../libwrist" ABSOLUTE)
     else()
-        file(GLOB _cand "${PP_REPO_ROOT}/build/*/_deps/hackmotion-src")
+        file(GLOB _cand "${PP_REPO_ROOT}/build/*/_deps/wrist-src")
         foreach(_c ${_cand})
             if(EXISTS "${_c}/CMakeLists.txt")
-                set(_hm_src "${_c}")
+                set(_wrist_src "${_c}")
                 break()
             endif()
         endforeach()
     endif()
 
-    if(_hm_src)
-        message(STATUS "PinPointTests: libhackmotion from ${_hm_src}")
-        set(FETCHCONTENT_SOURCE_DIR_HACKMOTION "${_hm_src}" CACHE PATH "" FORCE)
+    if(_wrist_src)
+        message(STATUS "PinPointTests: libwrist from ${_wrist_src}")
+        set(FETCHCONTENT_SOURCE_DIR_WRIST "${_wrist_src}" CACHE PATH "" FORCE)
     else()
         # Clear it, don't just skip setting it: the branch above writes FORCE, so
         # a build dir that once found a local source would keep using that path
-        # after it moved away or -DPP_HACKMOTION_DIR was pointed elsewhere.
-        unset(FETCHCONTENT_SOURCE_DIR_HACKMOTION CACHE)
-        message(STATUS "PinPointTests: libhackmotion not found locally — fetching main")
+        # after it moved away or -DPP_LIBWRIST_DIR was pointed elsewhere.
+        unset(FETCHCONTENT_SOURCE_DIR_WRIST CACHE)
+        message(STATUS "PinPointTests: libwrist not found locally — fetching main")
     endif()
 
     # The library defaults its tests, tools, FFI object, -Werror and install
     # rules off when embedded, so there is nothing to switch off here. Record is
     # the exception — it defaults ON as a library target, and no suite reads a
-    # .hmwire container, so skip compiling it.
-    set(HM_BUILD_RECORD OFF CACHE BOOL "" FORCE)
+    # .wrwire container, so skip compiling it.
+    set(WR_BUILD_RECORD OFF CACHE BOOL "" FORCE)
 
     include(FetchContent)
-    FetchContent_Declare(hackmotion
-        GIT_REPOSITORY https://github.com/PinPoint-Golf/libhackmotion.git
+    FetchContent_Declare(wrist
+        GIT_REPOSITORY https://github.com/PinPoint-Golf/libwrist.git
         GIT_TAG        main
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL)
 
-    FetchContent_MakeAvailable(hackmotion)
+    FetchContent_MakeAvailable(wrist)
 endfunction()
 
 # --- Sanitizers (one convention for ALL suites) -------------------------------

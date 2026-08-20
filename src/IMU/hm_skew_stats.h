@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 //
 // The wG3's two units are read from ONE stream and are NOT sampled
-// simultaneously. `hm_sample::skew_us` carries palm − lower_arm for one record,
+// simultaneously. `wr_sample::skew_us` carries palm − lower_arm for one record,
 // and spec §10.3 measures a STABLE 59 ticks (0.92 ms) across a session — worth
 // ~0.9° of relative angle at 1,000 °/s, which is the device's primary output.
 //
@@ -13,7 +13,7 @@
 // The two units share a sample index by construction — a record carries one
 // header, read once, applying to every block in it — while running two
 // free-running MCU timers. So a single record's difference is dominated by
-// ±½-sample PAIRING JITTER: libhackmotion measured 89 and 99 ticks on two
+// ±½-sample PAIRING JITTER: libwrist measured 89 and 99 ticks on two
 // consecutive records of one capture against that session median of 59. At the
 // device's ≈799 Hz internal rate a half sample is ~626 µs, so ~1250 µs of
 // scatter is what a perfectly healthy device looks like.

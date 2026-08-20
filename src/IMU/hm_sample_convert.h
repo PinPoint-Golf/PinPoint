@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include <hackmotion/sample.h>
+#include <wrist/sample.h>
 
 #include "imu_sample.h"
 
@@ -39,7 +39,7 @@
 // a struct, and are NOT the same physical quantity. Nothing downstream may
 // compare, difference, threshold or pool them across lanes — an impact detector
 // tuned on one is meaningless on the other, and "the accel looks wrong, it's
-// near zero" is this device working correctly (spec §6.4, hm_unit_sample).
+// near zero" is this device working correctly (spec §6.4, wr_unit_sample).
 //
 // ⚠ THERE IS NO AGGREGATE ACROSS THE TWO UNITS, AND THERE MUST NEVER BE ONE.
 // The wG3 is one peripheral carrying two units 3-8 cm apart on hand and
@@ -66,7 +66,7 @@
 //
 // WHAT THIS FUNCTION DELIBERATELY DOES NOT DO — all of it belongs to the caller:
 //   - TIME. ImuSample carries no timestamp; the EventBuffer takes it separately.
-//     Use hm_sample::host_time_us. Per-source monotonicity is the buffer's
+//     Use wr_sample::host_time_us. Per-source monotonicity is the buffer's
 //     constraint (event_buffer.cpp:84 clamps a violation and counts it), and
 //     host_time_us is the clock fit applied to the monotonically increasing
 //     sample_index, so it is monotonic per source BY CONSTRUCTION rather than by
@@ -74,10 +74,10 @@
 //     so the day the caller starts stamping arrival instants instead
 //     (host_recv_us, one-sidedly late and NOT monotonic) it is an obvious break.
 //   - SKEW. The palm block trails the lower arm by a stable 0.92 ms (§10.3),
-//     worth ~0.9° at 1,000 °/s. Carry hm_sample::skew_us into provenance; do not
+//     worth ~0.9° at 1,000 °/s. Carry wr_sample::skew_us into provenance; do not
 //     paper over it by stamping both blocks with one host time and calling them
 //     simultaneous.
-//   - PINNING. hm_unit_sample::pinned_mask says a channel saturated. int16 fields
+//   - PINNING. wr_unit_sample::pinned_mask says a channel saturated. int16 fields
 //     saturate rather than wrap, so a clipped peak is a plausible-looking flat
 //     top and nothing else reports it. That is a provenance/counter concern, not
 //     a reason to reject or alter a sample here.
@@ -93,13 +93,13 @@ inline constexpr float kAccelLsbG = 0.001f;   // spec §6.4: 1 LSB = 1 mg
 // One wire block -> one 40-byte ImuSample. Header-only and pure: no Qt, no
 // clock, no session, no side effects — so the unit test compiles it without a
 // library and the app's CMake needs no new source file.
-inline ImuSample toImuSample(const hm_unit_sample &b)
+inline ImuSample toImuSample(const wr_unit_sample &b)
 {
     // ⚠ g COMES FROM THE RAW COUNTS, NOT FROM linear_accel_mps2 / 9.80665.
     // 1 LSB is exactly 1 mg, so raw × 0.001 is exact. Going via the scaled field
     // would re-import the library's own g ≈ 9.8 rounding (0.0098 m/s² per mg is
     // 0.99932 mg of true gravity) and land every reading 0.068 % low for no
-    // reason at all. hm_unit_sample's header says the raw counts are the
+    // reason at all. wr_unit_sample's header says the raw counts are the
     // authoritative form — "they stay correct under any configuration" — and
     // this is the case that proves it. The test asserts against the 0.99932
     // specifically, so the shortcut cannot come back unnoticed.

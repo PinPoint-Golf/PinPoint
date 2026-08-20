@@ -35,7 +35,7 @@ GPL note. See **Known conflict — Teledyne FLIR Spinnaker SDK** below.
 | whisper.cpp (bundles ggml) | v1.7.2 | MIT | Permissive; GPL-compatible. |
 | libsamplerate | 0.2.2 | BSD-2-Clause | Permissive; GPL-compatible. |
 | Eigen | 3.4.0 | MPL-2.0 | MPL-2.0 carries an explicit GPL-2.0-or-later compatibility clause. |
-| libhackmotion (HackMotion wG3 wrist sensor driver) | tracks `main` (0.1.0) | LGPL-2.1-or-later | The "or later" grant permits taking it as LGPL-3.0, which combines with GPL-3.0. Statically linked; because the combined work is already conveyed under GPL-3.0 with corresponding source available, the LGPL's relinking provision is satisfied by construction. Sister project (same author); the exact commit built is recorded in the About box. |
+| libwrist (HackMotion wG3 wrist sensor driver) | tracks `main` (0.2.0) | MIT | Permissive. Statically linked, with the copyright notice retained. Combines with the GPL in either version, so unlike the LGPL terms it replaced this row does not rest on an argument about which GPL version this project conveys. Sister project (same author); the exact commit built is recorded in the About box. |
 | ONNX Runtime | 1.26.0 (Windows/Linux), 1.20.1 (macOS x86-64) | MIT | Permissive; GPL-compatible. |
 | onnxruntime-genai | 0.13.1 | MIT | Permissive; GPL-compatible. |
 | espeak-ng | 1.52.0 | GPL-3.0-or-later | Same copyleft family; conveyed under GPL-3.0. The library linked is GPL-3.0 (the repository's Android APK glue is separately Apache-2.0). |

@@ -60,7 +60,7 @@ struct DeferredStitchInput {
     std::vector<ImuSample> deferredSamples;
 
     // Half-open [start, end) host-time intervals the pull actually delivered,
-    // ascending and disjoint — hm_history_block::delivered.
+    // ascending and disjoint — wr_history_block::delivered.
     std::vector<std::pair<int64_t, int64_t>> delivered;
 };
 

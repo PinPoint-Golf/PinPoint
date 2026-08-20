@@ -93,7 +93,7 @@ inline constexpr int kCandidateUnset = -1;
 // SELECTED: C2 — Ry(+90°), x→−z, y→+y, z→+x.
 //
 // ⚠ MOUNTING THIS DESCRIBES: wG3 `wg3-mount1`, capture of 18 Aug 2026
-// (`phased2.hmwire`). Move the strap and this must be re-selected.
+// (`phased2.wrwire`). Move the strap and this must be re-selected.
 //
 // Chosen by `tools/hm_frame_select.py` from a directed capture, on the sign of
 // a known bow and a known ulnar deviation — NOT on cross-talk, which all four
@@ -112,7 +112,7 @@ inline constexpr int kCandidateUnset = -1;
 // their application. See docs/design/pinpoint_sign_conventions.md Rule 0.
 //
 // REPEATABILITY — MEASURED, not assumed. Three captures on one uninterrupted
-// mounting (`phased2/3/4.hmwire`), each with its own run of the calibration
+// mounting (`phased2/3/4.wrwire`), each with its own run of the calibration
 // routine, all select C2; the two richer ones agree on all THREE DOFs including
 // the rotation. So the selection is a property of the mounting and not of the
 // calibration attempt, which is what baking it in requires.

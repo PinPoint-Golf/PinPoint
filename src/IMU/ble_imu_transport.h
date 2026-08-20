@@ -97,8 +97,8 @@ public:
         // Minimum negotiated ATT MTU this device needs to function, or 0 for
         // "don't care" (the Witmotion default — its frames fit the 20-byte payload
         // of the default 23-byte MTU).  The wG3's calibration reply is 65 bytes and
-        // its stream notifications reach 93, so libhackmotion refuses to run below
-        // HM_MIN_ATT_MTU (96).  Nothing in Qt lets an application REQUEST an MTU on
+        // its stream notifications reach 93, so libwrist refuses to run below
+        // WR_MIN_ATT_MTU (96).  Nothing in Qt lets an application REQUEST an MTU on
         // any platform, so this is a check that produces a diagnosis, never a knob.
         int minAttMtu = 0;
 
@@ -151,8 +151,8 @@ public:
 
     // As above, but the CALLER states whether it wants an acknowledgement.
     //
-    // Exists because a protocol can care per write.  libhackmotion's
-    // hm_write_request carries `without_response` and sets it per command — the
+    // Exists because a protocol can care per write.  libwrist's
+    // wr_write_request carries `without_response` and sets it per command — the
     // wG3's data characteristic advertises Write and WriteNoResponse both, so the
     // properties alone cannot express the choice and the single-argument overload
     // above would silently answer it the same way every time.
