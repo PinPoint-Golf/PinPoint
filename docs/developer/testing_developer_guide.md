@@ -3,7 +3,7 @@
 **Audience**: Developers adding or running unit tests in PinPoint Studio
 **Location**: `tests/` (umbrella + shared CMake module + presets), `src/<Sub>/tests/` (the suites)
 **Language**: CMake + C++17/20 (GoogleTest or a hand-rolled `main()`)
-**Status**: 9 suites, 121 test targets, runnable as one umbrella build or individually
+**Status**: 9 suites, runnable as one umbrella build or individually
 
 ---
 
@@ -25,10 +25,18 @@
 ## 1. Philosophy — why tests are decoupled from the app
 
 The app target is heavy: configuring it pulls in whisper.cpp/ggml, FFmpeg,
-espeak-ng (built from source), OpenCV, ONNX Runtime and the full QML module — on
-the order of 20+ seconds just to *configure*, before a single object compiles. A
-unit test for, say, pure shaft-kinematics math has no business waiting on any of
-that.
+espeak-ng (built from source), OpenCV and ONNX Runtime — on the order of 20+
+seconds just to *configure*, before a single object compiles. A unit test for,
+say, pure shaft-kinematics math has no business waiting on any of that.
+
+⚠ **The QML module is no longer part of that argument, and the difference matters.**
+The Gui suite declares the `PinPointStudio` QML module itself, from the same lists
+the app builds it from (`cmake/PinPointQmlModule.cmake`), so its offscreen UI tests
+can press real components. It still depends on no app target — the module's C++
+needs only Qt, and its link closure stays inside sources other suites already
+compile. The invariant is *decoupled from the app*; *never builds QML* was only a
+proxy for it, and holding the proxy is what kept the only UI coverage in the repo
+out of every release gate on every platform.
 
 So **the test suites are not part of the app build.** The root `CMakeLists.txt`
 forces `BUILD_TESTING OFF`; building the app never compiles a test. Instead each
@@ -128,7 +136,7 @@ One configure produces one CTest registry spanning all suites:
 ```bash
 cmake -S tests -B build/tests
 cmake --build build/tests -j6
-ctest --test-dir build/tests --output-on-failure   # all 121 targets
+ctest --test-dir build/tests --output-on-failure   # every suite, incl. the offscreen qml_ui
 ```
 
 ---

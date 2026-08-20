@@ -14,7 +14,9 @@
 #   cmake --preset tests && cmake --build --preset tests && ctest --preset tests
 #   # tests-asan / tests-tsan presets build the suites under sanitizers.
 
-cmake_minimum_required(VERSION 3.16)
+# 3.21, not 3.16: the Gui suite declares a QML module (qt_add_qml_module) and Qt's QML
+# macros need the newer policy set. CMakePresets.json already declared 3.21.
+cmake_minimum_required(VERSION 3.21)
 project(pinpoint_tests LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

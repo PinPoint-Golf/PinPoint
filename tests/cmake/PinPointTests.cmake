@@ -10,8 +10,17 @@
 #   3. the sanitizer convention  (3 different flag names today)
 #   4. the pp_add_test helper    (redefined 6× with subtly different link sets)
 #
-# Nothing here pulls in the app, whisper/ggml, FFmpeg, espeak or the QML module —
-# the lightweight, app-decoupled property of the current design is preserved.
+# Nothing here pulls in the app, whisper/ggml, FFmpeg or espeak — the lightweight,
+# app-decoupled property of the current design is preserved.
+#
+# ⚠ THE QML MODULE IS NO LONGER ON THAT LIST, AND THE DISTINCTION IS THE WHOLE POINT.
+# The Gui suite now declares the PinPointStudio QML module itself, from the same lists
+# the app builds it from (cmake/PinPointQmlModule.cmake), so that the offscreen UI suite
+# can press real components. What it does NOT do is depend on the app target: the module's
+# C++ needs only Qt (plus Multimedia and GuiPrivate) and its link closure stays inside
+# sources other suites here already compile. "Decoupled from the app" is the invariant;
+# "never builds QML" was only ever a proxy for it, and holding the proxy was what kept
+# this suite out of every release gate on every platform.
 
 include_guard(GLOBAL)
 

@@ -105,7 +105,16 @@ a later cleanup.
    `CMAKE_AUTOMOC ON`).
 4. ~~Wire Buffer into the umbrella (the umbrella already special-cases it).~~
    **done** — Buffer/tests still uses its own helpers; full umbrella is green.
-5. **TODO:** add the umbrella to CI; optionally migrate Buffer/tests onto
+5. ~~Bring the offscreen QML UI suite in.~~ **done** — `qml_ui` was the one suite
+   left in the APP build, because it borrowed the app's QML module through a staged,
+   prefer-stripped copy. It now declares that module itself from
+   `cmake/PinPointQmlModule.cmake` and depends on no app target, which is what puts
+   UI coverage into the three release runbooks (they all run this umbrella and none
+   of them ran that suite). `cmake/StripQmlPrefer.cmake` was deleted with it. Two
+   things surfaced: the Gui suite needs its own `qt_standard_project_setup(REQUIRES 6.10)`
+   matching the app's, and the suite had never loaded the app's bundled fonts — so it
+   had been measuring layout in a host-chosen fallback face.
+6. **TODO:** add the umbrella to CI; optionally migrate Buffer/tests onto
    `pp_add_test ... GTEST` (drop its private googletest declare + sanitizer
    helper) and consolidate the three log stubs into `tests/stubs/`.
 

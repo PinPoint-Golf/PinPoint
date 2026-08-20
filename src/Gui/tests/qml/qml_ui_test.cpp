@@ -19,17 +19,14 @@
 // Driver for the QML UI suite — the tst_*.qml files beside this one.
 //
 // These are the tests that load a real component, render it offscreen and press it. The other Gui
-// suites are C++ model tests and deliberately pull in nothing of the app; this one cannot be, because
-// what it asserts is a QML component's behaviour and that component imports the app's QML module. So
-// it lives in the app build, where the module already is, rather than under src/Gui/tests/CMakeLists
-// with the decoupled ones.
+// suites are C++ model tests that pull in nothing of the app; this one asserts a QML component's
+// behaviour, so it needs the app's QML module — and it DECLARES that module rather than borrowing
+// it (src/Gui/tests/CMakeLists.txt, from the lists in cmake/PinPointQmlModule.cmake). It used to
+// live in the app build for want of any other way to reach the module, which meant it could only
+// run after whisper, FFmpeg, OpenCV and espeak had built, and so it ran in no release gate at all.
 //
-// Two things the setup has to supply, and both are the reason this is a binary rather than a bare
+// Two things the setup still has to supply, and they are why this is a binary rather than a bare
 // qmltestrunner invocation:
-//
-//   THE MODULE. Its qmldir prefers a resource path that only the app binary carries, so the build
-//   stages a copy with that line stripped and hands the path in as PP_QML_TEST_IMPORTS. See
-//   cmake/StripQmlPrefer.cmake for what that trade is.
 //
 //   appSettings. Theme is a singleton every component under test depends on, and it reads its
 //   values off the `appSettings` context property in Component.onCompleted. Without one, Theme
@@ -51,9 +48,10 @@
 #include <QSettings>
 #include <QTemporaryDir>
 
+// AppSettings only. ChartMetrics and TimelineLabels were included to register them by hand; the
+// module registers its own types now, so naming them here would claim a dependency this file
+// does not have.
 #include "app_settings.h"
-#include "chart_metrics.h"
-#include "timeline_labels.h"
 
 // ⚠ THE FONTS ARE THE UNITS THIS SUITE MEASURES IN, AND IT USED TO RUN WITHOUT THEM.
 //
@@ -108,20 +106,17 @@ public slots:
 
         m_settings = new AppSettings(this);
         engine->rootContext()->setContextProperty(QStringLiteral("appSettings"), m_settings);
-        engine->addImportPath(QStringLiteral(PP_QML_TEST_IMPORTS));
 
-        // The staged module is .qml files and a qmldir; the module's C++ QML_ELEMENT types are
-        // registered by the APP binary, which this target deliberately does not link. So a
-        // component that declares one — PpMetricChart and the whole chart family declare
-        // ChartMetrics and TimelineLabels — was simply "unavailable" here, which is why the chart
-        // had no UI coverage at all rather than failing coverage.
+        // NO addImportPath, AND NO qmlRegisterType. Both were needed while this binary borrowed a
+        // staged copy of the app's module: the copy carried .qml and a qmldir but none of the C++,
+        // so ChartMetrics and TimelineLabels had to be registered here by hand and everything else
+        // in the module stayed "unavailable" — which is why the chart family had UI coverage and
+        // the rest of the app's types had none.
         //
-        // Registering them by hand under the same URI is the smallest thing that opens those
-        // components up. It is not a stub: these are the real classes, compiled from the real
-        // sources, so a test can only pass here for the reason it would pass in the app. Add to
-        // this list (and to the target's sources) when a component under test needs another type.
-        qmlRegisterType<ChartMetrics>("PinPointStudio", 1, 0, "ChartMetrics");
-        qmlRegisterType<TimelineLabels>("PinPointStudio", 1, 0, "TimelineLabels");
+        // The module is now built into this target from the same PP_QML_SOURCES the app uses, so
+        // every QML_ELEMENT type registers itself exactly as it does in the app, and the import
+        // resolves out of this binary's own resources. A component needing another type needs
+        // nothing added here.
     }
 
 private:

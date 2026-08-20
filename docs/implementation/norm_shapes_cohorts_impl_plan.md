@@ -210,9 +210,11 @@ express a sex axis orthogonal to club.
 15. **`NormBasis` compares mu/sigmaLo/sigmaHi/monitorLo/monitorHi**
     (`diagnostics_health.cpp:231-236`). Without the plausibility pair, a shipped row that
     gains a cap compares as unmoved and `overrideCoreChanged` stays silent.
-16. **There are no QML tests anywhere in this repo** — no `qmltest`, no `QuickTest`, no
-    `tst_*.qml`. Every surface is covered only through its C++ model. A rule left inside a
-    binding is a rule nothing can test.
+16. ~~**There are no QML tests anywhere in this repo**~~ — TRUE WHEN WRITTEN, NO LONGER.
+    `src/Gui/tests/qml/` now carries 11 `tst_*.qml` run offscreen by the `qml_ui` suite, so a
+    rule left inside a binding IS testable. The observation's point still stands where it is
+    not covered: reach for the C++ model first, and put a rule in a binding only when the
+    QML suite is where it will be exercised.
 17. **`directionOptions` emits `{name,label,means,sentence}`**
     (`characteristic_editor_model.cpp:678-693`) with no `enabled`. `TailChip`
     (`CharacteristicEditor.qml:89-118`) has **no disabled state**. The nearest precedent for
