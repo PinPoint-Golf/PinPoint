@@ -223,6 +223,20 @@ set(EIGEN_BUILD_DOC       OFF CACHE BOOL "" FORCE)
 set(EIGEN_BUILD_TESTING   OFF CACHE BOOL "" FORCE)
 set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING         OFF CACHE BOOL "" FORCE)
+# ⚠ AND THE SPARSE BENCHMARKS, WHICH NO EIGEN OPTION TURNS OFF. Eigen's own CMakeLists adds
+# bench/spbench under a bare `if(NOT WIN32)` (eigen CMakeLists.txt:548), and that directory
+# creates spbenchsolver / spsolver / test_sparseLU unconditionally — EXCLUDE_FROM_ALL, so
+# they never build, but they are configured targets all the same. They then hunt for
+# CHOLMOD/UMFPACK/KLU/SuperLU and link whatever they find, which on a Homebrew machine is
+# /opt/homebrew/lib — the same directory that carries Homebrew's Qt and breaks the app's
+# plugin resolution under Qt Creator (see the long note at the OpenCV block). Refusing the
+# find_packages leaves the three targets present but linking nothing out of there.
+#
+# They still appear in Qt Creator's run-configuration list. That is Eigen's doing, there is
+# no switch for it, and patching a fetched dependency to tidy a menu is the worse trade.
+foreach(_pp_no_find CHOLMOD UMFPACK KLU SuperLU PASTIX METIS)
+    set(CMAKE_DISABLE_FIND_PACKAGE_${_pp_no_find} ON)
+endforeach()
 FetchContent_Declare(
   eigen
   GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
@@ -2106,6 +2120,12 @@ endif()
 # ── OpenCV ───────────────────────────────────────────────────────────────────
 # macOS: inject Homebrew prefix so CMake can locate OpenCVConfig.cmake.
 #
+# The escape hatch for an OpenCV somewhere else: -DPP_OPENCV_NO_PIN=ON leaves OpenCV_DIR
+# alone so -DOpenCV_DIR= is honoured. Without it the pin below wins on macOS, deliberately
+# — a stale cache pointing into /opt/homebrew/lib is exactly the state that has to be
+# repaired without anyone knowing to clear it.
+option(PP_OPENCV_NO_PIN "Do not pin OpenCV_DIR to the Homebrew formula prefix (macOS)" OFF)
+#
 # Try the VERSIONED formula first. Homebrew's plain `opencv` formula is now 5.x, which
 # reorganises calib3d into separate 3d/calib modules; this project targets 4.x and does
 # not build against it. The version guard below only rejects < 3.0, so an OpenCV 5 prefix
@@ -2123,6 +2143,38 @@ if(APPLE)
         )
         if(_brew_result EQUAL 0 AND EXISTS "${_brew_opencv}")
             list(APPEND CMAKE_PREFIX_PATH "${_brew_opencv}")
+            # ⚠ PINNED TO THE FORMULA'S OWN CONFIG DIR, NOT LEFT TO THE PREFIX SEARCH, AND THIS
+            # IS NOT TIDINESS. Appending the prefix above is only a hint: find_package still
+            # searches every prefix, and where opencv@4 has been linked into Homebrew's shared
+            # lib tree it resolves to /opt/homebrew/lib/cmake/opencv4. OpenCV's config computes
+            # its own prefix relative to that file, so every imported library then points at
+            # /opt/homebrew/lib/libopencv_*.dylib — and THAT is what puts /opt/homebrew/lib on
+            # this target's link line.
+            #
+            # Why a link directory matters at RUN time: Qt Creator derives DYLD_FRAMEWORK_PATH
+            # for the run environment from the target's link libraries, and DYLD_FRAMEWORK_PATH
+            # OUTRANKS the rpath baked into the binary. /opt/homebrew/lib also holds 63 Qt
+            # frameworks — Homebrew's own Qt, pulled in as a dependency of opencv@4 and vtk, and
+            # the SAME 6.11.1 version, so it loads happily rather than failing an ABI check.
+            # QLibraryInfo then reports Homebrew's prefix and every plugin lookup goes there,
+            # where there is no QtQuick3D and no QtMultimedia backend. It presents as
+            #     module "QtQuick3D" plugin "qquick3dplugin" not found
+            #     No QtMultimedia backends found
+            # which names neither OpenCV nor a link path and reads as a broken Qt install.
+            #
+            # ⚠ AND IT IS INVISIBLE FROM A SHELL — launched directly the rpath wins and the app
+            # is perfectly clean, so a terminal run cannot reproduce it. Bisected to this one
+            # directory 2026-08-20; every other entry on that path was harmless.
+            #
+            # Pinning to <formula prefix>/lib/cmake/opencv4 keeps the resolved libraries inside
+            # the formula's own tree, so /opt/homebrew/lib never reaches the link line and
+            # Homebrew's Qt is never on the search path. -DPP_OPENCV_NO_PIN=ON opts out.
+            if(NOT PP_OPENCV_NO_PIN AND EXISTS "${_brew_opencv}/lib/cmake/opencv4")
+                set(OpenCV_DIR "${_brew_opencv}/lib/cmake/opencv4" CACHE PATH
+                    "OpenCV config dir, pinned to the Homebrew formula (see CMakeLists)" FORCE)
+                message(STATUS "OpenCV: pinned OpenCV_DIR to ${OpenCV_DIR} "
+                               "(keeps /opt/homebrew/lib, and Homebrew's Qt, off the link line)")
+            endif()
             message(STATUS "OpenCV: using Homebrew formula '${_brew_formula}' at ${_brew_opencv}")
             break()
         endif()
