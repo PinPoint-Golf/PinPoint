@@ -143,13 +143,25 @@ bool loadDoc(const QString &path, QJsonObject *root)
     return true;
 }
 
-struct Tally { int visited = 0, repaired = 0, skipped = 0, failed = 0, rows = 0; };
+// The outcomes are counted apart rather than summed into one "skipped", because a sweep is
+// read for what it did NOT have to change and those answers are not interchangeable: a swing
+// that never met a launch monitor is fine, a swing whose rows are intact is fine, and a swing
+// with no swing.json at all is an unanalysed capture — which is worth seeing on a report about
+// missing data even though it is not this tool's business to fix.
+struct Tally {
+    int visited = 0, repaired = 0, intact = 0, noReading = 0, noDoc = 0, failed = 0, rows = 0;
+};
 
 void repairSwing(const QString &swingDir, bool dryRun, Tally &t)
 {
     const QString path = swingDir + QStringLiteral("/swing.json");
-    if (!QFile::exists(path))
+    if (!QFile::exists(path)) {
+        // SAID OUT LOUD, not passed over. A silent skip here reads as a clean session on the
+        // report, which is the one thing a recovery sweep must never do.
+        out() << "  " << QDir(swingDir).dirName() << ": no swing.json — never analysed\n";
+        ++t.noDoc;
         return;
+    }
 
     ++t.visited;
     const QString name = QDir(swingDir).dirName();
@@ -163,8 +175,8 @@ void repairSwing(const QString &swingDir, bool dryRun, Tally &t)
 
     const auto reading = readingFromRawBlock(root.value(QStringLiteral("launchMonitor")).toObject());
     if (!reading) {
-        out() << "  " << name << ": skipped — no launch monitor reading in this document\n";
-        ++t.skipped;
+        out() << "  " << name << ": no launch monitor reading in this document\n";
+        ++t.noReading;
         return;
     }
 
@@ -178,7 +190,7 @@ void repairSwing(const QString &swingDir, bool dryRun, Tally &t)
 
     if (before >= available) {
         out() << "  " << name << ": already intact — " << before << " lm.* rows\n";
-        ++t.skipped;
+        ++t.intact;
         return;
     }
 
@@ -268,10 +280,12 @@ int main(int argc, char *argv[])
     }
 
     out() << "\n" << (dryRun ? "would repair " : "repaired ") << t.repaired
-          << " of " << t.visited << " swings"
-          << " (" << t.rows << " lm.* rows"
-          << ", " << t.skipped << " skipped"
-          << ", " << t.failed << " failed)\n";
+          << " of " << t.visited << " swings carrying a swing.json"
+          << " (" << t.rows << " lm.* rows)\n"
+          << "  " << t.intact    << " already intact\n"
+          << "  " << t.noReading << " never had a launch monitor reading\n"
+          << "  " << t.noDoc     << " with no swing.json at all — never analysed\n"
+          << "  " << t.failed    << " failed\n";
     out().flush();
     return t.failed == 0 ? 0 : 1;
 }
