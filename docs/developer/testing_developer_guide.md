@@ -355,6 +355,17 @@ If the new suite needs Eigen, call `pp_find_eigen(<var>)`. If it needs a
 dependency the shared module doesn't `find_package` (OpenCV, Qt6::Bluetooth,
 Qt6::Qml), `find_package` it in the suite — that is additive and cached.
 
+⚠ **The QML UI suite is the one target that does not follow step 2**, and it is worth
+knowing why before copying it. `pp_add_test` cannot express it — that helper uses plain
+`add_executable` and hardcodes `Qt6::Core`/`Qt6::Gui`, with no hook for a test
+`ENVIRONMENT` — so `qml_ui_test` is spelled out by hand. It also lives in
+`src/Gui/CMakeLists.txt` rather than `src/Gui/tests/`, pulled in by `add_subdirectory`:
+`qt_add_qml_module` names each file's qmlcachegen output directory after the path
+*relative to `CMAKE_CURRENT_SOURCE_DIR`*, so declaring it from `tests/` yields
+`qml_ui_test_../theme` — which POSIX resolves and ninja on Windows rejects outright.
+`src/Gui` is an ancestor of all 157 QML files, so the paths come out clean. Anything else
+declaring a QML module from a test directory will hit the same wall.
+
 ---
 
 ## 9. Conventions and gotchas
