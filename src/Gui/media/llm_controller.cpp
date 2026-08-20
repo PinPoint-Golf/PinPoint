@@ -390,9 +390,33 @@ void LlmController::onDownloadFailed(const QString &error)
 // ---------------------------------------------------------------------------
 // Private helpers
 
+// ⚠ EVERY FILE, NOT A SENTINEL — AND THE SENTINEL WAS THE WORST POSSIBLE CHOICE.
+//
+// This asked only whether genai_config.json was present. That is 1.5 KB and the FIRST entry
+// in kModelFiles, so it is the first thing to land and the last thing a failure can remove.
+// An interrupted download — and 4.9 GB over a home connection gets interrupted — therefore
+// leaves the check passing over a directory holding almost nothing.
+//
+// The failure that produces is permanent and silent. `false` here routes to startDownload();
+// `true` routes to triggerModelLoad(), which fails inside ORT with
+//     External data path does not exist: ".../model.onnx.data"
+// and nothing ever retries, because the sentinel is still there next launch. Seen in the
+// field: a directory stuck for three weeks holding genai_config.json and a 52 MB model.onnx
+// out of a 4.9 GB set, re-reporting the same ORT error on every start.
+//
+// Checking presence is ENOUGH, and that is a property of the downloader rather than luck:
+// ModelDownloader writes each item to "<file>.part" and renames to the final name only on
+// success, removing the .part on failure (ModelDownloader.cpp:80,129-132,148-150). So a file
+// under its real name is a COMPLETE file, and no size or checksum check is needed to
+// distinguish a finished download from a torn one.
 bool LlmController::modelFilesExist() const
 {
-    return QFile::exists(modelDataDir() + QStringLiteral("genai_config.json"));
+    const QString dir = modelDataDir();
+    for (const char *file : kModelFiles) {
+        if (!QFile::exists(dir + QString::fromLatin1(file)))
+            return false;
+    }
+    return true;
 }
 
 void LlmController::startDownload()
