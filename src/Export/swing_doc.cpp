@@ -25,6 +25,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
+#include <QSet>
 #include <QTimeZone>
 #include <algorithm>
 #include <cmath>
@@ -796,7 +797,48 @@ bool SwingDocWriter::writeSwingJson(const QString &swingDir, const QJsonObject &
         // emit analysis t_us window-relative regardless of the source domain.
         const qint64 t0 = qint64(rawManifest.value(QStringLiteral("clock")).toObject()
                                             .value(QStringLiteral("t0_us")).toDouble());
-        root[QStringLiteral("analysis")] = serializeAnalysis(*analysis, t0);
+        QJsonObject an = serializeAnalysis(*analysis, t0);
+
+        // CARRIES THE LAUNCH MONITOR ROWS ACROSS, for the same reason the review block above
+        // seeds rather than overwrites: re-analysis owns what it computed and must not evict
+        // what it cannot recompute.
+        //
+        // No stage produces an `lm.` row. A reading is paired to a swing by shot_pairing AFTER
+        // the stages have run (see lmMetricEntries), so updateLaunchMonitor() writes the entries
+        // straight into the document and the document is the ONLY copy. serializeAnalysis
+        // rebuilds metrics[] from the stages alone, so replacing the block wholesale deleted
+        // them — silently, and on every re-analysis. The device's numbers do survive in the raw
+        // `launchMonitor` block, but that block is provenance with no reader (see the reload
+        // path, which takes `kind` out of it and nothing else), so the session board, the tiles
+        // and every `lm.` grade went dark while the file still looked complete.
+        const QJsonArray prior = rawManifest.value(QStringLiteral("analysis")).toObject()
+                                            .value(QStringLiteral("metrics")).toArray();
+        if (!prior.isEmpty()) {
+            QJsonArray metrics = an[QStringLiteral("metrics")].toArray();
+
+            // FRESH WINS. The catalogue does declare these keys (LaunchMonitorProvider and
+            // LaunchMonitorDerivedProvider), so a stage that starts emitting one must replace
+            // the carried row rather than sit beside it as a duplicate the resolver would pick
+            // between arbitrarily. Today nothing does, and this loop carries everything.
+            QSet<QString> computed;
+            for (const QJsonValue &v : metrics)
+                computed.insert(v.toObject().value(QStringLiteral("key")).toString());
+
+            for (const QJsonValue &v : prior) {
+                const QString key = v.toObject().value(QStringLiteral("key")).toString();
+                if (!key.startsWith(QStringLiteral("lm.")) && !lmDerivedKeys().contains(key))
+                    continue;
+                if (computed.contains(key))
+                    continue;
+                // Verbatim, phaseSample timestamp included. updateLaunchMonitor() anchored it at
+                // capture.impactUs, which re-analysis does not rewrite, so re-stamping would
+                // reproduce the value already there — and a reading is located by its phase tag
+                // rather than its timestamp in any case.
+                metrics.append(v);
+            }
+            an[QStringLiteral("metrics")] = metrics;
+        }
+        root[QStringLiteral("analysis")] = an;
     }
 
     const QString path = swingDir + QStringLiteral("/swing.json");

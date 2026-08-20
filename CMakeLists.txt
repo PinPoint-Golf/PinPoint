@@ -2623,6 +2623,35 @@ if(UNIX AND NOT APPLE)
     )
 endif()
 
+# ── Launch monitor row repair ────────────────────────────────────────────────
+# lm_repair rebuilds the `lm.*` metric rows in a swing.json from the raw
+# `launchMonitor` block already in the file, by handing it back to the production
+# emitter (SwingDocWriter::updateLaunchMonitor). Recovery for documents written
+# before writeSwingJson carried the rows across a re-analysis.
+#
+# Its own option rather than PINPOINT_BUILD_TOOLS: it needs the swing.json writer
+# and the reading table and NOTHING else — the same three-source link swing_doc_test
+# uses — so gating it behind the SwingLab set would drag OpenCV, ONNX Runtime and the
+# ViTPose model into a build that touches none of them.
+option(PINPOINT_BUILD_LM_REPAIR "Build the launch-monitor metric repair tool" OFF)
+if(PINPOINT_BUILD_LM_REPAIR)
+    add_executable(lm_repair
+        tools/launchmonitor/lm_repair.cpp
+        src/Export/swing_doc.cpp
+        # SwingDocReader's session-directory helpers call SwingPaths::sanitise. The tool
+        # never walks a library that way, but they are in the same translation unit.
+        src/Export/swing_paths.cpp
+        src/LaunchMonitor/launch_monitor_reading.cpp
+        # NOT src/Core/pp_debug.cpp — it includes whisper.h and would pull ggml and FFmpeg
+        # into a tool that rewrites one JSON file. lm_repair.cpp provides PpLogStream itself
+        # and routes it to stderr; see the note there.
+    )
+    target_include_directories(lm_repair PRIVATE
+        src/Buffer src/Export src/LaunchMonitor src/Core)
+    target_link_libraries(lm_repair PRIVATE Qt6::Core Qt6::Gui)
+    message(STATUS "Launch monitor tools: lm_repair enabled")
+endif()
+
 # ── SwingLab offline tools (docs/implementation/swinglab_impl.md) ─────────────
 # swinglab_run replays a recorded swing dir through the PRODUCTION analysis
 # pipeline (same sources, same configs) with JSON-injectable tuning params and

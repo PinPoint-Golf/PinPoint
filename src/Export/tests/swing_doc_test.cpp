@@ -860,6 +860,45 @@ int main()
         f2.close();
         check(again.size() == mets.size(), "re-applying replaces rather than appending");
 
+        // ── Re-analysis must not evict the readings ─────────────────────────
+        //
+        // The whole existing document goes back in as the manifest, which is exactly what
+        // reanalysis_controller hands over. serializeAnalysis rebuilds metrics[] from the
+        // stages, and no stage produces an `lm.` row — the pairing wrote them straight into
+        // the document — so without the carry-forward this call deletes every reading while
+        // leaving the raw `launchMonitor` block untouched. That is the worst shape a loss can
+        // take: a file that still looks complete, and a board that reads as a launch monitor
+        // which was never connected.
+        QFile f4(d3 + QStringLiteral("/swing.json"));
+        f4.open(QIODevice::ReadOnly);
+        const QJsonObject paired = QJsonDocument::fromJson(f4.readAll()).object();
+        f4.close();
+        check(SwingDocWriter::writeSwingJson(d3, paired, &an, &werr),
+              "re-analyse a swing that already carries a reading");
+
+        QFile f5(d3 + QStringLiteral("/swing.json"));
+        f5.open(QIODevice::ReadOnly);
+        const QJsonObject after = QJsonDocument::fromJson(f5.readAll()).object();
+        f5.close();
+
+        int lmAfter = 0, bareAfter = 0;
+        double lmValAfter = 0;
+        for (const QJsonValue &v : after[QStringLiteral("analysis")].toObject()
+                                       [QStringLiteral("metrics")].toArray()) {
+            const QJsonObject mo = v.toObject();
+            const QString key = mo[QStringLiteral("key")].toString();
+            if (key == QStringLiteral("clubheadSpeed")) ++bareAfter;
+            if (!key.startsWith(QStringLiteral("lm."))) continue;
+            ++lmAfter;
+            if (key == QStringLiteral("lm.clubheadSpeed"))
+                lmValAfter = mo[QStringLiteral("phaseSamples")].toArray().at(0).toObject()
+                               [QStringLiteral("value")].toDouble();
+        }
+        check(lmAfter == measured, "re-analysis keeps every lm. reading");
+        check(qAbs(lmValAfter - 87.1927) < 0.01, "…with the device's value unchanged");
+        check(bareAfter == 1, "…and our own estimate still lands exactly once, not twice");
+        check(after.contains(QStringLiteral("launchMonitor")), "…beside the raw block it came from");
+
         // A shot whose analysis failed still keeps what the device said.
         const QString d4 = QStringLiteral("/tmp/swingdoc_test_lm_noanalysis");
         QDir().mkpath(d4);
