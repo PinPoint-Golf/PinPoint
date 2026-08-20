@@ -513,18 +513,31 @@ TEST(SwingWindow, InterpolateImuCostOnDeferredShapedWindow) {
                 us > 0 ? double(refUs) / double(us) : 0.0,
                 double(entries) * double(calls) / 1e6);
 
-    // A tripwire, and ⚠ ITS THRESHOLD IS SET FROM THE TWO MEASURED NUMBERS, not
-    // from an estimate. Measured on this window (RelWithDebInfo, M4):
+    // A tripwire, and ⚠ IT GATES THE RATIO OF THE TWO NUMBERS ABOVE, not the
+    // indexed time on its own. What it has to catch is interpolateImu decaying
+    // into a linear scan, and "is it a scan?" is answered by how it grows against
+    // a scan measured on the same window in the same run — not by a stopwatch.
+    // Measured so far:
     //
-    //     linear scan over entries_   14,385 us
-    //     per-source binary search       210 us      — 68x
+    //     RelWithDebInfo, M4        scan  14,385 us   indexed    210 us   — 68x
+    //     Debug, Intel i7-9750H     scan 286,976 us   indexed  4,923 us   — 58x
     //
-    // A first attempt at this gate used 150 ms, which the LINEAR version passed
-    // comfortably — a check that cannot fail is not a check. 3 ms sits 14x above
-    // the indexed cost, so an ordinarily loaded machine will not trip it, and 5x
-    // below the linear cost, so a regression to a scan will.
-    EXPECT_LT(us, 3'000)
-        << "interpolateImu looks like a linear scan over " << entries << " entries";
+    // Both are the same index doing the same work; the 23x between their indexed
+    // columns is build type and machine, which is exactly what an absolute gate
+    // cannot tell apart from a regression. An earlier version of this check hard-
+    // coded 3 ms from the first row and failed the second for no other reason.
+    //
+    // 10x sits ~6x below the observed speedup, so an ordinarily loaded machine
+    // will not trip it, and far above the ~1x a genuine scan would produce, so a
+    // regression cannot slip through. Phrased as a multiply rather than a divide
+    // so an indexed run fast enough to round to 0 us cannot divide by zero.
+    ASSERT_GT(refUs, 1'000)
+        << "reference scan too fast to be a baseline — the window is degenerate";
+    constexpr int64_t kMinSpeedup = 10;
+    EXPECT_GT(refUs, us * kMinSpeedup)
+        << "interpolateImu looks like a linear scan over " << entries << " entries: "
+        << "indexed " << us << " us vs scan " << refUs << " us is only "
+        << (us > 0 ? double(refUs) / double(us) : 0.0) << "x, want " << kMinSpeedup << "x";
 }
 
 // ---------------------------------------------------------------------------
