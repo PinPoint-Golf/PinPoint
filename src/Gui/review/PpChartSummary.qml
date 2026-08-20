@@ -145,9 +145,15 @@ ColumnLayout {
                         // four separate error bars. Absent ⇒ nothing is drawn: a series with no
                         // σ has not been characterised, which is not the same as being exact.
                         Text {
-                            visible: card.modelData.sigma !== undefined
-                                     && card.modelData.sigma > 0
-                            text: "± " + card.modelData.sigma.toFixed(1)
+                            id: sigmaChip
+                            // Resolved once, because `visible` does not gate a binding: QML
+                            // evaluates `text` whether or not the item is shown, so a series
+                            // with no σ reached .toFixed() on undefined and warned per frame.
+                            readonly property real sigma:
+                                (card.modelData.sigma !== undefined
+                                 && card.modelData.sigma !== null) ? card.modelData.sigma : 0
+                            visible: sigmaChip.sigma > 0
+                            text: "± " + sigmaChip.sigma.toFixed(1)
                                        + (card.modelData.unit || "°")
                             font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                             font.letterSpacing: Theme.trackingData
