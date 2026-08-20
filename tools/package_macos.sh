@@ -40,7 +40,7 @@
 #                       Seconds instead of a full repackage while debugging the gate.
 #
 # Key environment variables (override per host):
-#   CMAKE_PREFIX       Qt6 prefix (default: ~/Qt/6.11.0/macos)
+#   CMAKE_PREFIX       Qt6 prefix (default: newest ~/Qt/*/macos carrying macdeployqt)
 #   JOBS               build parallelism (default 6 — this Mac OOMs above ~6)
 #   SIGN_IDENTITY      "Developer ID Application: …" codesign identity (§5; auto-detected if unset)
 #   NOTARY_PROFILE     notarytool keychain profile name (§5; required to notarize)
@@ -68,7 +68,7 @@ if [[ -z "${CMAKE_PREFIX:-}" ]]; then
         [[ -x "$_qt/bin/macdeployqt" ]] && CMAKE_PREFIX="$_qt"
     done
 fi
-CMAKE_PREFIX="${CMAKE_PREFIX:-$HOME/Qt/6.11.0/macos}"
+CMAKE_PREFIX="${CMAKE_PREFIX:-$HOME/Qt/6.11.1/macos}"
 JOBS="${JOBS:-6}"
 DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET:-13.0}"   # our own code's floor (macOS 13 Ventura)
 GH_OWNER="PinPoint-Golf"

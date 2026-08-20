@@ -1,6 +1,6 @@
 // Standalone test for the Wrist Motion assessment engine — Phase 0 windowed-median sampler.
 // Run via CTest (src/Analysis/tests/CMakeLists.txt):
-//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/analyzer-tests -j4
 //   ctest --test-dir build/analyzer-tests -R wrist_angle_sampling_test --output-on-failure
 //

@@ -303,7 +303,7 @@ lives separately in `truth.json` via the markup tool — §1.)
 /home/markl/venv/pinpoint/bin/python3 tools/balllab/acceptance.py
 
 # Pose core + detector tests (standalone CTest, NOT the app build):
-cmake -S src/Pose/tests -B build/pose-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+cmake -S src/Pose/tests -B build/pose-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 cmake --build build/pose-tests -j4 && ctest --test-dir build/pose-tests --output-on-failure
 
 # Parity (needs a same-host python reference; SKIPs when the fixture is absent):

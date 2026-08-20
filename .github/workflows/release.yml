@@ -119,7 +119,7 @@ jobs:
       - name: Install Qt 6.11
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.0'
+          version: '6.11.1'
           modules: 'qtmultimedia qtwebsockets qtquick3d qtshadertools qtserialport qtconnectivity'
 
       # ── AppImage tooling (linuxdeploy + Qt plugin, appimagetool, appimageupdatetool) ─
@@ -193,7 +193,7 @@ jobs:
       - name: Install Qt 6.11
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.0'
+          version: '6.11.1'
           modules: 'qtmultimedia qtwebsockets qtquick3d qtshadertools qtserialport qtconnectivity'
 
       - name: Install Ninja + Inno Setup
@@ -301,7 +301,7 @@ jobs:
       - name: Install Qt 6.11
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.0'
+          version: '6.11.1'
           modules: 'qtmultimedia qtwebsockets qtquick3d qtshadertools qtserialport qtconnectivity'
 
       # package_macos.sh builds Release (PINPOINT_INSTALLED=ON), runs macdeployqt,

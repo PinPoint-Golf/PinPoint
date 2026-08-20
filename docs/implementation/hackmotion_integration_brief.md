@@ -829,7 +829,7 @@ spent collecting data rather than discovering that the session wizard refuses to
 >
 > **Studio is now a RELEASE build**, by user decision — Debug post-shot analysis was too slow and no
 > development happens there. `build\Desktop_Qt_6_11_0_MSVC2022_64bit-Release`, wired identically to
-> the Debug dir (NMake Makefiles JOM, Qt `C:/Qt/6.11.0/msvc2022_64`, `PP_LIBWRIST_LOCAL=ON`,
+> the Debug dir (NMake Makefiles JOM, Qt `C:/Qt/6.11.1/msvc2022_64`, `PP_LIBWRIST_LOCAL=ON`,
 > sibling `FETCHCONTENT_SOURCE_DIR_WRIST`). Scripts on the studio PC:
 > `C:\Users\developer\configure-release.bat`, `build-release.bat`, `run-release.bat`.
 > ⚠ **The run script exists because neither build directory deploys Qt's DLLs and Qt is not on the

@@ -283,7 +283,7 @@ enabling "Dashboard" on a screen without a delegate omits it (no empty placehold
   inline literals.
 
 ```bash
-cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 cmake --build build/analyzer-tests -j4 && ctest --test-dir build/analyzer-tests --output-on-failure
 cmake --build build/Desktop_Qt_6_11_0-Debug --parallel 4    # app (≤4 jobs — OOM cap)
 ```

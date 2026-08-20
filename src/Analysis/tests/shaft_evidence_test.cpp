@@ -4,7 +4,7 @@
 // returns, and determinism. Full NUMERIC parity vs the Python exemplar is the
 // separate shaft_parity_test (Phase 5, against per-frame dumps).
 //
-//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/analyzer-tests --target shaft_evidence_test
 //   ctest --test-dir build/analyzer-tests -R shaft_evidence --output-on-failure
 

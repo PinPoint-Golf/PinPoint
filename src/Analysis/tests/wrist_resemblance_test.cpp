@@ -1,5 +1,5 @@
 // Standalone test for WristResemblanceScorer (design §B.0a). Run via CTest:
-//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/analyzer-tests && ctest --test-dir build/analyzer-tests --output-on-failure
 //
 // Verifies the per-archetype resemblance CONSTRUCTION (A.5 #12/#18): boundedness,

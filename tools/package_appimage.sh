@@ -29,7 +29,7 @@
 #   SIGN_KEY        GPG key id/fingerprint for the release signature (required unless --no-sign)
 #   GPG_PASSPHRASE  passphrase for the signing key (required for non-interactive/CI
 #                   signing when the key is passphrase-protected; omit to use the agent)
-#   CMAKE_PREFIX    Qt6 prefix (e.g. ~/Qt/6.11.0/gcc_64); else relies on PATH/env
+#   CMAKE_PREFIX    Qt6 prefix (e.g. ~/Qt/6.11.1/gcc_64); else relies on PATH/env
 #   CUDA_LIB_DIR    dir with CUDA 12 runtime .so's to bundle (e.g. /usr/local/cuda-12/lib64)
 #   CUDNN_LIB_DIR   dir with cuDNN 9 .so's to bundle
 #   SPINNAKER_DIR   Spinnaker SDK root (optional; load-if-present otherwise)

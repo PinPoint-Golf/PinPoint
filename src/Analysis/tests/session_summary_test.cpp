@@ -1,6 +1,6 @@
 // Standalone test for the session-metadata aggregation used by the carousel's
 // session-review drawer. Run via CTest (src/Analysis/tests/CMakeLists.txt):
-//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/analyzer-tests && ctest --test-dir build/analyzer-tests --output-on-failure
 //
 // Covers avg quality (rounded mean), length label (min→max span, min/h formats),

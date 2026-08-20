@@ -2,7 +2,7 @@
 // anatomical solve) and the end-to-end calibration→wrist-angle math.
 //
 // Run via CTest (src/Analysis/tests/CMakeLists.txt):
-//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/analyzer-tests && ctest --test-dir build/analyzer-tests --output-on-failure
 //
 // This is the Track-A keystone golden (docs/implementation/imu_rearchitecture.md §6 Phase 0.1): it

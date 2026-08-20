@@ -1,6 +1,6 @@
 // Standalone test for the Metric Catalogue layer (metric_catalogue / manifest / providers /
 // resolver). Run via CTest (src/Analysis/tests/CMakeLists.txt):
-//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/analyzer-tests --target metric_catalogue_test --parallel 4
 //   ctest --test-dir build/analyzer-tests -R metric_catalogue --output-on-failure
 //

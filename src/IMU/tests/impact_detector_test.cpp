@@ -1,6 +1,6 @@
 // Standalone truth-table test for impact_detector.h (shot detection P1).
 // Run via CTest (src/IMU/tests/CMakeLists.txt):
-//   cmake -S src/IMU/tests -B build/imu-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/IMU/tests -B build/imu-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/imu-tests && ctest --test-dir build/imu-tests --output-on-failure
 //
 // The truth table IS P1's real value: a sharp jerk with a preceding gyro ramp

@@ -212,7 +212,7 @@ macOS (Sparkle) / Windows (WinSparkle) update story. Design:
 # Host tools (once): linuxdeploy, linuxdeploy-plugin-qt, appimagetool,
 # appimageupdatetool, zsync (zsyncmake). All from the AppImageCommunity releases.
 export SIGN_KEY=<your-release-gpg-key-fpr>
-export CMAKE_PREFIX=~/Qt/6.11.0/gcc_64
+export CMAKE_PREFIX=~/Qt/6.11.1/gcc_64
 export CUDA_LIB_DIR=/usr/local/cuda-12/lib64   # for GPU ORT
 export CUDNN_LIB_DIR=/usr/lib/x86_64-linux-gnu # cuDNN 9
 tools/package_appimage.sh                      # → dist/PinPointStudio-<ver>-x86_64.AppImage{,.zsync,.sig}

@@ -60,7 +60,7 @@ tests are *not* part of the app build — they are nine standalone CTest suites 
 [`../../BUILDING.md`](../../BUILDING.md) § Testing). Run this from a Developer (vcvars64)
 shell with CMake + Ninja on `PATH`:
 ```powershell
-$Qt  = 'C:/Qt/6.11.0/msvc2022_64'
+$Qt  = 'C:/Qt/6.11.1/msvc2022_64'
 $OCV = 'C:/tools/opencv/build'                          # Analysis & Pose need OpenCV
 $env:PATH = "$Qt/bin;$OCV/x64/vc16/bin;$env:PATH"       # so test exes resolve Qt/OpenCV DLLs
 if (Test-Path build/tests) { Remove-Item -Recurse -Force build/tests }  # see the warning below

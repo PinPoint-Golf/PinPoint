@@ -1,6 +1,6 @@
 // Build-dependency smoke test for libwrist (github.com/PinPoint-Golf/libwrist).
 // Run via CTest (src/IMU/tests/CMakeLists.txt):
-//   cmake -S src/IMU/tests -B build/imu-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/IMU/tests -B build/imu-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/imu-tests && ctest --test-dir build/imu-tests --output-on-failure
 //
 // WHY THIS EXISTS. Until the HackMotion integration lands, no PinPoint code

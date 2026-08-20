@@ -603,7 +603,7 @@ The analyzer suite is standalone (own `main()`, CHECK macros — see
 provisioning notes):
 
 ```bash
-cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 cmake --build build/analyzer-tests --parallel 4
 ctest --test-dir build/analyzer-tests --output-on-failure
 ```

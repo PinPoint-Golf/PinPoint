@@ -1,6 +1,6 @@
 // Standalone pipeline test: synthetic FusedStreams -> PhaseSegmenter -> MetricExtractor.
 // Pure (no SwingWindow). Run via CTest (src/Analysis/tests/CMakeLists.txt):
-//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Analysis/tests -B build/analyzer-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/analyzer-tests && ctest --test-dir build/analyzer-tests --output-on-failure
 
 #include "../phase_segmenter.h"

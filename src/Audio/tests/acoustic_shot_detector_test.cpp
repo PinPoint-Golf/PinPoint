@@ -1,6 +1,6 @@
 // Standalone truth-table test for onset_detector.h (shot detection P2).
 // Run via CTest (src/Audio/tests/CMakeLists.txt):
-//   cmake -S src/Audio/tests -B build/audio-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.0/gcc_64
+//   cmake -S src/Audio/tests -B build/audio-tests -DCMAKE_PREFIX_PATH=$HOME/Qt/6.11.1/gcc_64
 //   cmake --build build/audio-tests && ctest --test-dir build/audio-tests --output-on-failure
 //
 // An impact "click" (broadband transient that collapses within the decay

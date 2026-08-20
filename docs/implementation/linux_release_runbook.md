@@ -39,7 +39,7 @@ tests are *not* part of the app build — they are nine standalone CTest suites 
 [`../../BUILDING.md`](../../BUILDING.md) § Testing). OpenCV is found from the system, so
 no `OpenCV_DIR` is needed:
 ```bash
-QT=~/Qt/6.11.0/gcc_64
+QT=~/Qt/6.11.1/gcc_64
 rm -rf build/tests \
   && cmake -S tests -B build/tests -DCMAKE_PREFIX_PATH="$QT" \
   && cmake --build build/tests -j 4 \
@@ -104,7 +104,7 @@ gh release edit   "$TAG" -R PinPoint-Golf/PinPointStudio --draft=false --prerele
 Use when you want a GPU-bundled build (CI is CPU-only) or no CI at all.
 
 ```bash
-export CMAKE_PREFIX=~/Qt/6.11.0/gcc_64
+export CMAKE_PREFIX=~/Qt/6.11.1/gcc_64
 export SIGN_KEY=C15A1C82CE718ED190B7C3C00F677C2EDA4F7BF0
 # Optional GPU bundle (else CPU-only). Spinnaker optional.
 export CUDA_LIB_DIR=/usr/local/cuda-12/lib64 CUDNN_LIB_DIR=/usr/lib/x86_64-linux-gnu
