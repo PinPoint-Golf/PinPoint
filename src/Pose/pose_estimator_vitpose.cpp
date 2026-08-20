@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <thread>
 #include "pp_debug.h"
+#include "pp_model_path.h"   // bundle-vs-bare-exe model lookup
 #include "pp_profiler.h"
 #include "cpu_topology.h"   // pinpoint::physicalCoreCount() (pose.intraOpThreads == -1)
 
@@ -127,14 +128,7 @@ QString PoseEstimatorViTPose::modelPath(ModelVariant v)
     if (v == ModelVariant::WholeBodyLarge)
         return largeModelDir() + QString::fromLatin1(kLargeModelFile);
 
-    const QString file = QStringLiteral(VITPOSE_MODEL_FILE);
-#ifdef Q_OS_MACOS
-    return QCoreApplication::applicationDirPath()
-         + QStringLiteral("/../Resources/models/") + file;
-#else
-    return QCoreApplication::applicationDirPath()
-         + QStringLiteral("/models/") + file;
-#endif
+    return pinpoint::modelFilePath(QStringLiteral(VITPOSE_MODEL_FILE), QStringLiteral("vitpose"));
 }
 
 bool PoseEstimatorViTPose::isVariantAvailable(ModelVariant v)

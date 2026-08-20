@@ -24,6 +24,7 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include "pp_debug.h"
+#include "pp_model_path.h"   // bundle-vs-bare-exe model lookup
 #include "pp_profiler.h"
 #include "pp_os_metrics.h"
 #include "pp_gpu_metrics.h"
@@ -81,13 +82,7 @@ QString PoseEstimatorMoveNet::modelPath(ModelVariant v)
 #endif
         : QStringLiteral(MOVENET_LIGHTNING_FILE);
 
-#ifdef Q_OS_MACOS
-    return QCoreApplication::applicationDirPath()
-         + QStringLiteral("/../Resources/models/") + file;
-#else
-    return QCoreApplication::applicationDirPath()
-         + QStringLiteral("/models/") + file;
-#endif
+    return pinpoint::modelFilePath(file, QStringLiteral("movenet"));
 }
 
 int PoseEstimatorMoveNet::inputSize(ModelVariant v)

@@ -25,6 +25,7 @@
 #include <QFileInfo>
 #include <QString>
 #include "pp_debug.h"
+#include "pp_model_path.h"   // bundle-vs-bare-exe model lookup
 #include "pp_profiler.h"
 #include "pp_gpu_metrics.h"
 
@@ -64,15 +65,7 @@ PersonSegmenter::~PersonSegmenter()
 
 QString PersonSegmenter::modelPath()
 {
-#ifdef Q_OS_MACOS
-    return QCoreApplication::applicationDirPath()
-         + QStringLiteral("/../Resources/models/")
-         + QStringLiteral(SEGMENTER_MODEL_FILE);
-#else
-    return QCoreApplication::applicationDirPath()
-         + QStringLiteral("/models/")
-         + QStringLiteral(SEGMENTER_MODEL_FILE);
-#endif
+    return pinpoint::modelFilePath(QStringLiteral(SEGMENTER_MODEL_FILE), QStringLiteral("segmenter"));
 }
 
 bool PersonSegmenter::isAvailable()

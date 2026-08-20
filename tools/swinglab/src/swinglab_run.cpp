@@ -60,6 +60,7 @@
 #include "imu_sample.h"
 #include "format_descriptor.h"
 
+#include "../../../src/Core/PpMessageLog.h"   // echo the pipeline's own log to stderr
 #include "../../../src/Analysis/shot_analyzer.h"
 #include "../../../src/Analysis/swing_reanalyzer.h"
 #include "../../../src/Analysis/ball_runner.h"
@@ -254,6 +255,15 @@ int runRefusionParity(const SwingWindow &window,
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+
+    // The pipeline explains itself through ppInfo/ppWarn/ppError, and those go to
+    // PpMessageLog — which only the GUI drains. Unset, this tool discards every
+    // reason the analysis had for doing what it did, including the ONNX Runtime
+    // callback in ort_log.h. That is not a preference: it is how a swing with no
+    // pose track at all came back reporting "write-back ok" and a plausible score.
+    // Always on, never behind a flag — a diagnostic tool that has to be asked to
+    // say what went wrong will be run without the flag on the day it matters.
+    PpMessageLog::instance()->setEchoToStderr(true);
 
     QCommandLineParser cli;
     cli.addPositionalArgument("swing_dir", "Recorded swing directory");

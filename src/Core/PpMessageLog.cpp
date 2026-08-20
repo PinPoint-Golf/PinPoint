@@ -21,6 +21,8 @@
 #include <QMutexLocker>
 #include <QTime>
 
+#include <cstdio>
+
 PpMessageLog *PpMessageLog::instance()
 {
     static PpMessageLog s_instance;
@@ -39,6 +41,12 @@ static QString severityString(QtMsgType type)
     return QStringLiteral("INFO");
 }
 
+void PpMessageLog::setEchoToStderr(bool on)
+{
+    QMutexLocker lk(&m_mutex);
+    m_echo = on;
+}
+
 void PpMessageLog::append(QtMsgType type, const QString &msg)
 {
     QMutexLocker lk(&m_mutex);
@@ -51,6 +59,15 @@ void PpMessageLog::append(QtMsgType type, const QString &msg)
     // Drop oldest when we exceed the cap
     while (m_entries.size() > kMaxEntries)
         m_entries.removeFirst();
+
+    // Under the lock deliberately: the ring buffer and the console must agree on
+    // order, and a tool reading interleaved output is exactly what this is for.
+    // stdio, not iostream — pp_debug.cpp's std::cerr tee would otherwise feed our
+    // own output back in as a captured message.
+    if (m_echo)
+        std::fprintf(stderr, "%s %-5s %s\n",
+                     qUtf8Printable(e.timestamp), qUtf8Printable(e.severity),
+                     qUtf8Printable(e.message));
 }
 
 QList<PpMessageLog::Entry> PpMessageLog::fetchSince(int &afterSeq) const

@@ -49,6 +49,20 @@ public:
     // Returns the current highest sequence number without fetching entries.
     int currentSeq() const;
 
+    // ALSO write each entry to stderr as it arrives. Off by default: in the app
+    // this log IS drained, by the resource monitor's application-log panel, and
+    // duplicating it on the console would help nobody.
+    //
+    // A HEADLESS TOOL MUST TURN THIS ON. Nothing else in the tree calls
+    // fetchSince(), so for a CLI binary this class is a write-only buffer that
+    // dies with the process — and ppInfo/ppWarn/ppError, plus the ONNX Runtime
+    // callback in ort_log.h, all report through it. swinglab_run consequently
+    // spent two debugging sessions insisting a swing analysed fine while the
+    // line naming the model it could not open was being discarded on every run.
+    // Echoing live rather than dumping at exit keeps the messages interleaved
+    // with the tool's own output and survives a crash.
+    void setEchoToStderr(bool on);
+
     static constexpr int kMaxEntries = 500;
 
 private:
@@ -57,4 +71,5 @@ private:
     mutable QMutex m_mutex;
     QList<Entry>   m_entries;
     int            m_nextSeq = 0;
+    bool           m_echo    = false;
 };
