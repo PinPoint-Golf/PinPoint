@@ -152,7 +152,7 @@ What it provides:
 | Thing | Detail |
 |---|---|
 | **Repo layout** | `PP_REPO_ROOT`, `PP_SRC`, `PP_BUFFER`, `PP_CORE`, `PP_THIRD` |
-| **Qt prefix** | Per-platform default (`~/Qt/6.11.1/macos`, `…/gcc_64`, `…/msvc2022_64`) unless `-DCMAKE_PREFIX_PATH` / env already set. Replaces the stale `gcc_64`-everywhere docs. |
+| **Qt prefix** | The **newest** `~/Qt/<version>/<abi>` carrying a `Qt6Config.cmake` (`macos`, `gcc_64`, `msvc2022_64`), unless `-DCMAKE_PREFIX_PATH` / env already set. Compared by version, not sorted, so 6.10 beats 6.9. If none is found it says so rather than silently letting CMake find some other Qt. |
 | **Qt + Threads** | `find_package(Qt6 Core Gui)` and `find_package(Threads)` once. Suites needing more (Qml, Bluetooth, OpenCV, Test for `QSignalSpy`) add their own — cheap and additive. |
 | **C++ standard** | Default C++20 (app/Buffer parity); per-target `STD` overrides. |
 | **`pp_find_eigen(<out>)`** | One Eigen locator: explicit `-DPP_EIGEN_DIR`, then any app build's `build/*/_deps/eigen-src` (matched regardless of build-dir name), then fetch 3.4.0. |
