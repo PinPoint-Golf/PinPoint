@@ -3427,14 +3427,14 @@
       ],
       "group": "posture",
       "kind": "fault",
-      "prominence": "ubiquitous",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
         "sig_reverseSpineP4"
       ],
       "state": "active",
-      "consequence": "Leaning toward the target at the top loads the trail side of the lower back and makes a sequenced downswing hard to start from the ground. On its own it is a posture, and a golfer can hold it and still transfer weight correctly. Read it with the P7 reading — the two together are what identify a reverse pivot.",
+      "consequence": "Leaning toward the target at the top loads the trail side of the lower back and makes a sequenced downswing hard to start from the ground. On its own it is a posture, and a golfer can hold it and still transfer weight correctly. It does not carry itself down into impact either — the golfer can lean this way at the top and still drop the trail shoulder on the way through, so this reading does NOT imply the P7 one. Read the two together: that pair, and only that pair, identifies a reverse pivot.",
       "provenance": {
         "tier": "supported",
         "citation": "10.1016/j.smhs.2020.03.002",
@@ -3453,7 +3453,7 @@
       ],
       "group": "lateral",
       "kind": "fault",
-      "prominence": "ubiquitous",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
@@ -3466,7 +3466,7 @@
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-08-17",
-        "searchTerms": "reverse pivot centre of pressure trail foot loading backswing golf force plate — the force-plate literature was searched for a prevalence or a criterion and has neither. The nearest hit, Ball & Best 2007, names a REVERSE cluster that is a downswing pattern in golfers who loaded the trail side correctly; it is carried as ref.ballBest2007 with the reason it must not be cited here.\n\nWHY UBIQUITOUS, AND WHY BOTH LEGS ARE TOO. A conjunction cannot be commoner than its rarer part, so seating this at the top rung forces reverse_spine_p4 and reverse_spine_p7 there with it; they were raised deliberately and not to make an arithmetic complaint go away. The judgement being recorded is that this is close to universal in golfers who have not been taught otherwise. It is ALSO the prominence in this library most exposed to a cohort effect the schema cannot express: prevalence here is a function of experience, not of population, and contexts key on shot type rather than skill. THE CORPUS WILL DISAGREE WITH THIS PRIOR and the disagreement will not be evidence against it — a swing library collected from people who own a launch monitor is not a sample of new golfers. Re-seat only against a population that contains beginners."
+        "searchTerms": "reverse pivot centre of pressure trail foot loading backswing golf force plate — the force-plate literature was searched for a prevalence or a criterion and has neither. The nearest hit, Ball & Best 2007, names a REVERSE cluster that is a downswing pattern in golfers who loaded the trail side correctly; it is carried as ref.ballBest2007 with the reason it must not be cited here.\n\nWHY COMMON, AND WHY BOTH LEGS ARE TOO. This sat at the top rung (`ubiquitous`, which reads to a golfer as \"almost everyone\") on the judgement that it is close to universal in golfers who have not been taught otherwise. That rung was wrong twice over. It overstated the fault to every golfer the pack graded — a chip saying almost everyone has this is a claim about the reader, not about beginners — and, because a conjunction cannot be commoner than its rarer part, it dragged reverse_spine_p4 and reverse_spine_p7 up with it, so BOTH halves also announced themselves as near-universal. All three now sit at `common`, which is the honest reading of a fault a coach sees often and does not see in most swings. The parts are held EQUAL to the conjunction rather than above it: the conjunction is strictly narrower than either half and a rung below would be defensible, but nothing measured says which, so the equal seating is the claim nobody has to defend with a number. What has not changed is the cohort effect the schema cannot express: prevalence here is a function of experience, not of population, and contexts key on shot type rather than skill. THE CORPUS CANNOT SETTLE THIS EITHER WAY — a swing library collected from people who own a launch monitor is not a sample of new golfers. Re-seat only against a population that contains beginners."
       },
       "drills": [
         "drill.trailHipLoad",
@@ -5299,14 +5299,14 @@
       "axis": "axis_tilt_impact",
       "group": "impact",
       "kind": "fault",
-      "prominence": "ubiquitous",
+      "prominence": "common",
       "observability": "observable",
       "confirmedBy": "measured",
       "detectedBy": [
         "sig_axisTiltImpactLow"
       ],
       "state": "active",
-      "consequence": "The upper body is not leaning away from the target at impact — level, or leaning toward the target, where the trail shoulder should have dropped. The club then arrives too steeply, and with a driver there is no room left to hit up on the ball. On its own this usually indicates a reverse pivot without settling it: early extension and a stalled pelvis flatten the same angle. Read it with the P4 reading — the two together are what identify the pivot. NAMING: this is the LOW tail of tilt at impact as a whole, so mild readings inside it are insufficient tilt rather than a spine truly reversed. The tail is named for what it means when it matters, which is the coach's usage.",
+      "consequence": "The upper body is not leaning away from the target at impact — level, or leaning toward the target, where the trail shoulder should have dropped. The club then arrives too steeply, and with a driver there is no room left to hit up on the ball. On its own this does not settle a reverse pivot: early extension and a stalled pelvis flatten the same angle, and those are the two causes carried for it. Nor does it follow from the P4 lean — a golfer who leans toward the target at the top can still drop the trail shoulder through the ball. Read the two together: that pair, and only that pair, identifies the pivot. NAMING: this is the LOW tail of tilt at impact as a whole, so mild readings inside it are insufficient tilt rather than a spine truly reversed. The tail is named for what it means when it matters, which is the coach's usage.",
       "provenance": {
         "tier": "practice",
         "searchedOn": "2026-07-27",
@@ -10429,14 +10429,25 @@
       }
     },
     {
-      "from": "reverse_spine_p4",
+      "from": "early_extension",
       "to": "reverse_spine_p7",
       "type": "causes",
       "strength": "moderate",
       "provenance": {
         "tier": "practice",
-        "searchedOn": "2026-08-02",
-        "searchTerms": "reverse spine angle top of backswing secondary tilt at impact"
+        "searchedOn": "2026-08-20",
+        "searchTerms": "early extension standing up through impact loss of secondary axis tilt golf"
+      }
+    },
+    {
+      "from": "hip_stall",
+      "to": "reverse_spine_p7",
+      "type": "causes",
+      "strength": "moderate",
+      "provenance": {
+        "tier": "practice",
+        "searchedOn": "2026-08-20",
+        "searchTerms": "pelvis stops rotating impact trail shoulder fails to drop axis tilt golf"
       }
     },
     {
