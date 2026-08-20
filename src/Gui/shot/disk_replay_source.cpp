@@ -181,13 +181,18 @@ bool DiskReplaySource::load(const QString &swingDir, double speed, bool trimToSw
                     { QStringLiteral("value"), s2[QStringLiteral("value")].toDouble() },
                     { QStringLiteral("band"),  s2[QStringLiteral("band")].toString() } });
             }
-            series.append(QVariantMap{
+            QVariantMap sm{
                 { QStringLiteral("key"),   m[QStringLiteral("key")].toString() },
                 { QStringLiteral("label"), m[QStringLiteral("label")].toString() },
                 { QStringLiteral("unit"),  m[QStringLiteral("unit")].toString() },
                 { QStringLiteral("t_us"),  ts },
                 { QStringLiteral("value"), vs },
-                { QStringLiteral("phaseSamples"), samples } });
+                { QStringLiteral("phaseSamples"), samples } };
+            // See ShotProcessor's twin: present only when the producer characterised one, so a
+            // swing analysed before σ existed reloads without inventing a perfect measurement.
+            if (m.contains(QStringLiteral("sigma")))
+                sm.insert(QStringLiteral("sigma"), m[QStringLiteral("sigma")].toDouble());
+            series.append(sm);
         }
         QVariantList phases;
         for (const QJsonValue &pv : an[QStringLiteral("phases")].toArray()) {

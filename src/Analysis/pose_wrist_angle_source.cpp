@@ -293,24 +293,31 @@ std::vector<MetricSeries> buildTrailWristSeries(const PoseTrack2D &pose,
         ch.push(f.t_us, v);
     }
 
+    // The band split, on the SURVIVING channel samples rather than the bridged curve: a bridge is
+    // an interpolation between two measurements, so its smoothness is an artefact of the drawing
+    // and counting it would flatter the estimate. Runs whether or not the filtered curve is the
+    // one emitted, because σ is wanted either way.
+    const std::vector<double> smooth   = lowpassIrregular(ch.t_us, ch.value, cfg.fcHz);
+    const double              sigmaDeg = smooth.empty() ? 0.0
+                                                        : outOfBandSigmaDeg(ch.value, smooth);
+
+    // ORDER MATTERS: σ is the distance between the two, so it is taken before either replaces the
+    // other. cfg.filterCurve is off — see the constant for what evidence would turn it on, and why
+    // a larger corpus is not that evidence.
+    if (cfg.filterCurve && !smooth.empty())
+        ch.value = smooth;
+
     MetricSeries m = buildChannelSeries(grid, ch, QStringLiteral("trailWristFlexExt"),
                                         QStringLiteral("Trail wrist — bow / cup"),
                                         QStringLiteral("°"), phases);
     if (m.key.isEmpty())
         return out;                      // refused upstream — nothing to characterise
 
-    // σ from the band split, on the SURVIVING channel samples rather than the bridged curve: a
-    // bridge is an interpolation between two measurements, so its smoothness is an artefact of the
-    // drawing and counting it would flatter the estimate. Carried only when the filter had
-    // something to say — MetricSeries::sigma absent means "not characterised", not "no error", and
-    // the field's own contract is explicit that confidence must WIDEN the bar rather than nudge
-    // the value, which is why nothing here touches m.value.
-    const std::vector<double> smooth = lowpassIrregular(ch.t_us, ch.value, cfg.fcHz);
-    if (!smooth.empty()) {
-        const double sigmaDeg = outOfBandSigmaDeg(ch.value, smooth);
-        if (sigmaDeg > 0.0)
-            m.sigma = sigmaDeg;
-    }
+    // Carried only where the filter had something to say. MetricSeries::sigma absent means "not
+    // characterised", not "no error", and the field's own contract is explicit that confidence
+    // must WIDEN the bar rather than nudge the value — which is why σ never touches m.value.
+    if (sigmaDeg > 0.0)
+        m.sigma = sigmaDeg;
     out.push_back(std::move(m));
     return out;
 }

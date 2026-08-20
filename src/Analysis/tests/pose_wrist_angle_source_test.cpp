@@ -242,6 +242,39 @@ int main()
                   "sigma: the emitted curve is IDENTICAL with and without the sigma pass");
     }
 
+    // ── filterCurve: off is the shipped path, on swaps the curve and nothing else ──
+    std::printf("-- filterCurve switch --\n");
+    {
+        check(!PoseWristAngleConfig{}.filterCurve, "filterCurve defaults OFF");
+
+        const PoseTrack2D t = buildNoisyTrack(3.0);
+        const std::vector<MetricSeries> off = buildTrailWristSeries(t, ph, 1, W, H, cfg);
+        PoseWristAngleConfig on = cfg; on.filterCurve = true;
+        const std::vector<MetricSeries> onS = buildTrailWristSeries(t, ph, 1, W, H, on);
+        check(off.size() == 1 && onS.size() == 1, "filterCurve: both produced a series");
+        if (off.size() == 1 && onS.size() == 1) {
+            check(off[0].value != onS[0].value, "filterCurve: on actually changes the curve");
+            // σ is the distance between raw and filtered, so it must not depend on which of
+            // the two was emitted — the order the .cpp takes them in is what guarantees it.
+            check(off[0].sigma && onS[0].sigma
+                      && near(*off[0].sigma, *onS[0].sigma, 1e-9),
+                  "filterCurve: sigma is identical either way");
+            check(off[0].t_us == onS[0].t_us && off[0].key == onS[0].key,
+                  "filterCurve: only the values move — grid and identity are untouched");
+            // The whole point of the switch: the noise it removes was above the wrist's band.
+            const auto rough = [](const std::vector<double> &v) {
+                double s = 0.0;
+                for (size_t i = 2; i < v.size(); ++i) {
+                    const double d2 = v[i] - 2.0 * v[i - 1] + v[i - 2];
+                    s += d2 * d2;
+                }
+                return v.size() > 2 ? std::sqrt(s / double(v.size() - 2)) : 0.0;
+            };
+            check(rough(onS[0].value) < rough(off[0].value),
+                  "filterCurve: on is smoother than off");
+        }
+    }
+
     std::printf("%s (%d failures)\n", g_fail ? "FAILED" : "OK", g_fail);
     return g_fail ? 1 : 0;
 }

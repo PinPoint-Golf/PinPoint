@@ -1,7 +1,9 @@
 # Trail-wrist corridors: why p6 and p7 fire Action on most swings
 
-**Status:** finding, 2026-08-20. No corridor was changed. This records what was measured and
-what it means, so the next person to open `m_trailWristFlexExt_*` starts from evidence.
+**Status:** ACTED ON, 2026-08-20. `m_trailWristFlexExt_p1`, `_p6` and `_p7` no longer have a norm
+row, so they report a value and grade nothing (`Grade::NotMeasured`). `_p2`–`_p5` are unchanged.
+The reasoning is below and is repeated in the `_comment` block of `norms.json`, because an absent
+row is invisible to anyone reading the pack.
 
 ## The observation
 
@@ -76,20 +78,56 @@ one golfer. Fitting mu to Mark's median would make his readings grade well and w
 about anyone else — and it would bake a known projection artefact into the norm set as if it were
 anatomy.
 
-## Recommended next steps
+## What was done
 
-1. **Reconsider `status` for the p6/p7 rows.** A measure that cannot be trusted at a position
-   should not grade at that position. Demoting those two rows costs two readings per swing and
-   removes the large majority of the Action noise.
-2. **p1 deserves separate thought.** It is the only `at` reducer in the set, so it grades the
-   ABSOLUTE apparent camera angle at address, seated at mu = 0 with a ±10° monitor. An absolute
-   image-plane angle depends on where the camera was placed, so this row is camera-setup dependent
-   by construction. The corpus median is +8.4° with 27 of 28 Action cases above the ceiling, which
-   is what a fixed setup offset looks like.
-3. **Anything that changes the curve should be judged against these numbers, not against
-   "smoother".** For reference, a 6 Hz zero-phase low-pass on this curve moves 25% of the graded
-   readings between bands while leaving the grade distribution essentially unchanged (Action
-   129 → 127). That is churn, not improvement, until the seating above is resolved.
+The three rows were removed from `src/Resources/diagnostics/norms.json`. That is the whole
+mechanism: `norm.h` defines `Grade::NotMeasured` as "no norm resolved", and its comment forbids
+collapsing it into a passing grade — "we could not assess this" and "this is fine" are different
+statements. The measures stay `live`, the curve still draws and the value still reads; only the
+verdict is withheld. No status was changed, because `MeasureStatus` has no value meaning "the
+producer works but its output is not trustworthy here": `NoProducer` would be false and
+`NotCapturable` claims something about the sensor that has not been established.
+
+Safe to remove without a health regression: no `Signal` in `core.json` references any
+`m_trailWristFlexExt_*` measure, so the `signalNoNorm` check in `diagnostics_health.cpp` — which
+fires when a corridor signal has nothing to compare against — cannot be tripped by their absence.
+
+Restore a row when there is a criterion for the TRAIL wrist. Not when the corpus grows: more
+swings through one camera cannot separate "the corridor is wrong" from "the measurement is wrong",
+which is the whole reason both were withheld rather than one being corrected.
+
+## A later finding that changes the filter argument
+
+This document originally said a 6 Hz low-pass on the curve was "churn, not improvement, until the
+seating above is resolved", implying the churn lived inside the questionable corridors. **That was
+measured afterwards and is false.** Grade changes under the filter, per position:
+
+| p1 | p2 | p3 | p4 | p5 | p6 | p7 |
+|---|---|---|---|---|---|---|
+| 23% | 23% | 21% | **31%** | 19% | 17% | 35% |
+
+It is uniform, and the largest single figure is at p4 — the one corridor here that is well seated.
+Withholding p6/p7 moves the total from 24% to 23%, so resolving the seating does not unblock the
+filter. What would is a criterion on the trail wrist; on the lead hand, where one exists, filtering
+improved agreement with it by +0.03. The filter is therefore behind
+`pose.wristAngles.filterCurve`, off, with that reasoning recorded at the constant.
+
+## What is still open
+
+1. **p2–p5 are still heuristic and still fire Action on about a quarter of readings.** Their
+   failures are two-sided, which is a wide corridor working rather than a misplaced one, so they
+   were left grading. They have never been fitted to anything and every number in them is expected
+   to move — that is what `"source": "heuristic"` says. They are the next thing to look at, and
+   like the withheld three they need a criterion rather than a bigger corpus.
+2. **The trail wrist has no criterion and no route to one that has been costed.** A goniometer is
+   worn on the lead hand; wearing one on the trail hand is physically possible but has never been
+   captured, and it is the single measurement that would unblock both the withheld corridors and
+   the filter. Worth a session on its own before any further work on this metric family.
+3. **Nothing yet reads `MetricSeries::sigma` when deciding what to say.** It reaches the summary
+   card as a chip, which tells a person how much of the curve is noise. A grader could use the
+   same number — a reading whose corridor is narrower than its own measurement noise is not
+   really being graded — but nothing does that today, and it would need thinking through before
+   it changed any verdict.
 
 ## Appendix — what the plausibility limit did, for reference
 

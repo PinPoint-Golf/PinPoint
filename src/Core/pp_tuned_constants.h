@@ -286,12 +286,31 @@ inline constexpr double kFeLimitDeg      = 120.0;   // pose.wristAngles.feLimitD
 // below 1.9 Hz, 99% below 2.7 Hz and 99.9% below 3.7 Hz, so 6 Hz keeps all of the real
 // signal with ~1.6× headroom and everything above it is keypoint noise.
 //
-// USED ONLY FOR THE σ ESTIMATE TODAY — the emitted curve is unfiltered (see
-// buildTrailWristSeries). Filtering the curve itself moves 25% of the graded
-// m_trailWristFlexExt_* readings between bands, which must not land before the p6/p7
-// corridor seating is resolved. 0 disables the filter entirely (lowpassZeroPhase
-// returns its input unchanged), which also withdraws σ.
+// Drives the σ estimate always, and the emitted curve only when kFilterCurve is on.
+// 0 disables the filter entirely (lowpassZeroPhase returns its input unchanged), which
+// also withdraws σ.
 inline constexpr double kFcHz            = 6.0;     // pose.wristAngles.fcHz
+// Emit the FILTERED curve rather than the raw one. Off, and there is currently no
+// evidence that would turn it on — which is the point of it being a switch rather than
+// a comment saying "flip this later".
+//
+// The physics is sound: above ~4 Hz is not wrist motion, so the jitter it removes is
+// provably noise. What is missing is any reason to believe the filtered VALUE is more
+// correct. Two measurements say it is not, or at least not measurably:
+//
+//   · on the lead hand, where HackMotion gives a right answer, filtering improved
+//     agreement with the criterion by +0.03 — it removes noise the correlation was
+//     already averaging out, and does not touch the projection error that dominates;
+//   · it moves ~23% of the graded m_trailWristFlexExt_* readings between bands at EVERY
+//     position, including p4 at 31% — the one corridor here that is well seated. The
+//     earlier reasoning that this churn sat inside the questionable p6/p7 corridors was
+//     measured and is false: withholding those two leaves 24% → 23%.
+//
+// So flipping this needs a CRITERION ON THE TRAIL WRIST, not a bigger corpus. More
+// swings through one camera cannot separate "the filter improved the value" from "the
+// filter moved the value". Until then the honest position is that the curve a user reads
+// is the one the detector produced, with σ saying how much of it is noise.
+inline constexpr bool   kFilterCurve     = false;   // pose.wristAngles.filterCurve
 } // namespace wristAngles
 } // namespace pose
 

@@ -208,12 +208,18 @@ QVariantMap toAnalysisDetail(const pinpoint::analysis::SwingAnalysis &a)
                                         { QStringLiteral("t_us"),  static_cast<qlonglong>(ps.t_us) },
                                         { QStringLiteral("value"), ps.value },
                                         { QStringLiteral("band"),  ps.band } });
-        series.append(QVariantMap{ { QStringLiteral("key"),   m.key },
-                                   { QStringLiteral("label"), m.label },
-                                   { QStringLiteral("unit"),  m.unit },
-                                   { QStringLiteral("t_us"),  ts },
-                                   { QStringLiteral("value"), vs },
-                                   { QStringLiteral("phaseSamples"), samples } });
+        QVariantMap sm{ { QStringLiteral("key"),   m.key },
+                        { QStringLiteral("label"), m.label },
+                        { QStringLiteral("unit"),  m.unit },
+                        { QStringLiteral("t_us"),  ts },
+                        { QStringLiteral("value"), vs },
+                        { QStringLiteral("phaseSamples"), samples } };
+        // 1σ measurement noise, ABSENT when the producer never characterised one — the key is
+        // omitted rather than set to 0, because a zero would read as "measured, and perfect".
+        // Mirrored in disk_replay_source.cpp: a live shot and its reloaded self must agree.
+        if (m.sigma)
+            sm.insert(QStringLiteral("sigma"), *m.sigma);
+        series.append(sm);
     }
     QVariantList phases;
     for (const PhaseEvent &e : a.phases)
@@ -848,9 +854,17 @@ void ShotProcessor::finishGatherAndLaunch()
 
     // Segmentation pre-stage (v3 G2): a milliseconds-cheap fuse + inertial
     // ladder over the frozen window, gating both heavy workers — its swing
-    // bounds trim the export encode span and the replay. The job is resolved
-    // on the UI thread NOW (value types only); failure or no-IMU yields a
-    // conf-0 result and everything below degrades to full-window behaviour.
+    // bounds bound the heavy-stage scan windows and the in-window replay. The
+    // job is resolved on the UI thread NOW (value types only); failure or
+    // no-IMU yields a conf-0 result and everything below degrades to
+    // full-window behaviour.
+    //
+    // ⚠ IT DOES NOT TRIM THE EXPORT, whatever this comment used to claim.
+    // SwingExportJob carries no span and SwingExporter reads no bounds: the
+    // encode is the whole frozen window, always. Playback trims instead —
+    // DiskReplaySource on the persisted Finish event, startReplay() below on
+    // the analysed one — which is why a swing.json can hold a 4 s clip and
+    // still replay 2.7 s of swing.
     m_analysisJob = buildAnalysisJob();
     const pinpoint::SwingWindow *win = &*m_swingWindow;
     m_segmentationInFlight = true;
@@ -1940,6 +1954,11 @@ void ShotProcessor::maybeJoin()
 // ¼× replay (migrated from CameraManager)
 // ---------------------------------------------------------------------------
 
+// Breathing room after the located Finish, so the club is seen to arrive rather than the
+// picture cutting on the frame the detector settled on. Matches the segmenter's own
+// boundPadUs in spirit; kept local because this is a viewing choice, not a measurement.
+static constexpr int64_t kReplayFinishPadUs = 250000;   // 250 ms
+
 void ShotProcessor::startReplay()
 {
     // Anchor to the actual first/last captured entry so replay starts
@@ -1960,7 +1979,22 @@ void ShotProcessor::startReplay()
     // mid-fidget. conf 0 (no IMU / failed pre-stage) keeps the full span.
     if (m_segmentation.conf > 0.f) {
         const int64_t lo = std::max(m_replayWindowStartUs, m_segmentation.swingStartUs);
-        const int64_t hi = std::min(m_replayWindowEndUs,   m_segmentation.swingEndUs);
+        // END ON THE ANALYSED FINISH WHERE THERE IS ONE. m_segmentation is the PRE-STAGE
+        // ladder — fused from the IMU before the club track exists — so its swingEndUs
+        // carries the segmenter's window-edge fallback whenever the quiet-run detector
+        // never fired, which on this corpus was every swing: the replay then ran ~1.3 s
+        // past a finish the camera had already located. The analysed ladder has been
+        // arbitrated against the club track by then (timeline_fusion.h), so its Finish is
+        // the real one. Bounds are deliberately NOT rewritten by fusion — it moves labels,
+        // never spans — so the correction belongs here, at the point of use.
+        int64_t endUs = m_segmentation.swingEndUs;
+        if (m_analysisResult.ok && m_analysisResult.detail) {
+            using pinpoint::analysis::Phase;
+            const auto &seg = m_analysisResult.detail->segmentation;
+            if (const auto *fin = seg.eventFor(Phase::Finish))
+                endUs = fin->t_us + kReplayFinishPadUs;
+        }
+        const int64_t hi = std::min(m_replayWindowEndUs, endUs);
         if (hi > lo) {
             m_replayWindowStartUs = lo;
             m_replayWindowEndUs   = hi;

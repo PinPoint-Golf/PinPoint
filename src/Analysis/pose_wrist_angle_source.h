@@ -64,6 +64,9 @@ struct PoseWristAngleConfig {
     double feLimitDeg      = tuned::pose::wristAngles::kFeLimitDeg;      // pose.wristAngles.feLimitDeg
     // Zero-phase low-pass cutoff for the σ estimate. ≤ 0 ⇒ no filter and NO σ.
     double fcHz            = tuned::pose::wristAngles::kFcHz;            // pose.wristAngles.fcHz
+    // Emit the FILTERED curve rather than the raw one. Off; see the constant for what
+    // evidence would justify turning it on, and why the corpus cannot supply it.
+    bool   filterCurve     = tuned::pose::wristAngles::kFilterCurve;     // pose.wristAngles.filterCurve
 
     static PoseWristAngleConfig fromOverrides(const QVariantMap &ov)
     {
@@ -74,6 +77,7 @@ struct PoseWristAngleConfig {
         apply(ov, "pose.wristAngles.apparentPenalty", c.apparentPenalty);
         apply(ov, "pose.wristAngles.feLimitDeg",      c.feLimitDeg);
         apply(ov, "pose.wristAngles.fcHz",            c.fcHz);
+        apply(ov, "pose.wristAngles.filterCurve",     c.filterCurve);
         return c;
     }
 };

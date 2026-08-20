@@ -28,13 +28,15 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls.Basic   // ToolTip on the σ chip
 import QtQuick.Layouts
 import PinPointStudio
 
 ColumnLayout {
     id: root
 
-    // series: [{ key, label, unit, t_us, value, phaseSamples, color }]
+    // series: [{ key, label, unit, t_us, value, phaseSamples, color, sigma? }]
+    // `sigma` is OPTIONAL and its absence is meaningful — see the chip below.
     property var    series:      []
     property real   startUs:     0
     property real   endUs:       0
@@ -136,6 +138,29 @@ ColumnLayout {
                             font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
                             font.letterSpacing: Theme.trackingData
                             color: Theme.colorText3
+                        }
+                        // Measurement NOISE on this series, when its producer characterised one.
+                        // Sits by the unit rather than on each of the four values because it is
+                        // one number for the whole curve — repeating it four times would read as
+                        // four separate error bars. Absent ⇒ nothing is drawn: a series with no
+                        // σ has not been characterised, which is not the same as being exact.
+                        Text {
+                            visible: card.modelData.sigma !== undefined
+                                     && card.modelData.sigma > 0
+                            text: "± " + card.modelData.sigma.toFixed(1)
+                                       + (card.modelData.unit || "°")
+                            font.family: Theme.fontData; font.pixelSize: Theme.fontSzMicro
+                            font.letterSpacing: Theme.trackingData
+                            color: Theme.colorText3
+                            HoverHandler { id: sigmaHover }
+                            ToolTip.visible: sigmaHover.hovered
+                            ToolTip.delay: 400
+                            // Deliberately says what it is NOT. This is frame-to-frame noise in
+                            // the detector, not the accuracy of the reading — the projection
+                            // error on a camera-derived angle is larger and uncharacterised, and
+                            // a reader who took ±σ for total accuracy would trust it too far.
+                            ToolTip.text: qsTr("Frame-to-frame measurement noise on this curve. "
+                                               + "Not the overall accuracy of the reading.")
                         }
                     }
 
