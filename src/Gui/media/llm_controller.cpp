@@ -63,6 +63,31 @@ static const char * const kModelFiles[] = {
 };
 
 // ---------------------------------------------------------------------------
+// ⚠ THE AI COACH IS DARK BY DEFAULT, AND THE CODE BELOW IS KEPT ON PURPOSE.
+//
+// The prototype works and its developer hatch is not reachable from the UI, so on every
+// ordinary run this controller would download 4.9 GB of Phi-4-mini, hold an ORT session and
+// a worker thread, and answer nobody. Nothing here is deleted — the hatch is expected back —
+// but it does not start, does not fetch, and does not load unless asked for by name.
+//
+// ⚠ RUNTIME, NOT #ifdef, DELIBERATELY. A compile-time gate stops the prototype being
+// COMPILED, and code that is not compiled rots: the next person to enable it inherits a
+// month of drift against headers that moved underneath it. Gated this way it keeps building
+// and keeps being linked, so it can only break in ways a build catches.
+//
+// Set PINPOINT_ENABLE_LLM=1 to bring it back, matching the PINPOINT_* hatches already used
+// for BLE tracing and the norm/pack overrides. Anything but "0" counts as on.
+//
+// ⚠ THE GATE COVERS THE CLOUD PATH TOO. switchToGemini() builds an engine and starts the
+// worker on its own, reachable from a settings change rather than from here, so "no local
+// model" would not have been enough to keep this quiet on a machine with a Gemini key.
+static bool llmEnabled()
+{
+    static const bool on =
+        qEnvironmentVariableIsSet("PINPOINT_ENABLE_LLM")
+        && qEnvironmentVariable("PINPOINT_ENABLE_LLM") != QLatin1String("0");
+    return on;
+}
 
 LlmController::LlmController(AppSettings *settings, QObject *parent)
     : QObject(parent)
@@ -71,6 +96,16 @@ LlmController::LlmController(AppSettings *settings, QObject *parent)
     , m_worker(nullptr)
     , m_downloader(new ModelDownloader(this))
 {
+    // Before anything is connected, probed or started. m_workerThread and m_downloader are
+    // constructed by the member-init list above but are inert until started, and
+    // LocalLlmEngine::hasGpu() below is deliberately on the far side of this return: a
+    // capability probe is still a probe.
+    if (!llmEnabled()) {
+        ppInfo() << "[LlmController] AI Coach is DARK — no model download, no engine, no "
+                    "worker thread. Set PINPOINT_ENABLE_LLM=1 to enable the prototype.";
+        return;
+    }
+
     connect(m_downloader, &ModelDownloader::progress,
             this, &LlmController::onDownloadProgress);
     connect(m_downloader, &ModelDownloader::fileComplete,
@@ -125,6 +160,11 @@ LlmController::LlmController(AppSettings *settings, QObject *parent)
 
 LlmController::~LlmController()
 {
+    // Dark: nothing was ever started, so there is nothing to unwind. Invoking on a null
+    // worker or waiting on an unstarted thread would be a crash in a destructor.
+    if (!m_worker)
+        return;
+
     QMetaObject::invokeMethod(m_worker, [this]() {
         m_worker->stop();
         m_worker->moveToThread(QCoreApplication::instance()->thread());
@@ -188,6 +228,8 @@ void LlmController::sendMessage(const QString &text)
 
 void LlmController::stopGeneration()
 {
+    if (!m_worker)
+        return;
     QMetaObject::invokeMethod(m_worker,
         [this]() { m_worker->stop(); }, Qt::QueuedConnection);
 }
@@ -421,6 +463,9 @@ bool LlmController::modelFilesExist() const
 
 void LlmController::startDownload()
 {
+    if (!llmEnabled())
+        return;
+
     const QString dir = modelDataDir();
     QDir().mkpath(dir);
 
@@ -442,6 +487,9 @@ void LlmController::startDownload()
 
 void LlmController::triggerModelLoad()
 {
+    if (!m_worker)
+        return;
+
     const QString dir = modelDataDir();
     QMetaObject::invokeMethod(m_worker,
         [this, dir]() { m_worker->loadModel(dir); }, Qt::QueuedConnection);
@@ -467,6 +515,11 @@ void LlmController::connectWorkerSignals()
 
 void LlmController::switchToGemini(const QString &apiKey)
 {
+    // Reachable from a settings change, not just from the constructor — so the gate has to
+    // be re-asserted here or a Gemini key would start the coach on a dark build.
+    if (!llmEnabled())
+        return;
+
     m_downloader->abort();
     m_workerThread->quit();
     m_workerThread->wait();
@@ -483,6 +536,11 @@ void LlmController::switchToGemini(const QString &apiKey)
 
 void LlmController::switchToLocal()
 {
+    // The mirror of switchToGemini's guard: also reachable from a settings change, and it
+    // ends in a LocalLlmEngine and a started thread.
+    if (!llmEnabled())
+        return;
+
     m_workerThread->quit();
     m_workerThread->wait();
     delete m_worker;
