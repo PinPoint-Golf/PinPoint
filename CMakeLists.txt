@@ -2773,6 +2773,38 @@ endif()
 #
 # That is what puts it in the Linux, macOS and Windows release gates, which all run the
 # umbrella and none of which ran this. cmake/StripQmlPrefer.cmake went with it.
+#
+# ── AND ITS OUTPUTS HAVE TO BE SWEPT UP, BECAUSE CMAKE WILL NOT ──────────────
+#
+# Deleting a target stops it PRODUCING anything; it does not remove what it already
+# produced. Every build directory that built the app before that change still holds
+# `qml-test-imports/PinPointStudio/qmldir` — a stale, prefer-STRIPPED duplicate of this
+# app's own QML module — sitting beside the real one in `qml/PinPointStudio/`, plus a
+# stale qml_ui_test binary. Pulling does not clear them and neither does rebuilding.
+#
+# ⚠ TWO PinPointStudio MODULES IN ONE BUILD TREE IS NOT INERT. Qt Creator scans the build
+# directory to assemble QML_IMPORT_PATH for the run environment, so a second copy of this
+# module — one whose qmldir has had its `prefer` line removed, pointing the engine at
+# on-disk files instead of the resources compiled into the binary — is on the import path
+# ahead of anything else. It surfaced as the app failing to load Main.qml with
+# "module QtQuick3D plugin qquick3dplugin not found" and "No QtMultimedia backends found",
+# which name neither QML nor this directory and read as a broken Qt install.
+#
+# ⚠ AND IT IS INVISIBLE FROM A SHELL. Running the binary directly resolves modules and
+# plugins from the Qt installation and is perfectly clean — the fault needs Qt Creator's
+# scanned environment to appear at all, so "it works when I run it" does not clear it.
+#
+# So the sweep happens at CONFIGURE time, here, rather than in a runbook step somebody has
+# to remember on each of four platforms. It is idempotent, costs nothing once the
+# directory is gone, and can be deleted from this file once every build directory in use
+# predates nothing.
+foreach(_pp_orphan qml-test-imports qml_ui_test qml_ui_test_autogen CMakeFiles/qml_ui_test.dir)
+    if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/${_pp_orphan}")
+        message(STATUS "Removing orphaned qml_ui_test output: ${_pp_orphan} "
+                       "(the suite moved to src/Gui/tests; see the note above)")
+        file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/${_pp_orphan}")
+    endif()
+endforeach()
 
 # ── Dependency version header for the About box ──────────────────────────────
 # Generated LAST so every find_package / FetchContent version variable above is
