@@ -180,6 +180,7 @@ Item {
             id: modeCarousel
             Layout.fillWidth: true
             visible: ViewLayout.isPanelOn(SessionMode.mode, "carousel")
+            sessionType: root.sessionType          // keys its collapsed state per screen+mode
             transport: Component { PpReplayTransport {} }
             transportActive: root._transitMode
             metricKeys: []

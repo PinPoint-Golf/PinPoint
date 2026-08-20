@@ -22,6 +22,12 @@
 // `shotModel` context property, filtered per-screen through this carousel's
 // own ShotFilterProxyModel. Rating/note/trash go straight to the shotModel
 // invokables; replay/export/face-on are the host screen's to wire.
+//
+// The rail is collapsible: the chevron at the right of the top band folds the card
+// strip away and keeps the band (session/filter chips, action bar, transport), so the
+// controls survive while the stage above gets the estate back. That choice is
+// remembered per screen+mode (Wrist/Replay separately from GRF/Analyse) — the host
+// supplies its sessionType; see _collapseKey.
 
 import QtQuick
 import QtQuick.Controls.Basic
@@ -45,6 +51,43 @@ Item {
     // the "hide/show by view" gate. Kept explicit (rather than the carousel peeking at the
     // loaded item's visibility) so the Loader and the dock-height grow stay in lockstep.
     property bool transportActive: false
+
+    // SessionController::Type of the host screen — the other half of the persistence
+    // key (see _collapseKey). −1 = a transient instance that never persists, matching
+    // the PpDataViewer / PpMetricChart convention.
+    property int sessionType: -1
+
+    // Collapsed/expanded state of the film strip. Collapsing drops ONLY the strip of
+    // cards — the top band (session chip, filter pill, action bar, injected transport)
+    // stays, so the controls remain reachable while the dock gives its screen estate
+    // back to the stage. Public so a host can drive or restore it.
+    property bool expanded: true
+
+    // Remembered per screen+mode, so Wrist/Replay and GRF/Analyse each keep their own
+    // answer: same appSettings.sectionCollapse map and same "<type>:<mode>:<section>"
+    // key the collapsible data-table and chart sections already use (true = collapsed;
+    // absent = expanded, so an existing install opens as it does today). Restored on
+    // creation AND whenever the key changes — the screens outlive a mode flip, so
+    // Replay↔Analyse must re-read rather than carry the old state across.
+    readonly property string _collapseKey: root.sessionType + ":" + SessionMode.mode + ":carousel"
+    on_CollapseKeyChanged: root._restoreCollapse()
+    Component.onCompleted:  root._restoreCollapse()
+    // Persisting on the property (not in the button's handler) also captures a
+    // host-driven change; a restore writes back what it just read, which the
+    // settings setter drops as a no-op.
+    onExpandedChanged:      root._persistCollapse()
+
+    function _restoreCollapse() {
+        if (root.sessionType < 0) return            // transient instance — keep the default
+        root.expanded = appSettings.sectionCollapse[root._collapseKey] !== true
+    }
+    function _persistCollapse() {
+        if (root.sessionType < 0) return            // transient instance — don't persist
+        var m = {}
+        for (var k in appSettings.sectionCollapse) m[k] = appSettings.sectionCollapse[k]
+        m[root._collapseKey] = !root.expanded
+        appSettings.sectionCollapse = m
+    }
 
     property int  selectedShotId: -1
     property Item selectedCard:   null   // live delegate; nulled by QML when it is destroyed
@@ -70,6 +113,9 @@ Item {
     readonly property real _stripTopMargin:    Theme.sp(3.5)   // halved top/bottom padding
     readonly property real _stripBottomMargin: Theme.sp(4)
     readonly property real _stripBandHeight:   Theme.sp(40)    // header band height when the transport shows
+    // Film-strip card height (16:9 card, sized off its width) — subtracted from the
+    // dock height when collapsed, along with the railCol spacing above it.
+    readonly property real _stripHeight:       Math.round(Theme.sp(139) * 9 / 16)
 
     // Bumped after each in-place edit (club/rating/note) so _focusSummary re-resolves
     // — those mutations emit dataChanged (not activeCountChanged), which the invokable
@@ -101,10 +147,16 @@ Item {
 
     // Grow for the transport band (chips overlay) AND the action-bar band — same
     // mechanism, summed. The bar band adds its height plus the railCol spacing it
-    // introduces above the chips row, so neither clips.
+    // introduces above the chips row, so neither clips. Collapsed, the strip and the
+    // spacing above it come back off (the layout drops the hidden strip, so the two
+    // stay in step); the bands are unaffected — that is the point of collapsing.
     implicitHeight: Theme.carouselHeight
+                    - (expanded ? 0 : _stripHeight + railCol.spacing)
                     + (_transportShown ? Theme.sp(20) : 0)
                     + (_barShown ? _barBandHeight + railCol.spacing : 0)
+    Behavior on implicitHeight {
+        NumberAnimation { duration: Theme.durationFast; easing.type: Easing.OutCubic }
+    }
 
     // Opens the export options sheet for a set of swing dirs. The ⋯ "export all
     // selected" action routes through here, sharing one options panel, one
@@ -317,8 +369,11 @@ Item {
         // ── Film strip ───────────────────────────────────────────────────────
         ListView {
             id: strip
+            // Hidden when collapsed — an invisible item is skipped by the layout, so
+            // the spacing above it collapses too (matching the implicitHeight sum).
+            visible: root.expanded
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.round(Theme.sp(139) * 9 / 16)
+            Layout.preferredHeight: root._stripHeight
             orientation: ListView.Horizontal
             spacing:     Theme.sp(5)
             clip:        true
@@ -347,14 +402,55 @@ Item {
         }
     }
 
+    // ── Collapse toggle — far right of the top band, opposite the chips ──────
+    //    An overlay (like the transport) rather than a chips-row member: the row is
+    //    left-aligned and the transport clamps off its right edge, so growing it to
+    //    the full width would shove the transport off-centre. Tracks the chips row's
+    //    y through railCol so it stays on the band as the action bar comes and goes.
+    //    Built to the same spec as the settings-list and content-rail fold buttons
+    //    (ScreenSettings / ModelTypeRail): same box, same doubled chevron in the data
+    //    font, same hover fill and no hover-grow — so all three read as one control.
+    //    The glyph is those buttons' own "‹‹" turned a quarter, which keeps their exact
+    //    metrics while pointing the way THIS pane folds (down, into the bottom edge).
+    Rectangle {
+        id: collapseChip
+        x: root.width - Theme.sp(16) - width
+        y: railCol.y + chipsRow.y + (chipsRow.height - height) / 2
+        implicitWidth:  Theme.sp(26)
+        implicitHeight: Theme.sp(22)
+        radius: Theme.radius
+        color:  collapseMa.containsMouse ? Theme.colorBg2 : "transparent"
+        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+        Text {
+            anchors.centerIn: parent
+            text:           "‹‹"
+            // -90 renders ⌄⌄, +90 renders ⌃⌃ (verified by grab, not by reasoning about
+            // the sign): down folds the strip away, up brings it back.
+            rotation:       root.expanded ? -90 : 90
+            font.family:    Theme.fontData
+            font.pixelSize: Theme.fontSzBody2
+            color:          collapseMa.containsMouse ? Theme.colorText2 : Theme.colorText3
+        }
+        PpPressable {
+            id: collapseMa
+            hoverScale: 1.0
+            onClicked: root.expanded = !root.expanded
+            ToolTip.visible: containsMouse
+            ToolTip.delay:   400
+            ToolTip.text:    root.expanded ? qsTr("Hide the shots") : qsTr("Show the shots")
+        }
+    }
+
     // Host-injected transport, centered across the dock. An overlay (not in the chips
     // row's flow) so it centers on the full width; the chips row reserves _stripBandHeight
     // so the filmstrip clears it. The transport's own content is centre-anchored, so the
     // buttons land on the dock's horizontal centre.
     Loader {
         id: transportLoader
-        // Centred across the dock, but clamped so it never rides over the chips on the left:
-        // true-centre on a wide dock; tucked just right of the chips on a narrow one.
+        // Centred across the dock, but clamped so it never rides over the chips on the left
+        // or the collapse toggle on the right: true-centre on a wide dock; tucked just right
+        // of the chips on a narrow one.
         // When the action bar shows, the chips row shifts down by the bar band (+ the
         // railCol spacing it introduces) — the transport follows so it stays centred on
         // the chips row, not the bar. (x clamp keys off chipsRow.x, unchanged horizontally.)
@@ -364,7 +460,7 @@ Item {
         x: {
             var centreX = root.width / 2 - width / 2
             var minX    = chipsRow.x + chipsRow.width + Theme.sp(12)
-            var maxX    = root.width - Theme.sp(16) - width
+            var maxX    = collapseChip.x - Theme.sp(12) - width
             return Math.min(Math.max(centreX, minX), maxX)
         }
         active:  root._transportShown

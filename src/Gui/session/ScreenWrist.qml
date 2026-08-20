@@ -192,6 +192,7 @@ Item {
             id: wristCarousel
             Layout.fillWidth: true
             visible: ViewLayout.isPanelOn(SessionMode.mode, "carousel")
+            sessionType: SessionController.Wrist   // keys its collapsed state per screen+mode
             transport: Component { PpReplayTransport {} }
             transportActive: root._transitMode
             metricKeys: ["leadWristFlexExt", "leadWristRadUln", "forearmPronation", "leadArmFlexion"]
