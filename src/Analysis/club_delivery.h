@@ -65,13 +65,18 @@
 // few ms of impact, and its attack angle at impact is UNBIASED against a launch monitor (+0.02°)
 // where the measured-head channel was out by tens of degrees.
 //
-// ⚠ THIS RELAXES A STATED INVARIANT, NARROWLY. `shaft_synthesis.h` calls the synthesized tier a
-// visualization channel "excluded from every metric/scoring/estimand", and that sentence was true
-// when it was written. It now has exactly one exception, this metric, and the exception is
-// deliberate: the arc IS the thing being measured, and reading the same series the overlay draws is
-// what makes the number and the picture agree. Everything else — scoring, estimands, the plane fit,
-// the wrist channel — still excludes `synth`. The coupling that comes with it: `synth.enabled=false`
-// now takes `lowPointAhead` with it, where before it changed nothing.
+// ⚠ THIS READS THE SYNTHESIZED TIER, and it is not the first metric to. `shaft_synthesis.h` still
+// describes that tier as "excluded from every metric/scoring/estimand"; that sentence stopped being
+// true before this metric existed. `kinematic_series.cpp` already prefers `shaft.synth` over
+// `shaft.samples` for `clubheadSpeed`, `handSpeed` and `lagAngle` — explicitly, because a C¹ curve
+// differentiates better than a gappy one. So the honest statement is that the synthesized arc is
+// the input for the metrics that need the club's PATH, and the measured samples are the input for
+// everything that needs a per-frame observation. Scoring, the estimands, the plane fit and the
+// wrist channel still exclude it.
+//
+// The coupling that comes with it, for this metric as for the speeds: `synth.enabled=false` takes
+// `lowPointAhead` with it. (The speeds survive — they fall back to `samples`; the low point does
+// not, because falling back is precisely what produced the vertices tens of ms past the ball.)
 //
 // ⚠ AND IT IS AN ESTIMATE, published as one. The arc through impact is an interpolation between
 // P6, P7 and P8 rather than an observation, so its vertex is pinned near the P7 anchor and what the

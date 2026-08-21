@@ -40,14 +40,17 @@
 // time-continuous — see synthSampleAt). It REPLACES nothing: samples[] keeps the
 // real per-frame track and this series rides alongside.
 //
-// ⚠ ONE METRIC READS IT. Scoring, the estimands, the plane fit and the wrist channel all still
-// filter this tier out by flag (§2 Layer C, same discipline as ShaftKinematicPredicted). The single
-// exception is `lowPointAhead` (club_delivery.h), which is DEFINED on the arc: the clubhead
-// detector does not hold a measured lock through impact, so the interpolated arc is the best
-// statement about the club's path there that exists, and reading the same series the overlay draws
-// keeps the number and the picture in agreement. It ships as an ESTIMATE with a published ±2 in.
-// The consequence to know: `enabled=false` below no longer changes nothing — it takes
-// `lowPointAhead` with it.
+// ⚠ METRICS DO READ IT, and the "display channel only" framing below is no longer the whole truth.
+// Scoring, the estimands, the plane fit and the wrist channel all still filter this tier out by flag
+// (§2 Layer C, same discipline as ShaftKinematicPredicted). But the metrics that measure the club's
+// PATH take it on purpose:
+//   * `clubheadSpeed`, `handSpeed`, `lagAngle` (kinematic_series.cpp) PREFER synth over samples and
+//     fall back to samples — a C¹ curve differentiates better than a gappy one.
+//   * `lowPointAhead` (club_delivery.h) is DEFINED on it, with no fallback: the clubhead detector
+//     does not hold a measured lock through impact, so the interpolated arc is the best statement
+//     about the club's path there that exists. It ships as an ESTIMATE with a published ±2 in.
+// The consequence to know: `enabled=false` below no longer changes nothing — the speeds drop back
+// to the measured samples, and `lowPointAhead` disappears entirely.
 //
 // SYNTHESIS MODEL (per bracket [a,b] of consecutive anchors, τ = (t−t_a)/(t_b−t_a)):
 //   θ(t)   C¹ monotone-safe cubic Hermite through the two anchors' (θ, θ̇). The

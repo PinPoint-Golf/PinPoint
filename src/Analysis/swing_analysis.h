@@ -694,10 +694,11 @@ struct ShaftTrack2D {
     // rateHz, default 240 Hz) STRICTLY between consecutive `positions` anchors,
     // each flagged ShaftSynthesized. Empty =
     // synthesis off (cfg.synth.enabled == false) / < 2 anchors. Excluded from
-    // scoring/estimands and from every metric EXCEPT `lowPointAhead`, which is
-    // defined on this arc rather than on the measured heads (club_delivery.h — the
-    // head detector does not hold a lock through impact); the real per-frame track
-    // stays in `samples`.
+    // scoring/estimands, but NOT from metrics: the club-PATH metrics read it on
+    // purpose — `clubheadSpeed`/`handSpeed`/`lagAngle` prefer it over `samples`
+    // (kinematic_series.cpp, a C¹ curve differentiates better) and `lowPointAhead`
+    // is defined on it outright (club_delivery.h — the head detector does not hold
+    // a lock through impact). The real per-frame track stays in `samples`.
     std::vector<ShaftSample2D> synth;
 };
 
