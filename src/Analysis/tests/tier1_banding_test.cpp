@@ -34,22 +34,37 @@ int main()
     std::printf("=== Tier-1 banding (assess) ===\n");
     NormBandProvider provider;
 
-    // Clean swing → every assessable cell is Green; P1 is Ref; trail-wrist P8 (no corridor) is Grey.
+    // Clean swing → every assessable cell is Green; P1 is Ref; the trail-wrist cells with no
+    // corridor are Grey.
+    //
+    // WHICH TRAIL CELLS ARE GREY IS CONTENT, NOT A CONSTANT OF THE ENGINE. This loop used to
+    // special-case P8 alone, which was true when P8 was the only trail cell without a row. 619d53d
+    // withdrew p1, p6 and p7 as well — the corridors graded an apparent image-plane angle against
+    // an anatomical expectation, see docs/validation/trail_wrist_corridor_seating.md — and a
+    // hard-coded single cell then reported a deliberate content decision as an engine failure.
+    // P1 does not appear here because the loop skips it as the Ref column.
     {
         std::printf("-- 1. clean swing → all Green --\n");
         const PpWristAssessmentResult r = WristAssessmentEngine::assess(makeCleanSwing(), provider);
+        auto trailUngraded = [](int p) {                 // 0-based: P6, P7, P8
+            return p == 5 || p == 6 || p == 7;
+        };
         bool allGreen = true;
         for (PpJointDof d : { PpJointDof::LeadWristRadUln, PpJointDof::LeadWristFlexExt,
                               PpJointDof::LeadForearmRot, PpJointDof::TrailWristFlexExt,
                               PpJointDof::LeadElbowFlex }) {
             for (int p = 1; p < kNumPos; ++p) {           // skip P1 (Ref)
                 const PpRag g = rag(r, d, static_cast<PpSwingPosition>(p));
-                const bool gapP8 = (d == PpJointDof::TrailWristFlexExt && p == 7);
-                if (gapP8) { if (g != PpRag::Grey) allGreen = false; }
-                else if (g != PpRag::Green) allGreen = false;
+                const bool noCorridor = (d == PpJointDof::TrailWristFlexExt && trailUngraded(p));
+                const PpRag want = noCorridor ? PpRag::Grey : PpRag::Green;
+                if (g != want) {
+                    std::printf("      %s P%d: %s, expected %s\n",
+                                dofName(d), p + 1, ragName(g), ragName(want));
+                    allGreen = false;
+                }
             }
         }
-        check(allGreen, "clean: all assessable cells Green (trail P8 Grey)");
+        check(allGreen, "clean: all assessable cells Green (trail P6-P8 Grey, no corridor)");
         check(rag(r, PpJointDof::LeadWristRadUln, PpSwingPosition::P1) == PpRag::Ref, "P1 is Ref");
         check(rag(r, PpJointDof::TrailWristFlexExt, PpSwingPosition::P8) == PpRag::Grey,
               "trail wrist P8 (no corridor) → Grey");

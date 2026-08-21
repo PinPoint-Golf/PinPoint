@@ -137,6 +137,23 @@ int main()
     {
         const char *kDofMetrics[] = { "leadWristFlexExt", "leadWristRadUln", "forearmPronation",
                                       "leadArmFlexion",   "trailWristFlexExt" };
+
+        // A DECLARED PHASE MAY BE KNOWINGLY UNGRADED, WHICH IS NOT A GAP. 619d53d withdrew the
+        // trail-wrist flex/ext corridors at p1, p6 and p7: the measurement is an apparent
+        // image-plane angle being graded against an anatomical expectation, and p6/p7 failed almost
+        // entirely in one direction across the library (docs/validation/trail_wrist_corridor_seating.md).
+        //
+        // The metric still DECLARES the phase and still reports a number there — "report a number
+        // and grade nothing" is the point of that change — so undeclaring the phase would delete a
+        // reading the curve still draws. Only the verdict is withheld, through Grade::NotMeasured.
+        //
+        // Stated as an exact (metric, phase) pair rather than a waiver on the metric, so every
+        // OTHER phase of trailWristFlexExt stays strict; of its two declared phases only Impact is
+        // withheld, and Top must still band.
+        const auto isWithheld = [](const MetricDescriptor &m, Phase p) {
+            return m.key == QLatin1String("trailWristFlexExt") && p == Phase::Impact;
+        };
+
         for (const char *key : kDofMetrics) {
             const MetricDescriptor *d = cat.descriptor(QLatin1String(key));
             if (d == nullptr) {
@@ -144,14 +161,29 @@ int main()
                 continue;
             }
             check(!d->phases.empty(), key);
-            int resolved = 0;
-            for (Phase p : d->phases)
-                if (corridorForMetricAtPhase(pack, *norms, d->key, p, kFull).has_value())
-                    ++resolved;
-            std::printf("      %-18s %d of %zu declared phases carry a corridor\n",
-                        key, resolved, d->phases.size());
-            check(resolved == int(d->phases.size()),
-                  "every declared phase of this metric resolves a corridor");
+            int resolved = 0, graded = 0, withheld = 0;
+            for (Phase p : d->phases) {
+                const bool has =
+                    corridorForMetricAtPhase(pack, *norms, d->key, p, kFull).has_value();
+                if (isWithheld(*d, p)) {
+                    ++withheld;
+                    // Fails in BOTH directions: a withheld corridor quietly coming back is a
+                    // content decision being undone by accident, and the waiver would hide it.
+                    check(!has, "a withheld phase carries no corridor — the waiver covers an "
+                                "absence, not a corridor");
+                    continue;
+                }
+                ++graded;
+                if (has) ++resolved;
+            }
+            if (withheld > 0)
+                std::printf("      %-18s %d of %d graded phases carry a corridor (%d withheld)\n",
+                            key, resolved, graded, withheld);
+            else
+                std::printf("      %-18s %d of %d declared phases carry a corridor\n",
+                            key, resolved, graded);
+            check(resolved == graded,
+                  "every declared phase of this metric resolves a corridor, unless stated withheld");
         }
     }
 

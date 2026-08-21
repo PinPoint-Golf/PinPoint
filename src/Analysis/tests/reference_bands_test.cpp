@@ -193,24 +193,74 @@ int main()
     // NormBandProvider reads content from a file at runtime where the table it replaced was compiled
     // in. If that read fails every band vanishes and the whole wrist grid greys — a failure that
     // looks like "no data" rather than like a bug, so it is asserted rather than assumed.
+    //
+    // TWO CLAIMS, ASSERTED APART, because one count cannot carry both. This block used to say
+    // `banded >= 39` and mean "the file loaded AND every migrated cell is banded" in a single
+    // number — so when three corridors were deliberately withdrawn (619d53d) the count fell to 36
+    // and the failure was indistinguishable from the content never having loaded at all. That is
+    // the same ambiguity the comment above says must not be tolerated, reintroduced by the
+    // assertion meant to catch it. The environment guard is now its own check, and the cells are
+    // named rather than counted.
     std::printf("=== the shipped norm set bands the instrumented DOFs ===\n");
     {
         const NormBandProvider shipped;              // the shared, cached shipped set
-        const PpJointDof kInstrumented[] = {
-            PpJointDof::LeadWristFlexExt, PpJointDof::LeadWristRadUln, PpJointDof::LeadForearmRot,
-            PpJointDof::LeadElbowFlex,    PpJointDof::TrailWristFlexExt,
-        };
 
-        int banded = 0, cells = 0;
-        for (PpJointDof dof : kInstrumented)
+        // The environment guard, and nothing else: if PINPOINT_CORE_NORMS is unset or unreadable
+        // EVERY cell below is unbanded, and every assertion in this block fails for a reason that
+        // has nothing to do with the norm content. Run this suite through ctest, which points it
+        // at the reviewable JSON (pp_norm_env in src/Analysis/tests/CMakeLists.txt); a bare
+        // ./reference_bands_test finds no content and fails wholesale.
+        check(shipped.band(PpJointDof::LeadWristFlexExt, PpSwingPosition::P4).valid,
+              "the shipped norm set loaded — without this the rest of this block is meaningless");
+
+        // The four LEAD DOFs are fully seated: 32 of 32, and any loss here is a regression.
+        const PpJointDof kLead[] = {
+            PpJointDof::LeadWristFlexExt, PpJointDof::LeadWristRadUln,
+            PpJointDof::LeadForearmRot,   PpJointDof::LeadElbowFlex,
+        };
+        int leadBanded = 0, leadCells = 0;
+        for (PpJointDof dof : kLead)
             for (int i = 0; i < kNumPos; ++i) {
-                ++cells;
-                if (shipped.band(dof, static_cast<PpSwingPosition>(i)).valid) ++banded;
+                ++leadCells;
+                if (shipped.band(dof, static_cast<PpSwingPosition>(i)).valid) ++leadBanded;
             }
-        std::printf("      %d of %d instrumented cells carry a corridor\n", banded, cells);
-        check(banded >= 39, "the shipped norm set loaded and bands every migrated cell");
-        check(!shipped.band(PpJointDof::TrailWristFlexExt, PpSwingPosition::P8).valid,
-              "trail wrist at P8 has no corridor — an absence the content states, not a gap");
+        std::printf("      lead DOFs: %d of %d cells carry a corridor\n", leadBanded, leadCells);
+        check(leadBanded == leadCells, "every lead-side cell carries a corridor");
+
+        // The trail wrist carries corridors at P2–P5 and NOWHERE ELSE, and each half of that is
+        // load-bearing. p1/p6/p7 were withdrawn on evidence (619d53d, and the reasoning is written
+        // out in docs/validation/trail_wrist_corridor_seating.md): p6 and p7 fired Action on 66%
+        // and 56% of readings and failed almost entirely in one direction, which is a corridor in
+        // the wrong place rather than a golfer outside it; p1 is the family's only `at` reducer, so
+        // it grades an absolute image-plane angle that moves with the camera. p8 never had a row.
+        //
+        // Asserted as an EXACT set so that it fails in both directions. A corridor going missing is
+        // a regression; a withdrawn corridor coming back is a content decision being undone by
+        // accident, and a >= threshold would have noticed neither.
+        const bool kTrailExpected[kNumPos] = {
+            false,  // P1 — absolute image-plane angle, withdrawn
+            true,   // P2
+            true,   // P3
+            true,   // P4 — the one row here that was reasoned about rather than filled in
+            true,   // P5
+            false,  // P6 — one-sided failure, withdrawn
+            false,  // P7 — one-sided failure, withdrawn
+            false,  // P8 — never seated
+        };
+        bool trailMatches = true;
+        for (int i = 0; i < kNumPos; ++i) {
+            const bool got = shipped.band(PpJointDof::TrailWristFlexExt,
+                                          static_cast<PpSwingPosition>(i)).valid;
+            if (got != kTrailExpected[i]) {
+                std::printf("      trail wrist P%d: corridor %s, expected %s\n",
+                            i + 1, got ? "present" : "absent",
+                            kTrailExpected[i] ? "present" : "absent");
+                trailMatches = false;
+            }
+        }
+        check(trailMatches,
+              "trail wrist carries corridors at exactly P2-P5 — the absences the content states");
+
         check(!shipped.band(PpJointDof::LeadShoulderRotation, PpSwingPosition::P4).valid,
               "an un-instrumented DOF has no corridor");
     }
