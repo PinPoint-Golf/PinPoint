@@ -136,6 +136,13 @@ if(NOT PP_GIT_SHA)
 endif()
 configure_file(cmake/pp_version.h.in "${CMAKE_BINARY_DIR}/generated/pp_version.h" @ONLY)
 
+# Qt prefix. Shared with tests/cmake/PinPointTests.cmake so configuring the app
+# and configuring a test suite land on the same Qt. Must precede find_package(Qt6):
+# without it this project names no prefix at all, and CMake's ordinary search finds
+# whatever Qt is on the box — on macOS the Homebrew one, which has no Quick3D, and
+# the failure below then reads as a missing module rather than the wrong Qt.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PinPointQtPrefix.cmake)
+
 # Qt GuiPrivate is used for QRhi (public API since Qt 6.6, accessed via GuiPrivate includes).
 set(QT_NO_PRIVATE_MODULE_WARNING ON)
 

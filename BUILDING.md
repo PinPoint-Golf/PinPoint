@@ -191,10 +191,23 @@ cmake -U "FFMPEG*" -U "__pkg_config_checked_FFMPEG" <builddir>
 ## Build Instructions
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/qt/6.11.x/compiler_arch
-cmake --build . --config Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
 ```
+
+The Qt prefix is resolved for you: `cmake/PinPointQtPrefix.cmake` takes the
+**newest** `~/Qt/<version>/<abi>` that carries a `Qt6Config.cmake`, so installing
+a new Qt needs no edit here. Override it only if your Qt lives somewhere else:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/Qt/6.11.x/<abi>
+```
+
+⚠ If a configure fails saying a required Qt **COMPONENT** is missing (`Quick3D`
+is the usual one), suspect the prefix before the component. That message is what
+you get when CMake finds a *different* Qt — a Homebrew or distro one — rather
+than a Qt that is genuinely missing a module. The `-- PinPoint: using Qt prefix …`
+line at the top of the configure says which one was picked.
 
 On first configure, CMake downloads all required models and binaries (see table below). Subsequent configures reuse the cache in `build/_deps/` — only a full directory wipe triggers re-downloads.
 

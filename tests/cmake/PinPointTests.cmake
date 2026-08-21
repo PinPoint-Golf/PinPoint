@@ -51,70 +51,11 @@ set(PP_BUFFER "${PP_SRC}/Buffer"             CACHE INTERNAL "")  # types.h, swin
 set(PP_CORE   "${PP_SRC}/Core"               CACHE INTERNAL "")
 set(PP_THIRD  "${PP_REPO_ROOT}/third_party"  CACHE INTERNAL "")  # imu_ekf, imu_ekf_compat
 
-# --- Qt prefix (resolve once, per-platform) -----------------------------------
-# Honour an explicit -DCMAKE_PREFIX_PATH or env; otherwise take the NEWEST Qt in
-# this project's standard install location.
-#
-# ⚠ NOT a hardcoded version, and the reason is that getting it wrong is silent.
-# The old form named one version and applied it only if(EXISTS). The day the
-# local Qt is bumped that path stops existing, so nothing is appended, no error
-# is raised, and find_package(Qt6) goes looking down CMake's ordinary search
-# path — on macOS that lands on the Homebrew Qt, which carries no Quick3D. The
-# configure then fails claiming a required COMPONENT is missing, which sends you
-# hunting for a missing module when the real fault is the wrong Qt entirely.
-# tools/package_macos.sh already picked the newest for the same reason.
-#
-# ⚠ Compared with VERSION_GREATER, not sorted. A lexical sort puts 6.9 above
-# 6.10, so glob order is exactly wrong at the next minor rollover — which is the
-# rollover this block exists to survive.
-if(NOT CMAKE_PREFIX_PATH AND NOT DEFINED ENV{CMAKE_PREFIX_PATH})
-    if(APPLE)
-        set(_pp_qt_root "$ENV{HOME}/Qt")
-        set(_pp_qt_abis macos)
-    elseif(WIN32)
-        set(_pp_qt_root "$ENV{HOMEDRIVE}$ENV{HOMEPATH}/Qt")
-        set(_pp_qt_abis msvc2022_64)
-    else()
-        set(_pp_qt_root "$ENV{HOME}/Qt")
-        set(_pp_qt_abis gcc_64)
-    endif()
-
-    set(_pp_qt "")
-    set(_pp_qt_ver "0")
-    file(GLOB _pp_qt_dirs "${_pp_qt_root}/*")
-    foreach(_pp_d IN LISTS _pp_qt_dirs)
-        get_filename_component(_pp_v "${_pp_d}" NAME)
-        # The installer tree also holds Tools/, Docs/, Licenses/, MaintenanceTool.
-        if(_pp_v MATCHES "^[0-9]+\\.[0-9]+")
-            foreach(_pp_abi IN LISTS _pp_qt_abis)
-                # Qt6Config.cmake, not the directory: an ABI dir can survive an
-                # uninstall, and find_package needs the config either way.
-                if(EXISTS "${_pp_d}/${_pp_abi}/lib/cmake/Qt6/Qt6Config.cmake"
-                   AND _pp_v VERSION_GREATER _pp_qt_ver)
-                    set(_pp_qt_ver "${_pp_v}")
-                    set(_pp_qt "${_pp_d}/${_pp_abi}")
-                endif()
-            endforeach()
-        endif()
-    endforeach()
-
-    if(_pp_qt)
-        list(APPEND CMAKE_PREFIX_PATH "${_pp_qt}")
-        message(STATUS "PinPointTests: using Qt prefix ${_pp_qt}")
-    else()
-        # Say so. Silence here is what made the old failure so hard to read.
-        message(STATUS "PinPointTests: no Qt6 under ${_pp_qt_root}/<version>/<abi>"
-                       " — falling back to CMake's search path. If a COMPONENT"
-                       " turns up missing, pass -DCMAKE_PREFIX_PATH explicitly.")
-    endif()
-    unset(_pp_qt_root)
-    unset(_pp_qt_abis)
-    unset(_pp_qt_ver)
-    unset(_pp_qt_dirs)
-    unset(_pp_d)
-    unset(_pp_v)
-    unset(_pp_abi)
-endif()
+# --- Qt prefix ----------------------------------------------------------------
+# Shared with the app's top-level CMakeLists.txt so a developer gets the same Qt
+# whether they configure the app or a suite. Picks the newest ~/Qt/<ver>/<abi>;
+# see that file for why it is not a hardcoded version.
+include(${PP_REPO_ROOT}/cmake/PinPointQtPrefix.cmake)
 
 # Components needed by nearly every suite. Suites that need more (Qml, Bluetooth)
 # add their own find_package — that is additive and cheap (results are cached).
