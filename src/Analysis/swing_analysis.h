@@ -693,9 +693,11 @@ struct ShaftTrack2D {
     // kinematically-interpolated samples on a dense fixed cadence (SynthConfig::
     // rateHz, default 240 Hz) STRICTLY between consecutive `positions` anchors,
     // each flagged ShaftSynthesized. Empty =
-    // synthesis off (cfg.synth.enabled == false) / < 2 anchors. EXCLUDED from
-    // metrics/scoring/estimands — a smooth-scrub display channel only; the real
-    // per-frame track stays in `samples`.
+    // synthesis off (cfg.synth.enabled == false) / < 2 anchors. Excluded from
+    // scoring/estimands and from every metric EXCEPT `lowPointAhead`, which is
+    // defined on this arc rather than on the measured heads (club_delivery.h — the
+    // head detector does not hold a lock through impact); the real per-frame track
+    // stays in `samples`.
     std::vector<ShaftSample2D> synth;
 };
 

@@ -21,9 +21,9 @@
 //
 // THE THREE THINGS THIS TEST EXISTS TO PIN:
 //
-//   1. PROJECTED HEADS ARE EXCLUDED, not down-weighted. headPx is only sometimes a measurement;
-//      without the Stage-2 head pass it is reconstructed from the grip along the shaft at an
-//      assumed length, and its "velocity" is the grip's. §5 builds a track that is entirely
+//   1. PROJECTED HEADS ARE EXCLUDED FROM THE ANGLES, not down-weighted. headPx is only sometimes a
+//      measurement; without the Stage-2 head pass it is reconstructed from the grip along the shaft
+//      at an assumed length, and its "velocity" is the grip's. §5 builds a track that is entirely
 //      projected and asserts NOTHING comes out — because something plausible coming out is the
 //      failure mode that would never be noticed.
 //   2. THE SIGNS. Past parallel is positive, an upward strike is positive, a low point ahead of the
@@ -32,6 +32,14 @@
 //   3. THE SUB-FRAME VERTEX. At impact speeds one frame of quantisation is inches of low point, so
 //      the parabola refinement is not a nicety; §3 places the true vertex deliberately between two
 //      samples and checks it is found there.
+//   4. THE TWO CHANNELS ARE SEPARATE AND FAIL SEPARATELY. The angles read the MEASURED heads in
+//      samples[]; lowPointAhead reads the SYNTHESIZED arc in synth[] and never looks at a measured
+//      head at all. §7 pins that both ways round — an arc with no measured heads still produces a
+//      low point, and measured heads with no arc still produce the angles — because the whole point
+//      of moving the low point onto the arc was that the head detector goes dark through impact.
+//   5. AN ARC THAT NEVER BOTTOMS OUT PRODUCES NOTHING. A vertex on either end of the window means
+//      the arc was still descending (or still climbing) when the data ran out, and the "low point"
+//      is then just the last sample. §8 pins the refusal.
 
 #include "../club_delivery.h"
 
@@ -68,13 +76,15 @@ static ShaftSample2D sample(int64_t t, QPointF grip, QPointF head, bool measured
     return s;
 }
 
-static ShaftTrack2D trackOf(std::vector<ShaftSample2D> samples)
+static ShaftTrack2D trackOf(std::vector<ShaftSample2D> samples,
+                           std::vector<ShaftSample2D> synth = {})
 {
     ShaftTrack2D t;
     t.valid       = true;
     t.frameWidth  = 1920;
     t.frameHeight = 1080;
     t.samples     = std::move(samples);
+    t.synth       = std::move(synth);
     return t;
 }
 
@@ -114,6 +124,37 @@ static std::vector<ShaftSample2D> arc(double xVertex, double dir, int64_t impact
         // divides by the absolute horizontal grip→head separation and refuses a stacked pair, which
         // is correct behaviour and made the first version of this fixture emit nothing.
         out.push_back(sample(t, QPointF(x - dir * 250.0, 400.0), QPointF(x, y)));
+    }
+    return out;
+}
+
+// The SYNTHESIZED arc — the series lowPointAhead is actually read from. Same parabola as `arc()`,
+// but flagged ShaftSynthesized and parked in ShaftTrack2D::synth, which is where club_delivery
+// looks for a low point and deliberately NOT where the two angles look. In production this is the
+// Hermite interpolation between the located P-anchors that the club overlay draws.
+static std::vector<ShaftSample2D> synthArc(double xVertex, double dir, int64_t impactUs, int n = 11)
+{
+    std::vector<ShaftSample2D> out = arc(xVertex, dir, impactUs, n);
+    for (ShaftSample2D &s : out) {
+        s.flags    = ShaftSynthesized;
+        s.headConf = -1.f;                  // a synthesized head is not a measurement, and says so
+    }
+    return out;
+}
+
+// A monotone descending run: the head is still falling when the window ends, so there is no turning
+// point inside it. What a truncated arc looks like — the next P-anchor is hundreds of ms away.
+static std::vector<ShaftSample2D> fallingArc(int64_t impactUs, int n = 11)
+{
+    std::vector<ShaftSample2D> out;
+    for (int i = 0; i < n; ++i) {
+        const double x = 900.0 + (i - n / 2) * 20.0;
+        ShaftSample2D s = sample(impactUs + int64_t(i - n / 2) * 4000,
+                                 QPointF(x - 250.0, 400.0),
+                                 QPointF(x, 700.0 + i * 8.0));   // y grows throughout = still sinking
+        s.flags    = ShaftSynthesized;
+        s.headConf = -1.f;
+        out.push_back(s);
     }
     return out;
 }
@@ -211,7 +252,7 @@ int main()
     // ── 3. lowPointAhead, including the sub-frame vertex ───────────────────────────────────────
     {
         // Ball at x = 900. Vertex deliberately at 910 — 10 px, i.e. BETWEEN samples spaced 20 px.
-        const auto t = trackOf(arc(910.0, +1.0, kImpact));
+        const auto t = trackOf(arc(910.0, +1.0, kImpact), synthArc(910.0, +1.0, kImpact));
         auto s = buildClubDeliverySeries(
             trackClubDelivery(t, ladder(10000, kImpact), QPointF(900, 800), true, kMmPerPx),
             ladder(10000, kImpact));
@@ -221,8 +262,21 @@ int main()
         CHECK("the vertex is found BETWEEN samples", near(lp, 0.787, 0.15));
         CHECK("a low point past the ball is POSITIVE", lp > 0.0);
 
+        // THE HEALTH WARNING IS PART OF THE READING. The arc is an interpolation, not an
+        // observation, so the metric ships a published 1σ; a low point with no σ would read as a
+        // measurement, which is the one thing it is not.
+        const MetricSeries *lpS = find(s, "lowPointAhead");
+        CHECK("lowPointAhead publishes a sigma", lpS != nullptr && lpS->sigma.has_value());
+        CHECK("and it is the tuned ±2 in",
+              lpS != nullptr && lpS->sigma.has_value()
+                  && near(*lpS->sigma, pinpoint::tuned::clubDelivery::kLowPointSigmaIn, 1e-9));
+        // The two angles are measured, not estimated, and must NOT borrow the arc's uncertainty.
+        const MetricSeries *aaS = find(s, "attackAngle");
+        CHECK("attackAngle does not inherit that sigma",
+              aaS != nullptr && !aaS->sigma.has_value());
+
         // Vertex BEHIND the ball — the fat / scoop signature.
-        const auto behind = trackOf(arc(880.0, +1.0, kImpact));
+        const auto behind = trackOf(arc(880.0, +1.0, kImpact), synthArc(880.0, +1.0, kImpact));
         s = buildClubDeliverySeries(
             trackClubDelivery(behind, ladder(10000, kImpact), QPointF(900, 800), true, kMmPerPx),
             ladder(10000, kImpact));
@@ -234,8 +288,8 @@ int main()
     // Swinging right-to-left across the frame is the same strike filmed from the other side. The
     // sign must not invert.
     {
-        const auto rightward = trackOf(arc(910.0, +1.0, kImpact));
-        const auto leftward  = trackOf(arc(890.0, -1.0, kImpact));
+        const auto rightward = trackOf(arc(910.0, +1.0, kImpact), synthArc(910.0, +1.0, kImpact));
+        const auto leftward  = trackOf(arc(890.0, -1.0, kImpact), synthArc(890.0, -1.0, kImpact));
         double a = 0.0, b = 0.0;
         scalarOf(buildClubDeliverySeries(
                      trackClubDelivery(rightward, ladder(10000, kImpact), QPointF(900, 800), true,
@@ -268,7 +322,7 @@ int main()
 
     // ── 6. Refusals that must not cascade ──────────────────────────────────────────────────────
     {
-        const auto t = trackOf(arc(910.0, +1.0, kImpact));
+        const auto t = trackOf(arc(910.0, +1.0, kImpact), synthArc(910.0, +1.0, kImpact));
 
         // No ruler: low point is absent, the two angles are unaffected. They are scale-free and
         // must not be taken down with it.
@@ -293,12 +347,57 @@ int main()
               !trackClubDelivery(invalid, ladder(10000, kImpact), QPointF(900, 800), true,
                                  kMmPerPx).valid);
 
-        // Too few samples around impact to trust a vertex.
-        const auto sparse = trackOf(arc(910.0, +1.0, kImpact, 3));
+        // Too few ARC samples around impact to trust a vertex. (In production ±60 ms of a 240 Hz
+        // synthesis is ~29 samples, so this floor catches a truncated arc rather than a sparse one.)
+        const auto sparse = trackOf(arc(910.0, +1.0, kImpact),
+                                    synthArc(910.0, +1.0, kImpact, 3));
         s = buildClubDeliverySeries(
             trackClubDelivery(sparse, ladder(10000, kImpact), QPointF(900, 800), true, kMmPerPx),
             ladder(10000, kImpact));
         CHECK("too few impact-zone samples ⇒ no low point", find(s, "lowPointAhead") == nullptr);
+    }
+
+    // ── 7. The two channels are separate, and fail separately ──────────────────────────────────
+    // This is the whole reason the low point moved onto the arc: on a real swing the head detector
+    // goes dark through impact while the arc is still there. A metric that needed both would have
+    // gained nothing.
+    {
+        // An arc with NO measured heads at all — every sample projected. The angles must stay
+        // silent (their input really is absent) and the low point must still land.
+        std::vector<ShaftSample2D> allProjected = arc(910.0, +1.0, kImpact);
+        for (ShaftSample2D &x : allProjected) { x.flags |= ShaftHeadProjected; x.headConf = -1.f; }
+        auto s = buildClubDeliverySeries(
+            trackClubDelivery(trackOf(allProjected, synthArc(910.0, +1.0, kImpact)),
+                              ladder(10000, kImpact), QPointF(900, 800), true, kMmPerPx),
+            ladder(10000, kImpact));
+        double lp = 0.0;
+        CHECK("no measured head anywhere ⇒ lowPointAhead STILL lands",
+              scalarOf(s, "lowPointAhead", lp));
+        CHECK("and it is the same vertex the measured fixture found", near(lp, 0.787, 0.15));
+        CHECK("but the angles stay silent", find(s, "attackAngle") == nullptr
+                                            && find(s, "shaftAngleVsHorizontal") == nullptr);
+
+        // The mirror image: measured heads, no synthesized arc. Angles land, low point does not.
+        s = buildClubDeliverySeries(
+            trackClubDelivery(trackOf(arc(910.0, +1.0, kImpact)), ladder(10000, kImpact),
+                              QPointF(900, 800), true, kMmPerPx),
+            ladder(10000, kImpact));
+        CHECK("no arc ⇒ no lowPointAhead", find(s, "lowPointAhead") == nullptr);
+        CHECK("but the angles are unaffected", find(s, "attackAngle") != nullptr
+                                               && find(s, "shaftAngleVsHorizontal") != nullptr);
+    }
+
+    // ── 8. An arc that never turns over inside the window is refused ───────────────────────────
+    // The head is still sinking at the last sample, so the lowest point in the window is its final
+    // one. Reporting that would be a confident statement about a bottom nothing saw — and it is
+    // exactly what a swing whose next P-anchor lands hundreds of ms away produces.
+    {
+        const auto s = buildClubDeliverySeries(
+            trackClubDelivery(trackOf(arc(910.0, +1.0, kImpact), fallingArc(kImpact)),
+                              ladder(10000, kImpact), QPointF(900, 800), true, kMmPerPx),
+            ladder(10000, kImpact));
+        CHECK("an arc with no turning point ⇒ no low point", find(s, "lowPointAhead") == nullptr);
+        CHECK("and the angles are still unaffected", find(s, "attackAngle") != nullptr);
     }
 
     std::printf(g_fail == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", g_fail);

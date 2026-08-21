@@ -39,6 +39,58 @@ bool headMeasured(const ShaftSample2D &s, double headConfMin)
     return double(s.headConf) >= headConfMin;
 }
 
+// The arc's turning point inside `win`, in image x, refined below the sample spacing.
+//
+// The lowest point in the image is the LARGEST y. Find it, then refine with a three-point parabola
+// through its neighbours in (x, y): the arc near its vertex is locally quadratic, and the true
+// bottom almost never falls exactly on a sampled instant. Without the refinement the answer
+// quantises to the sample spacing, which at impact speeds is inches.
+//
+// REFUSES A VERTEX THAT SITS ON EITHER END of the window. An interior minimum means the arc was
+// seen to turn over; an endpoint one means it never did inside the window, and the "low point" is
+// then just the last sample before the data ran out. That is exactly what a truncated arc looks
+// like — a swing whose next P-anchor lands hundreds of ms away has no bottom in ±60 ms — and
+// reporting one is a confident statement about a part of the swing nothing observed.
+bool arcVertexX(const std::vector<const ShaftSample2D *> &win, double &lowX, int64_t &lowTUs)
+{
+    if (win.size() < 3)
+        return false;
+
+    size_t lo = 0;
+    for (size_t i = 1; i < win.size(); ++i)
+        if (win[i]->headPx.y() > win[lo]->headPx.y())
+            lo = i;
+    if (lo == 0 || lo + 1 >= win.size())
+        return false;                                   // never turned over inside the window
+
+    lowX   = win[lo]->headPx.x();
+    lowTUs = win[lo]->t_us;
+
+    const double x0 = win[lo - 1]->headPx.x(), y0 = win[lo - 1]->headPx.y();
+    const double x1 = win[lo]->headPx.x(),     y1 = win[lo]->headPx.y();
+    const double x2 = win[lo + 1]->headPx.x(), y2 = win[lo + 1]->headPx.y();
+    const double d0 = (x0 - x1) * (x0 - x2);
+    const double d1 = (x1 - x0) * (x1 - x2);
+    const double d2 = (x2 - x0) * (x2 - x1);
+    if (std::abs(d0) <= kEps || std::abs(d1) <= kEps || std::abs(d2) <= kEps)
+        return true;                                    // coincident x — keep the sampled vertex
+
+    // Vertex of the Lagrange quadratic through the three points.
+    const double A = y0 / d0 + y1 / d1 + y2 / d2;
+    const double B = -(y0 * (x1 + x2) / d0 + y1 * (x0 + x2) / d1 + y2 * (x0 + x1) / d2);
+    if (std::abs(A) <= kEps)
+        return true;
+
+    const double vx = -B / (2.0 * A);
+    // Only accept a vertex that lies inside the bracket it was fitted through. Outside it the
+    // quadratic is extrapolating, and an extrapolated low point is a confident statement about
+    // instants that were never sampled.
+    const double xlo = std::min({ x0, x1, x2 }), xhi = std::max({ x0, x1, x2 });
+    if (vx >= xlo && vx <= xhi)
+        lowX = vx;
+    return true;
+}
+
 } // namespace
 
 ClubDeliveryResult trackClubDelivery(const ShaftTrack2D &shaft, const std::vector<PhaseEvent> &phases,
@@ -46,17 +98,17 @@ ClubDeliveryResult trackClubDelivery(const ShaftTrack2D &shaft, const std::vecto
                                      const ClubDeliveryConfig &cfg)
 {
     ClubDeliveryResult res;
-    if (!shaft.valid || shaft.samples.empty())
+    if (!shaft.valid)
         return res;
 
-    // The measured-head subset, in time order. Everything below reads this and only this.
+    // The measured-head subset, in time order. THE TWO ANGLES read this and only this; the low
+    // point deliberately does not (see the header). An empty subset is therefore not a refusal —
+    // it silences the angles and leaves the arc channel to answer for itself.
     std::vector<const ShaftSample2D *> m;
     m.reserve(shaft.samples.size());
     for (const ShaftSample2D &s : shaft.samples)
         if (headMeasured(s, cfg.headConfMin))
             m.push_back(&s);
-    if (m.empty())
-        return res;
 
     res.grid.reserve(m.size());
     for (const ShaftSample2D *s : m)
@@ -103,52 +155,26 @@ ClubDeliveryResult trackClubDelivery(const ShaftTrack2D &shaft, const std::vecto
     // ── lowPointAhead ──────────────────────────────────────────────────────────────────────────
     // Where the arc bottoms out, relative to the ball, along the target line, in signed inches.
     //
+    // READ OFF THE SYNTHESIZED ARC, not the measured heads — `shaft.synth`, the dense Hermite
+    // interpolation between the located P-anchors that the club overlay draws. The header carries
+    // the corpus evidence for why; the short version is that the head detector does not hold a lock
+    // through impact on real swings, and the rare vertex it did produce sat tens of ms past the
+    // ball. Reading the same series the overlay draws also means the number and the picture cannot
+    // disagree.
+    //
     // Needs the ball (the reference the answer is stated against) and the ruler (the unit it is
     // stated in). Missing either suppresses THIS metric only — the two angles above are scale-free
     // and are unaffected.
     const int64_t impactUs = phaseTime(phases, Phase::Impact, -1);
-    if (ballValid && mmPerPx > 0.0 && impactUs >= 0) {
+    if (ballValid && mmPerPx > 0.0 && impactUs >= 0 && !shaft.synth.empty()) {
         std::vector<const ShaftSample2D *> win;
-        for (const ShaftSample2D *s : m)
-            if (std::llabs(s->t_us - impactUs) <= cfg.lowPointWinUs)
-                win.push_back(s);
+        for (const ShaftSample2D &s : shaft.synth)
+            if (std::llabs(s.t_us - impactUs) <= cfg.lowPointWinUs)
+                win.push_back(&s);
 
-        if (int(win.size()) >= cfg.lowPointMinSamples) {
-            // The lowest point in the image is the LARGEST y. Find it, then refine to sub-frame
-            // precision with a three-point parabola through its neighbours in (x, y): the arc near
-            // its vertex is locally quadratic, and the true bottom almost never falls exactly on a
-            // sampled frame. Without the refinement the answer quantises to the frame spacing,
-            // which at impact speeds is inches.
-            size_t lo = 0;
-            for (size_t i = 1; i < win.size(); ++i)
-                if (win[i]->headPx.y() > win[lo]->headPx.y())
-                    lo = i;
-
-            double lowX = win[lo]->headPx.x();
-            if (lo > 0 && lo + 1 < win.size()) {
-                const double x0 = win[lo - 1]->headPx.x(), y0 = win[lo - 1]->headPx.y();
-                const double x1 = win[lo]->headPx.x(),     y1 = win[lo]->headPx.y();
-                const double x2 = win[lo + 1]->headPx.x(), y2 = win[lo + 1]->headPx.y();
-                const double d0 = (x0 - x1) * (x0 - x2);
-                const double d1 = (x1 - x0) * (x1 - x2);
-                const double d2 = (x2 - x0) * (x2 - x1);
-                if (std::abs(d0) > kEps && std::abs(d1) > kEps && std::abs(d2) > kEps) {
-                    // Vertex of the Lagrange quadratic through the three points.
-                    const double A = y0 / d0 + y1 / d1 + y2 / d2;
-                    const double B = -(y0 * (x1 + x2) / d0 + y1 * (x0 + x2) / d1
-                                       + y2 * (x0 + x1) / d2);
-                    if (std::abs(A) > kEps) {
-                        const double vx = -B / (2.0 * A);
-                        // Only accept a vertex that lies inside the bracket it was fitted through.
-                        // Outside it the quadratic is extrapolating, and an extrapolated low point
-                        // is a confident statement about frames that were never measured.
-                        const double xlo = std::min({ x0, x1, x2 }), xhi = std::max({ x0, x1, x2 });
-                        if (vx >= xlo && vx <= xhi)
-                            lowX = vx;
-                    }
-                }
-            }
-
+        double  lowX   = 0.0;
+        int64_t lowTUs = 0;
+        if (int(win.size()) >= cfg.lowPointMinSamples && arcVertexX(win, lowX, lowTUs)) {
             // Which image direction the target is. Taken from the CLUBHEAD ITSELF — at impact the
             // head is travelling toward the target, so the sign of its horizontal displacement
             // across the window IS the target direction. Deliberately not taken from pose
@@ -157,9 +183,10 @@ ClubDeliveryResult trackClubDelivery(const ShaftTrack2D &shaft, const std::vecto
             const double sweep = win.back()->headPx.x() - win.front()->headPx.x();
             if (std::abs(sweep) > kEps) {
                 const double targetSign = sweep > 0.0 ? 1.0 : -1.0;
-                res.lowPointIn    = targetSign * (lowX - addressBallPx.x()) * mmPerPx / kMmPerIn;
-                res.lowPointTUs   = win[lo]->t_us;
-                res.lowPointValid = true;
+                res.lowPointIn      = targetSign * (lowX - addressBallPx.x()) * mmPerPx / kMmPerIn;
+                res.lowPointTUs     = lowTUs;
+                res.lowPointSigmaIn = cfg.lowPointSigmaIn;
+                res.lowPointValid   = true;
             }
         }
     }
@@ -187,13 +214,18 @@ std::vector<MetricSeries> buildClubDeliverySeries(const ClubDeliveryResult &res,
     const int64_t fallbackUs = res.grid.empty() ? 0 : res.grid.front();
     const int64_t impactUs   = phaseTime(phases, Phase::Impact, fallbackUs);
 
+    // `sigma` <= 0 leaves the field ABSENT, which is the "not characterised" state — never 0,
+    // which would read as an exact measurement.
     const auto pushScalar = [&](bool ok, const QString &key, const QString &label,
-                                const QString &unit, double value, int64_t atUs) {
+                                const QString &unit, double value, int64_t atUs,
+                                double sigma = 0.0) {
         if (!ok) return;
         MetricSeries m;
         m.key   = key;
         m.label = label;
         m.unit  = unit;
+        if (sigma > 0.0)
+            m.sigma = sigma;
         m.phaseSamples.push_back({ Phase::Impact, atUs, value, QString() });
         out.push_back(std::move(m));
     };
@@ -203,8 +235,9 @@ std::vector<MetricSeries> buildClubDeliverySeries(const ClubDeliveryResult &res,
         pushScalar(true, QStringLiteral("attackAngle"), QStringLiteral("Attack angle"), deg, aa,
                    impactUs);
     }
+    // The health warning rides WITH the number: an estimate off an interpolated arc, ±2 in.
     pushScalar(res.lowPointValid, QStringLiteral("lowPointAhead"), QStringLiteral("Low point"),
-               QStringLiteral("in"), res.lowPointIn, res.lowPointTUs);
+               QStringLiteral("in"), res.lowPointIn, res.lowPointTUs, res.lowPointSigmaIn);
     return out;
 }
 

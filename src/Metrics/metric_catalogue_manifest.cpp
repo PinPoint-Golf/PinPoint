@@ -1304,25 +1304,40 @@ void installMetricManifest(MetricCatalogue &cat)
             "Where the bottom of the swing arc is relative to the ball, as a signed distance along "
             "the target line — positive when the low point is ahead of (target-side of) the ball. "
             "It is the single best 2D summary of ball-then-turf contact and the one club-delivery "
-            "number a lone face-on camera can estimate."),
+            "number a lone face-on camera can estimate — emphasis on ESTIMATE: it comes off the "
+            "synthesized club arc, carries a published ±2 in, and is meant to be read across a "
+            "handful of swings rather than one."),
         .howToRead = QStringLiteral(
             "Read near impact; a positive value (low point ahead of the ball) is the descending, "
             "ball-first strike you want with irons, while the driver is normally struck with the "
             "low point behind the ball. A low point behind the ball on an iron is the fat/thin "
-            "signature. Read from the MEASURED clubhead only, with the arc vertex refined below "
-            "frame spacing by a local parabola — at impact speeds a whole frame is inches. The "
-            "target direction comes from the head's own travel across impact rather than from "
-            "handedness, so a mirrored camera cannot invert the sign. Needs a face-on camera, the "
-            "club track and the ball (which supplies both the reference the answer is stated "
-            "against and, through its diameter, the inches it is stated in)."),
+            "signature. ⚠ READ IT AS A SESSION TENDENCY, NOT AS A SINGLE SWING. It is taken off "
+            "the synthesized club arc — the interpolation between the located P-positions that the "
+            "club overlay draws — because the clubhead detector does not hold a lock through "
+            "impact, where the club is fastest and most blurred. That arc is an estimate of the "
+            "path rather than an observation of it, and against a launch monitor it carries about "
+            "±2 inches of spread on one swing, which is most of the width of the corridor it is "
+            "graded in. It is UNBIASED, so several swings average to something trustworthy while "
+            "any one of them can be out by more than the finding it drives. The arc vertex is "
+            "refined below sample spacing by a local parabola, and is refused outright unless the "
+            "arc is seen to turn over inside the window. The target direction comes from the "
+            "head's own travel across impact rather than from handedness, so a mirrored camera "
+            "cannot invert the sign. Needs a face-on camera, the club track and the ball (which "
+            "supplies both the reference the answer is stated against and, through its diameter, "
+            "the inches it is stated in)."),
         .signPositive = QStringLiteral("the arc bottoming out AHEAD of the ball, on the target side"),
         .signNegative = QStringLiteral("bottoming out behind the ball"),
         .phases = { P::Impact },
+        // ESTIMATED, not Direct — so the shot-level answer resolves Bridged, and this summary is
+        // shown verbatim as the reason. The rung is honest about the method rather than about a
+        // missing device: the number IS produced on every swing that has an arc, it is simply an
+        // interpolated arc's vertex rather than a measured clubhead's.
         .routes = {
-            via("faceOnClubBall", RM::Projected, Direct,
+            via("faceOnClubBall", RM::Projected, Estimated,
                 { .faceOnCamera = true, .clubTrack = true, .ballTrack = true },
-                QStringLiteral("the arc's low point against the ball, in the face-on image and in "
-                               "the ball's own ruler")) },
+                QStringLiteral("estimated from the synthesized club arc's low point against the "
+                               "ball, in the face-on image and in the ball's own ruler — about "
+                               "±2 in on a single swing, so read it across several")) },
         .usedBy = { QStringLiteral("characteristic:low_point_behind_ball"),
                     QStringLiteral("characteristic:low_point_too_far_ahead"),
                     // …and the two outcomes those become when a strike height and an attack angle

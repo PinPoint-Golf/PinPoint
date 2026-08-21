@@ -41,19 +41,46 @@
 // term from the path's depth component, which is a few degrees of path acting on the tangent, not
 // a projection that destroys the quantity.
 //
-// ── Measured heads only ─────────────────────────────────────────────────────
+// ── Two channels, on purpose ────────────────────────────────────────────────
 //
-// Every reading here is taken from `ShaftSample2D::headPx`, and `headPx` is NOT always a
-// measurement: without the Stage-2 head pass it is projected from the grip along the shaft
-// direction at an assumed club length (`ShaftHeadProjected`). A projected head is a rigid function
-// of θ and length, so its "velocity" is the grip's velocity plus a length-scaled rotation term —
-// differentiating it produces a confident attack angle that contains no information about the
-// clubhead at all. Samples carrying `ShaftHeadProjected` are therefore EXCLUDED, not down-weighted,
-// and a swing whose head was never measured produces nothing rather than something plausible.
+// The two ANGLES are taken from `ShaftSample2D::headPx`, and `headPx` is NOT always a measurement:
+// without the Stage-2 head pass it is projected from the grip along the shaft direction at an
+// assumed club length (`ShaftHeadProjected`). A projected head is a rigid function of θ and length,
+// so its "velocity" is the grip's velocity plus a length-scaled rotation term — differentiating it
+// produces a confident attack angle that contains no information about the clubhead at all. Samples
+// carrying `ShaftHeadProjected` are therefore EXCLUDED from the angles, not down-weighted.
 //
-// This is also why `lowPointAhead` was deferred when it was first designed: the measured-head
-// detector did not exist. It does now (`clubhead_track.{h,cpp}`, default ON), which is what makes
-// this module possible at all.
+// `lowPointAhead` DOES NOT USE THAT CHANNEL, and the reason is a corpus fact rather than a
+// preference. Across 108 recorded swings the head detector holds a measured lock through roughly
+// −45 ms to +40 ms of impact on almost none of them — the club is at its fastest, most motion-
+// blurred, and lowest against the turf exactly where this metric is read. Requiring 5 measured
+// heads inside ±60 ms of Impact produced a value on 9 of 108 swings, and on the three that could be
+// checked the located vertex sat +16 to +38 ms PAST impact: over a metre beyond the ball, which is
+// not a low point at all but the lowest of a handful of scattered survivors. The gate was not
+// filtering out bad swings, it was admitting bad vertices on the rare swing it fired.
+//
+// So the low point is read off `ShaftTrack2D::synth` — the kinematically-synthesized arc
+// (`shaft_synthesis.h`) Hermite-interpolated between the located P-anchors at a dense fixed
+// cadence. On the same corpus that yields a value on every swing with the vertex landing within a
+// few ms of impact, and its attack angle at impact is UNBIASED against a launch monitor (+0.02°)
+// where the measured-head channel was out by tens of degrees.
+//
+// ⚠ THIS RELAXES A STATED INVARIANT, NARROWLY. `shaft_synthesis.h` calls the synthesized tier a
+// visualization channel "excluded from every metric/scoring/estimand", and that sentence was true
+// when it was written. It now has exactly one exception, this metric, and the exception is
+// deliberate: the arc IS the thing being measured, and reading the same series the overlay draws is
+// what makes the number and the picture agree. Everything else — scoring, estimands, the plane fit,
+// the wrist channel — still excludes `synth`. The coupling that comes with it: `synth.enabled=false`
+// now takes `lowPointAhead` with it, where before it changed nothing.
+//
+// ⚠ AND IT IS AN ESTIMATE, published as one. The arc through impact is an interpolation between
+// P6, P7 and P8 rather than an observation, so its vertex is pinned near the P7 anchor and what the
+// metric really reports is where that anchor puts the head relative to the ball. Measured against a
+// launch monitor the spread is ±2.0 in (tuned::clubDelivery::kLowPointSigmaIn) against a corridor
+// only 3.2 in wide. That number ships WITH the metric as `MetricSeries::sigma`, and the catalogue
+// route is RouteQuality::Estimated so the reading resolves as Bridged rather than Measured. It
+// averages well — six swings of one session recovered the device's own session mean to 0.02° — so
+// read it as a session tendency and distrust any single swing.
 //
 // ── Units, and the ruler ────────────────────────────────────────────────────
 //
@@ -87,8 +114,12 @@ struct ClubDeliveryConfig {
     int     velHalfSpan   = tuned::clubDelivery::kVelHalfSpan;   // clubDelivery.velHalfSpan
     // Search half-window about Impact for the arc vertex, in microseconds.
     int64_t lowPointWinUs = tuned::clubDelivery::kLowPointWinUs; // clubDelivery.lowPointWinUs
-    // Minimum measured-head samples inside that window before a low point is reported.
+    // Minimum SYNTHESIZED-ARC samples inside that window before a low point is reported. At the
+    // 240 Hz synthesis cadence ±60 ms is ~29 samples, so this is not a coverage bar the way it was
+    // for measured heads — it is a floor that refuses a truncated or barely-populated arc.
     int     lowPointMinSamples = tuned::clubDelivery::kLowPointMinSamples; // clubDelivery.lowPointMinSamples
+    // Published 1σ on lowPointAhead, in inches. See the constant for its provenance.
+    double  lowPointSigmaIn = tuned::clubDelivery::kLowPointSigmaIn; // clubDelivery.lowPointSigmaIn
     // Head-confidence gate. −1 in the sample means the Stage-2 pass never ran, which is a harder
     // refusal than a low confidence and is handled separately.
     double  headConfMin   = tuned::clubDelivery::kHeadConfMin;   // clubDelivery.headConfMin
@@ -100,6 +131,7 @@ struct ClubDeliveryConfig {
         apply(ov, "clubDelivery.velHalfSpan",        c.velHalfSpan);
         apply(ov, "clubDelivery.lowPointWinUs",      c.lowPointWinUs);
         apply(ov, "clubDelivery.lowPointMinSamples", c.lowPointMinSamples);
+        apply(ov, "clubDelivery.lowPointSigmaIn",    c.lowPointSigmaIn);
         apply(ov, "clubDelivery.headConfMin",        c.headConfMin);
         return c;
     }
@@ -114,6 +146,7 @@ struct ClubDeliveryResult {
     bool   lowPointValid = false;
     double lowPointIn    = 0.0;         // signed inches, + = low point ahead of (target-side of) the ball
     int64_t lowPointTUs  = 0;           // when the arc bottomed out
+    double lowPointSigmaIn = 0.0;       // published 1σ (in) — 0 when no low point was produced
 
     bool valid = false;                 // at least one measured-head sample was usable
 };
@@ -123,6 +156,10 @@ struct ClubDeliveryResult {
 // `addressBallPx` and `mmPerPx` come from `computeBallPosition` (which yields both even when the
 // heel pair is unusable — the ruler survives what the stance geometry does not). Pass mmPerPx <= 0
 // or an unresolved ball to suppress `lowPointAhead` alone; the two angles do not need either.
+//
+// The two channels fail INDEPENDENTLY: a track with no measured heads still yields a low point if
+// `shaft.synth` is populated, and a track with measured heads but no synthesized arc still yields
+// the two angles. Neither is allowed to take the other down.
 ClubDeliveryResult trackClubDelivery(const ShaftTrack2D &shaft, const std::vector<PhaseEvent> &phases,
                                      QPointF addressBallPx, bool ballValid, double mmPerPx,
                                      const ClubDeliveryConfig &cfg = {});

@@ -113,6 +113,62 @@ plane exists). Let `W = frameWidth`.
 > `docs/design/clubhead_length_status.md`'s RESOLUTION block for the full
 > picture.
 
+> **Update (2026-08-21) — SHIPPED, AND NOT FROM THE MEASURED HEAD.** Everything
+> above assumed the measured clubhead detector was the unlock. It was not, and
+> the corpus is unambiguous about why.
+>
+> Across 108 recorded swings the Stage-2 head pass does not hold a measured lock
+> through impact. It goes dark from roughly −45 ms to +40 ms — the club at its
+> fastest, most motion-blurred, and lowest against the turf, which is exactly
+> the window this metric reads. Requiring 5 measured heads inside ±60 ms of
+> Impact produced a value on **9 of 108 swings**. Worse, on the three that could
+> be checked the located vertex sat **+16 to +38 ms past impact** — over a metre
+> beyond the ball. The gate was not filtering out bad swings; it was admitting
+> bad vertices on the rare swing it fired. §4's caveat was right about the
+> physics and wrong about the remedy: measuring the head does not help if the
+> head cannot be measured *there*.
+>
+> **The metric is now read off the synthesized club arc** — `ShaftTrack2D::synth`
+> (`shaft_synthesis.h`), the dense Hermite interpolation between the located
+> P-anchors that the club overlay draws. Same vertex search, same sub-frame
+> parabola, same ball reference and ruler; different source series. On the same
+> corpus that yields a value on essentially every swing with the vertex landing
+> within a few ms of impact.
+>
+> **What that costs, stated plainly.** The arc through impact is an
+> *interpolation* between P6, P7 and P8, not an observation, so its vertex is
+> pinned near the P7 anchor — what the metric really reports is where that
+> anchor puts the head relative to the ball. Against a launch monitor on one
+> session (2026-08-18 Wrist_02, six 7-iron swings) the arc's attack angle at
+> impact was **unbiased (+0.02°) with a spread of 3.26°**; over the arc radii
+> that session fitted (33–42 in) that is **±2.0 in of low point**, against a
+> corridor only 3.2 in wide. The session *mean* recovered the device's own to
+> 0.02° (+1.42 in against +1.43 in).
+>
+> So it ships as an **estimate, with the health warning attached in three
+> places**: `MetricSeries::sigma = 2.0 in` rides with the number, the catalogue
+> route is `RouteQuality::Estimated` so the reading resolves **Bridged** rather
+> than Measured, and the route summary is shown verbatim as the reason. Read it
+> across a handful of swings; distrust any single one.
+>
+> Two consequences worth knowing:
+> * **It relaxes a stated invariant, narrowly.** `shaft_synthesis.h` called the
+>   synthesized tier "excluded from every metric/scoring/estimand". That now has
+>   exactly one exception, this metric. Scoring, the estimands, the plane fit and
+>   the wrist channel still exclude it. The coupling that comes with it:
+>   `synth.enabled=false` now takes `lowPointAhead` with it.
+> * **An arc that never turns over inside the window is refused.** A vertex on
+>   either end means the arc was still descending when the data ran out — what a
+>   swing whose next P-anchor lands hundreds of ms away produces. That refusal
+>   removed the one visibly-wrong value on the 2026-08-18 set.
+>
+> ⚠ **Six swings from one golfer on one session is not an error budget.** It is
+> the first evidence we have, and `kLowPointSigmaIn` is a frozen constant rather
+> than a per-swing propagation precisely so it cannot pretend otherwise. §7's
+> validation requirement stands; re-seat the σ against a multi-session corpus
+> with launch-monitor truth, and scale it by the fitted arc radius at the same
+> time.
+
 ## 5. Where it slots (compute phase)
 
 Model it on `buildShaftLeanSeries()` (`src/Analysis/wrist_analyzer.cpp:56-82`):

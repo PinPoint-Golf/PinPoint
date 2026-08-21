@@ -218,7 +218,7 @@ Two telemetry layers — do not conflate them:
 | 14a | LowerBodyMetrics | FaceOn && pose frames | 6 frontal-plane series (unscored) |
 | 14b | UpperBodyMetrics | FaceOn && pose frames | 9 upper-body series + `trailWristFlexExt` (unscored) |
 | 14c | BodyRotation | pose frames **OR** a bound Pelvis/Thorax stream | pelvis/thorax turn, X-factor + stretch (unscored) |
-| 14d | ClubDelivery | `shaft.valid` && samples | shaft-vs-horizontal, attack angle, low point (unscored) |
+| 14d | ClubDelivery | `shaft.valid` && samples | shaft-vs-horizontal + attack angle from the MEASURED head; low point from the SYNTHESIZED arc (`shaft.synth`) — the two channels fail independently. All unscored; low point carries σ = 2.0 in |
 | 14e | Tempo | confident Address/Top/Impact ladder | tempo backswing + ratio (unscored) |
 | 14f | Kinematics | `kinematics.enabled` (dark by default) | clubhead/hand speed + lag series from the shaft track and pose (unscored). Shared with `CameraKinematicsAnalyzer`, which is the whole of that profile. |
 | 15 | Bindings | always | `detail->bindings` (calibration snapshot per device) |

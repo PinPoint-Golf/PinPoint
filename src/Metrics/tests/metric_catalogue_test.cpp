@@ -284,9 +284,17 @@ int main()
               "lowPointAhead still needs the ball it is measured against");
         ShotContext clubBall = club;
         clubBall.hasBallTrack = true;
+        // BRIDGED, not Measured, and that is the health warning doing its job. The route is
+        // RouteQuality::Estimated because the low point is taken off the SYNTHESIZED arc — the
+        // clubhead detector does not hold a lock through impact, so what fires is an interpolation
+        // between the located P-positions rather than an observation of the head. A reading that
+        // resolved Measured would be claiming a fidelity the producer cannot supply.
         check(cat.resolve(QStringLiteral("lowPointAhead"), clubBall).state
-                  == MetricAvailability::Measured,
-              "…and lands once the ball is there");
+                  == MetricAvailability::Bridged,
+              "…and lands once the ball is there — Bridged, because the arc is estimated");
+        check(cat.resolve(QStringLiteral("lowPointAhead"), clubBall).reason.contains(
+                  QStringLiteral("synthesized club arc")),
+              "…saying so in the reason, which is the route's own words");
 
         // attackAngle no longer demands a stereo tier. It never should have: the angle lives in the
         // vertical plane containing the target line, which is the face-on image plane.

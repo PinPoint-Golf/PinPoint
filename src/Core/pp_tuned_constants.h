@@ -467,8 +467,9 @@ inline constexpr double       kSinFloor      = 0.0872;  // bodyRotation.sinFloor
 } // namespace bodyRotation
 
 // --- Club delivery from a face-on camera (src/Analysis/club_delivery.h) -------
-// shaftAngleVsHorizontal / attackAngle / lowPointAhead, read off the MEASURED
-// clubhead terminus only. Consumed by ClubDeliveryConfig::fromOverrides via
+// shaftAngleVsHorizontal / attackAngle read off the MEASURED clubhead terminus;
+// lowPointAhead read off the SYNTHESIZED ARC instead (see club_delivery.h "Two
+// channels, on purpose"). Consumed by ClubDeliveryConfig::fromOverrides via
 // "clubDelivery.*" dotted keys.
 //
 // kVelHalfSpan is the half-width of the centred difference the head velocity — and
@@ -480,6 +481,23 @@ inline constexpr int          kVelHalfSpan        = 2;        // clubDelivery.ve
 inline constexpr std::int64_t kLowPointWinUs      = 60000;    // clubDelivery.lowPointWinUs — ±60 ms about Impact
 inline constexpr int          kLowPointMinSamples = 5;        // clubDelivery.lowPointMinSamples
 inline constexpr double       kHeadConfMin        = 0.30;     // clubDelivery.headConfMin
+
+// THE PUBLISHED 1σ ON lowPointAhead, IN INCHES — the health warning, as a number.
+//
+// MEASURED, not assumed, and the measurement is thin: one session (2026-08-18
+// Wrist_02, six 7-iron swings) with a launch monitor present. The arc's attack
+// angle at impact was compared against the device's, giving a bias of +0.02° and
+// a spread of 3.26°; over the arc radii that session fitted (33–42 in, mean 36)
+// that is 36 · tan(3.26°) ≈ 2.0 in of low point. The bias being ~0 is what makes
+// the number publishable at all — the estimator is unbiased and noisy, not skewed.
+//
+// SIX SWINGS FROM ONE GOLFER ON ONE SESSION IS NOT AN ERROR BUDGET, it is the
+// first evidence we have. It is a frozen constant rather than a per-swing
+// propagation deliberately: a σ computed per swing from a 6-sample calibration
+// would dress up the same one number as if it tracked the swing. Re-seat it the
+// day a multi-session corpus with launch-monitor truth exists, and scale it by
+// the fitted arc radius at the same time.
+inline constexpr double       kLowPointSigmaIn    = 2.0;      // clubDelivery.lowPointSigmaIn
 } // namespace clubDelivery
 
 // --- Tempo metrics (src/Analysis/tempo_metrics.h) -----------------------------

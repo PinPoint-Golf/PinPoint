@@ -38,9 +38,16 @@
 // (default 240 Hz), NOT the source frame rate, so ¼× replay and the shaft fan read
 // a dense series that fills the inter-frame gaps (the interpolation math is
 // time-continuous — see synthSampleAt). It REPLACES nothing: samples[] keeps the
-// real per-frame track;
-// this series rides alongside and every metric/scoring/estimand consumer filters
-// it out by flag (§2 Layer C, same discipline as ShaftKinematicPredicted).
+// real per-frame track and this series rides alongside.
+//
+// ⚠ ONE METRIC READS IT. Scoring, the estimands, the plane fit and the wrist channel all still
+// filter this tier out by flag (§2 Layer C, same discipline as ShaftKinematicPredicted). The single
+// exception is `lowPointAhead` (club_delivery.h), which is DEFINED on the arc: the clubhead
+// detector does not hold a measured lock through impact, so the interpolated arc is the best
+// statement about the club's path there that exists, and reading the same series the overlay draws
+// keeps the number and the picture in agreement. It ships as an ESTIMATE with a published ±2 in.
+// The consequence to know: `enabled=false` below no longer changes nothing — it takes
+// `lowPointAhead` with it.
 //
 // SYNTHESIS MODEL (per bracket [a,b] of consecutive anchors, τ = (t−t_a)/(t_b−t_a)):
 //   θ(t)   C¹ monotone-safe cubic Hermite through the two anchors' (θ, θ̇). The
@@ -68,11 +75,13 @@ namespace pinpoint::analysis {
 
 // "synth.*" tuning namespace (design §4). Nested in ShaftV3Config as `synth` (lives
 // here beside the Layer-C code, mirroring PositionsConfig in shaft_positions.h).
-// enabled defaults ON: the synthesized tier is a VISUALIZATION channel only —
-// ShaftSynthesized-flagged and excluded from every metric/scoring/estimand — so it
-// never moves the numbers; the real per-frame track stays in samples[]. Set
-// enabled=false to go dark again (ShaftTrack2D.synth stays empty ⇒ swing.json omits
-// the club.synth block, byte-identical to the pre-synth baseline). Keys
+// enabled defaults ON: the synthesized tier is a visualization channel PLUS the one
+// input `lowPointAhead` is defined on (see the ⚠ above) — everything else is
+// ShaftSynthesized-flagged and filtered out, so it moves no other number; the real
+// per-frame track stays in samples[]. Set enabled=false to go dark again
+// (ShaftTrack2D.synth stays empty ⇒ swing.json omits the club.synth block,
+// byte-identical to the pre-synth baseline) — which now ALSO suppresses
+// `lowPointAhead`, where before it changed nothing. Keys
 // "synth.enabled" / "synth.midConfFrac" / "synth.rateHz" via ShaftV3Config::fromOverrides.
 struct SynthConfig {
     bool   enabled     = true;    // master gate — VIZ tier is live; metrics never read synth

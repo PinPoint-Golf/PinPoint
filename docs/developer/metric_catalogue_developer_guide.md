@@ -398,7 +398,7 @@ a magnitude — a carry, a spin rate, a duration.
 | `swingPlane` | ° | planned | a steeper plane | a flatter plane |
 | `clubPath` | ° | planned | the head travelling RIGHT of the target line — in-to-out for a right-hander | travelling left — out-to-in for a right-hander |
 | `attackAngle` | ° | live | an UPWARD strike | a descending strike |
-| `lowPointAhead` | in | live | the arc bottoming out AHEAD of the ball, on the target side | bottoming out behind the ball |
+| `lowPointAhead` | in | live (estimated, ±2 in) | the arc bottoming out AHEAD of the ball, on the target side | bottoming out behind the ball |
 | `shaftDirection` | ° | planned | pointing RIGHT of the target line — across the line for a right-hander | pointing left — laid off, or dragged inside |
 | `shaftAngleVsHorizontal` | ° | live | PAST parallel to the ground; zero IS parallel | short of parallel |
 | `lm.attackAngle` | ° | device | an UPWARD strike | a descending strike |
@@ -994,7 +994,7 @@ the same frontal plane as sway and lift, and it is read alongside them.
 |---|---|---|---|---|---|
 | `shaftAngleVsHorizontal` | live | FaceCam + Club | `buildClubDeliverySeries` shaft vs horizontal ✓ | px→mm | `club_delivery_test` · (corpus) |
 | `attackAngle` | live | FaceCam + Club | vertical velocity angle at Impact (`PointInTime`) ✓ | px→mm | `club_delivery_test` · (launch monitor) |
-| `lowPointAhead` | live | FaceCam + Club + Ball | arc low-point vs ball (`PointInTime`) ✓ | px→mm | `club_delivery_test` · (corpus) |
+| `lowPointAhead` | live *(Bridged)* | FaceCam + Club + Ball | **synthesized-arc** low-point vs ball (`PointInTime`), σ = 2.0 in ✓ | px→mm | `club_delivery_test` · (launch monitor, n=6) |
 | `lm.faceAngle` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
 | `lm.dynamicLoft` | device | **LM** | GC Quad connector ✓ | — | `gcquad_csv_parser_test` |
 | `lm.spinLoft` | device | **LM** | derived in the connector from the row ✓ | — | `gcquad_csv_parser_test` |

@@ -226,7 +226,7 @@ All need `highMeans`, real units, and `viewNeeded`. Statuses: **live** = produce
 | `m_shaftPlaneBackswing` | `swingPlane` | Δ vs address plane, p2→p4 | ° | planned |
 | `m_shaftPlaneDelivery` | `swingPlane` | at p6 (vs address plane) | ° | planned |
 | `m_impactShaftLean` | `impactShaftLean` | at p7 | ° | live |
-| `m_lowPointAhead` | `lowPointAhead` | summary | cm | live |
+| `m_lowPointAhead` | `lowPointAhead` | summary | cm | live — **estimated** off the synthesized arc, ±2 in; resolves Bridged, read across swings |
 | `m_attackAngle` | `attackAngle` | at p7 | ° | planned — camera-derived; note reduced accuracy vs LM in the label; LM value preferred when connected |
 | `m_clubheadSpeedImpact` | `clubheadSpeed` | at p7 | mph | planned — requires curvature correction or second camera (documented hardware limitation) |
 
