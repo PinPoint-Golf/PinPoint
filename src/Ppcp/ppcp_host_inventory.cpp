@@ -1,0 +1,60 @@
+/*
+ * Copyright (c) 2026 Mark Liversedge (liversedge@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
+// The one place the declaration touches the running application.
+//
+// Separated from ppcp_source_declaration.cpp so that the builder is a pure
+// function of an Inventory and can be tested with no camera, no microphone and
+// no DeviceEnumerator — which is most of CT-S3, since the assertion that
+// matters most (MSG 3.3d: a host with no Sources still sends `declare`) is
+// exactly the case a developer machine cannot produce by having hardware.
+
+#include "ppcp_source_declaration.h"
+
+#include "../Core/device_enumerator.h"
+
+namespace Ppcp {
+
+PpcpSourceDeclaration::Inventory PpcpSourceDeclaration::hostInventory()
+{
+    Inventory inv;
+    DeviceEnumerator *e = DeviceEnumerator::instance();
+    if (!e) return inv;
+
+    for (const Device &d : e->devices(DeviceType::VideoInput)) {
+        Camera c;
+        c.backend = d.backend;
+        c.id = d.id.toStdString();
+        c.label = d.description.toStdString();
+        c.caps = d.capabilities;
+        inv.cameras.push_back(std::move(c));
+    }
+
+    // One microphone Source, because one is what the host nominates from: the
+    // acoustic detector of src/Audio runs on the active input, not on all of
+    // them.  The first registered input is the one the app opens by default.
+    const QList<Device> audio = e->devices(DeviceType::AudioInput);
+    if (!audio.isEmpty()) {
+        inv.hasMicrophone = true;
+        inv.microphone.id = audio.front().id.toStdString();
+        inv.microphone.label = audio.front().description.toStdString();
+    }
+    return inv;
+}
+
+}  // namespace Ppcp

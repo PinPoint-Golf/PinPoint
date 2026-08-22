@@ -1041,6 +1041,16 @@ target_link_libraries(PinPointStudio PRIVATE whisper samplerate wrist)
 if(TARGET ppcp)
     target_link_libraries(PinPointStudio PRIVATE ppcp)
     target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP)
+
+    # H2, first half — the host's own `declare`. Needs the library's entity
+    # vocabulary (L4) and nothing else: no socket, no peer engine, no OpenSSL.
+    # It is therefore built whenever libppcp is embedded, even on a box with no
+    # TLS, because CT-S3 and CT-I19 are about what the host SAYS about itself.
+    target_sources(PinPointStudio PRIVATE
+        src/Ppcp/ppcp_source_declaration.h
+        src/Ppcp/ppcp_source_declaration.cpp
+        src/Ppcp/ppcp_host_inventory.cpp)
+    target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
 endif()
 # No include directory needed — libwrist's include/ is PUBLIC on the target,
 # so <wrist/wrist.h> resolves through the link. HAVE_WRIST means

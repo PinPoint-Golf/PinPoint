@@ -23,6 +23,31 @@ endif()
 
 set(PPCP ${CMAKE_CURRENT_SOURCE_DIR}/..)   # src/Ppcp
 
+# CameraCapabilities is Qt-built, so the declaration suite needs Multimedia for
+# the QVideoFrameFormat that video_input_base.h pulls in.
+find_package(Qt6 REQUIRED COMPONENTS Multimedia)
+
+# libppcp — the declaration suite needs the L4 entity vocabulary, and the
+# transport suites below need the L1 frame/CBOR/envelope writers for link_bind.
+pp_require_ppcp()
+
+# ── CT-S3 / CT-I19 — the host's own declaration (work package H2) ────────────
+# Qt IS linked here, unlike the transport suites: CameraCapabilities is the
+# shape the three camera backends normalise onto and it is built out of QString.
+# DeviceEnumerator is NOT linked — hostInventory() lives in its own translation
+# unit precisely so that the builder is a pure function of an Inventory and the
+# MSG 3.3d case (a host with no Sources) is reachable on any machine.
+pp_add_test(ppcp_source_declaration_test
+    SOURCES ppcp_source_declaration_test.cpp ${PPCP}/ppcp_source_declaration.cpp
+    INCLUDE ${PPCP}
+    LINK    ppcp Qt6::Multimedia
+    DEFINES PP_PPCP_SRC_DIR="${PPCP}"
+    STD 20
+    GTEST)
+
+# ⚠ EVERYTHING BELOW THIS LINE NEEDS OpenSSL, AND THE DECLARATION SUITE ABOVE
+# DOES NOT.  A box without OpenSSL headers still runs CT-S3 and CT-I19; only the
+# TLS-PSK transport rows go missing, and they say so.
 pp_find_openssl()
 if(NOT PP_OPENSSL_FOUND)
     # Not fatal: the umbrella must still configure on a box without OpenSSL
@@ -34,11 +59,6 @@ if(NOT PP_OPENSSL_FOUND)
         "Windows: vcpkg install openssl, or -DOPENSSL_ROOT_DIR=<path>.")
     return()
 endif()
-
-# libppcp — the transport now encodes and decodes `link_bind` (ENC 2.1, erratum
-# E1) with the library's own frame, CBOR and envelope writers, so the suite
-# links it.  Nothing here calls a planned.h symbol; those do not link by design.
-pp_require_ppcp()
 
 # ── Loopback TLS-PSK: handshake, failure modes, channel independence ─────────
 # Qt-free by design (NO_QT): the transport owns no event loop, so the suite can
@@ -62,3 +82,4 @@ pp_add_test(ppcp_link_bind_test
     STD 20
     NO_QT
     GTEST)
+
