@@ -3037,7 +3037,25 @@ include(cmake/PinPointOpenSSL.cmake)
 pp_find_openssl()
 if(PP_OPENSSL_FOUND AND TARGET ppcp)
     target_sources(PinPointStudio PRIVATE
-        src/Ppcp/ppcp_transport.h  src/Ppcp/ppcp_transport.cpp)
+        src/Ppcp/ppcp_transport.h     src/Ppcp/ppcp_transport.cpp
+        src/Ppcp/ppcp_ingest_policy.h src/Ppcp/ppcp_ingest_policy.cpp
+        src/Ppcp/ppcp_host_peer.h     src/Ppcp/ppcp_host_peer.cpp)
+
+    # Team L runs one session ahead of this repository (plan §7), so the peer
+    # engine may or may not be in the checkout we build with. planned.h says
+    # the right answer for a symbol that has not landed is an UNDEFINED SYMBOL
+    # AT LINK TIME naming the function, never a stub — so the guard is read off
+    # the header on disk and flips with no edit here the day L6 lands.
+    set(PP_PPCP_HAVE_PEER OFF)
+    if(EXISTS "${ppcp_SOURCE_DIR}/include/ppcp/peer.h")
+        file(STRINGS "${ppcp_SOURCE_DIR}/include/ppcp/peer.h" _peer_hit REGEX "ppcp_peer_new")
+        if(_peer_hit)
+            set(PP_PPCP_HAVE_PEER ON)
+            target_compile_definitions(PinPointStudio PRIVATE PPCP_HAVE_PEER)
+        endif()
+        unset(_peer_hit)
+    endif()
+    message(STATUS "PPCP host peer: libppcp L6 peer engine ${PP_PPCP_HAVE_PEER}")
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
     target_link_libraries(PinPointStudio PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP_TRANSPORT)

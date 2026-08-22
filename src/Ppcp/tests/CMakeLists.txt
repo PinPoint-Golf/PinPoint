@@ -45,6 +45,14 @@ pp_add_test(ppcp_source_declaration_test
     STD 20
     GTEST)
 
+# Which libppcp packages are here today. The suites below assert the DEFERRAL
+# as loudly as they would assert the feature: a test that goes red when L6 lands
+# is how a deferral gets noticed instead of quietly becoming permanent.
+pp_ppcp_landed(peer.h   ppcp_peer_new           PP_PPCP_HAVE_PEER)
+pp_ppcp_landed(bundle.h ppcp_bundle_reader_new  PP_PPCP_HAVE_BUNDLE)
+message(STATUS "PinPointTests: libppcp L6 peer engine ${PP_PPCP_HAVE_PEER}, "
+               "L8 bundle reader ${PP_PPCP_HAVE_BUNDLE}")
+
 # ⚠ EVERYTHING BELOW THIS LINE NEEDS OpenSSL, AND THE DECLARATION SUITE ABOVE
 # DOES NOT.  A box without OpenSSL headers still runs CT-S3 and CT-I19; only the
 # TLS-PSK transport rows go missing, and they say so.
@@ -83,3 +91,24 @@ pp_add_test(ppcp_link_bind_test
     NO_QT
     GTEST)
 
+
+# ── CT-I14 and the host peer adapter (work package H2, second half) ──────────
+# Needs OpenSSL because ppcp_host_peer.h owns a PeerConnection from H1's
+# transport. PPCP_HAVE_PEER is set only when libppcp's L6 header is real — see
+# pp_ppcp_landed() in tests/cmake/PinPointTests.cmake.
+set(_hp_defines PP_PPCP_SRC_DIR="${PPCP}")
+if(PP_PPCP_HAVE_PEER)
+    list(APPEND _hp_defines PPCP_HAVE_PEER)
+endif()
+
+pp_add_test(ppcp_host_peer_test
+    SOURCES ppcp_host_peer_test.cpp
+            ${PPCP}/ppcp_host_peer.cpp
+            ${PPCP}/ppcp_ingest_policy.cpp
+            ${PPCP}/ppcp_source_declaration.cpp
+            ${PPCP}/ppcp_transport.cpp
+    INCLUDE ${PPCP}
+    LINK    ppcp Qt6::Multimedia OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+    DEFINES ${_hp_defines}
+    STD 20
+    GTEST)

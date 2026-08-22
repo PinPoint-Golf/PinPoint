@@ -215,6 +215,30 @@ function(pp_require_ppcp)
     FetchContent_MakeAvailable(ppcp)
 endfunction()
 
+# --- Which libppcp work packages have landed ----------------------------------
+# Team L runs one session ahead of this repository (plan §7), so a package we
+# code against may or may not exist in the checkout we build with. planned.h
+# says the right answer for a symbol that has not landed is an UNDEFINED SYMBOL
+# AT LINK TIME naming the function — never a stub. So the guard is set from the
+# header actually on disk rather than from a hand-maintained list, and the day
+# L lands a package the guard flips with no edit here.
+#
+#   pp_ppcp_landed(<header-basename> <symbol> <out-var>)
+function(pp_ppcp_landed header symbol out)
+    set(${out} OFF PARENT_SCOPE)
+    if(NOT ppcp_SOURCE_DIR)
+        return()
+    endif()
+    set(_h "${ppcp_SOURCE_DIR}/include/ppcp/${header}")
+    if(NOT EXISTS "${_h}")
+        return()
+    endif()
+    file(STRINGS "${_h}" _hit REGEX "${symbol}")
+    if(_hit)
+        set(${out} ON PARENT_SCOPE)
+    endif()
+endfunction()
+
 # --- OpenSSL (lazy; only the Ppcp suite needs it) -----------------------------
 # Shared with the app through cmake/PinPointOpenSSL.cmake so both resolve the
 # same library. Leaves PP_OPENSSL_FOUND for the caller; it does not fail.
