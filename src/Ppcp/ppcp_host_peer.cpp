@@ -20,6 +20,8 @@
 
 #include <cstring>
 
+#include <ppcp/frame.h>
+
 #include "ppcp_host_engine.h"
 
 namespace Ppcp {
@@ -225,24 +227,79 @@ bool PpcpHostPeer::pump()
             const IoStatus st = tc->read(m_scratch.data() + keep, m_scratch.size() - keep, got);
             if (st == IoStatus::Ok && got > 0) {
                 m_stats.bytesIn += got;
-                // The engine gets the channel with the bytes because ENC 2c's
-                // "the channel in the header matches the stream it arrived on"
-                // is the engine's check to make, not ours — we are the only
-                // thing that knows which stream this was.
-                std::size_t consumed = 0;
-                const ppcp_result r =
-                    m_engine->feed(chNo, m_scratch.data(), keep + got, &consumed);
-                tail.assign(m_scratch.begin() + static_cast<std::ptrdiff_t>(consumed),
-                            m_scratch.begin() + static_cast<std::ptrdiff_t>(keep + got));
-                if (r == PPCP_ERR_FATAL_LIMIT || r == PPCP_ERR_MALFORMED) {
-                    // ENC 8a — a length beyond the channel limit means the
-                    // stream has desynchronised and cannot be resynchronised.
-                    // The link is finished; nothing is skipped and retried.
+                const std::size_t have = keep + got;
+
+                // ⚠ ONE FRAME PER FEED, AND DRAIN BETWEEN THEM.  F-L13-1:
+                // ppcp_peer_feed() consumes UNBOUNDEDLY MANY whole frames from
+                // one buffer, the event ring is FOUR deep, and an overflow
+                // drops the OLDEST event with nothing readable to say so.  A
+                // single socket read carrying a replayed bundle therefore lost
+                // `capture_announce` while the payload frames that referenced
+                // it arrived — silently, and only under load, which is the
+                // worst shape available.
+                //
+                // The slice is bounded by the frame header's own `payload_len`,
+                // exactly as PpcpBundleTransport has always done it.  A header
+                // the parser REFUSES is handed over unshortened: ENC 8a is the
+                // engine's refusal to make, and a transport that pre-judged it
+                // would be deciding what the library is for.
+                //
+                // The library fix is libppcp L15's; until it lands this is not
+                // a workaround but the documented contract — peer.h's own event
+                // note says a `msg` is valid only "until PPCP_PEER_EVENT_QUEUE
+                // further events have been queued", and the only way to honour
+                // that is to look between feeds.
+                std::size_t off = 0;
+                bool fatal = false;
+                while (off < have) {
+                    std::size_t slice = have - off;
+                    if (slice >= PPCP_FRAME_HEADER_BYTES) {
+                        ppcp_frame_header fh{};
+                        if (ppcp_frame_header_parse(m_scratch.data() + off, &fh) == PPCP_OK) {
+                            const std::size_t whole =
+                                static_cast<std::size_t>(PPCP_FRAME_HEADER_BYTES)
+                                + fh.payload_len;
+                            if (whole > slice) break;   // a partial frame: it is the tail
+                            slice = whole;
+                        }
+                    } else {
+                        break;   // not even a header yet
+                    }
+
+                    // The engine gets the channel with the bytes because ENC
+                    // 2c's "the channel in the header matches the stream it
+                    // arrived on" is the engine's check to make, not ours — we
+                    // are the only thing that knows which stream this was.
+                    std::size_t consumed = 0;
+                    const ppcp_result r =
+                        m_engine->feed(chNo, m_scratch.data() + off, slice, &consumed);
+                    off += consumed;
+
+                    // ⚠ HERE, AND NOT AT THE END OF pump().  The event's `msg`
+                    // borrows the bytes just fed, and `payload_chunk.data`
+                    // points straight into this buffer — which the next read
+                    // overwrites.
+                    drainEvents();
+
+                    if (r == PPCP_ERR_FATAL_LIMIT || r == PPCP_ERR_MALFORMED) {
+                        // ENC 8a — a length beyond the channel limit means the
+                        // stream has desynchronised and cannot be
+                        // resynchronised. The link is finished; nothing is
+                        // skipped and retried.
+                        fatal = true;
+                        break;
+                    }
+                    if (consumed == 0) break;   // no progress; keep it as tail
+                }
+
+                tail.assign(m_scratch.begin() + static_cast<std::ptrdiff_t>(off),
+                            m_scratch.begin() + static_cast<std::ptrdiff_t>(have));
+                if (fatal) {
                     tc->close();
                     m_stats.closed = true;
                     return false;
                 }
-                if (keep + got < m_scratch.size()) break;
+                if (have < m_scratch.size()) break;
                 continue;   // the buffer filled; there may be more waiting
             }
             if (st == IoStatus::WouldBlock) break;
@@ -316,12 +373,11 @@ bool PpcpHostPeer::pump()
         }
     }
 
-    // ⚠ DRAINED HERE, AFTER THE FEED AND BEFORE THE NEXT ONE.  An event's `msg`
-    // is valid "until PPCP_PEER_EVENT_QUEUE further events have been queued"
-    // (four), and `payload_chunk.data` points into the buffer that was just fed
-    // — which this pump is about to overwrite on its next read.  A caller that
-    // drained events on its own schedule would be reading whichever bytes
-    // happened still to be there.
+    // A last sweep for events the engine raised ITSELF rather than decoded —
+    // link loss, link restored — which are queued by the liveness pump and by
+    // nothing that was fed.  Every decoded event was already drained beside the
+    // frame it came from, above; this is not a second chance at those, because
+    // by now their bytes are gone.
     drainEvents();
 
     return alive;

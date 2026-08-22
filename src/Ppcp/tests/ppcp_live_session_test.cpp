@@ -33,6 +33,9 @@
 #include <chrono>
 #include <cmath>
 
+// ppcp_peer_nominate lives in shot.h, not peer.h: 5.12 nomination is Detect's.
+#include <ppcp/shot.h>
+
 using namespace Ppcp;
 using pptest::DevicePeer;
 
@@ -529,4 +532,93 @@ TEST(PpcpLiveSession, TheHostTimebaseIsTheSameSteadyClockTheEventBufferStamps)
     const std::int64_t c = hostNowNs();
     EXPECT_LE(a / 1000, b);
     EXPECT_LE(b, c / 1000);
+}
+
+// ── F-L13-1 — why the pump feeds ONE FRAME PER CALL ───────────────────────
+//
+// `ppcp_peer_feed()` consumes UNBOUNDEDLY MANY whole frames from one buffer;
+// the event ring is PPCP_PEER_EVENT_QUEUE deep (four); and an overflow drops
+// the OLDEST event with nothing readable to say so.  A single socket read
+// carrying a replayed bundle therefore loses `capture_announce` while the
+// payload frames that reference it arrive — silently, and only under load.
+//
+// This asserts BOTH halves, because the second is the one that protects the
+// pump: bulk-feeding N frames loses events, and feeding the identical bytes one
+// frame at a time with a drain between them loses none.  `PpcpHostPeer::pump()`
+// does the latter.  When libppcp L15 makes `feed` stop at the ring's capacity,
+// the first EXPECT here goes red and points at this note.
+TEST(PpcpLiveSession, F_L13_1_FeedingAWholeReadAtOnceLosesEventsAndOneFrameAtATimeDoesNot)
+{
+    constexpr int kFrames = 12;   // three times the ring's depth
+
+    // The bytes: `kFrames` candidates from the device, drained into one buffer
+    // exactly as a socket read would deliver them.
+    auto produce = [](Link &L, std::vector<std::uint8_t> &out) {
+        for (int i = 0; i < kFrames; ++i) {
+            ppcp_candidate c{};
+            ppcp_instant at{};
+            const std::string cid = "c-" + std::to_string(i);
+            ASSERT_EQ(ppcp_instant_make_z(&at, L.dev.tb.c_str(), 1000000 * (i + 1)), PPCP_OK);
+            ASSERT_EQ(ppcp_candidate_make(&c, cid.c_str(), L.dev.peerId.c_str(), "src-mic",
+                                          "acoustic", &at, 0.5), PPCP_OK);
+            ASSERT_EQ(ppcp_peer_nominate(L.dev.p, &c), PPCP_OK);
+        }
+        std::vector<std::uint8_t> buf(1u << 20);
+        for (;;) {
+            std::size_t len = 0;
+            if (ppcp_peer_drain(L.dev.p, PPCP_CHANNEL_CONTROL, buf.data(), buf.size(), &len)
+                    != PPCP_OK || len == 0)
+                break;
+            out.insert(out.end(), buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(len));
+        }
+        ASSERT_FALSE(out.empty());
+    };
+
+    // ── (a) the whole read in one feed ────────────────────────────────────
+    std::size_t bulkSeen = 0;
+    {
+        Link L;
+        ASSERT_NO_FATAL_FAILURE(L.build());
+        ASSERT_NO_FATAL_FAILURE(L.declare());
+        std::vector<std::uint8_t> bytes;
+        ASSERT_NO_FATAL_FAILURE(produce(L, bytes));
+
+        std::size_t took = 0;
+        ppcp_peer_feed(L.host->peer(), PPCP_CHANNEL_CONTROL, bytes.data(), bytes.size(), &took);
+        pptest::drainEvents(L.host->peer(), [&](const ppcp_event &e) {
+            if (e.kind == PPCP_EVENT_CANDIDATE) ++bulkSeen;
+        });
+    }
+
+    // ── (b) the identical bytes, one frame per feed, draining between ─────
+    std::size_t slicedSeen = 0;
+    {
+        Link L;
+        ASSERT_NO_FATAL_FAILURE(L.build());
+        ASSERT_NO_FATAL_FAILURE(L.declare());
+        std::vector<std::uint8_t> bytes;
+        ASSERT_NO_FATAL_FAILURE(produce(L, bytes));
+
+        std::size_t off = 0;
+        while (off < bytes.size()) {
+            ppcp_frame_header fh{};
+            ASSERT_EQ(ppcp_frame_header_parse(bytes.data() + off, &fh), PPCP_OK);
+            const std::size_t whole = PPCP_FRAME_HEADER_BYTES + fh.payload_len;
+            std::size_t took = 0;
+            ppcp_peer_feed(L.host->peer(), PPCP_CHANNEL_CONTROL, bytes.data() + off, whole,
+                           &took);
+            pptest::drainEvents(L.host->peer(), [&](const ppcp_event &e) {
+                if (e.kind == PPCP_EVENT_CANDIDATE) ++slicedSeen;
+            });
+            if (took == 0) break;
+            off += took;
+        }
+    }
+
+    EXPECT_EQ(slicedSeen, static_cast<std::size_t>(kFrames))
+        << "one frame per feed with a drain between must lose nothing";
+    EXPECT_LT(bulkSeen, slicedSeen)
+        << "F-L13-1 has been fixed in libppcp L15 — this guard can go";
+    EXPECT_LE(bulkSeen, static_cast<std::size_t>(PPCP_PEER_EVENT_QUEUE))
+        << "the ring is what bounds a bulk feed, and it is four deep";
 }

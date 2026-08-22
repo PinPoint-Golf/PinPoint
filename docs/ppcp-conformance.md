@@ -245,50 +245,219 @@ were never stated over a UI.
 
 ---
 
-## Work in progress — S3 wave 2 (H5, H7)
+## 7. What H5 and H7 landed (session 3, wave 2)
 
-**Status at last commit.** Landed in `src/Ppcp/` and not yet built:
+Everything below is reproduced by one command:
 
-- `ppcp_live_session.{h,cpp}` — `session_open` with `tb:host` as `timebase_ref` and BOTH
-  arbitration parameters (5.10e); the sync prober registered **per timebase the host
-  declares** (I21, by walking the declaration rather than by a constant); the two separate
-  pumps of 6.3d (sync schedule, liveness schedule); 7.4c link loss surfaced as a callback;
-  `arm`/`disarm` with MSG 5.2's empty list; and `offsetToRefNs()`, the one scalar
-  `VideoInputPpcp::setTimebaseOffsetNs()` can take, which REFUSES rather than returning zero
-  where there is no direct relation (5.4b, 8.2i1).
-- `ppcp_shot_bridge.{h,cpp}` — the arbitration bridge. Nomination through
-  `ppcp_candidate_make_canonical` (I33, converted once, by the nominator); the host's own
-  Candidates arbitrated on the same terms as a peer's; 8.2d's "too uncertain" as an
-  application policy callback and nowhere else; `capture_request` (8.4); and
-  `linkForeignShot()` — the GCQuad row as a `ShotLink`, `basis: arrival_pairing`,
-  `confirmed_by: observer`, with **no function anywhere on the class that can turn a launch
-  monitor reading into a Candidate** (8.1b, 8.1e).
-- `ppcp_offer_controller.{h,cpp}` — the in-screen offer list as a `QAbstractListModel`:
-  `session_offer` in becomes a row, accepting sends `session_accept` with the digests the
-  ledger holds (9.1a) and the offer's `msg_id` as `reply_to`.
-- `ppcp_annotation_store.{h,cpp}` — H7. Supersession through libppcp (5.18e, including the
-  bytewise author tiebreak); the body persisted RAW to its own file so 5.18a's round trip is
-  byte-identical; placement checked through `ppcp_annotation_validate_placement` before
-  origination (5.18g, 5.18j).
-- `ppcp_host_engine.h` gained `healthReport` (7.4b), `syncTimebase` (6.1b) and an injectable
-  `clock` — the last **only** so `ppcp_sim_clock` can drive §6.3 in a test.
-- `ppcp_import_ledger` gained `heldDigests()` (9.1a).
+```
+cmake --build build/ppcp-tests -j3
+ctest --test-dir build/ppcp-tests --output-on-failure
+```
 
-Tests written, **not yet compiled or run**: `ppcp_live_session_test.cpp`,
-`ppcp_arbitration_test.cpp`, `ppcp_offer_test.cpp`, `ppcp_annotation_test.cpp`, and the
-shared two-peers-in-one-process harness `ppcp_test_peer.h`.
+10 suites, 10 passing.
 
-**Next:** add the four targets to `src/Ppcp/tests/CMakeLists.txt`, build, make them green;
-then the QML offer list and the `ShotController` seam (app-side, unverifiable here).
+### 7.1 The rows
 
-**Blocked / known red:** `ppcp_video_input_test`'s
-`APreviewCaptureAnnouncedPendingIsRefused` broke when libppcp L9 landed —
-`ppcp_peer_capture_announce()` now checks `is_preview` against the Stream the engine
-recorded, so the test's way of producing a non-conformant announce (a device lying about
-`is_preview`) is refused at origination with `PPCP_ERR_INVALID`. That is finding 6 (F-H4-1)
-fixed on the ORIGINATION side; whether the RECEIVE side still has the hole is what the fixed
-test must now establish, and it needs a hand-built frame rather than a conformant peer.
+| Test | Invariant | Method | Work packages | PinPointStudio | Command |
+|---|---|---|---|---|---|
+| CT-I7 | I7 | paired | H5 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_arbitration_test` |
+| CT-I8 | I8 | paired | H5 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_arbitration_test` |
+| CT-I18 | I18 | static + injected | H5 | `pass` (negative half) | `ctest --test-dir build/ppcp-tests -R ppcp_live_session_test` |
+| CT-I20 | I20 | static | H5 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_arbitration_test` |
+| CT-I21 | I21 | static | H5 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_live_session_test` |
+| CT-I35 | I35 | paired | H5 | `impl` | `ctest --test-dir build/ppcp-tests -R ppcp_arbitration_test` |
+| CT-I37 | I37 | static (API surface) | H7 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_annotation_test` |
+| CT-S5 | — | paired | H5 | `impl` | `ctest --test-dir build/ppcp-tests -R ppcp_live_session_test` |
+| CT-S1 | I17, I22 | injected | H4, H5 | `impl` | `ctest --test-dir build/ppcp-tests -R ppcp_video_input_test` |
+| CT-I36a | I36 | paired | H4 | `pass` (consumer half) | `ctest --test-dir build/ppcp-tests -R ppcp_video_input_test` |
 
-`tools/ppcp-sim` (libppcp L13) does not exist yet, so every row below is evidence from two
-`ppcp_peer`s in one process. The rows that move to real interoperability when it lands are
-CT-I7, CT-I8, CT-I20, CT-I21, CT-I35 and CT-S5.
+**⚠ Every row above is evidence from two `ppcp_peer`s in ONE PROCESS.** `tools/ppcp-sim`
+(`libppcp` L13) now exists at `libppcp/build/dev/tools/ppcp-sim`, and this agent could not
+execute it — the sandbox refuses a binary outside this repository, and copying a build
+artefact of another repository into this tree to get round that would make the evidence about
+a copy rather than about the tool. So no row here is claimed against it yet. When it does, CT-I7, CT-I8, CT-I20, CT-I21, CT-I35 and
+CT-S5 become claims against a genuinely independent implementation, and interop rows 1, 5, 6,
+7 and 8 become reachable at all. Nothing here is a mock — the device end is a real engine
+configured as a capture peer and the host end is the one `makeHostEngine()` builds — but two
+engines built from one library agree about more than two implementations do, and that is the
+whole point of the pairing.
+
+**CT-I21** — `OneSyncEstimatorPerDeclaredHostTimebase`. The prober is registered by walking
+the host's own declaration, not by a constant: this host samples every Source against one
+clock and gets one estimator, and a host with four free-running camera clocks would declare
+four Timebases and get four, with no branch and no edit. The assertion is that the count came
+from the declaration. It also asserts the negative: **no** estimator for `tb:dev`, because a
+host that had one would be claiming to read a clock it cannot (I1).
+
+**⚠ The remote half of I21 is not reachable through libppcp's API, and that is a finding.**
+A responder answers `sync_probe` by stamping its ONE `ppcp_peer_config.sync_timebase`, and
+`ppcp_peer_sync_add_timebase()` keys its estimators on the LOCAL timebase — so a host cannot
+run two probe sequences against two clocks of the same device. A device with a camera clock
+and an audio clock yields one measured relation and one that is simply absent, which 5.4b
+makes a legal and honest outcome and 8.2d then excludes. See finding 9.
+
+**CT-S5 / CORE §6.3** — `TheProbeExchangeRecoversTheOffsetAndTheSkew`. Two `ppcp_sim_clock`s
+with a **4.2 s offset and 40 ppm of skew** between them, driven for a couple of minutes of
+simulated time. The exchange recovers both, and neither number is ever handed to the
+estimator; the responder's timebase is **learned from the first `sync_reply`** (6.1b — the
+constructor was given NULL). The relation comes back `affine`, `method: estimated_online`,
+with both sigmas non-zero (I3 makes a relation without them unconstructible). The tolerances
+are loose on purpose: 6.3e publishes a **filtered** value, so a tight bound here would be
+asserting that the filter does not exist.
+
+It is `impl` and not `pass` because CT-S5 is stated over a real link with real network
+latency, and a same-process pair has none — the RTT distribution whose left tail 6.3f filters
+on is degenerate here.
+
+**CT-I18** — `AConversionWithNoDirectRelationIsRefusedAndNeverAssumedZero`. Three assertions.
+With nothing measured, `offsetToRefNs()` **refuses and writes nothing** to its output; a
+fabricated zero is indistinguishable downstream from a measured mapping and shaped exactly
+like drift. A Source already on `tb:host` converts with a zero offset, and that zero is a
+fact rather than a fallback (I4 — identity is identity, never asserted as a relation with
+`from == to`). And after the exchange has run, the conversion either found a **direct**
+relation or refused; nothing composes, because `ppcp_relations_convert` applies at most one
+relation and 5.4c forbids deriving A→C from A→B and B→C.
+
+**CT-I20** — `ANonHostPeerCannotArbitrate`. `ppcp_arbiter_new()` refuses a `role: capture`
+peer, and `PpcpShotBridge::start()` reports the refusal rather than degrading into something
+that looks as though it worked. CONF §1d's negative half: a peer that arbitrated without
+declaring Arbitrate is non-conformant, and the refusal is what stops it reaching a wire.
+
+**CT-I8** — `TwoAcousticNominatorsFromDifferentPeersBothAppear`. The host declares **its own
+microphone**, so the assertion the row exists for is reachable: a device microphone and a
+host microphone nominate 3 ms apart, inside the 50 ms coincidence window, and the issued Shot
+carries **both** Candidates. This is the assertion `ShotArbiter` fails — it models three fixed
+modalities in fixed slots, so the second `acoustic` nomination overwrites the first and
+nothing records that it happened. Two further rows: an over-wide sigma **excludes and
+retains** (8.2d — exclusion is a conclusion, the Candidate remains evidence), and with no
+relation at all **every** foreign Candidate is retained and none is grouped (8.2i1 — there is
+not even an instant to group by, and the honest answer is a Candidate held for ever with no
+Shot).
+
+**CT-I7** — `ACandidateArrivingAfterTheShotAttachesAndT0IsNotRevised`. A late Candidate
+produces no second Shot and no revision. `t0` could not have been revised even if this host
+wanted to: libppcp has no setter for it anywhere, and `ppcp_shot_attach_candidate()` takes a
+Candidate rather than an instant precisely so that attaching cannot move it.
+
+**CT-I35 is `impl`.** The half that is asserted is that a late Candidate attaches and the
+Shot converges. The half that is not is 8.2k/8.2l with a **device-minted** Shot — a Mint peer
+issuing its own `shot` and the host attaching to it rather than competing. That needs a
+device that mints, which is `PinPointCapture`'s D-series or `ppcp-sim`, and this host cannot
+produce one.
+
+**CORE §8.1 — the launch monitor row.**
+`TheLaunchMonitorRowBecomesAnArrivalPairingLinkConfirmedByObserver`. The GCQuad's CSV row
+becomes a `ShotLink` with `basis: arrival_pairing`, `confirmed: true`,
+`confirmed_by: observer` and `foreign_system: com.foresightsports.gcquad`, and the Candidate
+count **does not move**. 5.16f permits `observer` here precisely because `arrival_pairing` is
+not one of the three retrospective bases — the host armed the slot when it detected the swing
+and watched the row arrive, which is an observation and not a human decision. There is
+deliberately **no function on `PpcpShotBridge` that can turn a launch monitor reading into a
+Candidate**, which is 8.1b and 8.1e by API surface.
+
+**CORE §8.4** — `CaptureRequestNamesT0InTheSessionTimebaseRef`. `t0` crosses in `tb:host`.
+The owner inverts §6.1's conversion into its own convention at its end; a host that did it
+for them would apply the correction twice (8.2a, I33) — which is CT-S1 assertion 4, and it is
+still not exercised here, because nothing on this side inverts.
+
+**CT-I37** — `NothingInAnalysisReadsAnAnnotation`. CONF §3 makes this a check on **API
+surface, not behaviour**, so the test greps every `.h`/`.cpp` under `src/Analysis` for an
+include of a markup header and fails if one appears. A grep is an odd-looking test and it is
+the right one: no runtime assertion can say "no analysis ever reads an Annotation" about code
+nobody has written yet. The failure it catches is a plausible one — a `kind: nav_anchor`
+annotation looks exactly like phase data, a labelled instant on a shot, and the analysis
+ladder is full of code that wants labelled instants. Reading one would turn a user's drawing
+into an observation and every metric downstream would inherit it.
+
+**CORE §5.18** — three more rows. `ThePersistedBodyComesBackByteIdentical` writes a body with
+**embedded NULs and high bytes**, restarts the store, and reads it back byte for byte; a
+store that had gone through a text encoder would truncate at byte ten and every other field
+would still look right. `TwoDeliveryOrdersConvergeOnTheSameRevision` and
+`EqualRevisionsFromTwoAuthorsAreBrokenBytewiseAndNotIgnored` assert 5.18e including the
+`author_peer_id` tiebreak — the case a coach at the host and a golfer at the device create,
+where without the tiebreak both hold revision 1, both produce revision 2, each ignores the
+other's equal revision, and the two ends diverge permanently while each believes it
+converged.
+
+**CT-I36a's consumer half had to be rewritten, and the rewrite is itself the finding.** Until
+`libppcp` L9 the suite made the device non-conformant by lying to its own engine —
+`ppcp_peer_capture_announce(..., is_preview=false)` on a preview Stream. L9 closed that:
+the engine now resolves the Stream from the Capture's own `stream_id` and refuses when the
+flag disagrees. **Finding 6 (F-H4-1) is therefore fixed on the origination side**, and a
+conformant peer can no longer produce the frame at all. The frame is now built and framed by
+hand and fed straight in, which is what a genuinely non-conformant third-party peer would put
+on the wire — and the consumer-side check is still `VideoInputPpcp`'s own, so the row is still
+an application obligation.
+
+### 7.2 What is wired but not exercised in the application
+
+**Nothing in this application constructs a `PpcpHostPeer`.** H1's transport and H2's peer are
+built and tested; no screen, service or controller starts one. Everything in §7.1 is asserted
+over engines the test suite constructs. So the following are written, compiled only by the app
+target (which this work did **not** build), and **unverified**:
+
+- `PpcpHostPeer` now owns the live session, the arbitration bridge and the annotation store,
+  drains the event ring in `pump()` and dispatches to all three, and offers
+  `setDeclarationHook()` / `setRelationsHook()` / `addEventHook()`. `tick(nowNs)` runs the two
+  §6.3/§7.4 schedules and 8.2h's issue hold.
+- `ShotController` gains `setPpcpBridge()`, `setPpcpSourceIds()` and
+  `commitArbitratedShot()`; `reportCandidate()` nominates and **returns** when the bridge is
+  active, never touching `m_arbiter`.
+- `PpcpOfferList.qml` in the DEVICES area of the home screen, and `ppcpOffers` as a context
+  property beside `ppcpImport`. **The controller is installed detached**, so the list is
+  always empty until an owner for the link exists. The component hides itself entirely rather
+  than showing an empty heading, because "this device offered nothing" is a different and
+  untrue statement.
+
+**Three joins are named in the code and have no caller, all for the same reason.**
+`video_input_factory::registerPpcpPeer()` on `PPCP_EVENT_DECLARE` (MSG 3.3 — a peer's cameras
+exist the moment it declares and at no other moment); `VideoInputPpcp::setTimebaseOffsetNs()`
+from `PpcpLiveSession::offsetToRefNs()` after 6.1f; and `clipReady(PpcpClip)` into the session
+layer. The first two are one line each in whatever constructs the peer. The third is blocked
+on more than an owner — see below.
+
+**⚠ `clipReady()` is blocked on host review item 2 and is NOT worked around.** A `PpcpClip`
+carries opaque PPCP identities; this application's `Session.id` is a filesystem directory path
+and its `Shot.id` an `int` ordinal, and CORE 8.5c keys idempotent re-import on **opaque** ids.
+Writing a clip into the swing library today would either duplicate it on the second arrival or
+throw the PPCP identity away, and I34 is precisely the invariant that would be lost. H3 made
+the same call for imported bundles and landed them under `PPCP Imports/<peer>/<session>/`
+instead; the live path has no equivalent yet.
+
+**⚠ And the offset seam cannot carry the whole relation.** `setTimebaseOffsetNs()` takes a
+scalar, and a `TimebaseRelation` is affine — so `offsetToRefNs()` evaluates it at one instant
+and the skew term goes stale at the rate it was measured. That is why the function returns the
+uncertainty beside the offset and why it is re-evaluated on every publish rather than set once.
+Widening the seam to take a relation is a `VideoInputPpcp` change and belongs with whoever
+owns the join.
+
+### 7.3 What is not claimed
+
+- **`tof_correction` is never sent.** 8.1d asks an acoustic nominator to correct for time of
+  flight before emitting `at`, and to report the correction and its uncertainty. This host's
+  detectors do not measure their distance to the ball, so there is no correction to report and
+  **none is invented** — at 343 m/s it is ~2.9 ms per metre, and a device 2 m from the ball
+  lags 5.8 ms, which is most of a frame at 150 fps. It needs a surveyed microphone position,
+  which is a `Calibration` this application does not yet acquire.
+- **`coincidence_window_ns` and `issue_hold_ns` are `CORE` §5.10's proposals**, not
+  measurements. CORE B8 says the same of them, and says the floor must be measured **per
+  nominator class**. `PpcpLiveSession::Config` holds both so that a rig measurement changes one
+  number in one place.
+- **`maxConversionSigmaNs` (5 ms) is a guess with a reason**, not a measurement: it is a frame
+  at 200 fps and the arbitrated instant is read against video. It is this repository's number,
+  never libppcp's (I14), and it is the only threshold in the arbitration path.
+- **No `epoch` on `session_open`.** I15 / 5.3b make a wall-clock reading a label that is never
+  used to compute an interval, and this host computes every interval from `tb:host`. Putting
+  one on the arbitration frame would invite exactly the computation the clause forbids.
+
+## 8. Further findings
+
+| # | Clause | Finding |
+|---|---|---|
+| 9 | `libppcp` API — **F-H5-1** | **The remote half of I21 is unreachable.** 6.1d and I21 call for one probe sequence per timebase, and `ppcp_peer_sync_add_timebase()` keys its estimators on the LOCAL one while a responder answers with its single `ppcp_peer_config.sync_timebase`. So a host CAN run a sequence per clock of its own and CANNOT run one per clock of a device's: a phone with a camera clock and an audio clock yields one measured relation and one absent. 5.4b makes that legal and 8.2d then excludes the Candidates that needed it, so nothing is fabricated — but "one exchange per timebase" reads as symmetric and is not. Either the responder's timebase belongs in `sync_probe` as a request, or 6.1d should say that the responder chooses. |
+| 10 | `libppcp` API — **F-H5-2** | **`ppcp_peer_session_params()` is NULL on the peer that ORIGINATED `session_open`.** peer.h says "as they arrived in `session_open`", and that is literally what it does — but the consequence is that a HOST cannot read back the Session it just opened: not `timebase_ref`, not `coincidence_window_ns`, not `issue_hold_ns`. Every one of those is needed by the host itself (8.2b compares against the window, 8.2h holds against the hold), so the host keeps a second copy and the two can drift, which is what a single accessor exists to prevent. 8.3g's "nothing about the Session changes" is therefore asserted at the DEVICE end in `ppcp_live_session_test`. |
+| 11 | `libppcp` API — **F-H5-3** | **`ppcp_peer_config.health_report` is a PRECONDITION for liveness, not a decoration on it, and nothing says so.** peer.h documents it as "what `heartbeat_ack` carries". What actually happens without one is that every `heartbeat` is answered `error` / `profile_not_supported` with the message "no health source", so 7.4a never runs, no ack ever returns, and the sender's own link state stays `live` for ever because it is never told otherwise. Both halves of §7.4 looked broken in this suite until the harness supplied a callback; neither was. The refusal is arguably right — a peer reporting `thermal: nominal` on no evidence is the fabrication this library refuses everywhere else — but an embedding with no thermometer will silently have no liveness at all. |
+| 12 | `libppcp` API — **finding 5, CLOSED** | `ppcp_peer_drain()` had no way to say "I only wrote N", so a short socket write under `CORE` T2 backpressure lost bytes the engine considered sent. L9 added `ppcp_peer_drain_peek()` / `_commit()`, and `PpcpHostPeer::pump()` now uses them. `commit` is given the exact byte count the socket accepted rather than a whole number of frames — a channel is an ordered byte stream, and rounding down to a frame boundary would re-send bytes that had already left. Recorded as closed rather than deleted, because the shape of the fix is the interesting part. |
+| 13 | `libppcp` API — **finding 6 (F-H4-1), HALF CLOSED** | `ppcp_peer_capture_announce()` now resolves the Stream from the Capture's own `stream_id` and refuses when `is_preview` disagrees, so 5.11j is enforced on the way OUT and a conformant peer can no longer be made to lie. The receiving side is unchanged: a consumer must still run `ppcp_capture_validate_in_stream()` itself, and `VideoInputPpcp::onCaptureAnnounce()` does. CT-I36a's consumer half remains an application obligation. |
+| 15 | `libppcp` API — **F-L13-1**, raised by team L | **`ppcp_peer_feed()` consumes unboundedly many frames per call, the event ring is four deep, and an overflow drops the OLDEST event with nothing readable to say so.** A single socket read carrying a replayed bundle loses `capture_announce` while the payload frames that reference it arrive — silently, and only under load, which is the worst shape available. `PpcpHostPeer::pump()` had exactly this bug: it fed a whole read and drained events afterwards. It now bounds each feed to one frame using the header's own `payload_len` — the idiom `PpcpBundleTransport` has always used — and drains between them. `F_L13_1_FeedingAWholeReadAtOnceLosesEventsAndOneFrameAtATimeDoesNot` asserts both halves, so the day libppcp L15 makes `feed` stop at the ring's capacity, the guard goes red and points at this row. |
+| 14 | `libppcp` API — **finding 8, CLOSED** | `ppcp_event` gained `channel`, so a consumer can now check 5.11h — preview payload on a bulk channel distinct from shot payload. Not yet asserted here; it belongs with the join that consumes `clipReady()`. |
