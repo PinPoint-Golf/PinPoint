@@ -159,6 +159,11 @@ function(pp_require_wrist)
     FetchContent_MakeAvailable(wrist)
 endfunction()
 
+# --- OpenSSL (lazy; only the Ppcp suite needs it) -----------------------------
+# Shared with the app through cmake/PinPointOpenSSL.cmake so both resolve the
+# same library. Leaves PP_OPENSSL_FOUND for the caller; it does not fail.
+include(${PP_REPO_ROOT}/cmake/PinPointOpenSSL.cmake)
+
 # --- Sanitizers (one convention for ALL suites) -------------------------------
 # -DPP_SANITIZE=address  |  "address;undefined"  |  thread
 # Replaces the three current spellings (PINPOINT_ENABLE_ASAN/UBSAN/TSAN,

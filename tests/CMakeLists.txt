@@ -33,6 +33,6 @@ add_subdirectory("${PP_SRC}/Buffer"       "${CMAKE_BINARY_DIR}/Buffer-lib")
 add_subdirectory("${PP_SRC}/Buffer/tests" "${CMAKE_BINARY_DIR}/Buffer")
 
 # --- The remaining standalone suites -----------------------------------------
-foreach(suite Analysis Audio Core Gui IMU LaunchMonitor Pose Update)
+foreach(suite Analysis Audio Core Gui IMU LaunchMonitor Pose Ppcp Update)
     add_subdirectory("${PP_SRC}/${suite}/tests" "${CMAKE_BINARY_DIR}/${suite}")
 endforeach()
