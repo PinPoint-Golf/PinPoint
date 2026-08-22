@@ -552,11 +552,13 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("updateController"),   &updateController);
     engine.rootContext()->setContextProperty(QStringLiteral("cudaRuntime"),        &cudaRuntime);
 
-    // H3 — "Import session…". A context property and not a QML type because
-    // libppcp is an OPTIONAL dependency (H0): a build without it must still
-    // produce a working application, and PpcpImportAction.qml checks for this
-    // name before it calls anything. HAVE_PPCP means only "the library is
-    // linked" and is never a runtime feature gate.
+    // H3 — the PPCP session import engine. A context property and not a QML
+    // type because libppcp is an OPTIONAL dependency (H0): a build without it
+    // must still produce a working application. NOTHING IN THE UI CALLS THIS
+    // YET, on purpose: the user does not import files — a connected capture
+    // device offers its recorded sessions (MSG §9 session_offer/manifest) and
+    // the host picks from that list. That UI is S3's (H4–H7); this controller
+    // is the engine behind it. HAVE_PPCP means only "the library is linked".
 #ifdef HAVE_PPCP
     static PpcpImportController ppcpImportController;
     engine.rootContext()->setContextProperty(QStringLiteral("ppcpImport"),

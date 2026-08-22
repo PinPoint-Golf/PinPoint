@@ -289,13 +289,6 @@ ApplicationWindow {
         id: aboutDialog
     }
 
-    // H3 — "Import session…". Picks a file and hands it to the PPCP file
-    // transport; there is no importer behind it (plan A10).
-    PpcpImportAction {
-        id: ppcpImportAction
-        onFinished: function(ok, message) { console.log("PPCP import:", message) }
-    }
-
     // Native macOS application-menu "About PinPoint Studio" item. Isolated to a
     // separate QML file loaded ONLY on macOS, so its Qt.labs.platform import and the
     // native menu bar never touch Linux/Windows (where the header pill is the trigger).
@@ -308,7 +301,6 @@ ApplicationWindow {
             // Route Quit through window.close() so the session-active confirm fires,
             // same as the header ✕ (never Qt.quit(), which bypasses onClosing).
             item.quitRequested.connect(function() { root.close() })
-            item.importSessionRequested.connect(function() { ppcpImportAction.open() })
         }
     }
 

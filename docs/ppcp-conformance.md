@@ -149,3 +149,14 @@ Recorded here because they were found while building this, and dispositioned in 
 | 3 | `ENC` §6, `CORE` 5.7 | **A payload has no declared container.** `payload_begin` carries `bytes`, a `digest` and `chunk_bytes`, and nothing that says what the bytes ARE. `CaptureProfile.format.codec` exists but is a *codec* (`hevc`), not a container (`mp4`), and it reaches a receiver three hops away — Source → CaptureProfile → Stream → Capture. A consumer that writes an imported clip to a file must therefore guess its extension, which this host does from the Stream `kind` (`ppcp_import_sink.cpp`, `extensionFor`). Either `payload_begin` gains an optional media type, or `ENC` §6 says out loud that the container is out of band. |
 | 4 | `ENC` §7, `MSG` 3.3c | **Nothing requires a bundle to carry a `declare`**, yet `CORE` 8.5c scopes Capture identity by the **minting peer**, and the only place a bundle states who that is is a `declare` (or a `session_joined` nobody records offline). `MSG` 3.3c rescues the ordinary case — a peer declares before originating anything referencing a Source — but it is an inference across two documents, and a bundle of pure `capture_announce` frames is unattributable and therefore un-deduplicable. `ENC` §7 should require `declare` before any Capture-bearing frame, in the same breath as 7c's manifest rule. This host counts what it cannot attribute (`Stats::capturesUnattributable`) rather than guessing a scope. |
 | 5 | `libppcp` API (not the specification) | **`ppcp_peer_feed()` gained `out_consumed`; `ppcp_peer_drain()` has no counterpart.** Inbound, the engine takes whole frames and hands the tail back, which is right and is why the pump now keeps one. Outbound, `drain` dequeues whole frames and the embedding is expected to have written all of them — so a short socket write (`CORE` T2 backpressure, which is ordinary on a bulk channel) loses bytes the engine considers sent. `PpcpHostPeer::pump()` counts the occasions rather than pretending; the fix is a `drain` that can be told how much was taken, or a peek/commit pair. |
+
+### Note (22 Aug 2026) — H3 has no UI
+
+The "Import Session…" menu item and its file dialog were removed the day they
+landed. This application has no menus and no native dialogs; and the user's
+intent is not to import files at all — a connected capture device OFFERS its
+recorded sessions (`MSG` §9 `session_offer` / `session_accept` /
+`session_manifest`, Offline profile) and the host chooses from that list. The
+bundle transport, import sink and ledger stay, as the engine behind that list;
+the list itself is S3 (H4–H7) work. The CT rows above are unaffected — they
+were never stated over a UI.

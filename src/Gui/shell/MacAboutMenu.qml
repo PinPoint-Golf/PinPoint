@@ -33,7 +33,6 @@ Labs.MenuBar {
 
     signal aboutRequested()
     signal quitRequested()
-    signal importSessionRequested()
 
     Labs.Menu {
         // macOS replaces the first menu's title with the application name.
@@ -48,21 +47,6 @@ Labs.MenuBar {
             text:        qsTr("Quit PinPoint Studio")
             role:        Labs.MenuItem.QuitRole
             onTriggered: menuBar.quitRequested()
-        }
-    }
-
-    // ⚠ THE ONLY UI H3 ASKS FOR, AND THE REASON IT IS ONLY THIS. CORE §9 and
-    // plan A10: a bundle is a recorded session and a consumer gains a FILE
-    // TRANSPORT, not an importer. So there is one item, it opens a file dialog,
-    // and everything a wizard would ask about is either already in the bundle
-    // or forbidden here — CORE 8.5b makes reconciliation a confirmation step in
-    // its own right, not a checkbox on the way in.
-    Labs.Menu {
-        title: qsTr("File")
-
-        Labs.MenuItem {
-            text:        qsTr("Import Session…")
-            onTriggered: menuBar.importSessionRequested()
         }
     }
 }
