@@ -213,6 +213,16 @@ function(pp_require_ppcp)
         EXCLUDE_FROM_ALL)
 
     FetchContent_MakeAvailable(ppcp)
+
+    # ⚠ FetchContent SETS `ppcp_SOURCE_DIR` IN THE CALLING SCOPE, WHICH HERE IS
+    # THIS FUNCTION'S. Without this line it evaporates on return and
+    # pp_ppcp_landed() below — which reads the header on disk to decide which
+    # work packages have landed — silently answers OFF for everything, however
+    # complete the checkout is. It did exactly that from H1 until H3: the
+    # configure line said "L6 peer engine OFF" while L6 was sitting in
+    # ../libppcp. A probe that fails CLOSED is worse than no probe, because it
+    # reads as evidence.
+    set(ppcp_SOURCE_DIR "${ppcp_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
 # --- Which libppcp work packages have landed ----------------------------------
