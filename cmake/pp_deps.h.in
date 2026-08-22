@@ -18,6 +18,10 @@
 // Carries a git sha, and "local" when built against a sibling checkout — the
 // library tracks a branch, so the version alone does not identify a build.
 #define PP_LIBWRIST_VERSION "@PP_LIBWRIST_VERSION@"
+// Same shape and the same reason as libwrist: a branch upstream, a sibling
+// checkout able to win, and a conformance claim that means nothing without the
+// commit it was measured against.
+#define PP_LIBPPCP_VERSION "@PP_LIBPPCP_VERSION@"
 #define PP_ARAVIS_VERSION     "@ARAVIS_VERSION@"
 #define PP_SPINNAKER_VERSION  "@PP_SPINNAKER_VERSION@"
 #define PP_CUDA_VERSION       "@CUDAToolkit_VERSION@"

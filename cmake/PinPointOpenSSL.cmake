@@ -22,8 +22,13 @@
 
 include_guard(GLOBAL)
 
+# Runs its find_package on EVERY configure, not once per build directory. A
+# cached "yes" is not enough: find_package is what creates the OpenSSL::SSL
+# imported target, and a target does not survive into the next configure. Caching
+# the answer instead of repeating the question is how a reconfigure ends up
+# linking to a target that was never defined.
 macro(pp_find_openssl)
-    if(NOT DEFINED PP_OPENSSL_FOUND)
+    if(NOT TARGET OpenSSL::SSL)
         # Homebrew's openssl@3 is keg-only, so CMake will not find it on macOS
         # without a hint — and what it WOULD find otherwise is LibreSSL, whose
         # SSL_CTX_set_psk_use_session_callback does not exist.  Probe the prefix
@@ -48,12 +53,15 @@ macro(pp_find_openssl)
         find_package(OpenSSL 1.1.1 QUIET COMPONENTS SSL Crypto)
 
         if(OpenSSL_FOUND)
-            set(PP_OPENSSL_FOUND TRUE  CACHE INTERNAL "OpenSSL available for src/Ppcp")
-            set(PP_OPENSSL_VERSION "${OPENSSL_VERSION}" CACHE INTERNAL "")
             message(STATUS "OpenSSL ${OPENSSL_VERSION}: ${OPENSSL_SSL_LIBRARY}")
-        else()
-            set(PP_OPENSSL_FOUND FALSE CACHE INTERNAL "OpenSSL available for src/Ppcp")
-            set(PP_OPENSSL_VERSION "" CACHE INTERNAL "")
         endif()
+    endif()
+
+    if(TARGET OpenSSL::SSL)
+        set(PP_OPENSSL_FOUND TRUE)
+        set(PP_OPENSSL_VERSION "${OPENSSL_VERSION}")
+    else()
+        set(PP_OPENSSL_FOUND FALSE)
+        set(PP_OPENSSL_VERSION "")
     endif()
 endmacro()

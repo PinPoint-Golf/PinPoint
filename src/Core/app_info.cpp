@@ -75,6 +75,9 @@ AppInfo::AppInfo(QObject *parent)
 #ifdef HAVE_WRIST
     addDep(m_dependencies, QStringLiteral("libwrist"), QStringLiteral(PP_LIBWRIST_VERSION));
 #endif
+#ifdef HAVE_PPCP
+    addDep(m_dependencies, QStringLiteral("libppcp"), QStringLiteral(PP_LIBPPCP_VERSION));
+#endif
 #ifdef HAVE_ESPEAK_NG
     addDep(m_dependencies, QStringLiteral("espeak-ng"), QStringLiteral(PP_ESPEAK_VERSION));
 #endif

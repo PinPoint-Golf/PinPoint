@@ -358,6 +358,104 @@ unset(_wrist_ver_line)
 unset(_wrist_sha)
 unset(_wrist_dirty)
 unset(_wrist_local)
+
+# ── libppcp — C11 sans-I/O implementation of the PinPoint Capture Protocol ───
+# github.com/PinPoint-Golf/libppcp, MIT. Work package H0 of
+# libppcp/docs/implementation/implementation-plan.md, and decision A4 there:
+# PinPointStudio embeds libppcp EXACTLY as it embeds libwrist, so the block
+# above is the pattern and this one deliberately does not invent a second.
+#
+# The same sister-project shape: it owns no socket, thread, timer, clock or file
+# (plan ground rule 7). PinPointStudio supplies the transport — src/Ppcp, the
+# block near the end of this file — the host clock and the storage, and drains
+# the library. That split is what lets one MIT implementation serve both ends of
+# the protocol without dragging a transport dependency into it (CORE A.3).
+#
+# ⚠ SOURCE RESOLUTION: a sibling ../libppcp checkout WINS over GitHub, for the
+# same reason libwrist's does — the library is under active co-development and
+# its fixes are made in that clone. NEVER edit the fetched copy under
+# build/*/_deps/ppcp-src: the update step overwrites it on reconfigure.
+#
+# ⚠ PP_LIBPPCP_FETCH DEFAULTS OFF, AND THAT IS TEMPORARY. A4 says FetchContent
+# from GitHub with the sibling overriding it, and that is what this block does —
+# but the repository is not published yet, and a failed clone is a failed
+# configure for everyone including people who do not care about PPCP. Flip this
+# default to ON the day PinPoint-Golf/libppcp is pushed; nothing else changes.
+option(PP_LIBPPCP_LOCAL "Prefer a sibling ../libppcp checkout over GitHub" ON)
+option(PP_LIBPPCP_FETCH "Fetch libppcp from GitHub when no sibling checkout exists" OFF)
+
+set(_ppcp_local "${CMAKE_CURRENT_SOURCE_DIR}/../libppcp")
+set(_ppcp_origin "")
+if(PP_LIBPPCP_LOCAL AND EXISTS "${_ppcp_local}/CMakeLists.txt")
+    get_filename_component(_ppcp_local "${_ppcp_local}" ABSOLUTE)
+    set(FETCHCONTENT_SOURCE_DIR_PPCP "${_ppcp_local}" CACHE PATH
+        "Local libppcp checkout to build against instead of fetching" FORCE)
+    set(_ppcp_origin "local ${_ppcp_local}")
+elseif(PP_LIBPPCP_FETCH)
+    # Written FORCE above, so clear it rather than merely not setting it — else
+    # a build dir that once resolved the sibling keeps honouring the stale path
+    # and -DPP_LIBPPCP_LOCAL=OFF becomes a silent no-op. Same trap as libwrist.
+    unset(FETCHCONTENT_SOURCE_DIR_PPCP CACHE)
+    unset(_ppcp_local)
+    set(_ppcp_origin "github main")
+else()
+    unset(FETCHCONTENT_SOURCE_DIR_PPCP CACHE)
+    unset(_ppcp_local)
+endif()
+
+if(_ppcp_origin)
+    # Defensive, and no-ops if the library names its options differently: it is
+    # expected to gate its own tests, tools and install rules on its top-level
+    # check the way libwrist does, so embedding yields the library and nothing else.
+    set(PPCP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(PPCP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+      ppcp
+      # ⚠ Tracking a BRANCH, not a tag, while the protocol lands — the same
+      # deliberate choice as libwrist above, and to be pinned once ppcp/1.0
+      # freezes. GIT_SHALLOW works with branches and tags but NOT a raw SHA.
+      GIT_REPOSITORY https://github.com/PinPoint-Golf/libppcp.git
+      GIT_TAG        main
+      GIT_SHALLOW    TRUE
+      EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(ppcp)
+
+    # Provenance, for the same reason libwrist has it: a branch upstream and a
+    # local checkout able to win means "which libppcp built this?" is a question
+    # the About box has to answer, and a conformance claim is worthless without
+    # the commit it was measured against.
+    file(STRINGS "${ppcp_SOURCE_DIR}/include/ppcp/version.h" _ppcp_ver_line
+         REGEX "^#define[ \t]+PPCP_LIB_VERSION_STRING")
+    string(REGEX REPLACE ".*\"([^\"]+)\".*" "\\1" PP_LIBPPCP_VERSION "${_ppcp_ver_line}")
+    execute_process(
+        COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY "${ppcp_SOURCE_DIR}"
+        OUTPUT_VARIABLE _ppcp_sha OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(
+        COMMAND git status --porcelain
+        WORKING_DIRECTORY "${ppcp_SOURCE_DIR}"
+        OUTPUT_VARIABLE _ppcp_dirty OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_ppcp_sha)
+        if(_ppcp_dirty)
+            string(APPEND _ppcp_sha "-dirty")
+        endif()
+        if(_ppcp_local)
+            string(APPEND PP_LIBPPCP_VERSION " (${_ppcp_sha}, local)")
+        else()
+            string(APPEND PP_LIBPPCP_VERSION " (${_ppcp_sha})")
+        endif()
+    endif()
+    message(STATUS "libppcp: ${PP_LIBPPCP_VERSION} — ${_ppcp_origin}")
+else()
+    message(STATUS "libppcp: not embedded (no sibling ../libppcp and PP_LIBPPCP_FETCH is OFF)")
+endif()
+unset(_ppcp_ver_line)
+unset(_ppcp_sha)
+unset(_ppcp_dirty)
+unset(_ppcp_local)
+unset(_ppcp_origin)
 unset(_wrist_origin)
 
 # EventBuffer library — lock-free ring-buffer capture store
@@ -936,6 +1034,14 @@ else()
 endif()
 
 target_link_libraries(PinPointStudio PRIVATE whisper samplerate wrist)
+# libppcp, when it resolved (H0 above). Linked with nothing calling it yet: the
+# peer engine lands in H2. Its include/ is PUBLIC on the target, so <ppcp/ppcp.h>
+# resolves through the link and needs no include directory here — same as wrist.
+# HAVE_PPCP means only "the library is linked", never a runtime feature gate.
+if(TARGET ppcp)
+    target_link_libraries(PinPointStudio PRIVATE ppcp)
+    target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP)
+endif()
 # No include directory needed — libwrist's include/ is PUBLIC on the target,
 # so <wrist/wrist.h> resolves through the link. HAVE_WRIST means
 # only "the library is linked"; the runtime feature gate is a separate setting.
@@ -2893,6 +2999,39 @@ foreach(_pp_orphan qml-test-imports qml_ui_test qml_ui_test_autogen CMakeFiles/q
         file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/${_pp_orphan}")
     endif()
 endforeach()
+
+# ── PPCP transport — TLS-PSK over two TCP channels (src/Ppcp, package H1) ────
+# The host half of the PinPoint Capture Protocol transport. Nothing calls it
+# yet; H2 wraps it around libppcp's peer engine.
+#
+# WHY OpenSSL AND NOT Qt Network, which is already linked: PPCP-RV §5 needs a
+# TLS EXTERNAL pre-shared key, and RV §8 states that the PSK interfaces in
+# common toolkits — identity hints, RFC 4279 ciphersuite selection — do not
+# reach TLS 1.3 external PSKs at all. QSslPreSharedKeyAuthenticator is one of
+# those. See cmake/PinPointOpenSSL.cmake for the locate routine, which the
+# standalone test suite in src/Ppcp/tests shares.
+#
+# ⚠ OPTIONAL AT BUILD TIME, NEVER AT RUN TIME. A box without OpenSSL headers
+# configures as it always did and gets an app with no PPCP transport, said out
+# loud. That is not the plaintext fallback RV 5.2f forbids — there is no code
+# path in src/Ppcp that produces an unencrypted connection, so the choice is
+# "PPCP or no PPCP", never "PPCP in the clear".
+include(cmake/PinPointOpenSSL.cmake)
+pp_find_openssl()
+if(PP_OPENSSL_FOUND)
+    target_sources(PinPointStudio PRIVATE
+        src/Ppcp/ppcp_transport.h  src/Ppcp/ppcp_transport.cpp)
+    target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
+    target_link_libraries(PinPointStudio PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP_TRANSPORT)
+    message(STATUS "PPCP transport: OpenSSL ${PP_OPENSSL_VERSION}")
+else()
+    message(WARNING
+        "PPCP transport NOT built — OpenSSL development headers not found. "
+        "The app will have no capture-device link. "
+        "macOS: brew install openssl@3.  Debian/Ubuntu: apt install libssl-dev. "
+        "Windows: vcpkg install openssl, or -DOPENSSL_ROOT_DIR=<path>.")
+endif()
 
 # ── Dependency version header for the About box ──────────────────────────────
 # Generated LAST so every find_package / FetchContent version variable above is
