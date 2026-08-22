@@ -66,6 +66,36 @@ public:
     virtual ppcp_result drain(std::uint8_t channel, std::uint8_t *out, std::size_t cap,
                               std::size_t *out_len) = 0;
 
+    // ── Partial writes (CORE T2), and why drain() alone was not enough ─────
+    //
+    // ⚠ THIS IS FINDING 5 CLOSED, AND IT WAS CLOSED IN libppcp RATHER THAN
+    // HERE.  drain() DEQUEUES: it hands back whole frames and assumes the
+    // embedding wrote all of them, which is true of a file and false of a
+    // socket — under backpressure `write()` returns short and the bytes it did
+    // not take are bytes the engine has already forgotten.  L9 added
+    // ppcp_peer_drain_peek()/_commit(): peek borrows the queue without
+    // dequeuing, and commit removes EXACTLY the byte count it is given.
+    //
+    // Not a whole number of frames, and that matters: a channel is an ordered
+    // byte stream, half a frame on the wire is half a frame the peer will
+    // reassemble, and rounding down to a frame boundary would re-send bytes
+    // that had already left.
+    //
+    // The default implementations fall back to drain() so an engine that is not
+    // a ppcp_peer — the bundle transport's, which writes to a file and cannot
+    // short-write — needs no change.
+    virtual ppcp_result drainPeek(std::uint8_t channel, const std::uint8_t **out,
+                                  std::size_t *out_len)
+    {
+        (void)channel; (void)out; (void)out_len;
+        return PPCP_ERR_UNIMPLEMENTED;
+    }
+    virtual ppcp_result drainCommit(std::uint8_t channel, std::size_t written)
+    {
+        (void)channel; (void)written;
+        return PPCP_ERR_UNIMPLEMENTED;
+    }
+
     // The engine underneath, where there is one.
     //
     // ⚠ NOT A LEAK OF THE ABSTRACTION — it is L8's interface showing through.

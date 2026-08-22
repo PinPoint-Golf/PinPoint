@@ -102,6 +102,15 @@ public:
     {
         return ppcp_peer_drain(m_peer, channel, out, cap, len);
     }
+    ppcp_result drainPeek(std::uint8_t channel, const std::uint8_t **out,
+                          std::size_t *len) override
+    {
+        return ppcp_peer_drain_peek(m_peer, channel, out, len);
+    }
+    ppcp_result drainCommit(std::uint8_t channel, std::size_t written) override
+    {
+        return ppcp_peer_drain_commit(m_peer, channel, written);
+    }
     ppcp_peer *peer() const override { return m_peer; }
 
 private:

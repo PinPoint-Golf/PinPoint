@@ -188,36 +188,60 @@ bool PpcpHostPeer::pump()
         if (!tc->isOpen()) continue;
 
         // ── Engine to socket ───────────────────────────────────────────────
+        //
+        // ⚠ PEEK AND COMMIT, NOT DRAIN, AND FINDING 5 IS WHY.  drain() DEQUEUES:
+        // it hands back whole frames and assumes every byte was written.  Under
+        // CORE T2 backpressure — ordinary on a bulk channel carrying a clip —
+        // write() returns short, and the bytes it did not take were bytes the
+        // engine had already forgotten.  This pump used to count those
+        // occasions and lose the data anyway.
+        //
+        // L9 answered it.  peek borrows the queue without removing anything;
+        // commit removes EXACTLY the byte count the socket accepted — not a
+        // whole number of frames, because a channel is an ordered byte stream
+        // and rounding down to a frame boundary would re-send bytes that had
+        // already left.  The two paths do not mix, so once a partial commit has
+        // left the head frame half-written, drain() refuses; this loop never
+        // calls it.
         for (;;) {
+            const std::uint8_t *bytes = nullptr;
             std::size_t len = 0;
-            const ppcp_result r = m_engine->drain(chNo, m_scratch.data(), m_scratch.size(), &len);
-            if (r != PPCP_OK || len == 0) break;
+            const ppcp_result pr = m_engine->drainPeek(chNo, &bytes, &len);
+            if (pr == PPCP_ERR_UNIMPLEMENTED) {
+                // An engine that is not a ppcp_peer — the bundle transport's,
+                // which writes to a file and cannot short-write.  Nothing to do
+                // here; this pump is only ever given the socket one.
+                break;
+            }
+            if (pr != PPCP_OK || len == 0 || !bytes) break;
 
             std::size_t written = 0;
-            const IoStatus st = tc->write(m_scratch.data(), len, written);
-            m_stats.bytesOut += written;
-            if (st == IoStatus::WouldBlock || written < len) {
-                // CORE T2's backpressure, observed rather than assumed. The
-                // engine has more than this channel can take right now; the
-                // OTHER channels are untouched, which is the entire reason
-                // there are two of them (CORE §3.1).
-                //
-                // ⚠ STILL A REAL GAP, AND L6 DID NOT CLOSE IT. The engine
-                // handed us bytes it now considers sent, and a short write
-                // loses them. ppcp_peer_feed() gained an `out_consumed` for
-                // exactly this problem in the inbound direction;
-                // ppcp_peer_drain() has no matching "I only took N" and
-                // dequeues whole frames on the way out. Reported to the
-                // orchestrator as the remaining asymmetry; until it is
-                // answered, the pump must not offer a channel more than its
-                // socket will take, and it counts the times it did.
-                ++m_stats.wouldBlockOnWrite;
-                break;
+            const IoStatus st = tc->write(bytes, len, written);
+            if (written > 0) {
+                m_stats.bytesOut += written;
+                const ppcp_result cr = m_engine->drainCommit(chNo, written);
+                if (cr != PPCP_OK) {
+                    // The engine and this pump now disagree about what left, and
+                    // there is no honest way to resynchronise a byte stream.
+                    tc->close();
+                    m_stats.closed = true;
+                    return false;
+                }
             }
             if (st == IoStatus::Closed || st == IoStatus::Error) {
                 tc->close();
                 m_stats.closed = true;
                 alive = false;
+                break;
+            }
+            if (st == IoStatus::WouldBlock || written < len) {
+                // CORE T2's backpressure, observed rather than assumed — and now
+                // survived rather than merely counted.  The OTHER channels are
+                // untouched, which is the entire reason there are two of them
+                // (CORE §3.1).  The counter stays because the RATE of short
+                // writes is a real signal about the link, even now that none of
+                // them loses anything.
+                ++m_stats.wouldBlockOnWrite;
                 break;
             }
         }
