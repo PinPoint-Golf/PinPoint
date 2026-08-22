@@ -26,6 +26,7 @@
 // assertion can say that about code nobody wrote yet.
 
 #include "ppcp_annotation_store.h"
+#include "ppcp_source_declaration.h"
 #include "ppcp_host_engine.h"
 #include "ppcp_test_peer.h"
 

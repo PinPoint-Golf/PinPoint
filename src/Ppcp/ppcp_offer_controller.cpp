@@ -22,6 +22,7 @@
 
 #include <QDateTime>
 #include <QLocale>
+#include <QTimeZone>
 
 #include <ppcp/peer.h>
 

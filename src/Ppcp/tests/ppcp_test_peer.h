@@ -72,6 +72,28 @@ struct DevicePeer {
 
     ~DevicePeer() { if (p) ppcp_peer_free(p); }
 
+    // ⚠ WITHOUT THIS EVERY `heartbeat` IS ANSWERED `error` /
+    // `profile_not_supported` WITH "no health source", and liveness never
+    // starts.  `ppcp_peer_config.health_report` reads as optional in peer.h —
+    // "what `heartbeat_ack` carries" — and it is in fact a PRECONDITION for
+    // 7.4a working at all.  Recorded as F-H5-3; the harness supplies one so the
+    // other rows are about what they say they are about.
+    static ppcp_result healthReport(void *ctx, ppcp_health *out)
+    {
+        DevicePeer *self = static_cast<DevicePeer *>(ctx);
+        if (!self || !out) return PPCP_ERR_INVALID;
+        *out = ppcp_health{};
+        out->thermal = PPCP_THERMAL_NOMINAL;
+        out->storage_free_bytes = 8ull * 1024 * 1024 * 1024;
+        out->has_battery_pct = true;
+        out->battery_pct = self->batteryPct;
+        out->has_charging = true;
+        out->charging = false;
+        return PPCP_OK;
+    }
+
+    std::uint32_t batteryPct = 87;
+
     static ppcp_result clockNow(void *ctx, const char *timebase_id, std::int64_t *out)
     {
         DevicePeer *self = static_cast<DevicePeer *>(ctx);
@@ -157,6 +179,8 @@ struct DevicePeer {
         // probe.  Without it a `sync_probe` is answered
         // `error`/`profile_not_supported` rather than with a made-up instant.
         pc.sync_timebase = tb.c_str();
+        pc.health_report = &DevicePeer::healthReport;
+        pc.ctx = this;
         ASSERT_EQ(ppcp_peer_new(storage.data(), storage.size(), &pc, &p), PPCP_OK);
     }
 };

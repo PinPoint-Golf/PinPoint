@@ -46,6 +46,7 @@
 #include <vector>
 
 #include <ppcp/frame.h>
+#include <ppcp/message.h>
 #include <ppcp/peer.h>
 #include <ppcp/transfer.h>
 #include <ppcp/version.h>
@@ -461,29 +462,57 @@ TEST(VideoInputPpcpPreview, APreviewCaptureAnnouncedPendingIsRefused)
     ASSERT_NO_FATAL_FAILURE(L.openStreams());
 
     // 5.11j: "a consumer therefore never sees `transfer: pending` on a preview
-    // Capture".  Producing one needs a NON-CONFORMANT peer, and the way to be
-    // one is instructive: ppcp_peer_capture_announce() refuses this when told
-    // the Stream is preview, so the device lies about that — which is exactly
-    // the hole the receiving side has (see F-H4-1 in the report), because the
-    // engine hardcodes `is_preview = false` on receipt.
+    // Capture".  Producing one needs a NON-CONFORMANT peer.
+    //
+    // ⚠ HOW THIS TEST HAD TO CHANGE, AND WHAT THE CHANGE MEANS.  Until libppcp
+    // L9 the device could be made non-conformant by LYING to its own engine —
+    // `ppcp_peer_capture_announce(..., is_preview=false)` on a preview Stream —
+    // because the parameter was taken at face value.  L9 closed that: the
+    // engine now resolves the Stream from the Capture's own `stream_id` and
+    // refuses when `is_preview` disagrees with it.  So F-H4-1 IS FIXED ON THE
+    // ORIGINATION SIDE, and a conformant peer can no longer be used to produce
+    // the frame at all.
+    //
+    // The frame is therefore built and framed by hand and fed straight in,
+    // which is what a genuinely non-conformant third-party peer would put on
+    // the wire.  That is the only way left to ask the question this row is
+    // about: does the CONSUMER catch it.
     ppcp_interval iv{};
     ASSERT_EQ(ppcp_interval_make(&iv, kDevTb, std::strlen(kDevTb), 1000000, 2000000), PPCP_OK);
     ppcp_capture c{};
     ASSERT_EQ(ppcp_capture_make_segment(&c, "cap-preview-bad", kPreviewStream,
                                         PPCP_COMPLETE, &iv), PPCP_OK);
     ASSERT_EQ(ppcp_capture_set_transfer(&c, PPCP_TRANSFER_PENDING), PPCP_OK);
-    ASSERT_EQ(ppcp_peer_capture_announce(L.dev.p, &c, /*is_preview=*/false, nullptr, nullptr, 0),
-              PPCP_OK);
-    L.toHost(0);
 
+    // The owner's own engine refuses to ORIGINATE it, told the truth or told a
+    // lie.  8.1i on the way out — and the second of these two is the L9 change.
+    EXPECT_NE(ppcp_peer_capture_announce(L.dev.p, &c, /*is_preview=*/true, nullptr, nullptr, 0),
+              PPCP_OK);
+    EXPECT_NE(ppcp_peer_capture_announce(L.dev.p, &c, /*is_preview=*/false, nullptr, nullptr, 0),
+              PPCP_OK);
+
+    ppcp_msg m{};
+    ASSERT_EQ(ppcp_msg_init(&m, PPCP_MT_CAPTURE_ANNOUNCE, 9999), PPCP_OK);
+    ASSERT_EQ(ppcp_msg_set_session_id(&m, kSessionId), PPCP_OK);
+    m.body.capture_announce.capture = c;
+    std::vector<std::uint8_t> frame(65536);
+    std::size_t wrote = 0;
+    ASSERT_EQ(ppcp_msg_encode(frame.data(), frame.size(), PPCP_CHANNEL_CONTROL, &m, &wrote),
+              PPCP_OK);
+    std::size_t took = 0;
+    ASSERT_EQ(ppcp_peer_feed(L.host->peer(), PPCP_CHANNEL_CONTROL, frame.data(), wrote, &took),
+              PPCP_OK);
+    L.in.drainEvents();
+
+    // ⚠ AND THE CONSUMER HALF OF F-H4-1 IS STILL AN APPLICATION OBLIGATION.
+    // `VideoInputPpcp::onCaptureAnnounce()` runs
+    // `ppcp_capture_validate_in_stream()` itself and counts the refusal; the
+    // engine's own transfer table did not.  If a later libppcp makes the
+    // receiving side check too, this counter drops to zero and the row becomes
+    // the library's — which is where CT-I36a's consumer half belongs.
     EXPECT_EQ(L.in.counters().previewPendingRefused, 1u);
     EXPECT_EQ(L.in.counters().previewCaptures, 0u);
     EXPECT_TRUE(L.clips.empty());
-
-    // And the owner's own engine refuses to originate it when it is told the
-    // truth — 8.1i, checked on the way out as well as on the way in.
-    EXPECT_NE(ppcp_peer_capture_announce(L.dev.p, &c, /*is_preview=*/true, nullptr, nullptr, 0),
-              PPCP_OK);
 }
 
 TEST(VideoInputPpcpPreview, AShedPreviewSegmentIsAnAbsentSegmentAndNotAGap)

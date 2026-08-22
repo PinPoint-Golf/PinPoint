@@ -61,6 +61,9 @@
 #include <memory>
 #include <string>
 
+// The whole message vocabulary, because `ppcp_offer_verdict` lives beside the
+// body it belongs to and the moc-generated translation unit needs it too.
+#include <ppcp/message.h>
 #include <ppcp/model.h>
 
 struct ppcp_peer;

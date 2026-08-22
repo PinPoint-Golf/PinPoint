@@ -295,6 +295,76 @@ TEST(PpcpLiveSession, AConversionWithNoDirectRelationIsRefusedAndNeverAssumedZer
 }
 
 // ── CORE §7.4 — liveness ──────────────────────────────────────────────────
+//
+// ⚠ F-H5-3, AND IT COST THIS SUITE AN HOUR.  `ppcp_peer_config.health_report`
+// is documented in peer.h as "what `heartbeat_ack` carries" — which reads as a
+// decoration on liveness and is in fact a PRECONDITION for it.  A peer without
+// one answers every `heartbeat` with `error` / `profile_not_supported` and the
+// message "no health source", so 7.4a never runs, no ack ever returns, and the
+// host's own link state stays `live` for ever because it is never told
+// otherwise.  Both halves of §7.4 looked broken until the harness supplied a
+// callback; neither was.  It is arguably the right refusal — a peer reporting
+// `thermal: nominal` on no evidence is the fabrication this library refuses
+// everywhere else — but an embedding with no thermometer will silently have no
+// liveness at all, and the field's documentation should say so.
+
+TEST(PpcpLiveSession, AHeartbeatIsQueuedEveryIntervalAndTheSessionIsUnchangedByIt)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build());
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    PpcpLiveSession::Config cfg;
+    cfg.sessionId = kSession;
+    cfg.heartbeatIntervalMs = 1000;
+    std::string err;
+    ASSERT_TRUE(L.live.open(cfg, &err)) << err;
+    L.toDevice();
+
+    // 7.4a — the host sends `heartbeat` at `Session.heartbeat_interval_ms`, and
+    // every peer answers `heartbeat_ack`.  Counted at the far end, because a
+    // heartbeat the host queued and nobody received is not a heartbeat.
+    std::size_t beats = 0, acks = 0;
+    for (int i = 0; i < 6; ++i) {
+        L.advance(1000 * kMs);
+        L.live.pump(L.hostNowNs());
+        pptest::pipe(L.host->peer(), L.dev.p, PPCP_CHANNEL_CONTROL);
+        pptest::drainEvents(L.dev.p, [&](const ppcp_event &e) {
+            if (e.kind == PPCP_EVENT_HEARTBEAT) ++beats;
+        });
+        pptest::pipe(L.dev.p, L.host->peer(), PPCP_CHANNEL_CONTROL);
+        pptest::drainEvents(L.host->peer(), [&](const ppcp_event &e) {
+            L.live.observe(e);
+            if (e.kind == PPCP_EVENT_HEARTBEAT) ++acks;
+        });
+    }
+    EXPECT_GE(beats, 3u) << "7.4a — one per interval, driven by the embedding's clock";
+    EXPECT_GE(acks, 3u)  << "7.4a — every peer answers `heartbeat_ack`";
+    EXPECT_EQ(L.live.linkState(), PPCP_LINK_LIVE);
+
+    // 7.4b — and the ack CARRIES the degradation, which is the whole reason the
+    // message has a body.  A host that could see the beat but not the reading
+    // would learn only that the device is alive, which is the least useful half.
+    ASSERT_TRUE(L.live.peerHealth().valid)
+        << "no reading is a different answer from `nominal` and is not shown as one";
+    EXPECT_EQ(L.live.peerHealth().thermal, PPCP_THERMAL_NOMINAL);
+    EXPECT_GT(L.live.peerHealth().storageFreeBytes, 0u);
+    ASSERT_TRUE(L.live.peerHealth().hasBatteryPct);
+    EXPECT_EQ(L.live.peerHealth().batteryPct, 87u);
+    EXPECT_GE(L.live.stats().heartbeatAcks, 3u);
+
+    // 8.3g — "a Session with an unreachable host is not a Session with no
+    // host."  Liveness changes NOTHING about the Session, and that is the whole
+    // content of the clause.  Asserted at the DEVICE end, because that is the
+    // peer libppcp lets read the parameters back (see the next test).
+    const ppcp_body_session_open *p = ppcp_peer_session_params(L.dev.p);
+    ASSERT_NE(p, nullptr);
+    EXPECT_EQ(pptest::idStr(p->timebase_ref), std::string(kHostTimebaseId));
+    EXPECT_TRUE(p->has_arbitration);
+    EXPECT_EQ(p->coincidence_window_ns, PPCP_DEFAULT_COINCIDENCE_WINDOW_NS);
+    EXPECT_EQ(p->issue_hold_ns, PPCP_DEFAULT_ISSUE_HOLD_NS);
+    EXPECT_TRUE(p->has_heartbeat_interval);
+    EXPECT_EQ(p->heartbeat_interval_ms, 1000u);
+}
 
 TEST(PpcpLiveSession, ThreeMissedIntervalsIsALostLinkAndTheSessionIsUnchanged)
 {
@@ -308,35 +378,55 @@ TEST(PpcpLiveSession, ThreeMissedIntervalsIsALostLinkAndTheSessionIsUnchanged)
     ASSERT_TRUE(L.live.open(cfg, &err)) << err;
     L.toDevice();
 
-    // A few good intervals first, so the loss below is a transition and not an
-    // initial state.
+    // Good intervals first, so what follows is a TRANSITION and not an initial
+    // state.  A test that started from silence would pass on a peer that
+    // reported `lost` from the moment it was constructed.
     for (int i = 0; i < 6; ++i) L.tick(1000 * kMs);
     ASSERT_EQ(L.live.linkState(), PPCP_LINK_LIVE);
+    ASSERT_TRUE(L.linkStates.empty());
 
-    // Now the device stops answering: the clocks advance and the host pumps,
-    // but nothing is moved back from the device.
-    for (int i = 0; i < 6; ++i) {
+    // Now the device answers nothing: the host's frames still reach it, and
+    // nothing comes back.
+    for (int i = 0; i < 12; ++i) {
         L.advance(1000 * kMs);
         L.live.pump(L.hostNowNs());
         pptest::pipe(L.host->peer(), L.dev.p, PPCP_CHANNEL_CONTROL);   // out only
     }
 
-    EXPECT_EQ(L.live.linkState(), PPCP_LINK_LOST);
+    // 7.4c — three consecutive missed intervals is a lost link.
     EXPECT_GE(L.live.missedHeartbeats(), 3u);
+    EXPECT_EQ(L.live.linkState(), PPCP_LINK_LOST);
     ASSERT_FALSE(L.linkStates.empty());
     EXPECT_EQ(L.linkStates.back(), PPCP_LINK_LOST);
+    EXPECT_EQ(L.live.stats().linkLosses, 1u) << "one transition, not one per interval";
 
     // 8.3g — "a Session with an unreachable host is not a Session with no
-    // host."  Nothing about the Session changed: `timebase_ref` and both
-    // arbitration parameters are what they were.  That is the whole content of
-    // the clause and it is asserted here rather than assumed.
-    const ppcp_body_session_open *p = ppcp_peer_session_params(L.host->peer());
-    if (p) {
-        EXPECT_EQ(pptest::idStr(p->timebase_ref), std::string(kHostTimebaseId));
-        EXPECT_TRUE(p->has_arbitration);
-        EXPECT_EQ(p->coincidence_window_ns, PPCP_DEFAULT_COINCIDENCE_WINDOW_NS);
-        EXPECT_EQ(p->issue_hold_ns, PPCP_DEFAULT_ISSUE_HOLD_NS);
-    }
+    // host."  NOTHING about the Session changed, and that is the entire content
+    // of the clause.  What changes is that no arbitration occurs; the
+    // parameters, the reference timebase and the roster are what they were.
+    //
+    // ⚠ ASSERTED AT THE DEVICE END, AND THAT IS FINDING F-H5-2.
+    // `ppcp_peer_session_params()` returns NULL on the peer that ORIGINATED
+    // `session_open` — peer.h says "as they arrived in `session_open`" and that
+    // is literally what it does.  The consequence is that a HOST cannot read
+    // back the Session it just opened: not `timebase_ref`, not
+    // `coincidence_window_ns`, not `issue_hold_ns` — every one of which the
+    // host itself needs, since 8.2b compares against the window and 8.2h holds
+    // against the hold.  So the host keeps a second copy (PpcpLiveSession's
+    // Config) and the two can drift, which is exactly what a single accessor
+    // exists to prevent.
+    EXPECT_EQ(ppcp_peer_session_params(L.host->peer()), nullptr)
+        << "F-H5-2 has been fixed in libppcp — assert the host's own parameters here";
+    const ppcp_body_session_open *p = ppcp_peer_session_params(L.dev.p);
+    ASSERT_NE(p, nullptr);
+    EXPECT_EQ(pptest::idStr(p->timebase_ref), std::string(kHostTimebaseId));
+    EXPECT_TRUE(p->has_arbitration);
+    EXPECT_EQ(p->coincidence_window_ns, PPCP_DEFAULT_COINCIDENCE_WINDOW_NS);
+    EXPECT_EQ(p->issue_hold_ns, PPCP_DEFAULT_ISSUE_HOLD_NS);
+
+    // …and the device, which is the peer 8.3g's regime applies to, enters it.
+    EXPECT_TRUE(ppcp_peer_zero_host(L.dev.p) || ppcp_peer_link_state(L.dev.p) == PPCP_LINK_LIVE)
+        << "the device is either still hearing us or has entered the zero-host regime";
 }
 
 // ── CORE 5.10e / I16 — what `session_open` carries ────────────────────────
