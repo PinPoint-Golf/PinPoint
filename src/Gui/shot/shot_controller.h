@@ -26,6 +26,12 @@
 
 class SessionController;
 
+#ifdef HAVE_PPCP
+// Forward-declared, not included: ppcp_shot_bridge.h pulls the whole libppcp
+// entity vocabulary in, and this header is included by half of src/Gui.
+namespace Ppcp { class PpcpShotBridge; }
+#endif
+
 // Central application-level shot trigger. The toolbar SHOT button calls
 // triggerShot() (direct commit — manual bypasses the arbiter hold); the auto
 // detectors (IMU impact, acoustic onset, ball launch) call reportCandidate(),
@@ -81,6 +87,47 @@ public:
     // Inherits the armed() gate; Manual is rerouted to triggerShot().
     void reportCandidate(Source source, qint64 estImpactUs, float confidence);
 
+#ifdef HAVE_PPCP
+    // ── H5 — PPCP arbitration REPLACES the arbiter above ───────────────────
+    //
+    // ⚠ REPLACES.  NOT "IN ADDITION TO", AND NOT "FALLS BACK TO".  For any
+    // Session with a PPCP peer in it, reportCandidate() nominates into the
+    // library's Arbitrate engine and RETURNS WITHOUT TOUCHING `m_arbiter`.
+    // Running both would give one Session two arbiters that disagree about
+    // which Candidates exist, and the disagreement would be silent.
+    //
+    // The reason it must be a replacement rather than a layer is that
+    // `ShotArbiter` breaks three PPCP invariants the moment a second peer
+    // appears, and breaks all three quietly:
+    //
+    //   I8   it models THREE FIXED MODALITIES in fixed slots, so a host
+    //        microphone and a device microphone — two Sources of the same
+    //        `basis: acoustic` — collide for one slot and one is dropped with
+    //        no record.  CT-I8 exists for exactly that failure.
+    //   8.2f `decide()` throws the losing candidates away, and an issued Shot
+    //        must reference EVERY contributing and excluded Candidate:
+    //        "exclusion is a conclusion; the Candidate remains evidence."
+    //   8.2e a 1500 ms refractory DROPS a late nomination, where the
+    //        specification says it ATTACHES to the Shot already issued.
+    //
+    // Null on every build without libppcp, and null on every Session with no
+    // PPCP peer — which is every Session this application runs today, so the
+    // local path above is unchanged for the shipping product.
+    void setPpcpBridge(Ppcp::PpcpShotBridge *bridge);
+    // The host's OWN declared Source ids, per basis (I26 / 5.12a: a Candidate
+    // names a Source THIS peer declared).  Empty means "this host has no
+    // nominator of that kind", and a candidate of that kind is then not
+    // nominated rather than being attributed to some other Source.
+    void setPpcpSourceIds(const QString &acoustic, const QString &motion,
+                          const QString &vision);
+    // 8.2h — the arbiter issues on a CLOCK, not on an event: no earlier than
+    // `issue_hold_ns` after the earliest contributing Candidate.  Whoever owns
+    // the link calls this when the bridge reports an issued Shot, and `t0` is a
+    // reading of `Session.timebase_ref` in nanoseconds, which for this host is
+    // `tb:host` and therefore EventBuffer::nowMicros() * 1000.
+    void commitArbitratedShot(qint64 t0HostNs);
+#endif
+
 public slots:
     // Connected to CameraManager::bufferStateChanged (the single always-notified
     // buffer-state signal) so the armed property tracks every net transition.
@@ -118,4 +165,11 @@ private:
 
     pinpoint::ShotArbiter  m_arbiter;
     QTimer                 m_arbTimer;   // single-shot hold-window deadline
+
+#ifdef HAVE_PPCP
+    Ppcp::PpcpShotBridge  *m_ppcpBridge = nullptr;
+    QString                m_ppcpAcousticSourceId;
+    QString                m_ppcpMotionSourceId;
+    QString                m_ppcpVisionSourceId;
+#endif
 };
