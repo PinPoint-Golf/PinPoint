@@ -45,7 +45,15 @@ sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
 
 # Optional: espeak-ng (built from source if absent)
 sudo apt install libespeak-ng-dev
+
+# PPCP capture-device link (TLS pre-shared key) — needed for src/Ppcp
+sudo apt install libssl-dev
 ```
+
+Without `libssl-dev` the build still configures and succeeds; it warns, and the
+resulting app has no PPCP transport, so it cannot link to a capture device. It
+never falls back to an unencrypted link — `PPCP-RV` 5.2f forbids that under any
+circumstance and there is no code path in `src/Ppcp` that could.
 
 ### 4. GPU Acceleration (Optional)
 
@@ -81,8 +89,13 @@ Dependencies are best managed via [Homebrew](https://brew.sh/).
 
 ### 1. Install Dependencies
 ```bash
-brew install cmake espeak-ng aravis opencv ffmpeg
+brew install cmake espeak-ng aravis opencv ffmpeg openssl@3
 ```
+`openssl@3` is the PPCP capture-device link (`src/Ppcp`, TLS with a pre-shared
+key). It is keg-only, so CMake probes `brew --prefix openssl@3` directly rather
+than relying on the default search — otherwise it would find LibreSSL, which has
+no external-PSK session callbacks at all. Omit it and the build succeeds with a
+warning and no PPCP transport; it never falls back to an unencrypted link.
 CMake injects the Homebrew prefix into `PKG_CONFIG_PATH` automatically, so `ffmpeg` is found without any extra configuration.
 
 ### 2. Install Qt 6.11
@@ -185,6 +198,13 @@ cmake -U "FFMPEG*" -U "__pkg_config_checked_FFMPEG" <builddir>
 ```
 
 > **windeployqt caveat:** Qt Multimedia bundles its own LGPL FFmpeg with the **same DLL names** (`avcodec-61.dll`, …) but *without* libx264. Running `windeployqt` overwrites the copied DLLs and breaks swing export ("libx264 encoder not available"). After deploying, re-copy the five DLLs from `C:\ffmpeg\bin` over the deployed ones — Qt Multimedia works fine against the GPL build (same ABI, superset of features).
+
+### 8. OpenSSL (Optional — PPCP capture-device link)
+`src/Ppcp` speaks TLS with an external pre-shared key, which needs OpenSSL ≥ 1.1.1 headers:
+```
+vcpkg install openssl:x64-windows
+```
+then configure with `-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`, or point CMake at an existing installation with `-DOPENSSL_ROOT_DIR=C:\path\to\openssl`. Omit it and the build succeeds with a warning and no PPCP transport; it never falls back to an unencrypted link.
 
 ---
 
