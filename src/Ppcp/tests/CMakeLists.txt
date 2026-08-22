@@ -35,6 +35,11 @@ if(NOT PP_OPENSSL_FOUND)
     return()
 endif()
 
+# libppcp — the transport now encodes and decodes `link_bind` (ENC 2.1, erratum
+# E1) with the library's own frame, CBOR and envelope writers, so the suite
+# links it.  Nothing here calls a planned.h symbol; those do not link by design.
+pp_require_ppcp()
+
 # ── Loopback TLS-PSK: handshake, failure modes, channel independence ─────────
 # Qt-free by design (NO_QT): the transport owns no event loop, so the suite can
 # run headless in the conformance harness of H8.  Threads: the listener accepts
@@ -42,7 +47,18 @@ endif()
 pp_add_test(ppcp_transport_test
     SOURCES ppcp_transport_test.cpp ${PPCP}/ppcp_transport.cpp
     INCLUDE ${PPCP}
-    LINK    OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+    LINK    OpenSSL::SSL OpenSSL::Crypto Threads::Threads ppcp
+    STD 20
+    NO_QT
+    GTEST)
+
+# ── ENC §2.1 link binding (erratum E1) ───────────────────────────────────────
+# Concurrent dials, an abandoned dial, a late third channel and a bad first
+# frame — the four cases the implicit rules of session 1 got wrong.
+pp_add_test(ppcp_link_bind_test
+    SOURCES ppcp_link_bind_test.cpp ${PPCP}/ppcp_transport.cpp
+    INCLUDE ${PPCP}
+    LINK    OpenSSL::SSL OpenSSL::Crypto Threads::Threads ppcp
     STD 20
     NO_QT
     GTEST)

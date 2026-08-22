@@ -530,6 +530,15 @@ struct Tls12Probe {
     Key key = kTlsVector();
     PskIdentity identity = identityVector();
 
+    // ENC 2.1a — the first frame on the stream.  A probe that sent nothing here
+    // would complete its handshake and then be discarded on the listener's bind
+    // timeout, because since erratum E1 an unbound stream is not a channel.
+    // The default is a correct `link_bind` on channel 0; a caller that wants to
+    // exercise 2.1c's refusals overwrites it.
+    LinkId linkId = [] { LinkId l{}; mintLinkId(l); return l; }();
+    Channel channel = Channel::Control;
+    std::vector<unsigned char> firstFrame;
+
     bool completed = false;
     bool sawServerKeyExchange = false;
     std::vector<unsigned char> hint;     // the psk_identity_hint as sent
@@ -598,9 +607,17 @@ struct Tls12Probe {
             version = SSL_get_version(ssl);
             const SSL_CIPHER *c = SSL_get_current_cipher(ssl);
             if (c) cipher = SSL_CIPHER_standard_name(c) ? SSL_CIPHER_standard_name(c) : "";
+
+            // ENC 2.1a — bind the stream, or send whatever the caller asked for
+            // in its place.
+            std::vector<unsigned char> frame = firstFrame;
+            if (frame.empty()) encodeLinkBindFrame(linkId, channel, frame);
+            if (!frame.empty())
+                SSL_write(ssl, frame.data(), static_cast<int>(frame.size()));
+
             // Leave the connection up long enough for the listener to hand back
             // its channel, then close.
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
         SSL_free(ssl);
 #ifdef _WIN32
@@ -708,54 +725,9 @@ TEST(PpcpTransportTls12, IdentityWithAnEmbeddedNulCannotSurviveTheTls12Path)
     EXPECT_EQ(server->tls().version, "TLSv1.3");
 }
 
-// ── ENC 2a — an abandoned dial must not renumber the next peer's channels ──
-// The association of connections to channels is not in the specification (see
-// the note at the top of ppcp_transport.cpp).  This transport orders by arrival
-// within a pairing, which is only safe if a half-built group cannot be joined by
-// a later peer: otherwise the next dialler's CONTROL channel silently becomes
-// the stale group's BULK, and every frame header then contradicts the stream it
-// arrived on — ENC 2c, caught one layer up as `malformed`, after the damage.
-TEST(PpcpTransport, AnAbandonedDialDoesNotRenumberTheNextPeersChannels)
-{
-    Options opts;
-    opts.handshakeTimeoutMs = 200;
-
-    Harness h(oneKnownPairing(kTlsVector()), 2, opts);
-    ASSERT_TRUE(h.ok());
-    auto accepted = h.acceptAsync(8000);
-
-    {
-        // A dialler that gets one channel up and then goes away.
-        ConnectorConfig half;
-        half.host = "127.0.0.1";
-        half.port = h.port();
-        half.kTls = kTlsVector();
-        half.identity = identityVector();
-        half.channels = {Channel::Control};
-        half.options = opts;
-        HandshakeFailure fail;
-        std::unique_ptr<PeerConnection> orphan = Connector::connect(half, &fail);
-        ASSERT_NE(orphan, nullptr) << fail.message;
-    }   // closed here
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(400));   // past the deadline
-
-    ConnectorConfig full;
-    full.host = "127.0.0.1";
-    full.port = h.port();
-    full.kTls = kTlsVector();
-    full.identity = identityVector();
-    full.options = opts;
-    full.options.handshakeTimeoutMs = 2000;
-    HandshakeFailure fail;
-    std::unique_ptr<PeerConnection> client = Connector::connect(full, &fail);
-    ASSERT_NE(client, nullptr) << fail.message;
-
-    std::unique_ptr<PeerConnection> server = accepted.get();
-    ASSERT_NE(server, nullptr);
-    EXPECT_EQ(server->channels().size(), 2u);
-    EXPECT_NE(server->channel(Channel::Control), nullptr) << "the stale group renumbered "
-                                                             "control into bulk";
-    EXPECT_NE(server->channel(Channel::Bulk), nullptr);
-    EXPECT_EQ(server->channel(Channel::Preview), nullptr);
-}
+// ⚠ The abandoned-dial test that stood here has MOVED to
+// ppcp_link_bind_test.cpp.  It was written against H1's rule that arrival order
+// within a resolved pairing is channel order; erratum E1 withdrew that rule, so
+// the property it guarded ("a stale half-built group must not renumber the next
+// peer's channels") is now guarded by `link_id` instead of by a deadline, and
+// the test that proves it belongs with the rest of the ENC §2.1 evidence.

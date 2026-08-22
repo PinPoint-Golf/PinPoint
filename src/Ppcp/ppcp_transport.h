@@ -70,6 +70,53 @@ enum class Channel : std::uint8_t {
     Preview = 2,
 };
 
+// ── The link, and the token that names it (ENC §2.1, erratum E1) ────────────
+//
+// A LINK is the set of TCP connections between two peers that together carry
+// one PPCP session — one connection per channel here (plan A6).  ENC 2.1 exists
+// because a listener cannot infer from the transport which arriving connections
+// belong to one peer, nor which of them is channel 0: arrival order breaks the
+// moment a dialler opens channels concurrently or abandons a dial, an address
+// is shared by every peer behind one NAT, and a TLS identity exists only on the
+// rendezvous path.  Session 1 of this programme grouped by the resolved PSK
+// pairing and ordered by serialised handshakes; PinPointCapture used arrival
+// order.  Both were self-consistent and neither would have met the other, which
+// is what erratum E1 records and what this type now settles.
+//
+// 2.1a: the DIALLER mints 16 CSPRNG bytes per link and sends
+// `link_bind { link_id, channel }` as the FIRST frame on every stream it opens,
+// on every channel including 0.  The listener binds by `link_id` and takes the
+// channel from the frame header (2.1b).  2.1f: it is a transport-binding token
+// and nothing else — not `Peer.id`, never persisted, never reused.
+using LinkId = std::array<unsigned char, 16>;
+
+// 16 bytes from the CSPRNG (2.1a).  Returns false if the RNG failed, which is
+// fatal to the dial: a predictable link_id would let a stranger's stream join
+// somebody else's link on a `direct` transport that has no authentication.
+bool mintLinkId(LinkId &out);
+
+// Why a listener refused a stream under 2.1c.  This is NOT an authentication
+// outcome — the handshake has already succeeded by the time any of these can
+// happen — so RV 7.7c's uniformity does not reach it and the reason may be
+// named, logged and asserted on.
+enum class BindRejection {
+    None = 0,
+    NotLinkBind,       // 2.1c: the first frame was not a `link_bind`
+    ChannelMismatch,   // 2.1c: body `channel` disagreed with the frame header
+    DuplicateChannel,  // 2.1c: that link already holds that channel
+    Malformed,         // ENC §4/§8: the frame or its CBOR did not decode
+    BindTimeout,       // 2.1c: no `link_bind` arrived inside the bind timeout
+};
+const char *describe(BindRejection r);
+
+// ENC 2.1a / MSG 3.0 — the `link_bind` frame for one stream, encoded, header
+// and all.  Public because a dialler that is not this Connector still owes the
+// frame: the `direct` path of CORE §3.2 is a tunnel or a socket an embedding
+// hands in, and the synthetic peer of CONF §2c has to be able to produce both a
+// correct one and a wrong one.  Returns false only if libppcp refuses the
+// encode, which would be a bug in this file rather than in the caller.
+bool encodeLinkBindFrame(const LinkId &id, Channel ch, std::vector<unsigned char> &out);
+
 // The 32-byte external pre-shared key of RV 5.1 — HKDF-Expand(PRK, "ppcp1
 // tls-psk", 32).  Used for the TLS handshake and for nothing else (5.1a).
 using Key = std::array<unsigned char, 32>;
@@ -148,41 +195,62 @@ public:
     // test can assert it rather than trust the comment.
     bool acceptedEarlyData() const { return false; }
 
+    // The socket and the SSL* behind this channel.  Named here and DEFINED
+    // ONLY IN ppcp_transport.cpp: nothing outside that file can do anything
+    // with it but pass it along, which is what the connector's dial slots and
+    // the listener's pending streams do while a channel is being built.  Public
+    // because those are free functions in the .cpp rather than members, and an
+    // incomplete type is not an encapsulation the header was keeping.
+    struct Impl;
+
 private:
     friend struct detail::ChannelFactory;
     friend class Connector;
     friend class Listener;
     TransportChannel();
 
-    struct Impl;
     std::unique_ptr<Impl> m_impl;
     Channel m_channel = Channel::Control;
     TlsOutcome m_tls;
 };
 
-// ── One peer: the channels that belong together ─────────────────────────────
+// ── One link: the streams that ENC 2.1 bound together ───────────────────────
+// Named PeerConnection since H1 and kept for the call sites; ENC 2.1 calls the
+// same thing a LINK, and `linkId()` is the name it was bound under.
 class PeerConnection {
 public:
     ~PeerConnection();
     PeerConnection(const PeerConnection &) = delete;
     PeerConnection &operator=(const PeerConnection &) = delete;
 
-    // Null if this peer connection does not carry that channel.  Channel 2 is
-    // optional (plan A6); 0 and 1 are the CORE T2 minimum and are always here.
+    // Null if this link does not carry that channel.  Channel 2 is optional
+    // (plan A6); 0 and 1 are the CORE T2 minimum and are always here.
     TransportChannel *channel(Channel c) const;
 
-    // The control channel's outcome.  Every channel of one peer connection is a
-    // separate TLS session over the same K_tls, so in practice they agree; the
+    // The control channel's outcome.  Every channel of one link is a separate
+    // TLS session over the same K_tls, so in practice they agree; the
     // per-channel value is on the channel for the case where they do not.
     const TlsOutcome &tls() const;
 
+    // ENC 2.1a/2.1b — the token the dialler minted and both ends bound by.
+    const LinkId &linkId() const { return m_linkId; }
+
     std::vector<Channel> channels() const;
     void close();
+
+    // ENC 2.1d: a bulk channel MAY be opened at any later point in the session
+    // — a `preview` channel after the session is established is the expected
+    // case — by a further stream carrying `link_bind` with the SAME link_id.
+    // Both ends reach that through here: the dialler via
+    // Connector::connectAdditional, the listener via Listener::acceptInto.
+    // Returns false if this link already holds that channel (2.1c).
+    bool adopt(std::unique_ptr<TransportChannel> c);
 
 private:
     friend struct detail::ChannelFactory;
     PeerConnection();
 
+    LinkId m_linkId{};
     std::vector<std::unique_ptr<TransportChannel>> m_channels;
 };
 
@@ -193,6 +261,11 @@ private:
 // timeout on a handshake.
 struct Options {
     int handshakeTimeoutMs = 10000;
+    // ENC 2.1c: "a link that has not bound channel 0 within the listener's own
+    // timeout is discarded with every stream it holds; THE TIMEOUT IS THE
+    // EMBEDDING'S POLICY".  So it is a knob here and not a constant in libppcp,
+    // for the same reason the 120 fps ingest floor is (I14).
+    int bindTimeoutMs = 10000;
     int sndBufBytes = 0;   // 0 = leave the OS default. Tests set it small so a
     int rcvBufBytes = 0;   // stalled channel is reachable in bounded time.
     bool tcpNoDelay = true;
@@ -225,8 +298,21 @@ public:
     // falling back to one under ANY circumstance, including a handshake
     // failure, a timeout or a user instruction, and the way to be sure of that
     // is to have no code path that produces one.
+    //
+    // Mints one `link_id` for the whole call (ENC 2.1a) and sends `link_bind`
+    // as the first frame on every stream.  The TLS handshakes run CONCURRENTLY
+    // and in no particular order — H1 serialised them so that arrival order at
+    // the listener would be the channel order, and E1 withdrew the rule that
+    // made that necessary.  Nothing downstream may depend on the order again.
     static std::unique_ptr<PeerConnection> connect(const ConnectorConfig &cfg,
                                                    HandshakeFailure *fail = nullptr);
+
+    // ENC 2.1d — one more stream on an established link, carrying `link_bind`
+    // with that link's existing `link_id`.  This is how the preview channel is
+    // opened after the session is up.  On success the channel is adopted into
+    // `link` and the function returns true.
+    static bool connectAdditional(const ConnectorConfig &cfg, PeerConnection &link,
+                                  Channel ch, HandshakeFailure *fail = nullptr);
 };
 
 // ── Listening ───────────────────────────────────────────────────────────────
@@ -237,9 +323,11 @@ public:
 // transport takes it as a callback and knows nothing about how it is done.
 struct ResolvedPairing {
     Key kTls{};
-    // Opaque, stable for the life of one pairing, never sent anywhere.  The
-    // listener uses it to decide which accepted connections belong to the same
-    // peer — see the note on association in the .cpp.
+    // Opaque, stable for the life of one pairing, never sent anywhere.  It is
+    // the embedding's handle on WHICH pairing authenticated a stream — nothing
+    // more.  ⚠ It is NOT how the channels of one peer are associated: H1 used
+    // it for exactly that and erratum E1 withdrew the rule.  Association is
+    // `link_id`, on the wire, and nothing else (ENC 2.1b).
     std::string pairingId;
 };
 
@@ -267,17 +355,40 @@ public:
     void setOptions(const Options &o);
     void setLog(LogFn f);
 
-    // How many channels make up one peer connection.  CORE T2's minimum is two;
-    // three where the device offers preview.  See the association note in the
-    // .cpp for why the listener has to be told rather than discovering it.
+    // How many bound channels make a link ready to hand over.  CORE T2's
+    // minimum is two; a third arrives later under ENC 2.1d and is taken through
+    // acceptInto(), not counted here.  The listener has to be told because
+    // `link_bind` says which channel a stream is, never how many are coming.
     void setChannelsPerPeer(int n);
 
-    // Blocks up to `timeoutMs` for a complete peer connection.  Returns null on
-    // timeout (with `fail->message` empty) or on a failed handshake (with
-    // `fail` filled in uniformly — 7.7c).
+    // Blocks up to `timeoutMs` for a link that has bound channelsPerPeer
+    // channels.  Returns null on timeout (with `fail->message` empty) or on a
+    // failed handshake (with `fail` filled in uniformly — 7.7c).
+    //
+    // Concurrent dials, abandoned dials and out-of-order channels are all
+    // ordinary here: streams are bound by `link_id` (ENC 2.1b) and a stream
+    // that never binds is discarded on its own without disturbing any other
+    // link (2.1c).
     std::unique_ptr<PeerConnection> accept(int timeoutMs, HandshakeFailure *fail = nullptr);
 
+    // ENC 2.1d — waits for ONE further stream whose `link_bind` names `link`'s
+    // existing link_id, and adopts it.  Streams that bind other links are kept
+    // for a later accept() rather than dropped.  Returns false on timeout.
+    bool acceptInto(PeerConnection &link, int timeoutMs, HandshakeFailure *fail = nullptr);
+
+    // 2.1c diagnostics.  Not an authentication outcome (see BindRejection), so
+    // naming it breaches nothing and a test can assert on it.
+    BindRejection lastBindRejection() const;
+    int           bindRejectionCount() const;
+
 private:
+    // The one loop behind accept() and acceptInto().  `want` is null for the
+    // first and names a link for the second; a stream that binds some other
+    // link is kept for a later accept() either way.
+    std::unique_ptr<PeerConnection> acceptImpl(int timeoutMs, HandshakeFailure *fail,
+                                               const LinkId *want,
+                                               std::unique_ptr<TransportChannel> *out_one);
+
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };

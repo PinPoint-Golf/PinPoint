@@ -18,6 +18,16 @@
 
 #include "ppcp_transport.h"
 
+// ENC §2.1 / §3 / §5 are libppcp's, not ours.  The transport does not hand-roll
+// a frame header, a CBOR map or an envelope: it calls the library that both
+// ends of the protocol are built from, which is the whole reason ground rule 1
+// makes libppcp the only shared artefact.  These four headers are all real in
+// libppcp.a today (L1); nothing here reaches into planned.h.
+#include <ppcp/cbor.h>
+#include <ppcp/common.h>
+#include <ppcp/envelope.h>
+#include <ppcp/frame.h>
+
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
@@ -58,30 +68,40 @@
 namespace Ppcp {
 namespace {
 
-// ── ASSOCIATING THE CHANNELS OF ONE PEER — a gap in the specification ───────
+// ── ASSOCIATING THE STREAMS OF ONE LINK — settled by erratum E1 ─────────────
 //
-// CORE §3 requires two independently flow-controlled channels and ENC §2 numbers
-// them, but NEITHER SAYS how a listener decides that two arriving TCP
-// connections are the two channels of one peer, nor which of them is channel 0.
-// With one connection per channel (plan A6) that decision has to be made
-// somewhere, and it is not in the specification.  Reported to the orchestrator
-// as a defect; the resolution here is chosen to need no bytes on the wire, so
-// that whatever clause lands later can standardise it without breaking us:
+// H1 shipped with a gap: CORE §3 requires two independently flow-controlled
+// channels and ENC §2 numbers them, but nothing said how a listener decides
+// that two arriving TCP connections are two channels of one peer, nor which is
+// channel 0.  H1 grouped by the pairing the offered PSK identity resolved to
+// and ordered by the dialler completing each handshake before dialling the
+// next.  PinPointCapture took arrival order.  Both worked against themselves,
+// which is the definition of an interoperability failure, and BOTH ARE NOW
+// WITHDRAWN — ENC §2.1 / MSG §3.0, erratum E1 of 22 August 2026.
 //
-//   * grouping — by the pairing the offered PSK identity resolved to (RV 5.3b).
-//     Every channel of one peer connection carries an identity derived from the
-//     same K_id, so they resolve to the same pairing and nothing else does.
-//   * ordering — the dialler completes each channel's handshake BEFORE dialling
-//     the next, so arrival order at the listener is the channel order and no
-//     race decides which stream is control.  One extra round trip, once, at
-//     connection setup.  See Connector::connect.
+// What replaces them, and nothing else may be reintroduced beside it:
 //
-// The alternative — a channel byte in a transport preamble — would have been a
-// wire change invented by one implementation, which is exactly what a second
-// implementation cannot guess.  ENC 2c gives the receiving PEER a cross-check
-// (the channel in each frame header must match the stream it arrived on), so a
-// mis-association is caught one layer up as `error` / `malformed` rather than
-// being silently wrong.
+//   * the DIALLER mints a `link_id` — 16 CSPRNG bytes, fresh per link — and
+//     sends `link_bind { link_id, channel }` as the FIRST frame on every stream
+//     it opens, on every channel including 0, with the frame header carrying
+//     that same channel (2.1a).
+//   * the LISTENER associates streams into a link by `link_id` and takes each
+//     stream's channel from the header (2.1b).  It MUST NOT infer either from
+//     arrival order, from the transport address, or from a rendezvous identity.
+//   * a stream whose first frame is not `link_bind`, whose `channel` disagrees
+//     with its header, or whose `link_id` already holds that channel is closed
+//     (2.1c); a link that has not bound channel 0 inside the listener's own
+//     timeout is discarded with every stream it holds.
+//
+// Two consequences worth stating because H1's design forbade them.  Channels
+// may be dialled CONCURRENTLY — the connector below does — and a third channel
+// may be opened at ANY later point in the session with the same link_id (2.1d),
+// which is what the preview Stream of CORE §5.11.2 wants.
+//
+// The pairing that RV 5.3b resolves is still surfaced to the embedding as
+// ResolvedPairing::pairingId.  It is no longer consulted for association, and
+// it must not be: `link_bind` is what makes this transport meet a foreign one,
+// and the `direct` path has no PSK identity to group by at all.
 
 // ── Sockets ─────────────────────────────────────────────────────────────────
 
@@ -119,6 +139,19 @@ void setNonBlocking(pp_socket_t s)
 
 void applyOptions(pp_socket_t s, const Options &o)
 {
+#ifdef SO_NOSIGPIPE
+    // A peer that walks away mid-session is ordinary here — ENC 2.1c makes an
+    // abandoned dial an expected event, not an error — and writing to the
+    // socket it left behind raises SIGPIPE and kills the process.  A transport
+    // must not do that to its embedding, and it must not fix it by changing the
+    // process's signal disposition either.  Where the platform has the
+    // per-socket option (Apple, the BSDs) that is the right place for it; where
+    // it does not, the listener never writes to a stream it is refusing — see
+    // Impl::abandon() below.
+    int nosig = 1;
+    setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, reinterpret_cast<const char *>(&nosig),
+               sizeof nosig);
+#endif
     if (o.tcpNoDelay) {
         int on = 1;
         setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
@@ -469,6 +502,159 @@ bool driveHandshake(SSL *ssl, pp_socket_t s, bool server, double deadlineMs)
     }
 }
 
+
+// ── One handshake step, non-blocking (E1 wants them concurrent) ─────────────
+// H1 drove each handshake to completion before starting the next, because
+// arrival order was load-bearing.  It no longer is, so the connector runs every
+// channel's handshake at once and the listener runs every pending stream's at
+// once — which means neither can be held up by one peer that stalls.
+enum class Step { Done, Again, Failed };
+
+Step stepHandshake(SSL *ssl, bool server, short &wantEvents)
+{
+    ERR_clear_error();
+    const int r = server ? SSL_accept(ssl) : SSL_connect(ssl);
+    if (r == 1) return Step::Done;
+    const int e = SSL_get_error(ssl, r);
+    if (e == SSL_ERROR_WANT_READ)  { wantEvents = POLLIN;  return Step::Again; }
+    if (e == SSL_ERROR_WANT_WRITE) { wantEvents = POLLOUT; return Step::Again; }
+    return Step::Failed;
+}
+
+// ── link_bind, encoded and decoded (ENC §2.1, §3, §5; MSG §3.0) ─────────────
+//
+//   link_bind { link_id: bytes(16), channel: uint }
+//
+// Deterministic key order (ENC 4e) is the writer's job, not ours: the encoded
+// keys sort `type` < `msg_id` < `channel` < `link_id` and
+// ppcp_envelope_before() interleaves the reserved keys with the body's.  We
+// declare the two body fields in that order and the writer refuses us if we
+// are wrong, which is why this is not a comment that can rot.
+//
+// ⚠ `msg_id`.  MSG §3.0 does not say what msg_id a `link_bind` carries, and it
+// matters here because the TRANSPORT mints this frame while the PEER ENGINE
+// owns the sender's per-connection msg_id sequence (ENC 5c).  We send 1 and the
+// engine will also start at 1 for `hello`.  That is safe — 3.0c says link_bind
+// requires no response, so no `reply_to` ever names it, and the listener
+// consumes the frame before the engine sees a byte of the stream — but it is a
+// silence in the specification and is reported as such.
+
+struct LinkBindBody {
+    const LinkId *id;
+    uint8_t       channel;
+};
+
+ppcp_result writeLinkBind(ppcp_cbor_writer *w, ppcp_envelope_writer *ew, void *ctx)
+{
+    const LinkBindBody *b = static_cast<const LinkBindBody *>(ctx);
+    ppcp_result rc = ppcp_envelope_before(w, ew, "channel", 7);
+    if (rc != PPCP_OK) return rc;
+    rc = ppcp_cbor_write_text_z(w, "channel");
+    if (rc != PPCP_OK) return rc;
+    rc = ppcp_cbor_write_uint(w, b->channel);
+    if (rc != PPCP_OK) return rc;
+
+    rc = ppcp_envelope_before(w, ew, "link_id", 7);
+    if (rc != PPCP_OK) return rc;
+    rc = ppcp_cbor_write_text_z(w, "link_id");
+    if (rc != PPCP_OK) return rc;
+    return ppcp_cbor_write_bytes(w, b->id->data(), b->id->size());
+}
+
+// A link_bind frame is roughly forty bytes (ENC §2.1's own estimate).  This
+// bound is a BUFFER SIZE, not a protocol threshold: a first frame that does not
+// fit in it cannot be a link_bind, so the stream is refused under 2.1c without
+// reading a megabyte to find that out.
+constexpr std::size_t kLinkBindMaxFrame = 256;
+
+bool encodeLinkBindImpl(const LinkId &id, Channel ch, std::vector<unsigned char> &out)
+{
+    ppcp_envelope e;
+    if (ppcp_envelope_init(&e, "link_bind", 1) != PPCP_OK) return false;
+
+    LinkBindBody body{ &id, static_cast<uint8_t>(ch) };
+    unsigned char buf[kLinkBindMaxFrame];
+    std::size_t written = 0;
+    const ppcp_result rc = ppcp_message_encode(buf, sizeof buf, static_cast<uint8_t>(ch),
+                                               &e, /*body_fields=*/2, writeLinkBind,
+                                               &body, &written);
+    if (rc != PPCP_OK) return false;
+    out.assign(buf, buf + written);
+    return true;
+}
+
+// Decodes one complete link_bind frame.  The channel this stream will carry is
+// the frame header's (ENC 2b/2c), so the caller learns it from `out_channel`
+// rather than telling us.
+//
+// Returns None with `out_consumed == 0` for "not a whole frame yet, poll again"
+// and None with `out_consumed > 0` for a stream bound successfully.  Every
+// other value is a 2.1c refusal.
+BindRejection decodeLinkBind(const unsigned char *buf, std::size_t len,
+                             LinkId &out_id, uint8_t &out_channel,
+                             std::size_t &out_consumed)
+{
+    out_consumed = 0;
+    ppcp_frame_header hdr{};
+    const uint8_t *payload = nullptr;
+    const ppcp_result fr = ppcp_frame_read(buf, len, &hdr, &payload, &out_consumed);
+    if (fr == PPCP_ERR_TRUNCATED) { out_consumed = 0; return BindRejection::None; }
+    if (fr != PPCP_OK) return BindRejection::Malformed;
+
+    const ppcp_cbor_limits lim = ppcp_cbor_limits_for_channel(hdr.channel);
+
+    // ENC §4 and §8 in one pass before any field is read (I13 skipping included).
+    std::size_t consumed = 0;
+    if (ppcp_cbor_validate(payload, hdr.payload_len, lim, &consumed) != PPCP_OK)
+        return BindRejection::Malformed;
+
+    ppcp_envelope env;
+    uint32_t pairs = 0;
+    if (ppcp_envelope_decode(payload, hdr.payload_len, lim, &env, &pairs) != PPCP_OK)
+        return BindRejection::Malformed;
+    if (std::strcmp(env.type, "link_bind") != 0) return BindRejection::NotLinkBind;
+
+    ppcp_cbor_reader r;
+    ppcp_cbor_reader_init(&r, payload, hdr.payload_len, lim);
+    ppcp_cbor_item it;
+    if (ppcp_cbor_read(&r, &it) != PPCP_OK || it.type != PPCP_CBOR_MAP)
+        return BindRejection::Malformed;
+
+    bool haveId = false, haveChannel = false;
+    uint8_t bodyChannel = 0;
+    for (uint32_t i = 0; i < it.count; ++i) {
+        const char *k = nullptr;
+        std::size_t klen = 0;
+        if (ppcp_cbor_read_key(&r, &k, &klen) != PPCP_OK) return BindRejection::Malformed;
+        if (ppcp_cbor_key_is(k, klen, "link_id")) {
+            ppcp_cbor_item v;
+            if (ppcp_cbor_read(&r, &v) != PPCP_OK) return BindRejection::Malformed;
+            if (v.type != PPCP_CBOR_BYTES || v.len != out_id.size())
+                return BindRejection::Malformed;   // 2.1a: sixteen bytes, exactly
+            std::memcpy(out_id.data(), v.bytes, out_id.size());
+            haveId = true;
+        } else if (ppcp_cbor_key_is(k, klen, "channel")) {
+            ppcp_cbor_item v;
+            if (ppcp_cbor_read(&r, &v) != PPCP_OK) return BindRejection::Malformed;
+            if (v.type != PPCP_CBOR_UINT || v.i < 0 || v.i > 255)
+                return BindRejection::Malformed;
+            bodyChannel = static_cast<uint8_t>(v.i);
+            haveChannel = true;
+        } else if (ppcp_cbor_skip(&r) != PPCP_OK) {
+            return BindRejection::Malformed;       // I13: skip what we do not know
+        }
+    }
+    if (!haveId || !haveChannel) return BindRejection::Malformed;
+
+    // 2.1a/2.1c: the body `channel` MUST equal the header's.  ENC 2c already
+    // requires every later frame on this stream to match it too.
+    if (bodyChannel != hdr.channel) return BindRejection::ChannelMismatch;
+    if (ppcp_channel_validate(hdr.channel) != PPCP_OK) return BindRejection::Malformed;
+
+    out_channel = hdr.channel;
+    return BindRejection::None;
+}
+
 }  // namespace
 
 // ── TransportChannel ────────────────────────────────────────────────────────
@@ -481,6 +667,18 @@ struct TransportChannel::Impl {
     std::unique_ptr<SslState> state;
 
     ~Impl() { shut(); }
+
+    // ENC 2.1c — "a listener closes a stream whose first frame is not
+    // link_bind".  It closes it; it does not answer it.  Suppressing the TLS
+    // close_notify is therefore the right shape as well as the safe one: a
+    // stream being refused is told nothing, which is also what RV 7.7c's habit
+    // of mind asks for, and nothing is written to a socket whose peer may
+    // already be gone.
+    void abandon()
+    {
+        if (ssl) SSL_set_shutdown(ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+        shut();
+    }
 
     void shut()
     {
@@ -520,6 +718,12 @@ struct ChannelFactory {
         p->m_channels = std::move(chans);
         return p;
     }
+    // ENC 2.1b — the link_id both ends bound by.  Set once, by whichever side
+    // learned it: the dialler when it minted it, the listener when the first
+    // link_bind on the link arrived.
+    static void setLinkId(PeerConnection &p, const LinkId &id) { p.m_linkId = id; }
+    // Drops a built channel without a close_notify — see Impl::abandon().
+    static void abandon(TransportChannel &c) { if (c.m_impl) c.m_impl->abandon(); }
 };
 }  // namespace detail
 
@@ -613,6 +817,47 @@ void PeerConnection::close()
     for (std::unique_ptr<TransportChannel> &c : m_channels) c->close();
 }
 
+bool PeerConnection::adopt(std::unique_ptr<TransportChannel> c)
+{
+    if (!c) return false;
+    // ENC 2.1c — a link_bind naming a link that already holds that channel is
+    // refused.  Enforced here as well as in the listener so the dialler's own
+    // side cannot build a link with two channel 1s either.
+    if (channel(c->channel())) return false;
+    m_channels.push_back(std::move(c));
+    return true;
+}
+
+// ── The link token (ENC 2.1a) ───────────────────────────────────────────────
+
+bool mintLinkId(LinkId &out)
+{
+    // 2.1a: sixteen bytes from a CSPRNG, fresh per link.  RAND_bytes is
+    // OpenSSL's, which is already linked for the TLS half; a failure is
+    // reported rather than papered over, because a predictable link_id would
+    // let a stranger's stream join somebody else's link on a `direct`
+    // transport that has no authentication to stop it (2.1f).
+    return RAND_bytes(out.data(), static_cast<int>(out.size())) == 1;
+}
+
+bool encodeLinkBindFrame(const LinkId &id, Channel ch, std::vector<unsigned char> &out)
+{
+    return encodeLinkBindImpl(id, ch, out);
+}
+
+const char *describe(BindRejection r)
+{
+    switch (r) {
+    case BindRejection::None:             return "bound";
+    case BindRejection::NotLinkBind:      return "first frame was not link_bind (ENC 2.1c)";
+    case BindRejection::ChannelMismatch:  return "link_bind channel disagrees with its header (ENC 2.1c)";
+    case BindRejection::DuplicateChannel: return "link already holds that channel (ENC 2.1c)";
+    case BindRejection::Malformed:        return "malformed first frame (ENC 4, 8)";
+    case BindRejection::BindTimeout:      return "no link_bind inside the bind timeout (ENC 2.1c)";
+    }
+    return "unknown";
+}
+
 // ── TlsOutcome ──────────────────────────────────────────────────────────────
 
 std::string TlsOutcome::describe() const
@@ -681,13 +926,86 @@ TlsCapabilities queryTlsCapabilities()
     return caps;
 }
 
-// ── Connector ───────────────────────────────────────────────────────────────
+// ── Connector ─────────────────────────────────────────────────────────────────────
 
-std::unique_ptr<PeerConnection> Connector::connect(const ConnectorConfig &cfg,
-                                                   HandshakeFailure *fail)
+namespace {
+
+// One channel being dialled.  The three phases are separated so all channels
+// can be in flight at once: TCP connect, TLS handshake, link_bind write.
+struct DialSlot {
+    Channel channel = Channel::Control;
+    std::unique_ptr<TransportChannel::Impl> impl;
+    bool     handshaken = false;
+    short    want = POLLOUT;
+    std::vector<unsigned char> bind;   // the link_bind frame, not yet sent
+    std::size_t sent = 0;
+    TlsOutcome outcome;
+};
+
+// Dials one TCP connection, bounded by `deadline`.  Address fallback is here
+// and nowhere else.
+pp_socket_t dialTcp(const ConnectorConfig &cfg, double deadline)
 {
-    ensureSockets();
-    const double started = nowMs();
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo *res = nullptr;
+    const std::string portText = std::to_string(cfg.port);
+    if (getaddrinfo(cfg.host.c_str(), portText.c_str(), &hints, &res) != 0 || !res)
+        return PP_INVALID_SOCKET;
+
+    pp_socket_t s = PP_INVALID_SOCKET;
+    for (addrinfo *ai = res; ai; ai = ai->ai_next) {
+        s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (s == PP_INVALID_SOCKET) continue;
+        applyOptions(s, cfg.options);
+        setNonBlocking(s);
+        const int r = ::connect(s, ai->ai_addr, static_cast<socklen_t>(ai->ai_addrlen));
+        if (r == 0) break;
+        if (waitFor(s, false, deadline)) {
+            int err = 0;
+            socklen_t len = sizeof err;
+            getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&err), &len);
+            if (err == 0) break;
+        }
+        pp_close_socket(s);
+        s = PP_INVALID_SOCKET;
+    }
+    freeaddrinfo(res);
+    return s;
+}
+
+// Writes the whole link_bind frame, bounded by `deadline`.  It is the first
+// frame on the stream (2.1a), so nothing has been written before it and a short
+// write can only mean the socket buffer, never interleaving.
+bool sendLinkBind(DialSlot &slot, double deadline)
+{
+    while (slot.sent < slot.bind.size()) {
+        ERR_clear_error();
+        const int n = SSL_write(slot.impl->ssl, slot.bind.data() + slot.sent,
+                                static_cast<int>(slot.bind.size() - slot.sent));
+        if (n > 0) { slot.sent += static_cast<std::size_t>(n); continue; }
+        const int e = SSL_get_error(slot.impl->ssl, n);
+        if (e == SSL_ERROR_WANT_READ) {
+            if (!waitFor(slot.impl->sock, true, deadline)) return false;
+        } else if (e == SSL_ERROR_WANT_WRITE) {
+            if (!waitFor(slot.impl->sock, false, deadline)) return false;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Dials `channels` streams on one link_id, running every TLS handshake
+// CONCURRENTLY, and writes link_bind first on each (ENC 2.1a/2.1d).  Returns
+// the built channels, or an empty vector with `fail` filled in.
+std::vector<std::unique_ptr<TransportChannel>> dialLink(const ConnectorConfig &cfg,
+                                                        const LinkId &linkId,
+                                                        const std::vector<Channel> &channels,
+                                                        HandshakeFailure *fail,
+                                                        double started)
+{
     auto reportFail = [&](const char *msg, const SslState *st) {
         if (!fail) return;
         fail->message = msg;
@@ -698,107 +1016,191 @@ std::unique_ptr<PeerConnection> Connector::connect(const ConnectorConfig &cfg,
         }
     };
 
-    if (cfg.channels.empty()) {
-        reportFail("no channels requested", nullptr);
-        return nullptr;
-    }
-
     const TlsCapabilities caps = queryTlsCapabilities();
-    std::vector<std::unique_ptr<TransportChannel>> built;
+    const double deadline = nowMs() + cfg.options.handshakeTimeoutMs;
 
-    // One channel at a time, each handshake completed before the next is
-    // dialled — see the association note at the top of this file.  It also means
-    // a failure on channel 0 costs nothing on channel 1.
-    for (Channel ch : cfg.channels) {
-        auto impl = std::make_unique<TransportChannel::Impl>();
-        impl->state = std::make_unique<SslState>();
-        impl->state->identity = cfg.identity;
-        impl->state->key = cfg.kTls;
+    std::vector<DialSlot> slots;
+    slots.reserve(channels.size());
 
-        // Resolve and dial.
-        addrinfo hints{};
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-        addrinfo *res = nullptr;
-        const std::string portText = std::to_string(cfg.port);
-        if (getaddrinfo(cfg.host.c_str(), portText.c_str(), &hints, &res) != 0 || !res) {
-            reportFail("address not resolved", nullptr);
-            return nullptr;
+    for (Channel ch : channels) {
+        DialSlot slot;
+        slot.channel = ch;
+        slot.impl = std::make_unique<TransportChannel::Impl>();
+        slot.impl->state = std::make_unique<SslState>();
+        slot.impl->state->identity = cfg.identity;
+        slot.impl->state->key = cfg.kTls;
+
+        // ENC 2.1a — the frame is built BEFORE the socket, so a failure to encode
+        // it (an impossibility that would still be a bug) never leaves a stream
+        // open with no binding on it.
+        if (!encodeLinkBindFrame(linkId, ch, slot.bind)) {
+            reportFail("link_bind could not be encoded", nullptr);
+            return {};
         }
 
-        pp_socket_t s = PP_INVALID_SOCKET;
-        const double deadline = nowMs() + cfg.options.handshakeTimeoutMs;
-        for (addrinfo *ai = res; ai; ai = ai->ai_next) {
-            s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-            if (s == PP_INVALID_SOCKET) continue;
-            applyOptions(s, cfg.options);
-            setNonBlocking(s);
-            const int r = ::connect(s, ai->ai_addr, static_cast<socklen_t>(ai->ai_addrlen));
-            if (r == 0) break;
-            if (waitFor(s, false, deadline)) {
-                int err = 0;
-                socklen_t len = sizeof err;
-                getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&err), &len);
-                if (err == 0) break;
-            }
-            pp_close_socket(s);
-            s = PP_INVALID_SOCKET;
-        }
-        freeaddrinfo(res);
+        const pp_socket_t s = dialTcp(cfg, deadline);
         if (s == PP_INVALID_SOCKET) {
-            // Every address failed or the deadline passed.  Not an
-            // authentication outcome, so it may say what it is — RV 7.7c
+            // Not an authentication outcome, so it may say what it is — RV 7.7c
             // constrains the uniformity of a REJECTION, not of a dead socket.
             reportFail("no endpoint reachable", nullptr);
-            return nullptr;
+            return {};
         }
-        impl->sock = s;
+        slot.impl->sock = s;
 
         // RV 5.2g: we dialled, so we are the TLS client.
-        impl->ctx = makeContext(/*server=*/false, caps);
-        impl->ownsCtx = true;
-        if (!impl->ctx) {
+        slot.impl->ctx = makeContext(/*server=*/false, caps);
+        slot.impl->ownsCtx = true;
+        if (!slot.impl->ctx) {
             reportFail("TLS context unavailable", nullptr);
-            return nullptr;
+            return {};
         }
-        impl->ssl = SSL_new(impl->ctx);
-        if (!impl->ssl) {
+        slot.impl->ssl = SSL_new(slot.impl->ctx);
+        if (!slot.impl->ssl) {
             reportFail("TLS context unavailable", nullptr);
-            return nullptr;
+            return {};
         }
-        SSL_set_ex_data(impl->ssl, sslStateIndex(), impl->state.get());
-        SSL_set_fd(impl->ssl, static_cast<int>(s));
-        SSL_set_connect_state(impl->ssl);
+        SSL_set_ex_data(slot.impl->ssl, sslStateIndex(), slot.impl->state.get());
+        SSL_set_fd(slot.impl->ssl, static_cast<int>(s));
+        SSL_set_connect_state(slot.impl->ssl);
+        slots.push_back(std::move(slot));
+    }
 
-        if (!driveHandshake(impl->ssl, s, /*server=*/false, deadline)) {
-            reportFail(kUniformHandshakeFailure, impl->state.get());
-            if (cfg.log) cfg.log(std::string(kUniformHandshakeFailure));
-            return nullptr;
+    // Every handshake at once.  H1 completed each before starting the next so
+    // that arrival order at the listener would be the channel order; E1
+    // withdrew that rule, and running them together is how this file stops
+    // being able to depend on it again by accident.
+    std::size_t remaining = slots.size();
+    while (remaining > 0) {
+        if (nowMs() >= deadline) {
+            reportFail(kUniformHandshakeFailure, nullptr);
+            return {};
         }
+#ifdef _WIN32
+        std::vector<WSAPOLLFD> fds;
+#else
+        std::vector<struct pollfd> fds;
+#endif
+        std::vector<std::size_t> idx;
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            if (slots[i].handshaken) continue;
+            const Step st = stepHandshake(slots[i].impl->ssl, /*server=*/false, slots[i].want);
+            if (st == Step::Done) {
+                slots[i].handshaken = true;
+                --remaining;
+                continue;
+            }
+            if (st == Step::Failed) {
+                reportFail(kUniformHandshakeFailure, slots[i].impl->state.get());
+                if (cfg.log) cfg.log(std::string(kUniformHandshakeFailure));
+                return {};
+            }
+#ifdef _WIN32
+            WSAPOLLFD p{};
+#else
+            struct pollfd p{};
+#endif
+            p.fd = slots[i].impl->sock;
+            p.events = slots[i].want;
+            fds.push_back(p);
+            idx.push_back(i);
+        }
+        if (remaining == 0) break;
+        if (!fds.empty()) {
+            const double remain = deadline - nowMs();
+            if (remain <= 0) {
+                reportFail(kUniformHandshakeFailure, nullptr);
+                return {};
+            }
+            pp_poll(fds.data(), static_cast<unsigned long>(fds.size()),
+                    static_cast<int>(remain));
+        }
+    }
 
-        const TlsOutcome outcome = outcomeOf(impl->ssl);
+    // Outcomes, then the binding frame.
+    std::vector<std::unique_ptr<TransportChannel>> built;
+    for (DialSlot &slot : slots) {
+        slot.outcome = outcomeOf(slot.impl->ssl);
 
         // RV 5.2b: psk_ke MUST NOT be used.  OpenSSL's defaults already refuse
         // it, so reaching here with psk_ke means a defaults change or a
         // downgrade — and 5.2f says a failed handshake is a failed connection,
         // never a fallback, so we drop it rather than continue on weaker terms.
-        if (outcome.kexMode == "psk_ke") {
-            reportFail(kUniformHandshakeFailure, impl->state.get());
+        if (slot.outcome.kexMode == "psk_ke") {
+            reportFail(kUniformHandshakeFailure, slot.impl->state.get());
             if (cfg.log) cfg.log("PPCP TLS refused: psk_ke (RV 5.2b)");
-            return nullptr;
+            return {};
         }
-
+        if (!sendLinkBind(slot, deadline)) {
+            reportFail("link_bind could not be sent", slot.impl->state.get());
+            return {};
+        }
         if (cfg.log)
-            cfg.log("PPCP channel " + std::to_string(static_cast<int>(ch)) + " "
-                    + outcome.describe());
+            cfg.log("PPCP channel " + std::to_string(static_cast<int>(slot.channel)) + " "
+                    + slot.outcome.describe());
+        built.push_back(detail::ChannelFactory::make(std::move(slot.impl), slot.channel,
+                                                     slot.outcome));
+    }
+    return built;
+}
 
-        built.push_back(detail::ChannelFactory::make(std::move(impl), ch, outcome));
+}  // namespace
+
+std::unique_ptr<PeerConnection> Connector::connect(const ConnectorConfig &cfg,
+                                                   HandshakeFailure *fail)
+{
+    ensureSockets();
+    const double started = nowMs();
+
+    if (cfg.channels.empty()) {
+        if (fail) fail->message = "no channels requested";
+        return nullptr;
     }
 
-    return detail::ChannelFactory::makePeer(std::move(built));
+    // ENC 2.1a — ONE link_id for the whole link, minted here, fresh, never
+    // reused and never persisted (2.1f).
+    LinkId linkId{};
+    if (!mintLinkId(linkId)) {
+        if (fail) fail->message = "CSPRNG unavailable for link_id";
+        return nullptr;
+    }
+
+    std::vector<std::unique_ptr<TransportChannel>> built =
+        dialLink(cfg, linkId, cfg.channels, fail, started);
+    if (built.empty()) return nullptr;
+
+    std::unique_ptr<PeerConnection> peer = detail::ChannelFactory::makePeer(std::move(built));
+    detail::ChannelFactory::setLinkId(*peer, linkId);
+    return peer;
+}
+
+bool Connector::connectAdditional(const ConnectorConfig &cfg, PeerConnection &link,
+                                  Channel ch, HandshakeFailure *fail)
+{
+    ensureSockets();
+    // ENC 2.1c — refuse before dialling: a second stream for a channel the link
+    // already holds is exactly what the listener would close.
+    if (link.channel(ch)) {
+        if (fail) fail->message = "link already holds that channel";
+        return false;
+    }
+    std::vector<std::unique_ptr<TransportChannel>> built =
+        dialLink(cfg, link.linkId(), { ch }, fail, nowMs());
+    if (built.size() != 1) return false;
+    return link.adopt(std::move(built.front()));
 }
 
 // ── Listener ────────────────────────────────────────────────────────────────
+//
+// Streams arrive one at a time and are bound into links by `link_id` (ENC
+// 2.1b).  Nothing here looks at arrival order, at the transport address, or at
+// the resolved pairing — 2.1b forbids all three, and E1 exists because two
+// implementations each chose one of them.
+//
+// The loop is stage-based rather than one-stream-at-a-time because 2.1c makes
+// an unbound stream something that must NOT hold up anybody else: a dialler
+// that completes its TLS handshake and then dies is expected, and the link it
+// left half-built is discarded on its own timeout while every other link
+// carries on binding.
 
 struct Listener::Impl {
     pp_socket_t sock = PP_INVALID_SOCKET;
@@ -806,31 +1208,90 @@ struct Listener::Impl {
     IdentityResolver resolver;
     Options options;
     LogFn log;
-    int channelsPerPeer = 2;   // CORE T2's minimum; 3 where preview is carried
+    int channelsPerPeer = 2;   // CORE T2's minimum; a third arrives under 2.1d
     SSL_CTX *ctx = nullptr;
     TlsCapabilities caps;
     Key dummyKey{};
+    BindRejection lastRejection = BindRejection::None;
+    int rejections = 0;
 
-    // Channels accepted so far that do not yet make a complete peer, keyed by
-    // the pairing their identity resolved to.  See the association note above.
-    //
-    // `firstArrivalMs` is not bookkeeping.  A dialler that completes channel 0
-    // and then dies leaves a half-built group behind, and the NEXT peer dialling
-    // on the same pairing would have its channel 0 counted as that group's
-    // channel 1 — control and bulk swapped, silently, on a reconnect.  A group
-    // older than the handshake deadline is therefore abandoned rather than
-    // joined.  Single use (RV 7.3a, `mu` defaulting to 1) bounds what can share
-    // a pairing in the first place; this bounds what can share a stale one.
-    struct PendingGroup {
-        double firstArrivalMs = 0.0;
+    // A stream that has been accepted but not yet bound: still handshaking, or
+    // handshaken and waiting for its link_bind frame.
+    struct Pending {
+        std::unique_ptr<TransportChannel::Impl> impl;
+        bool   handshaken = false;
+        short  want = POLLIN;
+        double deadline = 0.0;     // handshake, then bind
+        std::vector<unsigned char> rx;
+        double started = 0.0;
+    };
+    std::vector<std::unique_ptr<Pending>> pending;
+
+    // A link being assembled.  `firstBindMs` starts at the FIRST link_bind for
+    // this link_id, and 2.1c discards the link and every stream it holds if
+    // channel 0 has not bound by `bindTimeoutMs` after it.
+    struct Link {
+        double firstBindMs = 0.0;
         std::vector<std::unique_ptr<TransportChannel>> channels;
     };
-    std::map<std::string, PendingGroup> pending;
+    std::map<LinkId, Link> links;
 
     ~Impl()
     {
         if (ctx) SSL_CTX_free(ctx);
         if (sock != PP_INVALID_SOCKET) pp_close_socket(sock);
+    }
+
+    void reject(BindRejection why)
+    {
+        lastRejection = why;
+        ++rejections;
+        if (log) log(std::string("PPCP stream closed: ") + describe(why));
+    }
+
+    bool linkHasChannel(const Link &l, uint8_t ch) const
+    {
+        for (const std::unique_ptr<TransportChannel> &c : l.channels)
+            if (static_cast<uint8_t>(c->channel()) == ch) return true;
+        return false;
+    }
+
+    // 2.1c — a link that has not bound channel 0 inside the timeout is
+    // discarded with every stream it holds.  A link that HAS bound channel 0 is
+    // left alone: 2.1d lets a bulk channel arrive at any later point.
+    void expireLinks()
+    {
+        const double now = nowMs();
+        for (auto it = links.begin(); it != links.end();) {
+            const bool haveControl = linkHasChannel(it->second, PPCP_CHANNEL_CONTROL);
+            if (!haveControl && now - it->second.firstBindMs > options.bindTimeoutMs) {
+                reject(BindRejection::BindTimeout);
+                for (std::unique_ptr<TransportChannel> &c : it->second.channels)
+                    detail::ChannelFactory::abandon(*c);
+                it = links.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    void expirePending()
+    {
+        const double now = nowMs();
+        for (auto it = pending.begin(); it != pending.end();) {
+            if (now > (*it)->deadline) {
+                // A stream that handshook and then owed us a link_bind is a
+                // 2.1c refusal and is counted as one.  A stream that never got
+                // through the handshake is a dead socket, not a bind failure,
+                // and RV 7.7c has already had its say about naming those.
+                if ((*it)->handshaken) reject(BindRejection::BindTimeout);
+                else if (log) log("PPCP stream closed: handshake did not complete");
+                if ((*it)->impl) (*it)->impl->abandon();
+                it = pending.erase(it);
+            } else {
+                ++it;
+            }
+        }
     }
 };
 
@@ -850,6 +1311,8 @@ void Listener::setOptions(const Options &o) { m_impl->options = o; }
 void Listener::setLog(LogFn f) { m_impl->log = std::move(f); }
 void Listener::setChannelsPerPeer(int n) { m_impl->channelsPerPeer = n; }
 std::uint16_t Listener::port() const { return m_impl->boundPort; }
+BindRejection Listener::lastBindRejection() const { return m_impl->lastRejection; }
+int Listener::bindRejectionCount() const { return m_impl->rejections; }
 
 bool Listener::listen(std::uint16_t port, std::string *err)
 {
@@ -902,7 +1365,34 @@ void Listener::stop()
     }
 }
 
-std::unique_ptr<PeerConnection> Listener::accept(int timeoutMs, HandshakeFailure *fail)
+namespace {
+
+// Reads whatever is available into `rx` without blocking.  Returns false when
+// the stream died; "nothing to read right now" is a true with no growth.
+bool drainAvailable(TransportChannel::Impl &impl, std::vector<unsigned char> &rx)
+{
+    for (;;) {
+        unsigned char buf[512];
+        ERR_clear_error();
+        const int n = SSL_read(impl.ssl, buf, static_cast<int>(sizeof buf));
+        if (n > 0) {
+            rx.insert(rx.end(), buf, buf + n);
+            if (rx.size() > kLinkBindMaxFrame * 4) return false;   // see kLinkBindMaxFrame
+            continue;
+        }
+        const int e = SSL_get_error(impl.ssl, n);
+        if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) return true;
+        return false;
+    }
+}
+
+}  // namespace
+
+// The one loop behind accept() and acceptInto().  `want` is null for accept()
+// and names a link for acceptInto().
+std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFailure *fail,
+                                                     const LinkId *want,
+                                                     std::unique_ptr<TransportChannel> *out_one)
 {
     if (fail) *fail = HandshakeFailure{};
     if (m_impl->sock == PP_INVALID_SOCKET) {
@@ -910,89 +1400,199 @@ std::unique_ptr<PeerConnection> Listener::accept(int timeoutMs, HandshakeFailure
         return nullptr;
     }
 
+    Impl *impl = m_impl.get();
     const double deadline = nowMs() + timeoutMs;
+
     while (nowMs() < deadline) {
-        if (!waitFor(m_impl->sock, true, deadline)) return nullptr;  // timeout: no message
+        impl->expirePending();
+        impl->expireLinks();
 
-        pp_socket_t c = ::accept(m_impl->sock, nullptr, nullptr);
-        if (c == PP_INVALID_SOCKET) continue;
+        // Drive every pending stream one step, then poll everything at once.
+#ifdef _WIN32
+        std::vector<WSAPOLLFD> fds;
+#else
+        std::vector<struct pollfd> fds;
+#endif
+        for (auto it = impl->pending.begin(); it != impl->pending.end();) {
+            Impl::Pending &p = **it;
+            bool drop = false;
 
-        const double started = nowMs();
-        applyOptions(c, m_impl->options);
-        setNonBlocking(c);
-
-        auto impl = std::make_unique<TransportChannel::Impl>();
-        impl->sock = c;
-        impl->ctx = m_impl->ctx;   // shared; the listener owns it
-        impl->ownsCtx = false;
-        impl->state = std::make_unique<SslState>();
-        impl->state->resolver = &m_impl->resolver;
-        impl->state->dummyKey = m_impl->dummyKey;
-
-        impl->ssl = SSL_new(m_impl->ctx);
-        if (!impl->ssl) {
-            if (fail) fail->message = "TLS context unavailable";
-            return nullptr;
-        }
-        SSL_set_ex_data(impl->ssl, sslStateIndex(), impl->state.get());
-        SSL_set_fd(impl->ssl, static_cast<int>(c));
-        SSL_set_accept_state(impl->ssl);
-
-        const double hsDeadline =
-            std::min(deadline, nowMs() + m_impl->options.handshakeTimeoutMs);
-        const bool ok = driveHandshake(impl->ssl, c, /*server=*/true, hsDeadline);
-
-        if (!ok) {
-            // RV 5.3c / 7.7c.  ONE report, ONE log line, for an unresolvable
-            // identity and for a wrong key alike.  Nothing here consults
-            // impl->state->resolved, and nothing may be added that does: the
-            // whole obligation is that these two outcomes are the same outcome.
-            if (fail) {
-                fail->message = kUniformHandshakeFailure;
-                fail->alert = impl->state->alert;
-                fail->alertWasSent = impl->state->alertWasSent;
-                fail->elapsedMs = nowMs() - started;
+            if (!p.handshaken) {
+                const Step st = stepHandshake(p.impl->ssl, /*server=*/true, p.want);
+                if (st == Step::Failed) {
+                    // RV 5.3c / 7.7c.  ONE report, ONE log line, for an
+                    // unresolvable identity and for a wrong key alike.  Nothing
+                    // here consults p.impl->state->resolved, and nothing may be
+                    // added that does: the whole obligation is that these two
+                    // outcomes are the same outcome.
+                    if (fail) {
+                        fail->message = kUniformHandshakeFailure;
+                        fail->alert = p.impl->state->alert;
+                        fail->alertWasSent = p.impl->state->alertWasSent;
+                        fail->elapsedMs = nowMs() - p.started;
+                    }
+                    if (impl->log) impl->log(std::string(kUniformHandshakeFailure));
+                    impl->pending.erase(it);
+                    return nullptr;
+                }
+                if (st == Step::Done) {
+                    const TlsOutcome outcome = outcomeOf(p.impl->ssl);
+                    if (outcome.kexMode == "psk_ke") {
+                        // RV 5.2b — refuse, and refuse as a handshake failure (5.2f).
+                        if (fail) {
+                            fail->message = kUniformHandshakeFailure;
+                            fail->elapsedMs = nowMs() - p.started;
+                        }
+                        if (impl->log) impl->log("PPCP TLS refused: psk_ke (RV 5.2b)");
+                        impl->pending.erase(it);
+                        return nullptr;
+                    }
+                    p.handshaken = true;
+                    p.want = POLLIN;
+                    // 2.1c's timeout starts here: the stream is up and owes us a
+                    // link_bind.
+                    p.deadline = nowMs() + impl->options.bindTimeoutMs;
+                }
             }
-            if (m_impl->log) m_impl->log(std::string(kUniformHandshakeFailure));
-            return nullptr;
-        }
 
-        const TlsOutcome outcome = outcomeOf(impl->ssl);
-        if (outcome.kexMode == "psk_ke") {
-            // RV 5.2b — refuse, and refuse as a handshake failure (5.2f).
-            if (fail) {
-                fail->message = kUniformHandshakeFailure;
-                fail->elapsedMs = nowMs() - started;
+            if (p.handshaken && !drainAvailable(*p.impl, p.rx)) {
+                impl->reject(BindRejection::Malformed);
+                drop = true;
             }
-            if (m_impl->log) m_impl->log("PPCP TLS refused: psk_ke (RV 5.2b)");
-            return nullptr;
+
+            if (!drop && p.handshaken && !p.rx.empty()) {
+                LinkId id{};
+                uint8_t ch = 0;
+                std::size_t consumed = 0;
+                const BindRejection why = decodeLinkBind(p.rx.data(), p.rx.size(),
+                                                         id, ch, consumed);
+                if (why != BindRejection::None) {
+                    impl->reject(why);
+                    drop = true;
+                } else if (consumed > 0) {
+                    // ENC 2.1b — bound.  Everything after this frame belongs to
+                    // the peer engine; there is never a partial frame left over,
+                    // because 2.1a makes link_bind the FIRST frame and the
+                    // dialler writes nothing else before hello.
+                    Impl::Link &link = impl->links[id];
+                    if (link.channels.empty()) link.firstBindMs = nowMs();
+
+                    if (impl->linkHasChannel(link, ch)) {
+                        impl->reject(BindRejection::DuplicateChannel);
+                        drop = true;
+                    } else {
+                        const TlsOutcome outcome = outcomeOf(p.impl->ssl);
+                        if (impl->log)
+                            impl->log("PPCP channel " + std::to_string(static_cast<int>(ch))
+                                      + " bound " + outcome.describe());
+                        link.channels.push_back(detail::ChannelFactory::make(
+                            std::move(p.impl), static_cast<Channel>(ch), outcome));
+                        it = impl->pending.erase(it);
+
+                        if (want && out_one && id == *want) {
+                            *out_one = std::move(link.channels.back());
+                            link.channels.pop_back();
+                            if (link.channels.empty()) impl->links.erase(id);
+                            return nullptr;   // the caller reads *out_one
+                        }
+                        if (!want && static_cast<int>(link.channels.size())
+                                     >= impl->channelsPerPeer) {
+                            std::vector<std::unique_ptr<TransportChannel>> done =
+                                std::move(link.channels);
+                            impl->links.erase(id);
+                            std::unique_ptr<PeerConnection> peer =
+                                detail::ChannelFactory::makePeer(std::move(done));
+                            detail::ChannelFactory::setLinkId(*peer, id);
+                            return peer;
+                        }
+                        continue;   // `it` was advanced by erase
+                    }
+                }
+            }
+
+            if (drop) {
+                if (p.impl) p.impl->abandon();   // 2.1c: closed, not answered
+                it = impl->pending.erase(it);
+                continue;
+            }
+
+#ifdef _WIN32
+            WSAPOLLFD pf{};
+#else
+            struct pollfd pf{};
+#endif
+            pf.fd = p.impl->sock;
+            pf.events = p.want;
+            fds.push_back(pf);
+            ++it;
         }
 
-        const std::string pairing = impl->state->pairingId;
-        Impl::PendingGroup &group = m_impl->pending[pairing];
-        if (!group.channels.empty()
-            && nowMs() - group.firstArrivalMs > m_impl->options.handshakeTimeoutMs) {
-            group.channels.clear();   // an abandoned dial; see PendingGroup
-        }
-        if (group.channels.empty()) group.firstArrivalMs = nowMs();
+        // The listen socket last, so a burst of new dials never starves the
+        // streams already waiting to bind.
+#ifdef _WIN32
+        WSAPOLLFD lf{};
+#else
+        struct pollfd lf{};
+#endif
+        lf.fd = impl->sock;
+        lf.events = POLLIN;
+        fds.push_back(lf);
 
-        // Arrival order is channel order — the dialler serialises its handshakes
-        // so that it is.  ENC 2a numbering: 0 control, then bulk, then preview.
-        const Channel ch = static_cast<Channel>(group.channels.size());
+        double slice = deadline - nowMs();
+        if (slice <= 0) break;
+        // Bounded so expireLinks() and expirePending() run even while nothing
+        // is readable — 2.1c's timeout is a deadline, not an event.
+        if (slice > 50) slice = 50;
+        const int pr = pp_poll(fds.data(), static_cast<unsigned long>(fds.size()),
+                               static_cast<int>(slice));
+        if (pr <= 0) continue;
 
-        if (m_impl->log)
-            m_impl->log("PPCP channel " + std::to_string(static_cast<int>(ch)) + " "
-                        + outcome.describe());
+        if (fds.back().revents & POLLIN) {
+            pp_socket_t c = ::accept(impl->sock, nullptr, nullptr);
+            if (c != PP_INVALID_SOCKET) {
+                applyOptions(c, impl->options);
+                setNonBlocking(c);
 
-        group.channels.push_back(detail::ChannelFactory::make(std::move(impl), ch, outcome));
-
-        if (static_cast<int>(group.channels.size()) >= m_impl->channelsPerPeer) {
-            std::vector<std::unique_ptr<TransportChannel>> complete = std::move(group.channels);
-            m_impl->pending.erase(pairing);
-            return detail::ChannelFactory::makePeer(std::move(complete));
+                auto ps = std::make_unique<Impl::Pending>();
+                ps->started = nowMs();
+                ps->deadline = nowMs() + impl->options.handshakeTimeoutMs;
+                ps->impl = std::make_unique<TransportChannel::Impl>();
+                ps->impl->sock = c;
+                ps->impl->ctx = impl->ctx;   // shared; the listener owns it
+                ps->impl->ownsCtx = false;
+                ps->impl->state = std::make_unique<SslState>();
+                ps->impl->state->resolver = &impl->resolver;
+                ps->impl->state->dummyKey = impl->dummyKey;
+                ps->impl->ssl = SSL_new(impl->ctx);
+                if (!ps->impl->ssl) {
+                    if (fail) fail->message = "TLS context unavailable";
+                    return nullptr;
+                }
+                SSL_set_ex_data(ps->impl->ssl, sslStateIndex(), ps->impl->state.get());
+                SSL_set_fd(ps->impl->ssl, static_cast<int>(c));
+                SSL_set_accept_state(ps->impl->ssl);
+                impl->pending.push_back(std::move(ps));
+            }
         }
     }
-    return nullptr;
+    return nullptr;   // timeout: no message (fail->message stays empty)
+}
+
+std::unique_ptr<PeerConnection> Listener::accept(int timeoutMs, HandshakeFailure *fail)
+{
+    return acceptImpl(timeoutMs, fail, nullptr, nullptr);
+}
+
+bool Listener::acceptInto(PeerConnection &link, int timeoutMs, HandshakeFailure *fail)
+{
+    // ENC 2.1d — one more stream, same link_id.  A stream that binds a
+    // DIFFERENT link stays in this listener's link table and is handed out by a
+    // later accept(); it is not dropped, because the dialler behind it did
+    // nothing wrong.
+    std::unique_ptr<TransportChannel> one;
+    acceptImpl(timeoutMs, fail, &link.linkId(), &one);
+    if (!one) return false;
+    return link.adopt(std::move(one));
 }
 
 }  // namespace Ppcp

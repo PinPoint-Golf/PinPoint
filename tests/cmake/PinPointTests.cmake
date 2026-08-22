@@ -159,6 +159,62 @@ function(pp_require_wrist)
     FetchContent_MakeAvailable(wrist)
 endfunction()
 
+# --- libppcp (lazy; defines the `ppcp` target) --------------------------------
+# Shaped exactly like pp_require_wrist above, and for the same reason: what the
+# Ppcp suite needs is a TARGET, not an include dir. Work package H0 embedded the
+# library in the app; the suites resolve it themselves so a standalone configure
+# of src/Ppcp/tests still gets <ppcp/ppcp.h> and libppcp.a.
+#
+# Resolution order mirrors the app's (CMakeLists.txt, decision A4): explicit
+# -DPP_LIBPPCP_DIR; a sibling ../libppcp checkout, which WINS; any app build's
+# FetchContent copy; else fetch main from GitHub.
+set(PP_LIBPPCP_DIR "" CACHE PATH "libppcp source root (dir containing CMakeLists.txt)")
+function(pp_require_ppcp)
+    if(TARGET ppcp)
+        return()
+    endif()
+
+    set(_ppcp_src "")
+    if(PP_LIBPPCP_DIR AND EXISTS "${PP_LIBPPCP_DIR}/CMakeLists.txt")
+        set(_ppcp_src "${PP_LIBPPCP_DIR}")
+    elseif(EXISTS "${PP_REPO_ROOT}/../libppcp/CMakeLists.txt")
+        get_filename_component(_ppcp_src "${PP_REPO_ROOT}/../libppcp" ABSOLUTE)
+    else()
+        file(GLOB _cand "${PP_REPO_ROOT}/build/*/_deps/ppcp-src")
+        foreach(_c ${_cand})
+            if(EXISTS "${_c}/CMakeLists.txt")
+                set(_ppcp_src "${_c}")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(_ppcp_src)
+        message(STATUS "PinPointTests: libppcp from ${_ppcp_src}")
+        set(FETCHCONTENT_SOURCE_DIR_PPCP "${_ppcp_src}" CACHE PATH "" FORCE)
+    else()
+        # Clear it rather than skipping: the branch above writes FORCE, so a
+        # build dir that once found a local source would keep using that path
+        # after it moved away. Same trap as libwrist.
+        unset(FETCHCONTENT_SOURCE_DIR_PPCP CACHE)
+        message(STATUS "PinPointTests: libppcp not found locally — fetching main")
+    endif()
+
+    # The library's own tests, tools and -Werror default off when embedded; set
+    # them anyway so a suite build never inherits a gate that is the library's.
+    set(PPCP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(PPCP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+
+    include(FetchContent)
+    FetchContent_Declare(ppcp
+        GIT_REPOSITORY https://github.com/PinPoint-Golf/libppcp.git
+        GIT_TAG        main
+        GIT_SHALLOW    TRUE
+        EXCLUDE_FROM_ALL)
+
+    FetchContent_MakeAvailable(ppcp)
+endfunction()
+
 # --- OpenSSL (lazy; only the Ppcp suite needs it) -----------------------------
 # Shared with the app through cmake/PinPointOpenSSL.cmake so both resolve the
 # same library. Leaves PP_OPENSSL_FOUND for the caller; it does not fail.

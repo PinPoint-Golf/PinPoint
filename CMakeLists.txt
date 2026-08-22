@@ -3016,21 +3016,33 @@ endforeach()
 # loud. That is not the plaintext fallback RV 5.2f forbids — there is no code
 # path in src/Ppcp that produces an unencrypted connection, so the choice is
 # "PPCP or no PPCP", never "PPCP in the clear".
+#
+# ⚠ AND libppcp IS NOW A SECOND HARD REQUIREMENT OF THIS BLOCK. Since erratum
+# E1 the transport sends and reads `link_bind` (ENC 2.1) through libppcp's own
+# frame, CBOR and envelope writers rather than hand-rolling the wire format —
+# ground rule 1: if two repositories need the same thing it belongs in libppcp.
+# So the transport needs the library as well as OpenSSL, and a box with neither
+# gets the same honest "no PPCP" as a box with no OpenSSL.
 include(cmake/PinPointOpenSSL.cmake)
 pp_find_openssl()
-if(PP_OPENSSL_FOUND)
+if(PP_OPENSSL_FOUND AND TARGET ppcp)
     target_sources(PinPointStudio PRIVATE
         src/Ppcp/ppcp_transport.h  src/Ppcp/ppcp_transport.cpp)
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
     target_link_libraries(PinPointStudio PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP_TRANSPORT)
-    message(STATUS "PPCP transport: OpenSSL ${PP_OPENSSL_VERSION}")
-else()
+    message(STATUS "PPCP transport: OpenSSL ${PP_OPENSSL_VERSION}, libppcp ${PP_LIBPPCP_VERSION}")
+elseif(NOT PP_OPENSSL_FOUND)
     message(WARNING
         "PPCP transport NOT built — OpenSSL development headers not found. "
         "The app will have no capture-device link. "
         "macOS: brew install openssl@3.  Debian/Ubuntu: apt install libssl-dev. "
         "Windows: vcpkg install openssl, or -DOPENSSL_ROOT_DIR=<path>.")
+else()
+    message(WARNING
+        "PPCP transport NOT built — libppcp is not embedded. "
+        "Check out github.com/PinPoint-Golf/libppcp beside this repository, or "
+        "configure with -DPP_LIBPPCP_FETCH=ON once it is public.")
 endif()
 
 # ── Dependency version header for the About box ──────────────────────────────
