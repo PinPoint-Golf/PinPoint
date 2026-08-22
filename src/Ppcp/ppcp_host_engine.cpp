@@ -38,7 +38,10 @@ public:
 
         ppcp_peer_config pc{};
         pc.role = PPCP_ROLE_HOST;
-        pc.clock = hostClock();
+        // CONF 2a — the injected clock where a test supplied one, and the real
+        // host clock otherwise.  Not a fallback with an opinion: a null `now`
+        // is the absence of an override, not a broken clock.
+        pc.clock = e->m_cfg.clock.now ? e->m_cfg.clock : hostClock();
         pc.peer_id = e->m_cfg.peerId.c_str();
 
         // ENC 2.1a — the listener half of erratum E1. H1's PeerListener binds
@@ -65,6 +68,15 @@ public:
         // ppcp_ingest_policy.h, in this repository, and libppcp never sees it.
         pc.ingest_policy = &LibppcpEngine::ingestTrampoline;
         pc.health = &LibppcpEngine::healthTrampoline;
+        // CORE 7.4b — degradation is REPORTED, not silently absorbed. Null when
+        // the embedding supplied no reading, so `heartbeat_ack` says nothing
+        // rather than saying "nominal" on no evidence.
+        if (e->m_cfg.healthReport) pc.health_report = &LibppcpEngine::healthReportTrampoline;
+        // MSG 6.1b — the clock this host stamps `t2`/`t3` on. `tb:host` and no
+        // other, because hostClock() answers for no other timebase (I1); a
+        // host that named a timebase it does not read would be fabricating the
+        // very instant §6.3 exists to measure.
+        if (!e->m_cfg.syncTimebase.empty()) pc.sync_timebase = e->m_cfg.syncTimebase.c_str();
         pc.ctx = e.get();
 
         ppcp_peer *p = nullptr;
@@ -114,6 +126,12 @@ private:
         LibppcpEngine *self = static_cast<LibppcpEngine *>(ctx);
         if (!self || !self->m_cfg.health) return PPCP_ERR_INVALID;
         return self->m_cfg.health(out);
+    }
+    static ppcp_result healthReportTrampoline(void *ctx, ppcp_health *out)
+    {
+        LibppcpEngine *self = static_cast<LibppcpEngine *>(ctx);
+        if (!self || !self->m_cfg.healthReport) return PPCP_ERR_INVALID;
+        return self->m_cfg.healthReport(out);
     }
 
     HostEngineConfig          m_cfg;

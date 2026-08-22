@@ -242,3 +242,53 @@ recorded sessions (`MSG` §9 `session_offer` / `session_accept` /
 bundle transport, import sink and ledger stay, as the engine behind that list;
 the list itself is S3 (H4–H7) work. The CT rows above are unaffected — they
 were never stated over a UI.
+
+---
+
+## Work in progress — S3 wave 2 (H5, H7)
+
+**Status at last commit.** Landed in `src/Ppcp/` and not yet built:
+
+- `ppcp_live_session.{h,cpp}` — `session_open` with `tb:host` as `timebase_ref` and BOTH
+  arbitration parameters (5.10e); the sync prober registered **per timebase the host
+  declares** (I21, by walking the declaration rather than by a constant); the two separate
+  pumps of 6.3d (sync schedule, liveness schedule); 7.4c link loss surfaced as a callback;
+  `arm`/`disarm` with MSG 5.2's empty list; and `offsetToRefNs()`, the one scalar
+  `VideoInputPpcp::setTimebaseOffsetNs()` can take, which REFUSES rather than returning zero
+  where there is no direct relation (5.4b, 8.2i1).
+- `ppcp_shot_bridge.{h,cpp}` — the arbitration bridge. Nomination through
+  `ppcp_candidate_make_canonical` (I33, converted once, by the nominator); the host's own
+  Candidates arbitrated on the same terms as a peer's; 8.2d's "too uncertain" as an
+  application policy callback and nowhere else; `capture_request` (8.4); and
+  `linkForeignShot()` — the GCQuad row as a `ShotLink`, `basis: arrival_pairing`,
+  `confirmed_by: observer`, with **no function anywhere on the class that can turn a launch
+  monitor reading into a Candidate** (8.1b, 8.1e).
+- `ppcp_offer_controller.{h,cpp}` — the in-screen offer list as a `QAbstractListModel`:
+  `session_offer` in becomes a row, accepting sends `session_accept` with the digests the
+  ledger holds (9.1a) and the offer's `msg_id` as `reply_to`.
+- `ppcp_annotation_store.{h,cpp}` — H7. Supersession through libppcp (5.18e, including the
+  bytewise author tiebreak); the body persisted RAW to its own file so 5.18a's round trip is
+  byte-identical; placement checked through `ppcp_annotation_validate_placement` before
+  origination (5.18g, 5.18j).
+- `ppcp_host_engine.h` gained `healthReport` (7.4b), `syncTimebase` (6.1b) and an injectable
+  `clock` — the last **only** so `ppcp_sim_clock` can drive §6.3 in a test.
+- `ppcp_import_ledger` gained `heldDigests()` (9.1a).
+
+Tests written, **not yet compiled or run**: `ppcp_live_session_test.cpp`,
+`ppcp_arbitration_test.cpp`, `ppcp_offer_test.cpp`, `ppcp_annotation_test.cpp`, and the
+shared two-peers-in-one-process harness `ppcp_test_peer.h`.
+
+**Next:** add the four targets to `src/Ppcp/tests/CMakeLists.txt`, build, make them green;
+then the QML offer list and the `ShotController` seam (app-side, unverifiable here).
+
+**Blocked / known red:** `ppcp_video_input_test`'s
+`APreviewCaptureAnnouncedPendingIsRefused` broke when libppcp L9 landed —
+`ppcp_peer_capture_announce()` now checks `is_preview` against the Stream the engine
+recorded, so the test's way of producing a non-conformant announce (a device lying about
+`is_preview`) is refused at origination with `PPCP_ERR_INVALID`. That is finding 6 (F-H4-1)
+fixed on the ORIGINATION side; whether the RECEIVE side still has the hole is what the fixed
+test must now establish, and it needs a hand-built frame rather than a conformant peer.
+
+`tools/ppcp-sim` (libppcp L13) does not exist yet, so every row below is evidence from two
+`ppcp_peer`s in one process. The rows that move to real interoperability when it lands are
+CT-I7, CT-I8, CT-I20, CT-I21, CT-I35 and CT-S5.

@@ -166,6 +166,21 @@ public:
     // mid-send must still be owed.
     void clearCommitted(const CaptureKey &k);
 
+    // ── MSG 9.1a — what to tell a device it need not send again ──────────
+    //
+    // `session_accept.have_digests` is what this importer ALREADY HOLDS, and
+    // the payload for such a Capture is not replayed.  Identity here is
+    // `Capture.digest` — a different rule from I34's re-import identity above,
+    // and deliberately so: a digest cannot be the key for an `absent` Capture,
+    // and an `absent` Capture has no payload to skip.  So a record with no
+    // digest contributes nothing here and that is correct, not a gap.
+    //
+    // Bounded by PPCP_MAX_HAVE_DIGESTS at the wire; the caller truncates and
+    // says so, because a silently truncated list makes the device re-send
+    // payloads rather than lose them, which is the safe direction.
+    std::vector<ppcp_digest> heldDigests(const std::string &peerId,
+                                         const std::string &sessionId) const;
+
     // I34, decided by libppcp and not by this class.
     //
     // ⚠ THE RULE IS THE LIBRARY'S AND THE MEMORY IS OURS. `ppcp_capture_index`

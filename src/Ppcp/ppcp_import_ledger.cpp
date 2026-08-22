@@ -343,4 +343,38 @@ bool PpcpImportLedger::save() const
     return f.commit();
 }
 
+std::vector<ppcp_digest> PpcpImportLedger::heldDigests(const std::string &peerId,
+                                                       const std::string &sessionId) const
+{
+    // MSG 9.1a.  A record whose `digestHex` is empty is one whose owner had not
+    // computed a digest — a `complete` + `pending` clip, or an `absent` Capture
+    // that will never have one.  Neither can be named here, and neither is a
+    // defect: the device re-sends the first and the second has no payload.
+    std::vector<ppcp_digest> out;
+    for (const CaptureRecord &r : m_captures) {
+        if (r.key.peerId != peerId || r.key.sessionId != sessionId) continue;
+        if (r.digestHex.size() != PPCP_SHA256_BYTES * 2) continue;
+        std::uint8_t v[PPCP_SHA256_BYTES];
+        bool ok = true;
+        for (std::size_t i = 0; i < PPCP_SHA256_BYTES && ok; ++i) {
+            unsigned byte = 0;
+            for (std::size_t k = 0; k < 2; ++k) {
+                const char c = r.digestHex[i * 2 + k];
+                unsigned d = 0;
+                if (c >= '0' && c <= '9') d = static_cast<unsigned>(c - '0');
+                else if (c >= 'a' && c <= 'f') d = static_cast<unsigned>(c - 'a' + 10);
+                else if (c >= 'A' && c <= 'F') d = static_cast<unsigned>(c - 'A' + 10);
+                else { ok = false; break; }
+                byte = (byte << 4) | d;
+            }
+            v[i] = static_cast<std::uint8_t>(byte);
+        }
+        if (!ok) continue;
+        ppcp_digest d{};
+        if (ppcp_digest_set(&d, v) != PPCP_OK) continue;
+        out.push_back(d);
+    }
+    return out;
+}
+
 }  // namespace Ppcp

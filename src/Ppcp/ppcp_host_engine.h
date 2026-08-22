@@ -37,6 +37,8 @@
 #include <string>
 
 #include <ppcp/model.h>
+#include <ppcp/sync.h>
+#include <ppcp/time.h>
 
 #include "ppcp_engine.h"
 
@@ -58,10 +60,38 @@ struct HostEngineConfig {
     // take them.
     std::function<ppcp_result(ppcp_readiness *)> health;
 
+    // CORE 7.4b / MSG 5.4 — what `heartbeat_ack` carries: thermal, storage,
+    // battery. A SECOND callback and not a field of the first, because L9
+    // separated them for the reason 5.15a separates readiness from a state
+    // name: readiness answers "can I capture the next shot", health answers
+    // "am I degrading". A host that reported one as the other would tell a
+    // device its thermal state when it asked whether the session could run.
+    // May be null, in which case a `heartbeat_ack` carries the minimum.
+    std::function<ppcp_result(ppcp_health *)> healthReport;
+
+    // MSG 6.1b — the timebase this peer stamps `t2`/`t3` on when it ANSWERS a
+    // `sync_probe`. Empty means this host does not answer probes, and one
+    // arriving is answered `error`/`profile_not_supported` rather than with a
+    // fabricated instant. It is `tb:host` here because that is the only clock
+    // this application reads (I1) — see hostClock().
+    std::string syncTimebase;
+
     // ENC 2.1a — only a DIALLER mints a `link_id` and sends `link_bind`. Under
     // PPCP-RV the host is the code publisher and the TLS server, so it listens;
     // a bundle has no dial at all and the flag is moot there.
     bool listener = true;
+
+    // CORE 5.3 / CONF 2a — the clock the engine reads for `sync_probe` and for
+    // nothing else.  `hostClock()` in production, and there is no other value
+    // this application ships with.
+    //
+    // ⚠ IT IS SETTABLE ONLY SO THAT `ppcp_sim_clock` CAN DRIVE IT IN A TEST.
+    // §6.3 measures a relation between two clocks running at different rates,
+    // and a test that had to WAIT for real skew to accumulate would take hours
+    // and still not know the answer.  libppcp ships the simulated clock in the
+    // library rather than in its tests precisely so both applications inject
+    // the same one; `now` being null means hostClock().
+    ppcp_clock clock{};
 };
 
 // Null with `whyNot` set when the engine cannot be built.
