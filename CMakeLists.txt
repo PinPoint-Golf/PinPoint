@@ -1062,7 +1062,15 @@ if(TARGET ppcp)
         src/Ppcp/ppcp_bundle_transport.h   src/Ppcp/ppcp_bundle_transport.cpp
         src/Ppcp/ppcp_import_ledger.h      src/Ppcp/ppcp_import_ledger.cpp
         src/Ppcp/ppcp_import_sink.h        src/Ppcp/ppcp_import_sink.cpp
-        src/Ppcp/ppcp_import_controller.h  src/Ppcp/ppcp_import_controller.cpp)
+        src/Ppcp/ppcp_import_controller.h  src/Ppcp/ppcp_import_controller.cpp
+        # H4 — a connected peer's camera Source behind the camera factory.
+        # In src/Video and not src/Ppcp because it IS a camera backend: it is a
+        # peer of VideoInputAravis and VideoInputApple, not a special case the
+        # consumers know about. No OpenSSL: a Source declared in a bundle is
+        # the same Source, and needing TLS to describe a camera would be this
+        # application inventing a requirement the specification has not.
+        src/Video/VideoInputPpcp.h         src/Video/VideoInputPpcp.cpp
+        src/Video/VideoInputPpcp_inventory.cpp)
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
     # ⚠ THE PPCP_HAVE_PEER GUARD IS GONE, AND ITS ABSENCE IS THE RECORD THAT L6
     # LANDED. It read the header on disk and flipped with no edit here, exactly

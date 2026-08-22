@@ -75,6 +75,36 @@ pp_add_test(ppcp_bundle_import_test
     STD 20
     GTEST)
 
+# ── H4 — a connected peer's camera Source behind the camera factory ─────────
+# CT-S1 on the HOST path (the canonical-instant conversion, applied where the
+# host applies it) and CT-I36a with the host as CONSUMER (preview is live-only).
+#
+# ⚠ NO OpenSSL AND NO TRANSPORT HERE EITHER, AND FOR THE SAME REASON THE BUNDLE
+# SUITE HAS NONE. A Source declared over a socket and a Source declared in a
+# bundle are the same Source; a camera backend that had to link TLS to describe
+# one would have said otherwise at the link line. Two real ppcp_peers in one
+# process, with the bytes moved between them a frame at a time.
+#
+# ⚠ AND NO DeviceEnumerator. VideoInputPpcp_inventory.cpp — the one translation
+# unit that registers a peer's Sources with the app's device registry — is
+# deliberately NOT in this target: device_enumerator.h reaches Bluetooth through
+# imu_base.h, and everything worth asserting about this backend is a pure
+# function of a declaration.
+pp_add_test(ppcp_video_input_test
+    SOURCES ppcp_video_input_test.cpp
+            ${PP_SRC}/Video/VideoInputPpcp.cpp
+            ${PP_SRC}/Video/video_input_base.cpp
+            ${PP_SRC}/Video/raw_video_frame.cpp
+            ${PPCP}/ppcp_host_engine.cpp
+            ${PPCP}/ppcp_ingest_policy.cpp
+            ${PPCP}/ppcp_source_declaration.cpp
+    INCLUDE ${PPCP} ${PP_SRC}/Video
+    LINK    ppcp Qt6::Multimedia
+    DEFINES PP_PPCP_SRC_DIR="${PPCP}"
+    STD 20
+    AUTOMOC
+    GTEST)
+
 # ⚠ EVERYTHING BELOW THIS LINE NEEDS OpenSSL, AND THE DECLARATION SUITE ABOVE
 # DOES NOT.  A box without OpenSSL headers still runs CT-S3 and CT-I19; only the
 # TLS-PSK transport rows go missing, and they say so.

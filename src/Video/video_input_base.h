@@ -80,6 +80,24 @@ public:
     virtual double            lastMeasuredExposureUs() const { return 0.0; } // us; 0 = unknown
     virtual int               lastExposureAutoMode()   const { return -1;  } // -1 unknown, 0 Off, 1 auto
 
+    // Per-frame CAPTURE INSTANT side channel, for the same reason exposure has
+    // one: it is a fact about the frame that cannot travel on the frame. A
+    // local camera has none — its frames are stamped on arrival, which for a
+    // camera on this machine's bus is close enough — and inherits the 0 below.
+    // A backend whose frames carry a time of their own (work package H4: a PPCP
+    // peer, whose Captures arrive with per-frame instants and may cross a slow
+    // link long after they were exposed) overrides this, and a consumer that
+    // ignored it would be stamping network arrival time on a swing.
+    //
+    // Microseconds on the EventBuffer clock (steady_clock), valid immediately
+    // after the frame signal fires and read on the same thread it fired on.
+    // 0 means "this backend has no instant of its own for that frame" — which
+    // is a DIFFERENT answer from "time zero", and is why 0 and not -1: the
+    // buffer's clock is a process-relative monotonic count that is never 0 in
+    // practice, and a backend that cannot map its instant onto it must say so
+    // rather than offer a plausible number.
+    virtual qint64            lastFrameInstantUs()     const { return 0; }
+
     // Prime the backend with a target device ID before start() so that
     // queryCapabilities() can enumerate that device's formats without opening
     // a live camera handle.  Default is a no-op; VideoInput overrides it.

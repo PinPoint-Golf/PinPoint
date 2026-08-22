@@ -594,15 +594,23 @@ void CameraInstance::connectVideoInput()
     // thread. The software crop runs ONCE here, upstream of every consumer
     // (buffer, display, pose throttle), so all downstream sizing — descriptor
     // stamping, replay, tile aspect — follows the cropped frame automatically.
+    VideoInputBase *const input = m_videoInput;   // as hwCrop: per backend instance
     connect(m_videoInput, &VideoInputBase::videoFrameReady,
-            this, [this, hwCrop](const QVideoFrame &frame) {
+            this, [this, hwCrop, input](const QVideoFrame &frame) {
                 m_frameCaptureCount.fetch_add(1, std::memory_order_relaxed);
 
                 // One capture-clock reading for this frame, sampled before any
                 // crop/publish/queue work — shared by the ring entry AND the
                 // pose/ball throttle so both land on the buffer clock at offset
                 // zero (ball samples align with window frame timestamps).
-                const qint64 frameTUs = pinpoint::EventBuffer::nowMicros();
+                //
+                // A backend that knows WHEN the frame was exposed says so, and
+                // is believed (work package H4): arrival time is a good enough
+                // proxy for a camera on this machine's bus and a bad one for a
+                // frame that crossed a link. 0 means the backend has no instant
+                // of its own, which is every local camera.
+                qint64 frameTUs = input->lastFrameInstantUs();
+                if (frameTUs == 0) frameTUs = pinpoint::EventBuffer::nowMicros();
 
                 // Software crop: engages when a crop is configured, the
                 // pipeline is live (not preview-only), and either the backend
@@ -643,12 +651,13 @@ void CameraInstance::connectVideoInput()
     // Raw Bayer display path — used by Spinnaker (and future Bayer backends).
     // Replaces the QVideoFrame path for cameras that emit rawVideoFrameReady.
     connect(m_videoInput, &VideoInputBase::rawVideoFrameReady,
-            this, [this, hwCrop](const RawVideoFrame &frame) {
+            this, [this, hwCrop, input](const RawVideoFrame &frame) {
                 m_frameCaptureCount.fetch_add(1, std::memory_order_relaxed);
 
                 // One capture-clock reading for this frame — see the QVideoFrame
-                // path above.
-                const qint64 frameTUs = pinpoint::EventBuffer::nowMicros();
+                // path above, including why a backend's own instant wins.
+                qint64 frameTUs = input->lastFrameInstantUs();
+                if (frameTUs == 0) frameTUs = pinpoint::EventBuffer::nowMicros();
 
                 // Software crop fallback — same rule as the QVideoFrame path.
                 RawVideoFrame f = frame;

@@ -33,7 +33,11 @@ public:
         QtMultimedia,
         AppleAVFoundation,
         Aravis,
-        Spinnaker
+        Spinnaker,
+        // A camera Source on the far side of a PPCP link (work package H4).
+        // Never chosen by Auto: a peer's camera is not a fallback for a local
+        // one, it appears only when a capture peer connects and declares.
+        Ppcp
     };
     Q_ENUM(Backend)
 
@@ -53,4 +57,13 @@ public:
     // Discovers all cameras across all backends and registers them with
     // DeviceEnumerator. Safe to call multiple times (duplicates are suppressed).
     static void enumerateDevices();
+
+#ifdef HAVE_PPCP
+    // PPCP cameras are NOT discoverable by scanning, which is why they are not
+    // in enumerateDevices(): there is no bus to walk and no device to open. A
+    // capture peer connects, sends `declare` (MSG 3.3), and its camera Sources
+    // become cameras at that moment — and stop being them when the link drops.
+    // Returns the number of camera Sources registered.
+    static int registerPpcpPeer(const struct ppcp_peer_desc *peer);
+#endif
 };

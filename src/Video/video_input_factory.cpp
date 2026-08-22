@@ -36,6 +36,10 @@
 #include "spinnaker_runtime.h"
 #endif
 
+#ifdef HAVE_PPCP
+#include "VideoInputPpcp.h"
+#endif
+
 #ifdef HAVE_ARAVIS
 #include "VideoInputAravis.h"
 // Include Aravis headers last to avoid 'signals' conflict
@@ -362,6 +366,15 @@ VideoInputBase* VideoInputFactory::create(Backend backend, QObject *parent)
             ppWarn() << "[VideoInputFactory] Spinnaker backend requested but SDK not found; falling back to Qt Multimedia.";
             return new VideoInput(parent);
 #endif
+#ifdef HAVE_PPCP
+        // ⚠ NO FALLBACK HERE, DELIBERATELY. Every other backend falls back to
+        // Qt Multimedia when its SDK is missing, because they are all ways of
+        // reaching a camera plugged into THIS machine. A PPCP camera is a
+        // camera on another device; substituting a local one would hand the
+        // caller a different camera under the same id.
+        case Backend::Ppcp:
+            return new VideoInputPpcp(parent);
+#endif
         default:
             ppWarn() << "[VideoInputFactory] Requested backend not available on this platform; falling back to Qt Multimedia.";
             return new VideoInput(parent);
@@ -371,6 +384,9 @@ VideoInputBase* VideoInputFactory::create(Backend backend, QObject *parent)
 VideoInputFactory::Backend VideoInputFactory::backendType(VideoInputBase *input)
 {
     if (!input) return Backend::QtMultimedia;
+#ifdef HAVE_PPCP
+    if (dynamic_cast<VideoInputPpcp*>(input)) return Backend::Ppcp;
+#endif
 #ifdef HAVE_SPINNAKER
     if (dynamic_cast<VideoInputSpinnaker*>(input)) return Backend::Spinnaker;
 #endif
@@ -387,6 +403,11 @@ QList<VideoInputFactory::Backend> VideoInputFactory::availableBackends()
 {
     QList<Backend> list;
     list << Backend::QtMultimedia;
+#ifdef HAVE_PPCP
+    // Always available where the library is linked: whether a PPCP camera
+    // EXISTS is a question about who is connected, not about this build.
+    list << Backend::Ppcp;
+#endif
 #ifdef Q_OS_MACOS
     list << Backend::AppleAVFoundation;
 #endif
@@ -399,3 +420,14 @@ QList<VideoInputFactory::Backend> VideoInputFactory::availableBackends()
 #endif
     return list;
 }
+
+#ifdef HAVE_PPCP
+int VideoInputFactory::registerPpcpPeer(const struct ppcp_peer_desc *peer)
+{
+    // One line, and it is a forward: VideoInputPpcp_inventory.cpp is the only
+    // translation unit in src/Video that touches DeviceEnumerator on the PPCP
+    // path, so that the capability mapping itself stays a pure function of a
+    // declaration and testable with no registry in the link.
+    return VideoInputPpcp::registerSources(peer);
+}
+#endif
