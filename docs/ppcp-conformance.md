@@ -7,7 +7,7 @@
 | Implementation | PinPointStudio, `role: host` |
 | Against | `PPCP-CORE` revision 9, `PPCP-MSG`, `PPCP-ENC`, `PPCP-CONF` 1.0; `PPCP-RV` revision 8 |
 | Companion | [`libppcp/docs/conformance/matrix.md`](../../libppcp/docs/conformance/matrix.md) — the programme-wide record this file feeds |
-| Status | **In progress.** Session S1 of the implementation programme: work packages H0 and H1 |
+| Status | **In progress.** Sessions S1–S2: work packages H0, H1, H2 and H3 |
 | Date | 22 August 2026 |
 
 ---
@@ -50,12 +50,18 @@ Nothing in `src/Ppcp/` carries a protocol constant. The only numbers in the tran
 Everything below runs on loopback with no device, no pairing code and no network:
 
 ```
-cmake -S src/Ppcp/tests -B build/ppcp-tests
-cmake --build build/ppcp-tests -j
+cmake -S src/Ppcp/tests -B build/ppcp-tests -G Ninja
+cmake --build build/ppcp-tests -j3
 ctest --test-dir build/ppcp-tests --output-on-failure
 ```
 
-Requires OpenSSL ≥ 1.1.1 development headers (`brew install openssl@3`, `apt install libssl-dev`, or `vcpkg install openssl`). The suite is Qt-free and app-free by design so that `ppcp-conform` (L14) can drive the same code headless in H8.
+⚠ **`ppcp_bundle_import_test` deliberately links neither OpenSSL nor the socket
+transport.** Plan A10 claims a bundle is a *file transport for the same engine*;
+a suite that had to link the TLS layer to read a file would have disproved that
+at the link line. Its target sits above the `pp_find_openssl()` gate for the
+same reason — the bundle rows must run on a box with no TLS at all.
+
+The rest requires OpenSSL ≥ 1.1.1 development headers (`brew install openssl@3`, `apt install libssl-dev`, or `vcpkg install openssl`). The suite is Qt-free and app-free by design so that `ppcp-conform` (L14) can drive the same code headless in H8.
 
 The same suite runs clean under AddressSanitizer and UndefinedBehaviorSanitizer, which matters more here than in most of this repository: the transport owns raw sockets, OpenSSL objects with callback-transferred ownership, and two threads.
 
@@ -104,7 +110,31 @@ The **static half** — the vectors reproducing byte-for-byte, and the identity 
 
 ## 5. Core, encoding and message tests
 
-Not yet claimed. `CT-*` rows open at H2 and later; this file gains them as the packages land, together with the `ppcp-conform` invocation of H8 that produces them from a command rather than by hand.
+Row format is that of [`matrix.md` §1](../../libppcp/docs/conformance/matrix.md). Only the **PinPointStudio** column is claimed here.
+
+| Test | Invariant | Method | Work packages | PinPointStudio | Command |
+|---|---|---|---|---|---|
+| CT-I12 | I12 | fixture | H3 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_bundle_import_test` |
+| CT-I14 | I14 | static | H2 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_host_peer_test` |
+| CT-I15 | I15 | fixture | H3 | `impl` | `ctest --test-dir build/ppcp-tests -R ppcp_bundle_import_test` |
+| CT-I16 | I16 | paired | H3 | `impl` | `ctest --test-dir build/ppcp-tests -R ppcp_bundle_import_test` |
+| CT-I19 | I19 | static | H2 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_source_declaration_test` |
+| CT-I34 | I34 | fixture | H3 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_bundle_import_test` |
+| CT-S3 | — | static | H2 | `pass` | `ctest --test-dir build/ppcp-tests -R ppcp_source_declaration_test` |
+
+**CT-I12** — `AnySubsetOfStreamsLoadsIncludingNone`. A video-only bundle, an IMU-only bundle and a Session with no Streams at all each load, produce a Session record, and yield the Captures the bundle announced. The bundles are written through `ppcp_bundle_writer`, not by hand.
+
+**CT-I34** — `ASecondImportOfTheSameBundleAddsNothing` and `TheSameCaptureIdUnderAnotherPeerIsAnotherCapture`. The identity decision is `ppcp_capture_index` in `libppcp`, seeded from this host's ledger, so both applications run one rule. The two Captures that break a digest-keyed importer are in the fixture: a `complete` + `pending` clip with no digest yet, and an `absent` one that will never have one. A second import reports both as already held and the ledger does not grow.
+
+**CT-I15 is `impl`, not `pass`.** Both halves are asserted — a bundle carrying a wall-clock `discontinuity` imports identically to one without it (`AWallClockStepChangesNothingAboutWhatIsImported`), and the ingest path contains no reference to `wall_utc` or `.epoch` for it to have computed from (`TheIngestPathNeverReadsTheWallClock`). What is missing is the positive half of the row's intent: this host does not yet COMPUTE an interval from an imported Session at all, so "no interval is computed from `wall`" is currently true for the uninteresting reason. It moves when H7 puts imported Captures on a timeline.
+
+**CT-I16 is `impl`, not `pass`.** The half that is reachable is asserted: a second `session_open` naming a different `timebase_ref` does not move the Session's (`ImportingCannotMoveASessionsTimebaseRef`, MSG 4.1a). The other half — a re-solved clock mapping appearing as a NEW `TimebaseRelation` **from** the unchanged `timebase_ref` — needs relations, which is `libppcp` L9, and is not claimed.
+
+### What H3 landed, and what it deliberately did not
+
+The bundle path is a **file transport**, not an importer (plan A10, `CORE` §9, `ENC` §7): `ppcp_bundle_reader` streams the frames into `ppcp_peer_feed()`, the same function the socket drives, and the peer is built by `makeHostEngine()` — the one factory both transports use. There is no message-type branch anywhere in `src/Ppcp/ppcp_bundle_transport.cpp`.
+
+What it does **not** do is write the imported Session into the swing library as a `swing.json` beside the live captures. It cannot yet: this application's `Session.id` is a filesystem directory path and its `Shot.id` an `int` ordinal, and `CORE` 8.5c keys idempotent re-import on **opaque** ids. Clips and the ledger therefore land under `<library>/PPCP Imports/<peer>/<session>/` with their real PPCP identities, and the join waits for host work item 2. Doing it early would either duplicate a Session on the second import or throw the PPCP identity away — and I34 is precisely the invariant that would be lost.
 
 ---
 
@@ -116,3 +146,6 @@ Recorded here because they were found while building this, and dispositioned in 
 |---|---|---|
 | 1 | `CORE` §3, `ENC` §2 | With one channel per TCP connection (plan A6), nothing says **how a listener associates the connections of one peer**, nor which of them is channel 0. Two implementations will resolve it two ways and never meet. This repository groups by the pairing the PSK identity resolved to (RV 5.3b) and orders by serialising the dialler's handshakes, which needs no bytes on the wire — but it is a local convention where a clause is wanted. |
 | 2 | `RV` 5.3f | *"A peer MUST NOT transcode, validate as text, or truncate an identity"* is **not achievable on the TLS 1.2 path through OpenSSL**: both its PSK callbacks pass the identity as `char *` and take its length with `strlen`. The 16 CSPRNG bytes of 5.3a carry an embedded `0x00` about one connection in sixteen, and that connection fails — intermittently, which is the worst shape available. 5.4b1 makes TLS 1.2 the *ordinary* path, not an edge case. Either 5.3a excludes `0x00` from `rn2`, or 5.3f acknowledges the limit. Characterised by a test (`IdentityWithAnEmbeddedNulCannotSurviveTheTls12Path`) rather than worked around: truncating on purpose would be the transcoding the clause forbids. |
+| 3 | `ENC` §6, `CORE` 5.7 | **A payload has no declared container.** `payload_begin` carries `bytes`, a `digest` and `chunk_bytes`, and nothing that says what the bytes ARE. `CaptureProfile.format.codec` exists but is a *codec* (`hevc`), not a container (`mp4`), and it reaches a receiver three hops away — Source → CaptureProfile → Stream → Capture. A consumer that writes an imported clip to a file must therefore guess its extension, which this host does from the Stream `kind` (`ppcp_import_sink.cpp`, `extensionFor`). Either `payload_begin` gains an optional media type, or `ENC` §6 says out loud that the container is out of band. |
+| 4 | `ENC` §7, `MSG` 3.3c | **Nothing requires a bundle to carry a `declare`**, yet `CORE` 8.5c scopes Capture identity by the **minting peer**, and the only place a bundle states who that is is a `declare` (or a `session_joined` nobody records offline). `MSG` 3.3c rescues the ordinary case — a peer declares before originating anything referencing a Source — but it is an inference across two documents, and a bundle of pure `capture_announce` frames is unattributable and therefore un-deduplicable. `ENC` §7 should require `declare` before any Capture-bearing frame, in the same breath as 7c's manifest rule. This host counts what it cannot attribute (`Stats::capturesUnattributable`) rather than guessing a scope. |
+| 5 | `libppcp` API (not the specification) | **`ppcp_peer_feed()` gained `out_consumed`; `ppcp_peer_drain()` has no counterpart.** Inbound, the engine takes whole frames and hands the tail back, which is right and is why the pump now keeps one. Outbound, `drain` dequeues whole frames and the embedding is expected to have written all of them — so a short socket write (`CORE` T2 backpressure, which is ordinary on a bulk channel) loses bytes the engine considers sent. `PpcpHostPeer::pump()` counts the occasions rather than pretending; the fix is a `drain` that can be told how much was taken, or a peek/commit pair. |

@@ -28,17 +28,19 @@
 // clock (`tb:host`), the acceptance decision, the health readings, and the loop
 // that moves bytes between the two.
 //
-// ⚠ DEFERRAL, RECORDED HONESTLY.  `ppcp_peer` is work package L6 and had not
-// landed when this file was written: `include/ppcp/peer.h` was still a
-// placeholder and every ppcp_peer_* symbol was a declaration in planned.h with
-// no definition in libppcp.a.  Rather than fake an engine, the binding to it is
-// behind PPCP_HAVE_PEER (set by CMake when the real header appears) and
-// everything on THIS side of the boundary — the pump, the policy, the clock,
-// the health callbacks — is real, built and tested against a sink interface.
-// The day L6 lands, LibppcpEngine below is the only thing that has to compile.
+// ⚠ THE DEFERRAL IS OVER, AND WHAT IT COST IS WORTH RECORDING.  When this file
+// was written `ppcp_peer` was work package L6, `include/ppcp/peer.h` was a
+// placeholder, and the binding sat behind PPCP_HAVE_PEER so that everything on
+// THIS side of the boundary — the pump, the policy, the clock, the health
+// callbacks — was real and tested against a sink interface rather than faked.
+// L6 has now landed and the binding compiles.  It cost two changes and no
+// rewrites: ppcp_peer_feed() gained an `out_consumed` (so the pump keeps the
+// tail of a partial frame, which is m_tails below), and the ingest callback
+// gained an `out_reason`.  Everything else stood.
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,32 +48,12 @@
 #include <ppcp/model.h>
 #include <ppcp/time.h>
 
+#include "ppcp_engine.h"
 #include "ppcp_ingest_policy.h"
 #include "ppcp_source_declaration.h"
 #include "ppcp_transport.h"
 
 namespace Ppcp {
-
-// What the pump moves bytes into and out of.
-//
-// In production this is `ppcp_peer` and nothing else. It is an interface
-// because the pump is THIS APPLICATION'S code — the part ground rule 7 says the
-// embedding owes the library — and it has to be testable without a socket at
-// one end and without L6 at the other.
-class PpcpEngine {
-public:
-    virtual ~PpcpEngine() = default;
-
-    // Bytes in, on the channel they arrived on. ENC 2c's header-matches-stream
-    // check is the engine's, which is why the channel travels with the bytes.
-    virtual ppcp_result feed(std::uint8_t channel, const std::uint8_t *bytes,
-                             std::size_t len) = 0;
-
-    // Bytes out, per channel. PPCP_ERR_NOT_FOUND (or *out_len == 0) means the
-    // engine has nothing to send on that channel right now.
-    virtual ppcp_result drain(std::uint8_t channel, std::uint8_t *out, std::size_t cap,
-                              std::size_t *out_len) = 0;
-};
 
 class PpcpHostPeer {
 public:
@@ -148,9 +130,9 @@ public:
 
     const PumpStats &stats() const { return m_stats; }
 
-    // Builds the engine over libppcp. Null until L6 lands — see the deferral
-    // note at the top of this header — and the caller is told which symbol is
-    // missing rather than getting a stub that lies.
+    // Builds the engine over libppcp — through ppcp_host_engine.h, which is the
+    // ONE place that says what a PinPointStudio peer is, so the bundle
+    // transport of H3 gets the identical engine without going near a socket.
     std::unique_ptr<PpcpEngine> makeLibppcpEngine(std::string *whyNot = nullptr);
 
 private:
@@ -163,6 +145,11 @@ private:
     PpcpEngine            *m_engine = nullptr;
     PumpStats              m_stats;
     std::vector<std::uint8_t> m_scratch;
+    // The unconsumed tail of each channel's stream. L6's ppcp_peer_feed()
+    // consumes whole frames and hands the remainder back, so somebody has to
+    // hold a partial frame between two socket reads; ground rule 7 says it is
+    // this side of the boundary.
+    std::map<std::uint8_t, std::vector<std::uint8_t>> m_tails;
 };
 
 }  // namespace Ppcp

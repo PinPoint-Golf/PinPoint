@@ -195,6 +195,7 @@ set(PP_QML_FILES
     src/Gui/session/PpMarkupPanel.qml
     src/Gui/shell/PpAboutDialog.qml
     src/Gui/shell/MacAboutMenu.qml
+    src/Gui/session/PpcpImportAction.qml
 )
 
 # The C++ types the module registers (QML_ELEMENT). Headers are listed alongside their .cpp

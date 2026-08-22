@@ -20,9 +20,7 @@
 
 #include <cstring>
 
-#if defined(PPCP_HAVE_PEER)
-#  include <ppcp/peer.h>
-#endif
+#include "ppcp_host_engine.h"
 
 namespace Ppcp {
 namespace {
@@ -133,16 +131,40 @@ bool PpcpHostPeer::pump()
         // WouldBlock, which is not an error and not a reason to stop looking at
         // the others: ENC 2d makes cross-channel arrival order explicitly
         // unordered, so a control frame must not wait on a bulk read.
+        //
+        // ⚠ THE TAIL IS OURS TO KEEP (L6). ppcp_peer_feed() consumes WHOLE
+        // frames and reports how many bytes it took; a socket read ends
+        // wherever the network felt like ending it, so the remainder is a
+        // partial frame that must be re-presented with the next read behind
+        // it. The engine deliberately buffers nothing (peer.h: nine megabytes
+        // per link for a caller that already has the bytes), which makes this
+        // buffer the embedding's obligation under ground rule 7 and not an
+        // optimisation.
+        std::vector<std::uint8_t> &tail = m_tails[chNo];
         for (;;) {
             std::size_t got = 0;
-            const IoStatus st = tc->read(m_scratch.data(), m_scratch.size(), got);
+            const std::size_t keep = tail.size();
+            if (keep >= m_scratch.size()) {
+                // A frame larger than the whole working buffer. ENC §8's limits
+                // are 1 MiB control / 8 MiB bulk, so grow rather than refuse:
+                // refusing here would be this repository inventing a limit the
+                // specification does not have (I14's discipline, applied to
+                // sizes).
+                m_scratch.resize(keep + kPumpBuffer);
+            }
+            std::memcpy(m_scratch.data(), tail.data(), keep);
+            const IoStatus st = tc->read(m_scratch.data() + keep, m_scratch.size() - keep, got);
             if (st == IoStatus::Ok && got > 0) {
                 m_stats.bytesIn += got;
                 // The engine gets the channel with the bytes because ENC 2c's
                 // "the channel in the header matches the stream it arrived on"
                 // is the engine's check to make, not ours — we are the only
                 // thing that knows which stream this was.
-                const ppcp_result r = m_engine->feed(chNo, m_scratch.data(), got);
+                std::size_t consumed = 0;
+                const ppcp_result r =
+                    m_engine->feed(chNo, m_scratch.data(), keep + got, &consumed);
+                tail.assign(m_scratch.begin() + static_cast<std::ptrdiff_t>(consumed),
+                            m_scratch.begin() + static_cast<std::ptrdiff_t>(keep + got));
                 if (r == PPCP_ERR_FATAL_LIMIT || r == PPCP_ERR_MALFORMED) {
                     // ENC 8a — a length beyond the channel limit means the
                     // stream has desynchronised and cannot be resynchronised.
@@ -151,7 +173,7 @@ bool PpcpHostPeer::pump()
                     m_stats.closed = true;
                     return false;
                 }
-                if (got < m_scratch.size()) break;
+                if (keep + got < m_scratch.size()) break;
                 continue;   // the buffer filled; there may be more waiting
             }
             if (st == IoStatus::WouldBlock) break;
@@ -180,11 +202,15 @@ bool PpcpHostPeer::pump()
                 // OTHER channels are untouched, which is the entire reason
                 // there are two of them (CORE §3.1).
                 //
-                // ⚠ The undrained tail is a real gap: the engine handed us
-                // bytes it now considers sent. It is closed when L6 lands and
-                // the drain call can be told how much was actually taken —
-                // reported to the orchestrator as a required shape for
-                // ppcp_peer_drain.
+                // ⚠ STILL A REAL GAP, AND L6 DID NOT CLOSE IT. The engine
+                // handed us bytes it now considers sent, and a short write
+                // loses them. ppcp_peer_feed() gained an `out_consumed` for
+                // exactly this problem in the inbound direction;
+                // ppcp_peer_drain() has no matching "I only took N" and
+                // dequeues whole frames on the way out. Reported to the
+                // orchestrator as the remaining asymmetry; until it is
+                // answered, the pump must not offer a channel more than its
+                // socket will take, and it counts the times it did.
                 ++m_stats.wouldBlockOnWrite;
                 break;
             }
@@ -201,115 +227,22 @@ bool PpcpHostPeer::pump()
 }
 
 // ── The binding to libppcp's engine (L6) ────────────────────────────────────
-
-#if defined(PPCP_HAVE_PEER)
-
-namespace {
-
-// The one thing on this side of the boundary that is libppcp's shape rather
-// than ours. Everything above is the embedding's obligation under ground rule 7
-// and is built and tested whether or not L6 exists.
-class LibppcpEngine final : public PpcpEngine {
-public:
-    static std::unique_ptr<LibppcpEngine> make(const PpcpHostPeer::Config &cfg,
-                                               const PpcpIngestPolicy *policy,
-                                               std::string *whyNot)
-    {
-        auto e = std::unique_ptr<LibppcpEngine>(new LibppcpEngine());
-        e->m_policy = policy;
-        e->m_storage.resize(ppcp_peer_sizeof());
-
-        ppcp_peer_config pc{};
-        pc.role = PPCP_ROLE_HOST;
-        pc.clock = hostClock();
-        pc.peer_id = cfg.peerId.c_str();
-
-        // The Studio profile set, as the claim file states it (plan §2).
-        e->m_profileNames = PpcpSourceDeclaration::studioProfiles();
-        e->m_profilePtrs.reserve(e->m_profileNames.size());
-        for (const std::string &s : e->m_profileNames) e->m_profilePtrs.push_back(s.c_str());
-        pc.profiles = e->m_profilePtrs.data();
-        pc.profile_count = e->m_profilePtrs.size();
-
-        // ⚠ I14 / CT-I14 — A CALLBACK, NEVER A NUMBER. The 120 fps floor is in
-        // ppcp_ingest_policy.h, in this repository, and libppcp never sees it.
-        pc.ingest_policy = &LibppcpEngine::ingestTrampoline;
-        pc.health = &LibppcpEngine::healthTrampoline;
-        pc.ctx = e.get();
-
-        ppcp_peer *p = nullptr;
-        const ppcp_result r =
-            ppcp_peer_new(e->m_storage.data(), e->m_storage.size(), &pc, &p);
-        if (r != PPCP_OK || !p) {
-            if (whyNot) *whyNot = std::string("ppcp_peer_new: ") + ppcp_result_str(r);
-            return nullptr;
-        }
-        e->m_peer = p;
-        return e;
-    }
-
-    ~LibppcpEngine() override { if (m_peer) ppcp_peer_free(m_peer); }
-
-    ppcp_result feed(std::uint8_t channel, const std::uint8_t *b, std::size_t n) override
-    {
-        return ppcp_peer_feed(m_peer, channel, b, n);
-    }
-    ppcp_result drain(std::uint8_t channel, std::uint8_t *out, std::size_t cap,
-                      std::size_t *len) override
-    {
-        return ppcp_peer_drain(m_peer, channel, out, cap, len);
-    }
-
-    ppcp_peer *raw() const { return m_peer; }
-
-private:
-    LibppcpEngine() = default;
-
-    static bool ingestTrampoline(void *ctx, const ppcp_peer_desc *counterpart)
-    {
-        LibppcpEngine *self = static_cast<LibppcpEngine *>(ctx);
-        if (!self || !self->m_policy || !counterpart) return false;
-        return self->m_policy->evaluate(*counterpart).accepted;
-    }
-    static ppcp_result healthTrampoline(void *ctx, ppcp_readiness *out)
-    {
-        LibppcpEngine *self = static_cast<LibppcpEngine *>(ctx);
-        if (!self || !self->m_host) return PPCP_ERR_INVALID;
-        return self->m_host->readiness(out);
-    }
-
-    ppcp_peer                *m_peer = nullptr;
-    const PpcpIngestPolicy   *m_policy = nullptr;
-    const PpcpHostPeer       *m_host = nullptr;
-    std::vector<std::uint8_t> m_storage;
-    std::vector<std::string>  m_profileNames;
-    std::vector<const char *> m_profilePtrs;
-};
-
-}  // namespace
+//
+// ⚠ IT MOVED, AND THE MOVE IS THE POINT. Building the peer used to live here,
+// beside the socket pump, which made the bundle path of H3 either a second
+// construction of the same engine or a dependency on OpenSSL to read a file.
+// ppcp_host_engine.cpp is now the one place that says what a PinPointStudio
+// peer is, and both transports ask it — which is what makes "the same ingest
+// path" a fact about the code rather than a claim in a comment.
 
 std::unique_ptr<PpcpEngine> PpcpHostPeer::makeLibppcpEngine(std::string *whyNot)
 {
-    return LibppcpEngine::make(m_cfg, &m_policy, whyNot);
+    HostEngineConfig cfg;
+    cfg.peerId = m_cfg.peerId;
+    cfg.policy = &m_policy;
+    cfg.health = [this](ppcp_readiness *out) { return this->readiness(out); };
+    cfg.listener = true;
+    return makeHostEngine(std::move(cfg), whyNot);
 }
-
-#else
-
-std::unique_ptr<PpcpEngine> PpcpHostPeer::makeLibppcpEngine(std::string *whyNot)
-{
-    // ⚠ NOT A STUB, AND DELIBERATELY NOT ONE.  planned.h says why: an
-    // application that CALLS an unimplemented symbol should fail at BUILD time
-    // with an undefined symbol naming the function, "which is a better
-    // diagnostic than a stub returning PPCP_ERR_UNIMPLEMENTED at runtime".  So
-    // this returns null and names the package, and nothing in this repository
-    // pretends to be an engine in the meantime.
-    if (whyNot)
-        *whyNot = "libppcp work package L6 has not landed: <ppcp/peer.h> is a placeholder "
-                  "and ppcp_peer_new / ppcp_peer_feed / ppcp_peer_drain / "
-                  "ppcp_peer_declare have no definition in libppcp.a";
-    return nullptr;
-}
-
-#endif
 
 }  // namespace Ppcp

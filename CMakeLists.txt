@@ -1047,10 +1047,28 @@ if(TARGET ppcp)
     # It is therefore built whenever libppcp is embedded, even on a box with no
     # TLS, because CT-S3 and CT-I19 are about what the host SAYS about itself.
     target_sources(PinPointStudio PRIVATE
+        src/Ppcp/ppcp_engine.h
         src/Ppcp/ppcp_source_declaration.h
         src/Ppcp/ppcp_source_declaration.cpp
-        src/Ppcp/ppcp_host_inventory.cpp)
+        src/Ppcp/ppcp_host_inventory.cpp
+        # The engine, built in ONE place so the socket path and the bundle path
+        # get the identical peer (plan A10). Deliberately outside the OpenSSL
+        # block below: a file is not a socket, and needing TLS to read one would
+        # be this application inventing a requirement the specification has not.
+        src/Ppcp/ppcp_host_engine.h        src/Ppcp/ppcp_host_engine.cpp
+        # H3 — the bundle path. No OpenSSL and no socket: plan A10 says a file
+        # transport feeds the SAME ingest path a socket does, and one that had
+        # to link TLS to reach the sink would not be the same path.
+        src/Ppcp/ppcp_bundle_transport.h   src/Ppcp/ppcp_bundle_transport.cpp
+        src/Ppcp/ppcp_import_ledger.h      src/Ppcp/ppcp_import_ledger.cpp
+        src/Ppcp/ppcp_import_sink.h        src/Ppcp/ppcp_import_sink.cpp
+        src/Ppcp/ppcp_import_controller.h  src/Ppcp/ppcp_import_controller.cpp)
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
+    # ⚠ THE PPCP_HAVE_PEER GUARD IS GONE, AND ITS ABSENCE IS THE RECORD THAT L6
+    # LANDED. It read the header on disk and flipped with no edit here, exactly
+    # as planned.h asks — "an undefined symbol at link time naming the function,
+    # never a stub". <ppcp/peer.h> is now real, so the guard would only be a way
+    # for a stale checkout to fail late instead of at the #include.
 endif()
 # No include directory needed — libwrist's include/ is PUBLIC on the target,
 # so <wrist/wrist.h> resolves through the link. HAVE_WRIST means
@@ -3041,21 +3059,6 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
         src/Ppcp/ppcp_ingest_policy.h src/Ppcp/ppcp_ingest_policy.cpp
         src/Ppcp/ppcp_host_peer.h     src/Ppcp/ppcp_host_peer.cpp)
 
-    # Team L runs one session ahead of this repository (plan §7), so the peer
-    # engine may or may not be in the checkout we build with. planned.h says
-    # the right answer for a symbol that has not landed is an UNDEFINED SYMBOL
-    # AT LINK TIME naming the function, never a stub — so the guard is read off
-    # the header on disk and flips with no edit here the day L6 lands.
-    set(PP_PPCP_HAVE_PEER OFF)
-    if(EXISTS "${ppcp_SOURCE_DIR}/include/ppcp/peer.h")
-        file(STRINGS "${ppcp_SOURCE_DIR}/include/ppcp/peer.h" _peer_hit REGEX "ppcp_peer_new")
-        if(_peer_hit)
-            set(PP_PPCP_HAVE_PEER ON)
-            target_compile_definitions(PinPointStudio PRIVATE PPCP_HAVE_PEER)
-        endif()
-        unset(_peer_hit)
-    endif()
-    message(STATUS "PPCP host peer: libppcp L6 peer engine ${PP_PPCP_HAVE_PEER}")
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
     target_link_libraries(PinPointStudio PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP_TRANSPORT)

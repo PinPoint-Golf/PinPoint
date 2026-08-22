@@ -104,9 +104,15 @@ public:
     std::vector<std::pair<std::uint8_t, std::vector<std::uint8_t>>> fed;
     std::vector<std::pair<std::uint8_t, std::vector<std::uint8_t>>> toSend;
 
-    ppcp_result feed(std::uint8_t channel, const std::uint8_t *b, std::size_t n) override
+    // L6 gave feed() an `out_consumed`: the engine takes whole frames and the
+    // embedding keeps the tail. This one takes everything, which is what a sink
+    // that is not parsing frames must say — claiming less would leave the pump
+    // re-presenting bytes for ever.
+    ppcp_result feed(std::uint8_t channel, const std::uint8_t *b, std::size_t n,
+                     std::size_t *consumed) override
     {
         fed.emplace_back(channel, std::vector<std::uint8_t>(b, b + n));
+        if (consumed) *consumed = n;
         return PPCP_OK;
     }
     ppcp_result drain(std::uint8_t channel, std::uint8_t *out, std::size_t cap,
@@ -286,15 +292,13 @@ TEST(PpcpHostPeerPump, BytesGoBothWaysOnTheChannelTheyBelongTo)
     EXPECT_EQ(host.stats().bytesOut, 0u);
 }
 
-// ── L6 is not here, and this says so out loud ─────────────────────────────
-// planned.h: an application that CALLS an unimplemented symbol should fail at
-// BUILD time naming the function, "which is a better diagnostic than a stub
-// returning PPCP_ERR_UNIMPLEMENTED at runtime". So the adapter returns null and
-// names the package rather than shipping something that behaves like an engine.
-//
-// ⚠ WHEN L6 LANDS, THIS TEST INVERTS. That is deliberate: a red test is how the
-// deferral gets noticed rather than quietly becoming permanent.
-TEST(PpcpHostPeer, TheEngineBindingIsDeferredAndSaysWhichSymbolIsMissing)
+// ── L6 IS here now, and this is the test that said it would invert ────────
+// It was written while <ppcp/peer.h> was a placeholder, asserting that the
+// adapter returned null and NAMED the missing package rather than shipping
+// something that behaved like an engine. L6 landed; the same test now asserts
+// an engine is built. A red test is how a deferral gets noticed rather than
+// quietly becoming permanent, and this one did its job.
+TEST(PpcpHostPeer, TheEngineBindingIsRealNowThatL6HasLanded)
 {
     PpcpHostPeer::Config cfg;
     cfg.peerId = "host-1";

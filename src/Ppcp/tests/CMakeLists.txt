@@ -53,6 +53,28 @@ pp_ppcp_landed(bundle.h ppcp_bundle_reader_new  PP_PPCP_HAVE_BUNDLE)
 message(STATUS "PinPointTests: libppcp L6 peer engine ${PP_PPCP_HAVE_PEER}, "
                "L8 bundle reader ${PP_PPCP_HAVE_BUNDLE}")
 
+# ── H3 — bundle import as a file transport ──────────────────────────────────
+# CT-I12, CT-I15, CT-I16 and CT-I34, the host column.
+#
+# ⚠ NO OpenSSL AND NO TRANSPORT IN THIS TARGET, AND THAT IS AN ASSERTION. Plan
+# A10 says a bundle is a FILE TRANSPORT for the same engine; a suite that had to
+# link the TLS socket layer to read a file would have disproved it at the link
+# line. It is above the pp_find_openssl() gate for the same reason — this row
+# must run on a box with no TLS at all.
+pp_add_test(ppcp_bundle_import_test
+    SOURCES ppcp_bundle_import_test.cpp
+            ${PPCP}/ppcp_bundle_transport.cpp
+            ${PPCP}/ppcp_import_ledger.cpp
+            ${PPCP}/ppcp_import_sink.cpp
+            ${PPCP}/ppcp_host_engine.cpp
+            ${PPCP}/ppcp_ingest_policy.cpp
+            ${PPCP}/ppcp_source_declaration.cpp
+    INCLUDE ${PPCP}
+    LINK    ppcp Qt6::Multimedia
+    DEFINES PP_PPCP_SRC_DIR="${PPCP}"
+    STD 20
+    GTEST)
+
 # ⚠ EVERYTHING BELOW THIS LINE NEEDS OpenSSL, AND THE DECLARATION SUITE ABOVE
 # DOES NOT.  A box without OpenSSL headers still runs CT-S3 and CT-I19; only the
 # TLS-PSK transport rows go missing, and they say so.
@@ -104,6 +126,7 @@ endif()
 pp_add_test(ppcp_host_peer_test
     SOURCES ppcp_host_peer_test.cpp
             ${PPCP}/ppcp_host_peer.cpp
+            ${PPCP}/ppcp_host_engine.cpp
             ${PPCP}/ppcp_ingest_policy.cpp
             ${PPCP}/ppcp_source_declaration.cpp
             ${PPCP}/ppcp_transport.cpp

@@ -20,6 +20,10 @@
 #include <QFontDatabase>
 #include <QIcon>
 #include <QQmlApplicationEngine>
+
+#ifdef HAVE_PPCP
+#include "../Ppcp/ppcp_import_controller.h"
+#endif
 #include <QQmlContext>
 #include <QQuickStyle>
 
@@ -547,6 +551,17 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sessionController"), &sessionController);
     engine.rootContext()->setContextProperty(QStringLiteral("updateController"),   &updateController);
     engine.rootContext()->setContextProperty(QStringLiteral("cudaRuntime"),        &cudaRuntime);
+
+    // H3 — "Import session…". A context property and not a QML type because
+    // libppcp is an OPTIONAL dependency (H0): a build without it must still
+    // produce a working application, and PpcpImportAction.qml checks for this
+    // name before it calls anything. HAVE_PPCP means only "the library is
+    // linked" and is never a runtime feature gate.
+#ifdef HAVE_PPCP
+    static PpcpImportController ppcpImportController;
+    engine.rootContext()->setContextProperty(QStringLiteral("ppcpImport"),
+                                             &ppcpImportController);
+#endif
     engine.rootContext()->setContextProperty(QStringLiteral("motionCaptureProbe"), &motionCaptureProbe);
     engine.rootContext()->setContextProperty(QStringLiteral("sessionReviewController"), &sessionReviewController);
     engine.rootContext()->setContextProperty(QStringLiteral("shotController"),    &shotController);
