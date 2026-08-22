@@ -810,7 +810,19 @@ struct Listener::Impl {
 
     // Channels accepted so far that do not yet make a complete peer, keyed by
     // the pairing their identity resolved to.  See the association note above.
-    std::map<std::string, std::vector<std::unique_ptr<TransportChannel>>> pending;
+    //
+    // `firstArrivalMs` is not bookkeeping.  A dialler that completes channel 0
+    // and then dies leaves a half-built group behind, and the NEXT peer dialling
+    // on the same pairing would have its channel 0 counted as that group's
+    // channel 1 — control and bulk swapped, silently, on a reconnect.  A group
+    // older than the handshake deadline is therefore abandoned rather than
+    // joined.  Single use (RV 7.3a, `mu` defaulting to 1) bounds what can share
+    // a pairing in the first place; this bounds what can share a stale one.
+    struct PendingGroup {
+        double firstArrivalMs = 0.0;
+        std::vector<std::unique_ptr<TransportChannel>> channels;
+    };
+    std::map<std::string, PendingGroup> pending;
 
     ~Impl()
     {
@@ -954,20 +966,25 @@ std::unique_ptr<PeerConnection> Listener::accept(int timeoutMs, HandshakeFailure
         }
 
         const std::string pairing = impl->state->pairingId;
-        std::vector<std::unique_ptr<TransportChannel>> &group = m_impl->pending[pairing];
+        Impl::PendingGroup &group = m_impl->pending[pairing];
+        if (!group.channels.empty()
+            && nowMs() - group.firstArrivalMs > m_impl->options.handshakeTimeoutMs) {
+            group.channels.clear();   // an abandoned dial; see PendingGroup
+        }
+        if (group.channels.empty()) group.firstArrivalMs = nowMs();
 
         // Arrival order is channel order — the dialler serialises its handshakes
         // so that it is.  ENC 2a numbering: 0 control, then bulk, then preview.
-        const Channel ch = static_cast<Channel>(group.size());
+        const Channel ch = static_cast<Channel>(group.channels.size());
 
         if (m_impl->log)
             m_impl->log("PPCP channel " + std::to_string(static_cast<int>(ch)) + " "
                         + outcome.describe());
 
-        group.push_back(detail::ChannelFactory::make(std::move(impl), ch, outcome));
+        group.channels.push_back(detail::ChannelFactory::make(std::move(impl), ch, outcome));
 
-        if (static_cast<int>(group.size()) >= m_impl->channelsPerPeer) {
-            std::vector<std::unique_ptr<TransportChannel>> complete = std::move(group);
+        if (static_cast<int>(group.channels.size()) >= m_impl->channelsPerPeer) {
+            std::vector<std::unique_ptr<TransportChannel>> complete = std::move(group.channels);
             m_impl->pending.erase(pairing);
             return detail::ChannelFactory::makePeer(std::move(complete));
         }

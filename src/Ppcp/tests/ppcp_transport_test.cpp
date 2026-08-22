@@ -707,3 +707,55 @@ TEST(PpcpTransportTls12, IdentityWithAnEmbeddedNulCannotSurviveTheTls12Path)
     ASSERT_NE(server, nullptr);
     EXPECT_EQ(server->tls().version, "TLSv1.3");
 }
+
+// ── ENC 2a — an abandoned dial must not renumber the next peer's channels ──
+// The association of connections to channels is not in the specification (see
+// the note at the top of ppcp_transport.cpp).  This transport orders by arrival
+// within a pairing, which is only safe if a half-built group cannot be joined by
+// a later peer: otherwise the next dialler's CONTROL channel silently becomes
+// the stale group's BULK, and every frame header then contradicts the stream it
+// arrived on — ENC 2c, caught one layer up as `malformed`, after the damage.
+TEST(PpcpTransport, AnAbandonedDialDoesNotRenumberTheNextPeersChannels)
+{
+    Options opts;
+    opts.handshakeTimeoutMs = 200;
+
+    Harness h(oneKnownPairing(kTlsVector()), 2, opts);
+    ASSERT_TRUE(h.ok());
+    auto accepted = h.acceptAsync(8000);
+
+    {
+        // A dialler that gets one channel up and then goes away.
+        ConnectorConfig half;
+        half.host = "127.0.0.1";
+        half.port = h.port();
+        half.kTls = kTlsVector();
+        half.identity = identityVector();
+        half.channels = {Channel::Control};
+        half.options = opts;
+        HandshakeFailure fail;
+        std::unique_ptr<PeerConnection> orphan = Connector::connect(half, &fail);
+        ASSERT_NE(orphan, nullptr) << fail.message;
+    }   // closed here
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));   // past the deadline
+
+    ConnectorConfig full;
+    full.host = "127.0.0.1";
+    full.port = h.port();
+    full.kTls = kTlsVector();
+    full.identity = identityVector();
+    full.options = opts;
+    full.options.handshakeTimeoutMs = 2000;
+    HandshakeFailure fail;
+    std::unique_ptr<PeerConnection> client = Connector::connect(full, &fail);
+    ASSERT_NE(client, nullptr) << fail.message;
+
+    std::unique_ptr<PeerConnection> server = accepted.get();
+    ASSERT_NE(server, nullptr);
+    EXPECT_EQ(server->channels().size(), 2u);
+    EXPECT_NE(server->channel(Channel::Control), nullptr) << "the stale group renumbered "
+                                                             "control into bulk";
+    EXPECT_NE(server->channel(Channel::Bulk), nullptr);
+    EXPECT_EQ(server->channel(Channel::Preview), nullptr);
+}
