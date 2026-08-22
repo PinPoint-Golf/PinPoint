@@ -57,7 +57,14 @@ ctest --test-dir build/ppcp-tests --output-on-failure
 
 Requires OpenSSL ≥ 1.1.1 development headers (`brew install openssl@3`, `apt install libssl-dev`, or `vcpkg install openssl`). The suite is Qt-free and app-free by design so that `ppcp-conform` (L14) can drive the same code headless in H8.
 
-The `K_tls` these tests use is the `PPCP-RV` §10.1 vector, hardcoded **in the test file only** until `libppcp`'s L12 derivation API lands. No key is hardcoded in shipping code, and none ever will be.
+The same suite runs clean under AddressSanitizer and UndefinedBehaviorSanitizer, which matters more here than in most of this repository: the transport owns raw sockets, OpenSSL objects with callback-transferred ownership, and two threads.
+
+```
+cmake -S src/Ppcp/tests -B build/ppcp-asan -DPP_SANITIZE="address;undefined"
+cmake --build build/ppcp-asan -j && ctest --test-dir build/ppcp-asan --output-on-failure
+```
+
+The `K_tls` these tests use is the `PPCP-RV` §10.1 vector, hardcoded **in the test file only**. No key is hardcoded in shipping code and none ever will be: L12's derivation landed in `libppcp` during this same session (`ppcp_rv_derive`, `ppcp_rv_psk_identity` and `ppcp_rv_resolve_psk_identity` in `include/ppcp/rv.h`) and H6 binds the transport's key and resolver to it. The vector stays in the test regardless — a test that derived its key with the same library it is testing would assert only that the library agrees with itself.
 
 ---
 
