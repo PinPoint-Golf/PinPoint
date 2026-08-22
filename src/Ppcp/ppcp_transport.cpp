@@ -746,7 +746,10 @@ std::unique_ptr<PeerConnection> Connector::connect(const ConnectorConfig &cfg,
         }
         freeaddrinfo(res);
         if (s == PP_INVALID_SOCKET) {
-            reportFail("connection refused", nullptr);
+            // Every address failed or the deadline passed.  Not an
+            // authentication outcome, so it may say what it is — RV 7.7c
+            // constrains the uniformity of a REJECTION, not of a dead socket.
+            reportFail("no endpoint reachable", nullptr);
             return nullptr;
         }
         impl->sock = s;
