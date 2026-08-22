@@ -1063,6 +1063,20 @@ if(TARGET ppcp)
         src/Ppcp/ppcp_import_ledger.h      src/Ppcp/ppcp_import_ledger.cpp
         src/Ppcp/ppcp_import_sink.h        src/Ppcp/ppcp_import_sink.cpp
         src/Ppcp/ppcp_import_controller.h  src/Ppcp/ppcp_import_controller.cpp
+        # H5 — the live Session and the arbitration bridge. NO OpenSSL here
+        # either, for the third time in this block and for the same reason: a
+        # Session is opened over a link and nothing about what it CARRIES
+        # depends on that link being TLS. The socket owner lives in the block
+        # below; these are what it drives.
+        src/Ppcp/ppcp_live_session.h       src/Ppcp/ppcp_live_session.cpp
+        src/Ppcp/ppcp_shot_bridge.h        src/Ppcp/ppcp_shot_bridge.cpp
+        # H5 — the offer list. The user-facing half of the bundle engine above:
+        # a connected device offers its Sessions and the host picks from an
+        # in-screen list. There is no file picker anywhere in this application.
+        src/Ppcp/ppcp_offer_controller.h   src/Ppcp/ppcp_offer_controller.cpp
+        # H7 — Markup. Deliberately NOT reachable from src/Analysis, which is
+        # I37 and is checked by a grep in ppcp_annotation_test.
+        src/Ppcp/ppcp_annotation_store.h   src/Ppcp/ppcp_annotation_store.cpp
         # H4 — a connected peer's camera Source behind the camera factory.
         # In src/Video and not src/Ppcp because it IS a camera backend: it is a
         # peer of VideoInputAravis and VideoInputApple, not a special case the

@@ -634,6 +634,17 @@ Item {
                 }
             }
 
+            // ── The sessions a connected capture device is offering ─────────
+            //
+            // In the DEVICES area on purpose: an offer is a fact about a
+            // connected device, and it belongs beside the device it came from.
+            // The component hides itself entirely when there are none, and on a
+            // build without libppcp there is no controller and it never appears
+            // (H0 — a build with no PPCP must still be a working application).
+            PpcpOfferList {
+                width: mainCol.width
+            }
+
             // Warning notice (first warning only)
             Item {
                 visible: resourceMonitor.warnings.length > 0

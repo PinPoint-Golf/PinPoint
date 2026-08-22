@@ -96,6 +96,10 @@ set(PP_QML_FILES
     src/Gui/monitor/RmTimelineChart.qml
     src/Gui/monitor/RmWarningNotice.qml
     src/Gui/home/ScreenHome.qml
+    # H5 — the sessions a connected capture device offers, in the DEVICES area
+    # of the home screen.  This is where H3's deleted "File -> Import Session…"
+    # menu item went: no menus, no dialogs, and the user never picks a file.
+    src/Gui/home/PpcpOfferList.qml
     src/Gui/settings/ScreenSettings.qml
     src/Gui/settings/AppearancePanel.qml
     src/Gui/settings/GeneralPanel.qml

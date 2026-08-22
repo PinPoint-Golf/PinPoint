@@ -23,6 +23,7 @@
 
 #ifdef HAVE_PPCP
 #include "../Ppcp/ppcp_import_controller.h"
+#include "../Ppcp/ppcp_offer_controller.h"
 #endif
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -563,6 +564,25 @@ int main(int argc, char *argv[])
     static PpcpImportController ppcpImportController;
     engine.rootContext()->setContextProperty(QStringLiteral("ppcpImport"),
                                              &ppcpImportController);
+
+    // H5 — the offer list, which IS the user-facing half of the above. A
+    // connected capture device sends `session_offer` for each Session it holds
+    // (MSG §9.1); each becomes a row in the DEVICES area of the home screen,
+    // and accepting one sends `session_accept` with the digests our ledger
+    // already holds (9.1a). The device then replays its stored frames onto the
+    // live link and they arrive through the ordinary ingest path — the engine
+    // above — so there is no importer and no second schema.
+    //
+    // ⚠ IT IS INSTALLED DETACHED, AND THAT IS THE HONEST STATE. The controller
+    // needs the `ppcp_peer` of a connected device, and NOTHING IN THIS
+    // APPLICATION CONSTRUCTS A PpcpHostPeer YET: H1's transport and H2's peer
+    // exist and are tested, and no screen or service starts one. So the list
+    // stays empty until that owner exists, and PpcpOfferList.qml hides itself
+    // entirely when it is. An empty section with a heading would look like a
+    // device that offered nothing, which is a different and untrue statement.
+    static PpcpOfferController ppcpOfferController;
+    engine.rootContext()->setContextProperty(QStringLiteral("ppcpOffers"),
+                                             &ppcpOfferController);
 #endif
     engine.rootContext()->setContextProperty(QStringLiteral("motionCaptureProbe"), &motionCaptureProbe);
     engine.rootContext()->setContextProperty(QStringLiteral("sessionReviewController"), &sessionReviewController);
