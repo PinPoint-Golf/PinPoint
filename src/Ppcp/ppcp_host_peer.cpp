@@ -112,6 +112,75 @@ void PpcpHostPeer::attach(PeerConnection *link, PpcpEngine *engine)
     m_link = link;
     m_engine = engine;
     m_stats = PumpStats{};
+
+    // H5 and H7 hang off the peer this link carries, and all three are bound
+    // here rather than by the caller — because a caller that bound two of the
+    // three would produce a Session that synchronises but never arbitrates, and
+    // nothing would say so.
+    ppcp_peer *p = engine ? engine->peer() : nullptr;
+    m_live.attach(p, &m_declaration);
+    m_shots.attach(p, &m_declaration, &m_live);
+    m_annotations.attach(p, m_cfg.peerId);
+
+    // 6.1f — a published or received relation moves every camera's mapping onto
+    // `tb:host`.  Wired here so the hook survives a re-attach.
+    m_live.setRelationsCallback([this] { if (m_onRelations) m_onRelations(m_live); });
+}
+
+void PpcpHostPeer::setRelationsHook(RelationsFn f)
+{
+    m_onRelations = std::move(f);
+    m_live.setRelationsCallback([this] { if (m_onRelations) m_onRelations(m_live); });
+}
+
+void PpcpHostPeer::drainEvents()
+{
+    if (!m_engine) return;
+    ppcp_peer *p = m_engine->peer();
+    if (!p) return;
+
+    // ⚠ ONE DRAINER, AND THIS IS IT.  ppcp_peer_next_event() REMOVES the event;
+    // a second consumer calling it against the same peer would see roughly half
+    // the conversation, silently and non-deterministically.  Everything else
+    // that needs events registers a hook — see the note in the header.
+    //
+    // The dispatch order is deliberate.  The live session first, because a
+    // `relation_update` must be in the relation set before the arbiter converts
+    // a Candidate against it (8.2a uses the CURRENT set).  The bridge second.
+    // Markup third, since nothing depends on it.  Application hooks last, so
+    // they see a peer whose protocol state is already settled.
+    ppcp_event ev{};
+    while (ppcp_peer_next_event(p, &ev) == PPCP_OK) {
+        m_live.observe(ev);
+        m_shots.observe(ev);
+        m_annotations.observeEvent(ev);
+
+        // MSG 3.3 — a counterpart declared, so its cameras exist now.  PPCP
+        // Sources are not discovered by scanning; this is the only moment they
+        // can be registered.
+        if (ev.kind == PPCP_EVENT_DECLARE && m_onDeclare)
+            m_onDeclare(ppcp_peer_counterpart(p));
+
+        for (const EventFn &f : m_hooks) f(ev);
+    }
+}
+
+bool PpcpHostPeer::tick(std::int64_t nowNs)
+{
+    const bool alive = pump();
+
+    // §6.3's sync cadence and §7.4's heartbeat cadence — two schedules, one
+    // call, and 6.3d is why they are not one schedule.
+    m_live.pump(nowNs);
+
+    // 8.2h — issue every group whose earliest contributing Candidate is at
+    // least `issue_hold_ns` old.  `nowNs` is a reading of `Session.timebase_ref`
+    // because this host's reference timebase IS its own clock.
+    m_shots.pump(nowNs);
+
+    // Whatever those two queued now has somewhere to go.
+    if (alive) return pump();
+    return alive;
 }
 
 bool PpcpHostPeer::pump()
@@ -246,6 +315,14 @@ bool PpcpHostPeer::pump()
             }
         }
     }
+
+    // ⚠ DRAINED HERE, AFTER THE FEED AND BEFORE THE NEXT ONE.  An event's `msg`
+    // is valid "until PPCP_PEER_EVENT_QUEUE further events have been queued"
+    // (four), and `payload_chunk.data` points into the buffer that was just fed
+    // — which this pump is about to overwrite on its next read.  A caller that
+    // drained events on its own schedule would be reading whichever bytes
+    // happened still to be there.
+    drainEvents();
 
     return alive;
 }

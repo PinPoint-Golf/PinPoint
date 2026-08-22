@@ -244,6 +244,9 @@ endif()
 pp_add_test(ppcp_host_peer_test
     SOURCES ppcp_host_peer_test.cpp
             ${PPCP}/ppcp_host_peer.cpp
+            ${PPCP}/ppcp_live_session.cpp
+            ${PPCP}/ppcp_shot_bridge.cpp
+            ${PPCP}/ppcp_annotation_store.cpp
             ${PPCP}/ppcp_host_engine.cpp
             ${PPCP}/ppcp_ingest_policy.cpp
             ${PPCP}/ppcp_source_declaration.cpp
