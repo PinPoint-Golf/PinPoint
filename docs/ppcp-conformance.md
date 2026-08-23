@@ -901,8 +901,13 @@ read only ours would pass for a host talking to itself.
 | IOP-9 | `preview-capture.json` / `preview-capture` | I36 | **pass** |
 | IOP-10 | this host's own bundle, written then read | `ENC` 7a | **pass, half of it** — see §11.3 |
 
-Measured 23 Aug 2026 against `libppcp` at `6aab730`, `ppcp-sim` from `build/dev/tools/ppcp-sim`.
-`ctest --test-dir build/ppcp-tests` is **22/22**.
+Measured 23 Aug 2026 against `libppcp` at **`d043135`** (L17's five `ENC` errata, E5–E9), with
+`ppcp-conform` and `ppcp-sim` rebuilt from that revision. `ctest --test-dir build/ppcp-tests` is
+**22/22**. Re-run unchanged across the errata, which is worth recording for **E9** in
+particular: 7h now makes the bundle writer REFUSE a frame naming a Capture, Stream, Shot or
+Candidate before a `declare`, and IOP-10's writer already put this host's `declare` second, so
+the new rule cost nothing here. **E5**'s deterministic key order changed the bytes of the
+checked-in bundle, which has been regenerated at `d043135`.
 
 ### 11.2 What each row actually asserted, and the numbers it got
 
