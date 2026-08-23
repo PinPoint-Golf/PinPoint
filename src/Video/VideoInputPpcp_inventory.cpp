@@ -48,7 +48,12 @@ int VideoInputPpcp::registerSources(const ppcp_peer_desc *peer)
         const QString sourceId = QString::fromUtf8(s.id.v);
         QString label = s.has_label ? QString::fromUtf8(s.label.v) : sourceId;
         if (peer->product.present && !QString::fromUtf8(peer->product.model.v).isEmpty())
-            label = QString::fromUtf8(peer->product.model.v) + QLatin1String(" — ") + label;
+            // ⚠ QStringLiteral AND NOT QLatin1String.  This file is UTF-8, so
+            // the em dash in that literal is the three bytes E2 80 94.
+            // QLatin1String declares them Latin-1, which turns one dash into
+            // three characters — "â" and two control codes — and every phone
+            // camera in the DEVICES list read "iPhone 16 â.. Wide".
+            label = QString::fromUtf8(peer->product.model.v) + QStringLiteral(" — ") + label;
 
         e->registerDevice(DeviceType::VideoInput,
                           VideoInputFactory::Backend::Ppcp,

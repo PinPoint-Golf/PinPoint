@@ -23,6 +23,7 @@
 #include "pp_debug.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
@@ -157,6 +158,19 @@ void ResourceMonitorController::refresh()
         const QList<Device> camDevices =
             DeviceEnumerator::instance()->devices(DeviceType::VideoInput);
 
+        // ⚠ THE SERIAL IS A DISAMBIGUATOR, SO ONLY SHOW IT WHEN IT DISAMBIGUATES.
+        // It used to be appended unconditionally, which was invisible while
+        // every camera was a webcam with a short serial and became absurd the
+        // moment phones arrived: a PPCP camera's `serialNumber` is the PEER id
+        // (VideoInputPpcp.cpp — `caps.serialNumber = idStr(src->peer_id)`), so
+        // BOTH cameras on one phone carried the same 36-character UUID and the
+        // rows read "iPhone 16 — Wide (peer:40ab5212-6688-…)".  Identical on
+        // both, so it told them apart not at all, while burying the one word
+        // that did.  Two genuinely identical webcams still collide on
+        // `description` and still get their serials.
+        QHash<QString, int> descriptionCount;
+        for (const Device &d : camDevices) descriptionCount[d.description] += 1;
+
         for (const Device &camDev : camDevices) {
             const auto cam = m_cameras->liveDeviceStats(camDev.id);
 
@@ -179,9 +193,15 @@ void ResourceMonitorController::refresh()
             const QString sn = camDev.capabilities.serialNumber;
             const QString camKey = camDev.description + QStringLiteral("|") +
                                    (sn.isEmpty() ? camDev.id : sn);
+            // `camKey` deliberately still carries the serial: it is the key a
+            // saved alias was stored under, and changing it would orphan every
+            // rename the user has already made.  Only the DEFAULT changes.
+            const bool serialTellsThemApart =
+                !sn.isEmpty() && descriptionCount.value(camDev.description) > 1;
             const QString camAlias = camAliasMap.value(camKey,
-                sn.isEmpty() ? camDev.description
-                             : camDev.description + QStringLiteral(" (") + sn + QStringLiteral(")")).toString();
+                serialTellsThemApart
+                    ? camDev.description + QStringLiteral(" (") + sn + QStringLiteral(")")
+                    : camDev.description).toString();
 
             if (sid != pinpoint::kInvalidSourceId)
                 sourceAliases[sid] = camAlias;
