@@ -200,6 +200,9 @@ private:
     StorageFn              m_storage;
     PeerConnection        *m_link = nullptr;
     PpcpEngine            *m_engine = nullptr;
+    // MSG 3.3c — has this host put its own `declare` on THIS link yet.  Cleared
+    // by attach(); see the note in drainEvents() and finding F-H8-1.
+    bool                   m_declaredOnLink = false;
     PumpStats              m_stats;
     std::vector<std::uint8_t> m_scratch;
     // The unconsumed tail of each channel's stream. L6's ppcp_peer_feed()

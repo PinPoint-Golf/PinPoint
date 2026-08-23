@@ -536,6 +536,70 @@ owns the join.
 
 ---
 
+## 10. H8 — the conformance claim (session 4, wave 2) — **WORK IN PROGRESS**
+
+> ⚠ **This section is a work-in-progress note, not a claim.** It records where H8 stopped so the
+> next session resumes from here rather than from scratch. Nothing in it has been measured yet.
+
+**The command this work package exists to run** — `ppcp-conform` (libppcp L14), driving a headless
+`PpcpHostPeer` over **plaintext** loopback:
+
+```sh
+# 1. the headless host, listening on an ephemeral port it writes to a file
+build/ppcp-tests/ppcp_conform_host --port 0 --port-file /tmp/pps.port --run-ms 60000
+
+# 2. the instrument, from the libppcp build tree
+../libppcp/build/dev/tools/ppcp-conform/ppcp-conform \
+    --profiles core,capture,detect,arbitrate,live,offline,markup \
+    --role host --connect 127.0.0.1:$(cat /tmp/pps.port) \
+    --column PinPointStudio \
+    --json  build/ppcp-tests/pps-conform.json \
+    --markdown build/ppcp-tests/pps-conform.md
+```
+
+`--psk` is deliberately absent: `ppcp-sim` has no TLS **transport**, so the harness socket is
+plaintext. `PPCP-RV` erratum E4 (RV 2c1) scopes 2c to the rendezvous paths and states that a test
+harness socket is not one of them; `CORE` §3.2's `direct` transport is conformant plaintext.
+
+### Done
+
+- **A harness-only plaintext listener.** `Ppcp::Listener::setPlaintextHarness()` in
+  `src/Ppcp/ppcp_transport.h`, and every line implementing it in `ppcp_transport.cpp`, sits inside
+  `#if defined(PP_PPCP_PLAINTEXT_HARNESS)`. That macro comes from ONE place — the CMake option of
+  the same name, **default `OFF`**, turned on only by `src/Ppcp/tests`. In a release build there is
+  no plaintext code path to reach. ENC §2.1 link binding is unchanged: the dialler still mints a
+  `link_id` and sends `link_bind` first on every stream, and every 2.1c refusal still applies.
+- **Finding F-H8-1 — this host never sent its own `declare`, and no suite noticed.** MSG 3.3c makes
+  `declare` a precondition for originating anything naming a Source, Stream or Candidate, and 3.3d
+  says a host sends it *even with an empty `sources` list*. `PpcpHostService::start()` built the
+  declaration and validated it; `grep -rn ppcp_peer_declare src/` outside the test tree returned
+  **nothing**. Every suite in `ppcp-tests` declared by hand in its own fixture, which is exactly how
+  a composition defect survives a green suite. Fixed in `PpcpHostPeer::drainEvents()`, on
+  `PPCP_EVENT_CONNECTED`, once per link. **Whose defect: this host's.**
+- **F-L13-1's guard inverted to the new libppcp contract** (`ppcp_live_session_test.cpp`). Recorded
+  as a second finding below, because the old guard *would still have passed*.
+- **Finding F-H8-2 — the old F-L13-1 guard could not tell the defect from the fix.** It asserted
+  `bulkSeen < slicedSeen` and said in its own comment that it would go red when libppcp L15 landed.
+  It did not: a bulk feed yields four events under **both** contracts — four survivors of a ring
+  that dropped eight, or four reported before a feed that stopped. What distinguishes them is
+  `ppcp_peer_events_dropped()`, `ppcp_peer_feed_stalled()` and the short `*out_consumed`, so those
+  are what the test asserts now. **Whose defect: this suite's.**
+
+### Next
+
+- `src/Ppcp/tests/ppcp_conform_host.cpp` — the headless host executable: real `PpcpHostPeer`, real
+  `makeHostEngine()`, real `PpcpIngestPolicy`, its own declaration through the real
+  `PpcpSourceDeclaration::build()`, the storage callback F-H5-3 makes a precondition for §7.4, a
+  `PpcpOfferController` for MSG 9.1/9.2, and a loop that pumps and ticks until the tool disconnects.
+- The CMake option, the target and the `ctest` row.
+- Run it, paste **every** row the tool reports — pass, fail, n/a — verbatim.
+
+### Blocked
+
+Nothing.
+
+---
+
 ## 9. What H6 and H-compose landed (session 4, wave 1)
 
 ### 9.1 The rows

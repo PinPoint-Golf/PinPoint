@@ -114,6 +114,9 @@ void PpcpHostPeer::attach(PeerConnection *link, PpcpEngine *engine)
     m_link = link;
     m_engine = engine;
     m_stats = PumpStats{};
+    // A new link is a new conversation: MSG 3.3c's obligation is per link and
+    // this host has not met it on this one yet.
+    m_declaredOnLink = false;
 
     // H5 and H7 hang off the peer this link carries, and all three are bound
     // here rather than by the caller — because a caller that bound two of the
@@ -156,6 +159,34 @@ void PpcpHostPeer::drainEvents()
         m_live.observe(ev);
         m_shots.observe(ev);
         m_annotations.observeEvent(ev);
+
+        // ── MSG 3.3c/3.3d — THIS HOST DECLARES ITSELF, AND NOTHING DID ──────
+        //
+        // ⚠ FOUND BY H8's CONFORMANCE RUN, 23 Aug 2026 (finding F-H8-1).
+        // `declareSelf()` built the declaration and `validate()` checked it,
+        // and NO CALL SITE ANYWHERE IN THIS APPLICATION EVER PUT IT ON A WIRE:
+        // `grep -rn ppcp_peer_declare src/` outside the test tree returned
+        // nothing.  3.3d is explicit that a host declares its own Sources with
+        // the same structure a capture peer uses — "a host owning no Sources
+        // sends `declare` with an empty `sources` list; it does not skip the
+        // message" — and 3.3c makes it a precondition for originating anything
+        // that names a Source, Stream or Candidate.  A host that never declared
+        // was therefore unable to nominate from its own microphone (CT-I8) and
+        // gave a third-party device nothing to convert its instants against
+        // (I19).  Every suite in `ppcp-tests` declared BY HAND in its fixture,
+        // which is exactly how a composition defect survives a green suite.
+        //
+        // It goes HERE, on PPCP_EVENT_CONNECTED, because that is the moment a
+        // wire version is agreed and before anything this peer originates can
+        // reference a Source.  Once per link: `attach()` clears the flag, and
+        // 3.3a's `generation` is the library's to increment, so sending a
+        // second snapshot per link would be claiming a change that did not
+        // happen.
+        if (ev.kind == PPCP_EVENT_CONNECTED && !m_declaredOnLink) {
+            m_declaredOnLink = true;
+            if (const ppcp_peer_desc *self = m_declaration.peer())
+                ppcp_peer_declare(p, self);
+        }
 
         // MSG 3.3 — a counterpart declared, so its cameras exist now.  PPCP
         // Sources are not discovered by scanning; this is the only moment they

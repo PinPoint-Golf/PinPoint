@@ -37,6 +37,7 @@
 #include <openssl/tls1.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <map>
@@ -655,6 +656,75 @@ BindRejection decodeLinkBind(const unsigned char *buf, std::size_t len,
     return BindRejection::None;
 }
 
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+// ══════════════════════════════════════════════════════════════════════════
+// ⚠⚠⚠  EVERY LINE UNDER THIS GUARD MOVES BYTES WITH NO TLS.  ⚠⚠⚠
+//
+// Compiled ONLY when the CMake option `PP_PPCP_PLAINTEXT_HARNESS` is ON, which
+// is `OFF` by default and set by `src/Ppcp/tests` and by nothing else.  See the
+// banner on `Listener::setPlaintextHarness()` in the header for why the
+// conformance harness needs it and why RV erratum E4 permits it.
+
+IoStatus plaintextRead(pp_socket_t s, void *buf, std::size_t len, std::size_t &got)
+{
+    got = 0;
+    const auto n = ::recv(s, static_cast<char *>(buf), static_cast<int>(len), 0);
+    if (n > 0) {
+        got = static_cast<std::size_t>(n);
+        return IoStatus::Ok;
+    }
+    if (n == 0) return IoStatus::Closed;
+#ifdef _WIN32
+    const int e = WSAGetLastError();
+    if (e == WSAEWOULDBLOCK) return IoStatus::WouldBlock;
+#else
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return IoStatus::WouldBlock;
+#endif
+    return IoStatus::Error;
+}
+
+IoStatus plaintextWrite(pp_socket_t s, const void *buf, std::size_t len, std::size_t &put)
+{
+    put = 0;
+#ifdef MSG_NOSIGNAL
+    const int flags = MSG_NOSIGNAL;
+#else
+    const int flags = 0;
+#endif
+    const auto n = ::send(s, static_cast<const char *>(buf), static_cast<int>(len), flags);
+    if (n > 0) {
+        // A short send is success with a smaller `put` — CORE T2's backpressure
+        // in the same shape SSL_MODE_ENABLE_PARTIAL_WRITE gives it above, so
+        // the pump above this layer cannot tell the two transports apart.
+        put = static_cast<std::size_t>(n);
+        return IoStatus::Ok;
+    }
+    if (n == 0) return IoStatus::WouldBlock;
+#ifdef _WIN32
+    const int e = WSAGetLastError();
+    if (e == WSAEWOULDBLOCK) return IoStatus::WouldBlock;
+#else
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return IoStatus::WouldBlock;
+    if (errno == EPIPE || errno == ECONNRESET) return IoStatus::Closed;
+#endif
+    return IoStatus::Error;
+}
+
+// RV 5.4k asks for the achieved version and key-exchange mode to be made
+// available to the application layer.  There is no handshake here, so the
+// honest answer names itself: nothing downstream can mistake this for TLS, and
+// a log line carrying it reads as the warning it is.
+TlsOutcome plaintextOutcome()
+{
+    TlsOutcome o;
+    o.version = "plaintext-harness";
+    o.cipher = "none";
+    o.kexMode = "none";
+    o.forwardSecrecy = false;
+    return o;
+}
+#endif  // PP_PPCP_PLAINTEXT_HARNESS
+
 }  // namespace
 
 // ── TransportChannel ────────────────────────────────────────────────────────
@@ -749,6 +819,12 @@ IoStatus TransportChannel::read(void *buf, std::size_t len, std::size_t &got)
 {
     got = 0;
     if (!isOpen()) return IoStatus::Error;
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+    // ⚠ HARNESS ONLY — see Listener::setPlaintextHarness().  A channel with no
+    // SSL* can only have come from a plaintext harness listener; in a shipping
+    // build this branch does not exist and `m_impl->ssl` is never null.
+    if (!m_impl->ssl) return plaintextRead(m_impl->sock, buf, len, got);
+#endif
     std::size_t n = 0;
     ERR_clear_error();
     const int r = SSL_read_ex(m_impl->ssl, buf, len, &n);
@@ -768,6 +844,10 @@ IoStatus TransportChannel::write(const void *buf, std::size_t len, std::size_t &
     put = 0;
     if (!isOpen()) return IoStatus::Error;
     if (len == 0) return IoStatus::Ok;
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+    // ⚠ HARNESS ONLY — see read() above.
+    if (!m_impl->ssl) return plaintextWrite(m_impl->sock, buf, len, put);
+#endif
     std::size_t n = 0;
     ERR_clear_error();
     // SSL_MODE_ENABLE_PARTIAL_WRITE is set, so a short write is success with a
@@ -1222,6 +1302,15 @@ struct Listener::Impl {
     Options options;
     LogFn log;
     int channelsPerPeer = 2;   // CORE T2's minimum; a third arrives under 2.1d
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+    // ⚠ HARNESS ONLY.  See Listener::setPlaintextHarness() in the header.
+    bool plaintext = false;
+#else
+    // In a shipping build the flag does not exist and every read of it below is
+    // the compile-time constant `false`, so there is no plaintext code path to
+    // reach even by mistake.
+    static constexpr bool plaintext = false;
+#endif
     SSL_CTX *ctx = nullptr;
     TlsCapabilities caps;
     Key dummyKey{};
@@ -1323,6 +1412,9 @@ void Listener::setIdentityResolver(IdentityResolver r) { m_impl->resolver = std:
 void Listener::setOptions(const Options &o) { m_impl->options = o; }
 void Listener::setLog(LogFn f) { m_impl->log = std::move(f); }
 void Listener::setChannelsPerPeer(int n) { m_impl->channelsPerPeer = n; }
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+void Listener::setPlaintextHarness(bool on) { m_impl->plaintext = on; }
+#endif
 std::uint16_t Listener::port() const { return m_impl->boundPort; }
 BindRejection Listener::lastBindRejection() const { return m_impl->lastRejection; }
 int Listener::bindRejectionCount() const { return m_impl->rejections; }
@@ -1360,6 +1452,16 @@ bool Listener::listen(std::uint16_t port, std::string *err)
     setNonBlocking(s);
     m_impl->sock = s;
 
+    if (m_impl->plaintext) {
+        // ⚠ HARNESS ONLY.  No context, no resolver, no handshake — and it is
+        // said out loud on the log so a run that reached this by accident is
+        // not a quiet one.
+        if (m_impl->log)
+            m_impl->log("PPCP listener is PLAINTEXT (conformance harness, CONF 2c / RV 2c1) "
+                        "— no TLS, no authentication");
+        return true;
+    }
+
     m_impl->caps = queryTlsCapabilities();
     // RV 5.2g: we listened, so we are the TLS server.
     m_impl->ctx = makeContext(/*server=*/true, m_impl->caps);
@@ -1386,6 +1488,18 @@ bool drainAvailable(TransportChannel::Impl &impl, std::vector<unsigned char> &rx
 {
     for (;;) {
         unsigned char buf[512];
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+        if (!impl.ssl) {
+            std::size_t got = 0;
+            const IoStatus st = plaintextRead(impl.sock, buf, sizeof buf, got);
+            if (st == IoStatus::Ok && got > 0) {
+                rx.insert(rx.end(), buf, buf + got);
+                if (rx.size() > kLinkBindMaxFrame * 4) return false;
+                continue;
+            }
+            return st == IoStatus::WouldBlock;
+        }
+#endif
         ERR_clear_error();
         const int n = SSL_read(impl.ssl, buf, static_cast<int>(sizeof buf));
         if (n > 0) {
@@ -1494,7 +1608,12 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                         impl->reject(BindRejection::DuplicateChannel);
                         drop = true;
                     } else {
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+                        const TlsOutcome outcome =
+                            p.impl->ssl ? outcomeOf(p.impl->ssl) : plaintextOutcome();
+#else
                         const TlsOutcome outcome = outcomeOf(p.impl->ssl);
+#endif
                         if (impl->log)
                             impl->log("PPCP channel " + std::to_string(static_cast<int>(ch))
                                       + " bound " + outcome.describe());
@@ -1571,6 +1690,21 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                 ps->deadline = nowMs() + impl->options.handshakeTimeoutMs;
                 ps->impl = std::make_unique<TransportChannel::Impl>();
                 ps->impl->sock = c;
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+                if (impl->plaintext) {
+                    // ⚠ HARNESS ONLY.  No SSL object is built, so there is
+                    // nothing to hand a key to and no resolver is called.  The
+                    // stream is "handshaken" the moment it is accepted and owes
+                    // us a `link_bind` from that instant — ENC 2.1c's timeout is
+                    // the SAME one, because binding is a protocol obligation and
+                    // has nothing to do with how the bytes are protected.
+                    ps->handshaken = true;
+                    ps->want = POLLIN;
+                    ps->deadline = nowMs() + impl->options.bindTimeoutMs;
+                    impl->pending.push_back(std::move(ps));
+                    continue;
+                }
+#endif
                 ps->impl->ctx = impl->ctx;   // shared; the listener owns it
                 ps->impl->ownsCtx = false;
                 ps->impl->state = std::make_unique<SslState>();

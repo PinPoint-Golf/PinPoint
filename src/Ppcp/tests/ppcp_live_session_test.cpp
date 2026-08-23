@@ -562,20 +562,31 @@ TEST(PpcpLiveSession, TheHostTimebaseIsTheSameSteadyClockTheEventBufferStamps)
     EXPECT_LE(b, c / 1000);
 }
 
-// ── F-L13-1 — why the pump feeds ONE FRAME PER CALL ───────────────────────
+// ── F-L13-1 — THE FEED NOW STOPS AT THE RING, AND THIS ASSERTS THE NEW ──────
 //
-// `ppcp_peer_feed()` consumes UNBOUNDEDLY MANY whole frames from one buffer;
-// the event ring is PPCP_PEER_EVENT_QUEUE deep (four); and an overflow drops
-// the OLDEST event with nothing readable to say so.  A single socket read
-// carrying a replayed bundle therefore loses `capture_announce` while the
-// payload frames that reference it arrive — silently, and only under load.
+// The finding, and it was this suite's: `ppcp_peer_feed()` consumed UNBOUNDEDLY
+// MANY whole frames from one buffer, the event ring is PPCP_PEER_EVENT_QUEUE
+// deep (four), and an overflow dropped the OLDEST event with nothing readable
+// to say so.  A single socket read carrying a replayed bundle therefore lost
+// `capture_announce` while the payload frames that referenced it arrived —
+// silently, and only under load.
 //
-// This asserts BOTH halves, because the second is the one that protects the
-// pump: bulk-feeding N frames loses events, and feeding the identical bytes one
-// frame at a time with a drain between them loses none.  `PpcpHostPeer::pump()`
-// does the latter.  When libppcp L15 makes `feed` stop at the ring's capacity,
-// the first EXPECT here goes red and points at this note.
-TEST(PpcpLiveSession, F_L13_1_FeedingAWholeReadAtOnceLosesEventsAndOneFrameAtATimeDoesNot)
+// libppcp L15 fixed it (peer.h, 23 Aug 2026): feed stops BEFORE a frame whose
+// events it cannot report, `*out_consumed` says how far it got, the return is
+// still PPCP_OK because backpressure is not an error, and
+// `ppcp_peer_feed_stalled()` is what tells "no room for events" apart from "not
+// a whole frame yet".  So the property to assert INVERTED, and it is a stronger
+// one: nothing is lost EITHER WAY round, and `ppcp_peer_events_dropped()` — the
+// counter a conformance harness asserts is zero — stays at zero.
+//
+// ⚠ THE OLD ASSERTION WOULD STILL HAVE PASSED, WHICH IS WHY IT IS GONE.  It
+// read `EXPECT_LT(bulkSeen, slicedSeen)`, and a bulk feed yields four events
+// under BOTH contracts — four survivors of a ring that dropped eight, or four
+// reported before a feed that stopped.  A guard that cannot tell the defect
+// from the fix is not a guard, and it said in its own comment that it would go
+// red when L15 landed.  It did not.  What distinguishes them is `dropped`,
+// `stalled` and `consumed`, so those are what this asserts now.
+TEST(PpcpLiveSession, F_L13_1_FeedStopsAtTheEventRingAndLosesNothing)
 {
     constexpr int kFrames = 12;   // three times the ring's depth
 
@@ -602,7 +613,12 @@ TEST(PpcpLiveSession, F_L13_1_FeedingAWholeReadAtOnceLosesEventsAndOneFrameAtATi
         ASSERT_FALSE(out.empty());
     };
 
-    // ── (a) the whole read in one feed ────────────────────────────────────
+    // ── (a) the whole read offered at once, in the loop peer.h documents ───
+    //
+    // One feed cannot take it all any more.  The FIRST call must return PPCP_OK
+    // having consumed strictly less than it was offered, and say `stalled` —
+    // that is the entire fix, stated as an assertion.  The loop then drains and
+    // re-presents the remainder, and nothing is lost.
     std::size_t bulkSeen = 0;
     {
         Link L;
@@ -611,14 +627,46 @@ TEST(PpcpLiveSession, F_L13_1_FeedingAWholeReadAtOnceLosesEventsAndOneFrameAtATi
         std::vector<std::uint8_t> bytes;
         ASSERT_NO_FATAL_FAILURE(produce(L, bytes));
 
-        std::size_t took = 0;
-        ppcp_peer_feed(L.host->peer(), PPCP_CHANNEL_CONTROL, bytes.data(), bytes.size(), &took);
-        pptest::drainEvents(L.host->peer(), [&](const ppcp_event &e) {
+        ppcp_peer *p = L.host->peer();
+        std::size_t first = 0;
+        ASSERT_EQ(ppcp_peer_feed(p, PPCP_CHANNEL_CONTROL, bytes.data(), bytes.size(), &first),
+                  PPCP_OK)
+            << "running out of event room is backpressure, not an error";
+        EXPECT_GT(first, 0u) << "it must make progress before it stalls";
+        EXPECT_LT(first, bytes.size())
+            << "F-L13-1: a feed that swallowed the whole buffer is the defect";
+        EXPECT_TRUE(ppcp_peer_feed_stalled(p))
+            << "short because the ring is full, and it must be able to say so";
+        EXPECT_LE(ppcp_peer_events_pending(p), ppcp_peer_events_capacity());
+
+        std::size_t off = first;
+        pptest::drainEvents(p, [&](const ppcp_event &e) {
             if (e.kind == PPCP_EVENT_CANDIDATE) ++bulkSeen;
         });
+        while (off < bytes.size()) {
+            std::size_t took = 0;
+            if (ppcp_peer_feed(p, PPCP_CHANNEL_CONTROL, bytes.data() + off, bytes.size() - off,
+                               &took) != PPCP_OK)
+                break;
+            off += took;
+            pptest::drainEvents(p, [&](const ppcp_event &e) {
+                if (e.kind == PPCP_EVENT_CANDIDATE) ++bulkSeen;
+            });
+            if (took == 0 && !ppcp_peer_feed_stalled(p)) break;   // a partial frame
+        }
+        EXPECT_EQ(off, bytes.size()) << "the loop peer.h documents must finish the buffer";
+        EXPECT_EQ(ppcp_peer_events_dropped(p), 0u)
+            << "with the S4 feed, a drop can only mean the embedding is not draining";
     }
 
-    // ── (b) the identical bytes, one frame per feed, draining between ─────
+    // ── (b) the identical bytes, one frame per feed — what pump() does ────
+    //
+    // `PpcpHostPeer::pump()` slices by the frame header's own `payload_len` and
+    // drains between feeds.  That is now belt AND braces rather than the only
+    // defence, and it stays: an event's `msg` borrows the bytes just fed, and
+    // `payload_chunk.data` points straight into the pump's buffer, which the
+    // next socket read overwrites.  Feeding one frame at a time is what makes
+    // that borrow safe, and no change in libppcp can make it unnecessary.
     std::size_t slicedSeen = 0;
     {
         Link L;
@@ -641,12 +689,11 @@ TEST(PpcpLiveSession, F_L13_1_FeedingAWholeReadAtOnceLosesEventsAndOneFrameAtATi
             if (took == 0) break;
             off += took;
         }
+        EXPECT_EQ(ppcp_peer_events_dropped(L.host->peer()), 0u);
     }
 
     EXPECT_EQ(slicedSeen, static_cast<std::size_t>(kFrames))
         << "one frame per feed with a drain between must lose nothing";
-    EXPECT_LT(bulkSeen, slicedSeen)
-        << "F-L13-1 has been fixed in libppcp L15 — this guard can go";
-    EXPECT_LE(bulkSeen, static_cast<std::size_t>(PPCP_PEER_EVENT_QUEUE))
-        << "the ring is what bounds a bulk feed, and it is four deep";
+    EXPECT_EQ(bulkSeen, slicedSeen)
+        << "and since L15, neither must feeding the whole read and draining as it stalls";
 }

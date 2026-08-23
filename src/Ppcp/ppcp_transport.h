@@ -378,6 +378,38 @@ public:
     // `link_bind` says which channel a stream is, never how many are coming.
     void setChannelsPerPeer(int n);
 
+#if defined(PP_PPCP_PLAINTEXT_HARNESS)
+    // ══════════════════════════════════════════════════════════════════════
+    // ⚠⚠⚠  THIS ACCEPTS CONNECTIONS WITH NO TLS AND NO AUTHENTICATION.  ⚠⚠⚠
+    //
+    // IT MUST NEVER BE COMPILED INTO A SHIPPING BUILD.  The whole declaration
+    // — and every line that implements it — is inside
+    // `#if defined(PP_PPCP_PLAINTEXT_HARNESS)`, and that macro is defined by
+    // exactly one thing: the CMake option `PP_PPCP_PLAINTEXT_HARNESS`, which
+    // is `OFF` by default and is turned on ONLY by `src/Ppcp/tests`.  The
+    // application's own CMakeLists.txt never sets it, so in a release build
+    // there is no plaintext code path at all — which is the same discipline
+    // `Connector::connect()` keeps for RV 5.2f, applied to the listener.
+    //
+    // WHY IT EXISTS.  `PPCP-CONF` §2c requires the peer under test to be
+    // driven from OUTSIDE, by the synthetic peer both implementations develop
+    // against.  `tools/ppcp-sim` has no TLS transport — its `--psk-ke-only`
+    // mode is a hand-built ClientHello for RT-4 and speaks no application
+    // data — so a conformance harness cannot reach this host over the
+    // rendezvous transport.  `PPCP-RV` erratum E4 (RV 2c1) settles what that
+    // means: the rendezvous *paths* are what 2c constrains, and a test
+    // harness socket is not one of them.  `CORE` §3.2's `direct` transport is
+    // conformant plaintext, and this is a `direct` listener.
+    //
+    // WHAT IT DOES NOT CHANGE.  ENC §2.1 link binding is identical — the
+    // dialler still mints a `link_id` and sends `link_bind` first on every
+    // stream, and every 2.1c refusal still applies.  The identity resolver is
+    // never consulted, because there is no identity: a plaintext listener
+    // authenticates nobody and says so through `TlsOutcome::version` being
+    // the literal string "plaintext-harness".
+    void setPlaintextHarness(bool on);
+#endif
+
     // Blocks up to `timeoutMs` for a link that has bound channelsPerPeer
     // channels.  Returns null on timeout (with `fail->message` empty) or on a
     // failed handshake (with `fail` filled in uniformly — 7.7c).
