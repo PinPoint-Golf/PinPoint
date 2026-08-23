@@ -240,35 +240,43 @@ if [ -n "${IMPORT_ROW:-}" ]; then
             exit 1
         fi
         echo "$ROW: wrote $(wc -c <"$BUNDLE" | tr -d ' ') bytes to $BUNDLE" >&2
+        BUNDLES="$BUNDLE"
     else
-        # ⚠ THE DEVICE'S BUNDLE FIRST, AND THE FALLBACK IS LOUD.  IOP-3 is an
-        # interoperability row: a bundle written by PinPointCapture and read by
-        # PinPointStudio.  Read against libppcp's fixtures it is still evidence
-        # about the reader — but about ONE writer, and that is a different and
-        # much weaker claim, so it says so on the way past.
-        BUNDLE=""
+        # ⚠ EVERY BUNDLE THE DEVICE WROTE, NOT THE FIRST ONE.  IOP-3 is an
+        # interoperability row — a bundle written by PinPointCapture and read by
+        # PinPointStudio — and the device checks in more than one shape on
+        # purpose (one Shot and two).  Reading only the first would leave the
+        # other unread and the row would still be green, which is how a
+        # conformance file stops being evidence.
+        #
+        # The fallback to libppcp's fixtures is LOUD: it is still evidence about
+        # the reader, but about ONE writer, and that is a different and much
+        # weaker claim.
+        BUNDLES=""
         if [ -n "$DEVDIR" ] && [ -d "$DEVDIR" ]; then
-            BUNDLE=$(ls -1 "$DEVDIR"/*.ppcpbndl "$DEVDIR"/*.ppcpb 2>/dev/null | head -1 || true)
+            BUNDLES=$(ls -1 "$DEVDIR"/*.ppcpbndl "$DEVDIR"/*.ppcpb 2>/dev/null || true)
         fi
-        if [ -n "$BUNDLE" ]; then
-            echo "$ROW: reading a bundle the DEVICE wrote: $BUNDLE" >&2
+        if [ -n "$BUNDLES" ]; then
+            echo "$ROW: reading the bundles the DEVICE wrote:" >&2
+            echo "$BUNDLES" | sed "s/^/$ROW:   /" >&2
         elif [ -n "$FIXDIR" ] && [ -d "$FIXDIR" ]; then
-            BUNDLE=$(ls -1 "$FIXDIR"/ct-i12-video.ppcpb 2>/dev/null | head -1 || true)
+            BUNDLES=$(ls -1 "$FIXDIR"/ct-i12-video.ppcpb 2>/dev/null || true)
             echo "$ROW: ⚠ NO DEVICE BUNDLE at ${DEVDIR:-<unset>} — falling back to libppcp's" >&2
-            echo "$ROW: ⚠ fixture $BUNDLE.  This measures the READER only; the pairing" >&2
+            echo "$ROW: ⚠ fixture $BUNDLES.  This measures the READER only; the pairing" >&2
             echo "$ROW: ⚠ is not demonstrated until the device checks a bundle in." >&2
         fi
-        if [ -z "$BUNDLE" ] || [ ! -s "$BUNDLE" ]; then
+        if [ -z "$BUNDLES" ]; then
             echo "$ROW: BLOCKED — no bundle to read (device dir '$DEVDIR', fixtures '$FIXDIR')" >&2
             exit 1
         fi
     fi
 
-    "$HOST" --row "$ROW" --summary "$SUMMARY" --import-bundle "$BUNDLE" \
-            --import-twice --import-root "$IMPORT_ROOT" >>"$HOSTLOG" 2>&1 || RC=1
-    tail -20 "$HOSTLOG" >&2 || true
-
-    python3 - "$SUMMARY" "$ROW" >&2 <<'PY' || RC=1
+    # ── The checker, written out once and run per bundle ───────────────────
+    #
+    # A file rather than a heredoc inside the loop, because the loop reads more
+    # than one bundle and a heredoc belongs to one command.
+    CHECK="$WORK/$ROW-check.py"
+    cat >"$CHECK" <<'PY'
 import json, sys
 
 path, row = sys.argv[1], sys.argv[2]
@@ -277,6 +285,10 @@ try:
 except Exception as e:                                     # noqa: BLE001
     print(f"{row}: FAIL — no host summary at {path}: {e}")
     sys.exit(1)
+
+# CORE 4.4a / I10 — three states, not two, and `unknown` is not `complete`:
+# completeness is ASSERTED by the owner and never inferred.
+NAMES = {0: "complete", 1: "partial", 2: "absent", 3: "unknown"}
 
 p = d.get("import_passes", [])
 bad = []
@@ -293,6 +305,11 @@ else:
         bad.append("the first read walked no frames")
     if not first["manifest_ordered"]:
         bad.append("ENC 7c: the manifest was not ordered before the payload")
+    # MSG 3.3c / I34 — a Capture announced before the walk knew who minted it
+    # is unattributable, and its identity is then unresolvable.  Zero, or the
+    # ledger is keying on nothing.
+    if first["captures_unattributable"]:
+        bad.append(f"{first['captures_unattributable']} Captures arrived before any declare")
     # I34 — the second read admits nothing new and duplicates nothing.  Stated
     # over the LEDGER because nothing on the wire could say it.
     if second["captures_new"] != 0:
@@ -304,6 +321,23 @@ else:
         bad.append("a digest conflict: the same identity with different content")
     if first["captures"] and not first["session_held"]:
         bad.append("the ledger does not hold the Session it just imported")
+    # ENC 7d / I10 — what the OWNER asserted is what is recorded.  An
+    # untruncated bundle asserting `partial` stays `partial`: 7d resolves the
+    # assertion and the observation in exactly one direction, and an
+    # observation may never UPGRADE a session the owner called incomplete.
+    if first["asserted_completeness"] and first["truncated"]:
+        bad.append("the bundle asserted a completeness AND was truncated; "
+                   "ENC 7d only ever downgrades, so this needs reading by hand")
+    # ⚠ CORE 5.14h — `capture_committed` is owed for a payload DURABLY HELD, and
+    # for nothing else.  The invariant is one commit per clip written, which is
+    # 0 == 0 for a Session whose every Capture is `absent`: committing one would
+    # confirm bytes that were never sent, and 8.4b puts `confirmed` outside the
+    # owner's own authority precisely so that cannot happen.
+    if first["commits_queued"] != first["clips_written"]:
+        bad.append(f"5.14h: {first['commits_queued']} commits queued for "
+                   f"{first['clips_written']} clips written")
+    if second["commits_queued"] != 0:
+        bad.append("5.14h: the second read queued a commit for a clip it did not write")
 
 if bad:
     print(f"{row}: FAIL — the import path:")
@@ -311,10 +345,56 @@ if bad:
         print("   " + b)
     print("   summary: " + json.dumps(d, indent=2))
     sys.exit(1)
-print(f"{row}: two reads, {p[0]['frames']} frames, {p[0]['captures']} Captures, "
-      f"{p[1]['captures_already_held']} already held on the second")
+f = p[0]
+print(f"{row}: {f['frames']} frames, {f['streams']} Streams, {f['captures']} Captures "
+      f"({f['captures_new']} new, {p[1]['captures_already_held']} already held on the second), "
+      f"completeness {NAMES.get(f['completeness'], f['completeness'])}"
+      f"{' (asserted)' if f['asserted_completeness'] else ' (nothing asserted)'}, "
+      f"{f['clips_written']} clips, {f['commits_queued']} commits owed to {f['owner_peer_id']}")
 sys.exit(0)
 PY
+
+    # ⚠ ONE LEDGER AND ONE ROOT PER BUNDLE.  I34's claim is that a SECOND read
+    # of the SAME bundle admits nothing new.  It is not a claim about two
+    # different Sessions sharing a ledger, and running them together would let a
+    # miscount in one hide behind the other's totals.
+    READ=0
+    CAPTURED=0
+    for BUNDLE in $BUNDLES; do
+        [ -s "$BUNDLE" ] || continue
+        BASE=$(basename "$BUNDLE")
+        BSUM="$WORK/$ROW.$BASE.json"
+        "$HOST" --row "$ROW" --summary "$BSUM" --import-bundle "$BUNDLE" \
+                --import-twice --import-root "$IMPORT_ROOT/$BASE" >>"$HOSTLOG" 2>&1 || RC=1
+        cp "$BSUM" "$SUMMARY"
+        READ=$((READ + 1))
+        if python3 "$CHECK" "$BSUM" "$ROW $BASE" >&2; then
+            N=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['import_passes'][0]['captures'])" "$BSUM")
+            CAPTURED=$((CAPTURED + N))
+        else
+            RC=1
+        fi
+    done
+    tail -40 "$HOSTLOG" >&2 || true
+
+    if [ "$READ" -eq 0 ]; then
+        echo "$ROW: FAIL — no bundle was readable" >&2
+        RC=1
+    fi
+    # A bundle carrying no Capture at all is a legal Session (I12) and a useless
+    # IOP-3: it would pass every assertion above without ever exercising the
+    # identity rule the row exists for.
+    #
+    # ⚠ IOP-3 ONLY.  This host's own Session record (IOP-10) carries Shots and
+    # no Captures, because this host owns no capture Stream — it arbitrates over
+    # a device's.  A Session of Shots with no Captures is exactly what 5.10e's
+    # hosted Session looks like from the arbitrating end, and requiring a
+    # Capture there would be requiring the host to own a camera.
+    if [ -z "${WRITE_FIRST:-}" ] && [ "$CAPTURED" -eq 0 ]; then
+        echo "$ROW: FAIL — $READ bundle(s) read and not one Capture between them" >&2
+        RC=1
+    fi
+    echo "$ROW: $READ bundle(s), $CAPTURED Captures imported in total" >&2
 
     if [ "$RC" -eq 0 ]; then echo "$ROW: PASS — $WHAT" >&2; fi
     exit $RC

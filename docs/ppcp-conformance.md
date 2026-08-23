@@ -892,14 +892,14 @@ read only ours would pass for a host talking to itself.
 
 | Row | Counterpart | Principally proves (CONF §5) | Outcome |
 |---|---|---|---|
-| IOP-3 | a bundle, no socket | I20, I23, I16, I9 | **pass, with a caveat** — see §11.3 |
+| IOP-3 | **two bundles PinPointCapture wrote**, no socket | I20, I23, I16, I9 | **pass** — see §11.3 |
 | IOP-4 | `observer-core.json` / `observer` | I24 | **pass** |
 | IOP-5 | `unrelated-capture.json` / `unrelated-capture` | I3, 8.2i1, and CONF 5b | **pass** |
 | IOP-6 | `reference-capture.json` / `nominating-capture`, this host nominating | I8 | **pass** |
 | IOP-7 | `reference-capture.json` / `nominating-capture`, this host never issuing | I32 | **pass** |
 | IOP-8 | `reference-capture.json` / `nominating-capture`, this host delayed 3 s | I35 | **pass** |
 | IOP-9 | `preview-capture.json` / `preview-capture` | I36 | **pass** |
-| IOP-10 | this host's own bundle, written then read | `ENC` 7a | **pass, half of it** — see §11.3 |
+| IOP-10 | this host's own bundle, written then read | `ENC` 7a | **pass, both directions** — see §11.3 |
 
 Measured 23 Aug 2026 against `libppcp` at **`d043135`** (L17's five `ENC` errata, E5–E9), with
 `ppcp-conform` and `ppcp-sim` rebuilt from that revision. `ctest --test-dir build/ppcp-tests` is
@@ -965,26 +965,62 @@ Every number below is from the row's own `--summary` JSON in `build/ppcp-tests/i
   preview Capture ever carried a payload frame — a measured zero for 5.11j's "the preview does not
   reach a bundle", rather than an assumption about what the device stored.
 
-### 11.3 The two bundle rows, and what is honestly claimed of each
+### 11.3 The two bundle rows
 
-- **IOP-3 is `pass` for the READER and is not yet the pairing.** CONF §5's row is "reference device,
-  no host → bundle → reference host import", and the bundle has to be one **PinPointCapture** wrote.
-  `run-interop.sh` looks in `PinPointCapture/docs/conformance/bundles/` first and says so loudly when
-  it is empty; as of this run that directory does not exist, so the row ran against libppcp's
-  `tests/fixtures/ct-i12-video.ppcpb`. What that proves is real and is less: **6 frames, 2 Captures
-  admitted on the first read, 2 already held and 0 new on the second, 0 digest conflicts, `ENC` 7c's
-  manifest ordering held.** I34 is asserted over the ledger because nothing on the wire could say it.
-  The moment a device bundle appears the same row picks it up with no change; **the interoperability
-  half of IOP-3 is open until it does.**
-- **IOP-10 is `pass` in this host's own direction only.** Phase 1 runs the IOP-6 pairing with
-  `--write-bundle`, so the file carries a real Session: `session_open` with **both** arbitration
-  parameters (5.10e — the structural statement that this Session has a host), this host's own
-  `declare`, the Shot it issued over two Candidates, `session_state: closed/complete` and
-  `session_manifest`. Five frames, 1657 bytes. Phase 2 reads it back through the same offline path
-  IOP-3 uses, and it parses clean. The file is checked in at
-  **`docs/conformance/bundles/pinpointstudio-host-session.ppcpbndl`** for the PinPointCapture agent
-  to read; **"both directions" is not demonstrated until it does**, and until a device bundle
-  arrives here.
+Both are now the real pairing. Updated 23 Aug 2026, after the PinPointCapture agent checked its
+bundles in.
+
+**IOP-3 — two bundles the DEVICE wrote, each read twice.** `run-interop.sh` reads **every** file in
+`PinPointCapture/docs/conformance/bundles/`, not the first one: the device checks in more than one
+shape on purpose, and reading only the first would leave the other unread with the row still green.
+Each bundle gets its own ledger and its own import root, because I34's claim is that a second read
+of the *same* bundle admits nothing new — running two Sessions through one ledger would let a
+miscount in either hide behind the other's totals.
+
+| Bundle | Frames | Streams | Captures | Second read | Completeness | Clips | Commits owed |
+|---|---|---|---|---|---|---|---|
+| `ses-interop-one-shot.ppcpbndl` | 13 | 2 | **3** new | **0 new, 3 already held** | `partial`, asserted | 0 | 0 |
+| `ses-interop-two-shots.ppcpbndl` | 20 | 2 | **6** new | **0 new, 6 already held** | `partial`, asserted | 0 | 0 |
+
+Both: `manifest_ordered` true, `truncated` false, `digest_conflicts` 0, `captures_unattributable` 0,
+owner `peer:1b4b06fd-…` on both passes, and the ledger holds the Session. Nine Captures imported in
+total, none twice.
+
+- **I34 is asserted over the ledger, because nothing on the wire could say it.** Second read: 0 new,
+  and the already-held count equals the first read's total exactly.
+- **I10 / `ENC` 7d — `partial` is honoured as `partial`.** The device asserts it (no camera in the
+  simulator, so every Capture is `absent`/`outside_buffer`) and neither bundle is truncated, so
+  there is nothing for 7d to resolve. The row asserts that an assertion and a truncation are never
+  seen together without being read by hand, because 7d resolves them in exactly one direction: an
+  observation may **downgrade** a Session nobody asserted anything about and may never **upgrade**
+  one the owner called incomplete.
+- **⚠ 5.14h — `capture_committed` is queued 0 times, and that is the conformant answer here.** The
+  invariant the row asserts is **one commit per clip written**, and both bundles wrote zero clips:
+  every Capture is `absent`/`outside_buffer`, so there is no payload and `PpcpImportSink` queues on
+  `payload_end` and on nothing else. Queueing a commit for an absent Capture would confirm bytes
+  that were never sent, and `MSG` 8.4b puts `confirmed` outside the owner's own authority precisely
+  so that cannot happen. The 5.14h path itself is exercised where there *is* a payload:
+  `ppcp_bundle_import_test` asserts `commitsQueued == 1`, that the queue is scoped to the **minting**
+  peer (`pendingCommits("peer:dev")` non-empty, `pendingCommits("peer:someone-else")` empty), and
+  that it survives a ledger reload. Nothing about that is left to the interop row.
+- The row also refuses to pass on an empty read: `READ == 0` or nine-Captures-becomes-zero both fail
+  it, so a bundle directory that silently emptied cannot look like a green row.
+
+**IOP-10 — both directions, and the device closed the other one.** Phase 1 runs the IOP-6 pairing
+with `--write-bundle`, so the file carries a real Session: `session_open` with **both** arbitration
+parameters (5.10e — the structural statement that this Session has a host), this host's own
+`declare`, the Shot it issued over two Candidates, `session_state: closed/complete` and
+`session_manifest`. Five frames, 1657 bytes, checked in at
+`docs/conformance/bundles/pinpointstudio-host-session.ppcpbndl`. Phase 2 reads it back through the
+same offline path IOP-3 uses. **The PinPointCapture agent has now read that same file clean on its
+side**, which is the direction this repository cannot assert for itself, so `ENC` 7a's "live and
+file are one format" holds across both writers and both readers.
+
+- That bundle carries **Shots and no Captures**, and the row's "at least one Capture" guard is
+  deliberately scoped to IOP-3 for that reason: this host owns no capture Stream — it arbitrates
+  over a device's — and a Session of Shots with no Captures is exactly what a hosted Session looks
+  like from the arbitrating end. Requiring a Capture there would be requiring the host to own a
+  camera.
 
 ### 11.4 Wave 2 — `run-tls-host.sh`, and what it is for
 
@@ -1025,6 +1061,8 @@ a full PPCP session over it: that is wave 2, and it needs the other product.
 
 ### 11.5 What these rows do not cover
 
+- **IOP-3 and IOP-10 no longer have an open half**, but they are still *bundle* rows: neither says
+  anything about the live link between the two products. That is IOP-1, and it is wave 2.
 - **IOP-1 and IOP-2 are not this host's to run in wave 1.** IOP-1 is the real pair (wave 2); IOP-2
   is a reference **device** against a synthetic third-party host, so PinPointStudio is not a party
   to it at all.
