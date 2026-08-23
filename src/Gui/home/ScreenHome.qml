@@ -641,6 +641,17 @@ Item {
             // The component hides itself entirely when there are none, and on a
             // build without libppcp there is no controller and it never appears
             // (H0 — a build with no PPCP must still be a working application).
+            // ── Pairing, PPCP-RV §4 ─────────────────────────────────────────
+            //
+            // Above the offers and below the devices, because that is the order
+            // it happens in: pair a device, the device's cameras join DEVICES,
+            // the device offers what it holds.  In-screen and not a menu item
+            // or a dialog — every control this application has is on the screen
+            // where its result appears.
+            PpcpPairPanel {
+                width: mainCol.width
+            }
+
             PpcpOfferList {
                 width: mainCol.width
             }

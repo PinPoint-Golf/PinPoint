@@ -118,6 +118,17 @@ struct Link {
         cfg.listener = true;
         cfg.clock = hostIface;
         cfg.syncTimebase = kHostTimebaseId;
+        // F-H5-3, closed — see the note above §7.4 below.  A host that declares
+        // `live` owes a health source, and this suite is where §7.4 is
+        // asserted, so it supplies one rather than having `live` dropped from
+        // under it.
+        cfg.healthReport = [](ppcp_health *out) {
+            if (!out) return PPCP_ERR_INVALID;
+            *out = ppcp_health{};
+            out->thermal = PPCP_THERMAL_NOMINAL;
+            out->storage_free_bytes = 512ull * 1024 * 1024 * 1024;
+            return PPCP_OK;
+        };
         std::string why;
         host = makeHostEngine(std::move(cfg), &why);
         ASSERT_NE(host, nullptr) << why;
@@ -300,17 +311,21 @@ TEST(PpcpLiveSession, AConversionWithNoDirectRelationIsRefusedAndNeverAssumedZer
 
 // ── CORE §7.4 — liveness ──────────────────────────────────────────────────
 //
-// ⚠ F-H5-3, AND IT COST THIS SUITE AN HOUR.  `ppcp_peer_config.health_report`
-// is documented in peer.h as "what `heartbeat_ack` carries" — which reads as a
-// decoration on liveness and is in fact a PRECONDITION for it.  A peer without
-// one answers every `heartbeat` with `error` / `profile_not_supported` and the
-// message "no health source", so 7.4a never runs, no ack ever returns, and the
-// host's own link state stays `live` for ever because it is never told
-// otherwise.  Both halves of §7.4 looked broken until the harness supplied a
-// callback; neither was.  It is arguably the right refusal — a peer reporting
-// `thermal: nominal` on no evidence is the fabrication this library refuses
-// everywhere else — but an embedding with no thermometer will silently have no
-// liveness at all, and the field's documentation should say so.
+// ⚠ F-H5-3, RAISED HERE AND NOW CLOSED IN libppcp.  `health_report` was
+// documented in peer.h as "what `heartbeat_ack` carries" — which reads as a
+// decoration on liveness and was in fact a PRECONDITION for it.  A peer without
+// one answered every `heartbeat` with `error` / `profile_not_supported` and the
+// message "no health source", so 7.4a never ran, no ack ever returned, and the
+// sender's own link state stayed `live` for ever because it was never told
+// otherwise.  Both halves of §7.4 looked broken in this suite until the harness
+// supplied a callback; neither was.
+//
+// libppcp now REFUSES ppcp_peer_new() for a peer that declares `live` with no
+// health source — "a peer that has no thermometer declares no Live" — so the
+// silent absence became a constructor error, which is the whole of what this
+// finding asked for.  On this side the consequence is that
+// `makeHostEngine()` drops `live` from the declared set when the embedding
+// supplied no reading, and PpcpHostPeer always supplies one.
 
 TEST(PpcpLiveSession, AHeartbeatIsQueuedEveryIntervalAndTheSessionIsUnchangedByIt)
 {

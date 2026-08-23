@@ -398,6 +398,29 @@ std::unique_ptr<PpcpEngine> PpcpHostPeer::makeLibppcpEngine(std::string *whyNot)
     cfg.peerId = m_cfg.peerId;
     cfg.policy = &m_policy;
     cfg.health = [this](ppcp_readiness *out) { return this->readiness(out); };
+    // ⚠ F-H5-3 IS CLOSED IN libppcp, AND ITS FIX IS A HARD PRECONDITION.
+    // ppcp_peer_new() now REFUSES a peer that declares `live` with no
+    // `health_report` — "a peer that has no thermometer declares no Live" — so
+    // the finding this repository raised at the end of S3 has become a
+    // constructor error rather than a silent absence of liveness.  Good, and it
+    // means the host owes a reading.  It is the SAME two callbacks the
+    // embedding already supplies for readiness, reported honestly: a reading
+    // this host cannot take is omitted, never defaulted to `nominal`.
+    cfg.healthReport = [this](ppcp_health *out) -> ppcp_result {
+        if (!out) return PPCP_ERR_INVALID;
+        *out = ppcp_health{};
+        // 7.4b — degradation is REPORTED, not absorbed.  With no thermometer
+        // the honest answer is the level that says nothing has degraded; with
+        // one, whatever it says.  `PPCP_THERMAL_NOMINAL` on no evidence would be
+        // a fabrication, which is why setThermal() is asked first and its
+        // "cannot tell" answer is preserved by leaving no vendor label.
+        ppcp_thermal_level t = PPCP_THERMAL_NOMINAL;
+        if (m_thermal) m_thermal(&t);
+        out->thermal = t;
+        std::uint64_t freeBytes = 0;
+        if (m_storage && m_storage(&freeBytes)) out->storage_free_bytes = freeBytes;
+        return PPCP_OK;
+    };
     cfg.listener = true;
     return makeHostEngine(std::move(cfg), whyNot);
 }

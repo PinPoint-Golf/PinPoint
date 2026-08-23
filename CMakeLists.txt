@@ -1084,7 +1084,12 @@ if(TARGET ppcp)
         # the same Source, and needing TLS to describe a camera would be this
         # application inventing a requirement the specification has not.
         src/Video/VideoInputPpcp.h         src/Video/VideoInputPpcp.cpp
-        src/Video/VideoInputPpcp_inventory.cpp)
+        src/Video/VideoInputPpcp_inventory.cpp
+        # H6 — the QR encoder behind RV 4.1d.  Here and not in the transport
+        # block because a pairing code is a picture of a URI and nothing about
+        # drawing one needs a TLS stack.  Ours because the repository has none:
+        # no qrencode, no ZXing, nothing vendored.
+        src/Ppcp/ppcp_qr.h                 src/Ppcp/ppcp_qr.cpp)
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
     # ⚠ THE PPCP_HAVE_PEER GUARD IS GONE, AND ITS ABSENCE IS THE RECORD THAT L6
     # LANDED. It read the header on disk and flipped with no edit here, exactly
@@ -3079,10 +3084,32 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
     target_sources(PinPointStudio PRIVATE
         src/Ppcp/ppcp_transport.h     src/Ppcp/ppcp_transport.cpp
         src/Ppcp/ppcp_ingest_policy.h src/Ppcp/ppcp_ingest_policy.cpp
-        src/Ppcp/ppcp_host_peer.h     src/Ppcp/ppcp_host_peer.cpp)
+        src/Ppcp/ppcp_host_peer.h     src/Ppcp/ppcp_host_peer.cpp
+        # H6 — PPCP-RV, host side.  In the TRANSPORT block because the code's
+        # whole purpose is to authenticate a TLS handshake: the resolver is
+        # installed on H1's Listener and the derived K_tls is that handshake's
+        # external PSK.  A rendezvous with no socket to hand it to would be a
+        # key generator.
+        src/Ppcp/ppcp_rendezvous.h    src/Ppcp/ppcp_rendezvous.cpp
+        src/Ppcp/ppcp_pairing_store.cpp
+        src/Ppcp/ppcp_discovery.h     src/Ppcp/ppcp_discovery.cpp
+        # H-compose — THE OWNER.  Until this file, nothing in this application
+        # constructed a PpcpHostPeer and three joins named in the code had no
+        # caller.  It is its own translation unit and not lines in main.cpp so
+        # that ppcp-tests can compile it (see the ppcp_app_tu_syntax row).
+        src/Ppcp/ppcp_host_service.h  src/Ppcp/ppcp_host_service.cpp)
 
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
     target_link_libraries(PinPointStudio PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    if(APPLE)
+        # RV 7.2c — "secrets at rest are held in the platform's protected
+        # storage where one exists".  On macOS that is the keychain, and this
+        # application's existing secrets subsystem (QSettings, i.e. a plain
+        # plist) is not it.  Security.framework is reached only by
+        # ppcp_pairing_store.cpp.
+        target_link_libraries(PinPointStudio PRIVATE
+            "-framework Security" "-framework CoreFoundation")
+    endif()
     target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP_TRANSPORT)
     message(STATUS "PPCP transport: OpenSSL ${PP_OPENSSL_VERSION}, libppcp ${PP_LIBPPCP_VERSION}")
 elseif(NOT PP_OPENSSL_FOUND)

@@ -148,6 +148,21 @@ struct DevicePeer {
         pc.profiles      = profileNames.data();
         pc.profile_count = profileNames.size();
         pc.listener      = true;   // ENC 2.1a — no link_bind is minted here
+        // ⚠ F-H5-3 IS CLOSED AND IT IS NOW A CONSTRUCTOR PRECONDITION.  This
+        // repository raised it at the end of S3: `health_report` reads in
+        // peer.h as a decoration on liveness and is in fact required by it, so
+        // an embedding with no thermometer silently had no liveness at all.
+        // libppcp now refuses ppcp_peer_new() for a peer that declares `live`
+        // without one — "a peer that has no thermometer declares no Live" —
+        // which is the loud version of the same rule.  This device declares
+        // `live`, so it owes a reading.
+        pc.health_report = [](void *, ppcp_health *out) {
+            if (!out) return PPCP_ERR_INVALID;
+            *out = ppcp_health{};
+            out->thermal = PPCP_THERMAL_NOMINAL;
+            out->storage_free_bytes = 64ull * 1024 * 1024 * 1024;
+            return PPCP_OK;
+        };
         ASSERT_EQ(ppcp_peer_new(storage.data(), storage.size(), &pc, &p), PPCP_OK);
     }
 };

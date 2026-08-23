@@ -100,6 +100,9 @@ set(PP_QML_FILES
     # of the home screen.  This is where H3's deleted "File -> Import Session…"
     # menu item went: no menus, no dialogs, and the user never picks a file.
     src/Gui/home/PpcpOfferList.qml
+    # H6 — "Pair a device": the PPCP-RV pairing code as a QR, the outstanding
+    # codes and the remembered devices, in the DEVICES area of the home screen.
+    src/Gui/home/PpcpPairPanel.qml
     src/Gui/settings/ScreenSettings.qml
     src/Gui/settings/AppearancePanel.qml
     src/Gui/settings/GeneralPanel.qml

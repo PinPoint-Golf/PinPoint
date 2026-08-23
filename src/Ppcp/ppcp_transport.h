@@ -195,6 +195,16 @@ public:
     // test can assert it rather than trust the comment.
     bool acceptedEarlyData() const { return false; }
 
+    // ⚠ F-H6-2 — WHICH PAIRING AUTHENTICATED THIS STREAM, AND IT HAD NO WAY
+    // OUT UNTIL H6.  `ResolvedPairing::pairingId` below is documented as "the
+    // embedding's handle on WHICH pairing authenticated a stream", the listener
+    // has held it since H1, and there was no accessor — so an embedding that
+    // had to act on it (RV 7.3a's "invalidate once `mu` handshakes have
+    // completed" is the whole of the single-use defence) could not find out
+    // which code had just been used.  Empty on the dialling side, which never
+    // resolves anything.
+    const std::string &pairingId() const;
+
     // The socket and the SSL* behind this channel.  Named here and DEFINED
     // ONLY IN ppcp_transport.cpp: nothing outside that file can do anything
     // with it but pass it along, which is what the connector's dial slots and
@@ -234,6 +244,13 @@ public:
 
     // ENC 2.1a/2.1b — the token the dialler minted and both ends bound by.
     const LinkId &linkId() const { return m_linkId; }
+
+    // F-H6-2 — the pairing the LISTENER resolved for this link, read off the
+    // control channel.  Every stream of one link resolves the same pairing
+    // (they are separate TLS sessions over the same K_tls), so the link-level
+    // answer is well defined and is the one RV 7.3a needs: `mu` counts links,
+    // never handshakes — see PpcpRendezvous::noteLinkEstablished().
+    const std::string &pairingId() const;
 
     std::vector<Channel> channels() const;
     void close();

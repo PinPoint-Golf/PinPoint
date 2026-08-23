@@ -18,6 +18,8 @@
 
 #include "ppcp_host_engine.h"
 
+#include <algorithm>
+
 #include <vector>
 
 #include <ppcp/peer.h>
@@ -51,6 +53,22 @@ public:
 
         // The Studio profile set, as the claim file states it (plan §2).
         e->m_profileNames = PpcpSourceDeclaration::studioProfiles();
+        // ⚠ AND `live` IS DROPPED WHERE THERE IS NO HEALTH SOURCE, BECAUSE A
+        // PROFILE IS A PROMISE ABOUT BEHAVIOUR (CORE 2.2.2).  libppcp now
+        // refuses ppcp_peer_new() for a peer that declares `live` with no
+        // `health_report` — that is F-H5-3, which this repository raised at the
+        // end of S3 and which used to present as every `heartbeat` coming back
+        // `profile_not_supported` while the sender's link state stayed `live`
+        // for ever.  An engine built with no reading now declares no Live
+        // rather than declaring one it cannot keep.  The SHIPPING host always
+        // has a reading — PpcpHostPeer::makeLibppcpEngine() supplies one — so
+        // this branch is the standalone/bundle path, where there is no link and
+        // no heartbeat to answer anyway.
+        if (!e->m_cfg.healthReport)
+            e->m_profileNames.erase(
+                std::remove(e->m_profileNames.begin(), e->m_profileNames.end(),
+                            std::string("live")),
+                e->m_profileNames.end());
         e->m_profilePtrs.reserve(e->m_profileNames.size());
         for (const std::string &s : e->m_profileNames) e->m_profilePtrs.push_back(s.c_str());
         pc.profiles = e->m_profilePtrs.data();

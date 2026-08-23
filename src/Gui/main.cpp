@@ -25,6 +25,9 @@
 #include "../Ppcp/ppcp_import_controller.h"
 #include "../Ppcp/ppcp_offer_controller.h"
 #endif
+#ifdef HAVE_PPCP_TRANSPORT
+#include "../Ppcp/ppcp_host_service.h"
+#endif
 #include <QQmlContext>
 #include <QQuickStyle>
 
@@ -583,6 +586,29 @@ int main(int argc, char *argv[])
     static PpcpOfferController ppcpOfferController;
     engine.rootContext()->setContextProperty(QStringLiteral("ppcpOffers"),
                                              &ppcpOfferController);
+#endif
+
+#ifdef HAVE_PPCP_TRANSPORT
+    // H-compose — THE OWNER, and the paragraph above is now out of date in one
+    // respect: something DOES construct a PpcpHostPeer.  Everything about it
+    // lives in PpcpHostService (its own translation unit, so ppcp-tests can
+    // compile it — main.cpp cannot be syntax-checked there without reproducing
+    // whisper, ONNX Runtime, OpenCV and Sparkle).  main.cpp's whole share is
+    // construct, wire, expose.
+    //
+    // 7788 is RV §10's example port and a stable one matters: a persisted
+    // pairing reconnects to an endpoint, and an ephemeral port would move under
+    // it every launch.  Falling back to 0 rather than refusing to start, because
+    // the pairing code carries whatever port we ended up with (4.3d).
+    static PpcpHostService ppcpHost;
+    ppcpHost.setOfferController(&ppcpOfferController);
+    // MSG 3.3 — a peer's cameras exist the moment it declares.  The registry
+    // has already been told by then; CameraManager snapshots at construction
+    // and merges only on enumerate(), so it is the one that has to be asked.
+    QObject::connect(&ppcpHost, &PpcpHostService::sourcesChanged,
+                     &cameraManager, &CameraManager::enumerate);
+    if (!ppcpHost.start(7788)) ppcpHost.start(0);
+    engine.rootContext()->setContextProperty(QStringLiteral("ppcpHost"), &ppcpHost);
 #endif
     engine.rootContext()->setContextProperty(QStringLiteral("motionCaptureProbe"), &motionCaptureProbe);
     engine.rootContext()->setContextProperty(QStringLiteral("sessionReviewController"), &sessionReviewController);

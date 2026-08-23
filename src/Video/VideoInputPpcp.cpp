@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 #include <QDateTime>
 #include <QImage>
@@ -117,14 +119,90 @@ QVideoFrameFormat::PixelFormat qtFormatFor(const QString &pixelFormat)
 
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// The live instances, so 6.1f's re-feed can reach cameras this file did not
+// open.  A plain list under a mutex: there are a handful of them, they are
+// created and destroyed on the GUI thread, and the push comes from whichever
+// thread pumps the link.
+std::mutex &ppcpLiveMutex()
+{
+    static std::mutex m;
+    return m;
+}
+std::vector<VideoInputPpcp *> &ppcpLive()
+{
+    static std::vector<VideoInputPpcp *> v;
+    return v;
+}
+
+}  // namespace
+
 VideoInputPpcp::VideoInputPpcp(QObject *parent)
     : VideoInputBase(parent)
 {
     qRegisterMetaType<PpcpClip>("PpcpClip");
+    std::lock_guard<std::mutex> g(ppcpLiveMutex());
+    ppcpLive().push_back(this);
+}
+
+QString VideoInputPpcp::timebaseId() const
+{
+    const ppcp_source *s = source();
+    return s ? idStr(s->timebase_id) : QString();
+}
+
+int VideoInputPpcp::applyTimebaseOffsets(const QString &peerId,
+                                         const TimebaseOffsetLookup &lookup)
+{
+    std::vector<VideoInputPpcp *> targets;
+    {
+        std::lock_guard<std::mutex> g(ppcpLiveMutex());
+        for (VideoInputPpcp *v : ppcpLive())
+            if (v->m_peerId == peerId) targets.push_back(v);
+    }
+    int mapped = 0;
+    for (VideoInputPpcp *v : targets) {
+        qint64 off = 0;
+        const QString tb = v->timebaseId();
+        if (!tb.isEmpty() && lookup && lookup(tb, &off)) {
+            v->setTimebaseOffsetNs(off);
+            mapped++;
+        } else {
+            v->clearTimebaseMapping();
+        }
+    }
+    return mapped;
+}
+
+int VideoInputPpcp::clearTimebaseMappings(const QString &peerId)
+{
+    std::vector<VideoInputPpcp *> targets;
+    {
+        std::lock_guard<std::mutex> g(ppcpLiveMutex());
+        for (VideoInputPpcp *v : ppcpLive())
+            if (v->m_peerId == peerId) targets.push_back(v);
+    }
+    for (VideoInputPpcp *v : targets) v->clearTimebaseMapping();
+    return static_cast<int>(targets.size());
+}
+
+int VideoInputPpcp::liveInstanceCount(const QString &peerId)
+{
+    std::lock_guard<std::mutex> g(ppcpLiveMutex());
+    int n = 0;
+    for (VideoInputPpcp *v : ppcpLive())
+        if (peerId.isEmpty() || v->m_peerId == peerId) n++;
+    return n;
 }
 
 VideoInputPpcp::~VideoInputPpcp()
 {
+    {
+        std::lock_guard<std::mutex> g(ppcpLiveMutex());
+        auto &v = ppcpLive();
+        v.erase(std::remove(v.begin(), v.end(), this), v.end());
+    }
     // No stop() here: stop() queues `stream_close` frames on an engine this
     // class does not own and whose lifetime it cannot see.  The embedding
     // closes the Streams while the link is still up, or the link's own close

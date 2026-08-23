@@ -224,6 +224,39 @@ public:
     // no device registry in the link.
     static int registerSources(const ppcp_peer_desc *peer);
 
+    // ── 6.1f, and the join it needs ────────────────────────────────────────
+    // "A `relation_update` was published or received, so every VideoInputPpcp
+    // bound to this peer can be re-fed its offset."  The owner of the LINK has
+    // the relation; the owner of the CAMERAS is CameraManager, several layers
+    // away and holding VideoInputBase pointers it has no reason to downcast.
+    // So the live instances keep a register of themselves and the link's owner
+    // pushes to it by `Peer.id`.  Returns how many instances were re-fed.
+    //
+    // ⚠ AND THE SEAM STILL CANNOT CARRY THE WHOLE RELATION.  setTimebaseOffsetNs
+    // takes a SCALAR and a TimebaseRelation is affine, so this is the relation
+    // evaluated at one instant and the skew term goes stale at the rate it was
+    // measured.  That is why it is re-fed on every publish rather than set
+    // once, and why PpcpLiveSession::offsetToRefNs() returns an uncertainty
+    // beside the offset.  Widening it to take a relation is a change to this
+    // class and is not made blind.
+    // `lookup` is asked for each live instance's OWN Source timebase (5.6a),
+    // because a peer with a camera clock and an audio clock has one relation
+    // per clock and a single scalar for the peer would be a fabrication for
+    // whichever Source it did not describe.  A lookup that answers false — no
+    // direct relation, or `unrelated` (5.4b, 8.2i1) — CLEARS that instance's
+    // mapping rather than leaving a stale one, because a stale offset is
+    // shaped exactly like drift and is indistinguishable downstream from a
+    // measured one.
+    using TimebaseOffsetLookup = std::function<bool(const QString &timebaseId, qint64 *outNs)>;
+    static int applyTimebaseOffsets(const QString &peerId, const TimebaseOffsetLookup &lookup);
+    static int clearTimebaseMappings(const QString &peerId);
+    static int liveInstanceCount(const QString &peerId);
+
+    // CORE 5.6a — the Timebase this Source stamps in.  Empty until the
+    // counterpart has declared, which is also when the offset seam can first
+    // mean anything.
+    QString timebaseId() const;
+
 signals:
     // A Capture that is NOT a preview frame, with its canonical instants
     // intact.  Deliberately not videoFrameReady() — see the header note.

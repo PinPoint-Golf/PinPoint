@@ -797,6 +797,19 @@ TransportChannel *PeerConnection::channel(Channel c) const
     return nullptr;
 }
 
+const std::string &TransportChannel::pairingId() const
+{
+    static const std::string kNone;
+    return (m_impl && m_impl->state) ? m_impl->state->pairingId : kNone;
+}
+
+const std::string &PeerConnection::pairingId() const
+{
+    static const std::string kNone;
+    const TransportChannel *c = channel(Channel::Control);
+    return c ? c->pairingId() : kNone;
+}
+
 const TlsOutcome &PeerConnection::tls() const
 {
     static const TlsOutcome none;
