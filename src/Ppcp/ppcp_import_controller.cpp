@@ -79,9 +79,13 @@ bool PpcpImportController::importSession(const QUrl &file)
     // CORE 9a: "a consumer gains a file transport, NOT an importer". If this
     // line built a different peer, or a lookalike, the claim would be false.
     std::string why;
-    std::unique_ptr<Ppcp::PpcpEngine> engine =
-        Ppcp::makeHostEngine(Ppcp::HostEngineConfig{ m_peerId.toStdString(), nullptr, {}, true },
-                             &why);
+    // Named members, not a positional brace list: H5 grew this struct and the
+    // positional form silently shifted `listener` onto the `health` callback.
+    Ppcp::HostEngineConfig cfg;
+    cfg.peerId   = m_peerId.toStdString();
+    cfg.policy   = nullptr;
+    cfg.listener = true;
+    std::unique_ptr<Ppcp::PpcpEngine> engine = Ppcp::makeHostEngine(std::move(cfg), &why);
     m_busy = false;
     emit busyChanged();
 
