@@ -536,67 +536,238 @@ owns the join.
 
 ---
 
-## 10. H8 — the conformance claim (session 4, wave 2) — **WORK IN PROGRESS**
+## 10. H8 — the conformance claim (session 4, wave 2)
 
-> ⚠ **This section is a work-in-progress note, not a claim.** It records where H8 stopped so the
-> next session resumes from here rather than from scratch. Nothing in it has been measured yet.
+**This is the claim.** Every row below was produced by `libppcp/tools/ppcp-conform` (work package
+L14) driving this application's real host peer over a loopback socket, with `tools/ppcp-sim` as the
+counterpart. Nothing in it was asserted by a test in this repository, and no row was edited.
 
-**The command this work package exists to run** — `ppcp-conform` (libppcp L14), driving a headless
-`PpcpHostPeer` over **plaintext** loopback:
+| | |
+|---|---|
+| Instrument | `ppcp-conform`, libppcp `e52647e` (`ppcp-sim` the same) |
+| Peer under test | `build/ppcp-tests/ppcp_conform_host` — the real `PpcpHostPeer`, headless |
+| Role | `host` |
+| Profiles claimed | `core capture detect arbitrate live offline markup` (Mint withheld) |
+| Result | **11 of 12 applicable rows pass.** One row — CT-I6 — cannot be run against a host and is a finding against the instrument, not against this host |
+| Date | 23 August 2026 |
+
+### 10.1 Reproducing it
 
 ```sh
-# 1. the headless host, listening on an ephemeral port it writes to a file
-build/ppcp-tests/ppcp_conform_host --port 0 --port-file /tmp/pps.port --run-ms 60000
-
-# 2. the instrument, from the libppcp build tree
-../libppcp/build/dev/tools/ppcp-conform/ppcp-conform \
-    --profiles core,capture,detect,arbitrate,live,offline,markup \
-    --role host --connect 127.0.0.1:$(cat /tmp/pps.port) \
-    --column PinPointStudio \
-    --json  build/ppcp-tests/pps-conform.json \
-    --markdown build/ppcp-tests/pps-conform.md
+cmake -S src/Ppcp/tests -B build/ppcp-tests -G Ninja
+cmake --build build/ppcp-tests -j3
+ctest --test-dir build/ppcp-tests -R ppcp_conformance --output-on-failure
 ```
 
-`--psk` is deliberately absent: `ppcp-sim` has no TLS **transport**, so the harness socket is
-plaintext. `PPCP-RV` erratum E4 (RV 2c1) scopes 2c to the rendezvous paths and states that a test
-harness socket is not one of them; `CORE` §3.2's `direct` transport is conformant plaintext.
+`ctest` drives `src/Ppcp/tests/run-conform.sh`, which is two commands:
 
-### Done
+```sh
+# 1. the peer under test, headless, on an ephemeral port it writes to a file
+build/ppcp-tests/ppcp_conform_host --port 0 --port-file $WORK/conform-host.port --run-ms 240000
 
-- **A harness-only plaintext listener.** `Ppcp::Listener::setPlaintextHarness()` in
-  `src/Ppcp/ppcp_transport.h`, and every line implementing it in `ppcp_transport.cpp`, sits inside
-  `#if defined(PP_PPCP_PLAINTEXT_HARNESS)`. That macro comes from ONE place — the CMake option of
-  the same name, **default `OFF`**, turned on only by `src/Ppcp/tests`. In a release build there is
-  no plaintext code path to reach. ENC §2.1 link binding is unchanged: the dialler still mints a
-  `link_id` and sends `link_bind` first on every stream, and every 2.1c refusal still applies.
-- **Finding F-H8-1 — this host never sent its own `declare`, and no suite noticed.** MSG 3.3c makes
-  `declare` a precondition for originating anything naming a Source, Stream or Candidate, and 3.3d
-  says a host sends it *even with an empty `sources` list*. `PpcpHostService::start()` built the
-  declaration and validated it; `grep -rn ppcp_peer_declare src/` outside the test tree returned
-  **nothing**. Every suite in `ppcp-tests` declared by hand in its own fixture, which is exactly how
-  a composition defect survives a green suite. Fixed in `PpcpHostPeer::drainEvents()`, on
-  `PPCP_EVENT_CONNECTED`, once per link. **Whose defect: this host's.**
-- **F-L13-1's guard inverted to the new libppcp contract** (`ppcp_live_session_test.cpp`). Recorded
-  as a second finding below, because the old guard *would still have passed*.
-- **Finding F-H8-2 — the old F-L13-1 guard could not tell the defect from the fix.** It asserted
+# 2. the instrument, from libppcp's own build tree
+../libppcp/build/dev/tools/ppcp-conform/ppcp-conform \
+    --profiles core,capture,detect,arbitrate,live,offline,markup \
+    --role host --connect 127.0.0.1:$(cat $WORK/conform-host.port) \
+    --column PinPointStudio \
+    --json $WORK/pps-conform.json --markdown $WORK/pps-conform.md
+```
+
+`ppcp-conform` is **not built by this repository** — `pp_require_ppcp()` forces `PPCP_BUILD_TOOLS`
+OFF when the library is embedded, because this repository must not start building another
+repository's command line tools (plan ground rule 1). CMake finds it in the sibling libppcp build
+tree, and says so loudly if it cannot; `-DPP_PPCP_CONFORM=<path>` overrides.
+
+### 10.2 The socket is plaintext, and that is a conformant `direct` transport
+
+`--psk` is deliberately absent. `ppcp-sim` has no TLS **transport**: its `--psk-ke-only` mode is a
+hand-built ClientHello for RT-4 and speaks no application data, so the instrument cannot reach a
+TLS-only host at all. `PPCP-RV` erratum E4 (RV 2c1) scopes 2c to the rendezvous *paths* and states
+that a conformance harness socket is not one of them; `PPCP-CORE` §3.2's `direct` transport is
+conformant plaintext.
+
+The listener side of that is **`Ppcp::Listener::setPlaintextHarness()`**, and every line
+implementing it — in `ppcp_transport.h` and `ppcp_transport.cpp` alike — is inside
+`#if defined(PP_PPCP_PLAINTEXT_HARNESS)`. That macro comes from one place: the CMake option of the
+same name, declared in the application's own `CMakeLists.txt`, **default OFF**, where
+`PP_SHIPPING_BUILD` makes it a `FATAL_ERROR` to turn on. `src/Ppcp/tests/CMakeLists.txt` is the only
+file in this repository that sets it. A release build compiles no plaintext code path at all —
+the same discipline `Connector::connect()` keeps for RV 5.2f, applied to the listener.
+
+ENC §2.1 link binding is unchanged by it: the dialler still mints a `link_id` and sends `link_bind`
+first on every stream, and every 2.1c refusal still applies. `TlsOutcome::version` reads
+`plaintext-harness`, so nothing downstream and no log line can mistake it for TLS.
+
+### 10.3 What the peer under test is, and what it is not
+
+`src/Ppcp/tests/ppcp_conform_host.cpp` is the application's own code reached through the same entry
+points `PpcpHostService` uses: `PpcpHostPeer`, `makeHostEngine()` (the one place that says what a
+PinPointStudio peer is), `PpcpIngestPolicy` with its real 120 fps floor, `PpcpSourceDeclaration`
+with its real `build()` and `validate()`, `PpcpLiveSession`, `PpcpShotBridge`,
+`PpcpAnnotationStore`, `PpcpOfferController` and H1's `Listener`.
+
+Three things it deliberately does **not** use, each stated rather than left to be discovered:
+
+- **`PpcpHostService` itself.** It reaches `VideoInputFactory`, which pulls in the AVFoundation
+  camera backend and `DeviceEnumerator` (which reaches Bluetooth through `imu_base.h`). Linking the
+  device stack into a conformance harness would make the run depend on what hardware is plugged in.
+  The composition it performs is performed here line for line, and the `ppcp_app_tu_syntax` row is
+  what keeps the service compiling. **Both halves of every fix below landed in both places.**
+- **`PpcpSourceDeclaration::hostInventory()`**, for the same reason: it reads `DeviceEnumerator`, so
+  the declaration would differ between two machines. The harness declares a fixed camera and a fixed
+  microphone — a microphone because CT-I8's second half needs a host Source that nominates, and a
+  camera because 3.3d's symmetric declaration needs one that does not.
+- **`PpcpRendezvous`.** There is no pairing code on a plaintext socket; no identity is offered and
+  none is resolved. RV rows are §4 of this document and are evidence in their own right.
+
+**The Session is the harness's decision, not the application's.** Nothing in `src/` calls
+`liveSession().open()` — §7.2 has said so since H5 — so the harness opens the Session, starts the
+arbiter and arms, exactly as `tools/scenarios/README.md`'s `reference-host` does. Every row that
+depends on a Session is therefore evidence about `PpcpLiveSession` and the engine behind it, and not
+about a screen. That gap is unchanged by this work package.
+
+### 10.4 The rows, verbatim
+
+The tool's `--markdown` output, unedited:
+
+```
+<!-- generated by ppcp-conform, 2026-08-23 — do not edit by hand -->
+<!-- profiles claimed: core capture detect arbitrate live offline markup -->
+
+| Test | Invariant | Profile | Method | PinPointStudio |
+|---|---|---|---|---|
+| CT-I7 | I7 | Mint, Arbitrate | paired | pass |
+| CT-I8 | I8 | Mint, Arbitrate | paired | pass |
+| CT-I20 | I20 | Arbitrate | paired | pass |
+| CT-I21 | I21 | Live | paired | pass |
+| CT-I36a | I36 | Capture | paired | pass |
+| CT-S5 | I18 | Core | paired | pass |
+| CT-S6 | I24 | Core | injected | pass |
+| IOP-5 | I3, 8.2i1 | Core | paired | pass |
+| CT-I12 | I12 | Offline | paired | pass |
+| CT-S3 | I19 | Core | injected | pass |
+| CT-S7 | I31 | Capture | injected | pass |
+| CT-I6 | I6 | Mint | injected | impl |
+```
+
+What each row put on the wire, from the JSON beside it:
+
+| Row | Counterpart declaration | Scenario | Asserted at exit | ms |
+|---|---|---|---|---|
+| CT-I7 | `reference-capture.json` | `late-candidate-capture` | `violations=0,t0_revisions=0,shots_rx>=1` | 6008 |
+| CT-I8 | `reference-capture.json` | `nominating-capture` | `violations=0,shots_rx>=1` | 6013 |
+| CT-I20 | `reference-capture.json` | `reference-capture` | `violations=0` | 5015 |
+| CT-I21 | `three-timebase-capture.json` | `reference-capture` | `violations=0,relations_composed=0,probe_timebases=3` | 8018 |
+| CT-I36a | `preview-capture.json` | `preview-capture` | `violations=0` | 6020 |
+| CT-S5 | `three-timebase-capture.json` | `reference-capture` | `violations=0,relations_composed=0,probe_timebases=3` | 8016 |
+| CT-S6 | `observer-core.json` | `observer` | `violations=0` | 5018 |
+| IOP-5 | `unrelated-capture.json` | `unrelated-capture` | `violations=0,shots_rx=0` | 6018 |
+| CT-I12 | `reference-capture.json` | `offer-session` | `violations=0,offers_tx>=1,accepts_rx>=1` | 8010 |
+| CT-S3 | `foreign-capture.json` | `nominating-capture` | `violations=0` | 6015 |
+| CT-S7 | `measured-capture.json` | `nominating-capture` | `violations=0` | 6019 |
+| CT-I6 | `reference-host.json` | `reference-host` | `violations=0,shots_rx=0` | 19 |
+
+Every `violations=0` is doing more work than it looks like: `ppcp-sim` refuses, on its own account,
+a `shot` re-issued with a different `t0` (I7), a message originated by a peer whose declared
+profiles do not confer it (I24), `authority: host` from a `role: capture` peer (I20, 8.3d), a
+malformed frame or one past the ENC §8 limit, a held relation spanning two clocks of one peer (I18,
+5.4c) and a first frame on a stream that is not `link_bind` (ENC 2.1c).
+
+### 10.5 The one failing row — F-H8-6, against the instrument
+
+**CT-I6 — `impl`. Reason, verbatim: `ppcp-sim: protocol violation: a fatal error arrived:
+role_conflict`.**
+
+CT-I6 is a **negative** row (`CONF` §1d): this host does not claim Mint, so the tool asserts it
+parses `shot` with `authority: device` and never originates one. The counterpart `ppcp-conform`
+picks for that is `reference-host.json` running the `reference-host` scenario — a peer declaring
+`role: host`.
+
+Against a peer under test that is **also** `role: host`, `PPCP-CORE` 5.2b and `PPCP-MSG` 3.2c
+*require* the responder to answer `error` / `role_conflict`, and `PPCP-MSG` §10's table marks that
+code **fatal**. `ppcp-sim` counts a fatal error as a protocol violation. So the row asserts
+`violations=0` against a counterpart the specification requires this host to refuse: it cannot pass,
+and a host that made it pass would be violating I20. Note the 19 ms — the row ends at the `hello`,
+before any Mint behaviour could be observed at all.
+
+**Whose defect: `ppcp-conform`'s row table (libppcp L14).** The row needs a counterpart that can
+send the `shot` this host must parse and not originate, and only a peer declaring **Mint** can — a
+minting capture peer (`reference-capture.json` / `nominating-capture`), not a second host. The row
+is listed as applying to role `any`, and it is the only one of the four negative rows whose
+counterpart is role-blind.
+
+`run-conform.sh` runs every row and records every row; it fails the `ctest` gate on any failure
+**except** this one named row, with the reason written into the script. That exclusion is one named
+row with a stated justification, not a filter over whatever happened to be red — anything else
+failing fails the gate — and the block goes the day the instrument gives CT-I6 a minting
+counterpart. A permanently red gate is a gate everybody learns to ignore, which is the same argument
+`ppcp_app_tu_syntax_probe` makes about its warning flags.
+
+### 10.6 Five defects the run found, and every one was a composition defect
+
+None of these was visible to `ppcp-tests`, and that is the whole argument of `CONF` §2c. Every suite
+in this repository builds one engine, for one link, and declares by hand in its own fixture; the
+first counterpart that was not us produced four of these on its first row.
+
+- **F-H8-1 — this host never sent its own `declare`.** MSG 3.3c makes `declare` a precondition for
+  originating anything naming a Source, Stream or Candidate, and 3.3d says a host sends it *even
+  with an empty `sources` list — it does not skip the message*. `PpcpHostService::start()` built the
+  declaration and validated it, and `grep -rn ppcp_peer_declare src/` outside the test tree returned
+  **nothing**. A host that never declared cannot nominate from its own microphone (CT-I8) and gives
+  a third-party device nothing to convert its instants against (I19). Fixed in
+  `PpcpHostPeer::drainEvents()`, on `PPCP_EVENT_CONNECTED`, once per link — the one place both the
+  application and the harness go through. **Whose defect: this host's.**
+
+- **F-H8-2 — the F-L13-1 guard could not tell the defect from the fix.** It asserted
   `bulkSeen < slicedSeen` and said in its own comment that it would go red when libppcp L15 landed.
   It did not: a bulk feed yields four events under **both** contracts — four survivors of a ring
-  that dropped eight, or four reported before a feed that stopped. What distinguishes them is
-  `ppcp_peer_events_dropped()`, `ppcp_peer_feed_stalled()` and the short `*out_consumed`, so those
-  are what the test asserts now. **Whose defect: this suite's.**
+  that dropped eight, or four reported before a feed that stopped. Rewritten onto
+  `ppcp_peer_events_dropped()`, `ppcp_peer_feed_stalled()` and the short `*out_consumed`, which are
+  what actually distinguish them. **Whose defect: this suite's.**
 
-### Next
+- **F-H8-3 — the listener dropped every byte it had read past `link_bind`.** ENC 2.1a makes
+  `link_bind` the *first* frame on a stream; it does not make it the only thing in the first read.
+  `ppcp-sim` queues `link_bind` and `hello` together and they arrive in one TCP segment; the bind
+  loop decoded the first frame, handed the channel over, and let the rest of the buffer go out of
+  scope with it. Every `hello` was silently lost and no link ever got past the handshake — twelve
+  rows, twelve links, zero frames received. This repository's own `Connector` writes `link_bind` and
+  then nothing until its engine is pumped, which is exactly why talking to ourselves never produced
+  the case. The residue now travels with the channel and is served ahead of the socket;
+  `drainAvailable()` also stops at one whole frame, so a dialler that queues several no longer
+  overruns the bind buffer and gets refused as malformed. **Whose defect: this host's.**
 
-- `src/Ppcp/tests/ppcp_conform_host.cpp` — the headless host executable: real `PpcpHostPeer`, real
-  `makeHostEngine()`, real `PpcpIngestPolicy`, its own declaration through the real
-  `PpcpSourceDeclaration::build()`, the storage callback F-H5-3 makes a precondition for §7.4, a
-  `PpcpOfferController` for MSG 9.1/9.2, and a loop that pumps and ticks until the tool disconnects.
-- The CMake option, the target and the `ctest` row.
-- Run it, paste **every** row the tool reports — pass, fail, n/a — verbatim.
+- **F-H8-4 — every `sync_probe` a device sent was answered `error`.** `HostEngineConfig::syncTimebase`
+  was never set at the call site, and `ppcp_host_engine.h` is explicit that an empty one means "this
+  host does not answer probes"; its own comment then says it should be `tb:host` because that is the
+  only clock this application reads (I1). Eighteen errors in one eight-second run. A device could
+  never measure its relation to the host, so §6.3 only ever worked in the direction this repository
+  happened to test. **Whose defect: this host's.**
 
-### Blocked
+- **F-H8-5 — one `ppcp_peer` was built in `start()` and handed to every link.** A peer *is* the
+  conversation: the counterpart's declaration, the open Session, the `msg_id` sequence and the link
+  state all live in it. The first link got a Session and the next eleven were refused
+  `ppcp_peer_session_open: invalid argument`, because the previous Session was still open on the
+  engine and nothing had closed it — the link died rather than saying goodbye, which is the ordinary
+  way a link ends. In the application this reads as *the second device to pair after a drop never
+  gets a Session*. A fresh engine per link, in `PpcpHostService::adoptLink()` and in the harness.
+  7.5a's resume is a different case and is not what this was: resume is the same peer on the same
+  `K_tls`, opened deliberately, not inherited by whoever dials next. **Whose defect: this host's.**
 
-Nothing.
+### 10.7 What this claim does not cover
+
+- **Mint stays unclaimed** and CT-I6 is the only row that would have exercised the negative half of
+  it on the wire. §1's negative claim — a `shot` with `authority: device` is parsed, honoured and
+  never originated — is still asserted by this repository's own suites and by nothing external.
+- **The RV rows of §4 are not in this run.** A plaintext harness socket cannot exercise a pairing
+  code, a PSK identity or a handshake refusal, which is the whole reason those rows have their own
+  suite and their own evidence.
+- **`static` and `fixture` rows are not in this run either**, by the instrument's design: they are
+  decidable from a declaration or a recorded stream and belong in the implementation's own suite.
+- **No screen was exercised.** The harness opens the Session the application does not yet open, and
+  accepts the offer a user would tap. §7.2 and §9.3 remain the record of what is wired and still
+  unverified in the application itself.
+- **`ppcp_conform_host` is not a shipping binary** and cannot be built into one: it exists only when
+  `PP_PPCP_PLAINTEXT_HARNESS` is ON, which a shipping configure refuses.
 
 ---
 
