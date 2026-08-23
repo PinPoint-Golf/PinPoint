@@ -452,6 +452,19 @@ std::unique_ptr<PpcpEngine> PpcpHostPeer::makeLibppcpEngine(std::string *whyNot)
         if (m_storage && m_storage(&freeBytes)) out->storage_free_bytes = freeBytes;
         return PPCP_OK;
     };
+    // ── MSG 6.1b — THE TIMEBASE THIS HOST STAMPS `t2`/`t3` ON ───────────────
+    //
+    // ⚠ FOUND BY H8's CONFORMANCE RUN, 23 Aug 2026 (finding F-H8-4).  It was
+    // never set here, and `ppcp_host_engine.h` is explicit about what an empty
+    // one means: "this host does not answer probes, and one arriving is
+    // answered `error`/`profile_not_supported` rather than with a fabricated
+    // instant".  Its own comment then says "it is `tb:host` here because that
+    // is the only clock this application reads (I1)" — and the call site never
+    // said so.  Every `sync_probe` a device sent this host came back an error,
+    // eighteen of them in one eight-second run, which means a device could
+    // never measure its relation to the host and §6.3 only ever worked in the
+    // direction this repository happened to test.
+    cfg.syncTimebase = kHostTimebaseId;
     cfg.listener = true;
     return makeHostEngine(std::move(cfg), whyNot);
 }

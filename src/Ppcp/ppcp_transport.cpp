@@ -736,6 +736,25 @@ struct TransportChannel::Impl {
     bool ownsCtx = false;
     std::unique_ptr<SslState> state;
 
+    // ── F-H8-3 — BYTES THE LISTENER READ PAST `link_bind`, AND USED TO DROP ──
+    //
+    // ENC 2.1a makes `link_bind` the FIRST frame on a stream.  It does not make
+    // it the ONLY thing in the first read, and a dialler that queues
+    // `link_bind` and `hello` together — which `tools/ppcp-sim` does, and which
+    // is the obvious thing for a peer engine with an outbound queue to do —
+    // puts both in one TCP segment.  The bind loop reads whatever is available,
+    // decodes the first frame and hands the CHANNEL over; everything after
+    // `consumed` in that buffer used to go out of scope with it.  The `hello`
+    // was simply gone, no error anywhere, and the link sat there until it timed
+    // out.
+    //
+    // This is the defect `PPCP-CONF` §2c exists to find: PinPointStudio's own
+    // `Connector` writes `link_bind` and then nothing until its engine is
+    // pumped, so this repository talking to itself never produced the case.
+    // The first counterpart that was not us produced it on the first row.
+    std::vector<unsigned char> carry;
+    std::size_t carryOff = 0;
+
     ~Impl() { shut(); }
 
     // ENC 2.1c — "a listener closes a stream whose first frame is not
@@ -819,6 +838,23 @@ IoStatus TransportChannel::read(void *buf, std::size_t len, std::size_t &got)
 {
     got = 0;
     if (!isOpen()) return IoStatus::Error;
+
+    // F-H8-3 — whatever the bind loop read past `link_bind` is the first thing
+    // on this stream, ahead of anything still in the socket.  One read at a
+    // time: the caller loops, and mixing the two sources in one call would
+    // reorder the byte stream, which is the one thing CORE T1 does not allow.
+    if (m_impl->carryOff < m_impl->carry.size()) {
+        const std::size_t have = m_impl->carry.size() - m_impl->carryOff;
+        const std::size_t take = (len < have) ? len : have;
+        std::memcpy(buf, m_impl->carry.data() + m_impl->carryOff, take);
+        m_impl->carryOff += take;
+        if (m_impl->carryOff >= m_impl->carry.size()) {
+            m_impl->carry.clear();
+            m_impl->carryOff = 0;
+        }
+        got = take;
+        return IoStatus::Ok;
+    }
 #if defined(PP_PPCP_PLAINTEXT_HARNESS)
     // ⚠ HARNESS ONLY — see Listener::setPlaintextHarness().  A channel with no
     // SSL* can only have come from a plaintext harness listener; in a shipping
@@ -1484,8 +1520,24 @@ namespace {
 
 // Reads whatever is available into `rx` without blocking.  Returns false when
 // the stream died; "nothing to read right now" is a true with no growth.
+// True once `rx` holds at least one whole frame — header plus its declared
+// payload.  F-H8-3's other half: without this the read loop below kept going
+// until the socket was empty, and a dialler that queued several frames at once
+// could push `rx` past the buffer cap and have its stream refused as malformed
+// when nothing was wrong with it.  One whole frame is all the bind decision
+// needs; everything after it is carried, not re-read.
+bool haveWholeFrame(const std::vector<unsigned char> &rx)
+{
+    ppcp_frame_header hdr{};
+    const uint8_t *payload = nullptr;
+    std::size_t consumed = 0;
+    return ppcp_frame_read(rx.data(), rx.size(), &hdr, &payload, &consumed) == PPCP_OK
+           && consumed > 0;
+}
+
 bool drainAvailable(TransportChannel::Impl &impl, std::vector<unsigned char> &rx)
 {
+    if (haveWholeFrame(rx)) return true;
     for (;;) {
         unsigned char buf[512];
 #if defined(PP_PPCP_PLAINTEXT_HARNESS)
@@ -1494,6 +1546,7 @@ bool drainAvailable(TransportChannel::Impl &impl, std::vector<unsigned char> &rx
             const IoStatus st = plaintextRead(impl.sock, buf, sizeof buf, got);
             if (st == IoStatus::Ok && got > 0) {
                 rx.insert(rx.end(), buf, buf + got);
+                if (haveWholeFrame(rx)) return true;
                 if (rx.size() > kLinkBindMaxFrame * 4) return false;
                 continue;
             }
@@ -1504,6 +1557,7 @@ bool drainAvailable(TransportChannel::Impl &impl, std::vector<unsigned char> &rx
         const int n = SSL_read(impl.ssl, buf, static_cast<int>(sizeof buf));
         if (n > 0) {
             rx.insert(rx.end(), buf, buf + n);
+            if (haveWholeFrame(rx)) return true;
             if (rx.size() > kLinkBindMaxFrame * 4) return false;   // see kLinkBindMaxFrame
             continue;
         }
@@ -1617,6 +1671,12 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                         if (impl->log)
                             impl->log("PPCP channel " + std::to_string(static_cast<int>(ch))
                                       + " bound " + outcome.describe());
+                        // F-H8-3 — the rest of what was read belongs to the
+                        // peer engine, and it travels with the channel.
+                        if (consumed < p.rx.size())
+                            p.impl->carry.assign(p.rx.begin()
+                                                     + static_cast<std::ptrdiff_t>(consumed),
+                                                 p.rx.end());
                         link.channels.push_back(detail::ChannelFactory::make(
                             std::move(p.impl), static_cast<Channel>(ch), outcome));
                         it = impl->pending.erase(it);

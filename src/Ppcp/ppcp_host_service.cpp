@@ -238,6 +238,32 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     if (!pairing.empty()) m_rv.noteLinkEstablished(pairing);
 
     m_link = std::move(link);
+
+    // ⚠ F-H8-5 — A `ppcp_peer` IS THE CONVERSATION, NOT THE APPLICATION, AND
+    // THIS BUILT ONE ENGINE IN start() AND GAVE IT TO EVERY LINK.
+    //
+    // Found by H8's conformance run on 23 Aug 2026, where twelve rows dial in
+    // turn: the FIRST got a Session and the other eleven were refused
+    // `ppcp_peer_session_open: invalid argument`, because the engine still held
+    // the previous device's open Session, its declaration, its `msg_id`
+    // sequence and its link state.  Nothing had closed that Session — the link
+    // died rather than saying goodbye, which is the ordinary way a link ends.
+    // In the application the same defect reads as "the second device to pair
+    // after a drop never gets a Session", and nothing in `ppcp-tests` could see
+    // it because every suite there builds one engine for one link.
+    //
+    // 7.5a's resume is a DIFFERENT case and is not what this was: resume is the
+    // same peer on the same K_tls, and it is opened deliberately, not inherited
+    // by whoever dials next.
+    std::string derr;
+    m_engine = m_peer.makeLibppcpEngine(&derr);
+    if (!m_engine) {
+        ppWarn() << "[ppcp] could not build an engine for this link:" << derr.c_str();
+        setStatus(tr("Could not build the PPCP engine: %1").arg(QString::fromStdString(derr)));
+        m_link->close();
+        m_link.reset();
+        return;
+    }
     m_peer.attach(m_link.get(), m_engine.get());
 
     const TlsOutcome &tls = m_link->tls();

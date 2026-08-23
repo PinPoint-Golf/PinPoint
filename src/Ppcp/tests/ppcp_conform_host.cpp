@@ -162,6 +162,7 @@ PpcpSourceDeclaration::Inventory harnessInventory()
 
 struct HarnessOptions {
     std::uint16_t port = 0;
+    bool          trace = false;
     std::string   portFile;
     int           runMs = 120000;
     std::string   peerId = "peer:pinpointstudio-conform";
@@ -177,6 +178,7 @@ bool parse(int argc, char **argv, HarnessOptions &o)
         else if (a == "--port-file") { const char *v = next(); if (!v) return false; o.portFile = v; }
         else if (a == "--run-ms")    { const char *v = next(); if (!v) return false; o.runMs = std::atoi(v); }
         else if (a == "--peer-id")   { const char *v = next(); if (!v) return false; o.peerId = v; }
+        else if (a == "--trace")     { o.trace = true; }
         else if (a == "--help") {
             std::printf("ppcp_conform_host — the PinPointStudio host, headless, on a PLAINTEXT\n"
                         "harness socket (PPCP-CONF 2c, PPCP-RV erratum E4).\n\n"
@@ -212,7 +214,7 @@ public:
               PpcpHostPeer::Config c;
               c.peerId = o.peerId;
               return c;
-          }())
+          }()), m_trace(o.trace)
     {
         // ⚠ A HEALTH SOURCE IS A PRECONDITION FOR LIVENESS, NOT A DECORATION
         // (finding F-H5-3).  Without one every `heartbeat` is answered
@@ -227,7 +229,14 @@ public:
         });
 
         m_peer.setDeclarationHook([this](const ppcp_peer_desc *d) { onCounterpartDeclared(d); });
-        m_peer.addEventHook([this](const ppcp_event &ev) { m_offers.observe(ev); });
+        m_peer.addEventHook([this](const ppcp_event &ev) {
+            m_offers.observe(ev);
+            if (m_trace) say("event " + std::to_string(static_cast<int>(ev.kind)));
+        });
+        m_peer.shotBridge().setShotCallback([this](const ppcp_shot &s) {
+            say("SHOT issued: " + idStr(s.id) + " over "
+                + std::to_string(s.candidate_count) + " candidate(s)");
+        });
         m_offers.setLedger(&m_ledger);
     }
 
@@ -290,8 +299,24 @@ private:
     void adopt(std::unique_ptr<PeerConnection> link)
     {
         m_link = std::move(link);
+
+        // ⚠ F-H8-5 — A `ppcp_peer` IS THE CONVERSATION, NOT THE APPLICATION.
+        // A fresh engine per link.  The engine carries the counterpart's
+        // declaration, the open Session, the `msg_id` sequence and the link
+        // state; handing a second, different device the engine the first one
+        // left behind means `ppcp_peer_session_open()` refuses — the previous
+        // Session is still open on it and nothing closed it, because the link
+        // died rather than saying goodbye.  See the same fix in
+        // `PpcpHostService::adoptLink()`.
+        std::string derr;
+        m_engine = m_peer.makeLibppcpEngine(&derr);
+        if (!m_engine) {
+            say("could not rebuild the engine for this link: " + derr);
+            m_link->close();
+            m_link.reset();
+            return;
+        }
         m_peer.attach(m_link.get(), m_engine.get());
-        m_offers.attach(m_engine->peer(), QString());
         m_sessionOpen = false;
         say("link up — " + m_link->tls().describe());
     }
@@ -305,7 +330,20 @@ private:
         m_link->close();
         m_link.reset();
         m_sessionOpen = false;
-        say(std::string("link down (") + why + ")");
+        // Every counter this host kept over the link, on one line.  A row that
+        // fails deserves a number rather than a guess about why.
+        const PpcpShotBridge::Stats &b = m_peer.shotBridge().stats();
+        const PpcpLiveSession::Stats &l = m_peer.liveSession().stats();
+        char buf[512];
+        std::snprintf(buf, sizeof buf,
+                      "nominated=%zu foreign=%zu excluded=%zu issued=%zu late=%zu adopted=%zu "
+                      "capreq=%zu refused=%zu | probes=%zu relations=%zu hbacks=%zu "
+                      "estimators=%zu noestimate=%zu",
+                      b.nominated, b.observedForeign, b.excluded, b.issued, b.late, b.adopted,
+                      b.captureRequests, b.nominationsRefused,
+                      l.probesQueued, l.relationsPublished, l.heartbeatAcks,
+                      l.syncEstimators, l.estimatorsWithoutEstimate);
+        say(std::string("link down (") + why + ") — " + buf);
     }
 
     // MSG 3.3 — the counterpart declared, so everything that references its
@@ -370,6 +408,7 @@ private:
     std::unique_ptr<PeerConnection>   m_link;
     std::uint16_t                     m_port = 0;
     bool                              m_sessionOpen = false;
+    bool                              m_trace = false;
 };
 
 }  // namespace
