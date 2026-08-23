@@ -47,9 +47,12 @@ set(PP_PPCP_PLAINTEXT_HARNESS ON CACHE BOOL
     "Compile the PLAINTEXT conformance-harness listener (CONF 2c). NEVER in a release build."
     FORCE)
 message(STATUS "PinPointTests: PPCP plaintext harness listener ON — this is a test tree")
-if(PP_PPCP_PLAINTEXT_HARNESS)
-    add_compile_definitions(PP_PPCP_PLAINTEXT_HARNESS)
-endif()
+#
+# ⚠ AND IT IS SET ON ONE TARGET, NOT ON THE DIRECTORY.  `ppcp_conform_host` at
+# the bottom of this file is the only thing that gets the macro.  Every other
+# suite here compiles `ppcp_transport.cpp` WITHOUT it — which is what makes
+# "the shipping build still has no plaintext code path" a fact this suite
+# checks on every build rather than something somebody verified once by hand.
 
 # CameraCapabilities is Qt-built, so the declaration suite needs Multimedia for
 # the QVideoFrameFormat that video_input_base.h pulls in.
@@ -440,7 +443,10 @@ if(PP_PPCP_PLAINTEXT_HARNESS)
     target_include_directories(ppcp_conform_host PRIVATE ${PPCP} ${PP_BUFFER})
     target_link_libraries(ppcp_conform_host PRIVATE
         ppcp Qt6::Core Qt6::Multimedia OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
-    target_compile_definitions(ppcp_conform_host PRIVATE PP_PPCP_SRC_DIR="${PPCP}")
+    # THE ONLY TARGET IN THIS REPOSITORY THAT GETS THE MACRO.  See the banner
+    # at the top of this file, and `Listener::setPlaintextHarness()`.
+    target_compile_definitions(ppcp_conform_host PRIVATE
+        PP_PPCP_SRC_DIR="${PPCP}" PP_PPCP_PLAINTEXT_HARNESS)
     pp_apply_sanitizers(ppcp_conform_host)
 
     # ── Where `ppcp-conform` is ─────────────────────────────────────────────

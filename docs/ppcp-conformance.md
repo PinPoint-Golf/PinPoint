@@ -598,6 +598,12 @@ ENC §2.1 link binding is unchanged by it: the dialler still mints a `link_id` a
 first on every stream, and every 2.1c refusal still applies. `TlsOutcome::version` reads
 `plaintext-harness`, so nothing downstream and no log line can mistake it for TLS.
 
+⚠ **The macro is set on one TARGET, not on the test directory.** `ppcp_conform_host` is the only
+thing in this repository that gets it; `ppcp_transport_test`, `ppcp_link_bind_test`,
+`ppcp_host_peer_test` and `ppcp_rendezvous_test` all compile `ppcp_transport.cpp` **without** it.
+So "the shipping build still has no plaintext code path" is something this suite checks on every
+build, not something somebody verified once by hand.
+
 ### 10.3 What the peer under test is, and what it is not
 
 `src/Ppcp/tests/ppcp_conform_host.cpp` is the application's own code reached through the same entry
