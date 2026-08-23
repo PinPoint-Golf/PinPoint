@@ -190,6 +190,11 @@ Rectangle {
                     { key: qsTr("Connection"),
                       value: d.status === "connected"    ? qsTr("Connected")
                            : d.status === "revoked"      ? qsTr("Revoked")
+                           // Seen advertising on this network. Its ABSENCE says
+                           // nothing (RV 3.6a — multicast fails routinely), so
+                           // the other case is "not connected" and never
+                           // "not found".
+                           : d.status === "available"    ? qsTr("On this network")
                                                          : qsTr("Not connected"),
                       cls:   d.status === "connected" ? "good" : "neutral" },
                     { key: qsTr("Remembered"),

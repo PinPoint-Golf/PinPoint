@@ -19,12 +19,15 @@
 #include "ppcp_host_service.h"
 
 #include <QDateTime>
+#include <QSocketNotifier>
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QMetaObject>
 #include <QVariantMap>
 
 #include <chrono>
+
+#include <ppcp/version.h>
 
 #include "../Core/pp_debug.h"
 #include "../Core/pp_settings.h"
@@ -197,6 +200,8 @@ bool PpcpHostService::start(quint16 port, QString *err)
         }
     });
 
+    startDiscovery();
+
     m_listening = true;
     m_timer.start();
     setStatus(tr("Waiting for a device on port %1.").arg(m_port));
@@ -207,6 +212,7 @@ bool PpcpHostService::start(quint16 port, QString *err)
 void PpcpHostService::stop()
 {
     m_timer.stop();
+    stopDiscovery();
     m_stopping = true;
     if (m_acceptThread.joinable()) m_acceptThread.join();
     dropLink("shutdown");
@@ -341,6 +347,82 @@ void PpcpHostService::onDeclare(const ppcp_peer_desc *desc)
     emit phonesChanged();
 }
 
+// ── RV §3 discovery ─────────────────────────────────────────────────────────
+//
+// ⚠ THE BROWSER WAS BUILT AND TESTED IN H6 AND HAD NO CALLER.
+// `makePlatformBrowser()` and `decideDial()` were reached only from
+// `ppcp_rendezvous_test`, so a subsystem the specification calls the
+// reconnection path was dead code in the application.  This is the caller.
+//
+// ⚠ IT OWNS NO THREAD, BY THE BROWSER'S OWN DESIGN.  `RvBrowser` exposes the
+// DNS-SD client socket and expects the embedding's event loop to watch it — so
+// a QSocketNotifier on the GUI thread, and `process()` when it is readable.
+// There is deliberately no second accept-style thread here: everything PPCP is
+// single-threaded from the moment a link is adopted.
+//
+// ⚠ AND ITS FAILURES ARE SILENT ON PURPOSE (3.6a).  Multicast "will not work at
+// a range" — rate-limited by consumer access points, blocked by guest-network
+// client isolation, and it does not cross VLANs.  `makePlatformBrowser()`
+// returns null on Windows and Linux, `start()` can refuse, and `process()` can
+// report the browse has died.  None of those is an error state, none reaches
+// `status`, and none produces a warning: the consequence is only that a phone
+// stops being marked as present, and §4's pairing code still works.
+void PpcpHostService::startDiscovery()
+{
+    m_browser = Ppcp::makePlatformBrowser();
+    if (!m_browser) return;   // 3.6b — no DNS-SD client here, and that is fine
+
+    const bool ok = m_browser->start(
+        [this](const Ppcp::RvAdvertisement &ad) {
+            // 3.4c — the one hard rule.  `decideDial` resolves the rotating
+            // `rid` against our own held pairings and has no "unknown" branch;
+            // a stranger's phone yields an empty pairing and is dropped here.
+            const Ppcp::DialDecision d = Ppcp::decideDial(
+                ad, PPCP_WIRE_VERSION_MAJOR,
+                [this](const std::uint8_t rn[PPCP_RV_RN_BYTES],
+                       const std::uint8_t rid[PPCP_RV_RID_BYTES]) {
+                    return m_rv.resolveRid(rn, rid);
+                });
+            if (!d.dial) return;
+
+            const QString inst = QString::fromStdString(ad.instanceName);
+            const QString pid  = QString::fromStdString(d.pairingId);
+            if (m_seenInstances.value(inst) == pid) return;
+            m_seenInstances.insert(inst, pid);
+            emit phonesChanged();
+        },
+        [this](const std::string &instanceName) {
+            const QString inst = QString::fromStdString(instanceName);
+            if (m_seenInstances.remove(inst) > 0) emit phonesChanged();
+        });
+
+    if (!ok) { m_browser.reset(); return; }
+
+    const int fd = m_browser->fd();
+    if (fd < 0) { m_browser.reset(); return; }
+
+    m_browseWatch = std::make_unique<QSocketNotifier>(fd, QSocketNotifier::Read);
+    connect(m_browseWatch.get(), &QSocketNotifier::activated, this, [this] {
+        if (m_browser && !m_browser->process()) {
+            // 3.6a — the browse died.  A reason to stop watching, and NOT a
+            // reason to report a fault.
+            stopDiscovery();
+        }
+    });
+    ppWarn() << "[ppcp-rv] discovery:" << m_browser->describe().c_str();
+}
+
+void PpcpHostService::stopDiscovery()
+{
+    m_browseWatch.reset();
+    if (m_browser) m_browser->stop();
+    m_browser.reset();
+    if (!m_seenInstances.isEmpty()) {
+        m_seenInstances.clear();
+        emit phonesChanged();
+    }
+}
+
 // ── The phone's own name ────────────────────────────────────────────────────
 //
 // ⚠ NOT IN THE KEYCHAIN, AND THE DISTINCTION IS THE POINT.  The pairing store
@@ -414,11 +496,15 @@ QVariantList PpcpHostService::phones() const
         dev[QStringLiteral("invalidated")] = st.invalidated;
 
         // The same status vocabulary the camera and IMU rows use, so the home
-        // screen's dot and the resource monitor need no new cases.  There is no
-        // `available` here yet: that is discovery's word for "paired and on this
-        // network", and nothing browses yet.
+        // screen's dot and the resource monitor need no new cases.  `available`
+        // is discovery's word: paired, advertising on this network, not
+        // connected.  Its ABSENCE says nothing — 3.6a, multicast fails routinely
+        // — so a phone that is merely undiscovered reads `disconnected` and not
+        // as any kind of fault.
+        const bool seen = m_seenInstances.key(pid, QString()).isEmpty() == false;
         dev[QStringLiteral("status")] = st.invalidated ? QStringLiteral("revoked")
                                       : isLive        ? QStringLiteral("connected")
+                                      : seen          ? QStringLiteral("available")
                                                       : QStringLiteral("disconnected");
 
         // A phone is not a Source.  Its CAMERAS carry the rate, and they are
@@ -636,9 +722,23 @@ void PpcpHostService::forgetPairing(const QString &pairingId)
     emit phonesChanged();
 }
 
+QString PpcpHostService::discoveryDescription() const
+{
+    if (!m_browser)
+        return tr("no service discovery on this platform");
+    return QString::fromStdString(m_browser->describe());
+}
+
 QString PpcpHostService::diagnosticExport() const
 {
-    return QString::fromStdString(m_rv.diagnosticExport());
+    // RT-9 — nothing here carries a secret or a payload.  The browser's
+    // description is a build fact ("DNS-SD via mDNSResponder (browse only)"),
+    // and the count is of pairings this host already holds; no `rid`, no
+    // instance name and no endpoint goes in, because those describe a peer.
+    return QString::fromStdString(m_rv.diagnosticExport())
+         + QStringLiteral("\ndiscovery: %1\ndiscovered-pairings: %2\n")
+               .arg(discoveryDescription())
+               .arg(m_seenInstances.size());
 }
 
 void PpcpHostService::setStatus(const QString &s)

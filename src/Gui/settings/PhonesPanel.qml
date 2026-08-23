@@ -201,6 +201,7 @@ Item {
                         Layout.preferredHeight: Theme.sp(6)
                         radius: Theme.sp(3)
                         color: pairingRow.modelData.status === "connected" ? Theme.colorGood
+                             : pairingRow.modelData.status === "available"  ? Theme.colorAccent
                              : pairingRow.modelData.invalidated             ? Theme.colorBorderStrong
                              : pairingRow.modelData.persisted               ? Theme.colorAccent
                                                                             : Theme.colorBorderStrong
@@ -226,6 +227,15 @@ Item {
                                                 : qsTr("Paired this session")]
                                 if (pairingRow.modelData.status === "connected")
                                     bits.push(qsTr("connected now"))
+                                // RV §3 saw it advertising. There is no
+                                // "Connect" control beside this yet and that is
+                                // deliberate: Ppcp::Connector exists and 5.2g
+                                // makes the host the TLS client on the discovery
+                                // path, but auto-dialling has never been run
+                                // against a live responder, so reconnecting
+                                // still means showing a code.
+                                else if (pairingRow.modelData.status === "available")
+                                    bits.push(qsTr("on this network"))
                                 if (pairingRow.modelData.invalidated) bits.push(qsTr("revoked"))
                                 bits.push(pairingRow.modelData.pairingId)
                                 return bits.join("  ·  ")

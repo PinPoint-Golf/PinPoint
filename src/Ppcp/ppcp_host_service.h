@@ -59,12 +59,15 @@
 #include <thread>
 
 #include <QObject>
+#include <QHash>
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QSocketNotifier>
 #include <QTimer>
 #include <QVariantList>
 
+#include "ppcp_discovery.h"
 #include "ppcp_engine.h"
 #include "ppcp_host_peer.h"
 #include "ppcp_qr.h"
@@ -168,6 +171,13 @@ public:
     // afterwards.  Q_INVOKABLE so the diagnostics screen can offer it.
     Q_INVOKABLE QString diagnosticExport() const;
 
+    // What this build's service discovery is, in the words RvBrowser::describe()
+    // uses, or why there is none.  Part of the diagnostic export because 3.6a
+    // gives discovery no error channel at all: when a remembered phone does not
+    // reappear by itself, whether this host is even browsing is the first thing
+    // anybody needs to know, and it is otherwise unanswerable.
+    QString discoveryDescription() const;
+
     Ppcp::PpcpHostPeer &hostPeer() { return m_peer; }
     Ppcp::PpcpRendezvous &rendezvous() { return m_rv; }
 
@@ -197,6 +207,8 @@ private:
     // Remembers the phone's own name against the pairing it arrived on.  See
     // the definition for why this is not in the keychain.
     void notePeerName();
+    void startDiscovery();
+    void stopDiscovery();
     static QString phoneNameFor(const QString &pairingId);
 
     Ppcp::PpcpRendezvous                   m_rv;
@@ -224,6 +236,28 @@ private:
     // device row up for a QR nobody ever scanned.  A device row means "this host
     // has met this phone", and this is the only place that fact exists.
     QSet<QString> m_pairedThisRun;
+
+    // ── RV §3 discovery, the browser half ───────────────────────────────────
+    //
+    // ⚠ CONVENIENCE, NOT PLUMBING.  RV §3 is "optional.  Reconnection
+    // convenience only — a first pairing always uses §4", and 3.6a MUST NOT
+    // treat discovery failure as an error state.  So none of this has an error
+    // path: `makePlatformBrowser()` returns null off macOS, the browse can die
+    // and the only consequence is that a phone stops being marked as here.
+    //
+    // ⚠ AND IT CAN ONLY EVER SEE PHONES WE ARE ALREADY PAIRED WITH.  3.4c
+    // forbids connecting to an instance whose `rid` cannot be resolved, and
+    // `decideDial()` has no branch that dials anyway; the resolver is our own
+    // pairing ledger.  A stranger's phone advertising on the same network
+    // resolves to nothing and never becomes a row.
+    std::unique_ptr<Ppcp::RvBrowser>  m_browser;
+    std::unique_ptr<QSocketNotifier>  m_browseWatch;
+    // `LostFn` hands back only the instance name, so the map from that to the
+    // pairing it resolved to has to be kept here.  The `rid` behind the name
+    // rotates at least every 15 minutes, so an instance that goes and comes
+    // back is a different name for the same phone — which is why the VALUE is
+    // the stable local pairingId and the key is not.
+    QHash<QString, QString> m_seenInstances;
 
     // The accept loop.  Its ONLY job is to block in accept() and hand the link
     // to the GUI thread; it touches no PPCP state of its own.

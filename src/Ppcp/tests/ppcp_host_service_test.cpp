@@ -228,6 +228,44 @@ TEST_F(HostServiceClock, ALiveCodeIsNotAPhone)
     EXPECT_TRUE(m_svc.phones().isEmpty());
 }
 
+// ── RV §3 discovery ─────────────────────────────────────────────────────────
+//
+// ⚠ WHAT CAN BE ASSERTED HERE IS THAT THE BROWSER IS WIRED, AND NOT THAT IT
+// FINDS ANYTHING.  There is nothing on a build machine's network advertising
+// `_ppcp._tcp`, which is why docs/ppcp-conformance.md §9.4 records
+// `DNSServiceBrowse` as unexercised; `parseTxtRecord`, `pvAcceptsMajor`,
+// `instanceNameMatchesRid` and `decideDial` are covered by
+// ppcp_rendezvous_test. What was missing until now was a CALLER — the browser
+// was built, tested and constructed nowhere outside that suite.
+TEST_F(HostServiceClock, DiscoveryIsWiredUpAndSaysWhatItIs)
+{
+    const QString d = m_svc.discoveryDescription();
+    EXPECT_FALSE(d.isEmpty());
+#if defined(__APPLE__)
+    // makePlatformBrowser() returns a BonjourBrowser here, and start() talks to
+    // the system mDNSResponder over its local IPC socket.
+    EXPECT_TRUE(d.contains(QStringLiteral("browse only"))) << d.toStdString();
+#endif
+    // 3.6a — whatever discovery did or did not do, it is not an error and does
+    // not reach the user-facing status line.
+    EXPECT_FALSE(m_svc.status().contains(QStringLiteral("discovery"), Qt::CaseInsensitive));
+}
+
+// RT-9 — a diagnostic export carries no secret and no payload, and the two
+// fields discovery added are a build fact and a count.
+TEST_F(HostServiceClock, TheDiagnosticExportGainsDiscoveryAndStillCarriesNoSecret)
+{
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    const QString dump = m_svc.diagnosticExport();
+
+    EXPECT_TRUE(dump.contains(QStringLiteral("discovery:"))) << dump.toStdString();
+    EXPECT_TRUE(dump.contains(QStringLiteral("discovered-pairings: 0")));
+    // The URI is the one thing that must never leave C++ (RV 4.4c, 7.2b), and a
+    // pairing code URI is a `ppcp://` one.
+    EXPECT_FALSE(dump.contains(QStringLiteral("ppcp://"))) << dump.toStdString();
+    EXPECT_FALSE(dump.contains(QStringLiteral("psk")));
+}
+
 }  // namespace
 
 int main(int argc, char **argv)

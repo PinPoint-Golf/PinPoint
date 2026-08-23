@@ -837,6 +837,20 @@ Called from it, and **compiled but not run in the application by this work**:
   one — a stale offset is shaped exactly like drift.
 - `PpcpOfferController::attach()`, which has been installed detached since H5.
 
+**Updated 23 Aug 2026.** `PpcpHostService` also now owns the RV §3 browser (above), keeps the
+`pairingId` the live link resolved to, and publishes a `phones` list — one device row per
+pairing this host holds, in the vocabulary `ResourceMonitorController` already builds for a
+camera and an IMU, so a paired phone appears in the DEVICES list, the resource monitor and
+Settings → Phones rather than in a bespoke table. The phone's declared `product.model` is
+written against its pairing in the ordinary settings file (**not** the keychain, which holds
+PRK and nothing else per 5.1c); `forgetPairing()` removes it with the key.
+
+⚠ A row is listed for a pairing that is **persisted, or that a link actually resolved to this
+run** — *not* for one with `usesRemaining == 0`. `closeSession()` sets `invalidated` and
+zeroes `usesRemaining` together, so a code the user merely dismissed is indistinguishable in
+the ledger from one a phone spent, and the older rule listed a device for a QR nobody had
+scanned.
+
 ### 9.4 What is still not claimed
 
 - **`clipReady()` is still not connected**, and for the reason §7.2 gives: a `PpcpClip` carries
@@ -856,6 +870,25 @@ Called from it, and **compiled but not run in the application by this work**:
   is not, because there is nothing on this network advertising `_ppcp._tcp`. 3.6a makes that a
   non-event by construction: discovery failure is not an error state and there is no error
   channel to report one on.
+
+  **Updated 23 Aug 2026 — it now has a caller.** `PpcpHostService::startDiscovery()`
+  constructs `makePlatformBrowser()`, watches its `fd()` with a `QSocketNotifier` and runs
+  `decideDial()` against `PpcpRendezvous::resolveRid` on every advertisement; a resolved
+  pairing is marked `available` in the device list. Until this the browser and `decideDial()`
+  were reached only from `ppcp_rendezvous_test`, so the reconnection path RV §3 describes was
+  dead code in the application. What is still **not** claimed:
+  - `DNSServiceBrowse` against a real responder — unchanged, and unchangeable here.
+  - **Nothing dials.** `Ppcp::Connector` exists and 5.2g makes the host the TLS client on the
+    discovery path, so reconnecting to a discovered phone is reachable — but auto-dialling on
+    sight is a live behaviour change that cannot be seen without a phone on a real network.
+    A discovered phone is *shown* as present; reconnecting to it still means §4's code.
+  - `makePlatformBrowser()` returns `nullptr` off macOS, so on Windows there is no discovery
+    at all. Together with `makePlatformPairingStore()` being macOS-only — no protected
+    storage, so `persist()` refuses — a Windows host cannot remember a phone OR find one, and
+    Settings → Phones says so rather than showing an empty list.
+  - `PpcpHostService::discoveryDescription()` is in the diagnostic export for exactly this
+    reason: 3.6a gives discovery no error channel, so "is this host browsing at all" is
+    otherwise unanswerable when a remembered phone does not come back.
 
 ### 9.5 Findings
 
