@@ -200,6 +200,34 @@ TEST_F(HostServiceClock, PublishingAgainReplacesTheCodeRatherThanAddingOne)
     EXPECT_FALSE(m_svc.codeLive());
 }
 
+// ── The device rows ─────────────────────────────────────────────────────────
+//
+// ⚠ ONLY THE NEGATIVE CASE IS REACHABLE HERE, AND THAT IS SAID RATHER THAN
+// LEFT TO LOOK LIKE COVERAGE.  A row appears for a pairing that is persisted or
+// spent; persisting needs protected storage (the login keychain, which cannot
+// be unlocked from a non-Aqua session — the same reason RT-12 is a review row),
+// and spending one needs a phone to dial in.  What IS reachable is the rule
+// that most wants guarding, because it is the one a future edit will get wrong:
+// a live code is not a phone.
+TEST_F(HostServiceClock, ALiveCodeIsNotAPhone)
+{
+    EXPECT_TRUE(m_svc.phones().isEmpty()) << "a host that has paired with nothing has no phones";
+
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    ASSERT_TRUE(m_svc.codeLive());
+
+    // The QR on screen belongs to the pairing dialog.  Nobody has scanned it,
+    // so there is no phone on the other end of it and the DEVICES list must not
+    // claim there is.
+    EXPECT_TRUE(m_svc.phones().isEmpty())
+        << "an unscanned code was listed as a device";
+
+    // And it does not become one by being thrown away, either: 7.3b closes the
+    // session, so the entry goes rather than becoming a spent pairing.
+    m_svc.closePairingCode();
+    EXPECT_TRUE(m_svc.phones().isEmpty());
+}
+
 }  // namespace
 
 int main(int argc, char **argv)

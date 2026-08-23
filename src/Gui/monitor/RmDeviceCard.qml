@@ -176,6 +176,28 @@ Rectangle {
                     { key: qsTr("Ring size"),     value: d.ringCapacityStr,     cls: "neutral" }
                 )
                 return camRows
+            } else if (d.kind === "Phone") {
+                // ⚠ ITS OWN ARM, AND IT NEEDED ONE.  This was a two-way branch
+                // — Camera or else-IMU — so a phone fell into the IMU side and
+                // was rendered with a battery gauge, a gimbal-drop count and a
+                // ring size, none of which it has.  A phone carries no bytes of
+                // its own: its CAMERAS are separate rows in this same list and
+                // they are where the rate and the ring live.
+                var phoneRows = []
+                if (d.identifier)
+                    phoneRows.push({ key: qsTr("Pairing"), value: d.identifier, cls: "neutral" })
+                phoneRows.push(
+                    { key: qsTr("Connection"),
+                      value: d.status === "connected"    ? qsTr("Connected")
+                           : d.status === "revoked"      ? qsTr("Revoked")
+                                                         : qsTr("Not connected"),
+                      cls:   d.status === "connected" ? "good" : "neutral" },
+                    { key: qsTr("Remembered"),
+                      value: d.persisted ? qsTr("Yes") : qsTr("No"),
+                      cls:   "neutral" },
+                    { key: qsTr("Transport"), value: d.backend, cls: "neutral" }
+                )
+                return phoneRows
             } else {
                 var imuRows = []
                 if (d.identifier)

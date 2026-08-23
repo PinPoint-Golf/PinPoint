@@ -608,6 +608,10 @@ int main(int argc, char *argv[])
     QObject::connect(&ppcpHost, &PpcpHostService::sourcesChanged,
                      &cameraManager, &CameraManager::enumerate);
     if (!ppcpHost.start(7788)) ppcpHost.start(0);
+    // A paired phone is a device, so it goes in the one device list beside the
+    // cameras and the IMUs.  Handed over as a plain QObject: the monitor reads
+    // its `phones` property and knows nothing about PPCP (see setPhoneSource).
+    resourceMonitor.setPhoneSource(&ppcpHost);
     engine.rootContext()->setContextProperty(QStringLiteral("ppcpHost"), &ppcpHost);
 #endif
     engine.rootContext()->setContextProperty(QStringLiteral("motionCaptureProbe"), &motionCaptureProbe);

@@ -27,6 +27,7 @@
 #include <chrono>
 
 #include "../Core/pp_debug.h"
+#include "../Core/pp_settings.h"
 #include "../Video/VideoInputPpcp.h"
 #include "../Video/video_input_factory.h"
 #include "ppcp_offer_controller.h"
@@ -236,6 +237,13 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     // refuse the bulk channel of the SAME link.  See F-H6-1.
     const std::string pairing = link->pairingId();
     if (!pairing.empty()) m_rv.noteLinkEstablished(pairing);
+    // ...and KEEP it.  Everything that wants to say something about "the phone
+    // on the other end of this link" — its name, its device row, whether the
+    // remembered pairing in Settings is the one currently connected — needs the
+    // join between the live link and the pairing, and until now the only reader
+    // of link->pairingId() consumed it and let it go.
+    m_linkPairingId = QString::fromStdString(pairing);
+    if (!m_linkPairingId.isEmpty()) m_pairedThisRun.insert(m_linkPairingId);
 
     m_link = std::move(link);
 
@@ -288,7 +296,11 @@ void PpcpHostService::dropLink(const char *why)
     m_counterpartId.clear();
     m_peerName.clear();
     setStatus(tr("Device disconnected (%1).").arg(QString::fromLatin1(why)));
+    m_linkPairingId.clear();
     emit stateChanged();
+    // The phone did not stop existing, it stopped being here — its row stays
+    // and changes state, the way a switched-off IMU's does.
+    emit phonesChanged();
 }
 
 void PpcpHostService::onDeclare(const ppcp_peer_desc *desc)
@@ -312,6 +324,11 @@ void PpcpHostService::onDeclare(const ppcp_peer_desc *desc)
     if (m_offers && m_engine && m_engine->peer())
         m_offers->attach(m_engine->peer(), m_counterpartId);
 
+    // The one moment a phone says what it is called.  Written down here or not
+    // at all: `dropLink()` clears m_peerName, and nothing about a pairing
+    // survives a restart except its handle and its key.
+    notePeerName();
+
     ppWarn() << "[ppcp] peer declared:" << m_peerName << "-" << n << "camera Source(s)";
     setStatus(tr("%1 connected — %2 camera(s).").arg(m_peerName).arg(n));
 
@@ -321,6 +338,99 @@ void PpcpHostService::onDeclare(const ppcp_peer_desc *desc)
     // the manager, not for the list.
     emit sourcesChanged();
     emit stateChanged();
+    emit phonesChanged();
+}
+
+// ── The phone's own name ────────────────────────────────────────────────────
+//
+// ⚠ NOT IN THE KEYCHAIN, AND THE DISTINCTION IS THE POINT.  The pairing store
+// holds PRK and says so in as many words — "nothing else, not the sid, not the
+// endpoints, not the display name" — because 5.1c makes PRK the unit of
+// storage and F-H6-3 records that this application's QSettings-backed secrets
+// path is not protected storage.  A nickname is not key material: RV 7.2b
+// constrains payloads and keys, and a display name is neither.  So it lives in
+// the ordinary settings file beside `cameraAlias` and `imuAlias`, which is what
+// it is — an alias for a device.
+//
+// ⚠ AND IT IS WHAT THE PHONE SAID, NOT WHAT WE DECIDED.  `product.model` is
+// display text from an untrusted counterpart (4.4d), so it names a row and is
+// never an identifier, never a trust signal, and never matched against.
+void PpcpHostService::notePeerName()
+{
+    if (m_linkPairingId.isEmpty() || m_peerName.isEmpty()) return;
+    QSettings s = ppSettings();
+    QVariantMap names = s.value(QStringLiteral("ppcp/phoneNames")).toMap();
+    QVariantMap row;
+    row[QStringLiteral("name")]     = m_peerName;
+    row[QStringLiteral("peerId")]   = m_counterpartId;
+    row[QStringLiteral("lastSeen")] = QDateTime::currentSecsSinceEpoch();
+    names[m_linkPairingId] = row;
+    s.setValue(QStringLiteral("ppcp/phoneNames"), names);
+}
+
+QString PpcpHostService::phoneNameFor(const QString &pairingId)
+{
+    const QVariantMap names =
+        ppSettings().value(QStringLiteral("ppcp/phoneNames")).toMap();
+    if (!names.contains(pairingId)) return {};
+    return names.value(pairingId).toMap().value(QStringLiteral("name")).toString();
+}
+
+// ── Every phone this host knows about, as a device row ──────────────────────
+//
+// Built from the rendezvous ledger, which after `loadPersisted()` holds one
+// entry per remembered pairing and one per code minted this run.  A LIVE code
+// is not a phone — it is a QR on screen that nobody has scanned — so it is
+// skipped here; it belongs to the pairing dialog.
+QVariantList PpcpHostService::phones() const
+{
+    QVariantList out;
+    for (const CodeStatus &st : m_rv.codes()) {
+        const QString pid = QString::fromStdString(st.pairingId);
+        // A phone, or a code?  Persisted means it was remembered, which can
+        // only follow a pairing; otherwise it counts only if a link actually
+        // resolved to it this run.  NOT `usesRemaining == 0`, which was the old
+        // panel's rule: closeSession() zeroes that as well as invalidating, so
+        // dismissing an unscanned QR left a device row behind for a phone that
+        // never existed.
+        if (!st.persisted && !m_pairedThisRun.contains(pid)) continue;
+
+        const bool isLive = !m_linkPairingId.isEmpty() && pid == m_linkPairingId;
+        const QString stored = phoneNameFor(pid);
+
+        QVariantMap dev;
+        dev[QStringLiteral("kind")]       = QStringLiteral("Phone");
+        // The phone's own name where it has ever declared one; otherwise the
+        // handle, shortened.  Inventing a friendlier name would assert a fact
+        // about the device, and nothing here knows one.
+        dev[QStringLiteral("name")] = isLive && !m_peerName.isEmpty() ? m_peerName
+                                    : !stored.isEmpty()              ? stored
+                                    : tr("Phone %1").arg(pid.left(6));
+        dev[QStringLiteral("model")]      = stored;
+        dev[QStringLiteral("backend")]    = QStringLiteral("PPCP");
+        dev[QStringLiteral("identifier")] = pid;
+        dev[QStringLiteral("pairingId")]  = pid;
+        dev[QStringLiteral("persisted")]  = st.persisted;
+        dev[QStringLiteral("invalidated")] = st.invalidated;
+
+        // The same status vocabulary the camera and IMU rows use, so the home
+        // screen's dot and the resource monitor need no new cases.  There is no
+        // `available` here yet: that is discovery's word for "paired and on this
+        // network", and nothing browses yet.
+        dev[QStringLiteral("status")] = st.invalidated ? QStringLiteral("revoked")
+                                      : isLive        ? QStringLiteral("connected")
+                                                      : QStringLiteral("disconnected");
+
+        // A phone is not a Source.  Its CAMERAS carry the rate, and they are
+        // their own rows in the same list — claiming a rate here would be
+        // inventing a second number for the same bytes.
+        dev[QStringLiteral("dataRateHz")]  = 0.0;
+        dev[QStringLiteral("dataRateStr")] = QStringLiteral("—");
+        dev[QStringLiteral("batteryPct")]  = -1;
+        dev[QStringLiteral("hasWarning")]  = false;
+        out.append(dev);
+    }
+    return out;
 }
 
 void PpcpHostService::onRelations()
@@ -504,6 +614,7 @@ bool PpcpHostService::rememberPairing(const QString &pairingId)
     const bool ok = m_rv.persist(pairingId.toStdString(), &why);
     if (!ok) setStatus(tr("Cannot remember this device: %1").arg(QString::fromStdString(why)));
     emit codeChanged();
+    emit phonesChanged();
     return ok;
 }
 
@@ -512,7 +623,17 @@ void PpcpHostService::forgetPairing(const QString &pairingId)
     // 7.4d — revocation is honoured immediately by this side, which means the
     // next handshake resolves nothing and fails like any stranger (7.7c).
     m_rv.revoke(pairingId.toStdString());
+    // The nickname goes with the key.  7.4d is about the pairing, but a name
+    // left behind is a record that this host has met that phone, and "forget"
+    // must not leave one.
+    {
+        QSettings st = ppSettings();
+        QVariantMap names = st.value(QStringLiteral("ppcp/phoneNames")).toMap();
+        if (names.remove(pairingId) > 0)
+            st.setValue(QStringLiteral("ppcp/phoneNames"), names);
+    }
     emit codeChanged();
+    emit phonesChanged();
 }
 
 QString PpcpHostService::diagnosticExport() const

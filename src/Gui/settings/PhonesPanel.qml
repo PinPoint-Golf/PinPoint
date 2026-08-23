@@ -33,9 +33,10 @@
 // such a machine would read as "you have never paired one", which is a
 // different and untrue statement — so the state is said out loud.
 //
-// Pairings are listed by their opaque `pairingId` for now.  A phone's own name
-// arrives in the MSG `declare` and is not persisted anywhere yet; giving these
-// rows a human name means inventing that storage, and that is its own change.
+// Rows come from `ppcpHost.phones` — the SAME list the home screen's DEVICES
+// section and the resource monitor draw from, because a paired phone is a
+// device and there should be one answer to what phones this host knows about.
+// What is extra here is the pair of controls 7.4b requires.
 
 import QtQuick
 import QtQuick.Layouts
@@ -52,19 +53,11 @@ Item {
 
     readonly property bool havePpcp: controller !== null
 
-    // Every held entry — outstanding codes and pairings reloaded from protected
-    // storage alike.  A live code is the QR in the pairing dialog and not a row
-    // here; what belongs here is what is left over: a code that became a
-    // pairing, and a device this host has agreed to remember.
-    readonly property var rows: {
-        if (!root.controller) return []
-        var all = root.controller.outstandingCodes
-        var out = []
-        for (var i = 0; i < all.length; ++i)
-            if (all[i].persisted || all[i].usesRemaining === 0)
-                out.push(all[i])
-        return out
-    }
+    // The same rows the DEVICES list and the resource monitor show — one list,
+    // built once in PpcpHostService::phones(), rather than this panel deciding
+    // for itself what counts as a phone.  A live, unscanned code is not in it:
+    // that is a QR on screen and belongs to the pairing dialog.
+    readonly property var rows: root.controller ? root.controller.phones : []
 
     // ── Settings search support (mirrors the other Hardware panels) ───────────
     property string lastHighlightId: ""
@@ -207,9 +200,10 @@ Item {
                         Layout.preferredWidth:  Theme.sp(6)
                         Layout.preferredHeight: Theme.sp(6)
                         radius: Theme.sp(3)
-                        color: pairingRow.modelData.invalidated ? Theme.colorBorderStrong
-                             : pairingRow.modelData.persisted   ? Theme.colorGood
-                                                                : Theme.colorWarn
+                        color: pairingRow.modelData.status === "connected" ? Theme.colorGood
+                             : pairingRow.modelData.invalidated             ? Theme.colorBorderStrong
+                             : pairingRow.modelData.persisted               ? Theme.colorAccent
+                                                                            : Theme.colorBorderStrong
                     }
 
                     ColumnLayout {
@@ -217,19 +211,23 @@ Item {
                         spacing: Theme.sp(3)
 
                         Text {
-                            text: pairingRow.modelData.persisted ? qsTr("Remembered phone")
-                                                                 : qsTr("Paired this session")
+                            // What the phone called itself in its MSG `declare`,
+                            // remembered against its pairing; the shortened
+                            // handle for one that has never declared.
+                            text:           pairingRow.modelData.name
                             font.family:    Theme.fontBody
                             font.pixelSize: Theme.fontSzBody
                             color:          Theme.colorText
                         }
                         Text {
-                            // The opaque handle is the only name there is. See
-                            // the file header: the phone's own name is not
-                            // persisted anywhere yet.
                             text: {
-                                var bits = [pairingRow.modelData.pairingId]
+                                var bits = [pairingRow.modelData.persisted
+                                                ? qsTr("Remembered")
+                                                : qsTr("Paired this session")]
+                                if (pairingRow.modelData.status === "connected")
+                                    bits.push(qsTr("connected now"))
                                 if (pairingRow.modelData.invalidated) bits.push(qsTr("revoked"))
+                                bits.push(pairingRow.modelData.pairingId)
                                 return bits.join("  ·  ")
                             }
                             font.family:    Theme.fontData

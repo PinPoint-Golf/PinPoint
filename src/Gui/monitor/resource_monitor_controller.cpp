@@ -167,6 +167,12 @@ void ResourceMonitorController::refresh()
             switch (camDev.backend) {
             case VideoInputFactory::Backend::Aravis:    backendStr = QStringLiteral("Aravis");         break;
             case VideoInputFactory::Backend::Spinnaker: backendStr = QStringLiteral("Spinnaker");      break;
+            // A camera on a paired phone.  It had no case here and fell to the
+            // default, so every phone camera in the resource monitor claimed to
+            // be a Qt Multimedia device — which is the one thing it certainly
+            // is not.  Harmless while nothing surfaced phones; not once they
+            // are first-class rows in the same list.
+            case VideoInputFactory::Backend::Ppcp:      backendStr = QStringLiteral("PPCP");           break;
             default:                                    backendStr = QStringLiteral("Qt Multimedia");  break;
             }
 
@@ -411,6 +417,21 @@ void ResourceMonitorController::refresh()
         }
     }
 
+    // ── Phone entries — one per pairing this host holds ──────────────────────
+    //
+    // Built elsewhere (PpcpHostService::phones()) and appended verbatim: the
+    // rows are already in this list's key vocabulary, and a phone has no
+    // EventBuffer source of its own to merge against — its CAMERAS carry the
+    // bytes and are their own rows above.
+    //
+    // ⚠ LISTED WHETHER OR NOT THE PHONE IS HERE, which is the IMU rule and not
+    // the camera one.  A remembered pairing is a standing ability to reconnect;
+    // it is a device that is switched off, not a device that does not exist.
+    if (m_phones) {
+        const QVariantList phones = m_phones->property("phones").toList();
+        for (const QVariant &p : phones) m_devices.append(p.toMap());
+    }
+
     // sourceAliases is now populated — build sources with alias-resolved names.
     buildSources();
 
@@ -502,6 +523,17 @@ int ResourceMonitorController::sourceCount() const
 }
 
 QVariantList ResourceMonitorController::sources() const { return m_sources; }
+void ResourceMonitorController::setPhoneSource(QObject *src)
+{
+    if (m_phones == src) return;
+    m_phones = src;
+    // No connection to a `phonesChanged` signal: this list is rebuilt by
+    // refresh() on the screens' own two-second timer, the same cadence every
+    // other row here arrives on, and a phone appearing a second late is not a
+    // thing anybody can perceive.
+    refresh();
+}
+
 QVariantList ResourceMonitorController::devices() const { return m_devices; }
 QStringList  ResourceMonitorController::warnings() const { return m_warnings; }
 

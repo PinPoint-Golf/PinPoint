@@ -23,6 +23,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QTime>
+#include <QPointer>
 #include <QVariantList>
 
 #include "PpMessageLog.h"
@@ -72,6 +73,17 @@ public:
     bool         scanning()           const;
     QString      scanStatus()         const;
 
+    // ── Where a phone's device row comes from ───────────────────────────────
+    // A paired phone is a device and belongs in this list beside the cameras
+    // and the IMUs.  It arrives through a plain property read — `phones`, a
+    // QVariantList of the same row shape built below — rather than through a
+    // PpcpHostService* and a header include, for two reasons: this controller
+    // has no business knowing what PPCP is, and HAVE_PPCP_TRANSPORT is defined
+    // for some of this application's translation units and not others, so a
+    // guarded member here would be a different class in different objects.
+    // Null on a build with no PPCP, which is simply no phone rows.
+    void setPhoneSource(QObject *src);
+
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void clearLog();
     Q_INVOKABLE QString exportLog() const;
@@ -94,6 +106,7 @@ private:
 
     QVariantList   m_sources;
     QVariantList   m_devices;
+    QPointer<QObject> m_phones;   // see setPhoneSource()
     QStringList    m_warnings;
     QList<quint64> m_timelineHistory;
     QVariantList   m_messageLog;

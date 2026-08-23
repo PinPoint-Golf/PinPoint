@@ -59,6 +59,7 @@
 #include <thread>
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -101,6 +102,19 @@ class PpcpHostService : public QObject
     Q_PROPERTY(QStringList codeEndpoints READ codeEndpoints NOTIFY codeChanged)
     Q_PROPERTY(QVariantList outstandingCodes READ outstandingCodes NOTIFY codeChanged)
 
+    // ── Every phone this host knows about, as a device ──────────────────────
+    // A paired phone IS a device and belongs in the ordinary enumeration beside
+    // the cameras and the IMUs, not in a bespoke table of pairing handles.  The
+    // rows use the same key vocabulary `ResourceMonitorController` builds for a
+    // Camera and an IMU, so the DEVICES list, the resource monitor and the
+    // Settings panel all read one shape.
+    //
+    // ⚠ AND A PHONE THAT IS NOT HERE IS STILL LISTED, which is the IMU rule
+    // ("Devices appear regardless of connection state") and not the camera one.
+    // A remembered pairing is a standing ability to reconnect; it is a device
+    // that is switched off, not a device that does not exist.
+    Q_PROPERTY(QVariantList phones READ phones NOTIFY phonesChanged)
+
 public:
     explicit PpcpHostService(QObject *parent = nullptr);
     ~PpcpHostService() override;
@@ -129,6 +143,7 @@ public:
     int          codeSecondsLeft() const;
     QStringList  codeEndpoints() const { return m_codeEndpoints; }
     QVariantList outstandingCodes() const;
+    QVariantList phones() const;
 
     // RV 7.3c leaves the exact expiry to the publisher and this host chose 300
     // seconds.  Settable ONLY so `ppcp_host_service_test` can watch a code run
@@ -160,6 +175,7 @@ signals:
     void stateChanged();
     void statusChanged();
     void codeChanged();
+    void phonesChanged();
 
     // MSG 3.3 — a counterpart declared, so its cameras exist NOW and at no
     // other moment.  `main.cpp` connects this to `CameraManager::enumerate()`:
@@ -178,6 +194,10 @@ private:
     void onRelations();
     void setStatus(const QString &s);
     void refreshCode();
+    // Remembers the phone's own name against the pairing it arrived on.  See
+    // the definition for why this is not in the keychain.
+    void notePeerName();
+    static QString phoneNameFor(const QString &pairingId);
 
     Ppcp::PpcpRendezvous                   m_rv;
     Ppcp::Listener                         m_listener;
@@ -192,6 +212,18 @@ private:
     QString m_status;
     QString m_peerName;
     QString m_counterpartId;
+    // The pairing the LIVE link resolved to.  It used to be read in adoptLink()
+    // and dropped on the floor immediately after noteLinkEstablished(), which
+    // left no way to say "this connected phone is that remembered pairing" —
+    // and therefore no way to give a remembered pairing the name its phone sent.
+    QString m_linkPairingId;
+    // ⚠ WHICH PAIRINGS A PHONE ACTUALLY ARRIVED ON, and it cannot be inferred
+    // from the ledger.  `closeSession()` sets `invalidated` and zeroes
+    // `usesRemaining` — so a code the user simply dismissed is indistinguishable
+    // from one a phone spent, and both look "used".  Listing on that basis put a
+    // device row up for a QR nobody ever scanned.  A device row means "this host
+    // has met this phone", and this is the only place that fact exists.
+    QSet<QString> m_pairedThisRun;
 
     // The accept loop.  Its ONLY job is to block in accept() and hand the link
     // to the GUI thread; it touches no PPCP state of its own.
