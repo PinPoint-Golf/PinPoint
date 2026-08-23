@@ -130,6 +130,13 @@ public:
     QStringList  codeEndpoints() const { return m_codeEndpoints; }
     QVariantList outstandingCodes() const;
 
+    // RV 7.3c leaves the exact expiry to the publisher and this host chose 300
+    // seconds.  Settable ONLY so `ppcp_host_service_test` can watch a code run
+    // out without a five-minute test; nothing in the application calls it, and a
+    // value <= 0 restores the default rather than minting a code that is already
+    // expired.
+    void setCodeLifetimeSecondsForTest(int seconds);
+
     // RV §4 — publish a code.  Fresh psk and sid per code (7.3d), every
     // reachable address in `ep` (4.3d), `mu: 1` (7.3a) and a short `exp`
     // (7.3c).  Displaces whatever code was showing, which 7.3b then invalidates.
@@ -191,8 +198,14 @@ private:
     std::thread       m_acceptThread;
     std::atomic<bool> m_stopping{false};
 
+    // 0 = use kCodeLifetimeS.  See setCodeLifetimeSecondsForTest().
+    int                 m_codeLifetimeS = 0;
     Ppcp::PublishedCode m_code;
     bool                m_codeLive = false;
+    // The last whole second `onTick()` reported, so the 20 ms tick emits
+    // `codeChanged` once a second rather than fifty times.  -1 means "no code
+    // has been counted yet"; 0 is a real reading and cannot stand in for it.
+    int                 m_lastSecondsLeft = -1;
     Ppcp::QrCode        m_qr;
     QVariantList        m_qrRows;
     QStringList         m_codeEndpoints;

@@ -344,6 +344,58 @@ pp_add_test(ppcp_rendezvous_test
     GTEST)
 
 
+# ── H-compose (c) — the pairing code's clock ────────────────────────────────
+#
+# ⚠ THE FIRST TEST `PpcpHostService` HAS EVER HAD.  It was reachable only from
+# QML, so `ppcp_app_tu_syntax` (compiles it) and `ppcp_conform_host` (builds the
+# peer, not the service) were the whole of its coverage, and the pairing panel's
+# countdown had never worked in any build.  See the header of the .cpp for the
+# three defects; all three are asserted with NO LINK PRESENT, which is both the
+# state they lived in and the state a user pairing a phone is in.
+#
+# ⚠ IT STUBS THE THREE src/Video SYMBOLS AND DOES NOT LINK THEM.  The service
+# calls `registerPpcpPeer()` on `declare` and the two timebase functions around a
+# link's relations; the real ones would drag `video_input_factory.cpp` (Aravis,
+# Spinnaker, Qt Multimedia) and `VideoInputPpcp_inventory.cpp` (Bluetooth, via
+# device_enumerator.h -> imu_base.h) into a suite about a clock.
+# `ppcp_video_input_test` refuses the same translation unit for the same reason.
+# Every stubbed symbol is unreachable here — nothing dials the listener.
+#
+# ⚠ AND IT SPENDS REAL SECONDS.  The countdown is wall-clock, off
+# `QDateTime::currentSecsSinceEpoch()`, so there is nothing to fake: the suite
+# runs an event loop for ~2.5 s per timing row.  That is the cost of asserting a
+# clock rather than asserting that a function was called.
+set(_hs_link ppcp Qt6::Multimedia OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+if(APPLE)
+    list(APPEND _hs_link "-framework Security" "-framework CoreFoundation")
+endif()
+
+pp_add_test(ppcp_host_service_test
+    SOURCES ppcp_host_service_test.cpp
+            ppcp_host_service_stubs.cpp
+            ${PPCP}/ppcp_host_service.cpp
+            ${PPCP}/ppcp_rendezvous.cpp
+            ${PPCP}/ppcp_pairing_store.cpp
+            ${PPCP}/ppcp_discovery.cpp
+            ${PPCP}/ppcp_transport.cpp
+            ${PPCP}/ppcp_host_peer.cpp
+            ${PPCP}/ppcp_live_session.cpp
+            ${PPCP}/ppcp_shot_bridge.cpp
+            ${PPCP}/ppcp_annotation_store.cpp
+            ${PPCP}/ppcp_host_engine.cpp
+            ${PPCP}/ppcp_ingest_policy.cpp
+            ${PPCP}/ppcp_source_declaration.cpp
+            ${PPCP}/ppcp_offer_controller.cpp
+            ${PPCP}/ppcp_import_ledger.cpp
+            ${PPCP}/ppcp_qr.cpp
+    INCLUDE ${PPCP} ${PP_SRC}/Video ${PP_SRC}/Core
+    LINK    ${_hs_link}
+    DEFINES PP_PPCP_SRC_DIR="${PPCP}" HAVE_PPCP HAVE_PPCP_TRANSPORT
+    STD 20
+    AUTOMOC
+    GTEST_NO_MAIN)
+
+
 # ── H-compose (b) — every app-side PPCP translation unit, syntax-only ───────
 #
 # ⚠ WHY THIS ROW EXISTS.  On 22 Aug the application build broke on

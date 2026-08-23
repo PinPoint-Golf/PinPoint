@@ -345,15 +345,46 @@ void PpcpHostService::onRelations()
 
 void PpcpHostService::onTick()
 {
-    if (!m_link) return;
-    if (!m_peer.tick(hostNowNs())) dropLink("link closed");
+    // ⚠ THE CODE'S HALF RUNS BEFORE THE LINK GUARD, AND THAT IS THE WHOLE POINT.
+    // It used to sit below `if (!m_link) return`, which meant none of it ran
+    // while no phone was connected — which is the entire window in which a code
+    // is displayed and counting down.  The countdown a user reads was therefore
+    // frozen at whatever `publishPairingCode()` left behind, and only ever moved
+    // AFTER a device had already paired, when nobody is looking at it.
+    //
     // 7.3b's periodic half, and 7.2d's: a code nobody used still holds a K_tls
     // until something removes it.
     if (m_rv.reap() > 0) emit codeChanged();
-    if (m_codeLive) emit codeChanged();   // the countdown
+
+    if (m_codeLive) {
+        // ⚠ ONCE A SECOND, NOT ONCE A TICK.  m_timer is 20 ms, so emitting
+        // unconditionally here signalled `codeChanged` fifty times a second and
+        // every QR view repainting on it redrew its ~1681 modules each time.
+        // `codeSecondsLeft()` has one-second resolution, so a signal that fires
+        // faster carries no information that anything can render.
+        const int left = codeSecondsLeft();
+        if (left != m_lastSecondsLeft) {
+            m_lastSecondsLeft = left;
+            emit codeChanged();
+        }
+        // 7.3e — the publisher holds the authoritative clock, so when it says
+        // the code is spent the code IS spent.  Nothing else cleared m_codeLive:
+        // reap() drops the rendezvous entry but leaves this class believing it
+        // still displays a live code, so the panel sat on "expires in 0s" for
+        // as long as it was open while the handshake behind it would be refused.
+        if (left == 0) closePairingCode();
+    }
+
+    if (!m_link) return;
+    if (!m_peer.tick(hostNowNs())) dropLink("link closed");
 }
 
 // ── RV §4 — the pairing code ────────────────────────────────────────────────
+
+void PpcpHostService::setCodeLifetimeSecondsForTest(int seconds)
+{
+    m_codeLifetimeS = seconds > 0 ? seconds : 0;
+}
 
 bool PpcpHostService::publishPairingCode()
 {
@@ -370,7 +401,8 @@ bool PpcpHostService::publishPairingCode()
     const std::vector<RvEndpoint> eps = reachableEndpoints(m_port);
 
     PpcpRendezvous::Config cfg;
-    cfg.codeLifetimeS = kCodeLifetimeS;
+    cfg.codeLifetimeS = m_codeLifetimeS > 0 ? static_cast<std::uint64_t>(m_codeLifetimeS)
+                                            : kCodeLifetimeS;
     cfg.maxUses = 1;   // 7.3a; anything above it costs 7.4f
     // 4.3/4.4d — ours to print, UNTRUSTED at the far end.  A bay name and not a
     // person's name: the code is photographed and the name is on it.
@@ -392,6 +424,7 @@ bool PpcpHostService::publishPairingCode()
         return false;
     }
     m_codeLive = true;
+    m_lastSecondsLeft = -1;
     refreshCode();
     setStatus(tr("Scan the code with the capture device."));
     return true;
@@ -407,6 +440,10 @@ void PpcpHostService::closePairingCode()
     m_codeLive = false;
     m_code = PublishedCode{};
     m_qr = QrCode{};
+    // -1 rather than 0: 0 is a value codeSecondsLeft() genuinely returns, and a
+    // memo holding it would swallow the first tick of the NEXT code that
+    // happened to be read at its final second.
+    m_lastSecondsLeft = -1;
     refreshCode();
 }
 
