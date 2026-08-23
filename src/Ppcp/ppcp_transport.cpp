@@ -42,6 +42,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <string>
 
 #ifdef _WIN32
 #  include <winsock2.h>
@@ -1455,6 +1456,23 @@ std::uint16_t Listener::port() const { return m_impl->boundPort; }
 BindRejection Listener::lastBindRejection() const { return m_impl->lastRejection; }
 int Listener::bindRejectionCount() const { return m_impl->rejections; }
 
+namespace {
+
+// Why a socket call failed, in words, on both platforms.  `bind()` reports
+// through WSAGetLastError() on Windows and leaves `errno` untouched, so the
+// obvious std::strerror(errno) would print "Undefined error: 0" on exactly the
+// machine where a port clash is most likely.
+std::string sockErrText()
+{
+#ifdef _WIN32
+    return "WSA error " + std::to_string(WSAGetLastError());
+#else
+    return std::strerror(errno);
+#endif
+}
+
+}  // namespace
+
 bool Listener::listen(std::uint16_t port, std::string *err)
 {
     ensureSockets();
@@ -1469,16 +1487,44 @@ bool Listener::listen(std::uint16_t port, std::string *err)
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    // ⚠ INADDR_ANY, AND IT MUST BE.  This was INADDR_LOOPBACK from H1 until
+    // 23 Aug, which meant no phone ever reached this host: RV 4.3d has
+    // `reachableEndpoints()` print the ROUTABLE addresses into the pairing
+    // code (loopback deliberately last, "a code that leads with 127.0.0.1
+    // works only on the machine that displayed it"), so the QR sent the
+    // scanner to 192.168.x.y:7788 while the socket answered only on
+    // 127.0.0.1:7788.  The dial was refused by the kernel — no firewall, no
+    // handshake, nothing on any log.
+    //
+    // ⚠ AND NO TEST CAN CATCH THE REGRESSION.  Every peer in `ppcp-tests`,
+    // the conformance harness and `tools/ppcp-sim` included, runs on this
+    // machine and connects over loopback, so the suite passed throughout and
+    // would pass again the moment somebody narrows this line.  What guards it
+    // is the endpoint the code advertises, not a test.
+    //
+    // Listening wide is not a widening of TRUST: RV 5.2g makes this side the
+    // TLS server, `m_impl->resolver` authenticates every dial against the
+    // pairing ledger, and 5.3d gives an unresolvable identity the same path a
+    // wrong key takes.  A stranger who reaches the port gets a failed
+    // handshake, which is what the port is for.
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons(port);
     if (bind(s, reinterpret_cast<sockaddr *>(&addr), sizeof addr) != 0) {
+        // The reason, not just the fact.  On a wide bind EADDRINUSE is a real
+        // possibility (another copy of the application, or anything else on
+        // 7788) where on loopback it never was, and `start()` answers a bare
+        // failure by silently retrying on an ephemeral port — so without the
+        // errno there is nothing to tell "somebody has the port" apart from
+        // "the network stack refused us".
+        const std::string why = sockErrText();
         pp_close_socket(s);
-        if (err) *err = "bind() failed";
+        if (err) *err = "bind() failed: " + why;
         return false;
     }
     if (::listen(s, 8) != 0) {
+        const std::string why = sockErrText();
         pp_close_socket(s);
-        if (err) *err = "listen() failed";
+        if (err) *err = "listen() failed: " + why;
         return false;
     }
     socklen_t len = sizeof addr;

@@ -1294,7 +1294,10 @@ int main(int argc, char **argv)
         if (!opt.summaryPath.empty()) (void)writeSummary(seen, opt.summaryPath);
         return 1;
     }
-    say("listening on 127.0.0.1:" + std::to_string(h.port())
+    // 0.0.0.0 and not 127.0.0.1: the listener binds every interface, and this
+    // line claimed loopback for as long as it was true.  A driver reading it
+    // for an address to dial should get the one the socket actually answers on.
+    say("listening on 0.0.0.0:" + std::to_string(h.port())
         + (opt.tlsPskHex.empty() ? " (PLAINTEXT harness socket)" : " (TLS 1.3 external PSK)"));
     if (!opt.portFile.empty()) {
         // Written last and atomically-enough for a driver script: the port is
