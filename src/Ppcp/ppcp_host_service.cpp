@@ -78,11 +78,7 @@ const char *kPairingService = "golf.pinpoint.studio.ppcp.pairings";
 }  // namespace
 
 PpcpHostService::PpcpHostService(QObject *parent)
-    : QObject(parent), m_peer([] {
-          PpcpHostPeer::Config c;
-          c.peerId = hostPeerId().toStdString();
-          return c;
-      }())
+    : QObject(parent)
 {
     // 7.4b — persistence is opt-in.  Installing the store does not persist
     // anything; rememberPairing() is the only path that writes a key, and it is
@@ -98,33 +94,6 @@ PpcpHostService::PpcpHostService(QObject *parent)
     // exists to notice.
     m_timer.setInterval(20);
     connect(&m_timer, &QTimer::timeout, this, &PpcpHostService::onTick);
-
-    m_peer.setDeclarationHook([this](const ppcp_peer_desc *d) { onDeclare(d); });
-    m_peer.setRelationsHook([this](const PpcpLiveSession &) { onRelations(); });
-    m_peer.addEventHook([this](const ppcp_event &ev) {
-        // ⚠ THE EVENT RING HAS EXACTLY ONE DRAINER AND IT IS PpcpHostPeer.
-        // Everything else that needs to see events registers here.  In
-        // particular `VideoInputPpcp::drainEvents()` MUST NOT be called on this
-        // peer — it exists for the standalone paths where nothing else drains.
-        if (m_offers) m_offers->observe(ev);
-    });
-
-    // The host's own readings.  Both answer false for "cannot tell", which is a
-    // different answer from "fine" and is treated as one — a peer reporting
-    // `thermal: nominal` on no evidence is the fabrication this protocol
-    // refuses everywhere else.
-    //
-    // ⚠ AND A HEALTH SOURCE IS A PRECONDITION FOR LIVENESS, NOT A DECORATION
-    // ON IT (finding F-H5-3).  Without one every `heartbeat` is answered
-    // `error` / `profile_not_supported`, no ack ever returns, and §7.4 silently
-    // never runs.  This host has storage and no thermometer, so it says so.
-    m_peer.setStorage([](std::uint64_t *freeBytes) {
-        if (!freeBytes) return false;
-        const QStorageInfo si(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
-        if (!si.isValid() || !si.isReady() || si.bytesAvailable() < 0) return false;
-        *freeBytes = static_cast<std::uint64_t>(si.bytesAvailable());
-        return true;
-    });
 
     // ⚠ clipReady() IS DELIBERATELY NOT CONNECTED, AND THAT IS NOT AN OVERSIGHT.
     // A `PpcpClip` carries opaque PPCP identities; this application's
@@ -192,19 +161,12 @@ bool PpcpHostService::start(quint16 port, QString *err)
     // payload reaching a log, and nothing handed to this callback is either.
     m_listener.setLog([](const std::string &line) { ppWarn() << "[ppcp-rv]" << line.c_str(); });
 
-    // MSG 3.3c — a peer declares BEFORE it originates any message referencing a
-    // Source, Stream or Candidate, so this happens before anything is pumped.
-    std::string derr;
-    if (!m_peer.declareSelf(PpcpSourceDeclaration::hostInventory(), &derr))
-        ppWarn() << "[ppcp] the host could not declare itself:" << derr.c_str();
-
-    m_engine = m_peer.makeLibppcpEngine(&derr);
-    if (!m_engine) {
-        if (err) *err = QString::fromStdString(derr);
-        setStatus(tr("Could not build the PPCP engine: %1").arg(QString::fromStdString(derr)));
-        m_listener.stop();
-        return false;
-    }
+    // ⚠ NO PEER AND NO ENGINE ARE BUILT HERE ANY MORE.  They used to be, one
+    // of each, for the lifetime of the service — which is what made this a
+    // one-phone host.  A `ppcp_peer` is the CONVERSATION (F-H8-5), so it is
+    // built in adoptLink() per phone and dies with that phone's link.
+    // `declareSelf()` moves with it: MSG 3.3c makes declaring a per-conversation
+    // obligation, not a per-process one.
 
     m_stopping = false;
     m_acceptThread = std::thread([this] {
@@ -253,107 +215,222 @@ void PpcpHostService::stop()
     stopDiscovery();
     m_stopping = true;
     if (m_acceptThread.joinable()) m_acceptThread.join();
-    dropLink("shutdown");
+    dropAllPhones("shutdown");
     m_listener.stop();
     // 7.3b — the code dies with the session it belongs to, used or not, and
     // 7.2d erases its key material with it.
     closePairingCode();
-    m_engine.reset();
     m_listening = false;
     emit stateChanged();
+}
+
+// ── Everything a phone's own peer needs before it carries anything ──────────
+//
+// Lifted wholesale out of the constructor, where it configured the single
+// service-wide peer.  It is a function now for one reason: the SECOND phone
+// must get exactly the setup the first got, and a second copy of this block
+// would drift from the first the day somebody edits one of them.
+bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err)
+{
+    ph->peer->setDeclarationHook([this, ph](const ppcp_peer_desc *d) { onDeclare(ph, d); });
+    ph->peer->setRelationsHook([this, ph](const PpcpLiveSession &) { onRelations(ph); });
+    ph->peer->addEventHook([this, ph](const ppcp_event &ev) {
+        // ⚠ THE EVENT RING HAS EXACTLY ONE DRAINER AND IT IS PpcpHostPeer.
+        // Everything else that needs to see events registers here.  In
+        // particular `VideoInputPpcp::drainEvents()` MUST NOT be called on this
+        // peer — it exists for the standalone paths where nothing else drains.
+        if (m_offers) m_offers->observe(ph->counterpartId, ev);
+    });
+
+    // The host's own readings.  Both answer false for "cannot tell", which is a
+    // different answer from "fine" and is treated as one — a peer reporting
+    // `thermal: nominal` on no evidence is the fabrication this protocol
+    // refuses everywhere else.
+    //
+    // ⚠ AND A HEALTH SOURCE IS A PRECONDITION FOR LIVENESS, NOT A DECORATION
+    // ON IT (finding F-H5-3).  Without one every `heartbeat` is answered
+    // `error` / `profile_not_supported`, no ack ever returns, and §7.4 silently
+    // never runs.  This host has storage and no thermometer, so it says so.
+    ph->peer->setStorage([](std::uint64_t *freeBytes) {
+        if (!freeBytes) return false;
+        const QStorageInfo si(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+        if (!si.isValid() || !si.isReady() || si.bytesAvailable() < 0) return false;
+        *freeBytes = static_cast<std::uint64_t>(si.bytesAvailable());
+        return true;
+    });
+
+
+    // MSG 3.3c — a peer declares BEFORE it originates any message referencing a
+    // Source, Stream or Candidate, so this happens before anything is pumped,
+    // and once per conversation.
+    std::string derr;
+    if (!ph->peer->declareSelf(PpcpSourceDeclaration::hostInventory(), &derr))
+        ppWarn() << "[ppcp] the host could not declare itself:" << derr.c_str();
+
+    ph->engine = ph->peer->makeLibppcpEngine(&derr);
+    if (!ph->engine) {
+        if (err) *err = derr;
+        return false;
+    }
+    return true;
+}
+
+PpcpHostService::Phone *PpcpHostService::phoneByPairing(const QString &pairingId)
+{
+    if (pairingId.isEmpty()) return nullptr;
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (p->pairingId == pairingId) return p.get();
+    return nullptr;
+}
+
+const PpcpHostService::Phone *PpcpHostService::phoneByPairing(const QString &pairingId) const
+{
+    return const_cast<PpcpHostService *>(this)->phoneByPairing(pairingId);
+}
+
+Ppcp::PpcpHostPeer *PpcpHostService::hostPeer()
+{
+    return m_phones.empty() ? nullptr : m_phones.front()->peer.get();
+}
+
+QString PpcpHostService::peerName() const
+{
+    // Deliberately empty with several connected — see the header.  A caller
+    // that wants them all asks for `connectedNames`.
+    return m_phones.size() == 1 ? m_phones.front()->name : QString();
+}
+
+QStringList PpcpHostService::connectedNames() const
+{
+    QStringList out;
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (!p->name.isEmpty()) out << p->name;
+    return out;
 }
 
 void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
 {
     if (!link) return;
-    if (m_link) {
-        // One link at a time in this build.  A second dialler is refused at the
-        // link rather than half-adopted: 7.3a already spent the code, and a
-        // host that quietly replaced a live capture peer mid-session would lose
-        // whatever it was carrying.
-        link->close();
-        return;
-    }
+
+    // A phone got in, so whatever failed before it is history.  The panel must
+    // not carry a refusal underneath a live connection.
+    clearFailure();
 
     // RV 7.3a — the code is spent by the PAIRING, not by the handshake.  This
     // link is two TLS handshakes (three with preview) over one K_tls; counting
     // handshakes would invalidate a `mu: 1` code on the control channel and
     // refuse the bulk channel of the SAME link.  See F-H6-1.
-    // A phone got in, so whatever failed before it is history.  The panel must
-    // not carry a refusal underneath a live connection.
-    clearFailure();
-
     const std::string pairing = link->pairingId();
     if (!pairing.empty()) m_rv.noteLinkEstablished(pairing);
-    // ...and KEEP it.  Everything that wants to say something about "the phone
-    // on the other end of this link" — its name, its device row, whether the
-    // remembered pairing in Settings is the one currently connected — needs the
-    // join between the live link and the pairing, and until now the only reader
-    // of link->pairingId() consumed it and let it go.
-    m_linkPairingId = QString::fromStdString(pairing);
-    if (!m_linkPairingId.isEmpty()) m_pairedThisRun.insert(m_linkPairingId);
+    const QString pairingId = QString::fromStdString(pairing);
+    if (!pairingId.isEmpty()) m_pairedThisRun.insert(pairingId);
 
-    m_link = std::move(link);
+    // ⚠ DO NOT DEDUPLICATE BY PAIRING HERE.  It is the obvious next thought —
+    // "the same pairing dialling again is that phone reconnecting, so replace
+    // its entry" — and it is wrong twice over.
+    //
+    // It is unreachable for the code this application publishes: `mu` is 1, and
+    // the resolver refuses a spent code outright (7.3a, `refusedExhausted`), so
+    // a second dial on it never gets far enough to be adopted.
+    //
+    // And it is incorrect for any code where `mu` exceeds 1, which the spec
+    // exists to allow — "pairing several devices from one displayed code is a
+    // real workflow".  Those devices share ONE pairing id, so collapsing by it
+    // would take down the phone that arrived first the moment the second one
+    // scanned the same code.  A pairing is not a phone; a LINK is.
 
-    // ⚠ F-H8-5 — A `ppcp_peer` IS THE CONVERSATION, NOT THE APPLICATION, AND
-    // THIS BUILT ONE ENGINE IN start() AND GAVE IT TO EVERY LINK.
+    auto phone = std::make_unique<Phone>();
+    Phone *ph = phone.get();
+    ph->pairingId = pairingId;
+    PpcpHostPeer::Config cfg;
+    // The HOST's own id, identical on every conversation: it is this
+    // application's identity, not this link's.
+    cfg.peerId = hostPeerId().toStdString();
+    ph->peer = std::make_unique<PpcpHostPeer>(cfg);
+
+    // ⚠ F-H8-5 — A `ppcp_peer` IS THE CONVERSATION, NOT THE APPLICATION.
     //
     // Found by H8's conformance run on 23 Aug 2026, where twelve rows dial in
     // turn: the FIRST got a Session and the other eleven were refused
     // `ppcp_peer_session_open: invalid argument`, because the engine still held
     // the previous device's open Session, its declaration, its `msg_id`
-    // sequence and its link state.  Nothing had closed that Session — the link
-    // died rather than saying goodbye, which is the ordinary way a link ends.
-    // In the application the same defect reads as "the second device to pair
-    // after a drop never gets a Session", and nothing in `ppcp-tests` could see
-    // it because every suite there builds one engine for one link.
-    //
-    // 7.5a's resume is a DIFFERENT case and is not what this was: resume is the
-    // same peer on the same K_tls, and it is opened deliberately, not inherited
-    // by whoever dials next.
+    // sequence and its link state.  That finding is why this is built here, per
+    // phone, and it is also the whole reason several phones work at all: two
+    // conversations are two peers, and always were.
     std::string derr;
-    m_engine = m_peer.makeLibppcpEngine(&derr);
-    if (!m_engine) {
+    if (!configurePhonePeer(ph, &derr)) {
         ppWarn() << "[ppcp] could not build an engine for this link:" << derr.c_str();
-        setStatus(tr("Could not build the PPCP engine: %1").arg(QString::fromStdString(derr)));
-        m_link->close();
-        m_link.reset();
+        // A phone that handshook correctly and is then dropped by OUR failure
+        // is exactly the invisible refusal the failure line exists for.
+        noteFailureText(tr("A phone paired, but this computer could not set up "
+                           "the connection: %1").arg(QString::fromStdString(derr)));
+        link->close();
         return;
     }
-    m_peer.attach(m_link.get(), m_engine.get());
 
-    const TlsOutcome &tls = m_link->tls();
+    ph->link = std::move(link);
+    ph->peer->attach(ph->link.get(), ph->engine.get());
+    m_phones.push_back(std::move(phone));
+
+    // ⚠ THE CODE ON SCREEN IS NOW SPENT, SO REPLACE IT.  `mu` is 1 (7.3a), so
+    // the QR still being displayed cannot pair anything else — it is a picture
+    // of a used ticket, and the next phone scanning it would be refused with no
+    // way to see why.  Minting the replacement HERE rather than making somebody
+    // press a button is what makes pairing the second angle a matter of holding
+    // the phone up to the screen.  Only while the panel is open: `m_codeLive`
+    // is that condition, and a closed panel stays closed.
+    if (m_codeLive) publishCode(/*userAsked=*/false);
+
+    const TlsOutcome &tls = ph->link->tls();
     // 5.4k — the achieved version and key-exchange mode are made available to
     // the application layer and recorded.  Forward secrecy is a per-connection
     // outcome since the 5.4.3 relaxation, so a peer that cannot say which it
     // got cannot honestly tell a user what "encrypted" means here.
     ppWarn() << "[ppcp-rv] link up:" << tls.describe().c_str();
-    setStatus(tr("Device connected — %1.").arg(QString::fromStdString(tls.describe())));
+    setStatus(m_phones.size() == 1
+                  ? tr("Device connected — %1.").arg(QString::fromStdString(tls.describe()))
+                  : tr("%1 devices connected.").arg(m_phones.size()));
     refreshCode();
     emit stateChanged();
+    emit phonesChanged();
 }
 
-void PpcpHostService::dropLink(const char *why)
+void PpcpHostService::dropPhone(Phone *ph, const char *why)
 {
-    if (!m_link) return;
-    if (m_offers) m_offers->detach();
-    if (!m_counterpartId.isEmpty()) VideoInputPpcp::clearTimebaseMappings(m_counterpartId);
-    m_peer.attach(nullptr, nullptr);
-    m_link->close();
-    m_link.reset();
-    m_counterpartId.clear();
-    m_peerName.clear();
-    setStatus(tr("Device disconnected (%1).").arg(QString::fromLatin1(why)));
-    m_linkPairingId.clear();
+    if (!ph) return;
+    // Find it before anything is torn down, so the erase below cannot be
+    // reading a half-destroyed entry.
+    auto it = std::find_if(m_phones.begin(), m_phones.end(),
+                           [ph](const std::unique_ptr<Phone> &p) { return p.get() == ph; });
+    if (it == m_phones.end()) return;
+
+    // The offer list is attached PER PEER, so only this phone's offers go.
+    if (m_offers && !ph->counterpartId.isEmpty()) m_offers->detach(ph->counterpartId);
+    if (!ph->counterpartId.isEmpty())
+        VideoInputPpcp::clearTimebaseMappings(ph->counterpartId);
+    ph->peer->attach(nullptr, nullptr);
+    if (ph->link) ph->link->close();
+
+    const QString name = ph->name;
+    m_phones.erase(it);
+
+    setStatus(name.isEmpty()
+                  ? tr("Device disconnected (%1).").arg(QString::fromLatin1(why))
+                  : tr("%1 disconnected (%2).").arg(name, QString::fromLatin1(why)));
     emit stateChanged();
     // The phone did not stop existing, it stopped being here — its row stays
     // and changes state, the way a switched-off IMU's does.
     emit phonesChanged();
 }
 
-void PpcpHostService::onDeclare(const ppcp_peer_desc *desc)
+void PpcpHostService::dropAllPhones(const char *why)
 {
-    if (!desc) return;
+    while (!m_phones.empty()) dropPhone(m_phones.back().get(), why);
+}
+
+void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
+{
+    if (!ph || !desc) return;
 
     // MSG 3.3 — a peer's cameras exist the moment it declares and at no other
     // moment.  There is no bus to walk and no scan to run: this is the whole of
@@ -361,24 +438,24 @@ void PpcpHostService::onDeclare(const ppcp_peer_desc *desc)
     // has never had a PPCP branch.
     const int n = VideoInputFactory::registerPpcpPeer(desc);
 
-    m_counterpartId = QString::fromUtf8(desc->id.v, static_cast<int>(desc->id.len));
+    ph->counterpartId = QString::fromUtf8(desc->id.v, static_cast<int>(desc->id.len));
     // 4.4d's habit of mind, one layer in: a counterpart's product strings are
     // display text and are never an identifier or a trust signal.
-    m_peerName = QString::fromUtf8(desc->product.model.v,
+    ph->name = QString::fromUtf8(desc->product.model.v,
                                    static_cast<int>(desc->product.model.len));
 
     // MSG 9.1 — the offer list, which has been installed DETACHED since H5
     // because there was no live peer to give it.  There is now.
-    if (m_offers && m_engine && m_engine->peer())
-        m_offers->attach(m_engine->peer(), m_counterpartId);
+    if (m_offers && ph->engine && ph->engine->peer())
+        m_offers->attach(ph->engine->peer(), ph->counterpartId);
 
     // The one moment a phone says what it is called.  Written down here or not
-    // at all: `dropLink()` clears m_peerName, and nothing about a pairing
+    // at all: `dropPhone()` forgets the live name, and nothing about a pairing
     // survives a restart except its handle and its key.
-    notePeerName();
+    notePeerName(ph);
 
-    ppWarn() << "[ppcp] peer declared:" << m_peerName << "-" << n << "camera Source(s)";
-    setStatus(tr("%1 connected — %2 camera(s).").arg(m_peerName).arg(n));
+    ppWarn() << "[ppcp] peer declared:" << ph->name << "-" << n << "camera Source(s)";
+    setStatus(tr("%1 connected — %2 camera(s).").arg(ph->name).arg(n));
 
     // CameraManager snapshots the registry at construction and merges only on
     // enumerate(); the home screen's DEVICES list reads the registry directly
@@ -479,16 +556,16 @@ void PpcpHostService::stopDiscovery()
 // ⚠ AND IT IS WHAT THE PHONE SAID, NOT WHAT WE DECIDED.  `product.model` is
 // display text from an untrusted counterpart (4.4d), so it names a row and is
 // never an identifier, never a trust signal, and never matched against.
-void PpcpHostService::notePeerName()
+void PpcpHostService::notePeerName(const Phone *ph)
 {
-    if (m_linkPairingId.isEmpty() || m_peerName.isEmpty()) return;
+    if (!ph || ph->pairingId.isEmpty() || ph->name.isEmpty()) return;
     QSettings s = ppSettings();
     QVariantMap names = s.value(QStringLiteral("ppcp/phoneNames")).toMap();
     QVariantMap row;
-    row[QStringLiteral("name")]     = m_peerName;
-    row[QStringLiteral("peerId")]   = m_counterpartId;
+    row[QStringLiteral("name")]     = ph->name;
+    row[QStringLiteral("peerId")]   = ph->counterpartId;
     row[QStringLiteral("lastSeen")] = QDateTime::currentSecsSinceEpoch();
-    names[m_linkPairingId] = row;
+    names[ph->pairingId] = row;
     s.setValue(QStringLiteral("ppcp/phoneNames"), names);
 }
 
@@ -519,7 +596,8 @@ QVariantList PpcpHostService::phones() const
         // never existed.
         if (!st.persisted && !m_pairedThisRun.contains(pid)) continue;
 
-        const bool isLive = !m_linkPairingId.isEmpty() && pid == m_linkPairingId;
+        const Phone *live = phoneByPairing(pid);
+        const bool isLive = live != nullptr;
         const QString stored = phoneNameFor(pid);
 
         QVariantMap dev;
@@ -527,7 +605,7 @@ QVariantList PpcpHostService::phones() const
         // The phone's own name where it has ever declared one; otherwise the
         // handle, shortened.  Inventing a friendlier name would assert a fact
         // about the device, and nothing here knows one.
-        dev[QStringLiteral("name")] = isLive && !m_peerName.isEmpty() ? m_peerName
+        dev[QStringLiteral("name")] = isLive && !live->name.isEmpty() ? live->name
                                     : !stored.isEmpty()              ? stored
                                     : tr("Phone %1").arg(pid.left(6));
         dev[QStringLiteral("model")]      = stored;
@@ -561,18 +639,18 @@ QVariantList PpcpHostService::phones() const
     return out;
 }
 
-void PpcpHostService::onRelations()
+void PpcpHostService::onRelations(Phone *ph)
 {
-    if (m_counterpartId.isEmpty()) return;
+    if (!ph || ph->counterpartId.isEmpty()) return;
 
     // 6.1f — a `relation_update` was published, so every VideoInputPpcp bound
     // to this peer is re-fed its offset.  Per SOURCE timebase and not per peer:
     // a phone with a camera clock and an audio clock has one relation per clock
     // and a single scalar would fabricate one of them.
     const std::int64_t now = hostNowNs();
-    const PpcpLiveSession &live = m_peer.liveSession();
+    const PpcpLiveSession &live = ph->peer->liveSession();
     const int mapped = VideoInputPpcp::applyTimebaseOffsets(
-        m_counterpartId, [&](const QString &tb, qint64 *outNs) {
+        ph->counterpartId, [&](const QString &tb, qint64 *outNs) {
             std::int64_t off = 0;
             if (!live.offsetToRefNs(tb.toStdString(), now, &off)) return false;
             *outNs = static_cast<qint64>(off);
@@ -584,7 +662,7 @@ void PpcpHostService::onRelations()
 void PpcpHostService::onTick()
 {
     // ⚠ THE CODE'S HALF RUNS BEFORE THE LINK GUARD, AND THAT IS THE WHOLE POINT.
-    // It used to sit below `if (!m_link) return`, which meant none of it ran
+    // It used to sit below a `no phone connected` early-out, so none of it ran
     // while no phone was connected — which is the entire window in which a code
     // is displayed and counting down.  The countdown a user reads was therefore
     // frozen at whatever `publishPairingCode()` left behind, and only ever moved
@@ -610,11 +688,38 @@ void PpcpHostService::onTick()
         // reap() drops the rendezvous entry but leaves this class believing it
         // still displays a live code, so the panel sat on "expires in 0s" for
         // as long as it was open while the handshake behind it would be refused.
-        if (left == 0) closePairingCode();
+        if (left == 0) {
+            // ⚠ RENEW, DON'T GO DARK.  This used to close the code and leave
+            // the panel showing an expired QR with a "Get a new code" button —
+            // a click that only a person standing at this computer can make,
+            // to prove something they proved by standing there.  7.3 is
+            // explicit that the real defences are elsewhere: `mu` and 7.3b are
+            // "clock-free and are the primary defence; `exp` ... is therefore
+            // secondary rather than relied upon".  Renewing weakens neither.
+            // Every renewal is a WHOLE new code — fresh psk and sid (7.3d),
+            // its own 5-minute exp (7.3c), and the one it replaces invalidated
+            // (7.3b) — so no individual code lives a second longer than before.
+            //
+            // Only while the panel is open, which needs no extra state: the
+            // dialog publishes on open and closes on dismiss, so `m_codeLive`
+            // IS "the panel is showing".  And not once a phone is on the link,
+            // where a displayed code has nothing left to do.
+            // Renewed whether or not a phone is already connected: with `mu: 1`
+            // a live link does not make the NEXT phone's code unnecessary, and
+            // publishCode() knows not to invalidate a session that is carrying
+            // one.
+            if (!publishCode(/*userAsked=*/false)) closePairingCode();
+        }
     }
 
-    if (!m_link) return;
-    if (!m_peer.tick(hostNowNs())) dropLink("link closed");
+    // ⚠ EVERY PHONE, AND COLLECT THE DEAD BEFORE TOUCHING THE LIST.
+    // dropPhone() erases from m_phones, so ticking and dropping in one pass
+    // would invalidate the iterator underneath itself.
+    const std::int64_t now = hostNowNs();
+    std::vector<Phone *> dead;
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (!p->peer->tick(now)) dead.push_back(p.get());
+    for (Phone *p : dead) dropPhone(p, "link closed");
 }
 
 // ── RV §4 — the pairing code ────────────────────────────────────────────────
@@ -624,19 +729,24 @@ void PpcpHostService::setCodeLifetimeSecondsForTest(int seconds)
     m_codeLifetimeS = seconds > 0 ? seconds : 0;
 }
 
-bool PpcpHostService::publishPairingCode()
+bool PpcpHostService::publishCode(bool userAsked)
 {
     if (!m_listening) {
         setStatus(tr("Not listening, so there is nothing to pair with."));
         return false;
     }
-    // 7.3b — displacing a code invalidates it, used or not.
-    closePairingCode();
+    // 7.3b — displacing a code invalidates it, used or not.  ⚠ UNLESS A PHONE
+    // IS ON THE OTHER END OF IT.  Pressing "New code" after a phone paired used
+    // to run closeSession() over the pairing that phone is connected on, wiping
+    // the K_tls its reconnection (7.5a) and its preview channel (ENC 2.1d) both
+    // need.  The displaced code is spent either way; only the session differs.
+    dropDisplayedCode(/*invalidateSession=*/!displayedCodePairedAPhone());
     // A new code is a new attempt, so the last one's failure stops being the
     // answer to "what is happening".  ⚠ closePairingCode() deliberately does
     // NOT do this: a user who dismisses the panel after a refusal should still
     // find out what happened, and only asking for a fresh code says otherwise.
-    clearFailure();
+    // ⚠ AND NEITHER DOES THE AUTOMATIC RENEWAL — see publishCode()'s comment.
+    if (userAsked) clearFailure();
 
     // 4.3d — every address this host is reachable at: wired, wireless, and its
     // hotspot address where it provides one.  This is what makes the code work
@@ -675,11 +785,41 @@ bool PpcpHostService::publishPairingCode()
 
 void PpcpHostService::closePairingCode()
 {
+    // ⚠ NOT UNCONDITIONALLY TRUE, and the QML used to carry this rule instead:
+    // the pair panel guarded its own close with "unless a phone got in first,
+    // because closing its session would take the link down with it".  A rule
+    // that lives in a caller is a rule the next caller does not have.  It lives
+    // here now, which is why the panel can simply close its code.
+    dropDisplayedCode(/*invalidateSession=*/!displayedCodePairedAPhone());
+}
+
+// Is the code currently on screen the one a CONNECTED phone paired on?
+bool PpcpHostService::displayedCodePairedAPhone() const
+{
+    return m_codeLive
+        && phoneByPairing(QString::fromStdString(m_code.pairingId)) != nullptr;
+}
+
+// ⚠ WHY INVALIDATING IS A DECISION AND NOT A REFLEX.  `closeSession()` marks
+// the row invalidated AND wipes its key material (7.2d) unless the pairing was
+// persisted.  That is exactly right for a code nobody used — and destructive
+// for one a phone HAS used, because the pairing outlives the code that created
+// it (7.3f) and the live link still needs `K_tls`: RV 7.5a reconnects a dropped
+// channel on it, and ENC 2.1d opens the preview channel on it later, with a
+// handshake that has to resolve.  `noteLinkEstablished()` is deliberate about
+// this — it spends the code and keeps the keys, saying so in as many words.
+//
+// So displacing a SPENT code drops the display and leaves the session alone.
+// Nothing is lost by that: 7.3a already took `usesRemaining` to zero, so the
+// code cannot pair anything else; it is invalidated in the only sense that
+// matters, and 7.3b will finish the job when the session really does close.
+void PpcpHostService::dropDisplayedCode(bool invalidateSession)
+{
     if (!m_codeLive) return;
     // 7.3b — invalidated when the session it belongs to closes, whether or not
     // it was used, and its key material erased with it (7.2d) unless the
     // pairing was persisted under 7.4.
-    m_rv.closeSession(m_code.sessionId);
+    if (invalidateSession) m_rv.closeSession(m_code.sessionId);
     m_codeLive = false;
     m_code = PublishedCode{};
     m_qr = QrCode{};
@@ -839,7 +979,13 @@ QString PpcpHostService::describeFailure(const HandshakeFailure &f)
 void PpcpHostService::noteFailure(const HandshakeFailure &f)
 {
     if (f.kind == FailureKind::None) return;
-    m_lastFailureText = describeFailure(f);
+    noteFailureText(describeFailure(f));
+}
+
+void PpcpHostService::noteFailureText(const QString &text)
+{
+    if (text.isEmpty()) return;
+    m_lastFailureText = text;
     ++m_failureCount;
     emit failureChanged();
 }

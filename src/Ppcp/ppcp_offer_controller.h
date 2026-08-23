@@ -54,6 +54,7 @@
 // counts.
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QString>
 #include <QVector>
 
@@ -108,8 +109,16 @@ public:
     // which may differ, because a device may hold a Session another peer minted
     // and 8.5c scopes identity by the MINTER, not by whoever hands over the
     // bytes.
+    // ⚠ ADDITIVE, BECAUSE A HOST HOLDS SEVERAL PHONES AT ONCE.  Down-the-line
+    // and face-on are two phones, each with its own conversation and its own
+    // link, and an offer must go back out on the link it ARRIVED on.  This used
+    // to keep one peer, so with two connected the second phone's accept was
+    // sent down the first phone's link.
     void attach(ppcp_peer *peer, const QString &peerId);
-    void detach();
+    // Forgets one peer and the rows that came from it, leaving every other
+    // phone's offers standing.
+    void detach(const QString &peerId);
+    void detachAll();
 
     // The ledger this host keeps, so `have_digests` is real rather than empty.
     // Null is legal and means "I hold nothing", which makes the device replay
@@ -118,7 +127,9 @@ public:
 
     // Every event the peer raised.  `session_offer` adds a row; `session_accept`
     // and `session_manifest` are noted for the status line.  Consumes nothing.
-    void observe(const ppcp_event &ev);
+    // `peerId` is the counterpart the event came from — the caller knows,
+    // and with several attached this class cannot work it out.
+    void observe(const QString &peerId, const ppcp_event &ev);
 
     // ── The one control on each row ────────────────────────────────────────
     //
@@ -168,8 +179,8 @@ private:
     bool sendAccept(int row, ppcp_offer_verdict verdict, const QString &reason);
 
     QVector<Row>  m_rows;
-    ppcp_peer    *m_peer = nullptr;
-    QString       m_peerId;
+    // Peer id -> the conversation an accept for its rows goes out on.
+    QHash<QString, ppcp_peer *> m_peers;
     const Ppcp::PpcpImportLedger *m_ledger = nullptr;
     QString       m_status;
     std::size_t   m_offersSeen = 0;

@@ -102,17 +102,36 @@ QVariant PpcpOfferController::data(const QModelIndex &index, int role) const
 
 void PpcpOfferController::attach(ppcp_peer *peer, const QString &peerId)
 {
-    m_peer = peer;
-    m_peerId = peerId;
+    if (peerId.isEmpty()) return;
+    m_peers.insert(peerId, peer);
 }
 
-void PpcpOfferController::detach()
+void PpcpOfferController::detach(const QString &peerId)
 {
-    m_peer = nullptr;
-    if (m_rows.isEmpty()) return;
+    if (m_peers.remove(peerId) == 0 && peerId.isEmpty()) return;
+
     // The offers were facts about a link that no longer exists.  Keeping them
     // would present a control that cannot work, which is worse than an empty
     // list: the user would press it and nothing would happen.
+    //
+    // ⚠ ONLY THIS PEER'S ROWS.  The other phone is still connected and its
+    // offers are still true; clearing the whole model on one disconnect —
+    // which is what detach() used to do — would take them with it.
+    bool removedAny = false;
+    for (int i = m_rows.size() - 1; i >= 0; --i) {
+        if (m_rows.at(i).peerId != peerId) continue;
+        beginRemoveRows({}, i, i);
+        m_rows.removeAt(i);
+        endRemoveRows();
+        removedAny = true;
+    }
+    if (removedAny) emit countChanged();
+}
+
+void PpcpOfferController::detachAll()
+{
+    m_peers.clear();
+    if (m_rows.isEmpty()) return;
     beginResetModel();
     m_rows.clear();
     endResetModel();
@@ -133,7 +152,7 @@ int PpcpOfferController::indexOf(const QString &peerId, const QString &sessionId
     return -1;
 }
 
-void PpcpOfferController::observe(const ppcp_event &ev)
+void PpcpOfferController::observe(const QString &peerId, const ppcp_event &ev)
 {
     if (!ev.msg) return;
     switch (ev.kind) {
@@ -143,7 +162,7 @@ void PpcpOfferController::observe(const ppcp_event &ev)
 
         Row r;
         r.sessionId     = idToString(o.session_id);
-        r.peerId        = m_peerId;
+        r.peerId        = peerId;
         r.mintingPeerId = idToString(o.minting_peer_id);
         r.hasEpoch      = o.epoch.present;
         r.epochWallUtcNs = o.epoch.present ? o.epoch.wall_utc_ns : 0;
@@ -174,7 +193,7 @@ void PpcpOfferController::observe(const ppcp_event &ev)
             emit countChanged();
         }
         setStatus(tr("%1 offered %n session(s)", "", static_cast<int>(m_rows.size()))
-                      .arg(m_peerId));
+                      .arg(peerId));
         break;
     }
     case PPCP_EVENT_SESSION_MANIFEST: {
@@ -195,8 +214,11 @@ void PpcpOfferController::observe(const ppcp_event &ev)
 bool PpcpOfferController::sendAccept(int row, ppcp_offer_verdict verdict, const QString &reason)
 {
     if (row < 0 || row >= m_rows.size()) { setStatus(tr("That session is no longer offered.")); return false; }
-    if (!m_peer) { setStatus(tr("The device is no longer connected.")); return false; }
     Row &r = m_rows[row];
+    // The link this offer ARRIVED on, which with several phones connected is
+    // not necessarily the one that spoke most recently.
+    ppcp_peer *peer = m_peers.value(r.peerId, nullptr);
+    if (!peer) { setStatus(tr("The device is no longer connected.")); return false; }
 
     ppcp_body_session_accept acc{};
     if (ppcp_id_set(&acc.session_id, r.sessionId.toUtf8().constData(),
@@ -231,7 +253,7 @@ bool PpcpOfferController::sendAccept(int row, ppcp_offer_verdict verdict, const 
     // ENC 5b — every response carries `reply_to`, and this is the offer's own
     // `msg_id`.  Without it a device offering several Sessions cannot tell
     // which offer was answered.
-    const ppcp_result res = ppcp_peer_session_accept(m_peer, &acc, r.msgId);
+    const ppcp_result res = ppcp_peer_session_accept(peer, &acc, r.msgId);
     if (res != PPCP_OK) {
         setStatus(tr("The device refused the request (%1).")
                       .arg(QString::fromLatin1(ppcp_result_str(res))));

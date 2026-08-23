@@ -52,6 +52,7 @@ Item {
         property int    codeSecondsLeft: 0
         property var    codeEndpoints:   []
         property bool   connected:       false
+        property int    connectedCount:  0
         property string peerName:        ""
         property string status:          "Waiting for a device on port 7788."
         // A phone that arrived and did not become a link.  Names match the real
@@ -277,16 +278,51 @@ Item {
             tryCompare(fakeHost, "closeCount", 1)
         }
 
-        // ...unless a phone got in first.  That code is spent on a live link,
-        // and closing its session would take the link down with it.
-        function test_closing_after_a_phone_connected_leaves_the_link_alone() {
+        // ⚠ THIS TEST USED TO ASSERT THE OPPOSITE, AND THE RULE MOVED RATHER
+        // THAN CHANGED.  The panel used to guard its own close with "unless a
+        // phone got in first, because closing that code's session would take
+        // the link down with it".  That rule now lives in PpcpHostService
+        // (`displayedCodePairedAPhone()`), where every caller gets it instead
+        // of only this one — and it has to, because the code on screen after a
+        // phone pairs is no longer the spent one anyway: a fresh one is minted
+        // the moment the link is adopted, so the next angle can just scan.
+        //
+        // What the panel owes is therefore simply: close the code you are
+        // showing.  The invariant this replaced is pinned in C++ by
+        // ppcp_host_service_test.
+        function test_closing_after_a_phone_connected_still_closes_its_code() {
             dialog.open()
             tryCompare(fakeHost, "publishCount", 1)
             fakeHost.connected = true
+            fakeHost.connectedCount = 1
 
             dialog.close()
             tryCompare(dialog, "opened", false)
-            compare(fakeHost.closeCount, 0)
+            compare(fakeHost.closeCount, 1)
+        }
+
+        // Two angles is the ordinary case, so the panel says how many rather
+        // than picking one phone's name to stand for both.
+        function test_several_phones_are_counted_not_named() {
+            dialog.open()
+            tryCompare(fakeHost, "publishCount", 1)
+            var stage = findByName(dialog.contentItem, "ppcpPairStage")
+
+            fakeHost.connected = true
+            fakeHost.connectedCount = 1
+            fakeHost.peerName = "Pixel 8"
+            verify(stage.text.indexOf("Pixel 8") >= 0, stage.text)
+
+            // A second angle arrives.  `peerName` goes empty, exactly as the
+            // real controller reports it, because there is no honest single
+            // answer once there are two.
+            fakeHost.connectedCount = 2
+            fakeHost.peerName = ""
+            verify(stage.text.indexOf("2") >= 0, stage.text)
+            compare(stage.color, Theme.colorGood)
+
+            fakeHost.connected = false
+            fakeHost.connectedCount = 0
         }
 
         // H0 — a build with neither libppcp nor OpenSSL has no `ppcpHost`, and

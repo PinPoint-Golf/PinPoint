@@ -574,7 +574,7 @@ public:
 
         m_peer.setDeclarationHook([this](const ppcp_peer_desc *d) { onCounterpartDeclared(d); });
         m_peer.addEventHook([this](const ppcp_event &ev) {
-            m_offers.observe(ev);
+            m_offers.observe(QString::fromStdString(m_seen.counterpart), ev);
             count(ev);
             if (m_trace) say("event " + std::to_string(static_cast<int>(ev.kind)));
         });
@@ -787,7 +787,7 @@ private:
         // is the whole of CONF 5b: a host that substituted a zero would answer
         // `true` with `0` and nothing on the wire would say so.
         harvest();
-        m_offers.detach();
+        m_offers.detachAll();
         m_peer.shotBridge().stop();
         m_peer.attach(nullptr, nullptr);
         m_link->close();

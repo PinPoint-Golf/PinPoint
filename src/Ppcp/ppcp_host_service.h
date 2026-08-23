@@ -56,6 +56,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 #include <thread>
 
 #include <QObject>
@@ -87,8 +88,17 @@ class PpcpHostService : public QObject
     Q_PROPERTY(bool listening READ listening NOTIFY stateChanged)
     Q_PROPERTY(quint16 port READ port NOTIFY stateChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+    // ⚠ "ANY PHONE", NOT "THE PHONE".  Two camera angles is the core case —
+    // down-the-line and face-on are two phones — so these are aggregates over
+    // however many are on the link, and `connectedCount` is what a caller needs
+    // when the difference matters.  `peerName` is the ONE name only while there
+    // is one; with several it is empty, because there is no honest single
+    // answer and inventing one is how a panel ends up lying about which phone
+    // it is talking to.
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
+    Q_PROPERTY(int connectedCount READ connectedCount NOTIFY stateChanged)
     Q_PROPERTY(QString peerName READ peerName NOTIFY stateChanged)
+    Q_PROPERTY(QStringList connectedNames READ connectedNames NOTIFY stateChanged)
 
     // ── A phone that arrived and did not become a link ──────────────────────
     // Until these existed the pairing panel could only say "still waiting",
@@ -159,8 +169,10 @@ public:
     bool    listening() const { return m_listening; }
     quint16 port() const { return m_port; }
     QString status() const { return m_status; }
-    bool    connected() const { return m_link != nullptr; }
-    QString peerName() const { return m_peerName; }
+    bool    connected() const { return !m_phones.empty(); }
+    int     connectedCount() const { return static_cast<int>(m_phones.size()); }
+    QString peerName() const;
+    QStringList connectedNames() const;
     QString lastFailureText() const { return m_lastFailureText; }
     int     failureCount() const { return m_failureCount; }
 
@@ -191,7 +203,7 @@ public:
     // RV §4 — publish a code.  Fresh psk and sid per code (7.3d), every
     // reachable address in `ep` (4.3d), `mu: 1` (7.3a) and a short `exp`
     // (7.3c).  Displaces whatever code was showing, which 7.3b then invalidates.
-    Q_INVOKABLE bool publishPairingCode();
+    Q_INVOKABLE bool publishPairingCode() { return publishCode(/*userAsked=*/true); }
     // 7.3b — invalidate the displayed code, used or not.
     Q_INVOKABLE void closePairingCode();
     // 7.4b — persistence is opt-in, visible and individually revocable, so all
@@ -211,7 +223,9 @@ public:
     // anybody needs to know, and it is otherwise unanswerable.
     QString discoveryDescription() const;
 
-    Ppcp::PpcpHostPeer &hostPeer() { return m_peer; }
+    // The first connected phone's peer, for callers that predate several.
+    // Null when nothing is connected.
+    Ppcp::PpcpHostPeer *hostPeer();
     Ppcp::PpcpRendezvous &rendezvous() { return m_rv; }
 
 signals:
@@ -228,48 +242,99 @@ signals:
     // snapshots at construction and needs asking.
     void sourcesChanged();
 
+private:
+    // ── One of these per connected phone ────────────────────────────────────
+    //
+    // ⚠ WHY A PEER PER PHONE AND NOT ONE PEER WITH SEVERAL LINKS.  Finding
+    // F-H8-5 settled it: a `ppcp_peer` IS THE CONVERSATION, not the
+    // application.  One engine shared across links kept the previous device's
+    // open Session, its declaration and its `msg_id` sequence, and every device
+    // after the first was refused `ppcp_peer_session_open: invalid argument`.
+    // `PpcpHostPeer` holds exactly that per-conversation state — the attached
+    // link, the engine, `m_declaredOnLink`, the reassembly tails, the live
+    // Session — so one phone is one of these, whole.
+    //
+    // Nothing below this class needed changing for it: the transport already
+    // assembles concurrent links (ENC 2.1's `link_id` exists for that, and
+    // `ppcp_link_bind_test` pins it), and `VideoInputPpcp` has always been
+    // keyed by peer id.  The single-phone assumption was only ever here.
+    struct Phone {
+        // Declared in the order they must DIE in — reverse declaration order —
+        // because `peer` holds raw pointers to the other two.
+        std::unique_ptr<Ppcp::PpcpHostPeer>   peer;
+        std::unique_ptr<Ppcp::PpcpEngine>     engine;
+        std::unique_ptr<Ppcp::PeerConnection> link;
+
+        // The pairing this phone arrived on.  Stable, local, and the join
+        // between a live link and the row in Settings -> Phones.
+        QString pairingId;
+        // Its declared `Peer.id`, which is what `VideoInputPpcp` keys cameras
+        // and timebase relations by.
+        QString counterpartId;
+        // What it called itself in MSG 3.3.  Display text from an untrusted
+        // counterpart (4.4d): it names a row and is never an identifier.
+        QString name;
+    };
+
+
 private slots:
     void onTick();
 
 private:
     void adoptLink(std::unique_ptr<Ppcp::PeerConnection> link);
-    void dropLink(const char *why);
-    void onDeclare(const ppcp_peer_desc *desc);
-    void onRelations();
+    // Closes ONE phone's link and forgets it.  `why` is for the status line.
+    void dropPhone(Phone *ph, const char *why);
+    void dropAllPhones(const char *why);
+    // Everything a freshly constructed peer needs before it is attached: the
+    // hooks, the health sources and this host's own declaration.  One place, so
+    // the second phone cannot quietly get a different setup from the first.
+    bool configurePhonePeer(Phone *ph, std::string *err);
+    void onDeclare(Phone *ph, const ppcp_peer_desc *desc);
+    void onRelations(Phone *ph);
+    // Is any connected phone paired on this pairing id?
+    Phone *phoneByPairing(const QString &pairingId);
+    const Phone *phoneByPairing(const QString &pairingId) const;
     void setStatus(const QString &s);
     // Records a failure and builds its user-facing sentence.  One place, so the
     // rule above about what may be named lives in one place too.
     void noteFailure(const Ppcp::HandshakeFailure &f);
+    // The same record, for a refusal this class makes itself rather than one
+    // the transport reported.
+    void noteFailureText(const QString &text);
     void clearFailure();
     static QString describeFailure(const Ppcp::HandshakeFailure &f);
     void refreshCode();
+    // The one implementation behind both the button and the automatic renewal
+    // at expiry.  `userAsked` is what separates them, and it decides exactly one
+    // thing: whether the last failure is cleared.  A person pressing "New code"
+    // is starting again and wants a clean panel; the clock coming round is not
+    // an answer to "why did my phone not connect", and wiping the message on
+    // that tick would delete the only report of a refusal 30 seconds before it.
+    bool publishCode(bool userAsked);
+    // Stops displaying the current code.  `invalidateSession` is false only
+    // when the code being dropped is the one a LIVE link paired on — see the
+    // definition; closing that session would wipe the K_tls the link still
+    // needs.
+    void dropDisplayedCode(bool invalidateSession);
+    bool displayedCodePairedAPhone() const;
     // Remembers the phone's own name against the pairing it arrived on.  See
     // the definition for why this is not in the keychain.
-    void notePeerName();
+    void notePeerName(const Phone *ph);
     void startDiscovery();
     void stopDiscovery();
     static QString phoneNameFor(const QString &pairingId);
 
     Ppcp::PpcpRendezvous                   m_rv;
     Ppcp::Listener                         m_listener;
-    Ppcp::PpcpHostPeer                     m_peer;
-    std::unique_ptr<Ppcp::PpcpEngine>      m_engine;
-    std::unique_ptr<Ppcp::PeerConnection>  m_link;
+    std::vector<std::unique_ptr<Phone>>    m_phones;
     PpcpOfferController                   *m_offers = nullptr;
 
     QTimer  m_timer;
     bool    m_listening = false;
     quint16 m_port = 0;
     QString m_status;
-    QString m_peerName;
     QString m_lastFailureText;
     int     m_failureCount = 0;
-    QString m_counterpartId;
-    // The pairing the LIVE link resolved to.  It used to be read in adoptLink()
-    // and dropped on the floor immediately after noteLinkEstablished(), which
-    // left no way to say "this connected phone is that remembered pairing" —
-    // and therefore no way to give a remembered pairing the name its phone sent.
-    QString m_linkPairingId;
     // ⚠ WHICH PAIRINGS A PHONE ACTUALLY ARRIVED ON, and it cannot be inferred
     // from the ledger.  `closeSession()` sets `invalidated` and zeroes
     // `usesRemaining` — so a code the user simply dismissed is indistinguishable

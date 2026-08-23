@@ -57,6 +57,7 @@ Popup {
     readonly property bool showing:   controller !== null && controller.codeLive
                                       && controller.qrSize > 0
     readonly property bool connected: controller !== null && controller.connected
+    readonly property int connectedCount: controller ? controller.connectedCount : 0
     readonly property string peerName: controller ? controller.peerName : ""
 
     parent: Overlay.overlay
@@ -97,8 +98,16 @@ Popup {
                                           ? controller.lastFailureText : ""
 
     readonly property var stage: {
+        // ⚠ SEVERAL PHONES IS THE ORDINARY CASE, NOT AN EDGE ONE — down-the-line
+        // and face-on are two.  `peerName` is deliberately empty once there is
+        // more than one, so the count is what gets said rather than one of the
+        // names standing in for both.
+        if (root.connectedCount > 1)
+            return { text: qsTr("%1 phones connected.").arg(root.connectedCount),
+                     fg: Theme.colorGood }
         if (root.connected && root.peerName !== "")
-            return { text: qsTr("Connected to %1.").arg(root.peerName), fg: Theme.colorGood }
+            return { text: qsTr("Connected to %1. Scan again to add another.")
+                             .arg(root.peerName), fg: Theme.colorGood }
         if (root.connected)
             return { text: qsTr("Phone connected — securing the link…"), fg: Theme.colorAccent }
         // ⚠ ABOVE "waiting" and BELOW "connected".  Above, because displacing
@@ -129,7 +138,7 @@ Popup {
     // Unless a phone got in first: that code is already spent on a live link,
     // and closing its session would take the link down with it.
     onClosed: {
-        if (root.controller && root.controller.codeLive && !root.connected)
+        if (root.controller && root.controller.codeLive)
             root.controller.closePairingCode()
         root._showEndpoints = false
     }
@@ -333,11 +342,15 @@ Popup {
             width:   parent.width
             spacing: Theme.sp(10)
 
+            // ⚠ NO LONGER TWO STATES, BECAUSE EXPIRY NO LONGER STRANDS ANYONE.
+            // This used to read "Get a new code" and turn primary once the
+            // countdown hit zero — the panel went dark and waited to be asked.
+            // The service now renews the code on its own while this panel is
+            // open, so the only reason left to press this is wanting a fresh
+            // secret sooner, which is an ordinary secondary action.
             PpButton {
                 objectName: "ppcpPairNewCode"
-                label:      root.showing && root.secondsLeft > 0 ? qsTr("New code")
-                                                                 : qsTr("Get a new code")
-                primary:    !root.showing || root.secondsLeft === 0
+                label:      qsTr("New code")
                 // 7.3d — a fresh psk and sid.  Pressing this while a code shows
                 // REPLACES it, and 7.3b invalidates the one it replaced.
                 onClicked:  if (root.controller) root.controller.publishPairingCode()

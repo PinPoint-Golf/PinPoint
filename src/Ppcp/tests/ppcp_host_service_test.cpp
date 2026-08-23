@@ -44,7 +44,13 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 
+#include <ppcp/rv.h>
+
+#include <cstring>
+
 #include "ppcp_host_service.h"
+#include "ppcp_rendezvous.h"
+#include "ppcp_transport.h"
 
 namespace {
 
@@ -85,6 +91,75 @@ public:
 private:
     QMetaObject::Connection m_conn;
     int                     m_n = 0;
+};
+
+// ── Dialling this host for real ─────────────────────────────────────────────
+// A phone, reduced to the part that matters here: decode a code, derive the
+// keys, open a link.  Same four libppcp functions PinPointCapture uses, and the
+// same `Ppcp::Connector` the conformance harness dials with — nothing about the
+// connection below is simulated.
+//
+// It does NOT declare itself afterwards, which is deliberate: `onDeclare()` is
+// what reaches `VideoInputPpcp`, and this suite links stubs for those (see
+// ppcp_host_service_stubs.cpp).  Staying silent keeps the assertions about the
+// thing under test — how many conversations this service is holding — instead
+// of about a stub.
+class Phone
+{
+public:
+    explicit Phone(PpcpHostService *svc, std::uint64_t maxUses = 1)
+    {
+        Ppcp::PpcpRendezvous::Config cfg;
+        cfg.displayName = "test";
+        cfg.maxUses = maxUses;
+        std::string err;
+        m_ok = svc->rendezvous().publish(cfg, Ppcp::reachableEndpoints(svc->port()),
+                                         nullptr, &m_code, &err);
+        if (!m_ok) return;
+
+        std::vector<std::uint8_t> scratch(PPCP_RV_MAX_PAYLOAD);
+        ppcp_rv_payload payload;
+        ppcp_rv_payload_init(&payload);
+        m_ok = ppcp_rv_uri_decode(m_code.uri.c_str(), m_code.uri.size(),
+                                  scratch.data(), scratch.size(), &payload) == PPCP_OK
+            && ppcp_rv_derive(payload.sid, PPCP_RV_SID_BYTES,
+                              payload.psk, payload.psk_len, &m_keys) == PPCP_OK;
+    }
+
+    bool ok() const { return m_ok; }
+    const std::string &pairingId() const { return m_code.pairingId; }
+
+    // 5.3a — a fresh rn2 per connection; the seed keeps two phones distinct.
+    bool dial(std::uint16_t port, std::uint8_t seed)
+    {
+        std::uint8_t rn2[PPCP_RV_RN_BYTES];
+        for (std::size_t i = 0; i < sizeof rn2; ++i)
+            rn2[i] = static_cast<std::uint8_t>(seed + i * 31u);
+        Ppcp::PskIdentity id(PPCP_RV_PSK_IDENTITY_BYTES);
+        if (ppcp_rv_psk_identity(m_keys.k_id, rn2, id.data()) != PPCP_OK) return false;
+
+        Ppcp::ConnectorConfig c;
+        c.host = "127.0.0.1";
+        c.port = port;
+        std::memcpy(c.kTls.data(), m_keys.k_tls, PPCP_RV_KEY_BYTES);
+        c.identity = id;
+        Ppcp::HandshakeFailure f;
+        // KEPT, not replaced: a `mu: 2` code is dialled twice and both links
+        // have to stay up, or the second assertion would be measuring the
+        // first link's destructor rather than the host's book-keeping.
+        std::unique_ptr<Ppcp::PeerConnection> link = Ppcp::Connector::connect(c, &f);
+        if (!link) return false;
+        m_links.push_back(std::move(link));
+        return true;
+    }
+
+    void hangUp() { if (!m_links.empty() && m_links.front()) m_links.front()->close(); }
+
+private:
+    bool                  m_ok = false;
+    Ppcp::PublishedCode   m_code;
+    ppcp_rv_keys          m_keys{};
+    std::vector<std::unique_ptr<Ppcp::PeerConnection>> m_links;
 };
 
 // Port 0 — an ephemeral port.  7788 is what the application asks for and a
@@ -151,18 +226,201 @@ TEST_F(HostServiceClock, TheCountdownSignalsOnceASecondAndNotOncePerTick)
 
 // (c) — 7.3e: the publisher holds the authoritative clock, so a code it will no
 // longer honour must stop being reported as live.
-TEST_F(HostServiceClock, AnExpiredCodeStopsBeingLiveWithoutAnybodyPressingAnything)
+// An expiring code RENEWS itself rather than stranding the panel behind a
+// button.  It used to go dark and wait to be asked, which is a click only
+// somebody already standing at this computer can make — friction bought with
+// nothing, since 7.3 says plainly that `mu` and 7.3b are "clock-free and are
+// the primary defence" while `exp` is "secondary rather than relied upon".
+//
+// ⚠ WHAT MUST STILL BE TRUE, and is the reason this is not simply a longer
+// expiry: every renewal is a WHOLE new code.  7.3d — "a publisher generates
+// fresh psk and sid for every code.  A code is never regenerated with the same
+// secret" — so a renewed symbol MUST differ, and no individual code lives one
+// second longer than it did before.
+TEST_F(HostServiceClock, AnExpiringCodeRenewsItselfWithoutAnybodyPressingAnything)
 {
     m_svc.setCodeLifetimeSecondsForTest(1);
     ASSERT_TRUE(m_svc.publishPairingCode());
     ASSERT_TRUE(m_svc.codeLive());
+    const QVariantList first = m_svc.qrRows();
+    ASSERT_FALSE(first.isEmpty());
 
-    spin(3000);
+    spin(3000);   // three lifetimes: it has to have come round at least twice
 
-    EXPECT_FALSE(m_svc.codeLive())
-        << "the service still displays a code whose handshake it would refuse";
-    EXPECT_EQ(m_svc.codeSecondsLeft(), 0);
-    EXPECT_EQ(m_svc.qrSize(), 0) << "the symbol outlived the code it encoded";
+    EXPECT_TRUE(m_svc.codeLive())
+        << "the panel went dark and waited to be asked";
+    EXPECT_GT(m_svc.qrSize(), 0) << "the symbol outlived the code it encoded";
+    EXPECT_NE(m_svc.qrRows(), first)
+        << "RV 7.3d — the same secret was displayed again";
+    EXPECT_GT(m_svc.codeSecondsLeft(), 0) << "the countdown did not reset";
+    EXPECT_LE(m_svc.codeSecondsLeft(), 1) << "a renewal outlived its own lifetime";
+}
+
+// The other half of the same rule: renewal is tied to the PANEL, not to the
+// clock running for ever.  Dismissing the code stops it dead — 7.3b — and
+// nothing brings it back on its own.
+TEST_F(HostServiceClock, AClosedCodeIsNotRenewed)
+{
+    m_svc.setCodeLifetimeSecondsForTest(1);
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    m_svc.closePairingCode();
+    ASSERT_FALSE(m_svc.codeLive());
+
+    spin(2500);
+
+    EXPECT_FALSE(m_svc.codeLive()) << "a dismissed code came back by itself";
+    EXPECT_EQ(m_svc.qrSize(), 0);
+}
+
+// A code a phone has used is a picture of a used ticket: `mu` is 1, so it can
+// pair nothing else.  The panel must not go on showing it.
+//
+// ⚠ AND THE REPLACEMENT MUST NOT CLOSE THE SESSION THE PHONE IS ON.
+// closeSession() wipes K_tls unless the pairing was persisted, and the live
+// link still needs it — 7.5a reconnects a dropped channel on it and ENC 2.1d
+// opens the preview channel on it later.  7.3f is explicit that `mu` and 7.3b
+// invalidate the CODE, not the pairings already established from it.  This
+// fixture cannot adopt a link, so what is asserted here is the rule the
+// decision is made from: a code with no live pairing behind it IS closed
+// properly, keys and all.
+TEST_F(HostServiceClock, ReplacingAnUnusedCodeStillInvalidatesItProperly)
+{
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    ASSERT_EQ(m_svc.outstandingCodes().size(), 1);
+    const QString firstPairing =
+        m_svc.outstandingCodes().first().toMap()
+             .value(QStringLiteral("pairingId")).toString();
+    ASSERT_FALSE(firstPairing.isEmpty());
+
+    ASSERT_TRUE(m_svc.publishPairingCode());
+
+    // The displaced one is either gone (reaped) or on record as invalidated.
+    // Either way it must not still be offering a use.
+    for (const QVariant &v : m_svc.outstandingCodes()) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("pairingId")).toString() != firstPairing) continue;
+        EXPECT_TRUE(m.value(QStringLiteral("invalidated")).toBool())
+            << "the displaced code was left usable";
+        EXPECT_EQ(m.value(QStringLiteral("usesRemaining")).toULongLong(), 0u);
+    }
+}
+
+// A renewal is not an answer to "why did my phone not connect".  The failure
+// text has to survive the clock coming round, or a refusal 30 seconds before
+// an expiry would be deleted before anybody read it.
+TEST_F(HostServiceClock, RenewalKeepsTheLastFailureButAskingForANewCodeClearsIt)
+{
+    m_svc.setCodeLifetimeSecondsForTest(1);
+    ASSERT_TRUE(m_svc.publishPairingCode());
+
+    Ppcp::HandshakeFailure f;
+    f.kind = Ppcp::FailureKind::HandshakeTimeout;
+    m_svc.noteHandshakeFailureForTest(f);
+    const QString said = m_svc.lastFailureText();
+    ASSERT_FALSE(said.isEmpty());
+
+    spin(2500);   // renews underneath it
+
+    ASSERT_TRUE(m_svc.codeLive());
+    EXPECT_EQ(m_svc.lastFailureText(), said)
+        << "an automatic renewal deleted the refusal nobody had read yet";
+
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    EXPECT_TRUE(m_svc.lastFailureText().isEmpty())
+        << "asking for a new code should start clean";
+}
+
+// ── Two phones at once ──────────────────────────────────────────────────────
+// Down-the-line and face-on are two phones, so this is the core case and not an
+// edge one.  It used to be impossible: adoptLink() closed any link that arrived
+// while one was held, so the second angle handshook perfectly and was dropped.
+//
+// ⚠ WHAT MAKES IT WORK IS ONE PEER PER PHONE, and that was already the law.
+// F-H8-5 found that a `ppcp_peer` is the CONVERSATION, not the application —
+// one engine shared across links kept the previous device's Session and refused
+// every device after the first with `ppcp_peer_session_open: invalid argument`.
+// Nothing below this class ever assumed one phone: the transport assembles
+// concurrent links by `link_id` (ENC 2.1, pinned by ppcp_link_bind_test) and
+// `VideoInputPpcp` has always been keyed by peer id.
+TEST_F(HostServiceClock, TwoPhonesConnectAtOnceAndAreHeldSeparately)
+{
+    Phone dtl(&m_svc), faceOn(&m_svc);
+    ASSERT_TRUE(dtl.ok());
+    ASSERT_TRUE(faceOn.ok());
+
+    ASSERT_TRUE(dtl.dial(m_svc.port(), 1)) << "the first phone could not connect";
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+
+    ASSERT_TRUE(faceOn.dial(m_svc.port(), 2)) << "the second phone could not connect";
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 2; ++i) spin(10);
+
+    EXPECT_EQ(m_svc.connectedCount(), 2)
+        << "the second angle was refused — this is the DTL + face-on case";
+    EXPECT_TRUE(m_svc.connected());
+
+    // Two DIFFERENT pairings, each held on its own.  One phone dialling twice
+    // would be a reconnection and must NOT read as two.
+    EXPECT_NE(dtl.pairingId(), faceOn.pairingId());
+}
+
+// One angle dropping out mid-session must not take the other with it.
+TEST_F(HostServiceClock, OnePhoneLeavingLeavesTheOtherConnected)
+{
+    Phone a(&m_svc), b(&m_svc);
+    ASSERT_TRUE(a.ok());
+    ASSERT_TRUE(b.ok());
+    ASSERT_TRUE(a.dial(m_svc.port(), 3));
+    ASSERT_TRUE(b.dial(m_svc.port(), 4));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 2; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 2);
+
+    a.hangUp();
+    for (int i = 0; i < 400 && m_svc.connectedCount() > 1; ++i) spin(10);
+
+    EXPECT_EQ(m_svc.connectedCount(), 1)
+        << "a dropped link took the other phone down with it, or was never noticed";
+    EXPECT_TRUE(m_svc.connected());
+}
+
+// ⚠ TWO PHONES ON ONE `mu: 2` CODE ARE TWO PHONES, not one that reconnected.
+// They share a pairing id — one code, one pairing, several devices, which
+// §7.3's rationale calls "a real workflow" — so anything that keyed a
+// connection by pairing id would take the first phone down when the second
+// scanned.  A pairing is not a phone; a link is.  This application only ever
+// publishes `mu: 1`, so the case is not reachable from its own panel; it is
+// pinned here because the tempting "dedupe by pairing" shortcut looks correct
+// right up until somebody raises `mu`.
+TEST_F(HostServiceClock, TwoDevicesSharingOneMultiUseCodeAreStillTwoConnections)
+{
+    Phone shared(&m_svc, /*maxUses=*/2);
+    ASSERT_TRUE(shared.ok());
+
+    ASSERT_TRUE(shared.dial(m_svc.port(), 7));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+
+    ASSERT_TRUE(shared.dial(m_svc.port(), 8)) << "the code's second use was refused";
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 2; ++i) spin(10);
+
+    EXPECT_EQ(m_svc.connectedCount(), 2)
+        << "the second device collapsed onto the first because they share a pairing";
+}
+
+// 7.3a — and the use after that is refused, `mu` being 2.  The counterpart to
+// the test above: sharing a pairing must not mean sharing it for ever.
+TEST_F(HostServiceClock, AMultiUseCodeIsStillSpentOnceItsUsesAreGone)
+{
+    Phone shared(&m_svc, /*maxUses=*/2);
+    ASSERT_TRUE(shared.ok());
+    ASSERT_TRUE(shared.dial(m_svc.port(), 9));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_TRUE(shared.dial(m_svc.port(), 10));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 2; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 2);
+
+    EXPECT_FALSE(shared.dial(m_svc.port(), 11))
+        << "RV 7.3a — a code with no uses left still paired something";
 }
 
 // The panel reads `qrRows`/`qrSize` and never the URI — RV 4.4c and 7.2b, and

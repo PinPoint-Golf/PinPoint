@@ -88,7 +88,7 @@ struct Fixture {
         pptest::pipe(dev.p, host->peer(), PPCP_CHANNEL_CONTROL,
                      [this] {
                          pptest::drainEvents(host->peer(),
-                                             [this](const ppcp_event &e) { offers.observe(e); });
+                                             [this](const ppcp_event &e) { offers.observe(QStringLiteral("dev-1"), e); });
                      });
     }
 
@@ -222,7 +222,7 @@ TEST(PpcpOfferList, DetachingClearsTheRowsBecauseTheyWereFactsAboutALink)
     ASSERT_NO_FATAL_FAILURE(F.build());
     ASSERT_NO_FATAL_FAILURE(F.deviceOffers(kSession, PPCP_COMPLETE, 500));
     ASSERT_EQ(F.offers.rowCount(), 1);
-    F.offers.detach();
+    F.offers.detach(QStringLiteral("dev-1"));
     EXPECT_EQ(F.offers.rowCount(), 0);
     EXPECT_FALSE(F.offers.acceptOffer(0));
 }
