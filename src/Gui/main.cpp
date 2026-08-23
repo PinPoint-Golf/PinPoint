@@ -629,7 +629,28 @@ int main(int argc, char *argv[])
 
     // Clean merger shutdown before Qt tears down its event loop. Shut the platform
     // updater (WinSparkle on Windows) down first so its helper threads stop cleanly.
+    //
+    // ⚠ AND THE PPCP HOST, FOR A SHARPER REASON THAN TIDINESS.  `ppcpHost` is a
+    // function-local static, so its destructor does NOT run when main() returns
+    // — it runs later, from `exit()`, by which time `app` (an ordinary local,
+    // above) has already been destroyed.  ~PpcpHostService calls stop(), and
+    // stop() joins the accept thread, tears down a QSocketNotifier and takes
+    // `VideoInputPpcp`'s `ppcpLiveMutex()` on the way through `dropLink()`.
+    // That last one is a FUNCTION-LOCAL STATIC mutex, first constructed when
+    // the first PPCP camera appears — which is AFTER this static — so it is
+    // destroyed BEFORE it, and locking it at that point returns EINVAL.
+    // `std::mutex::lock()` turns EINVAL into a `std::system_error`, a
+    // destructor is implicitly `noexcept`, and the process therefore
+    // TERMINATES on the way out: "mutex lock failed: Invalid argument",
+    // reported as a crash on exit (observed 23 Aug, PinPointStudio-…-184129).
+    //
+    // Stopping here fixes it at the root: the accept thread is joined and the
+    // link is dropped while Qt, the event loop and every static this touches
+    // are still alive.  The destructor's own stop() then finds nothing to do —
+    // no link, no live code, no thread — and takes none of those paths.
+    // (`ppcpHost` is a static, so it is named directly rather than captured.)
     QObject::connect(&app, &QGuiApplication::aboutToQuit, [&eventBuffer, &updateController]() {
+        ppcpHost.stop();
         updateController.shutdownUpdater();
         eventBuffer.stop();
     });

@@ -26,6 +26,8 @@
 #include <QVariantMap>
 
 #include <chrono>
+#include <cstdio>
+#include <exception>
 
 #include <ppcp/version.h>
 
@@ -138,7 +140,28 @@ PpcpHostService::PpcpHostService(QObject *parent)
 
 PpcpHostService::~PpcpHostService()
 {
-    stop();
+    // ⚠ A DESTRUCTOR IS `noexcept`, SO ANYTHING THAT ESCAPES HERE TERMINATES
+    // THE PROCESS.  That is not hypothetical: this object is a function-local
+    // static in main(), so this runs from `exit()` — after `QGuiApplication`
+    // and, worse, after any function-local static constructed later than this
+    // one.  `VideoInputPpcp`'s `ppcpLiveMutex()` is exactly that, `dropLink()`
+    // reaches it, and locking a destroyed std::mutex throws `std::system_error`
+    // rather than returning an error.  The result was a crash report on a clean
+    // quit ("mutex lock failed: Invalid argument", 23 Aug).
+    //
+    // The REAL fix is in main.cpp, which now stops this on `aboutToQuit` while
+    // everything is still alive; by the time this runs there is no link, no
+    // live code and no thread, so stop() takes none of the dangerous paths.
+    // This catch is the backstop for the next such ordering, and it uses
+    // fprintf rather than ppWarn deliberately: the log is a static too, and a
+    // handler that needs one more static to survive is no handler at all.
+    try {
+        stop();
+    } catch (const std::exception &e) {
+        fprintf(stderr, "PPCP host shutdown threw at exit (ignored): %s\n", e.what());
+    } catch (...) {
+        fprintf(stderr, "PPCP host shutdown threw at exit (ignored)\n");
+    }
 }
 
 void PpcpHostService::setOfferController(PpcpOfferController *c)
