@@ -311,3 +311,69 @@ pp_add_test(ppcp_rendezvous_test
     STD 20
     NO_QT
     GTEST)
+
+
+# ── H-compose (b) — every app-side PPCP translation unit, syntax-only ───────
+#
+# ⚠ WHY THIS ROW EXISTS.  On 22 Aug the application build broke on
+# `ppcp_import_controller.cpp` — a positional `HostEngineConfig` had shifted the
+# listener onto the health callback — and NOTHING IN ppcp-tests COMPILED THAT
+# FILE.  Every suite above links the handful of translation units it needs; the
+# app-only ones (the QML controllers, the composition, the device registry
+# adapter) had no compiler pointed at them at all until Mark built the app.  A
+# green ppcp-tests therefore said nothing whatever about whether the application
+# still built, which is the worst property a gate can have.
+#
+# So this target compiles them — syntax only, with the app's own include paths
+# and Qt, no linking, no Q_OBJECT moc pass and no application dependency chain.
+# It is a compiler front end run over the sources, which is exactly the class of
+# break it exists to catch and is a second or two of wall clock.
+#
+# ⚠ GLOBBED ON PURPOSE, AND IT IS THE ONE GLOB IN THIS FILE.  Every other list
+# here is explicit, matching the repository's convention; this one must not be,
+# because a translation unit somebody forgets to add is precisely the failure
+# being guarded against.  CONFIGURE_DEPENDS re-runs it when the directory
+# changes.
+#
+# ⚠ WHAT IS NOT IN IT, AND WHY.  `src/Gui/main.cpp` reaches whisper, ONNX
+# Runtime, OpenCV, Sparkle and the whole model stack; syntax-checking it would
+# mean reproducing the application's entire include graph in a suite whose whole
+# point is not to need one.  The composition therefore lives in its own
+# translation unit (`ppcp_host_service.cpp`) and main.cpp's share of it is four
+# lines — construct, wire, expose — which is the smallest surface this row can
+# leave uncovered and is stated here rather than left to be discovered.
+file(GLOB _app_ppcp_tus CONFIGURE_DEPENDS ${PPCP}/*.cpp)
+list(APPEND _app_ppcp_tus
+    ${PP_SRC}/Video/VideoInputPpcp.cpp
+    ${PP_SRC}/Video/VideoInputPpcp_inventory.cpp
+    ${PP_SRC}/Gui/shot/shot_controller.cpp)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Multimedia Bluetooth Qml)
+
+# EXCLUDE_FROM_ALL: `cmake --build` must not pay for it, and the ctest row below
+# is what asks for it.  AUTOMOC OFF because -fsyntax-only produces no object and
+# a moc pass would be checking a different thing anyway.
+add_library(ppcp_app_tu_syntax_probe OBJECT EXCLUDE_FROM_ALL ${_app_ppcp_tus})
+set_target_properties(ppcp_app_tu_syntax_probe PROPERTIES
+    AUTOMOC OFF CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+# -Wno-unused-command-line-argument: CMake still passes -c and -o, and neither
+# means anything under -fsyntax-only.  The warning is about the invocation, not
+# the code, and leaving it in would train everyone to ignore this target's
+# output — which is the one thing it cannot afford.
+target_compile_options(ppcp_app_tu_syntax_probe PRIVATE
+    -fsyntax-only -Wno-unused-command-line-argument)
+target_compile_definitions(ppcp_app_tu_syntax_probe PRIVATE HAVE_PPCP HAVE_PPCP_TRANSPORT)
+# The app's include list, trimmed to what a PPCP translation unit can reach:
+# CMakeLists.txt lines 562-571, minus the subsystems none of these files touch.
+target_include_directories(ppcp_app_tu_syntax_probe PRIVATE
+    ${PPCP} ${PP_SRC}/Video ${PP_SRC}/Core ${PP_SRC}/Buffer ${PP_SRC}/IMU
+    ${PP_SRC}/Gui ${PP_SRC}/Gui/shot ${PP_SRC}/Gui/session ${PP_SRC}/Gui/athlete)
+target_link_libraries(ppcp_app_tu_syntax_probe PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Multimedia Qt6::Bluetooth Qt6::Qml ppcp)
+if(PP_OPENSSL_FOUND)
+    target_link_libraries(ppcp_app_tu_syntax_probe PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
+add_test(NAME ppcp_app_tu_syntax
+         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                 --target ppcp_app_tu_syntax_probe)
