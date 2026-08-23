@@ -176,99 +176,108 @@ Item {
             Repeater {
                 model: root.rows
 
-                RowLayout {
+                // ⚠ A COLUMN AROUND THE ROW, AND THE SEPARATOR IS A LAYOUT ITEM.
+                // The rule under each row used to be a Rectangle inside the
+                // RowLayout using `anchors` — which a layout manages, so Qt
+                // warned "Detected anchors on an item that is managed by a
+                // layout. This is undefined behavior" once per row, every time
+                // this panel was built.  It was also occupying a horizontal
+                // slot in the row it was trying to underline.
+                ColumnLayout {
                     id: pairingRow
                     objectName: "setting_pairedPhones"
                     required property var modelData
                     property bool searchHighlight: false
 
                     Layout.fillWidth: true
-                    spacing: Theme.sp(16)
+                    spacing: Theme.sp(8)
 
-                    Rectangle {
-                        anchors { bottom: parent.bottom; bottomMargin: -Theme.sp(8) }
-                        width:  parent.width
-                        height: 1
-                        color:  Theme.colorBorder
-                    }
-
-                    // Green only while the pairing is actually usable.  A
-                    // revoked one is a tombstone until reap() takes it (7.3b),
-                    // and showing it as live would be a lie about what a
-                    // handshake from that device would do now (7.7c).
-                    Rectangle {
-                        Layout.preferredWidth:  Theme.sp(6)
-                        Layout.preferredHeight: Theme.sp(6)
-                        radius: Theme.sp(3)
-                        color: pairingRow.modelData.status === "connected" ? Theme.colorGood
-                             : pairingRow.modelData.status === "available"  ? Theme.colorAccent
-                             : pairingRow.modelData.invalidated             ? Theme.colorBorderStrong
-                             : pairingRow.modelData.persisted               ? Theme.colorAccent
-                                                                            : Theme.colorBorderStrong
-                    }
-
-                    ColumnLayout {
+                    RowLayout {
                         Layout.fillWidth: true
-                        spacing: Theme.sp(3)
+                        spacing: Theme.sp(16)
 
-                        Text {
-                            // What the phone called itself in its MSG `declare`,
-                            // remembered against its pairing; the shortened
-                            // handle for one that has never declared.
-                            text:           pairingRow.modelData.name
-                            font.family:    Theme.fontBody
-                            font.pixelSize: Theme.fontSzBody
-                            color:          Theme.colorText
+                        // Green only while the pairing is actually usable.  A
+                        // revoked one is a tombstone until reap() takes it (7.3b),
+                        // and showing it as live would be a lie about what a
+                        // handshake from that device would do now (7.7c).
+                        Rectangle {
+                            Layout.preferredWidth:  Theme.sp(6)
+                            Layout.preferredHeight: Theme.sp(6)
+                            radius: Theme.sp(3)
+                            color: pairingRow.modelData.status === "connected" ? Theme.colorGood
+                                 : pairingRow.modelData.status === "available"  ? Theme.colorAccent
+                                 : pairingRow.modelData.invalidated             ? Theme.colorBorderStrong
+                                 : pairingRow.modelData.persisted               ? Theme.colorAccent
+                                                                                : Theme.colorBorderStrong
                         }
-                        Text {
-                            text: {
-                                var bits = [pairingRow.modelData.persisted
-                                                ? qsTr("Remembered")
-                                                : qsTr("Paired this session")]
-                                if (pairingRow.modelData.status === "connected")
-                                    bits.push(qsTr("connected now"))
-                                // RV §3 saw it advertising. There is no
-                                // "Connect" control beside this yet and that is
-                                // deliberate: Ppcp::Connector exists and 5.2g
-                                // makes the host the TLS client on the discovery
-                                // path, but auto-dialling has never been run
-                                // against a live responder, so reconnecting
-                                // still means showing a code.
-                                else if (pairingRow.modelData.status === "available")
-                                    bits.push(qsTr("on this network"))
-                                if (pairingRow.modelData.invalidated) bits.push(qsTr("revoked"))
-                                bits.push(pairingRow.modelData.pairingId)
-                                return bits.join("  ·  ")
+
+                        ColumnLayout {
+
+                            Text {
+                                // What the phone called itself in its MSG `declare`,
+                                // remembered against its pairing; the shortened
+                                // handle for one that has never declared.
+                                text:           pairingRow.modelData.name
+                                font.family:    Theme.fontBody
+                                font.pixelSize: Theme.fontSzBody
+                                color:          Theme.colorText
                             }
-                            font.family:    Theme.fontData
-                            font.pixelSize: Theme.fontSzMicro
-                            color:          Theme.colorText3
-                            elide:          Text.ElideRight
-                            Layout.fillWidth: true
+                            Text {
+                                text: {
+                                    var bits = [pairingRow.modelData.persisted
+                                                    ? qsTr("Remembered")
+                                                    : qsTr("Paired this session")]
+                                    if (pairingRow.modelData.status === "connected")
+                                        bits.push(qsTr("connected now"))
+                                    // RV §3 saw it advertising. There is no
+                                    // "Connect" control beside this yet and that is
+                                    // deliberate: Ppcp::Connector exists and 5.2g
+                                    // makes the host the TLS client on the discovery
+                                    // path, but auto-dialling has never been run
+                                    // against a live responder, so reconnecting
+                                    // still means showing a code.
+                                    else if (pairingRow.modelData.status === "available")
+                                        bits.push(qsTr("on this network"))
+                                    if (pairingRow.modelData.invalidated) bits.push(qsTr("revoked"))
+                                    bits.push(pairingRow.modelData.pairingId)
+                                    return bits.join("  ·  ")
+                                }
+                                font.family:    Theme.fontData
+                                font.pixelSize: Theme.fontSzMicro
+                                color:          Theme.colorText3
+                                elide:          Text.ElideRight
+                            }
+                        }
+
+                        // 7.4a/7.4b — opt-in, and it stores PRK in the platform
+                        // keychain and nothing else (5.1c).  Refused for a code
+                        // whose `mu` exceeded 1: that pairing's key material is held
+                        // by every peer that scanned it (7.4f).
+                        PpButton {
+                            label:   qsTr("Remember")
+                            visible: !pairingRow.modelData.persisted
+                                     && !pairingRow.modelData.invalidated
+                            onClicked: if (root.controller)
+                                           root.controller.rememberPairing(pairingRow.modelData.pairingId)
+                        }
+
+                        // 7.4d — honoured immediately by this side, which means the
+                        // next handshake from that phone resolves nothing and fails
+                        // like any stranger's (7.7c).
+                        PpButton {
+                            label:       qsTr("Forget")
+                            destructive: true
+                            visible:     pairingRow.modelData.persisted
+                            onClicked: if (root.controller)
+                                           root.controller.forgetPairing(pairingRow.modelData.pairingId)
                         }
                     }
 
-                    // 7.4a/7.4b — opt-in, and it stores PRK in the platform
-                    // keychain and nothing else (5.1c).  Refused for a code
-                    // whose `mu` exceeded 1: that pairing's key material is held
-                    // by every peer that scanned it (7.4f).
-                    PpButton {
-                        label:   qsTr("Remember")
-                        visible: !pairingRow.modelData.persisted
-                                 && !pairingRow.modelData.invalidated
-                        onClicked: if (root.controller)
-                                       root.controller.rememberPairing(pairingRow.modelData.pairingId)
-                    }
-
-                    // 7.4d — honoured immediately by this side, which means the
-                    // next handshake from that phone resolves nothing and fails
-                    // like any stranger's (7.7c).
-                    PpButton {
-                        label:       qsTr("Forget")
-                        destructive: true
-                        visible:     pairingRow.modelData.persisted
-                        onClicked: if (root.controller)
-                                       root.controller.forgetPairing(pairingRow.modelData.pairingId)
+                    // The hairline between rows, now sized by the column.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: Theme.colorBorder
                     }
                 }
             }
