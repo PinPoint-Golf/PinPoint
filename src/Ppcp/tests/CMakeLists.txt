@@ -23,6 +23,34 @@ endif()
 
 set(PPCP ${CMAKE_CURRENT_SOURCE_DIR}/..)   # src/Ppcp
 
+# ══════════════════════════════════════════════════════════════════════════
+# ⚠⚠⚠  THE PLAINTEXT HARNESS SOCKET, AND THE ONE PLACE IT IS TURNED ON  ⚠⚠⚠
+#
+# `PPCP-CONF` §2c requires the peer under test to be driven from OUTSIDE by the
+# synthetic peer both implementations develop against.  `tools/ppcp-sim` has no
+# TLS *transport* — its `--psk-ke-only` mode is a hand-built ClientHello for
+# RT-4 and speaks no application data — so `ppcp-conform` cannot reach a
+# TLS-only host at all.  `PPCP-RV` erratum E4 (RV 2c1) settles what that means:
+# 2c constrains the rendezvous PATHS, and a conformance harness socket is not
+# one of them; `PPCP-CORE` §3.2's `direct` transport is conformant plaintext.
+#
+# `PP_PPCP_PLAINTEXT_HARNESS` is DECLARED in the application's own
+# CMakeLists.txt, default OFF, where a `PP_SHIPPING_BUILD` refuses to configure
+# with it ON.  It is set ON HERE — in the test tree, and nowhere else in this
+# repository.  A release build therefore compiles no plaintext code path at all,
+# which is the same discipline `Connector::connect()` keeps for RV 5.2f.
+#
+# Turning it OFF must still leave every OTHER row in this file building: the
+# guard is on the transport's plaintext branches and on the harness executable
+# at the bottom of this file, never on anything the shipping code needs.
+set(PP_PPCP_PLAINTEXT_HARNESS ON CACHE BOOL
+    "Compile the PLAINTEXT conformance-harness listener (CONF 2c). NEVER in a release build."
+    FORCE)
+message(STATUS "PinPointTests: PPCP plaintext harness listener ON — this is a test tree")
+if(PP_PPCP_PLAINTEXT_HARNESS)
+    add_compile_definitions(PP_PPCP_PLAINTEXT_HARNESS)
+endif()
+
 # CameraCapabilities is Qt-built, so the declaration suite needs Multimedia for
 # the QVideoFrameFormat that video_input_base.h pulls in.
 find_package(Qt6 REQUIRED COMPONENTS Multimedia)
@@ -377,3 +405,73 @@ endif()
 add_test(NAME ppcp_app_tu_syntax
          COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
                  --target ppcp_app_tu_syntax_probe)
+
+
+# ── H8 — the conformance claim ───────────────────────────────────────────────
+#
+# `PPCP-CONF` §2c: an implementation tested only by its own unit tests is the
+# single-implementation trap.  `libppcp/tools/ppcp-conform` (L14) is the
+# instrument all three implementations are measured by; it drives the peer under
+# test from outside, through its real transport, with `ppcp-sim` as the
+# counterpart, and every assertion is made on the wire.
+#
+# `ppcp_conform_host` is the peer it dials: the REAL `PpcpHostPeer`, the REAL
+# `makeHostEngine()`, the REAL ingest policy and the REAL declaration builder,
+# with no Qt GUI and no device enumeration.  See the note at the top of the .cpp
+# for what it deliberately does NOT link and why.
+#
+# ⚠ IT IS BUILT ONLY WITH THE PLAINTEXT GUARD ON, because without it there is no
+# listener it can reach.  That is the guard doing its job, not a gap.
+if(PP_PPCP_PLAINTEXT_HARNESS)
+    add_executable(ppcp_conform_host
+        ppcp_conform_host.cpp
+        ${PPCP}/ppcp_host_peer.cpp
+        ${PPCP}/ppcp_live_session.cpp
+        ${PPCP}/ppcp_shot_bridge.cpp
+        ${PPCP}/ppcp_annotation_store.cpp
+        ${PPCP}/ppcp_offer_controller.cpp
+        ${PPCP}/ppcp_import_ledger.cpp
+        ${PPCP}/ppcp_host_engine.cpp
+        ${PPCP}/ppcp_ingest_policy.cpp
+        ${PPCP}/ppcp_source_declaration.cpp
+        ${PPCP}/ppcp_transport.cpp)
+    set_target_properties(ppcp_conform_host PROPERTIES
+        CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON AUTOMOC ON)
+    target_include_directories(ppcp_conform_host PRIVATE ${PPCP} ${PP_BUFFER})
+    target_link_libraries(ppcp_conform_host PRIVATE
+        ppcp Qt6::Core Qt6::Multimedia OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+    target_compile_definitions(ppcp_conform_host PRIVATE PP_PPCP_SRC_DIR="${PPCP}")
+    pp_apply_sanitizers(ppcp_conform_host)
+
+    # ── Where `ppcp-conform` is ─────────────────────────────────────────────
+    #
+    # NOT built here.  `pp_require_ppcp()` forces `PPCP_BUILD_TOOLS` OFF when the
+    # library is embedded — correctly, because this repository must not start
+    # building another repository's command line tools — so the instrument comes
+    # from libppcp's OWN build tree.  Ground rule 1: no code crosses repos; a
+    # binary that measures us is not code we carry.
+    if(NOT PP_PPCP_CONFORM)
+        find_program(PP_PPCP_CONFORM ppcp-conform
+            HINTS "${ppcp_SOURCE_DIR}/build/dev/tools/ppcp-conform"
+                  "${ppcp_SOURCE_DIR}/build/tools/ppcp-conform"
+            NO_DEFAULT_PATH)
+    endif()
+
+    if(PP_PPCP_CONFORM)
+        message(STATUS "PinPointTests: ppcp-conform at ${PP_PPCP_CONFORM}")
+        add_test(NAME ppcp_conformance
+                 COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run-conform.sh
+                         $<TARGET_FILE:ppcp_conform_host>
+                         ${PP_PPCP_CONFORM}
+                         ${CMAKE_CURRENT_BINARY_DIR})
+        # The claim run drives twelve rows over real sockets, one link each.
+        set_tests_properties(ppcp_conformance PROPERTIES TIMEOUT 300)
+    else()
+        # LOUD, and not a silent skip: a conformance row that quietly does not
+        # run is how a claim stops being evidence.
+        message(WARNING
+            "ppcp-conform NOT FOUND — the H8 conformance row will not run. Build it in the "
+            "libppcp checkout (cmake --build --preset dev --target ppcp-conform ppcp-sim) or "
+            "pass -DPP_PPCP_CONFORM=/path/to/ppcp-conform.")
+    endif()
+endif()

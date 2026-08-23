@@ -75,6 +75,34 @@ option(PINPOINT_INSTALLED "Mark this as a packaged/installed build" OFF)
 # which is worse: no -O, no NDEBUG, and nothing warns. Both now fail loudly.
 option(PP_SHIPPING_BUILD "This configure produces a distributable artefact — assert it is Release" OFF)
 
+# ══════════════════════════════════════════════════════════════════════════
+# ⚠⚠⚠  PLAINTEXT PPCP.  OFF, AND A SHIPPING BUILD REFUSES TO TURN IT ON.  ⚠⚠⚠
+#
+# `PPCP-CONF` §2c drives the peer under test from outside, with `ppcp-sim` as
+# the counterpart — and `ppcp-sim` has no TLS transport, so the conformance
+# harness of work package H8 reaches this host over a PLAINTEXT loopback socket.
+# `PPCP-RV` erratum E4 (RV 2c1) permits exactly that for a test harness, and
+# `PPCP-CORE` §3.2's `direct` transport is conformant plaintext.
+#
+# It is declared HERE, in the application's configure, so that the answer to
+# "could a shipped PinPointStudio listen without TLS?" is visible in this file
+# and in `cmake -LAH`, rather than buried in a test directory.  The only thing
+# that sets it ON is `src/Ppcp/tests/CMakeLists.txt`.  With it OFF, every
+# plaintext branch in `src/Ppcp/ppcp_transport.cpp` is `#if`-ed out of
+# existence: there is no code path to reach, which is the same way RV 5.2f's
+# "never fall back to an unencrypted connection" is kept.
+option(PP_PPCP_PLAINTEXT_HARNESS
+       "Compile the PLAINTEXT conformance-harness listener (CONF 2c). NEVER in a release build."
+       OFF)
+if(PP_PPCP_PLAINTEXT_HARNESS AND PP_SHIPPING_BUILD)
+    message(FATAL_ERROR
+        "PP_PPCP_PLAINTEXT_HARNESS is ON in a shipping build. That would ship a listener "
+        "that accepts unauthenticated, unencrypted PPCP connections. Refusing to configure.")
+endif()
+if(PP_PPCP_PLAINTEXT_HARNESS)
+    add_compile_definitions(PP_PPCP_PLAINTEXT_HARNESS)
+endif()
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     message(FATAL_ERROR
         "No CMAKE_BUILD_TYPE set.\n"
