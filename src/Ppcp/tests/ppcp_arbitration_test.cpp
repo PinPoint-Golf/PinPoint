@@ -110,7 +110,8 @@ struct Fixture {
 
     void toHost() { pptest::pipe(dev.p, host->peer(), PPCP_CHANNEL_CONTROL,
                                  [this] { drainHost(); }); }
-    void toDevice() { pptest::pipe(host->peer(), dev.p, PPCP_CHANNEL_CONTROL); }
+    void toDevice(const pptest::EventSink &sink = {})
+    { pptest::pipe(host->peer(), dev.p, PPCP_CHANNEL_CONTROL, {}, sink); }
 
     void drainHost()
     {
@@ -383,7 +384,6 @@ TEST(PpcpArbitration, TheLaunchMonitorRowBecomesAnArrivalPairingLinkConfirmedByO
     const std::size_t candidatesBefore = F.bridge.stats().nominated;
     ASSERT_TRUE(F.bridge.linkForeignShot(F.shots.front(), "GCQ-00417",
                                          "com.foresightsports.gcquad", 1.0, &err)) << err;
-    F.toDevice();
 
     // 8.1e — nothing was synthesised.  The CSV has no timestamp, so no Instant,
     // no Timebase and no TimebaseRelation was invented for it, and the
@@ -393,7 +393,9 @@ TEST(PpcpArbitration, TheLaunchMonitorRowBecomesAnArrivalPairingLinkConfirmedByO
 
     bool sawLink = false;
     ppcp_shot_link got{};
-    pptest::drainEvents(F.dev.p, [&](const ppcp_event &e) {
+    // Drained DURING the pipe: since F-L13-1 the feed refuses a frame it
+    // cannot report, so a frame behind an undrained ring never arrives at all.
+    F.toDevice([&](const ppcp_event &e) {
         if (e.kind == PPCP_EVENT_SHOT_LINK && e.msg) { sawLink = true; got = e.msg->body.shot_link.link; }
     });
     ASSERT_TRUE(sawLink);
@@ -425,11 +427,10 @@ TEST(PpcpArbitration, CaptureRequestNamesT0InTheSessionTimebaseRef)
     std::string err;
     ASSERT_TRUE(F.bridge.requestCapture("shot:1", 123456789, { "st:dev-1:src-cam:video" },
                                         200 * kMs, 800 * kMs, &err)) << err;
-    F.toDevice();
 
     bool saw = false;
     ppcp_body_capture_request req{};
-    pptest::drainEvents(F.dev.p, [&](const ppcp_event &e) {
+    F.toDevice([&](const ppcp_event &e) {
         if (e.kind == PPCP_EVENT_CAPTURE_REQUEST && e.msg) { saw = true; req = e.msg->body.capture_request; }
     });
     ASSERT_TRUE(saw);

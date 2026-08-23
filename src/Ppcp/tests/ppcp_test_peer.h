@@ -188,8 +188,42 @@ struct DevicePeer {
 // Moves every whole frame waiting on `ch` from one engine to the other, calling
 // `after` once per frame so a consumer sees the message while its bytes are
 // still the ones it was handed.
+// Drains every event the peer queued, handing each to `fn`.
+inline void drainEvents(ppcp_peer *p, const std::function<void(const ppcp_event &)> &fn)
+{
+    ppcp_event ev{};
+    while (ppcp_peer_next_event(p, &ev) == PPCP_OK) fn(ev);
+}
+
+using EventSink = std::function<void(const ppcp_event &)>;
+
+// Moves everything `from` has queued on `ch` into `to`, one frame at a time.
+//
+// ⚠ `sink` IS NOT OPTIONAL DECORATION SINCE libppcp 27b40c4 (F-L13-1).
+// `ppcp_peer_feed()` now REFUSES to start a frame it cannot report — the event
+// ring is PPCP_PEER_EVENT_QUEUE deep with two slots of headroom — so a peer
+// that is fed several frames without being drained stops consuming after the
+// second event.  That is the correct behaviour and it is the fix this
+// repository asked for; what it means for a harness is that "pipe everything,
+// then look at the events" is no longer a thing that works.  Draining between
+// frames is what PpcpHostPeer::pump() does in production, and `sink` is how a
+// test does the same.
+//
+// With no sink there is nowhere for the events to go, so a stalled feed STOPS
+// rather than skipping the frame.  Skipping is what the old harness did by
+// ignoring `took`, and it is how three assertions went quietly untested.
+//
+// ⚠ A STALLED pipe() DISCARDS THE BYTES IT HAD ALREADY DRAINED.
+// ppcp_peer_drain() dequeues in bulk, so once a frame in the middle of a read
+// cannot be fed there is nowhere to put the tail.  That is acceptable in a
+// harness and would not be in the application — PpcpHostPeer::pump() keeps the
+// tail in m_tails for exactly this reason — but it means a bare pipe() before a
+// pipe(sink) THROWS AWAY the very frame the second call was going to look for.
+// Pass the sink to the call that moves the interesting frame, and do not pipe
+// twice.
 inline void pipe(ppcp_peer *from, ppcp_peer *to, std::uint8_t ch,
-                 const std::function<void()> &after = {})
+                 const std::function<void()> &after = {},
+                 const EventSink &sink = {})
 {
     std::vector<std::uint8_t> buf(1u << 20);
     for (;;) {
@@ -204,17 +238,18 @@ inline void pipe(ppcp_peer *from, ppcp_peer *to, std::uint8_t ch,
                 break;
             std::size_t took = 0;
             ppcp_peer_feed(to, ch, buf.data() + off, consumed, &took);
+            if (took == 0) {
+                if (!sink) return;
+                drainEvents(to, sink);
+                ppcp_peer_feed(to, ch, buf.data() + off, consumed, &took);
+                if (took == 0) return;
+            }
             if (after) after();
+            if (sink) drainEvents(to, sink);
             off += consumed;
         }
     }
-}
-
-// Drains every event the peer queued, handing each to `fn`.
-inline void drainEvents(ppcp_peer *p, const std::function<void(const ppcp_event &)> &fn)
-{
-    ppcp_event ev{};
-    while (ppcp_peer_next_event(p, &ev) == PPCP_OK) fn(ev);
+    if (sink) drainEvents(to, sink);
 }
 
 }  // namespace pptest

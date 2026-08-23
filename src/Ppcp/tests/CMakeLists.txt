@@ -193,6 +193,24 @@ pp_add_test(ppcp_annotation_test
     GTEST)
 
 
+# ── H6 — the QR encoder (RV 4.1d) ───────────────────────────────────────────
+# NO Qt and NO OpenSSL, and above the OpenSSL gate for the same reason the
+# bundle suite is: a pairing code is a picture of a URI, and nothing about
+# drawing one depends on there being a TLS stack on the box.
+#
+# The suite is where the evidence for a hand-written encoder lives — there is no
+# QR decoder in this repository and no third-party symbol to diff against, so it
+# proves the Reed-Solomon stage by the divisibility property, the two BCH stages
+# against the published constants of ISO/IEC 18004, the module structure against
+# the standard, and the whole pipeline by reading the finished symbol back out.
+pp_add_test(ppcp_qr_test
+    SOURCES ppcp_qr_test.cpp ${PPCP}/ppcp_qr.cpp
+    INCLUDE ${PPCP}
+    STD 20
+    NO_QT
+    GTEST)
+
+
 # ⚠ EVERYTHING BELOW THIS LINE NEEDS OpenSSL, AND THE DECLARATION SUITE ABOVE
 # DOES NOT.  A box without OpenSSL headers still runs CT-S3 and CT-I19; only the
 # TLS-PSK transport rows go missing, and they say so.
@@ -255,4 +273,41 @@ pp_add_test(ppcp_host_peer_test
     LINK    ppcp Qt6::Multimedia OpenSSL::SSL OpenSSL::Crypto Threads::Threads
     DEFINES ${_hp_defines}
     STD 20
+    GTEST)
+
+
+# ── H6 — PPCP-RV rendezvous, host side ──────────────────────────────────────
+# RT-5, RT-7 (browser half), RT-8, RT-9, RT-15 and RT-16.
+#
+# ⚠ IT NEEDS OpenSSL BECAUSE THE REFUSALS ARE REAL HANDSHAKES.  "The publisher
+# invalidates the code" (7.3a) and "the publisher refuses a handshake past exp"
+# (7.3e) are claims about what happens when somebody dials, and RV 5.2i is
+# explicit that this class of assertion is settled by observed behaviour rather
+# than through an API.  So the suite stands up H1's Listener on loopback,
+# installs PpcpRendezvous::identityResolver() on it, and dials it with a scanner
+# built entirely out of libppcp's ppcp_rv_* functions — the same four calls
+# PinPointCapture will make.
+#
+# ⚠ AND Security.framework, because RV 7.2c is "protected storage where one
+# exists" and this application's existing secrets subsystem (QSettings, a plain
+# plist) is not one.  The keychain store is compiled here so the suite fails at
+# the link line if it ever stops building; it is NOT exercised at runtime,
+# because the login keychain cannot be unlocked from a non-Aqua session and a
+# test that needed it would be red on every headless box.  RT-12 is a review
+# row and that is where the keychain path is read.
+set(_rv_link ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+if(APPLE)
+    list(APPEND _rv_link "-framework Security" "-framework CoreFoundation")
+endif()
+
+pp_add_test(ppcp_rendezvous_test
+    SOURCES ppcp_rendezvous_test.cpp
+            ${PPCP}/ppcp_rendezvous.cpp
+            ${PPCP}/ppcp_pairing_store.cpp
+            ${PPCP}/ppcp_discovery.cpp
+            ${PPCP}/ppcp_transport.cpp
+    INCLUDE ${PPCP}
+    LINK    ${_rv_link}
+    STD 20
+    NO_QT
     GTEST)

@@ -127,7 +127,8 @@ struct Link {
     }
 
     void toHost() { pptest::pipe(dev.p, host->peer(), PPCP_CHANNEL_CONTROL); }
-    void toDevice() { pptest::pipe(host->peer(), dev.p, PPCP_CHANNEL_CONTROL); }
+    void toDevice(const pptest::EventSink &sink = {})
+    { pptest::pipe(host->peer(), dev.p, PPCP_CHANNEL_CONTROL, {}, sink); }
 
     void declare()
     {
@@ -408,24 +409,35 @@ TEST(PpcpLiveSession, ThreeMissedIntervalsIsALostLinkAndTheSessionIsUnchanged)
     // of the clause.  What changes is that no arbitration occurs; the
     // parameters, the reference timebase and the roster are what they were.
     //
-    // ⚠ ASSERTED AT THE DEVICE END, AND THAT IS FINDING F-H5-2.
-    // `ppcp_peer_session_params()` returns NULL on the peer that ORIGINATED
-    // `session_open` — peer.h says "as they arrived in `session_open`" and that
-    // is literally what it does.  The consequence is that a HOST cannot read
-    // back the Session it just opened: not `timebase_ref`, not
-    // `coincidence_window_ns`, not `issue_hold_ns` — every one of which the
-    // host itself needs, since 8.2b compares against the window and 8.2h holds
-    // against the hold.  So the host keeps a second copy (PpcpLiveSession's
-    // Config) and the two can drift, which is exactly what a single accessor
-    // exists to prevent.
-    EXPECT_EQ(ppcp_peer_session_params(L.host->peer()), nullptr)
-        << "F-H5-2 has been fixed in libppcp — assert the host's own parameters here";
+    // ⚠ F-H5-2 IS CLOSED, AND THE ASSERTION IS NOW MADE AT BOTH ENDS.
+    // `ppcp_peer_session_params()` used to return NULL on the peer that
+    // ORIGINATED `session_open` — peer.h said "as they arrived in
+    // `session_open`" and that was literally what it did, so a HOST could not
+    // read back the Session it had just opened: not `timebase_ref`, not
+    // `coincidence_window_ns`, not `issue_hold_ns`, every one of which the host
+    // itself needs (8.2b compares against the window, 8.2h holds against the
+    // hold).  The host kept a second copy in `PpcpLiveSession::Config` and the
+    // two could drift, which is exactly what a single accessor exists to
+    // prevent.  libppcp 42a690a fixed it; this now asserts the two ends agree,
+    // which is the property the finding was actually about.
+    const ppcp_body_session_open *mine = ppcp_peer_session_params(L.host->peer());
+    ASSERT_NE(mine, nullptr) << "F-H5-2: the originator must be able to read its own Session";
+    EXPECT_EQ(pptest::idStr(mine->timebase_ref), std::string(kHostTimebaseId));
+    EXPECT_TRUE(mine->has_arbitration);
+    EXPECT_EQ(mine->coincidence_window_ns, PPCP_DEFAULT_COINCIDENCE_WINDOW_NS);
+    EXPECT_EQ(mine->issue_hold_ns, PPCP_DEFAULT_ISSUE_HOLD_NS);
+
     const ppcp_body_session_open *p = ppcp_peer_session_params(L.dev.p);
     ASSERT_NE(p, nullptr);
     EXPECT_EQ(pptest::idStr(p->timebase_ref), std::string(kHostTimebaseId));
     EXPECT_TRUE(p->has_arbitration);
     EXPECT_EQ(p->coincidence_window_ns, PPCP_DEFAULT_COINCIDENCE_WINDOW_NS);
     EXPECT_EQ(p->issue_hold_ns, PPCP_DEFAULT_ISSUE_HOLD_NS);
+    // 8.3g's "nothing about the Session changes" is now a comparison rather
+    // than a claim about one end.
+    EXPECT_EQ(pptest::idStr(mine->timebase_ref), pptest::idStr(p->timebase_ref));
+    EXPECT_EQ(mine->coincidence_window_ns, p->coincidence_window_ns);
+    EXPECT_EQ(mine->issue_hold_ns, p->issue_hold_ns);
 
     // …and the device, which is the peer 8.3g's regime applies to, enters it.
     EXPECT_TRUE(ppcp_peer_zero_host(L.dev.p) || ppcp_peer_link_state(L.dev.p) == PPCP_LINK_LIVE)
@@ -490,8 +502,10 @@ TEST(PpcpLiveSession, ArmWithNoStreamIdsMeansEveryOpenCaptureStream)
     ASSERT_TRUE(L.live.arm({}, &err)) << err;
     bool armed = false;
     std::size_t namedStreams = 1;
-    L.toDevice();
-    pptest::drainEvents(L.dev.p, [&](const ppcp_event &e) {
+    // Drained DURING the pipe, not after it: since F-L13-1 the feed stops
+    // rather than overrun the event ring, so `arm` never reaches a device that
+    // is still holding `declare` and `session_open` unread.
+    L.toDevice([&](const ppcp_event &e) {
         if (e.kind == PPCP_EVENT_ARM && e.msg) {
             armed = true;
             namedStreams = e.msg->body.arm.stream_id_count;
@@ -504,8 +518,7 @@ TEST(PpcpLiveSession, ArmWithNoStreamIdsMeansEveryOpenCaptureStream)
 
     ASSERT_TRUE(L.live.disarm({}, &err)) << err;
     bool disarmed = false;
-    L.toDevice();
-    pptest::drainEvents(L.dev.p, [&](const ppcp_event &e) {
+    L.toDevice([&](const ppcp_event &e) {
         if (e.kind == PPCP_EVENT_DISARM) disarmed = true;
     });
     EXPECT_TRUE(disarmed);
