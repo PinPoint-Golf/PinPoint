@@ -865,3 +865,171 @@ Called from it, and **compiled but not run in the application by this work**:
 | 21 | `libppcp` — **F-H5-2, closed** | `ppcp_peer_session_params()` now answers on the peer that ORIGINATED `session_open`, so a host can read back the Session it just opened. `ppcp_live_session_test` asserts the two ends agree rather than asserting the host is blind, which is the property the finding was about. |
 | 22 | `libppcp` — **F-H5-3, closed, and it broke six suites** | It came back as a **hard precondition**: `ppcp_peer_new()` now refuses a peer that declares `live` with no `health_report` — "a peer that has no thermometer declares no Live". That is exactly what this repository asked for, and six suites went red at once because the host and the harness peers all declared `live` and supplied nothing. `PpcpHostPeer::makeLibppcpEngine()` now builds a report from the two callbacks it already had, and `makeHostEngine()` drops `live` where the embedding supplied no reading — a profile is a promise about behaviour (2.2.2), and the bundle path has no heartbeat to answer anyway. |
 | 23 | `libppcp` — **F-L13-1, closed, with a harness consequence** | `ppcp_peer_feed()` now stops rather than overrun the event ring. The consequence for a test harness is that "pipe everything, then look at the events" no longer works: three assertions in this repository had been reading whatever survived a four-deep ring. `pptest::pipe()` takes an event sink and drains between frames — which is what `PpcpHostPeer::pump()` has always done in production — and **stops rather than skipping** a frame it cannot feed, so the next one to get this wrong fails loudly. |
+
+---
+
+## 11. Interoperability — the `PPCP-CONF` §5 rows (session 5, wave 1)
+
+**A different claim from §10, and §5 opens by saying why both are needed:** "conformance to the
+document is necessary and not sufficient — two implementations that each pass §3 and §4 alone can
+still fail to interoperate." §10 asks whether this host passes every row the instrument holds for
+the profiles it claims. These rows ask CONF §5's question instead: does this host interoperate with
+a peer of a **stated shape** — an observer that owns nothing, a clock declared `unrelated`, a device
+that nominates, a device with a preview it throws away.
+
+The counterpart is `libppcp/tools/ppcp-sim` throughout wave 1, over the same plaintext harness
+socket §10.2 justifies. Wave 2's pairing — this host against PinPointCapture on the simulator, over
+real TLS — is §11.4.
+
+### 11.1 The rows
+
+`ctest --test-dir build/ppcp-tests -R ppcp_interop` runs all eight. Each is
+`src/Ppcp/tests/run-interop.sh ROW <ppcp_conform_host> <ppcp-sim> <scenarios> <workdir> [device-bundles] [fixtures]`,
+and each asserts **on both ends**: the counterpart's view as `ppcp-sim --expect` (its exit code),
+and this host's own view as the JSON summary `--summary` writes. A row that read only the
+simulator's counters would pass for a host that received everything and concluded nothing; one that
+read only ours would pass for a host talking to itself.
+
+| Row | Counterpart | Principally proves (CONF §5) | Outcome |
+|---|---|---|---|
+| IOP-3 | a bundle, no socket | I20, I23, I16, I9 | **pass, with a caveat** — see §11.3 |
+| IOP-4 | `observer-core.json` / `observer` | I24 | **pass** |
+| IOP-5 | `unrelated-capture.json` / `unrelated-capture` | I3, 8.2i1, and CONF 5b | **pass** |
+| IOP-6 | `reference-capture.json` / `nominating-capture`, this host nominating | I8 | **pass** |
+| IOP-7 | `reference-capture.json` / `nominating-capture`, this host never issuing | I32 | **pass** |
+| IOP-8 | `reference-capture.json` / `nominating-capture`, this host delayed 3 s | I35 | **pass** |
+| IOP-9 | `preview-capture.json` / `preview-capture` | I36 | **pass** |
+| IOP-10 | this host's own bundle, written then read | `ENC` 7a | **pass, half of it** — see §11.3 |
+
+Measured 23 Aug 2026 against `libppcp` at `6aab730`, `ppcp-sim` from `build/dev/tools/ppcp-sim`.
+`ctest --test-dir build/ppcp-tests` is **22/22**.
+
+### 11.2 What each row actually asserted, and the numbers it got
+
+Every number below is from the row's own `--summary` JSON in `build/ppcp-tests/interop/`.
+
+- **IOP-4 — I24.** `declares_rx 1`, `candidates_rx 0`, `shots_rx 0`, `issued 0`, `heartbeat_acks 6`,
+  `errors_fatal 0`. The observer originated nothing past `hello`, `declare` and its acks; this host
+  neither required it to nor treated the link as dead — the six acks are the transport still open at
+  the end. The simulator's half asserts the same from the other side (`violations=0`,
+  `candidates_tx=0`, `shots_tx=0`).
+  - ⚠ **This row found a defect in the harness, not in the host.** The first run failed on
+    `errors_fatal`, because the summary was classifying fatality from `ppcp_event::status` — which
+    also carries the reason the engine itself raised an event. `MSG` §10 makes exactly **two** codes
+    fatal, and `ppcp_msg_error_is_fatal()` is the answer; classifying on `status` reads every
+    `profile_not_supported` as a lost link, which is precisely the answer CT-S6 assertion 2 says is
+    wrong. Fixed in `count()`, and the codes are now recorded verbatim in `error_codes`.
+- **IOP-5 — I3, 8.2i1, CONF 5b.** `candidates_rx 1`, `retained 1`, `issued 0`, `groups 0`, and
+  **`counterpart_offsets 0`**. The last is the row: CONF 5b asks that a host "never substitutes a
+  zero offset", and a substituted zero is invisible on the wire because it is a number shaped like
+  every other number. So the host is asked directly — for each clock the counterpart declared,
+  `PpcpLiveSession::offsetToRefNs()` is called and the answer recorded. For `tb:unrelated` it is
+  `has_offset: false`, not `true` with `0`.
+  - **Recorded, not a failure: `excluded` is 0 and `retained` is 1.** CONF §5's wording is "the host
+    excludes and retains every Candidate". In this host's counters `excluded` is 8.2d's
+    conversion-uncertainty exclusion, and a peer with **no relation at all** never reaches that
+    test: the Candidate is held with no Shot, which is 8.2i1's own words ("a missing or `unrelated`
+    relation leaves not even an instant to group by"). Both clauses are satisfied and the outcome is
+    the one 8.2i1 describes; the two counters simply are not the same counter. Worth a sentence in
+    CONF §5 that "excludes" there means 8.2i1's retention-without-grouping, not 8.2d's exclusion.
+- **IOP-6 — I8.** `nominated 1` (this host's own microphone), `candidates_rx 1` (the device's),
+  `issued 1`, **`max_shot_candidates 2`**, and the simulator saw the same Shot with
+  `shot_candidates_max 2`. Two nominators of one `basis: acoustic` from two peers, both on one Shot
+  — the assertion the `ShotArbiter` this bridge replaced could not have met, because its
+  per-modality slot keeps one of them and drops the other silently.
+  - The synthetic onset is raised when the device's Candidate arrives and stamped with this host's
+    own clock, which on loopback is inside 5.10's 50 ms coincidence window. `tof_correction` is
+    null: 8.1e forbids inventing one.
+  - ⚠ **This row found a real API trap and the library caught it.** The first run passed the
+    inventory's device id as the Source and was refused — `no declared Source named
+    pps-conform-mic-0 (I26)` — because `PpcpSourceDeclaration` prefixes a microphone's Source id
+    with `mic:`. I26 doing its job. The harness now reads the id back out of the declaration
+    instead of repeating a convention that lives in another file.
+- **IOP-7 — I32.** `issued 0`, `candidates_rx 1`, `shots_rx 1`, `adopted 1`. The arbiter is built
+  and 8.2h is never run, so the only thing that can fire is the device's own 8.2i deadline — and
+  this host then **attaches** to what it minted rather than ignoring it.
+- **IOP-8 — I35.** `issued 0`, `adopted 1`, `shots_rx 1`, and the simulator `minted 1` with
+  `t0_revisions 0`. The margin is stated rather than assumed, because libppcp's own log records the
+  trap: the deadline is `issue_hold_ns + heartbeat_interval_ms` after the Candidate, and a host
+  delayed by only a little more wins the race and the run looks like an ordinary arbitration while
+  asserting nothing. Here the deadline is 1.2 s (`--issue-hold-ms 200 --heartbeat-ms 1000`) and this
+  host is delayed 3 s.
+- **IOP-9 — I36.** `streams_rx 3`, `preview_streams_rx 1`, `continuous_streams_rx 2`,
+  `captures_rx 2`, `captures_absent 1`, `captures_not_retained 1`, and **`preview_payload_frames 0`**.
+  The discarded preview is announced `absent` / `not_retained` (5.11c3) rather than as a gap, and no
+  preview Capture ever carried a payload frame — a measured zero for 5.11j's "the preview does not
+  reach a bundle", rather than an assumption about what the device stored.
+
+### 11.3 The two bundle rows, and what is honestly claimed of each
+
+- **IOP-3 is `pass` for the READER and is not yet the pairing.** CONF §5's row is "reference device,
+  no host → bundle → reference host import", and the bundle has to be one **PinPointCapture** wrote.
+  `run-interop.sh` looks in `PinPointCapture/docs/conformance/bundles/` first and says so loudly when
+  it is empty; as of this run that directory does not exist, so the row ran against libppcp's
+  `tests/fixtures/ct-i12-video.ppcpb`. What that proves is real and is less: **6 frames, 2 Captures
+  admitted on the first read, 2 already held and 0 new on the second, 0 digest conflicts, `ENC` 7c's
+  manifest ordering held.** I34 is asserted over the ledger because nothing on the wire could say it.
+  The moment a device bundle appears the same row picks it up with no change; **the interoperability
+  half of IOP-3 is open until it does.**
+- **IOP-10 is `pass` in this host's own direction only.** Phase 1 runs the IOP-6 pairing with
+  `--write-bundle`, so the file carries a real Session: `session_open` with **both** arbitration
+  parameters (5.10e — the structural statement that this Session has a host), this host's own
+  `declare`, the Shot it issued over two Candidates, `session_state: closed/complete` and
+  `session_manifest`. Five frames, 1657 bytes. Phase 2 reads it back through the same offline path
+  IOP-3 uses, and it parses clean. The file is checked in at
+  **`docs/conformance/bundles/pinpointstudio-host-session.ppcpbndl`** for the PinPointCapture agent
+  to read; **"both directions" is not demonstrated until it does**, and until a device bundle
+  arrives here.
+
+### 11.4 Wave 2 — `run-tls-host.sh`, and what it is for
+
+The pairing CONF 5a actually names first is reference device ↔ reference host, and neither of those
+is `ppcp-sim`. That run must not go over the plaintext harness socket — it would be measuring a
+transport neither product ships — so `ppcp_conform_host` gained `--tls-psk HEX --tls-identity TEXT`,
+which takes the harness option off and stands up `Ppcp::Listener` with an `IdentityResolver` exactly
+as `PpcpHostService` does. `src/Ppcp/tests/run-tls-host.sh` is its driver:
+
+```sh
+src/Ppcp/tests/run-tls-host.sh PORT PSK_HEX IDENTITY [RUN_MS] [SUMMARY_JSON]
+```
+
+- **PORT** — 0 takes an ephemeral one; the chosen port is written to `$SUMMARY_JSON.port` and
+  printed as `run-tls-host.sh: PORT <n>`, so the dialling side can read it.
+- **PSK_HEX** — `K_tls` (RV §5.1) as 64 hex characters. On the product path it is derived from the
+  pairing code; here it is given, because two agents cannot share a QR code.
+- **IDENTITY** — the PSK identity (RV §5.3, §10.2) to accept, as text. The literal **`any`** accepts
+  every identity, which is what to use when the dialling side derives a per-connection identity
+  carrying a rotating `rid` — a script cannot know that value in advance. Anything else is an exact
+  match, and a mismatch is refused indistinguishably from an unknown identity (RV 5.3d).
+- **RUN_MS** — default 120000. **SUMMARY_JSON** — default `./pps-tls-host.json`.
+
+The host declares its Sources, accepts the session, opens it, arms, arbitrates, and writes the same
+flat JSON summary every §11.1 row is judged from: `link_up`, `session_opened`, `arbiter_started`,
+`declares_rx`, `candidates_rx`, `nominated`, `issued`, `adopted`, `late`, `excluded`, `retained`,
+`max_shot_candidates`, `shot_ids`, `streams_rx`, `preview_streams_rx`, `captures_rx`,
+`captures_absent`, `captures_not_retained`, `payload_frames`, `offers_rx`, `offers_accepted`,
+`errors_rx`, `errors_fatal`, `error_codes`, and `counterpart_timebases` (per clock: does this host
+claim a reading, and what). Exit 0 means the run completed and the summary exists — **it does not
+mean the pairing passed**; the row is judged from this summary and the dialling side's report
+together.
+
+**Verified so far:** the listener completes a real TLS 1.3 external-PSK handshake —
+`openssl s_client -tls1_3 -psk_identity … -psk …` negotiates `TLS_CHACHA20_POLY1305_SHA256` against
+it and then goes no further, correctly, because it sends no `link_bind`. What is **not** verified is
+a full PPCP session over it: that is wave 2, and it needs the other product.
+
+### 11.5 What these rows do not cover
+
+- **IOP-1 and IOP-2 are not this host's to run in wave 1.** IOP-1 is the real pair (wave 2); IOP-2
+  is a reference **device** against a synthetic third-party host, so PinPointStudio is not a party
+  to it at all.
+- **CONF 5c** — a pairing by an implementation not written by the reference team — remains open, and
+  nothing here moves it.
+- **The Session is still the harness's, not the application's.** §7.2 has said since H5 that nothing
+  in `src/` calls `liveSession().open()`; the three decisions the `reference-host` shape needs —
+  open, arm, arbitrate — are made in `ppcp_conform_host.cpp`. Every row above is therefore evidence
+  about `PpcpLiveSession`, `PpcpShotBridge` and `PpcpHostPeer`, and not about a screen.
+- **`--never-issue` and `--issue-delay-ms` do not call `PpcpHostPeer::tick()`.** They call its four
+  other steps directly and skip or defer 8.2h's issue step — which is exactly what `ppcp-sim`'s
+  `silent-host` (`SIM_F_NEVER_ISSUE`) and `late-host` (`arb_delay_ms`) do on the other side of the
+  same pairing. No other row takes that path: with neither option the call **is** `tick()`.

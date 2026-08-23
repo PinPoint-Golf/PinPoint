@@ -428,6 +428,8 @@ add_test(NAME ppcp_app_tu_syntax
 if(PP_PPCP_PLAINTEXT_HARNESS)
     add_executable(ppcp_conform_host
         ppcp_conform_host.cpp
+        ${PPCP}/ppcp_bundle_transport.cpp
+        ${PPCP}/ppcp_import_sink.cpp
         ${PPCP}/ppcp_host_peer.cpp
         ${PPCP}/ppcp_live_session.cpp
         ${PPCP}/ppcp_shot_bridge.cpp
@@ -479,5 +481,62 @@ if(PP_PPCP_PLAINTEXT_HARNESS)
             "ppcp-conform NOT FOUND — the H8 conformance row will not run. Build it in the "
             "libppcp checkout (cmake --build --preset dev --target ppcp-conform ppcp-sim) or "
             "pass -DPP_PPCP_CONFORM=/path/to/ppcp-conform.")
+    endif()
+
+    # ── S5 — the `PPCP-CONF` §5 interoperability rows ────────────────────────
+    #
+    # A different claim again from `ppcp_conformance`.  That row asks "does this
+    # host pass every CONF §3/§4 test the instrument has for the profiles it
+    # claims"; these ask CONF §5's question, which is a different one: does this
+    # host interoperate with a peer of a STATED SHAPE — an observer, an
+    # `unrelated` clock, a nominating device, a device with a preview.  §5 opens
+    # by saying why both are needed: "two implementations that each pass §3 and
+    # §4 alone can still fail to interoperate."
+    #
+    # Each row is `run-interop.sh`, which asserts on BOTH ends — `ppcp-sim`'s
+    # `--expect` and the host's own `--summary` JSON.  The declarations and
+    # scenarios come from libppcp's `tools/scenarios/`, never from a copy here:
+    # ground rule 1, no code crosses repos.
+    if(PP_PPCP_SIM AND EXISTS "${PP_PPCP_SIM}")
+        set(_pp_sim "${PP_PPCP_SIM}")
+    else()
+        find_program(PP_PPCP_SIM ppcp-sim
+            HINTS "${ppcp_SOURCE_DIR}/build/dev/tools/ppcp-sim"
+                  "${ppcp_SOURCE_DIR}/build/tools/ppcp-sim"
+            NO_DEFAULT_PATH)
+        set(_pp_sim "${PP_PPCP_SIM}")
+    endif()
+
+    set(_pp_scenarios "${ppcp_SOURCE_DIR}/tools/scenarios")
+    # Where the PinPointCapture agent checks in the bundles ITS device wrote.
+    # IOP-3 is an interoperability row and this directory is what makes it one;
+    # `run-interop.sh` says so out loud when it is missing and falls back to
+    # libppcp's fixtures, which measure the reader and not the pairing.
+    set(_pp_device_bundles "${CMAKE_CURRENT_SOURCE_DIR}/../../../../PinPointCapture/docs/conformance/bundles")
+    set(_pp_fixtures "${ppcp_SOURCE_DIR}/tests/fixtures")
+
+    if(_pp_sim AND EXISTS "${_pp_sim}" AND EXISTS "${_pp_scenarios}")
+        message(STATUS "PinPointTests: ppcp-sim at ${_pp_sim}")
+        foreach(_row IOP-3 IOP-4 IOP-5 IOP-6 IOP-7 IOP-8 IOP-9 IOP-10)
+            string(REPLACE "-" "_" _rowname "${_row}")
+            string(TOLOWER "${_rowname}" _rowname)
+            add_test(NAME ppcp_interop_${_rowname}
+                     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run-interop.sh
+                             ${_row}
+                             $<TARGET_FILE:ppcp_conform_host>
+                             ${_pp_sim}
+                             ${_pp_scenarios}
+                             ${CMAKE_CURRENT_BINARY_DIR}/interop
+                             ${_pp_device_bundles}
+                             ${_pp_fixtures})
+            # IOP-8 waits out a 3 s arbitration delay on purpose (I35's margin);
+            # everything else is under 15 s.  60 is slack, not a budget.
+            set_tests_properties(ppcp_interop_${_rowname} PROPERTIES TIMEOUT 60)
+        endforeach()
+    else()
+        message(WARNING
+            "ppcp-sim NOT FOUND — the S5 interoperability rows will not run. Build it in the "
+            "libppcp checkout (cmake --build --preset dev --target ppcp-conform ppcp-sim) or "
+            "pass -DPP_PPCP_SIM=/path/to/ppcp-sim.")
     endif()
 endif()
