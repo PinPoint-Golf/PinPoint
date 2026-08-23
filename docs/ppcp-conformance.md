@@ -81,10 +81,76 @@ Row format is that of [`matrix.md` §5](../../libppcp/docs/conformance/matrix.md
 | Test | Method | Asserts | Work packages | `libppcp` | PinPointStudio | PinPointCapture |
 |---|---|---|---|---|---|---|
 | RT-4 | injected | strongest mode negotiated, never plaintext, outcome surfaced | H1, D1 | n/a | `impl` | — |
+| RT-5 | paired | a second handshake with a `mu: 1` code is refused | H6, D1 | n/a | `pass — ctest --test-dir build/ppcp-tests -R ppcp_rendezvous_test` | — |
+| RT-6 | injected | an expired code is reported as expired, no connection attempted | H6, D1 | n/a | `n/a — this host PUBLISHES codes and does not scan them` | — |
+| RT-7 | paired | TXT carries no `Peer.id`, device name or session count | H6, D1 | n/a | `pass (browser half) — ctest --test-dir build/ppcp-tests -R ppcp_rendezvous_test` | — |
+| RT-8 | paired | `rid` changes across re-registration, resolves under one `K_id` only | L12, H6 | — | `pass — ctest --test-dir build/ppcp-tests -R ppcp_rendezvous_test` | — |
+| RT-9 | paired | a diagnostic export right after a pairing carries no secret and no payload | H6 | n/a | `pass — ctest --test-dir build/ppcp-tests -R ppcp_rendezvous_test` | — |
 | RT-10 | injected | `session_resume` refused without a completed handshake | H1, D1 | n/a | `impl` | — |
 | RT-11 | injected | unknown identity and wrong key indistinguishable | H1 | n/a | `pass — ctest --test-dir build/ppcp-tests -R ppcp_transport_test` | n/a |
+| RT-12 | **review** | secrets from a platform CSPRNG at full width, protected storage, erased | H6 | n/a | `review — src/Ppcp/ppcp_rendezvous.cpp csprngBytes() and its four call sites; src/Ppcp/ppcp_pairing_store.cpp; commit 6b9b1af; reviewer unassigned` | — |
+| RT-13 | **review** | a network join obtains consent for the specific network | — | n/a | `n/a — this host publishes no wifi block and joins no network` | — |
 | RT-14 | static | §10.2 PSK identity; differs per connection; empty hint at TLS 1.2 | L12, H1, D1 | — | `pass — ctest --test-dir build/ppcp-tests -R ppcp_transport_test` (wire half) | — |
+| RT-15 | paired | a publisher refuses a handshake past `exp`; a bad clock attempts | H6, D1 | n/a | `pass (publisher half) — ctest --test-dir build/ppcp-tests -R ppcp_rendezvous_test` | — |
+| RT-16 | **review** | no `PRK` from a `mu > 1` code is persisted | H6 | n/a | `pass — ctest --test-dir build/ppcp-tests -R ppcp_rendezvous_test` (raised from `review`; see below) | — |
 | RT-17 | **review** | every platform mode offered, from a capability query | H1, D1 | n/a | `review — src/Ppcp/ppcp_transport.cpp, queryTlsCapabilities() and makeContext(), commit 0496c2f; reviewer unassigned` | — |
+
+### What H6 landed, and where the halves fall
+
+This host is the **code publisher** (`RV` §2): it displays a code, it listens,
+and the peer that scans dials it. Three things follow at once — it is the TLS
+server (5.2g), it sends `hello_accept` rather than `hello` (2d), and it holds
+the authoritative clock for expiry (7.3e). Every RV row above that this column
+can move is moved by that role, and the rows it cannot are marked with which
+half is missing rather than left blank:
+
+- **RT-6 is `n/a` and not `impl`.** 4.4a is an obligation on the peer that
+  SCANS a code, and nothing in this application scans one. The rendezvous panel
+  displays; PinPointCapture scans. Adding a scanner to claim the row would be
+  building a feature to satisfy a test.
+- **RT-15's publisher half passes; its 4.4a1 half is the scanner's**, for the
+  same reason.
+- **RT-7's browser half passes.** The advertiser half needs a peer that
+  advertises, and this host **does not advertise at all** — 3.5b puts the
+  responder on the capture peer, and the browser here never registers a service
+  and never binds 5353. What is asserted is that the dial decision reads only
+  `pv`, `rn` and `rid`, that an instance name which does not derive from `rid`
+  is refused (3.2a), and that an unresolvable `rid` is **not dialled** (3.4c).
+- **RT-16 moves from `review` to `pass`.** 7.4f is a refusal with an observable
+  outcome — `persist()` returns false and the store stays empty — so it does not
+  have to be read in the code, and a row that can be tested should not be a
+  review row. The predicate is `ppcp_rv_may_persist()` and this host does not
+  second-guess it.
+- **RT-12 stays `review`, and it is the one that matters.** Entropy quality and
+  storage protection produce no observable difference on the wire. What the
+  suite can show — 64 codes with no repeated `K_tls`, `K_id`, `Session.id` or
+  URI — catches a secret minted once and reused, and would not catch a
+  generator with a long period. The reviewer reads `csprngBytes()` (getentropy,
+  full width, no fallback), its four call sites, and the keychain store.
+
+### The QR encoder, and why there is one
+
+`RV` 4.1d wants the code rendered at error correction level M or higher, and
+this repository has no QR code anywhere: no qrencode, no ZXing, no QZXing,
+nothing vendored. The choice was a new third-party dependency in an application
+that already fetches ten, or ~450 lines of arithmetic that ISO/IEC 18004 fixed
+in 2006. `src/Ppcp/ppcp_qr.cpp` is byte mode, level M, versions 1–20.
+
+Verified four independent ways, because there is no decoder here to diff
+against and "it produced a picture" is not evidence:
+
+| | What | Why it cannot be faked |
+|---|---|---|
+| 1 | Every block's data+EC codewords evaluate to zero at `alpha^0..alpha^(n-1)` | That is the definition of a Reed-Solomon codeword; it depends on no table in the file |
+| 2 | The eight level-M format strings and the version-7 and version-10 version strings, as literals | Published constants, so a BCH encoder cannot agree with itself |
+| 3 | Symbol size, three finder patterns, both timing patterns, the dark module, and the block tables' internal consistency | — |
+| 4 | The finished symbol is read back out — mask undone, zigzag walked, blocks de-interleaved — for 19 payload lengths | Catches the interleave, padding and placement bugs the first three miss |
+
+Row 3 earned itself immediately: reserving the format-information area was
+blanking two timing modules, which no scanner would have read and no eye would
+have seen.
+
+`ctest --test-dir build/ppcp-tests -R ppcp_qr_test`
 
 ### Why RT-4 is `impl` and not `pass`
 
@@ -391,10 +457,16 @@ an application obligation.
 
 ### 7.2 What is wired but not exercised in the application
 
-**Nothing in this application constructs a `PpcpHostPeer`.** H1's transport and H2's peer are
-built and tested; no screen, service or controller starts one. Everything in §7.1 is asserted
-over engines the test suite constructs. So the following are written, compiled only by the app
-target (which this work did **not** build), and **unverified**:
+**⚠ SUPERSEDED BY H-COMPOSE (session 4, §9 below).** `PpcpHostService` now constructs the
+`PpcpHostPeer`, owns the `Listener`, and is built in `main.cpp`. What follows is the state as
+it stood at the end of session 3 and is kept because the *evidence* position it describes has
+not changed: everything in §7.1 is still asserted over engines the test suite constructs, and
+the application path is still unverified in the running application.
+
+At the end of session 3, **nothing in this application constructed a `PpcpHostPeer`.** H1's
+transport and H2's peer were built and tested; no screen, service or controller started one.
+So the following were written, compiled only by the app target (which that work did **not**
+build), and **unverified**:
 
 - `PpcpHostPeer` now owns the live session, the arbitration bridge and the annotation store,
   drains the event ring in `pump()` and dispatches to all three, and offers
@@ -409,12 +481,12 @@ target (which this work did **not** build), and **unverified**:
   than showing an empty heading, because "this device offered nothing" is a different and
   untrue statement.
 
-**Three joins are named in the code and have no caller, all for the same reason.**
-`video_input_factory::registerPpcpPeer()` on `PPCP_EVENT_DECLARE` (MSG 3.3 — a peer's cameras
-exist the moment it declares and at no other moment); `VideoInputPpcp::setTimebaseOffsetNs()`
-from `PpcpLiveSession::offsetToRefNs()` after 6.1f; and `clipReady(PpcpClip)` into the session
-layer. The first two are one line each in whatever constructs the peer. The third is blocked
-on more than an owner — see below.
+**Three joins were named in the code and had no caller, all for the same reason. Two are
+now called (H-compose, session 4).** `video_input_factory::registerPpcpPeer()` runs on
+`PPCP_EVENT_DECLARE` from `PpcpHostService::onDeclare()` (MSG 3.3 — a peer's cameras exist the
+moment it declares and at no other moment), and `VideoInputPpcp`'s offset seam is re-fed from
+`PpcpLiveSession::offsetToRefNs()` on every 6.1f publish. The third — `clipReady(PpcpClip)`
+into the session layer — is blocked on more than an owner and is still open; see below.
 
 **⚠ `clipReady()` is blocked on host review item 2 and is NOT worked around.** A `PpcpClip`
 carries opaque PPCP identities; this application's `Session.id` is a filesystem directory path
@@ -461,3 +533,94 @@ owns the join.
 | 13 | `libppcp` API — **finding 6 (F-H4-1), HALF CLOSED** | `ppcp_peer_capture_announce()` now resolves the Stream from the Capture's own `stream_id` and refuses when `is_preview` disagrees, so 5.11j is enforced on the way OUT and a conformant peer can no longer be made to lie. The receiving side is unchanged: a consumer must still run `ppcp_capture_validate_in_stream()` itself, and `VideoInputPpcp::onCaptureAnnounce()` does. CT-I36a's consumer half remains an application obligation. |
 | 15 | `libppcp` API — **F-L13-1**, raised by team L | **`ppcp_peer_feed()` consumes unboundedly many frames per call, the event ring is four deep, and an overflow drops the OLDEST event with nothing readable to say so.** A single socket read carrying a replayed bundle loses `capture_announce` while the payload frames that reference it arrive — silently, and only under load, which is the worst shape available. `PpcpHostPeer::pump()` had exactly this bug: it fed a whole read and drained events afterwards. It now bounds each feed to one frame using the header's own `payload_len` — the idiom `PpcpBundleTransport` has always used — and drains between them. `F_L13_1_FeedingAWholeReadAtOnceLosesEventsAndOneFrameAtATimeDoesNot` asserts both halves, so the day libppcp L15 makes `feed` stop at the ring's capacity, the guard goes red and points at this row. |
 | 14 | `libppcp` API — **finding 8, CLOSED** | `ppcp_event` gained `channel`, so a consumer can now check 5.11h — preview payload on a bulk channel distinct from shot payload. Not yet asserted here; it belongs with the join that consumes `clipReady()`. |
+
+---
+
+## 9. What H6 and H-compose landed (session 4, wave 1)
+
+### 9.1 The rows
+
+| Row | Command |
+|---|---|
+| RT-5, RT-7 (browser), RT-8, RT-9, RT-15 (publisher), RT-16 | `ctest --test-dir build/ppcp-tests -R ppcp_rendezvous_test` |
+| The QR encoder behind RV 4.1d | `ctest --test-dir build/ppcp-tests -R ppcp_qr_test` |
+| Every app-side PPCP translation unit still compiles | `ctest --test-dir build/ppcp-tests -R ppcp_app_tu_syntax` |
+
+**Every refusal in the rendezvous suite is a real TLS handshake on loopback**, dialled by a
+scanner built out of nothing but `ppcp_rv_uri_decode()`, `ppcp_rv_derive()` and
+`ppcp_rv_psk_identity()` — the same four calls PinPointCapture will make. `RV` 5.2i is explicit
+that this class of requirement is settled by observed behaviour and never by an API assertion,
+and the same reasoning applies to §7.3: "the publisher invalidates the code" is a claim about
+what happens when somebody dials.
+
+### 9.2 `ppcp_app_tu_syntax`, and the hole it closes
+
+On 22 August the application build broke on `ppcp_import_controller.cpp` and **no suite here
+compiled that file**. Every row in this document links the handful of translation units it
+needs; the app-only ones — the QML controllers, the device-registry adapter, the composition —
+had no compiler pointed at them at all until the application was built by hand. A green
+`ppcp-tests` therefore carried no information about whether the application still built, which
+is the worst property a gate can have.
+
+The row runs the compiler front end (`-fsyntax-only`) over all 21 of them with the app's
+include paths and Qt: no link, no moc, ~2.4 s. It is **deliberately globbed**, and it is the
+one glob in that file — a translation unit somebody forgets to list is exactly the failure
+being guarded against. It was verified by **negative control**: made red by reintroducing the
+22 August shape of break, green again by removing it.
+
+`src/Gui/main.cpp` is out of scope and the file says so: it reaches whisper, ONNX Runtime,
+OpenCV and Sparkle. The composition therefore lives in its own translation unit and main.cpp's
+uncovered share is four lines.
+
+### 9.3 What is wired in the application and still unverified there
+
+`PpcpHostService` (`src/Ppcp/ppcp_host_service.{h,cpp}`) owns the `Listener`, the
+`PpcpRendezvous`, the `PpcpHostPeer` and the engine. It is constructed in `main.cpp` beside
+`CameraManager`, listens on 7788 (falling back to an ephemeral port), accepts on one thread
+whose only job is to block in `accept()`, and pumps and ticks from a 20 ms `QTimer`.
+
+Called from it, and **compiled but not run in the application by this work**:
+
+- `VideoInputFactory::registerPpcpPeer()` on `declare`, then a signal that asks
+  `CameraManager::enumerate()` — the registry has already been told, and the home screen's
+  DEVICES list reads the registry directly on its own two-second refresh, but `CameraManager`
+  snapshots at construction and has to be asked.
+- `VideoInputPpcp::applyTimebaseOffsets()` on every 6.1f publish, **per Source timebase**. A
+  peer with a camera clock and an audio clock has one relation per clock; a single scalar for
+  the peer would fabricate whichever Source it did not describe. A lookup that answers "no
+  direct relation" (5.4b, 8.2i1) **clears** that instance's mapping rather than leaving a stale
+  one — a stale offset is shaped exactly like drift.
+- `PpcpOfferController::attach()`, which has been installed detached since H5.
+
+### 9.4 What is still not claimed
+
+- **`clipReady()` is still not connected**, and for the reason §7.2 gives: a `PpcpClip` carries
+  opaque PPCP identities, this application's `Session.id` is a filesystem directory path and
+  its `Shot.id` an `int` ordinal, and CORE 8.5c keys idempotent re-import on opaque ids.
+  Wiring it today would either duplicate the clip on re-arrival or throw the identity away.
+  That is host review item 2 and H-compose does not settle it by accident.
+- **`ShotController::setPpcpBridge()` is still not called.** It is a live behaviour change for
+  every shot — `reportCandidate()` stops touching `m_arbiter` once a bridge is set — and this
+  work cannot run the application to see it. Deliberately left for a wave that can.
+- **The macOS keychain path is compiled but not exercised at runtime.** The login keychain
+  cannot be unlocked from a non-Aqua session, so a test that needed it would be red on every
+  headless box. The suite uses the in-memory store, whose `describe()` says in as many words
+  that it is **not** protected storage. RT-12 is where the keychain path is read.
+- **Discovery is browse-only and untested against a live responder.** `parseTxtRecord`,
+  `pvAcceptsMajor`, `instanceNameMatchesRid` and `decideDial` are asserted; `DNSServiceBrowse`
+  is not, because there is nothing on this network advertising `_ppcp._tcp`. 3.6a makes that a
+  non-event by construction: discovery failure is not an error state and there is no error
+  channel to report one on.
+
+### 9.5 Findings
+
+| # | Clause | Finding |
+|---|---|---|
+| 16 | `RV` 7.3a vs `CORE` T1/T2 and `ENC` §2.1 — **F-H6-1** | **`mu` cannot count handshakes, and 7.3a says it does.** "A publisher invalidates a pairing code once `mu` handshakes have completed with it. The default is one." A PPCP link is **two (optionally three) TCP connections**, each its own TLS session keyed by the same `K_tls` — that is CORE T1/T2 and ENC 2.1 and it is not optional. So the default `mu: 1`, which is the pairwise case the entire model is built around, is spent by the control channel's handshake and the bulk channel **of the same link** is then refused: every conformant PPCP-RV pairing dies on its second channel. `mu` can only mean **pairings**. This host counts links (`PpcpRendezvous::noteLinkEstablished()`, called once per accepted `PeerConnection`) and the suite asserts two resolves for one pairing so the arithmetic is visible. Suggested fix: 7.3a reads "once `mu` **pairings** have been established with it", with a note that a pairing is a link and a link is several handshakes. |
+| 17 | `RV` 7.3a vs 7.5a — **F-H6-1a** | **Second-order, and it survives the fix above.** 7.5a has a reconnecting peer complete a full handshake on the same derived `K_tls` without a new code; 7.3a invalidates the code after `mu` completions; 7.5c then says `session_resume` is refused for a session whose pairing was invalidated under §7.3. Read literally, a `mu: 1` code permits one link and no reconnection at all, which makes §7.5 dead letter in the default case. This host resolves it by treating 7.3a as spending the **code** and 7.3b as ending the **pairing**, so a session survives its code and dies with its session. §7.3 should say which of the two it means. |
+| 18 | H1's API — **F-H6-2, closed here** | `ResolvedPairing::pairingId` is documented in `ppcp_transport.h` as "the embedding's handle on WHICH pairing authenticated a stream", the listener has held it since H1, and there was **no accessor**. An embedding that had to act on it — and RV 7.3a's single-use defence is exactly an action on it — could not find out which code had just been used. `TransportChannel::pairingId()` and `PeerConnection::pairingId()` now expose it. |
+| 19 | `RV` 7.2c vs this application — **F-H6-3** | **The application's existing secrets subsystem is not protected storage, and using it would have been the easy mistake.** `src/Secrets/SecretsManager` keeps API keys in `QSettings`, which on macOS is a plain plist in `~/Library/Preferences`, and its header says the choice was "no extra dependencies". That is right for an Azure key and wrong for a `PRK`: possession of a preferences file would become a standing ability to complete a handshake as a paired peer. H6 reaches Security.framework directly and returns **no store at all** where the platform has none, so `persist()` refuses rather than falling back to a file. Not a defect in the specification — 7.2c is clear — but the shape of the trap is worth recording, because the wrong answer was already in the repository and looked like reuse. |
+| 20 | `libppcp` — **F-H5-1, closed** | The remote half of I21 is reachable: `ppcp_peer_sync_add_target()` keys sequences on the (local, remote) pair, and erratum E2 has a probe naming a timebase the responder declared answered on that timebase. Not yet exercised from this host, which has one clock and currently probes with `ppcp_peer_sync_add_timebase()`; the multi-clock device case is `libppcp`'s CT-I21. |
+| 21 | `libppcp` — **F-H5-2, closed** | `ppcp_peer_session_params()` now answers on the peer that ORIGINATED `session_open`, so a host can read back the Session it just opened. `ppcp_live_session_test` asserts the two ends agree rather than asserting the host is blind, which is the property the finding was about. |
+| 22 | `libppcp` — **F-H5-3, closed, and it broke six suites** | It came back as a **hard precondition**: `ppcp_peer_new()` now refuses a peer that declares `live` with no `health_report` — "a peer that has no thermometer declares no Live". That is exactly what this repository asked for, and six suites went red at once because the host and the harness peers all declared `live` and supplied nothing. `PpcpHostPeer::makeLibppcpEngine()` now builds a report from the two callbacks it already had, and `makeHostEngine()` drops `live` where the embedding supplied no reading — a profile is a promise about behaviour (2.2.2), and the bundle path has no heartbeat to answer anyway. |
+| 23 | `libppcp` — **F-L13-1, closed, with a harness consequence** | `ppcp_peer_feed()` now stops rather than overrun the event ring. The consequence for a test harness is that "pipe everything, then look at the events" no longer works: three assertions in this repository had been reading whatever survived a four-deep ring. `pptest::pipe()` takes an event sink and drains between frames — which is what `PpcpHostPeer::pump()` has always done in production — and **stops rather than skipping** a frame it cannot feed, so the next one to get this wrong fails loudly. |
