@@ -58,7 +58,7 @@ Item {
         Qt.callLater(function() {
             var panels = [
                 generalPanel, appearancePanel, displaysPanel,
-                camerasPanel, imusPanel, microphonesPanel,
+                camerasPanel, imusPanel, phonesPanel, microphonesPanel,
                 launchMonitorPanel, storagePanel, null, diagnosticModelPanel
             ]
             var panel = panels[entry.panelIndex]
@@ -236,22 +236,29 @@ Item {
                                 { navIdx: 2, icon: "▭", label: qsTr("Displays"),       sectionHead: "",               hasBadge: false },
                                 { navIdx: 3, icon: "⊙", label: qsTr("Cameras"),        sectionHead: qsTr("Hardware"), hasBadge: true  },
                                 { navIdx: 4, icon: "⌖", label: qsTr("IMUs"),           sectionHead: "",               hasBadge: true  },
-                                { navIdx: 5, icon: "♪", label: qsTr("Microphone"),     sectionHead: "",               hasBadge: false },
-                                { navIdx: 6, icon: "◎", label: qsTr("Launch Monitor"), sectionHead: "",               hasBadge: false },
-                                { navIdx: 7, icon: "▥", label: qsTr("Storage"),        sectionHead: qsTr("Data"),     hasBadge: false },
-                                { navIdx: 8, icon: "▤", label: qsTr("Archiving"),      sectionHead: "",               hasBadge: false },
+                                // Phones sits in Hardware and not at the end, so the
+                                // indices below all moved up by one. They are
+                                // positional in four places — this model, the
+                                // StackLayout, the `panels` lookup above and
+                                // SettingsIndex.entries — and all four were
+                                // changed together.
+                                { navIdx: 5, icon: "▣", label: qsTr("Phones"),         sectionHead: "",               hasBadge: false },
+                                { navIdx: 6, icon: "♪", label: qsTr("Microphone"),     sectionHead: "",               hasBadge: false },
+                                { navIdx: 7, icon: "◎", label: qsTr("Launch Monitor"), sectionHead: "",               hasBadge: false },
+                                { navIdx: 8, icon: "▥", label: qsTr("Storage"),        sectionHead: qsTr("Data"),     hasBadge: false },
+                                { navIdx: 9, icon: "▤", label: qsTr("Archiving"),      sectionHead: "",               hasBadge: false },
                                 // Metrics and Diagnostics were both rows here once. A metric, the
                                 // measures that read it and the corridors that judge them are one
                                 // chain, and following it meant leaving the panel — so they became
                                 // views inside Diagnostic Model, which now answers every deep link
                                 // the two of them used to. The old panel and its hidden row are
                                 // gone, and the indices below are contiguous again.
-                                { navIdx: 9, icon: "❖", label: qsTr("Diagnostic Model"), sectionHead: qsTr("Reference"), hasBadge: false },
+                                { navIdx: 10, icon: "❖", label: qsTr("Diagnostic Model"), sectionHead: qsTr("Reference"), hasBadge: false },
                                 // Not a panel: emits resourceMonitorRequested() (its own screen)
                                 // rather than switching activeNavIndex. It is an ACTION row, so its
                                 // navIdx never indexes the StackLayout — but it must not collide
                                 // with a panel index either, which is why it sits one past the last.
-                                { navIdx: 10, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
+                                { navIdx: 11, icon: "◈", label: qsTr("System"),        sectionHead: "",               hasBadge: false, action: "system" }
                             ]
 
                             delegate: Column {
@@ -552,11 +559,12 @@ Item {
                 DisplaysPanel {   id: displaysPanel;   Layout.fillWidth: true; Layout.fillHeight: true }  // 2
                 CamerasPanel {    id: camerasPanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 3
                 ImusPanel {       id: imusPanel;       Layout.fillWidth: true; Layout.fillHeight: true }  // 4
-                MicrophonesPanel { id: microphonesPanel; hostVisible: root.visible; Layout.fillWidth: true; Layout.fillHeight: true }  // 5
-                LaunchMonitorPanel { id: launchMonitorPanel; Layout.fillWidth: true; Layout.fillHeight: true } // 6
-                StoragePanel {    id: storagePanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 7
-                ScreenPlaceholder { titleText: "Archiving" }                                               // 8
-                DiagnosticModel { id: diagnosticModelPanel; Layout.fillWidth: true; Layout.fillHeight: true }       // 9
+                PhonesPanel {     id: phonesPanel;     Layout.fillWidth: true; Layout.fillHeight: true }  // 5
+                MicrophonesPanel { id: microphonesPanel; hostVisible: root.visible; Layout.fillWidth: true; Layout.fillHeight: true }  // 6
+                LaunchMonitorPanel { id: launchMonitorPanel; Layout.fillWidth: true; Layout.fillHeight: true } // 7
+                StoragePanel {    id: storagePanel;    Layout.fillWidth: true; Layout.fillHeight: true }  // 8
+                ScreenPlaceholder { titleText: "Archiving" }                                               // 9
+                DiagnosticModel { id: diagnosticModelPanel; Layout.fillWidth: true; Layout.fillHeight: true }       // 10
             }
         }
     }

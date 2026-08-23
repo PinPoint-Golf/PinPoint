@@ -72,6 +72,12 @@ Item {
         if (pref !== "") root.selectedClub = pref
     }
 
+    // The pairing panel.  A Popup parented to Overlay.overlay, so it covers the
+    // whole window from here without Main.qml having to host it.
+    PpcpPairDialog {
+        id: pairDialog
+    }
+
     Component.onCompleted: resourceMonitor.refresh()
 
     Timer {
@@ -532,7 +538,7 @@ Item {
 
             Item {
                 width:  parent.width
-                height: Theme.sp(20)
+                height: Theme.sp(34)
 
                 Text {
                     anchors { left: parent.left; verticalCenter: parent.verticalCenter }
@@ -541,6 +547,40 @@ Item {
                     font.pixelSize:     Theme.fontSzMicro
                     font.letterSpacing: Theme.trackingMicro
                     color:              Theme.colorText3
+                }
+
+                // ── Pairing, PPCP-RV §4 ────────────────────────────────────
+                //
+                // The whole of it, on this screen.  What used to be here — a
+                // "PAIR A DEVICE" heading, a status line, a paragraph, a raw
+                // IP:port list, two buttons and a table of 16-hex pairing
+                // handles — was visible on every launch whether or not anybody
+                // had a phone, because the panel keyed off the listener being
+                // up and the listener is always up.  It is now one button, and
+                // it opens PpcpPairDialog.
+                //
+                // Beside DEVICES because that is where the result appears: pair
+                // a phone, the phone's cameras join the list below.  Hidden
+                // entirely on a build without libppcp and OpenSSL, where there
+                // is no `ppcpHost` context property at all (H0 — a build with
+                // no PPCP must still be a working application).
+                PpButton {
+                    id: pairButton
+                    objectName: "pairPhoneButton"
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                    visible: (typeof ppcpHost !== "undefined") && ppcpHost !== null
+                             && ppcpHost.listening
+                    label:   qsTr("Pair to my phone")
+                    // Held while the dialog it owns is open — the toolbar-pill
+                    // convention, so the button stays visibly the source of the
+                    // thing covering the screen.
+                    onClicked: pairDialog.open()
+
+                    // Drawn, not a glyph: PpButton.glyph is a character in
+                    // Theme.fontSymbol, and neither Apple Symbols nor Segoe UI
+                    // Symbol has a QR or a phone.  PpButton's `icon` slot hands
+                    // it contentColor, so it tracks the theme with the label.
+                    icon: Component { PpQrGlyph {} }
                 }
             }
             Item { width: 1; height: 12 }
@@ -638,20 +678,12 @@ Item {
             //
             // In the DEVICES area on purpose: an offer is a fact about a
             // connected device, and it belongs beside the device it came from.
-            // The component hides itself entirely when there are none, and on a
-            // build without libppcp there is no controller and it never appears
-            // (H0 — a build with no PPCP must still be a working application).
-            // ── Pairing, PPCP-RV §4 ─────────────────────────────────────────
-            //
-            // Above the offers and below the devices, because that is the order
-            // it happens in: pair a device, the device's cameras join DEVICES,
-            // the device offers what it holds.  In-screen and not a menu item
-            // or a dialog — every control this application has is on the screen
-            // where its result appears.
-            PpcpPairPanel {
-                width: mainCol.width
-            }
-
+            // Unlike the pairing panel that used to sit above it, this one is
+            // already silent when it has nothing to say — `visible: offerCount
+            // > 0` — so it is not part of what the home screen was cluttered
+            // with, and it is the only route to a device's recorded sessions.
+            // On a build without libppcp there is no controller and it never
+            // appears (H0).
             PpcpOfferList {
                 width: mainCol.width
             }

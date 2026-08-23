@@ -25,6 +25,14 @@ Rectangle {
     property string label:       ""
     // Optional leading glyph rendered in the symbol font (e.g. "▶" on Replay).
     property string glyph:       ""
+    // Optional leading DRAWN icon, for the cases the symbol font cannot cover —
+    // fontSymbol is Apple Symbols on macOS and Segoe UI Symbol on Windows, and
+    // there are icons in neither (PpQrGlyph is the first). The component is
+    // handed `contentColor` through the loader's own `color` property if it has
+    // one, so it tracks the primary/outline/destructive palettes like the label
+    // does. `iconSize` sizes the square it is given.
+    property Component icon:     null
+    property real   iconSize:    Theme.sp(15)
     property bool   primary:     false
     property bool   destructive: false
     // Bold amber call-to-action fill (the Theme.colorAttention framing). Filled,
@@ -66,6 +74,16 @@ Rectangle {
         anchors.centerIn: parent
         spacing: Theme.sp(7)
 
+        Loader {
+            visible:  root.icon !== null
+            active:   root.icon !== null
+            width:    active ? root.iconSize : 0
+            height:   root.iconSize
+            anchors.verticalCenter: parent.verticalCenter
+            sourceComponent: root.icon
+            onLoaded: if (item && item.color !== undefined) item.color = Qt.binding(
+                          function() { return root.contentColor })
+        }
         Text {
             visible:        root.glyph !== ""
             anchors.verticalCenter: parent.verticalCenter

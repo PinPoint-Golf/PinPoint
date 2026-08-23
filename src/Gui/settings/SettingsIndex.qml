@@ -23,11 +23,17 @@ import PinPointStudio
 // Full-text search index for all settings panels.
 //
 // panelIndex → panel name mapping:
-//   0  General        5  Microphone
-//   1  Appearance     6  Launch Monitor (placeholder — no entries yet)
-//   2  Displays       7  Storage
-//   3  Cameras        8  Archiving      (placeholder — no entries yet)
-//   4  IMUs           9  Diagnostic Model (the whole content set)
+//   0  General        6  Microphone
+//   1  Appearance     7  Launch Monitor (placeholder — no entries yet)
+//   2  Displays       8  Storage
+//   3  Cameras        9  Archiving      (placeholder — no entries yet)
+//   4  IMUs          10  Diagnostic Model (the whole content set)
+//   5  Phones
+//
+// ⚠ THESE INDICES ARE POSITIONAL IN FOUR PLACES and Phones was inserted into
+// the middle of them rather than appended: this map, ScreenSettings' nav model,
+// its StackLayout and its `panels` lookup array. Appending would have filed
+// Phones under Reference instead of Hardware, so 5..9 all moved up by one.
 //
 // label / subtitle / groupLabel / panelLabel are wrapped in qsTr() so they
 // are extracted by lupdate and searched against the user's active locale.
@@ -256,80 +262,90 @@ QtObject {
           actions: "Test Connect Disconnect Zero orientation Calibrate magnetometer Save to flash Scan Euler angles roll pitch yaw battery calibration",
           itemId: "" },
 
-        // ── Microphone (panelIndex: 5) ────────────────────────────────────────
+        // ── Phones (panelIndex: 5) ────────────────────────────────────────────
+        { panelIndex: 5, panelLabel: qsTr("Phones"),     groupLabel: qsTr("Paired phones"),
+          label: qsTr("Paired phones"),                  subtitle: qsTr("Phones this computer has paired with, and how to forget one"),
+          actions: "ppcp pair pairing qr code remember forget revoke capture phone iphone android",
+          itemId: "setting_pairedPhones" },
+        { panelIndex: 5, panelLabel: qsTr("Phones"),     groupLabel: qsTr("Paired phones"),
+          label: qsTr("Remembering phones"),             subtitle: qsTr("Whether this computer can keep a pairing between launches"),
+          actions: "keychain protected storage persist remember windows linux macos",
+          itemId: "setting_phonesNoProtectedStorage" },
 
-        { panelIndex: 5, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Shot detection"),
+        // ── Microphone (panelIndex: 6) ────────────────────────────────────────
+
+        { panelIndex: 6, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Shot detection"),
           label: qsTr("Use microphone for shot detection"), subtitle: qsTr("Detect impact from the strike sound, fused with IMU and vision"),
           actions: "acoustic audio onset enable disable sound",
           itemId: "setting_acousticShotDetection" },
 
-        { panelIndex: 5, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Input device"),
+        { panelIndex: 6, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Input device"),
           label: qsTr("Audio input device"),              subtitle: qsTr("Select which microphone is used for capture and shot detection"),
           actions: "mic select default usb webcam rescan",
           itemId: "" },
 
-        { panelIndex: 5, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Position"),
+        { panelIndex: 6, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Position"),
           label: qsTr("Distance to hitting strip"),       subtitle: qsTr("Sound travel over this distance is subtracted when timing impact"),
           actions: "mic distance meters latency delay travel speed of sound impact timing",
           itemId: "setting_micDistance" },
 
-        { panelIndex: 5, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Calibration"),
+        { panelIndex: 6, panelLabel: qsTr("Microphone"),  groupLabel: qsTr("Calibration"),
           label: qsTr("Microphone sensitivity"),          subtitle: qsTr("Tune the acoustic detection threshold so every shot is detected"),
           actions: "calibrate sensitivity threshold level meter tune",
           itemId: "" },
 
-        // ── Storage (panelIndex: 7) ───────────────────────────────────────────
+        // ── Storage (panelIndex: 8) ───────────────────────────────────────────
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Athlete library"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Athlete library"),
           label: qsTr("Library location"),                 subtitle: qsTr("Root directory for all athlete profiles and session archives"),
           actions: "Change Reveal open folder",
           itemId: "setting_libraryPath" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Athlete library"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Athlete library"),
           label: qsTr("Session folder naming"),            subtitle: qsTr("Pattern used when creating a new session directory"),
           itemId: "setting_sessionNaming" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Athlete library"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Athlete library"),
           label: qsTr("Auto-save session on completion"),  subtitle: qsTr("Writes session data to the library immediately when recording ends"),
           itemId: "setting_autoSave" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
           label: qsTr("Recording resolution"),             subtitle: qsTr("Applies to all cameras — must be within sensor ROI bounds"),
           itemId: "setting_videoRes" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
           label: qsTr("Video codec"),                      subtitle: qsTr("Encoding applied when saving swing clips to disk"),
           itemId: "setting_videoCodec" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
           label: qsTr("Encoding quality"),                 subtitle: qsTr("Higher quality produces larger files"),
           itemId: "setting_videoQuality" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
           label: qsTr("Save raw camera frames"),           subtitle: qsTr("Stores unprocessed Bayer data alongside encoded clips"),
           itemId: "setting_saveRaw" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Video recording"),
           label: qsTr("Container format"),                 subtitle: qsTr("File format for saved swing clips"),
           itemId: "setting_container" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
           label: qsTr("Save pose keypoints"),              subtitle: qsTr("MoveNet skeleton data stored as JSON"),
           itemId: "setting_savePose" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
           label: qsTr("Save IMU streams"),                 subtitle: qsTr("Full quaternion and accelerometer data for all enabled IMUs"),
           itemId: "setting_saveImu" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
           label: qsTr("IMU data format"),                  subtitle: qsTr("File format for saved IMU streams"),
           itemId: "setting_imuFormat" },
 
-        { panelIndex: 7, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
+        { panelIndex: 8, panelLabel: qsTr("Storage"),     groupLabel: qsTr("Sensor data"),
           label: qsTr("Save launch monitor data"),         subtitle: qsTr("Ball-flight data from connected launch monitor"),
           itemId: "setting_saveLaunchMon" },
 
-        // ── Diagnostic Model (panelIndex: 9) ──────────────────────────────────
+        // ── Diagnostic Model (panelIndex: 10) ──────────────────────────────────
         //
         // Metrics was panelIndex 9 and Diagnostics 10 until the metric catalogue became a VIEW
         // inside Diagnostics rather than a panel beside it. Its search entries stayed — the words
@@ -340,27 +356,27 @@ QtObject {
         // "glossary" or "over the top" is asking about content that still exists. Left at 9 they
         // would open a panel with no row highlighted in the sidenav, which reads as a bug.
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Swing diagnostics"),                subtitle: qsTr("Named faults and their causes — what each costs the golfer"),
           actions: "diagnostics characteristics faults causes diagnosis library swing early extension loss of posture over the top casting scooping sway slide hanging back chicken wing flying elbow reverse spine s-posture c-posture ball position stance width alignment tempo sequence x-factor",
           itemId: "" },
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Reference"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Reference"),
           label: qsTr("Measures and corridors"),           subtitle: qsTr("What the app can read, and what good looks like for each"),
           actions: "metric metrics catalogue directory reference normative corridor tour wrist bow cup hinge roll elbow clubhead hand speed lag stance foot flare toe heel",
           itemId: "" },
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Physical screens"),                 subtitle: qsTr("Causes the app cannot measure — which screens would explain the most"),
           actions: "screen screening physical mobility hip internal rotation thoracic rotation pelvic disassociation core stability balance ankle dorsiflexion shoulder flexion wrist mobility",
           itemId: "" },
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Drills"),                           subtitle: qsTr("What a golfer does about a characteristic, and what it is trying to change"),
           actions: "drill drills practice rehearsal feel gate towel step pump hold the finish low point standoff",
           itemId: "" },
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Glossary"),                         subtitle: qsTr("What a coaching term means — search by the word you were taught"),
           actions: "glossary terms vocabulary jargon flip flipping ott over the top standing up early release casting shank chunk fat thin slice hook pull push block",
           itemId: "" },
@@ -370,52 +386,52 @@ QtObject {
         // The same content set as Diagnostics above, one screen instead of eight views. Both are
         // searchable while both ship — a search for "measures" should offer either.
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Diagnostic model"),                 subtitle: qsTr("The whole content set as one graph — navigate and edit it in place"),
           actions: "diagnostic model graph dag navigator content set browse edit author authoring inline table library characteristics causes measures signals causal links screens drills references",
           itemId: "" },
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Causal links"),                     subtitle: qsTr("Every edge between conditions — relation, strength and the evidence behind it"),
           actions: "causal link links edge edges cause causes corroborates excludes strength evidence tier citation acyclic cycle relation",
           itemId: "" },
 
-        { panelIndex: 9,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
+        { panelIndex: 10,  panelLabel: qsTr("Diagnostic Model"), groupLabel: qsTr("Swing diagnostics"),
           label: qsTr("Signals"),                          subtitle: qsTr("What each condition is detected by — the test, its direction and the measure it reads"),
           actions: "signal signals detection detected by test direction threshold measure reads",
           itemId: "" },
 
-        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
+        { panelIndex: 7,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
           label: qsTr("Device"),                           subtitle: qsTr("Which launch monitor to read — Foresight GC Quad via FSX2020, or none"),
           actions: "launch monitor device gcquad gc quad foresight fsx2020 fsx connect ball club data",
           itemId: "setting_lmDevice" },
 
-        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
+        { panelIndex: 7,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
           label: qsTr("Shot data folder"),                 subtitle: qsTr("The folder FSX2020 writes LastShot.CSV into — a local path or a share"),
           actions: "launch monitor folder path directory lastshot csv fsx2020 share network location",
           itemId: "setting_lmPath" },
 
-        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
+        { panelIndex: 7,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Connection"),
           label: qsTr("Connection status"),                subtitle: qsTr("Whether the configured folder can be read, and what was last read from it"),
           actions: "launch monitor status connected waiting error not reading last shot",
           itemId: "setting_lmStatus" },
 
-        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+        { panelIndex: 7,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
           label: qsTr("Chime when a reading arrives"),     subtitle: qsTr("A short quiet tone when the monitor's data is folded into the swing"),
           actions: "launch monitor chime sound ting audio beep tone notify silence mute arrival",
           itemId: "setting_lmChime" },
 
-        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+        { panelIndex: 7,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
           label: qsTr("Store launch monitor data with each swing"), subtitle: qsTr("Off means readings are read and discarded rather than saved to the swing"),
           actions: "launch monitor store save data swing json record keep discard",
           itemId: "setting_lmStore" },
 
-        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+        { panelIndex: 7,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
           label: qsTr("Check for new shots every"),        subtitle: qsTr("How often the shot data folder is re-read — raise it only for a slow share"),
           actions: "launch monitor poll interval frequency check rate refresh share slow",
           itemId: "setting_lmPoll" },
 
-        { panelIndex: 6,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
+        { panelIndex: 7,  panelLabel: qsTr("Launch Monitor"), groupLabel: qsTr("Behaviour"),
           label: qsTr("Record shots the monitor sees on its own"), subtitle: qsTr("Create a swing from the monitor's reading alone, with no video and no analysis"),
           actions: "launch monitor standalone device only no camera solo shots without cameras record alone",
           itemId: "setting_lmStandalone" }
