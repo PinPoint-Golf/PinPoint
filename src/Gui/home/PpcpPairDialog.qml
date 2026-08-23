@@ -86,11 +86,32 @@ Popup {
     // `status` string is shown UNDER it rather than instead of it: it is honest
     // and useful ("Device connected — TLS1.3 …") and it is not a sentence a
     // golfer should have to read to know whether their phone arrived.
+    // A phone that arrived and did not become a link.  ⚠ THE COUNT IS READ, NOT
+    // JUST THE TEXT: a phone that fails twice for the same reason produces the
+    // same string, and a binding on the text alone would not re-evaluate — the
+    // panel would sit on a stale-looking message through a second attempt.  See
+    // [[qml-dead-statement-bindings]] for why this is read INSIDE the
+    // expression rather than as a bare statement.
+    readonly property int failureCount: controller ? controller.failureCount : 0
+    readonly property string failureText: (controller && root.failureCount > 0)
+                                          ? controller.lastFailureText : ""
+
     readonly property var stage: {
         if (root.connected && root.peerName !== "")
             return { text: qsTr("Connected to %1.").arg(root.peerName), fg: Theme.colorGood }
         if (root.connected)
             return { text: qsTr("Phone connected — securing the link…"), fg: Theme.colorAccent }
+        // ⚠ ABOVE "waiting" and BELOW "connected".  Above, because displacing
+        // that line is the whole point: a refused phone used to leave it reading
+        // "Waiting for your phone to scan…" for ever.  Below, because a phone
+        // that succeeds afterwards has answered the question.
+        //
+        // ⚠ AND NOT ABOVE THE COUNTDOWN, which is a different binding entirely
+        // (`countdownText`) and stays that way: RV 4.4a requires expiry to be
+        // reported AS expiry and never as a failure to connect, so the two must
+        // not be able to displace one another.
+        if (root.failureText !== "")
+            return { text: root.failureText, fg: Theme.colorWarn }
         if (root.showing && root.secondsLeft > 0)
             return { text: qsTr("Waiting for your phone to scan…"), fg: Theme.colorText2 }
         return { text: qsTr("No code is showing."), fg: Theme.colorText3 }

@@ -190,7 +190,22 @@ bool PpcpHostService::start(quint16 port, QString *err)
             // listener is not doing anything expensive while it waits.
             HandshakeFailure fail;
             std::unique_ptr<PeerConnection> link = m_listener.accept(250, &fail);
-            if (!link) continue;
+            if (!link) {
+                // ⚠ `kind`, NOT `message`.  An ordinary 250 ms poll with nobody
+                // dialling also returns null, and it must stay silent — the
+                // panel would otherwise report a failure fifty times a second
+                // for the whole time it is open.  `accept()`'s contract is that
+                // a quiet poll leaves `kind` as None; anything else is a phone
+                // that reached us and did not become a link.
+                if (fail.kind != FailureKind::None) {
+                    const HandshakeFailure f = fail;
+                    // Same hand-over the link below uses, for the same reason:
+                    // this thread owns nothing but the accept call.
+                    QMetaObject::invokeMethod(this, [this, f] { noteFailure(f); },
+                                              Qt::QueuedConnection);
+                }
+                continue;
+            }
             // Hand it to the GUI thread.  Everything PPCP is single-threaded
             // from here on: this thread owns nothing but the accept call.
             auto *raw = link.release();
@@ -241,6 +256,10 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     // link is two TLS handshakes (three with preview) over one K_tls; counting
     // handshakes would invalidate a `mu: 1` code on the control channel and
     // refuse the bulk channel of the SAME link.  See F-H6-1.
+    // A phone got in, so whatever failed before it is history.  The panel must
+    // not carry a refusal underneath a live connection.
+    clearFailure();
+
     const std::string pairing = link->pairingId();
     if (!pairing.empty()) m_rv.noteLinkEstablished(pairing);
     // ...and KEEP it.  Everything that wants to say something about "the phone
@@ -590,6 +609,11 @@ bool PpcpHostService::publishPairingCode()
     }
     // 7.3b — displacing a code invalidates it, used or not.
     closePairingCode();
+    // A new code is a new attempt, so the last one's failure stops being the
+    // answer to "what is happening".  ⚠ closePairingCode() deliberately does
+    // NOT do this: a user who dismisses the panel after a refusal should still
+    // find out what happened, and only asking for a fresh code says otherwise.
+    clearFailure();
 
     // 4.3d — every address this host is reachable at: wired, wireless, and its
     // hotspot address where it provides one.  This is what makes the code work
@@ -739,6 +763,74 @@ QString PpcpHostService::diagnosticExport() const
          + QStringLiteral("\ndiscovery: %1\ndiscovered-pairings: %2\n")
                .arg(discoveryDescription())
                .arg(m_seenInstances.size());
+}
+
+// ── What a failed arrival is allowed to say ─────────────────────────────────
+//
+// ⚠ READ THE HEADER'S NOTE BEFORE CHANGING A WORD OF THIS.  RV 7.7c binds what
+// the COUNTERPART observes, not this screen — but `FailureKind::Handshake` is
+// still unnameable HERE, because the transport never told us which check failed
+// and must not be made to.  The other three are policy, framing and silence
+// respectively, none of them the pair of outcomes 7.7c holds together.
+QString PpcpHostService::describeFailure(const HandshakeFailure &f)
+{
+    switch (f.kind) {
+    case FailureKind::None:
+        return QString();
+
+    case FailureKind::NotForwardSecret:
+        return tr("A phone was refused: its secure connection is not forward "
+                  "secret, which PPCP does not allow.");
+
+    case FailureKind::HandshakeTimeout:
+        return tr("A phone connected but did not finish securing the link in "
+                  "time, and was dropped.");
+
+    case FailureKind::BindRejected:
+        return tr("A phone secured the link but its stream was refused: %1.")
+                 .arg(QString::fromLatin1(describe(f.bind)));
+
+    case FailureKind::Handshake:
+        break;
+    }
+
+    // The uniform one.  There is nothing to name and there never will be, so
+    // what is offered instead is the fact the counterpart already observed: the
+    // TLS alert and how long it took.  5.3c makes that alert IDENTICAL for an
+    // unresolvable identity and a wrong key, so it discriminates nothing — and
+    // it is the only thing that tells one failing phone from another when the
+    // sentence above it cannot change.
+    QString s = tr("A phone reached this computer and the secure connection "
+                   "failed. Nothing was disclosed to it.");
+    if (f.alert >= 0) {
+        s += QLatin1Char(' ');
+        s += f.alertWasSent
+                 ? tr("(TLS alert %1, sent by this computer, after %2 ms.)")
+                       .arg(f.alert).arg(qRound(f.elapsedMs))
+                 : tr("(TLS alert %1, sent by the phone, after %2 ms.)")
+                       .arg(f.alert).arg(qRound(f.elapsedMs));
+    }
+    return s;
+}
+
+void PpcpHostService::noteFailure(const HandshakeFailure &f)
+{
+    if (f.kind == FailureKind::None) return;
+    m_lastFailureText = describeFailure(f);
+    ++m_failureCount;
+    emit failureChanged();
+}
+
+void PpcpHostService::clearFailure()
+{
+    if (m_lastFailureText.isEmpty()) return;
+    m_lastFailureText.clear();
+    emit failureChanged();
+}
+
+void PpcpHostService::noteHandshakeFailureForTest(const HandshakeFailure &f)
+{
+    noteFailure(f);
 }
 
 void PpcpHostService::setStatus(const QString &s)

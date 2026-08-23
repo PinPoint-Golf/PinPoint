@@ -90,6 +90,28 @@ class PpcpHostService : public QObject
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(QString peerName READ peerName NOTIFY stateChanged)
 
+    // ── A phone that arrived and did not become a link ──────────────────────
+    // Until these existed the pairing panel could only say "still waiting",
+    // whether nothing had happened or a phone had reached us and been refused
+    // ten seconds ago.  Every one of those outcomes was already on the app log
+    // and none of it was on the screen.
+    //
+    // ⚠ WHAT MAY BE SAID, AND WHAT MAY NOT.  RV 7.7c makes rejection uniform
+    // "in what it RETURNS or in how long it TAKES" — it binds what the
+    // COUNTERPART observes, and 7.7b likewise forbids disclosure "to an
+    // unauthenticated counterpart".  Neither reaches what this host puts on its
+    // own screen, and RV 4.2b ("a pairing code that fails with 'could not pair'
+    // tells a user nothing they can act on") and §8 ("detect the symptom and
+    // explain it") ask for exactly this.  So a bind refusal, a timeout and a
+    // 5.2b policy refusal are named.  The AUTHENTICATION failure is not, and
+    // cannot be: `Ppcp::HandshakeFailure` carries one uniform message for an
+    // unresolvable identity and a wrong key alike, and nothing here unpicks it.
+    Q_PROPERTY(QString lastFailureText READ lastFailureText NOTIFY failureChanged)
+    // Rises on every failure, including a repeat of the same one.  The text
+    // alone cannot drive a QML binding: a phone that fails twice for the same
+    // reason produces the same string, and the panel would not re-evaluate.
+    Q_PROPERTY(int failureCount READ failureCount NOTIFY failureChanged)
+
     // The pairing code, as a QR.  `qrRows` is one string of '0'/'1' per row,
     // which a Canvas draws directly.
     //
@@ -139,6 +161,8 @@ public:
     QString status() const { return m_status; }
     bool    connected() const { return m_link != nullptr; }
     QString peerName() const { return m_peerName; }
+    QString lastFailureText() const { return m_lastFailureText; }
+    int     failureCount() const { return m_failureCount; }
 
     QVariantList qrRows() const { return m_qrRows; }
     int          qrSize() const { return m_qr.size(); }
@@ -154,6 +178,15 @@ public:
     // value <= 0 restores the default rather than minting a code that is already
     // expired.
     void setCodeLifetimeSecondsForTest(int seconds);
+
+    // The failure path, without a phone.  ⚠ Settable ONLY for the tests, like
+    // the lifetime above, and for a sharper reason: `ppcp_host_service_test`
+    // links `ppcp_host_service_stubs.cpp`, whose whole point is that this suite
+    // never accepts a link — "if a future test in this file did accept a link,
+    // it would be asserting against stubs".  So the only honest way to reach
+    // `noteFailure()` from that suite is to call it.  Nothing in the
+    // application does; the accept thread is the sole real caller.
+    void noteHandshakeFailureForTest(const Ppcp::HandshakeFailure &f);
 
     // RV §4 — publish a code.  Fresh psk and sid per code (7.3d), every
     // reachable address in `ep` (4.3d), `mu: 1` (7.3a) and a short `exp`
@@ -186,6 +219,7 @@ signals:
     void statusChanged();
     void codeChanged();
     void phonesChanged();
+    void failureChanged();
 
     // MSG 3.3 — a counterpart declared, so its cameras exist NOW and at no
     // other moment.  `main.cpp` connects this to `CameraManager::enumerate()`:
@@ -203,6 +237,11 @@ private:
     void onDeclare(const ppcp_peer_desc *desc);
     void onRelations();
     void setStatus(const QString &s);
+    // Records a failure and builds its user-facing sentence.  One place, so the
+    // rule above about what may be named lives in one place too.
+    void noteFailure(const Ppcp::HandshakeFailure &f);
+    void clearFailure();
+    static QString describeFailure(const Ppcp::HandshakeFailure &f);
     void refreshCode();
     // Remembers the phone's own name against the pairing it arrived on.  See
     // the definition for why this is not in the keychain.
@@ -223,6 +262,8 @@ private:
     quint16 m_port = 0;
     QString m_status;
     QString m_peerName;
+    QString m_lastFailureText;
+    int     m_failureCount = 0;
     QString m_counterpartId;
     // The pairing the LIVE link resolved to.  It used to be read in adoptLink()
     // and dropped on the floor immediately after noteLinkEstablished(), which

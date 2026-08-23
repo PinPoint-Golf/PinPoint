@@ -478,6 +478,13 @@ TEST(PpcpLinkBind, ABadFirstFrameClosesOnlyThatStream)
         EXPECT_TRUE(probe.get()) << c.what << ": the probe could not even handshake";
         EXPECT_GT(h.listener().bindRejectionCount(), before) << c.what;
         EXPECT_EQ(h.listener().lastBindRejection(), c.expect) << c.what;
+        // ⚠ AND IT REACHED THE CALLER.  The counters above have been right
+        // since H1 and only this test ever read them; the embedding saw an
+        // ordinary quiet poll and a pairing panel sat on "waiting" while a
+        // phone had arrived and been refused.  accept() now reports through
+        // `fail`, which is the whole point of the reporting path.
+        EXPECT_EQ(f.kind, FailureKind::BindRejected) << c.what;
+        EXPECT_EQ(f.bind, c.expect) << c.what;
     }
 
     // And the honest dialler behind all four is completely unaffected.
@@ -491,4 +498,61 @@ TEST(PpcpLinkBind, ABadFirstFrameClosesOnlyThatStream)
     EXPECT_EQ(server->channels().size(), 2u);
     EXPECT_NE(server->channel(Channel::Control), nullptr);
     EXPECT_NE(server->channel(Channel::Bulk), nullptr);
+}
+
+// ── A stream that arrives and never speaks TLS ─────────────────────────────
+// The case that motivated the reporting path.  `expirePending()` runs at the
+// TOP of the accept loop and erases such a stream in place, so before this it
+// could reach the log and nothing else — accept() returned null exactly as it
+// does for an ordinary quiet poll, and the two were indistinguishable to the
+// embedding.  A phone whose TLS never got going was therefore invisible.
+//
+// ⚠ NOTHING UNIFORM IS OWED HERE.  RV 7.7c holds together an unknown identity
+// and a wrong key — two ways of REJECTING a counterpart.  This counterpart was
+// never rejected; it stopped talking, and saying so gives nothing away.
+TEST(PpcpLinkBind, AStreamThatNeverHandshakesIsReportedAndNotOnlyLogged)
+{
+    Options opts;
+    opts.handshakeTimeoutMs = 300;   // short, so the test is not a wait
+    opts.bindTimeoutMs = 300;
+
+    Harness h(2, opts);
+    ASSERT_TRUE(h.ok());
+
+    // A bare TCP connection: no TLS, no bytes, just an open socket.
+    const int sock = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
+    ASSERT_GE(sock, 0);
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons(h.port());
+    ASSERT_EQ(::connect(sock, reinterpret_cast<sockaddr *>(&a), sizeof a), 0);
+
+    HandshakeFailure f;
+    std::unique_ptr<PeerConnection> nothing = h.listener().accept(2000, &f);
+
+    EXPECT_EQ(nothing, nullptr) << "a silent socket was handed over as a link";
+    EXPECT_EQ(f.kind, FailureKind::HandshakeTimeout)
+        << "the handshake timeout did not reach the caller";
+    EXPECT_GT(f.elapsedMs, 0.0);
+
+    pp_shut(sock);
+}
+
+// ── Quiet is not failure ───────────────────────────────────────────────────
+// The other half of the same contract, and the one that keeps the pairing panel
+// usable: an accept() that simply timed out with nobody dialling MUST leave
+// `kind` as None.  Without this the panel would report a failure every 250 ms
+// for the whole time it is open.
+TEST(PpcpLinkBind, AnAcceptThatNobodyDialledReportsNoFailure)
+{
+    Harness h;
+    ASSERT_TRUE(h.ok());
+
+    HandshakeFailure f;
+    std::unique_ptr<PeerConnection> nothing = h.listener().accept(150, &f);
+
+    EXPECT_EQ(nothing, nullptr);
+    EXPECT_EQ(f.kind, FailureKind::None) << "an idle poll was reported as a failure";
+    EXPECT_TRUE(f.message.empty()) << "an idle poll left a message behind";
 }

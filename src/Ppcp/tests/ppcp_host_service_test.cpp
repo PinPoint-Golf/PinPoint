@@ -266,6 +266,82 @@ TEST_F(HostServiceClock, TheDiagnosticExportGainsDiscoveryAndStillCarriesNoSecre
     EXPECT_FALSE(dump.contains(QStringLiteral("psk")));
 }
 
+// ── A phone that arrived and did not become a link ─────────────────────────
+// The panel's whole failure vocabulary, driven through the test seam because
+// this fixture cannot accept a link — see ppcp_host_service_stubs.cpp, which
+// stubs the three `src/Video` symbols on exactly that basis.
+TEST_F(HostServiceClock, AFailedArrivalIsReportedAndNamedWhereTheSpecAllows)
+{
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    EXPECT_EQ(m_svc.failureCount(), 0);
+    EXPECT_TRUE(m_svc.lastFailureText().isEmpty());
+
+    // (a) The uniform one.  It must NOT name a cause — there is none to name —
+    // but it must still say a phone was here, and carry the alert, which is the
+    // only thing that distinguishes one failing phone from the next.
+    Ppcp::HandshakeFailure uniform;
+    uniform.kind = Ppcp::FailureKind::Handshake;
+    uniform.message = "PPCP TLS handshake failed";
+    uniform.alert = 40;
+    uniform.alertWasSent = true;
+    uniform.elapsedMs = 214.0;
+    m_svc.noteHandshakeFailureForTest(uniform);
+
+    EXPECT_EQ(m_svc.failureCount(), 1);
+    const QString a = m_svc.lastFailureText();
+    EXPECT_FALSE(a.isEmpty());
+    EXPECT_TRUE(a.contains(QStringLiteral("40"))) << a.toStdString();
+    // ⚠ RV 5.3c / 7.7c.  If either of these words ever appears, somebody has
+    // taught the screen to tell an unknown identity from a wrong key.
+    EXPECT_FALSE(a.contains(QStringLiteral("identity"), Qt::CaseInsensitive)) << a.toStdString();
+    EXPECT_FALSE(a.contains(QStringLiteral("key"), Qt::CaseInsensitive)) << a.toStdString();
+    EXPECT_FALSE(a.contains(QStringLiteral("pairing"), Qt::CaseInsensitive)) << a.toStdString();
+
+    // (b) A repeat of the SAME failure still moves the count, because the text
+    // cannot change and a QML binding on the text alone would not re-evaluate.
+    m_svc.noteHandshakeFailureForTest(uniform);
+    EXPECT_EQ(m_svc.failureCount(), 2);
+    EXPECT_EQ(m_svc.lastFailureText(), a) << "the same failure changed its words";
+
+    // (c) The nameable ones are named.  These are policy and framing outcomes,
+    // not the pair of outcomes 7.7c holds together.
+    Ppcp::HandshakeFailure late;
+    late.kind = Ppcp::FailureKind::HandshakeTimeout;
+    m_svc.noteHandshakeFailureForTest(late);
+    EXPECT_EQ(m_svc.failureCount(), 3);
+    EXPECT_NE(m_svc.lastFailureText(), a) << "a timeout read as the uniform failure";
+    EXPECT_TRUE(m_svc.lastFailureText().contains(QStringLiteral("time"), Qt::CaseInsensitive))
+        << m_svc.lastFailureText().toStdString();
+
+    Ppcp::HandshakeFailure fs;
+    fs.kind = Ppcp::FailureKind::NotForwardSecret;
+    m_svc.noteHandshakeFailureForTest(fs);
+    EXPECT_TRUE(m_svc.lastFailureText().contains(QStringLiteral("forward secret"),
+                                                 Qt::CaseInsensitive))
+        << m_svc.lastFailureText().toStdString();
+
+    // (d) `None` is not a failure and must not be reported as one — it is what
+    // an ordinary idle accept() leaves behind, fifty times a second.
+    const int before = m_svc.failureCount();
+    m_svc.noteHandshakeFailureForTest(Ppcp::HandshakeFailure{});
+    EXPECT_EQ(m_svc.failureCount(), before) << "an idle poll was reported as a failure";
+}
+
+// A fresh code is a fresh attempt, so the last one's refusal stops being the
+// answer to "what is happening".
+TEST_F(HostServiceClock, AskingForANewCodeClearsTheLastFailure)
+{
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    Ppcp::HandshakeFailure f;
+    f.kind = Ppcp::FailureKind::HandshakeTimeout;
+    m_svc.noteHandshakeFailureForTest(f);
+    ASSERT_FALSE(m_svc.lastFailureText().isEmpty());
+
+    ASSERT_TRUE(m_svc.publishPairingCode());
+    EXPECT_TRUE(m_svc.lastFailureText().isEmpty())
+        << "a new code still carried the old code's failure";
+}
+
 }  // namespace
 
 int main(int argc, char **argv)

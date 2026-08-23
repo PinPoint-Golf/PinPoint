@@ -368,6 +368,17 @@ TEST(PpcpTransport, UnknownIdentityIsIndistinguishableFromAWrongKey)
     EXPECT_EQ(aServer.message, bServer.message);
     EXPECT_EQ(aServerLog, bServerLog) << "RV 7.7c — no distinguishing log";
 
+    // ⚠ AND THE KIND IS UNIFORM TOO.  `FailureKind` exists so the embedding can
+    // put a failed arrival on the screen, and it is the obvious place for a
+    // future maintainer to add "unknownIdentity" / "wrongKey" as a convenience.
+    // That would defeat this whole row without touching a byte on the wire, so
+    // it is asserted here rather than left to the comment in the header.
+    EXPECT_EQ(aServer.kind, bServer.kind) << "RV 7.7c — the kind named the cause";
+    EXPECT_EQ(aServer.kind, FailureKind::Handshake);
+    EXPECT_EQ(aClient.kind, bClient.kind);
+    EXPECT_EQ(aServer.bind, BindRejection::None)
+        << "an authentication failure is not a bind rejection";
+
     // Timing — 5.3d is a SHOULD and the technique it names is the dummy key,
     // which this transport uses: both cases run to Finished verification.  The
     // bound is deliberately loose because a unit test on a loaded machine cannot

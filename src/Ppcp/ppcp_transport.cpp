@@ -988,6 +988,22 @@ const char *describe(BindRejection r)
     return "unknown";
 }
 
+const char *describe(FailureKind k)
+{
+    switch (k) {
+    case FailureKind::None:             return "no failure";
+    // ⚠ 5.3c / 7.7c — ONE text for an unresolvable identity and for a wrong
+    // key.  It says THAT the handshake failed and never WHICH check failed,
+    // and it must not grow a cause: the whole obligation is that these two
+    // outcomes are the same outcome.  See kUniformHandshakeFailure.
+    case FailureKind::Handshake:        return "the secure connection failed";
+    case FailureKind::NotForwardSecret: return "refused: not forward secret (RV 5.2b)";
+    case FailureKind::HandshakeTimeout: return "the secure connection did not complete in time";
+    case FailureKind::BindRejected:     return "the stream was refused (ENC 2.1c)";
+    }
+    return "unknown";
+}
+
 // ── TlsOutcome ──────────────────────────────────────────────────────────────
 
 std::string TlsOutcome::describe() const
@@ -1136,9 +1152,11 @@ std::vector<std::unique_ptr<TransportChannel>> dialLink(const ConnectorConfig &c
                                                         HandshakeFailure *fail,
                                                         double started)
 {
-    auto reportFail = [&](const char *msg, const SslState *st) {
+    auto reportFail = [&](const char *msg, const SslState *st,
+                          FailureKind kind = FailureKind::Handshake) {
         if (!fail) return;
         fail->message = msg;
+        fail->kind = kind;
         fail->elapsedMs = nowMs() - started;
         if (st) {
             fail->alert = st->alert;
@@ -1202,7 +1220,7 @@ std::vector<std::unique_ptr<TransportChannel>> dialLink(const ConnectorConfig &c
     std::size_t remaining = slots.size();
     while (remaining > 0) {
         if (nowMs() >= deadline) {
-            reportFail(kUniformHandshakeFailure, nullptr);
+            reportFail(kUniformHandshakeFailure, nullptr, FailureKind::HandshakeTimeout);
             return {};
         }
 #ifdef _WIN32
@@ -1238,7 +1256,7 @@ std::vector<std::unique_ptr<TransportChannel>> dialLink(const ConnectorConfig &c
         if (!fds.empty()) {
             const double remain = deadline - nowMs();
             if (remain <= 0) {
-                reportFail(kUniformHandshakeFailure, nullptr);
+                reportFail(kUniformHandshakeFailure, nullptr, FailureKind::HandshakeTimeout);
                 return {};
             }
             pp_poll(fds.data(), static_cast<unsigned long>(fds.size()),
@@ -1256,7 +1274,8 @@ std::vector<std::unique_ptr<TransportChannel>> dialLink(const ConnectorConfig &c
         // downgrade — and 5.2f says a failed handshake is a failed connection,
         // never a fallback, so we drop it rather than continue on weaker terms.
         if (slot.outcome.kexMode == "psk_ke") {
-            reportFail(kUniformHandshakeFailure, slot.impl->state.get());
+            reportFail(kUniformHandshakeFailure, slot.impl->state.get(),
+                       FailureKind::NotForwardSecret);
             if (cfg.log) cfg.log("PPCP TLS refused: psk_ke (RV 5.2b)");
             return {};
         }
@@ -1354,6 +1373,18 @@ struct Listener::Impl {
     BindRejection lastRejection = BindRejection::None;
     int rejections = 0;
 
+    // ⚠ HOW A TIMEOUT GETS OUT.  `expirePending()` runs at the TOP of the accept
+    // loop and erases the stream in place, so until this existed the two
+    // outcomes it reports — a stream that never handshook, and one that
+    // handshook and never bound — could reach a log and nothing else.  The
+    // embedding saw an ordinary quiet poll and a pairing panel sat on "waiting"
+    // while a phone had in fact arrived and been dropped.  `expirePending()`
+    // fills this; `acceptImpl()` drains it into the caller's HandshakeFailure
+    // on the very next line and returns.  It holds at most one report — these
+    // are seconds apart by construction (the timeouts are 10 s), and the newest
+    // is the one worth showing.
+    HandshakeFailure pendingReport;
+
     // A stream that has been accepted but not yet bound: still handshaking, or
     // handshaken and waiting for its link_bind frame.
     struct Pending {
@@ -1381,11 +1412,21 @@ struct Listener::Impl {
         if (sock != PP_INVALID_SOCKET) pp_close_socket(sock);
     }
 
-    void reject(BindRejection why)
+    // The one place a 2.1c refusal is counted, logged AND made reportable.  It
+    // fills `pendingReport` as well as the counters because every caller of this
+    // is inside the accept loop, where returning is not an option — the loop is
+    // mid-iteration over `pending` — so the report has to be left somewhere for
+    // `acceptImpl()` to pick up.
+    void reject(BindRejection why, double elapsedMs = 0.0)
     {
         lastRejection = why;
         ++rejections;
         if (log) log(std::string("PPCP stream closed: ") + describe(why));
+        pendingReport = HandshakeFailure{};
+        pendingReport.message = std::string("PPCP stream closed: ") + describe(why);
+        pendingReport.kind = FailureKind::BindRejected;
+        pendingReport.bind = why;
+        pendingReport.elapsedMs = elapsedMs;
     }
 
     bool linkHasChannel(const Link &l, uint8_t ch) const
@@ -1423,8 +1464,20 @@ struct Listener::Impl {
                 // 2.1c refusal and is counted as one.  A stream that never got
                 // through the handshake is a dead socket, not a bind failure,
                 // and RV 7.7c has already had its say about naming those.
-                if ((*it)->handshaken) reject(BindRejection::BindTimeout);
-                else if (log) log("PPCP stream closed: handshake did not complete");
+                if ((*it)->handshaken) {
+                    reject(BindRejection::BindTimeout, now - (*it)->started);
+                } else {
+                    if (log) log("PPCP stream closed: handshake did not complete");
+                    // Nothing uniform is owed here and nothing is given away by
+                    // saying so: the stream never authenticated, so there is no
+                    // pair of outcomes to keep indistinguishable.  7.7c is about
+                    // rejecting a counterpart, and this one was never rejected —
+                    // it stopped talking.
+                    pendingReport = HandshakeFailure{};
+                    pendingReport.message = "PPCP stream closed: handshake did not complete";
+                    pendingReport.kind = FailureKind::HandshakeTimeout;
+                    pendingReport.elapsedMs = now - (*it)->started;
+                }
                 if ((*it)->impl) (*it)->impl->abandon();
                 it = pending.erase(it);
             } else {
@@ -1634,6 +1687,27 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
         impl->expirePending();
         impl->expireLinks();
 
+        // Anything the sweep (or a refusal on a previous pass) left behind is
+        // the caller's now.  Returning here rather than carrying on is what
+        // makes a timeout observable at all: `accept()` distinguishes "quiet"
+        // from "refused" by `kind`, and a quiet poll leaves it None.
+        //
+        // ⚠ ONLY ON THE PLAIN accept() PATH, and this is not tidiness.
+        // `acceptInto()` comes through here waiting for ONE named channel to
+        // join a link that already exists (ENC 2.1d, the preview channel).
+        // Returning early on an unrelated stream's refusal would abandon that
+        // wait and report a false failure for a channel that was still coming —
+        // the caller sees `false` and has no way to tell the two apart.  The
+        // accept() caller loses nothing by returning early, because the link
+        // being assembled lives on `impl` and the next call carries on with it;
+        // acceptInto()'s caller has no such loop.
+        const bool plainAccept = (want == nullptr && out_one == nullptr);
+        if (plainAccept && impl->pendingReport.kind != FailureKind::None) {
+            if (fail) *fail = impl->pendingReport;
+            impl->pendingReport = HandshakeFailure{};
+            return nullptr;
+        }
+
         // Drive every pending stream one step, then poll everything at once.
 #ifdef _WIN32
         std::vector<WSAPOLLFD> fds;
@@ -1654,6 +1728,10 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                     // outcomes are the same outcome.
                     if (fail) {
                         fail->message = kUniformHandshakeFailure;
+                        // ⚠ `Handshake` and nothing more specific, on BOTH the
+                        // unresolvable-identity and the wrong-key path.  The
+                        // kind is as uniform as the message and the alert are.
+                        fail->kind = FailureKind::Handshake;
                         fail->alert = p.impl->state->alert;
                         fail->alertWasSent = p.impl->state->alertWasSent;
                         fail->elapsedMs = nowMs() - p.started;
@@ -1668,6 +1746,10 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                         // RV 5.2b — refuse, and refuse as a handshake failure (5.2f).
                         if (fail) {
                             fail->message = kUniformHandshakeFailure;
+                            // Nameable: the handshake SUCCEEDED and policy then
+                            // refused it (5.2b), so this is not one of the two
+                            // outcomes 7.7c holds together.
+                            fail->kind = FailureKind::NotForwardSecret;
                             fail->elapsedMs = nowMs() - p.started;
                         }
                         if (impl->log) impl->log("PPCP TLS refused: psk_ke (RV 5.2b)");

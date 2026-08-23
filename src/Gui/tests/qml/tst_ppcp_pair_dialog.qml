@@ -54,6 +54,10 @@ Item {
         property bool   connected:       false
         property string peerName:        ""
         property string status:          "Waiting for a device on port 7788."
+        // A phone that arrived and did not become a link.  Names match the real
+        // Q_PROPERTYs so a rename breaks this file rather than drifting.
+        property string lastFailureText: ""
+        property int    failureCount:    0
 
         property int publishCount: 0
         property int closeCount:   0
@@ -74,6 +78,7 @@ Item {
             codeSecondsLeft = 272
             codeEndpoints = ["192.168.1.24:7788", "10.0.0.4:7788"]
             status = "Scan the code with the capture device."
+            lastFailureText = ""
             codeChanged()
             return true
         }
@@ -220,6 +225,41 @@ Item {
             fakeHost.closePairingCode()
             verify(stage.text.indexOf("No code") >= 0, stage.text)
             compare(stage.color, Theme.colorText3)
+        }
+
+        // A refused phone displaces "Waiting…", and a phone that gets in
+        // afterwards displaces the refusal.
+        function test_a_failed_arrival_displaces_the_waiting_line() {
+            dialog.open()
+            tryCompare(fakeHost, "publishCount", 1)
+            var stage = findByName(dialog.contentItem, "ppcpPairStage")
+            verify(stage !== null)
+            verify(stage.text.indexOf("Waiting") >= 0, stage.text)
+
+            // A phone arrived and was refused.  ⚠ BOTH properties move: the
+            // count is what a repeat of the same failure changes, and the arm
+            // reads it so the binding re-evaluates.
+            fakeHost.lastFailureText = "A phone connected but did not finish "
+                                     + "securing the link in time, and was dropped."
+            fakeHost.failureCount = 1
+            verify(stage.text.indexOf("did not finish securing") >= 0, stage.text)
+            compare(stage.color, Theme.colorWarn)
+
+            // RV 4.4a — expiry is reported AS expiry, on its own line, and a
+            // failure must not have swallowed it.
+            var countdown = findByName(dialog.contentItem, "ppcpPairCountdown")
+            verify(countdown !== null)
+            verify(countdown.text.indexOf("expires") >= 0, countdown.text)
+
+            // A phone that gets in afterwards has answered the question.
+            fakeHost.connected = true
+            fakeHost.peerName = "Pixel 8"
+            verify(stage.text.indexOf("Pixel 8") >= 0, stage.text)
+            compare(stage.color, Theme.colorGood)
+
+            fakeHost.connected = false
+            fakeHost.peerName = ""
+            fakeHost.closePairingCode()
         }
 
         // 7.3b — a displayed code is invalidated when its panel goes, used or

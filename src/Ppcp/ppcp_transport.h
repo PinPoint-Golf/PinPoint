@@ -151,11 +151,46 @@ struct TlsOutcome {
 // what it returns AND in how long it takes (7.7c).  So this struct carries no
 // field that could tell the two apart, `message` is drawn from a fixed set that
 // does not name the cause, and the resolver's verdict is never logged.
+//
+// ⚠ THE UNIFORMITY BINDS THE WIRE, NOT THE HOST'S OWN SCREEN.  7.7c is about
+// what the COUNTERPART can observe — "in what it returns or in how long it
+// takes" — and 7.7b about what is disclosed "to an unauthenticated
+// counterpart".  Neither reaches what this host shows its own operator, and RV
+// 4.2b and §8 ask in terms for a failure a user can act on.  So `kind` below
+// exists to let the embedding SAY SOMETHING, and the one kind that must stay
+// silent about its cause is the one that always was.
+enum class FailureKind {
+    None = 0,          // nothing failed.  A poll that timed out with no dial is
+                       // NOT a failure and leaves this None — that is how a
+                       // caller tells "quiet" from "refused".
+    // ⚠ UNIFORM, AND THE REASON IS NOT AVAILABLE HERE BY DESIGN.  An
+    // unresolvable identity and a wrong key both arrive as this, with the same
+    // `message` and the same `alert`.  Nothing may be added to this struct that
+    // tells them apart, and nothing that fills it may consult the resolver's
+    // verdict: that IS 5.3c/7.7c, and 5.3c1 records that the wrong-key branch
+    // is unreachable anyway while K_tls and K_id share one PRK.
+    Handshake,
+    NotForwardSecret,  // 5.2b — psk_ke, refused AFTER a completed handshake, so
+                       // it is a policy outcome and not an authentication one.
+    HandshakeTimeout,  // no handshake completed inside handshakeTimeoutMs.  The
+                       // stream never authenticated, so there is nothing to be
+                       // uniform ABOUT: it is a dead socket, not a rejection.
+    BindRejected,      // ENC 2.1c — see `bind` for which.  Post-handshake.
+};
+// Plain words for a kind, safe for a log and for a screen.  ⚠ `Handshake`'s
+// text must never grow a cause.
+const char *describe(FailureKind k);
+
 struct HandshakeFailure {
     std::string message;        // uniform text; never says which check failed
     int alert = -1;             // TLS alert seen on the wire, -1 if none
     bool alertWasSent = false;  // true: we sent it; false: the peer sent it
     double elapsedMs = 0.0;     // for the timing half of 7.7c / RT-11
+
+    // Which of the outcomes above this is.  `None` means nothing failed.
+    FailureKind kind = FailureKind::None;
+    // Only meaningful when `kind == BindRejected`; `None` otherwise.
+    BindRejection bind = BindRejection::None;
 };
 
 // ── One channel: one TCP connection, one TLS session ────────────────────────
