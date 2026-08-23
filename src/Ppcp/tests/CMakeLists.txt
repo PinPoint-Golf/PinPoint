@@ -517,7 +517,7 @@ if(PP_PPCP_PLAINTEXT_HARNESS)
 
     if(_pp_sim AND EXISTS "${_pp_sim}" AND EXISTS "${_pp_scenarios}")
         message(STATUS "PinPointTests: ppcp-sim at ${_pp_sim}")
-        foreach(_row IOP-3 IOP-4 IOP-5 IOP-6 IOP-7 IOP-8 IOP-9 IOP-10)
+        foreach(_row IOP-3 IOP-3-live IOP-4 IOP-5 IOP-6 IOP-7 IOP-8 IOP-9 IOP-10)
             string(REPLACE "-" "_" _rowname "${_row}")
             string(TOLOWER "${_rowname}" _rowname)
             add_test(NAME ppcp_interop_${_rowname}

@@ -215,6 +215,7 @@ private:
     PpcpShotBridge         m_shots;
     PpcpAnnotationStore    m_annotations;
     std::vector<EventFn>   m_hooks;
+    void onRelationsMoved();
     DeclarationFn          m_onDeclare;
     RelationsFn            m_onRelations;
 

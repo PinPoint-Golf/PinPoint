@@ -84,6 +84,10 @@ public:
         // never says a bundle MUST carry a `declare` at all — so it is counted
         // rather than assumed away. I34's identity is unresolvable without it.
         std::size_t capturesUnattributable = 0;
+        // ENC 6g / E7 — how many payloads named their container.  A zero
+        // against a non-zero `clipsWritten` means a sender that has not taken
+        // E7 yet, and the extension came off the Stream-kind fallback.
+        std::size_t payloadsWithContainer = 0;
         std::size_t clipsWritten = 0;
         std::size_t clipBytes = 0;
         std::size_t commitsQueued = 0;
@@ -113,12 +117,13 @@ private:
     void onPayloadChunk(const ppcp_msg *m);
     void onPayloadEnd(const ppcp_msg *m);
     std::string sessionDir();
-    std::string clipPath(const std::string &captureId) const;
+    std::string clipPath(const std::string &captureId, const std::string &container) const;
 
     struct OpenPayload {
         std::string captureId;
         std::string path;
         std::uint64_t declaredBytes = 0;
+        std::string container;     // ENC 6g / E7 — the IANA media type, or empty
         std::uint64_t written = 0;
         void *file = nullptr;      // FILE*, opaque so the header stays clean
     };

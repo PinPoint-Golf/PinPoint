@@ -129,13 +129,32 @@ void PpcpHostPeer::attach(PeerConnection *link, PpcpEngine *engine)
 
     // 6.1f — a published or received relation moves every camera's mapping onto
     // `tb:host`.  Wired here so the hook survives a re-attach.
-    m_live.setRelationsCallback([this] { if (m_onRelations) m_onRelations(m_live); });
+    m_live.setRelationsCallback([this] { onRelationsMoved(); });
 }
 
 void PpcpHostPeer::setRelationsHook(RelationsFn f)
 {
     m_onRelations = std::move(f);
-    m_live.setRelationsCallback([this] { if (m_onRelations) m_onRelations(m_live); });
+    m_live.setRelationsCallback([this] { onRelationsMoved(); });
+}
+
+// ⚠ TWO THINGS HAPPEN WHEN A RELATION MOVES, AND ONLY ONE OF THEM IS THE UI'S.
+//
+// The camera seam is re-evaluated at the new relation — that is what the hook
+// has always been for.  The other is erratum E29 / F-S5-1: a Candidate this
+// host retained because there was no relation into `timebase_ref` is now
+// convertible, and the arbiter cannot notice for itself.  Missing it is silent
+// — no error, no Shot, every Candidate present exactly as 8.2d requires — and
+// on a live link it is the NORMAL case, because §6.3's burst takes a moment to
+// converge and a device nominates as soon as it hears something.
+//
+// `PpcpShotBridge::observe()` catches the relation ARRIVING from the peer; this
+// catches the one this host's own estimator PUBLISHED.  6.3d is why they are
+// two paths and not one.
+void PpcpHostPeer::onRelationsMoved()
+{
+    m_shots.reconsider();
+    if (m_onRelations) m_onRelations(m_live);
 }
 
 void PpcpHostPeer::drainEvents()

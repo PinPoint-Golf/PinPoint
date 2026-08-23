@@ -464,3 +464,103 @@ TEST(PpcpArbitration, NominatingFromASourceWeDidNotDeclareIsRefused)
     EXPECT_EQ(F.bridge.stats().nominationsRefused, 1u);
     EXPECT_EQ(F.bridge.stats().nominated, 0u);
 }
+
+// ── Erratum E29 / F-S5-1 — A RETAINED CANDIDATE IS RECONSIDERED ────────────
+//
+// 8.2d1.  The test above asserts that a Candidate with no relation is retained
+// and never grouped, which is right and was where this host stopped.  What 8.2d
+// did not say, and E29 now does, is what happens when the relation ARRIVES —
+// which on a live link is the normal case, because §6.3's burst takes a moment
+// to converge and a device nominates the instant it hears something.
+//
+// ⚠ THE OLD BEHAVIOUR WAS SILENT AND LOOKED CORRECT.  No error, no Shot, and
+// every Candidate present in `retainedCount()` exactly as 8.2d requires.  A
+// host could run a whole Session arbitrating nothing and every assertion in
+// this file would still have passed.
+TEST(PpcpArbitration, ACandidateRetainedForWantOfARelationIsReconsideredWhenItArrives)
+{
+    Fixture F;
+    ASSERT_NO_FATAL_FAILURE(F.build());
+    ASSERT_NO_FATAL_FAILURE(F.declare());
+    ASSERT_NO_FATAL_FAILURE(F.openSession());
+    ASSERT_NO_FATAL_FAILURE(F.startBridge());
+
+    // Nominated BEFORE any relation exists — the sync burst has not converged.
+    const std::int64_t at = F.nowNs() + 10 * kMs;
+    F.deviceNominates(at, 0.9, kBasisAcoustic);
+    ppcp_sim_clock_advance(&F.hostClk, 400 * kMs);
+    F.bridge.pump(F.nowNs());
+
+    ASSERT_EQ(F.shots.size(), 0u) << "8.2d: with no relation there is not even an instant";
+    ASSERT_GE(F.bridge.retainedCount(), 1u);
+    ASSERT_EQ(F.bridge.stats().reconsidered, 0u);
+
+    // The relation arrives.  8.2d1: what was retained for want of one is
+    // reconsidered, and this host has to say so — the arbiter owns no clock and
+    // no event loop, so it cannot notice for itself.
+    F.declareRelation(/*offsetNs=*/0, /*sigmaNs=*/1000.0);
+    const std::size_t readmitted = F.bridge.reconsider();
+    EXPECT_GE(readmitted, 1u) << "E29: the Candidate is re-admitted to arbitration";
+    EXPECT_GE(F.bridge.stats().reconsidered, 1u);
+
+    ppcp_sim_clock_advance(&F.hostClk, 400 * kMs);
+    F.bridge.pump(F.nowNs());
+    EXPECT_EQ(F.shots.size(), 1u) << "and the Shot that could not be issued now is";
+    EXPECT_EQ(F.bridge.retainedCount(), 0u);
+}
+
+// ── Erratum E28 / F-S5-3 — AN IMPORTED FRAME NEVER REACHES THE ARBITER ─────
+//
+// MSG §9.1: a device offers a Session it recorded earlier and replays its
+// bundle down the link a LIVE Session is running on.  `ppcp_event::imported`
+// marks those frames, and an embedding that ignores the flag arbitrates two
+// Sessions as one — the replayed Candidates were nominated against another
+// `timebase_ref`, possibly days ago, and their instants are numerically
+// plausible, so 8.2 groups them by coincidence with live ones and issues Shots
+// that never happened.  Nothing is malformed and nothing goes red.
+//
+// The guard is asserted here as a branch and end to end in the `IOP-3-live`
+// interoperability row, which replays a real bundle over a real socket.
+TEST(PpcpArbitration, AnImportedCandidateIsCountedAndNeverArbitrated)
+{
+    Fixture F;
+    ASSERT_NO_FATAL_FAILURE(F.build());
+    ASSERT_NO_FATAL_FAILURE(F.declare());
+    ASSERT_NO_FATAL_FAILURE(F.openSession());
+    ASSERT_NO_FATAL_FAILURE(F.startBridge());
+    F.declareRelation(0, 1000.0);
+
+    // A live Candidate, so the arbiter has a group for an imported one to be
+    // wrongly folded into — which is the failure, not a crash.
+    F.deviceNominates(F.nowNs() + 10 * kMs, 0.9, kBasisAcoustic);
+    const std::size_t liveForeign = F.bridge.stats().observedForeign;
+    ASSERT_GE(liveForeign, 1u);
+
+    // The same shape of Candidate, arriving as part of a REPLAYED Session.
+    ppcp_candidate c{};
+    ppcp_instant at{};
+    ASSERT_EQ(ppcp_instant_make_z(&at, F.dev.tb.c_str(), F.nowNs() + 12 * kMs), PPCP_OK);
+    ASSERT_EQ(ppcp_candidate_make(&c, "imported-c-1", F.dev.peerId.c_str(), "src-mic",
+                                  kBasisAcoustic, &at, 0.9), PPCP_OK);
+    ppcp_msg m{};
+    ASSERT_EQ(ppcp_msg_init(&m, PPCP_MT_CANDIDATE, 4242), PPCP_OK);
+    m.body.candidate.candidate = c;
+
+    ppcp_event ev{};
+    ev.kind = PPCP_EVENT_CANDIDATE;
+    ev.msg = &m;
+    ev.status = PPCP_OK;
+    ev.imported = true;
+    F.bridge.observe(ev);
+
+    EXPECT_EQ(F.bridge.stats().observedForeign, liveForeign)
+        << "E28: an imported Candidate is not observed by the live arbiter";
+    EXPECT_EQ(F.bridge.stats().importedIgnored, 1u)
+        << "and it is COUNTED, so a routed replay is distinguishable from no replay";
+
+    // The same event with the flag clear IS arbitrated — otherwise this test
+    // would pass for a bridge that had simply stopped observing Candidates.
+    ev.imported = false;
+    F.bridge.observe(ev);
+    EXPECT_EQ(F.bridge.stats().observedForeign, liveForeign + 1);
+}

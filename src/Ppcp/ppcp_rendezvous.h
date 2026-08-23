@@ -255,6 +255,19 @@ public:
     // Resolve a discovered `rid` against every pairing held.  Returns the
     // pairingId on a match and an empty string otherwise, which 3.4c makes a
     // refusal to connect.  The caller never gets to see "close enough".
+    // RV 5.3a1 (erratum E21) — the PSK identity to offer when THIS peer dials
+    // (the discovery path; on the pairing-code path the scanner dials and draws
+    // its own).  Draws `rn2` until neither it nor the tag carries a `0x00`
+    // octet, because a TLS stack that lengths the identity with `strlen`
+    // truncates it and the handshake fails one connection in sixteen.
+    //
+    // ⚠ NOTHING ELSE IN THIS APPLICATION MAY CALL `ppcp_rv_psk_identity()` FOR
+    // A CONNECTION.  That entry point does not reject a zero-bearing draw, on
+    // purpose, so §10.2's test vector still reproduces byte for byte — which
+    // makes it correct for a vector and wrong for a socket.
+    bool drawPskIdentity(const std::string &pairingId, PskIdentity *out,
+                         std::string *whyNot = nullptr) const;
+
     std::string resolveRid(const std::uint8_t rn[PPCP_RV_RN_BYTES],
                            const std::uint8_t rid[PPCP_RV_RID_BYTES]) const;
 

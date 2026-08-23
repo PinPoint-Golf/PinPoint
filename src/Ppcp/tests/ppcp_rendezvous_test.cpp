@@ -680,3 +680,100 @@ TEST(PpcpRendezvous, ReapErasesWhatCanNeverAuthenticateAgainAndKeepsWhatCan)
     ASSERT_EQ(rv.codes().size(), 1u);
     EXPECT_EQ(rv.codes()[0].pairingId, b.pairingId);
 }
+
+// ── Erratum E25 — `RV` 3.3d's ONE range syntax, and the case that was wrong ─
+//
+// A version range is `LOW` or `LOW-HIGH`, each endpoint `MAJOR.MINOR`; both
+// endpoints are inclusive and SHARE a MAJOR; a bare `LOW` is `LOW-LOW`; support
+// across two MAJORs is several ranges separated by a comma, most preferred
+// first.  3.3e adds that the same syntax is used for `detail.supported` and is
+// NOT used for `hello.versions`, which stays an ordered list.
+//
+// ⚠ THE COMMA CASE IS WHY THIS TEST EXISTS.  The parser this replaced read bare
+// MAJORs, so `1.0-1.2` worked by accident (both endpoints parse to 1) and
+// `2.0-2.1,1.4-1.6` did not: the high endpoint ran to the comma, giving 2..2,
+// and a peer offering major 1 was silently refused.  Two conformant peers would
+// have failed to discover each other with nothing to say why.
+TEST(PpcpRendezvous, ThePvRangeSyntaxOfErratumE25)
+{
+    // A bare LOW is the range LOW-LOW.
+    EXPECT_TRUE(pvAcceptsMajor("1.0", 1));
+    EXPECT_FALSE(pvAcceptsMajor("1.0", 2));
+
+    // LOW-HIGH within one MAJOR, inclusive at both ends.
+    EXPECT_TRUE(pvAcceptsMajor("1.0-1.2", 1));
+    EXPECT_FALSE(pvAcceptsMajor("1.0-1.2", 2));
+
+    // Several ranges, comma separated, most preferred first — the case that
+    // was broken.  BOTH majors are accepted, and order is preference and not
+    // precedence, so it changes no answer here.
+    EXPECT_TRUE(pvAcceptsMajor("2.0-2.1,1.4-1.6", 2));
+    EXPECT_TRUE(pvAcceptsMajor("2.0-2.1,1.4-1.6", 1));
+    EXPECT_FALSE(pvAcceptsMajor("2.0-2.1,1.4-1.6", 3));
+    EXPECT_TRUE(pvAcceptsMajor("2.0,1.0", 1));
+
+    // 3.3d — "a reader that cannot parse a range IGNORES that advertisement
+    // rather than guessing", so anything malformed ANYWHERE makes the whole
+    // record unusable.  Accepting on the components that did parse would be
+    // guessing what the rest meant.
+    EXPECT_FALSE(pvAcceptsMajor("1", 1))          << "a bare MAJOR is not an endpoint";
+    EXPECT_FALSE(pvAcceptsMajor("1-2", 1))        << "10.1b endpoints are MAJOR.MINOR";
+    EXPECT_FALSE(pvAcceptsMajor("1.0-2.0", 1))    << "the endpoints must share a MAJOR";
+    EXPECT_FALSE(pvAcceptsMajor("1.4-1.2", 1))    << "HIGH below LOW is not a range";
+    EXPECT_FALSE(pvAcceptsMajor("1.0,,2.0", 1))   << "an empty component";
+    EXPECT_FALSE(pvAcceptsMajor("1.0,", 1))       << "a trailing comma";
+    EXPECT_FALSE(pvAcceptsMajor("1.x", 1))        << "a non-numeric MINOR";
+    EXPECT_FALSE(pvAcceptsMajor(".0", 1));
+    EXPECT_FALSE(pvAcceptsMajor("1.", 1));
+    EXPECT_FALSE(pvAcceptsMajor("", 1));
+    // One bad component poisons the record even though the other would match.
+    EXPECT_FALSE(pvAcceptsMajor("1.0-1.2,junk", 1));
+}
+
+// ── Erratum E21 — `RV` 5.3a1, and the intermittent failure it prevents ─────
+//
+// The PSK identity is `0x01 || rn2 || tag`, 17 octets, and it is BINARY (5.3f).
+// Several widely-used TLS stacks carry a PSK identity as a C string and take
+// its length with `strlen`: an embedded `0x00` truncates it, the server
+// resolves nothing, and the handshake fails ROUGHLY ONE CONNECTION IN SIXTEEN —
+// 17 octets each with a 1-in-256 chance of being zero.  At a driving range that
+// is diagnosed as a network fault, and `ppcp_transport_test` carries the
+// demonstration against OpenSSL's own TLS 1.2 PSK interface.
+//
+// So a live connection draws through `ppcp_rv_psk_identity_draw()`, which
+// redraws `rn2` until neither it nor the tag carries a zero.  Nothing changes at
+// the server: 5.3b recomputes the tag from the `rn2` it received exactly as
+// before, which is what the second half of this test asserts by resolving the
+// drawn identity against the publisher that issued the pairing.
+TEST(PpcpRendezvous, ADrawnPskIdentityCarriesNoZeroOctet)
+{
+    Bay bay;
+    ASSERT_TRUE(bay.open());
+
+    // ⚠ ONE DRAW IS NOT EVIDENCE.  A zero-bearing identity appears about once
+    // in sixteen, so a single clean draw says nothing at all — which is exactly
+    // why the defect survived a session of manual testing.  256 draws puts the
+    // chance of missing a broken implementation below 1 in 10^6.
+    for (int i = 0; i < 256; ++i) {
+        PskIdentity id;
+        std::string why;
+        ASSERT_TRUE(bay.rv.drawPskIdentity(bay.code.pairingId, &id, &why)) << why;
+        ASSERT_EQ(id.size(), static_cast<std::size_t>(PPCP_RV_PSK_IDENTITY_BYTES));
+        EXPECT_EQ(id[0], 0x01) << "5.3a — the identity is versioned";
+        for (std::size_t b = 0; b < id.size(); ++b)
+            ASSERT_NE(id[b], 0x00) << "draw " << i << " carried a zero at octet " << b;
+    }
+
+    // 5.3b — the server recomputes the tag from the `rn2` it received, so a
+    // drawn identity resolves exactly as an undrawn one does.  Without this the
+    // test would pass for a draw that produced 17 zero-free bytes of nonsense.
+    PskIdentity id;
+    ASSERT_TRUE(bay.rv.drawPskIdentity(bay.code.pairingId, &id));
+    ResolvedPairing out;
+    EXPECT_TRUE(bay.rv.identityResolver()(id.data(), id.size(), out));
+    EXPECT_EQ(out.pairingId, bay.code.pairingId);
+
+    // 5.3d — an unknown pairing is refused, and says nothing about which.
+    PskIdentity none;
+    EXPECT_FALSE(bay.rv.drawPskIdentity("pairing:never-issued", &none));
+}

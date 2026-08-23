@@ -157,6 +157,30 @@ IOP-9)
     HOST_ASSERT="link_up=true session_opened=true streams_rx>=2 preview_streams_rx>=1 captures_rx>=2 captures_absent>=1 captures_not_retained>=1 preview_payload_frames=0 errors_fatal=0"
     ;;
 
+# ── IOP-3-live — a stored Session REPLAYED onto the live link.  E28 ────────
+#
+# MSG §9.1: a device offers a Session it recorded earlier, the host accepts, and
+# the device replays the bundle down the SAME link a live Session is running on.
+# That is the pairing F-S5-3 was found in, and what it found was silent: the
+# replayed `session_open` names a different `session_id`, and a host reading
+# `CORE` 4.1a's immutability rule as being about *the same* id rebound its own
+# `timebase_ref` to the exporting device's clock.  Every subsequent `t0` was
+# then expressed in a timebase the live Session had never declared, and two
+# Sessions' Candidates were arbitrated as one.  Nothing on the wire was
+# malformed and no counter moved.
+#
+# ⚠ SO THE ASSERTION IS A COMPARISON, NOT A COUNTER.  The host records the live
+# Session's id and `timebase_ref` when it opens and reads them back from the
+# ENGINE at exit; they must be identical, the imported Session must be present
+# and distinct, and not one imported frame may have reached the live arbiter.
+IOP-3-live)
+    WHAT="E28 — a replayed Session is imported, and the live timebase_ref does not move"
+    SIM_DECL="$SCEN/reference-capture.json"
+    SIM_SCENARIO="offer-session"
+    SIM_EXPECT="violations=0,offers_tx>=1,accepts_rx>=1,replays>=1"
+    HOST_ASSERT="link_up=true session_opened=true offers_rx>=1 offers_accepted>=1 live_timebase_ref_unchanged=true live_session_id_unchanged=true imported_session_is_separate=true imported_ignored>=1 issued=0 errors_fatal=0"
+    ;;
+
 # ── IOP-3 (import half) and IOP-10 (read direction) ────────────────────────
 #
 # A bundle the DEVICE wrote, through this host's real offline path.  No socket
@@ -461,6 +485,22 @@ except Exception as e:                                     # noqa: BLE001
 # answer is no, for all of them.
 d["counterpart_offsets"] = sum(1 for t in d.get("counterpart_timebases", [])
                                if t.get("has_offset"))
+
+# ⚠ E28 / F-S5-3 — THREE DERIVED FACTS, AND NONE OF THEM IS VISIBLE ON THE WIRE.
+# CORE 4.1a and I16 make a Session's `timebase_ref` immutable for its life, and
+# an offered Session is a DIFFERENT Session.  A host that rebound the live one
+# to the exporting device's clock produced no malformed frame and no error: the
+# only way to see it is to read the live Session's identity before and after a
+# replay and compare.  Empty at both ends is NOT unchanged — that would pass for
+# a host that never opened a Session at all — so a reading is required.
+_open_tb = d.get("live_timebase_ref_at_open", "")
+_exit_tb = d.get("live_timebase_ref_at_exit", "")
+_open_id = d.get("live_session_id_at_open", "")
+_exit_id = d.get("live_session_id_at_exit", "")
+_imp_id = d.get("imported_session_id", "")
+d["live_timebase_ref_unchanged"] = bool(_open_tb) and _open_tb == _exit_tb
+d["live_session_id_unchanged"] = bool(_open_id) and _open_id == _exit_id
+d["imported_session_is_separate"] = bool(_imp_id) and _imp_id != _exit_id
 
 bad = []
 for a in sys.argv[3:]:

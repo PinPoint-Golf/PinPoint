@@ -21,6 +21,7 @@
 #include <arpa/inet.h>
 
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -78,26 +79,75 @@ bool parseTxtRecord(const std::uint8_t *txt, std::size_t len, RvAdvertisement *o
     return true;
 }
 
+// ── `RV` 3.3d / 3.3e — THE ONE RANGE SYNTAX (erratum E25) ──────────────────
+//
+// A version range is `LOW` or `LOW-HIGH`, each endpoint a `MAJOR.MINOR` as
+// `CORE` 10.1b defines it.  Both endpoints are INCLUSIVE and SHARE a MAJOR; a
+// bare `LOW` is the range `LOW-LOW`.  Support across two MAJORs is several
+// ranges separated by a comma, most preferred first — `2.0-2.1,1.4-1.6`.
+//
+// ⚠ THE OLD PARSER READ BARE MAJORS AND GOT THE COMMA CASE WRONG.  `1-2` meant
+// majors 1 through 2, so `1.0-1.2` accidentally worked (both endpoints parse to
+// 1) and `2.0-2.1,1.4-1.6` did not: the second endpoint parsed as `strtol`
+// stopped at the comma, giving the range 2..2, and a peer supporting major 1
+// was refused with nothing to say why.  E25 settled the syntax and this is it.
+//
+// 3.3d's last sentence is the failure mode: "a reader that cannot parse a range
+// IGNORES that advertisement rather than guessing."  So anything malformed
+// anywhere in the list makes the whole record unusable and this returns false —
+// it does not skip the bad component and accept on the others.
+bool parseEndpoint(const std::string &s, int *major, int *minor)
+{
+    if (s.empty()) return false;
+    const std::size_t dot = s.find('.');
+    if (dot == std::string::npos || dot == 0 || dot + 1 >= s.size()) return false;
+    auto num = [](const std::string &t, int *out) {
+        if (t.empty()) return false;
+        for (char ch : t) if (ch < '0' || ch > '9') return false;
+        errno = 0;
+        const long v = std::strtol(t.c_str(), nullptr, 10);
+        if (errno != 0 || v < 0 || v > 100000) return false;
+        *out = static_cast<int>(v);
+        return true;
+    };
+    return num(s.substr(0, dot), major) && num(s.substr(dot + 1), minor);
+}
+
 bool pvAcceptsMajor(const std::string &pv, int major)
 {
     if (pv.empty()) return false;
-    auto majorOf = [](const std::string &s, int *m) {
-        if (s.empty()) return false;
-        char *end = nullptr;
-        const long v = std::strtol(s.c_str(), &end, 10);
-        if (end == s.c_str() || v < 0) return false;
-        *m = static_cast<int>(v);
-        return true;
-    };
-    const std::size_t dash = pv.find('-');
-    if (dash == std::string::npos) {
-        int m = 0;
-        return majorOf(pv, &m) && m == major;
+
+    bool hit = false;
+    std::size_t at = 0;
+    while (at <= pv.size()) {
+        const std::size_t comma = pv.find(',', at);
+        const std::string range =
+            pv.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+        if (range.empty()) return false;         // "1.0,,2.0" is not parseable
+
+        const std::size_t dash = range.find('-');
+        int loMajor = 0, loMinor = 0, hiMajor = 0, hiMinor = 0;
+        if (dash == std::string::npos) {
+            if (!parseEndpoint(range, &loMajor, &loMinor)) return false;
+            hiMajor = loMajor;                    // a bare LOW is LOW-LOW
+            hiMinor = loMinor;
+        } else {
+            if (!parseEndpoint(range.substr(0, dash), &loMajor, &loMinor)) return false;
+            if (!parseEndpoint(range.substr(dash + 1), &hiMajor, &hiMinor)) return false;
+        }
+        // 3.3d — the endpoints share a MAJOR, and HIGH is not below LOW.  Both
+        // are parse failures rather than empty ranges: an advertisement saying
+        // `1.4-1.2` is one this reader cannot make sense of, and 3.3d says
+        // ignore rather than guess which end was meant.
+        if (loMajor != hiMajor) return false;
+        if (hiMinor < loMinor) return false;
+
+        if (loMajor == major) hit = true;
+        if (comma == std::string::npos) break;
+        at = comma + 1;
+        if (at == pv.size()) return false;        // a trailing comma
     }
-    int lo = 0, hi = 0;
-    if (!majorOf(pv.substr(0, dash), &lo)) return false;
-    if (!majorOf(pv.substr(dash + 1), &hi)) return false;
-    return major >= lo && major <= hi;
+    return hit;
 }
 
 bool instanceNameMatchesRid(const std::string &instanceName,

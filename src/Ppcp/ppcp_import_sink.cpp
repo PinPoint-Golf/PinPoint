@@ -68,19 +68,55 @@ std::string sanitise(const std::string &id)
     return out;
 }
 
-// ⚠ A GUESS, AND IT SHOULD NOT HAVE TO BE ONE.  ENC §6 carries no container or
-// media type on `payload_begin`: there is `bytes`, a `digest`, a `chunk_bytes`
-// and nothing that says what the bytes ARE.  CORE 5.7's `format.codec` is on
-// the capture profile and is a CODEC ("hevc"), not a container ("mp4"), and it
-// reaches this host through Source -> CaptureProfile -> Stream -> Capture,
-// three hops from the payload.  So a receiver writing a clip to disk has to
-// infer the extension from the Stream kind.  Reported as a specification gap.
-const char *extensionFor(const std::string &streamKind)
+// ── THE GAP THIS FILE REPORTED IS CLOSED: `ENC` 6g, erratum E7 ─────────────
+//
+// It used to say here that `payload_begin` carried `bytes`, a `digest`, a
+// `chunk_bytes` and nothing that said what the bytes ARE — that `format.codec`
+// is a CODEC ("hevc") three hops away through Source → CaptureProfile → Stream
+// → Capture, and that a receiver writing a clip to disk therefore had to guess
+// its extension from the Stream kind.  That was reported and E7 took it:
+// `payload_begin.container` is an IANA media type, REQUIRED wherever the bytes
+// are container-framed, and 6h forbids inferring one from `format.codec`, from
+// `Stream.kind`, or by sniffing.
+//
+// So the declared container is used where there is one.  The Stream-kind table
+// survives only for the case 6g leaves open — raw samples the profile describes
+// in full, where there IS no container — and it is now a fallback with a
+// clause behind it rather than a guess.
+const char *extensionForContainer(const std::string &mediaType)
+{
+    if (mediaType == "video/mp4")         return ".mp4";
+    if (mediaType == "video/quicktime")   return ".mov";
+    if (mediaType == "video/x-matroska")  return ".mkv";
+    if (mediaType == "audio/mp4")         return ".m4a";
+    if (mediaType == "audio/wav" || mediaType == "audio/x-wav" ||
+        mediaType == "audio/vnd.wave")    return ".wav";
+    if (mediaType == "audio/aac")         return ".aac";
+    if (mediaType == "application/octet-stream") return ".bin";
+    return nullptr;   // known to be container-framed, unknown to this table
+}
+
+// ⚠ 6h — A FALLBACK, NOT AN INFERENCE, AND THE DIFFERENCE MATTERS.  Naming a
+// file is not deciding what it contains: nothing downstream reads the extension
+// to choose a demuxer.  Where the peer declared a container this host does not
+// recognise, the subtype is used verbatim rather than mapped to something it
+// might not be.
+const char *extensionForStreamKind(const std::string &streamKind)
 {
     if (streamKind == PPCP_STREAM_KIND_VIDEO)   return ".mp4";
     if (streamKind == PPCP_STREAM_KIND_PREVIEW) return ".mp4";
     if (streamKind == PPCP_STREAM_KIND_AUDIO)   return ".m4a";
     return ".bin";
+}
+
+std::string extensionFrom(const std::string &container, const std::string &streamKind)
+{
+    if (container.empty()) return extensionForStreamKind(streamKind);
+    if (const char *known = extensionForContainer(container)) return known;
+    const std::size_t slash = container.find('/');
+    const std::string sub = (slash == std::string::npos) ? container
+                                                         : container.substr(slash + 1);
+    return sub.empty() ? std::string(".bin") : "." + sanitise(sub);
 }
 
 }  // namespace
@@ -113,7 +149,8 @@ std::string PpcpImportSink::sessionDir()
     return m_stats.sessionDir;
 }
 
-std::string PpcpImportSink::clipPath(const std::string &captureId) const
+std::string PpcpImportSink::clipPath(const std::string &captureId,
+                                    const std::string &container) const
 {
     auto it = m_captureStream.find(captureId);
     std::string kind;
@@ -122,7 +159,7 @@ std::string PpcpImportSink::clipPath(const std::string &captureId) const
         if (k != m_streamKind.end()) kind = k->second;
     }
     std::filesystem::path p(m_stats.sessionDir);
-    p /= sanitise(captureId) + extensionFor(kind);
+    p /= sanitise(captureId) + extensionFrom(container, kind);
     return p.string();
 }
 
@@ -185,7 +222,13 @@ void PpcpImportSink::onPayloadBegin(const ppcp_msg *m)
 
     m_open.captureId = idStr(m->body.payload_begin.capture_id);
     m_open.declaredBytes = m->body.payload_begin.bytes;
-    m_open.path = clipPath(m_open.captureId);
+    // ENC 6g / MSG 8.3h (E7) — the container the SENDER declared, carried
+    // through to where the bytes land.  Absent means raw samples the Stream's
+    // profile describes in full, which is the only case 6g leaves open.
+    m_open.container = m->body.payload_begin.has_container
+                           ? idStr(m->body.payload_begin.container) : std::string();
+    if (!m_open.container.empty()) ++m_stats.payloadsWithContainer;
+    m_open.path = clipPath(m_open.captureId, m_open.container);
     m_open.file = std::fopen(m_open.path.c_str(), "wb");
 }
 

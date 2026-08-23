@@ -13,6 +13,8 @@
 # The profile set is the CLAIM (docs/ppcp-conformance.md §1): seven of the
 # eight, with Mint withheld — this host parses `authority: device` and never
 # originates it.  Passing it here and claiming it there would be two claims.
+# CT-I6 is the negative row that asserts exactly that, and since libppcp's S5
+# fix it runs against a minting capture peer and passes.
 set -eu
 
 HOST="$1"
@@ -56,41 +58,39 @@ echo "── the row table ─────────────────�
 cat "$WORK/pps-conform.md" >&2 || true
 
 # ⚠ EVERY ROW IS RUN AND EVERY ROW IS RECORDED.  `pps-conform.md` and
-# `pps-conform.json` beside this script are the claim, verbatim, CT-I6's failure
-# included, and docs/ppcp-conformance.md reproduces them unedited.
+# `pps-conform.json` beside this script are the claim, verbatim, and
+# docs/ppcp-conformance.md reproduces them unedited.
 #
-# ── THE ONE ROW THIS GATE DOES NOT FAIL ON, AND WHY (finding F-H8-6) ────────
+# ── F-H8-6 IS CLOSED, AND THE EXCUSE THAT STOOD HERE IS GONE ────────────────
 #
-# CT-I6 is a NEGATIVE row (CONF §1d): this host does not claim Mint, so the tool
-# asserts it parses `shot` with `authority: device` and never originates one.
-# The counterpart it picks for that is `reference-host.json` running the
-# `reference-host` scenario — a peer declaring `role: host`.  Against a peer
-# under test that is ALSO `role: host`, `PPCP-CORE` 5.2b and `PPCP-MSG` 3.2c
-# require the responder to answer `error` / `role_conflict`, and `PPCP-MSG` §10
-# marks that code **fatal**.  `ppcp-sim` counts a fatal error as a protocol
-# violation, so the row asserts `violations=0` against a counterpart the
-# specification requires this host to refuse.  It cannot pass, and a host that
-# made it pass would be violating I20.
+# For two sessions this gate excluded ONE named row.  CT-I6 is a NEGATIVE row
+# (CONF §1d): this host does not claim Mint, so the tool asserts it parses
+# `shot` with `authority: device` and never originates one.  The counterpart it
+# picked was `reference-host.json` — a peer declaring `role: host`.  Against a
+# peer under test that is ALSO a host, `PPCP-CORE` 5.2b and `PPCP-MSG` 3.2c
+# require `error` / `role_conflict`, which `PPCP-MSG` §10 marks FATAL, so the
+# row died at `hello` and asserted `violations=0` against a counterpart the
+# specification required this host to refuse.  It could not pass, and a host
+# that made it pass would have been violating I20.
 #
-# So the exclusion is ONE NAMED ROW with a written reason, not a filter over
-# whatever happened to be red.  Anything else failing fails this test.  If
-# `ppcp-conform` ever gives CT-I6 a minting CAPTURE counterpart — which is what
-# the row needs, since only a peer with Mint can send the `shot` this host must
-# parse and not originate — this whole block goes.
-python3 - "$WORK/pps-conform.json" >&2 <<'PY'
+# libppcp fixed the INSTRUMENT in S5 (`a371748`): CT-I6 now runs a MINTING
+# CAPTURE peer — the only kind that can send the `shot` this host must parse and
+# not originate — and asserts a new `minted_shots_rx` counter rather than
+# `shots_rx`, because a host declaring Arbitrate may legitimately send `shot`
+# (the catalogue binds it to the SET Mint / Arbitrate) and under 8.2k it
+# re-sends the DEVICE's Shot unchanged.  What Mint confers is issuing on one's
+# OWN authority.
+#
+# So there is no excluded row any more.  ANY failing row fails this test.
+python3 - "$WORK/pps-conform.json" >&2 <<'CHECK'
 import json, sys
 rows = json.load(open(sys.argv[1]))["rows"]
-bad = [r for r in rows if r["verdict"] == "fail" and r["id"] != "CT-I6"]
-ct_i6 = [r for r in rows if r["id"] == "CT-I6" and r["verdict"] == "fail"]
-if ct_i6:
-    print("F-H8-6: CT-I6 failed and this gate does not fail on it — "
-          "its counterpart declares role: host and I20 requires this host to refuse it. "
-          "Reason from the tool: " + ct_i6[0].get("reason", ""))
+bad = [r for r in rows if r["verdict"] == "fail"]
 if bad:
     print("FAILED rows: " + ", ".join(r["id"] + " (" + r.get("reason", "") + ")" for r in bad))
     sys.exit(1)
 sys.exit(0)
-PY
+CHECK
 GATE=$?
 
 # A non-1 exit from the tool is never excused: 2 is a bad invocation and 3 is

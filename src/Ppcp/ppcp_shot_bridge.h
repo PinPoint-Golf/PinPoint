@@ -180,7 +180,31 @@ public:
 
     // Every event the peer raised.  `candidate`, `shot` and `capture_request`
     // are acted on; everything else is ignored, and nothing is consumed.
+    //
+    // ⚠ AN IMPORTED FRAME NEVER REACHES THE ARBITER (erratum E28, F-S5-3).
+    // `ppcp_event::imported` is true for a frame belonging to a Session
+    // REPLAYED onto this link under MSG §9.1 — a device offering a stored
+    // Session while a live one is running.  Those Candidates were nominated in
+    // another Session, against another `timebase_ref`, possibly days ago.
+    // Feeding them here arbitrates two Sessions as one, and because the
+    // instants are numerically plausible nothing is malformed and nothing goes
+    // red: 8.2 groups them by coincidence with live Candidates and issues Shots
+    // that never happened.  That is what E28 was raised for.
     void observe(const ppcp_event &ev);
+
+    // 8.2d1 (erratum E29, F-S5-1) — RECONSIDER what was retained for want of a
+    // relation, now that one has arrived.  Returns how many were re-admitted.
+    //
+    // ⚠ THE ARBITER CANNOT CALL THIS FOR ITSELF and the failure is silent.  A
+    // Candidate nominated before §6.3's sync burst converged has no relation
+    // into `timebase_ref`, so 8.2d retains it — correctly — and 8.2d said
+    // nothing about the relation arriving a moment later, which on a live link
+    // it always does.  Under the reading this class had, that Candidate stayed
+    // retained for the whole Session: no Shot, no error, and every Candidate
+    // present exactly as 8.2d requires.  Called from observe() on a
+    // `relation_update` and from PpcpHostPeer whenever this host's own
+    // estimator publishes one (6.1f).
+    std::size_t reconsider();
 
     // 8.2h — issues every group whose earliest contributing Candidate is at
     // least `issue_hold_ns` old.  `nowRefNs` is a reading of
@@ -224,6 +248,13 @@ public:
         std::size_t captureRequests = 0;
         std::size_t shotLinks       = 0;
         std::size_t nominationsRefused = 0;  // I26 — a Source we do not own
+        // E28 — frames of a REPLAYED Session that were kept away from the live
+        // arbiter.  Counted rather than dropped quietly: a number here is the
+        // difference between "no Session was offered" and "one was, and it was
+        // routed correctly".
+        std::size_t importedIgnored = 0;
+        // E29 — Candidates re-admitted to arbitration when a relation arrived.
+        std::size_t reconsidered = 0;
     };
     const Stats &stats() const;
 

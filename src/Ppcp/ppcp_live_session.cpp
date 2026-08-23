@@ -230,6 +230,15 @@ void PpcpLiveSession::publishRelations()
 
 void PpcpLiveSession::observe(const ppcp_event &ev)
 {
+    // ⚠ E28 / F-S5-3 — a frame of a REPLAYED Session says nothing about the
+    // live one.  Its `relation_update` relates two clocks of a Session that is
+    // over; folding it into this Session's relation set would put a stale
+    // offset on the seam every camera reads.  Its heartbeats are a recording.
+    // The live Session's own id, `timebase_ref` and parameters are unaffected
+    // by an import and stay readable through ppcp_peer_session_id() and
+    // ppcp_peer_session_params(), which is exactly what E28 settled.
+    if (ev.imported) return;
+
     switch (ev.kind) {
     case PPCP_EVENT_HEARTBEAT: {
         // 7.4b — the counterpart's degradation.  Only `heartbeat_ack` carries

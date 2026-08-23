@@ -539,6 +539,49 @@ std::string PpcpRendezvous::resolveRid(const std::uint8_t rn[PPCP_RV_RN_BYTES],
     return m_impl->entries[map[idx]].pairingId;
 }
 
+// ── RV 5.3a1, erratum E21 — DRAWING AN IDENTITY FOR A LIVE CONNECTION ──────
+//
+// ⚠ `ppcp_rv_psk_identity()` IS THE WRONG ENTRY POINT FOR A SOCKET, and it does
+// not say so at the call site — which is exactly how this cost a session.  The
+// identity is `0x01 || rn2 || tag`, 17 octets; several widely-used TLS stacks
+// carry a PSK identity as a C string and take its length with `strlen`, so an
+// embedded `0x00` truncates it, the server resolves nothing, and the handshake
+// fails **intermittently** — one connection in sixteen, because 17 octets each
+// have a 1-in-256 chance of being zero.  At a driving range that is diagnosed
+// as a network fault.  `ppcp_transport_test` carries the demonstration against
+// OpenSSL's own TLS 1.2 PSK interface.
+//
+// So the draw entry point is the one this class offers: it redraws `rn2` until
+// neither it nor the resulting tag carries a zero (1.07 draws on average,
+// leaving `rn2` better than 63 bits of entropy) and nothing at the server
+// changes — 5.3b recomputes the tag from the `rn2` it received exactly as
+// before.  `ppcp_rv_psk_identity()` stays reachable only where §10.2's vector
+// must reproduce byte for byte, which is a test and never a connection.
+bool PpcpRendezvous::drawPskIdentity(const std::string &pairingId, PskIdentity *out,
+                                     std::string *whyNot) const
+{
+    auto fail = [&](const char *why) { if (whyNot) *whyNot = why; return false; };
+    if (!out) return fail("no output buffer");
+
+    std::lock_guard<std::mutex> g(m_impl->mu);
+    for (const auto &e : m_impl->entries) {
+        if (e.pairingId != pairingId) continue;
+        if (e.invalidated) return fail("that pairing has been invalidated");
+        std::uint8_t rn2[PPCP_RV_RN_BYTES];
+        std::uint8_t id[PPCP_RV_PSK_IDENTITY_BYTES];
+        const ppcp_result r = ppcp_rv_psk_identity_draw(
+            e.kId,
+            [](void * /*ctx*/, std::uint8_t *buf, std::size_t len) {
+                return csprngBytes(buf, len);
+            },
+            nullptr, rn2, id);
+        if (r != PPCP_OK) return fail("the CSPRNG failed, so no identity was drawn");
+        out->assign(id, id + sizeof id);
+        return true;
+    }
+    return fail("no such pairing");
+}
+
 std::vector<CodeStatus> PpcpRendezvous::codes() const
 {
     std::lock_guard<std::mutex> g(m_impl->mu);

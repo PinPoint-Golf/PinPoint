@@ -391,6 +391,22 @@ struct Seen {
     std::size_t probesQueued = 0, relationsPublished = 0, heartbeatAcks = 0;
     std::size_t syncEstimators = 0, estimatorsWithoutEstimate = 0;
 
+    // ── E28 / F-S5-3 — THE LIVE SESSION'S OWN IDENTITY, READ TWICE ─────────
+    //
+    // Recorded when the Session opens and again at exit.  CORE 4.1a and I16
+    // make `timebase_ref` immutable for a Session's life, and the defect E28
+    // was raised for moved it without a malformed byte anywhere: one
+    // `session_offer` accepted mid-session rebound the host's reference clock
+    // to the exporting DEVICE's, so every subsequent `t0` was expressed in a
+    // timebase the live Session had never declared.  Two readings and a
+    // comparison is the only thing that could have caught it.
+    std::string liveSessionIdAtOpen, liveTimebaseRefAtOpen;
+    std::string liveSessionIdAtExit, liveTimebaseRefAtExit;
+    // The IMPORTED Session, where one was replayed onto this link (MSG §9.1).
+    std::string importedSessionId, importedTimebaseRef;
+    std::size_t importedIgnored = 0;   // frames kept away from the live arbiter
+    std::size_t reconsidered = 0;      // E29 — Candidates re-admitted
+
     // 8.2i1 / CONF 5b — asked of every timebase the counterpart declared, at
     // exit.  `has_offset: false` is the whole assertion: a host that
     // substituted a zero would answer true with 0 here and nothing else on the
@@ -478,6 +494,14 @@ bool writeSummary(const Seen &s, const std::string &path)
     n("heartbeat_acks", (long long)s.heartbeatAcks);
     n("sync_estimators", (long long)s.syncEstimators);
     n("estimators_without_estimate", (long long)s.estimatorsWithoutEstimate);
+    n("imported_ignored", (long long)s.importedIgnored);
+    n("reconsidered", (long long)s.reconsidered);
+    o << "  \"live_session_id_at_open\": " << jstr(s.liveSessionIdAtOpen) << ",\n";
+    o << "  \"live_timebase_ref_at_open\": " << jstr(s.liveTimebaseRefAtOpen) << ",\n";
+    o << "  \"live_session_id_at_exit\": " << jstr(s.liveSessionIdAtExit) << ",\n";
+    o << "  \"live_timebase_ref_at_exit\": " << jstr(s.liveTimebaseRefAtExit) << ",\n";
+    o << "  \"imported_session_id\": " << jstr(s.importedSessionId) << ",\n";
+    o << "  \"imported_timebase_ref\": " << jstr(s.importedTimebaseRef) << ",\n";
 
     o << "  \"error_codes\": [";
     for (std::size_t i = 0; i < s.errorCodes.size(); ++i)
@@ -816,6 +840,10 @@ private:
         }
         m_seen.sessionOpened = true;
         m_sessionId = cfg.sessionId;
+        if (m_engine && m_engine->peer()) {
+            m_seen.liveSessionIdAtOpen = idOrEmpty(ppcp_peer_session_id(m_engine->peer()));
+            m_seen.liveTimebaseRefAtOpen = idOrEmpty(ppcp_peer_timebase_ref(m_engine->peer()));
+        }
         openBundle(cfg);
 
         // I20 — libppcp refuses to build an arbiter for a peer that is not
@@ -954,6 +982,21 @@ private:
         m_seen.heartbeatAcks = l.heartbeatAcks;
         m_seen.syncEstimators = l.syncEstimators;
         m_seen.estimatorsWithoutEstimate = l.estimatorsWithoutEstimate;
+        m_seen.importedIgnored = b.importedIgnored;
+        m_seen.reconsidered = b.reconsidered;
+
+        // ⚠ READ FROM THE ENGINE, NOT FROM WHAT THIS HARNESS ASKED FOR.  The
+        // question E28 answers is what the LIBRARY thinks the live Session is
+        // after a replay, and reading back our own `cfg.sessionId` would answer
+        // a different and useless one.
+        if (m_engine && m_engine->peer()) {
+            m_seen.liveSessionIdAtExit = idOrEmpty(ppcp_peer_session_id(m_engine->peer()));
+            m_seen.liveTimebaseRefAtExit = idOrEmpty(ppcp_peer_timebase_ref(m_engine->peer()));
+            m_seen.importedSessionId =
+                idOrEmpty(ppcp_peer_imported_session_id(m_engine->peer()));
+            m_seen.importedTimebaseRef =
+                idOrEmpty(ppcp_peer_imported_timebase_ref(m_engine->peer()));
+        }
 
         m_seen.counterpartTimebases.clear();
         for (const std::string &tb : m_counterpartTimebases) {
@@ -1084,6 +1127,11 @@ private:
     static std::string idStr(const ppcp_id &id)
     {
         return std::string(id.v, id.len);
+    }
+
+    static std::string idOrEmpty(const ppcp_id *id)
+    {
+        return id ? std::string(id->v, id->len) : std::string();
     }
 
     HarnessOptions                    m_opt;

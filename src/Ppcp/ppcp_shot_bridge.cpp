@@ -189,6 +189,19 @@ bool PpcpShotBridge::nominate(const std::string &sourceId, const char *basis,
 void PpcpShotBridge::observe(const ppcp_event &ev)
 {
     if (!m_arbiter || !ev.msg) return;
+
+    // ⚠ E28 / F-S5-3 — BEFORE THE SWITCH, AND BEFORE collectIssued().  A frame
+    // of a replayed Session is scoped to that Session by the envelope's
+    // `session_id` and belongs to no part of the live arbitration: not its
+    // Candidates, not its Shots, not its `capture_request`s.  Returning here
+    // is the whole guard, and the reason it is one line at the top rather than
+    // a case-by-case test is that the next message type added to this switch
+    // would otherwise inherit the defect.
+    if (ev.imported) {
+        ++m_stats.importedIgnored;
+        return;
+    }
+
     switch (ev.kind) {
     case PPCP_EVENT_CANDIDATE: {
         bool excluded = false;
@@ -207,6 +220,12 @@ void PpcpShotBridge::observe(const ppcp_event &ev)
         if (ppcp_arbiter_observe_shot(m_arbiter, &ev.msg->body.shot.shot) == PPCP_OK)
             ++m_stats.adopted;
         break;
+    // 8.2d1 (erratum E29) — a relation arrived, so what was retained for want
+    // of one is reconsidered.  The engine has already folded the update into
+    // ppcp_peer_relations() by the time this event is raised.
+    case PPCP_EVENT_RELATION_UPDATE:
+        m_stats.reconsidered += ppcp_arbiter_reconsider(m_arbiter);
+        break;
     case PPCP_EVENT_CAPTURE_REQUEST:
         // 8.4b — answered with a Capture, possibly `absent` with
         // `absent_reason: outside_buffer`, and NEVER with an `error`: an absent
@@ -219,6 +238,18 @@ void PpcpShotBridge::observe(const ppcp_event &ev)
         break;
     }
     collectIssued();
+}
+
+std::size_t PpcpShotBridge::reconsider()
+{
+    if (!m_arbiter) return 0;
+    const std::size_t n = ppcp_arbiter_reconsider(m_arbiter);
+    m_stats.reconsidered += n;
+    // A re-admitted Candidate may complete a group that is already past its
+    // issue hold, so the Shot it now belongs to can be reported on this call
+    // rather than waiting for the next pump.
+    if (n) collectIssued();
+    return n;
 }
 
 std::size_t PpcpShotBridge::pump(std::int64_t nowRefNs)
