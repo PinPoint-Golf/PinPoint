@@ -958,6 +958,29 @@ bool GuidedPairing::begin(const std::string &instanceName, std::string *whyNot)
     return true;
 }
 
+bool GuidedPairing::addEndpoint(const std::string &instanceName,
+                                const std::string &host, std::uint16_t port,
+                                const std::string &label)
+{
+    if (instanceName.empty() || host.empty() || port == 0) return false;
+    BootstrapCandidate c;
+    c.instanceName = instanceName;
+    c.host = host;
+    c.port = port;
+    c.pv = wirePvRange();
+    c.role = "capture";
+    // ⛔ 4.4d STILL BINDS.  An out-of-band label is no more trustworthy than a
+    // `dl` off the wire — it was typed or configured by somebody, and it is not
+    // an identifier, a trust signal or a storage key here either.
+    c.hasLabel = !label.empty();
+    c.label = c.hasLabel ? sanitiseLabel(label) : std::string();
+    for (auto &held : m_candidates) {
+        if (held.instanceName == c.instanceName) { held = c; return true; }
+    }
+    m_candidates.push_back(c);
+    return true;
+}
+
 bool GuidedPairing::attemptInProgress() const
 {
     return m_attempt && !m_attempt->terminal();

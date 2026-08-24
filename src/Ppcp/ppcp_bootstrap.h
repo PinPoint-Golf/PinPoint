@@ -389,6 +389,27 @@ public:
     // overload that takes a list, and adding one would be the trap.
     bool begin(const std::string &instanceName, std::string *whyNot);
 
+    // ── 3.7h — an endpoint learned OUT OF BAND ─────────────────────────────
+    //
+    // "A guided pairing MAY be reached WITHOUT discovery, at an endpoint
+    // entered or configured out of band.  §11 constrains the handshake and not
+    // how the endpoint was learned."  So this is a conformant way to reach a
+    // window, not a hole: the five frames, the ordering, the digits and the
+    // affirmation are all unchanged, and `begin()` is still the only door.
+    //
+    // ⚠ AND IT IS WHAT MAKES RT-20c AUTOMATABLE.  The relay is interposed at an
+    // address a harness knows and does not advertise, so a test that could only
+    // reach a window through mDNS would need a fake responder to run a row
+    // about a man in the middle.
+    //
+    // ⛔ WHAT IT DOES NOT DO IS WEAKEN 11.3d1.  The endpoint becomes ONE more
+    // candidate in the list the user selects from — it is not dialled, and
+    // `begin()` still refuses while an attempt is live.  `instanceName` is the
+    // caller's handle for it and is never trusted as an identity, exactly like
+    // a discovered one.
+    bool addEndpoint(const std::string &instanceName, const std::string &host,
+                     std::uint16_t port, const std::string &label);
+
     bool attemptInProgress() const;
     GuidedAttempt *attempt() { return m_attempt.get(); }
     const GuidedAttempt *attempt() const { return m_attempt.get(); }

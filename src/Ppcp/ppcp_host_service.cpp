@@ -1410,3 +1410,26 @@ bool PpcpHostService::guidedUserAction(const QString &control)
     return false;
 #endif
 }
+
+bool PpcpHostService::addGuidedEndpoint(const QString &host, int port,
+                                        const QString &label)
+{
+#if defined(PP_PPCP_RV6_HARNESS)
+    // 3.7h — "§11 constrains the handshake and not how the endpoint was
+    // learned."  Everything downstream of this is the ordinary path: the same
+    // five frames, the same ordering, the same digits, the same affirmation,
+    // and the same refusal of a second concurrent attempt.
+    if (port <= 0 || port > 65535) return false;
+    const QString name = QStringLiteral("oob:%1:%2").arg(host).arg(port);
+    const bool ok = m_guided.addEndpoint(name.toStdString(), host.toStdString(),
+                                         static_cast<std::uint16_t>(port),
+                                         label.toStdString());
+    if (ok) emit guidedChanged();
+    return ok;
+#else
+    (void)host; (void)port; (void)label;
+    ppWarn() << "[ppcp-rv6] addGuidedEndpoint refused: this build has no "
+                "harness tap (PP_PPCP_RV6_HARNESS is off).";
+    return false;
+#endif
+}

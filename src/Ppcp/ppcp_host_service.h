@@ -319,6 +319,17 @@ public:
     // Returns false for an unknown control or when there is nothing to act on.
     Q_INVOKABLE bool guidedUserAction(const QString &control);
 
+    // 3.7h — offer a window at an endpoint learned out of band, so a harness
+    // can reach the interposed relay of RT-20c without a fake mDNS responder.
+    // It becomes one more CANDIDATE; nothing dials it and 11.3d1 is unchanged.
+    //
+    // ⚠ HARNESS-GATED FOR NOW BECAUSE OF THE UI DECISION, NOT THE PROTOCOL.
+    // 3.7h makes an out-of-band endpoint conformant; whether this application
+    // should offer a "type an address" field is a product question nobody has
+    // asked, and quietly answering it here would be the wrong way to settle it.
+    Q_INVOKABLE bool addGuidedEndpoint(const QString &host, int port,
+                                       const QString &label);
+
     // RT-9 — everything this subsystem contributes to a diagnostic bundle, and
     // it is constructed from a struct that holds no secret rather than filtered
     // afterwards.  Q_INVOKABLE so the diagnostics screen can offer it.

@@ -1135,6 +1135,46 @@ TEST(PpcpGuidedUx, NoRetryAffordanceSurvivesAMismatch)
         << "⛔ a disabled retry control is still a retry affordance (11.9c)";
 }
 
+// ⚠ THE GAP THE SYNTAX PROBE DOES NOT COVER, FOUND BY THE APP FAILING TO LINK.
+//
+// `ppcp_app_tu_syntax_probe` GLOBS `src/Ppcp/*.cpp` — deliberately, and its own
+// comment says why: "a translation unit somebody forgets to add is precisely
+// the failure being guarded against."  But the APPLICATION's source list in the
+// top-level CMakeLists.txt is EXPLICIT, so a new file is compiled by the probe,
+// compiled and linked by whichever ppcp-tests target names it, and NOT LINKED
+// INTO THE APPLICATION AT ALL.  Everything is green and the app does not build.
+//
+// That is the same shape as the break the probe was created for and one layer
+// out from it: the probe answers "does this file still compile", and nothing
+// answered "is this file still in the product".  This row does.
+//
+// ⚠ IT READS CMakeLists.txt AS TEXT, which is crude and is the point: it is a
+// guard against an omission, not a build system.
+TEST(PpcpBootstrapBuild, TheInitiatorIsInTheApplicationsOwnSourceList)
+{
+    const std::string path = std::string(PP_PPCP_SRC_DIR) + "/../../CMakeLists.txt";
+    FILE *f = std::fopen(path.c_str(), "rb");
+    ASSERT_NE(f, nullptr) << "cannot read " << path;
+    std::string cm;
+    char buf[8192];
+    std::size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) cm.append(buf, n);
+    std::fclose(f);
+
+    EXPECT_NE(cm.find("src/Ppcp/ppcp_bootstrap.cpp"), std::string::npos)
+        << "⛔ the guided-pairing initiator compiles in ppcp-tests and is not "
+           "linked into the application — every suite is green and the app does "
+           "not build";
+    // And the harness gate must still refuse a shipping build.
+    EXPECT_NE(cm.find("PP_PPCP_RV6_HARNESS"), std::string::npos);
+    const std::size_t opt = cm.find("option(PP_PPCP_RV6_HARNESS");
+    const std::size_t guard = cm.find("PP_PPCP_RV6_HARNESS AND PP_SHIPPING_BUILD");
+    ASSERT_NE(opt, std::string::npos);
+    ASSERT_NE(guard, std::string::npos)
+        << "⛔ the RV-6 harness tap no longer refuses to configure in a "
+           "shipping build — it presses \"yes, they match\" (11.1d, 11.7c)";
+}
+
 TEST(PpcpGuidedUx, TheWindowListShowsNoDigits)
 {
     // ⛔ 11.3d1 / TRAP 3 — a list of discovered windows each carrying a number

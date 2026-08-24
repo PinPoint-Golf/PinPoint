@@ -3161,6 +3161,14 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
         src/Ppcp/ppcp_rendezvous.h    src/Ppcp/ppcp_rendezvous.cpp
         src/Ppcp/ppcp_pairing_store.cpp
         src/Ppcp/ppcp_discovery.h     src/Ppcp/ppcp_discovery.cpp
+        # H10 — RV-6 guided pairing, the INITIATOR half.  In the TRANSPORT
+        # block for the same reason the rendezvous is: what a guided pairing
+        # produces is a `PRK`, and §5's TLS handshake is the only thing that
+        # consumes one.  ⛔ Three of CR-01's nine traps live in this file and
+        # none of them is visible on the wire — read its header before touching
+        # it, and in particular before adding anything that dials more than one
+        # discovered window or compares six digits in software.
+        src/Ppcp/ppcp_bootstrap.h     src/Ppcp/ppcp_bootstrap.cpp
         # H-compose — THE OWNER.  Until this file, nothing in this application
         # constructed a PpcpHostPeer and three joins named in the code had no
         # caller.  It is its own translation unit and not lines in main.cpp so
