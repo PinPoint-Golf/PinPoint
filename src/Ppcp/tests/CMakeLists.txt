@@ -368,6 +368,33 @@ pp_add_test(ppcp_advertise_test
     GTEST)
 set_tests_properties(ppcp_advertise_test PROPERTIES TIMEOUT 300)
 
+# ⚠⚠ MEASURED FLAKE, PRE-EXISTING, AND THE FULL SUITE HAD NEVER BEEN RUN.
+#
+# `ppcp_advertise_test` followed by `ppcp_host_service_test` TIMES OUT roughly
+# TWO RUNS IN THREE.  Measured 24 August 2026 during H10, six bounded runs of
+# the pair (`ctest -R 'ppcp_advertise_test$|ppcp_host_service_test' --timeout
+# 70`): 1 pass and 2 timeouts, then the identical 1 and 2 with H10's four hooks
+# into `PpcpHostService` neutralised.  ⛔ SO IT IS NOT H10's, and a one-shot
+# bisect said the opposite in both directions before the runs were repeated —
+# at a 1-in-3 pass rate, n=1 convicts and acquits with equal confidence.
+#
+# `ppcp_host_service_test` alone: 17.5s, green, every time.  After the
+# advertise suite it sits in `Ppcp::Listener::accept()` ->
+# `__recvfrom_nocancel` (ppcp_transport.cpp:1866, from a `sample` of the hung
+# process) and does not come out.  The suspected mechanism is that the
+# advertise suite talks to the REAL mDNSResponder — which is why C1 split it
+# out of `ppcp_rendezvous_test` in the first place — and leaves state the next
+# suite's browse then reacts to.  ⚠ NOT CONFIRMED, and it is written down as a
+# suspicion rather than a cause.
+#
+# ⛔ THE PART WORTH KEEPING IS HOW IT SURVIVED.  C1's gate recorded
+# "ppcp_advertise_test 14/14" — true, in isolation, and the full ppcp-tests
+# suite was never run in that session, so a pair that fails two runs in three
+# was reported as a green row.  That is main-plan ground rule 4's distinction
+# between "implemented" and "passing" landing on the harness rather than on the
+# code.  The whole suite is `ctest --test-dir build/ppcp-tests --timeout 180`
+# and it is 336s; at the time of writing it is 26/27 with this one row red.
+
 # The by-hand observation: holds a real advertisement up for as long as
 # PPCP_ADVERTISE_HOLD_S says so `dns-sd -B` / `dns-sd -L` can watch it.  Skips
 # in a second when the variable is unset, which is every CI run.
