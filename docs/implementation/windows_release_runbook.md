@@ -38,6 +38,32 @@ it). After this, skip straight to the per-release checklist.
    > normally; every release *after* it can auto-update. Plan key rollout one release
    > ahead of when you need updates to work.
 
+4. **Add the firewall rule to the installer — NOT YET DONE, and it gates the next release.**
+   PinPointStudio is the PPCP *host*: the phone dials us, so we listen. The first time an
+   unregistered exe binds a listening socket, Windows raises the "Security Alert" box — and a
+   user who clicks Cancel gets a permanent **block** rule, after which pairing never works
+   again and nothing in the UI explains why. A golf pro will click Cancel.
+
+   The installer already elevates, so it creates the rule during the UAC prompt the user
+   accepts anyway — either in the Inno Setup `[Run]` section or via `INetFwPolicy2`:
+   ```powershell
+   netsh advfirewall firewall add rule name="PinPointStudio" dir=in action=allow `
+         program="{app}\PinPointStudio.exe" enable=yes profile=any
+   ```
+   - **Program-scoped, not port-scoped** — narrower, and it survives a port change.
+   - **`profile=any`** — a studio PC is often classified Public, because Windows asks "do you
+     want this PC to be discoverable" on first connect and the cautious answer is No.
+
+   > This is the **TCP listener only**. Discovery needs no UDP 5353 rule: with the native
+   > `windns.h` API (`DnsServiceRegister`, Win10 1703+) the OS resolver owns that socket and
+   > Windows ships its own mDNS rules for it. Apple's Bonjour would need one — one more reason
+   > not to take that dependency.
+
+   A standard user cannot add a firewall rule, and a UAC prompt mid-session is worse than the
+   problem, so this cannot be done at runtime. The app may *detect* and log it (`INetFwPolicy2`,
+   `INetworkListManager`) but must not nag: `PPCP-RV` 3.6a forbids treating discovery failure as
+   an error state and 3.6b requires the fallback to be silent.
+
 ---
 
 ## Do this FOR EACH RELEASE
@@ -225,6 +251,8 @@ installer, verifies the signature, and relaunches on the new version — no UAC 
 - [ ] **Build + upload `-cuda.exe` (`build_installer.ps1 -Components cuda`) — every
       release, local build only; `releases/latest` must always have one**
 - [ ] Confirm assets + test an update from an older build
+- [ ] **Installer still creates the PPCP listener firewall rule — verify on a CLEAN VM**, never
+      on an upgrade (see ONCE §4)
 
 ---
 
@@ -244,6 +272,10 @@ installer, verifies the signature, and relaunches on the new version — no UAC 
 - **Mixed-platform releases are fine.** The same GitHub release can also carry the
   Linux `*.AppImage*` assets; WinSparkle only ever looks at `appcast-win.xml` and the
   Linux updater only looks at its own assets.
+- **A dropped firewall rule is invisible on your own machines.** Once the rule exists it
+  persists, so an installer that silently stops creating it still works on every box that has
+  ever run a build. It fails only at a customer's studio, as "pairing doesn't work", weeks
+  later. Test it on a clean VM or you are not testing it.
 - **Rollback:** re-draft or delete the release
   (`gh release edit <tag> --draft=true` / `gh release delete <tag>`) and the updater
   stops offering it immediately.
