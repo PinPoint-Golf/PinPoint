@@ -262,6 +262,17 @@ bool buildTxtRecord(const RvTxtFields &f, std::vector<std::uint8_t> *out);
 // the registration, so a rotation is ONE TXT update rather than a deregister /
 // probe / announce cycle.  E49 corrected the clause on exactly this point, and
 // `RvReconnectionAdvertisement` below is built to keep it true.
+//
+// ⚠ THAT AFFORDABILITY IS BONJOUR'S, NOT THE PROTOCOL'S, and these three
+// numbers inherit it.  They are chosen on the assumption that a rotation costs
+// ONE PACKET — true of `DNSServiceUpdateRecord`, and established nowhere else.
+// The native Windows API (`windns.h`, the likely basis of a port) publishes
+// `DnsServiceRegister`, `DnsServiceDeRegister`, `DnsServiceBrowse` and
+// `DnsServiceResolve`, with no evident update call.  If that is right, a
+// rotation there is a full deregister/probe/announce on a link 3.6a says
+// rate-limits multicast, and a ten-second floor stops being aggressive and
+// starts being wrong.  CONFIRM IT AGAINST THE API BEFORE PORTING; the fix is
+// to make `rotationPeriodSeconds()` platform-aware, not to detune these.
 inline constexpr unsigned kAdvertisementCycleTargetS = 60;
 inline constexpr unsigned kAdvertisementMinPeriodS   = 10;
 inline constexpr unsigned kAdvertisementMaxPeriodS   = 900;   // 3.4a's MUST
@@ -286,6 +297,14 @@ public:
     // 3.2d's whole point: a rotation replaces the TXT record of an existing
     // registration and does NOT re-register.  A call that re-registered would
     // rename the service and trigger the probe/announce storm E49 describes.
+    //
+    // ⚠ AND IT PRESUMES A PLATFORM PRIMITIVE THAT MAY NOT EXIST.  Bonjour has
+    // `DNSServiceUpdateRecord`; a platform without an equivalent can honour
+    // this only by re-registering, which is the one thing the contract above
+    // forbids.  Such an implementation should degrade OPENLY — say so, and let
+    // the rotation period be told — rather than re-register behind the
+    // interface and leave the cost invisible to the caller that sized it.  See
+    // the note on `kAdvertisementCycleTargetS`.
     virtual bool updateTxt(const std::vector<std::uint8_t> &txt) = 0;
 
     // Withdraws the instance.  3.7b withdraws a bootstrap instance on close;
