@@ -20,6 +20,10 @@
 
 #include <QDateTime>
 #include <QSocketNotifier>
+
+// 11.6f — the erasure below is not `memset`, which the optimiser is entitled to
+// elide on a dying object.  OpenSSL is already this application's crypto.
+#include <openssl/crypto.h>
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QMetaObject>
@@ -504,6 +508,15 @@ void PpcpHostService::startDiscovery()
                        const std::uint8_t rid[PPCP_RV_RID_BYTES]) {
                     return m_rv.resolveRid(rn, rid);
                 });
+            // ── RV-6 (H10) — an OPEN BOOTSTRAP WINDOW is a different record ──
+            // 3.3f tells the two forms apart by the presence of `bs`, and 3.3g
+            // makes an instance carrying both `bs` and `rid` malformed and
+            // ignored.  `noteAdvertisement` classifies and keeps only windows;
+            // ⛔ it DIALS NOTHING (11.3d1, trap 3) — the user selects one, and
+            // `beginGuidedPairing()` is the only door.
+            if (m_guided.noteAdvertisement(ad, PPCP_WIRE_VERSION_MAJOR))
+                emit guidedChanged();
+
             if (!d.dial) return;
 
             const QString inst = QString::fromStdString(ad.instanceName);
@@ -514,6 +527,9 @@ void PpcpHostService::startDiscovery()
         },
         [this](const std::string &instanceName) {
             const QString inst = QString::fromStdString(instanceName);
+            // 3.7b/3.7d — a bootstrap instance exists only while its window is
+            // open, so the record going away IS the window closing.
+            if (m_guided.dropInstance(instanceName)) emit guidedChanged();
             if (m_seenInstances.remove(inst) > 0) emit phonesChanged();
         });
 
@@ -538,6 +554,11 @@ void PpcpHostService::stopDiscovery()
     m_browseWatch.reset();
     if (m_browser) m_browser->stop();
     m_browser.reset();
+    // The windows we knew about are unobservable now.  An attempt already
+    // running keeps its own socket — 11.3b's stream is a connection of its own
+    // and does not depend on discovery — so it is NOT cancelled here.
+    m_guided.clearCandidates();
+    emit guidedChanged();
     if (!m_seenInstances.isEmpty()) {
         m_seenInstances.clear();
         emit phonesChanged();
@@ -770,6 +791,11 @@ void PpcpHostService::onTick()
     // 7.3b's periodic half, and 7.2d's: a code nobody used still holds a K_tls
     // until something removes it.
     if (m_rv.reap() > 0) emit codeChanged();
+
+    // RV-6 (H10) — drive the single attempt 11.3d1 allows, off the timer that
+    // is already running.  `poll()` applies 11.3e's 30- and 60-second timers,
+    // which are the embedding's obligation because libppcp owns no clock.
+    pumpGuided();
 
     // 3.4a/3.4d1 — the `rn` rotation, driven off the timer that is already
     // running rather than a second one.  `tick()` is an integer comparison
@@ -1123,4 +1149,264 @@ void PpcpHostService::setStatus(const QString &s)
     if (m_status == s) return;
     m_status = s;
     emit statusChanged();
+}
+
+// ══ RV-6 — guided pairing, the INITIATOR half (H10) ═══════════════════════
+//
+// ⛔ THE THREE TRAPS OF THIS SECTION, AND WHY EACH IS INVISIBLE FROM OUTSIDE.
+//
+//   TRAP 3 (11.3d1) — `guidedWindows` carries no digits and nothing dials a
+//     candidate.  `beginGuidedPairing()` takes ONE name and refuses while an
+//     attempt is live, so there is never a moment at which two sets of digits
+//     exist.  An attacker advertising N windows would otherwise get N blind
+//     draws against one confirmation, WITH THE OPERATOR FINDING THE COLLISION
+//     FOR THEM: shown a list of numbers one of which matches the phone in their
+//     hand, an operator taps the match and reads it as success.
+//
+//   TRAP 7 (11.6b) — lives in ppcp_bootstrap.cpp, where a failed key agreement
+//     becomes `invalid_key` and never a transport error and never a retry.
+//     What surfaces here is `guidedMayRetry == false` and a message that says
+//     it is not a network fault.
+//
+//   TRAP 8 (11.1d) — there is NO property here carrying the counterpart's
+//     digits and no function that could take one.  `confirmGuidedDigitsMatch()`
+//     is reachable only from a control a person touched.  A peer that compared
+//     the digits itself would pass every static test in the document and
+//     authenticate nothing.
+
+bool PpcpHostService::guidedAvailable() const
+{
+    // 3.6b — silent absence.  No DNS-SD client, no windows to find, and the
+    // §4 pairing code path is unaffected and is what the user sees instead.
+    return m_browser != nullptr;
+}
+
+QVariantList PpcpHostService::guidedWindows() const
+{
+    QVariantList out;
+    for (const auto &c : m_guided.candidates()) {
+        QVariantMap m;
+        m.insert("instanceName", QString::fromStdString(c.instanceName));
+        // ⛔ 4.4d, reached through 3.3g — UNTRUSTED DISPLAY TEXT.  Already
+        // escaped and truncated by `sanitiseLabel()`.  It is shown before
+        // anything has been authenticated, so it is whatever a stranger put on
+        // the wire, and it is NEVER an identifier, a trust signal or a storage
+        // key: `instanceName` above is what selection is keyed on.
+        m.insert("label", QString::fromStdString(c.label));
+        m.insert("hasLabel", c.hasLabel);
+        m.insert("role", QString::fromStdString(c.role));
+        // ⚠ NO `rid`, NO `rn`, NO PAIRING HANDLE, and there is nothing to put
+        // there: 3.3g says a bootstrap instance carries none, because it names
+        // no pairing.
+        out.append(m);
+    }
+    return out;
+}
+
+bool PpcpHostService::guidedActive() const { return m_guided.attemptInProgress(); }
+
+QString PpcpHostService::guidedPhase() const
+{
+    const Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr) return QStringLiteral("idle");
+    switch (a->phase()) {
+    case Ppcp::GuidedPhase::Idle:       return QStringLiteral("idle");
+    case Ppcp::GuidedPhase::Dialling:   return QStringLiteral("dialling");
+    case Ppcp::GuidedPhase::Exchanging: return QStringLiteral("exchanging");
+    case Ppcp::GuidedPhase::Comparing:  return QStringLiteral("comparing");
+    case Ppcp::GuidedPhase::Confirming: return QStringLiteral("confirming");
+    case Ppcp::GuidedPhase::Paired:     return QStringLiteral("paired");
+    case Ppcp::GuidedPhase::Failed:     return QStringLiteral("failed");
+    }
+    return QStringLiteral("idle");
+}
+
+QString PpcpHostService::guidedDigits() const
+{
+    // ⛔ 11.7e and 11.7f BOTH, and the emptiness is the enforcement.  Nothing
+    // before 11.5d has completed — there is nothing to compare, and a
+    // progressive display would leak the value to whichever side an attacker
+    // reached first — and nothing after the attempt ends, because the digits
+    // are a function of two ephemeral keys and are meaningless outside it.
+    // `GuidedAttempt::sasDigits()` returns "" outside that window and the
+    // engine has wiped the value.
+    const Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr) return QString();
+    return QString::fromStdString(a->sasDigits());
+}
+
+QString PpcpHostService::guidedMessage() const
+{
+    const Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr) return QString();
+    if (a->phase() == Ppcp::GuidedPhase::Paired)
+        return tr("Paired. That device can now connect on its own.");
+    if (a->phase() != Ppcp::GuidedPhase::Failed) return QString();
+    return QString::fromStdString(a->advice().message);
+}
+
+bool PpcpHostService::guidedMayRetry() const
+{
+    // ⛔ 11.9c — FALSE MEANS THE DIALOGUE SHOWS NO RETRY AFFORDANCE AT ALL.
+    // Not a greyed-out one, not one behind a confirmation — none.  A mismatch
+    // or a MAC failure means either an implementation is wrong or someone is on
+    // the link, and a dialogue whose reflex is *try again* converts a one-shot
+    // bound into an unbounded one by way of the operator's muscle memory.
+    const Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr || a->phase() != Ppcp::GuidedPhase::Failed) return false;
+    return a->advice().mayOfferRetry;
+}
+
+bool PpcpHostService::guidedOfferCode() const
+{
+    // 11.9d1 on the first `unsupported_version`, 11.9d on the second of
+    // anything else.  §4's code is REQUIRED of every implementation (2a), does
+    // not depend on multicast, and is the answer to both plausible causes.
+    if (m_guided.shouldOfferPairingCode()) return true;
+    const Ppcp::GuidedAttempt *a = m_guided.attempt();
+    return a != nullptr && a->phase() == Ppcp::GuidedPhase::Failed &&
+           a->advice().offerPairingCode;
+}
+
+bool PpcpHostService::beginGuidedPairing(const QString &instanceName)
+{
+    // ⛔ TRAP 3'S ONE DOOR.  One name, and a refusal while an attempt is live.
+    std::string why;
+    const bool ok = m_guided.begin(instanceName.toStdString(), &why);
+    if (!ok && !why.empty())
+        ppWarn() << "[ppcp-rv6] not started:" << why.c_str();
+    emit guidedChanged();
+    return ok;
+}
+
+void PpcpHostService::confirmGuidedDigitsMatch()
+{
+    // ⛔ 11.7c / TRAP 8 — THIS IS THE AFFIRMATIVE ACT OF A PERSON AT THIS END,
+    // and there is no other caller.  "A single affirmation at one end does not
+    // establish a pairing at the other, and a peer MUST NOT treat the arrival
+    // of the counterpart's `bs_confirm` as standing in for its own user's."
+    Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr) return;
+    a->affirm();
+    pumpGuided();
+    emit guidedChanged();
+}
+
+void PpcpHostService::rejectGuidedDigits()
+{
+    Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr) return;
+    a->decline();
+    emit guidedChanged();
+}
+
+void PpcpHostService::cancelGuidedPairing()
+{
+    Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr) return;
+    // 11.9a — any abort ends the attempt and leaves no pairing at either peer.
+    // A user walking away is a timeout rather than a mismatch, so 11.9c lets it
+    // read as the ordinary failure it is.
+    a->abort(PPCP_BS_RC_TIMEOUT);
+    emit guidedChanged();
+}
+
+void PpcpHostService::dismissGuidedResult()
+{
+    // 11.9b — "MUST NOT reopen the window without a further explicit user
+    // action."  This IS that action's first half: until the last result has
+    // been dismissed, `begin()` refuses.
+    m_guided.endAttempt();
+    m_guidedLastPhase.clear();
+    m_guidedLastDigits.clear();
+    emit guidedChanged();
+}
+
+void PpcpHostService::pumpGuided()
+{
+    Ppcp::GuidedAttempt *a = m_guided.attempt();
+    if (a == nullptr) return;
+    if (!a->terminal()) a->poll();
+
+    // 11.5g — the pairing exists only now, and 11.1a makes it an ORDINARY one:
+    // "from here the pairing is INDISTINGUISHABLE from one established by a
+    // scanned code, so §5, §7.4 and §7.5 apply verbatim."  So it goes into the
+    // same ledger the code path fills, and the Phones panel, the resolver and
+    // the reconnection advertiser cannot tell which produced it.
+    if (a->phase() == Ppcp::GuidedPhase::Paired && m_guidedPairingId.isEmpty()) {
+        ppcp_bs_pairing p{};
+        if (a->takePairing(&p)) {
+            std::string id, err;
+            // ⛔ 4.4d — the label is UNTRUSTED and is carried as a label only.
+            const std::string label = a->candidate().label;
+            if (m_rv.adoptGuidedPairing(p.sid, p.keys, label, &id, &err)) {
+                m_guidedPairingId = QString::fromStdString(id);
+                ppWarn() << "[ppcp-rv6] guided pairing established";
+                emit phonesChanged();
+            } else {
+                ppWarn() << "[ppcp-rv6] the pairing could not be recorded:"
+                         << err.c_str();
+            }
+            // 11.6f / 11.10c — whatever happened above, this copy goes.  A peer
+            // computes the whole chain the moment it holds `Z`, so a failure
+            // here would otherwise leave a `PRK` for a pairing nothing knows
+            // about.  Computing is not holding.
+            OPENSSL_cleanse(&p, sizeof p);
+        }
+    }
+
+    const QString phase = guidedPhase();
+    const QString digits = guidedDigits();
+    if (phase != m_guidedLastPhase || digits != m_guidedLastDigits) {
+        m_guidedLastPhase = phase;
+        m_guidedLastDigits = digits;
+        emit guidedChanged();
+    }
+}
+
+// ── The harness tap (RT-20c) ───────────────────────────────────────────────
+//
+// ⛔⛔ THE TAP, NEVER THE COMPARISON.  See the header.  Read the four branches
+// below and note what is absent from every one of them: no digits are read, no
+// counterpart value arrives, and nothing is compared.  `control` names a
+// button; the caller decided which to press before it called.
+bool PpcpHostService::guidedUserAction(const QString &control)
+{
+#if defined(PP_PPCP_RV6_HARNESS)
+    // ⚠ THE SAME FOUR ENTRIES THE REAL CONTROLS CALL, AND DELIBERATELY NOT A
+    // PARALLEL PATH.  A harness that reached past these into the engine would
+    // be testing something the application does not do, and 11.7c's obligation
+    // — that the affirmation is this device's own user's — would then hold on a
+    // path no test ever exercised.
+    if (control == QLatin1String("match")) {
+        if (m_guided.attempt() == nullptr) return false;
+        confirmGuidedDigitsMatch();
+        return true;
+    }
+    if (control == QLatin1String("different")) {
+        if (m_guided.attempt() == nullptr) return false;
+        rejectGuidedDigits();
+        return true;
+    }
+    if (control == QLatin1String("cancel")) {
+        if (!m_guided.attemptInProgress()) return false;
+        cancelGuidedPairing();
+        return true;
+    }
+    if (control == QLatin1String("dismiss")) {
+        dismissGuidedResult();
+        return true;
+    }
+    return false;
+#else
+    // ⛔ THE SHIPPING SHAPE.  Not merely inert — it says so, because a silent
+    // false would let a harness "pass" against a build that never pressed
+    // anything, and a green RT-20c row that asserted nothing is worse than a
+    // red one.
+    (void)control;
+    ppWarn() << "[ppcp-rv6] guidedUserAction refused: this build has no harness "
+                "tap (PP_PPCP_RV6_HARNESS is off, and a shipping build refuses "
+                "to configure with it on).";
+    return false;
+#endif
 }

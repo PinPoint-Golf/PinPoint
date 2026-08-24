@@ -984,3 +984,172 @@ TEST(PpcpGuidedRelay, CompletesAPairingAgainstTheRelay)
     ppcp_bs_pairing p{};
     EXPECT_TRUE(at.takePairing(&p));
 }
+
+// ══ ⛔ THE TWO UX MUSTs, READ OFF THE QML SOURCE ══════════════════════════
+//
+// ⚠ WHAT THIS IS, AND WHAT IT IS NOT, STATED PLAINLY.
+//
+// 11.7d and 11.9c are MUSTs about a DIALOGUE, and the honest instrument for
+// them is a rendered screen — this repository has one, the offscreen `qml_ui`
+// suite, and it lives in the umbrella tree.  This session may not build the
+// PinPointStudio application target, so that instrument is out of reach here
+// and saying so is part of the result.
+//
+// What IS in reach is the property that actually regresses.  Nobody will
+// rewrite this dialogue from scratch; somebody will "tidy" its footer to match
+// the house convention every other dialogue in the application follows —
+// Cancel first, the affirmative last carrying `primary: true` — which is
+// correct for *Export* and is exactly the arrangement 11.7d forbids here.  So
+// these rows read the QML as text and assert the shape:
+//
+//   • the affirmative control is NOT `primary`,
+//   • it is NOT the last control in its row (not where a stray tap lands),
+//   • the prompt asks whether the numbers MATCH,
+//   • and the retry control is bound to `guidedMayRetry` and hidden with
+//     `visible`, not disabled with `enabled` — because a greyed-out *Try
+//     again* still teaches the operator that trying again is the answer, and
+//     11.9c is about the reflex rather than the click.
+//
+// ⛔ A SOURCE SCAN IS WEAKER THAN A RENDER AND IS RECORDED AS SUCH.  It cannot
+// see focus, z-order, or a style that repaints a plain button to look primary.
+// It is a regression guard, not a demonstration that the dialogue is right.
+
+namespace {
+
+// ⚠ COMMENTS OUT FIRST, AND THE SUITE FOUND OUT WHY BY FAILING ON THEM.  This
+// dialogue is heavily commented — deliberately, because the reasons are the
+// only thing stopping someone "fixing" its inverted footer — and the comments
+// say "NOT primary" and "the six digits are the only thing that authenticates
+// anybody" right beside the code they describe.  A scanner that reads the prose
+// asserts against the explanation rather than the dialogue.
+std::string stripComments(const std::string &in)
+{
+    std::string out;
+    out.reserve(in.size());
+    std::size_t at = 0;
+    while (at < in.size()) {
+        const std::size_t nl = in.find('\n', at);
+        const std::string line = in.substr(at, nl == std::string::npos
+                                               ? std::string::npos : nl - at);
+        const std::size_t c = line.find("//");
+        out += (c == std::string::npos) ? line : line.substr(0, c);
+        out += '\n';
+        if (nl == std::string::npos) break;
+        at = nl + 1;
+    }
+    return out;
+}
+
+std::string readQml(const char *rel)
+{
+    std::string path = std::string(PP_PPCP_SRC_DIR) + "/../Gui/home/" + rel;
+    FILE *f = std::fopen(path.c_str(), "rb");
+    if (f == nullptr) return std::string();
+    std::string out;
+    char buf[4096];
+    std::size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) out.append(buf, n);
+    std::fclose(f);
+    return stripComments(out);
+}
+
+// The body of one named QML object: from its `objectName` to the start of the
+// NEXT named one.  Crude, and sufficient for a flat dialogue in which every
+// control this suite cares about carries an objectName — and it is bounded that
+// way rather than by a closing brace because a brace at a guessed indentation
+// ran straight past `guidedAffirm` into `guidedReject`, whose `primary: true`
+// then read as the affirmative being the default.  The scanner said the
+// dialogue was wrong when it was right, which is the worse direction for a
+// guard like this to fail in.
+std::string blockFor(const std::string &qml, const std::string &objectName)
+{
+    const std::size_t at = qml.find("objectName: \"" + objectName + "\"");
+    if (at == std::string::npos) return std::string();
+    const std::size_t next = qml.find("objectName: \"", at + 1);
+    return qml.substr(at, next == std::string::npos ? std::string::npos : next - at);
+}
+
+}  // namespace
+
+TEST(PpcpGuidedUx, TheAffirmativeControlIsNotTheDefault)
+{
+    // ⛔ 11.7d — "the affirmative control is not pre-selected and not the one a
+    // stray tap reaches ... A dialogue whose default is *Continue* is a
+    // dialogue that authenticates whatever is on the other end."
+    const std::string qml = readQml("PpcpGuidedPairDialog.qml");
+    ASSERT_FALSE(qml.empty()) << "the guided pairing dialogue is missing";
+
+    const std::string affirm = blockFor(qml, "guidedAffirm");
+    ASSERT_FALSE(affirm.empty()) << "no affirmative control found";
+    // NOT primary, NOT attention — nothing that paints it as the thing to do.
+    EXPECT_EQ(affirm.find("primary"), std::string::npos)
+        << "⛔ the affirmative control is styled as the default (11.7d)";
+    EXPECT_EQ(affirm.find("attention"), std::string::npos);
+    EXPECT_EQ(affirm.find("focus"), std::string::npos);
+
+    // And it comes BEFORE the safe answer in its row, so the right-hand slot a
+    // thumb reaches by habit is the one that declines.
+    const std::size_t a = qml.find("objectName: \"guidedAffirm\"");
+    const std::size_t r = qml.find("objectName: \"guidedReject\"");
+    ASSERT_NE(a, std::string::npos);
+    ASSERT_NE(r, std::string::npos);
+    EXPECT_LT(a, r) << "⛔ the affirmative is where a stray tap lands (11.7d)";
+
+    // The SAFE answer is the prominent one.
+    const std::string reject = blockFor(qml, "guidedReject");
+    EXPECT_NE(reject.find("primary: true"), std::string::npos);
+}
+
+TEST(PpcpGuidedUx, ThePromptAsksWhetherTheNumbersMatch)
+{
+    // ⛔ 11.7d — "the prompt asks whether the numbers MATCH rather than whether
+    // to trust or continue."  Every one of trust/continue/allow/connect asks
+    // the operator for a judgement they have no basis for.
+    const std::string qml = readQml("PpcpGuidedPairDialog.qml");
+    ASSERT_FALSE(qml.empty());
+    const std::string prompt = blockFor(qml, "guidedPrompt");
+    ASSERT_FALSE(prompt.empty());
+    EXPECT_NE(prompt.find("match"), std::string::npos);
+    for (const char *forbidden : {"Trust", "Continue", "Allow", "Connect"})
+        EXPECT_EQ(prompt.find(forbidden), std::string::npos)
+            << "⛔ the prompt asks for a judgement rather than a comparison: "
+            << forbidden;
+}
+
+TEST(PpcpGuidedUx, NoRetryAffordanceSurvivesAMismatch)
+{
+    // ⛔ 11.9c — "a peer MUST NOT report an abort to its user in terms that
+    // invite a retry as the obvious next step where the cause was a mismatch or
+    // a MAC failure."  The control is bound to `guidedMayRetry`, which
+    // `adviseOnAbort` sets false for exactly those causes.
+    const std::string qml = readQml("PpcpGuidedPairDialog.qml");
+    ASSERT_FALSE(qml.empty());
+    const std::string retry = blockFor(qml, "guidedRetry");
+    ASSERT_FALSE(retry.empty());
+    EXPECT_NE(retry.find("visible"), std::string::npos);
+    EXPECT_NE(retry.find("mayRetry"), std::string::npos)
+        << "⛔ the retry control is not bound to 11.9c's predicate";
+    // ⚠ HIDDEN, NOT DISABLED.  A greyed-out *Try again* still teaches the
+    // operator that trying again is the shape of the answer.
+    EXPECT_EQ(retry.find("enabled:"), std::string::npos)
+        << "⛔ a disabled retry control is still a retry affordance (11.9c)";
+}
+
+TEST(PpcpGuidedUx, TheWindowListShowsNoDigits)
+{
+    // ⛔ 11.3d1 / TRAP 3 — a list of discovered windows each carrying a number
+    // is the interface that hands an attacker N draws against one confirmation.
+    // The list binds `label` and `instanceName`, and there is no digits binding
+    // anywhere inside it.
+    const std::string qml = readQml("PpcpGuidedPairDialog.qml");
+    ASSERT_FALSE(qml.empty());
+    const std::size_t list = qml.find("objectName: \"guidedWindowList\"");
+    const std::size_t compare = qml.find("objectName: \"guidedCompare\"");
+    ASSERT_NE(list, std::string::npos);
+    ASSERT_NE(compare, std::string::npos);
+    ASSERT_LT(list, compare);
+    const std::string body = qml.substr(list, compare - list);
+    EXPECT_EQ(body.find("digits"), std::string::npos)
+        << "⛔ the candidate list carries digits (11.3d1, trap 3)";
+    EXPECT_EQ(body.find("guidedAffirm"), std::string::npos);
+}

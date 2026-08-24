@@ -106,6 +106,12 @@ set(PP_QML_FILES
     # remembered pairings it also carried are now Settings -> Phones, which is
     # where RV 7.4b's "visible and individually revocable" is satisfied.
     src/Gui/home/PpcpPairDialog.qml
+    # H10 — RV-6 guided pairing: six digits compared on two screens, with no
+    # code carried between them.  ⛔ Its footer deliberately INVERTS this
+    # application's Cancel-then-primary-affirmative convention, because 11.7d
+    # forbids the affirmative being the default or where a stray tap lands.
+    # See the file header before changing anything in it.
+    src/Gui/home/PpcpGuidedPairDialog.qml
     src/Gui/home/PpQrGlyph.qml
     src/Gui/settings/ScreenSettings.qml
     src/Gui/settings/AppearancePanel.qml

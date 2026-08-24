@@ -78,6 +78,18 @@ Item {
         id: pairDialog
     }
 
+    // H10 — RV-6 guided pairing (PPCP-RV §11): a first pairing with no code
+    // carried between two screens, authenticated by six digits compared on
+    // both.  A separate dialogue from PpcpPairDialog rather than a mode of it,
+    // deliberately: that one exists to show a code, and §11's screen must not
+    // acquire a control that shows one.  The two paths meet only where 11.9d
+    // sends a failed guided attempt to the code — which is an offer of a
+    // DIFFERENT path and never a retry (11.9c).
+    PpcpGuidedPairDialog {
+        id: guidedDialog
+        onPairingCodeRequested: pairDialog.open()
+    }
+
     Component.onCompleted: resourceMonitor.refresh()
 
     Timer {
@@ -581,6 +593,24 @@ Item {
                     // Symbol has a QR or a phone.  PpButton's `icon` slot hands
                     // it contentColor, so it tracks the theme with the label.
                     icon: Component { PpQrGlyph {} }
+                }
+
+                // H10 — the guided path, beside the code path and never
+                // instead of it.  §4's code is the REQUIRED path (2a) and
+                // stays the primary button; this one appears only where the
+                // platform can browse at all, because RV §3 is optional and
+                // 3.6b makes its absence silent (no DNS-SD client, no windows
+                // to find, and the user sees the code prompt as before).
+                PpButton {
+                    id: guidedPairButton
+                    objectName: "guidedPairButton"
+                    anchors { right: pairButton.left
+                              rightMargin: Theme.sp(8)
+                              verticalCenter: parent.verticalCenter }
+                    visible: (typeof ppcpHost !== "undefined") && ppcpHost !== null
+                             && ppcpHost.listening && ppcpHost.guidedAvailable
+                    label:   qsTr("Pair without a code")
+                    onClicked: guidedDialog.open()
                 }
             }
             Item { width: 1; height: 12 }

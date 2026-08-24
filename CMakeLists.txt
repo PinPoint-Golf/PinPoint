@@ -103,6 +103,36 @@ if(PP_PPCP_PLAINTEXT_HARNESS)
     add_compile_definitions(PP_PPCP_PLAINTEXT_HARNESS)
 endif()
 
+# ── RV-6's harness tap (H10) — the SAME shape and the SAME refusal ──────────
+#
+# `PPCP-RV` §11 is authenticated by a person comparing six digits on two
+# screens.  RT-20c drives BOTH applications either side of the relay and has to
+# be able to press the confirm button without a person in the room, so this
+# compiles an entry that supplies THE TAP.
+#
+# ⛔⛔ IT SUPPLIES THE TAP AND NEVER THE COMPARISON, AND THE DIFFERENCE IS THE
+# WHOLE SECURITY OF THE PATH (11.1d, trap 8).  Nothing behind this flag reads
+# the six digits, receives the counterpart's, or decides whether they match; it
+# operates the control a person would operate, and the decision it carries is a
+# constant the harness was told to send.  A build that compared them in software
+# would pass every static test in the document and authenticate nothing.
+#
+# ⛔ AND IT MUST NEVER SHIP.  A shipping build refuses to configure with it ON,
+# exactly as the plaintext harness above does, and for a sharper reason: this
+# one presses "yes, they match" on the user's behalf.
+option(PP_PPCP_RV6_HARNESS
+       "Compile the RV-6 guided-pairing harness tap (RT-20c). NEVER in a release build."
+       OFF)
+if(PP_PPCP_RV6_HARNESS AND PP_SHIPPING_BUILD)
+    message(FATAL_ERROR
+        "PP_PPCP_RV6_HARNESS is ON in a shipping build. That would ship an entry that "
+        "affirms a guided pairing without a person having compared anything — RV 11.1d "
+        "and 11.7c. Refusing to configure.")
+endif()
+if(PP_PPCP_RV6_HARNESS)
+    add_compile_definitions(PP_PPCP_RV6_HARNESS)
+endif()
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     message(FATAL_ERROR
         "No CMAKE_BUILD_TYPE set.\n"

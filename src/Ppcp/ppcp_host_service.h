@@ -66,6 +66,8 @@
 #include <QStringList>
 #include <QSocketNotifier>
 #include <QTimer>
+
+#include "ppcp_bootstrap.h"
 #include <QVariantList>
 
 #include "ppcp_discovery.h"
@@ -150,6 +152,46 @@ class PpcpHostService : public QObject
     // that is switched off, not a device that does not exist.
     Q_PROPERTY(QVariantList phones READ phones NOTIFY phonesChanged)
 
+    // ── RV-6 guided pairing, the INITIATOR half (H10) ───────────────────────
+    //
+    // A first pairing with no code carried between two screens: this host
+    // browses for open bootstrap windows (3.3f, §3.7), the user picks ONE, and
+    // both ends show six digits a person compares.  The engine and the traps
+    // live in ppcp_bootstrap.h; this is the surface QML binds to.
+    //
+    // ⛔ TRAP 3 (11.3d1) IS WHY `guidedWindows` CARRIES NO DIGITS.  Discovered
+    // windows are candidates; digits exist only for the ONE attempt that is
+    // running.  A list of windows each showing a number would give an attacker
+    // advertising N windows N blind draws against one confirmation, with the
+    // operator finding the collision for them.  There is no property here that
+    // could hold a second set of digits, and `beginGuidedPairing()` refuses
+    // while an attempt is live.
+    Q_PROPERTY(bool guidedAvailable READ guidedAvailable NOTIFY guidedChanged)
+    Q_PROPERTY(QVariantList guidedWindows READ guidedWindows NOTIFY guidedChanged)
+    Q_PROPERTY(bool guidedActive READ guidedActive NOTIFY guidedChanged)
+    // idle | dialling | exchanging | comparing | confirming | paired | failed
+    Q_PROPERTY(QString guidedPhase READ guidedPhase NOTIFY guidedChanged)
+
+    // ⛔ 11.7a/11.7e/11.7f — "435 948", and EMPTY outside the one window in
+    // which the digits exist.  Nothing before 11.5d has completed (there is
+    // nothing to compare, and a progressive display would leak the value to
+    // whichever side an attacker reached first) and nothing after the attempt
+    // ends (they are a function of two ephemeral keys and are meaningless
+    // outside the attempt that produced them).
+    Q_PROPERTY(QString guidedDigits READ guidedDigits NOTIFY guidedChanged)
+
+    // ⛔ 11.9c — `guidedMayRetry` IS FALSE FOR A MISMATCH OR A MAC FAILURE AND
+    // THE DIALOGUE MUST SHOW NO RETRY AFFORDANCE AT ALL WHEN IT IS.  Not a
+    // greyed-out one, not one behind a confirmation — none.  A mismatch is the
+    // one signal this path produces that an attack is under way, and a dialogue
+    // whose reflex is *try again* converts a one-shot bound into an unbounded
+    // one by way of the operator's muscle memory.
+    Q_PROPERTY(QString guidedMessage READ guidedMessage NOTIFY guidedChanged)
+    Q_PROPERTY(bool guidedMayRetry READ guidedMayRetry NOTIFY guidedChanged)
+    // 11.9d1 — the pairing code is offered on the FIRST `unsupported_version`
+    // abort and on the second of anything else.
+    Q_PROPERTY(bool guidedOfferCode READ guidedOfferCode NOTIFY guidedChanged)
+
 public:
     explicit PpcpHostService(QObject *parent = nullptr);
     ~PpcpHostService() override;
@@ -211,6 +253,72 @@ public:
     Q_INVOKABLE bool rememberPairing(const QString &pairingId);
     Q_INVOKABLE void forgetPairing(const QString &pairingId);
 
+    // ── RV-6 guided pairing (H10) ───────────────────────────────────────────
+    bool         guidedAvailable() const;
+    QVariantList guidedWindows() const;
+    bool         guidedActive() const;
+    QString      guidedPhase() const;
+    QString      guidedDigits() const;
+    QString      guidedMessage() const;
+    bool         guidedMayRetry() const;
+    bool         guidedOfferCode() const;
+
+    // ⛔ THE ONE DOOR (11.3d1, trap 3).  Takes ONE instance name — the one the
+    // user selected BEFORE any attempt began — and refuses while an attempt is
+    // live.  There is no overload taking a list and adding one would be the
+    // trap: `dl` exists so a browser seeing four windows can tell them apart,
+    // and the obvious host interface is a list, so dialling the list is the
+    // obvious next step and it is the thing 11.3d1 forbids.
+    Q_INVOKABLE bool beginGuidedPairing(const QString &instanceName);
+
+    // ⛔ 11.7c AND TRAP 8 — CALL ONLY FROM A CONTROL A PERSON TOUCHED.  "A peer
+    // MUST NOT treat the arrival of the counterpart's `bs_confirm` as standing
+    // in for its own user's."  Comparing the digits in software, or accepting
+    // the counterpart's assertion that they matched, removes the entire
+    // security of this path while leaving every byte on the wire unchanged —
+    // and passes every static test in the document.  The comparison has value
+    // only because it crosses a channel the attacker is not on, and the only
+    // such channel is a person looking at two screens.
+    Q_INVOKABLE void confirmGuidedDigitsMatch();
+
+    // The user says the numbers do NOT match.  11.9a ends the attempt; 11.9c
+    // then governs what they are told and `guidedMayRetry` is false.
+    Q_INVOKABLE void rejectGuidedDigits();
+
+    // The user walked away, or closed the dialogue mid-exchange.
+    Q_INVOKABLE void cancelGuidedPairing();
+
+    // 11.9b — dismissing a result is the "further explicit user action" that
+    // has to happen before another attempt may begin.  Nothing retries on its
+    // own and nothing reopens without this.
+    Q_INVOKABLE void dismissGuidedResult();
+
+    // ── The harness tap (RT-20c) ────────────────────────────────────────────
+    //
+    // RT-20c drives BOTH applications either side of the relay and cannot have
+    // a person in the room for the protocol assertions.  This names THE CONTROL
+    // a person would operate — the same vocabulary PinPointCapture's
+    // `UserAction` uses — and dispatches to exactly the four entries above, so
+    // the harness path and the real path are one path and cannot diverge.
+    //
+    // ⛔⛔ IT SUPPLIES THE TAP AND NEVER THE COMPARISON (11.1d, TRAP 8).
+    // Nothing here reads the six digits, nothing receives the counterpart's,
+    // and nothing decides whether they match.  `"match"` means *a person
+    // pressed the button labelled "yes, they match"*, and the harness was told
+    // to send it — it is not a conclusion drawn from any value.  A peer that
+    // compared the digits in software, or accepted the counterpart's assertion
+    // that they matched, "removes the entire security of the path while leaving
+    // every byte on the wire unchanged" and passes every static test in the
+    // document.
+    //
+    // ⛔ COMPILED ONLY UNDER PP_PPCP_RV6_HARNESS, WHICH A SHIPPING BUILD
+    // REFUSES TO CONFIGURE.  Same gate and same refusal as the plaintext
+    // conformance listener, for a sharper reason: this one presses "yes".
+    //
+    // `control` is one of: "match", "different", "cancel", "dismiss".
+    // Returns false for an unknown control or when there is nothing to act on.
+    Q_INVOKABLE bool guidedUserAction(const QString &control);
+
     // RT-9 — everything this subsystem contributes to a diagnostic bundle, and
     // it is constructed from a struct that holds no secret rather than filtered
     // afterwards.  Q_INVOKABLE so the diagnostics screen can offer it.
@@ -233,6 +341,7 @@ signals:
     void statusChanged();
     void codeChanged();
     void phonesChanged();
+    void guidedChanged();
     void failureChanged();
 
     // MSG 3.3 — a counterpart declared, so its cameras exist NOW and at no
@@ -279,6 +388,8 @@ private:
 
 private slots:
     void onTick();
+    // RV-6 (H10).  Private: nothing outside drives an attempt.
+    void pumpGuided();
 
 private:
     void adoptLink(std::unique_ptr<Ppcp::PeerConnection> link);
@@ -392,6 +503,18 @@ private:
     std::unique_ptr<Ppcp::RvAdvertiser>                 m_advertiser;
     std::unique_ptr<Ppcp::RvReconnectionAdvertisement>  m_advert;
     std::unique_ptr<QSocketNotifier>                    m_advertWatch;
+
+    // ── RV-6 (H10) ─────────────────────────────────────────────────────────
+    // Owns no socket of its own: `m_guided` is driven from the tick that is
+    // already running, and its stream is the one it opens for the single
+    // attempt 11.3d1 allows.
+    Ppcp::GuidedPairing m_guided;
+    QString             m_guidedLastPhase;
+    QString             m_guidedLastDigits;
+    // 11.5g — where a completed guided pairing lands.  It becomes an ORDINARY
+    // pairing (11.1a): "from here the pairing is INDISTINGUISHABLE from one
+    // established by a scanned code, so §5, §7.4 and §7.5 apply verbatim".
+    QString             m_guidedPairingId;
 
     // The accept loop.  Its ONLY job is to block in accept() and hand the link
     // to the GUI thread; it touches no PPCP state of its own.

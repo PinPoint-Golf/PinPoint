@@ -530,6 +530,55 @@ void PpcpRendezvous::revoke(const std::string &pairingId)
     if (*store) (*store)->erase(pairingId);
 }
 
+bool PpcpRendezvous::adoptGuidedPairing(const std::uint8_t sid[PPCP_RV_SID_BYTES],
+                                       const ppcp_rv_keys &keys,
+                                       const std::string &displayName,
+                                       std::string *out, std::string *err)
+{
+    if (!out) return false;
+    std::uint8_t handle[8];
+    if (!csprngBytes(handle, sizeof handle)) {
+        if (err) *err = "the platform CSPRNG failed";
+        return false;
+    }
+
+    char sessionId[PPCP_RV_SESSION_ID_CHARS] = {0};
+    // 11.6d — `sid` is DERIVED rather than exchanged, with the version and
+    // variant bits set before it is used for anything.  libppcp did that; this
+    // only renders it, and a `sid` that does not render is one this host would
+    // not be able to name a session with.
+    if (ppcp_rv_sid_to_session_id(sid, sessionId) != PPCP_OK) {
+        if (err) *err = "the derived sid does not render as a Session.id";
+        return false;
+    }
+
+    Impl::Entry e;
+    e.pairingId = toHex(handle, sizeof handle);
+    e.sessionId = sessionId;
+    // ⛔ 4.4d / 3.3g — the display name here came off a bootstrap TXT record as
+    // `dl` and is UNTRUSTED: it was shown before anything was authenticated, so
+    // it is whatever a stranger put on the wire.  It is stored as a LABEL and
+    // never as an identifier, a trust signal or a storage key — `pairingId`
+    // above is drawn from the CSPRNG and owes nothing to it.
+    e.displayName = displayName;
+    std::memcpy(e.prk, keys.prk, PPCP_RV_KEY_BYTES);
+    std::memcpy(e.kId, keys.k_id, PPCP_RV_KEY_BYTES);
+    std::memcpy(e.kTls, keys.k_tls, PPCP_RV_KEY_BYTES);
+    // 7.4a — no expiry and no use limit; see the header.
+    e.maxUses = 0;
+    e.usesRemaining = UINT64_MAX;
+    e.expUnixS = 0;
+    e.persisted = false;         // 7.4b — the user's action, not this one
+    e.mayPersist = true;
+
+    *out = e.pairingId;
+    {
+        std::lock_guard<std::mutex> g(m_impl->mu);
+        m_impl->entries.push_back(std::move(e));
+    }
+    return true;
+}
+
 bool PpcpRendezvous::persist(const std::string &pairingId, std::string *whyNot)
 {
     auto no = [&](const char *m) {

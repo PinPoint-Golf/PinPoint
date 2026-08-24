@@ -238,6 +238,36 @@ public:
     // that pairing resolves nothing and fails like any stranger (7.7c).
     void revoke(const std::string &pairingId);
 
+    // ── RV 11.5g / 11.1a — a guided pairing becomes an ORDINARY pairing ────
+    //
+    // 11.1a is the point of `ppcp_bs_pairing`'s shape: "from here the pairing
+    // is INDISTINGUISHABLE from one established by a scanned code, so §5, §7.4
+    // and §7.5 apply verbatim and are unchanged by §11".  So this is the only
+    // function §11 needs from this class, and it produces an entry the resolver,
+    // the advertiser and the Phones panel cannot tell from a code's.
+    //
+    // ⛔ CALL ONLY AFTER 11.5g.  "The pairing exists only when a peer has BOTH
+    // affirmed at its own end and verified the counterpart's MAC.  Until then it
+    // holds nothing and MUST NOT persist, advertise, or offer anything derived
+    // from the exchange."  `GuidedAttempt::takePairing()` refuses in any other
+    // phase, which is what makes that a property rather than a comment.
+    //
+    // ⚠ NO EXPIRY AND NO USE LIMIT, AND THAT IS NOT A LIBERTY.  Those are
+    // properties of a CODE (7.4a) and a guided pairing is not one: there is no
+    // `exp` to honour and no `mu` to count down, because nothing was printed.
+    // 7.4f does not bite either — the material was never held by anyone who
+    // scanned anything — so `mayPersist` is true and 7.4b's opt-in is the only
+    // gate on persistence, exactly as it is for a `mu: 1` code.
+    //
+    // ⚠ AND IT IS NOT PERSISTED HERE.  7.4b makes persistence opt-in, visible
+    // and individually revocable; `persist()` is still the user's action.
+    //
+    // False if the CSPRNG cannot draw a handle.  `out` receives the pairingId.
+    bool adoptGuidedPairing(const std::uint8_t sid[PPCP_RV_SID_BYTES],
+                            const ppcp_rv_keys &keys,
+                            const std::string &displayName,
+                            std::string *out, std::string *err = nullptr);
+
     // 7.4a — persist this pairing so a later session needs no new code.
     // Refuses, returning false, when the code's `mu` exceeded 1 (7.4f: the key
     // material is held by every peer that scanned it) or when no protected

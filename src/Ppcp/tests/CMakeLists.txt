@@ -410,6 +410,7 @@ pp_add_test(ppcp_bootstrap_test
             ${PPCP}/ppcp_discovery.cpp
     INCLUDE ${PPCP}
     LINK    ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+    DEFINES PP_PPCP_SRC_DIR="${PPCP}"
     STD 20
     NO_QT
     GTEST)
@@ -449,6 +450,9 @@ pp_add_test(ppcp_host_service_test
             ${PPCP}/ppcp_rendezvous.cpp
             ${PPCP}/ppcp_pairing_store.cpp
             ${PPCP}/ppcp_discovery.cpp
+            # H10 — the guided-pairing surface QML binds to lives on
+            # PpcpHostService, so the initiator comes with it.
+            ${PPCP}/ppcp_bootstrap.cpp
             ${PPCP}/ppcp_transport.cpp
             ${PPCP}/ppcp_host_peer.cpp
             ${PPCP}/ppcp_live_session.cpp
