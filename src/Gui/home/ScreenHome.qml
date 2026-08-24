@@ -78,18 +78,20 @@ Item {
         id: pairDialog
     }
 
-    // H10 — RV-6 guided pairing (PPCP-RV §11): a first pairing with no code
-    // carried between two screens, authenticated by six digits compared on
-    // both.  A separate dialogue from PpcpPairDialog rather than a mode of it,
+    // ⛔ H10 — RV-6 guided pairing (PPCP-RV §11) WAS INSTANTIATED HERE and is
+    // withdrawn with its button; see the note further down where the button
+    // was.  Restoring it is:
+    //
+    //     PpcpGuidedPairDialog {
+    //         id: guidedDialog
+    //         onPairingCodeRequested: pairDialog.open()
+    //     }
+    //
+    // It is a separate dialogue from PpcpPairDialog rather than a mode of it,
     // deliberately: that one exists to show a code, and §11's screen must not
     // acquire a control that shows one.  The two paths meet only where 11.9d
     // sends a failed guided attempt to the code — which is an offer of a
     // DIFFERENT path and never a retry (11.9c).
-    PpcpGuidedPairDialog {
-        id: guidedDialog
-        onPairingCodeRequested: pairDialog.open()
-    }
-
     Component.onCompleted: resourceMonitor.refresh()
 
     Timer {
@@ -595,23 +597,16 @@ Item {
                     icon: Component { PpQrGlyph {} }
                 }
 
-                // H10 — the guided path, beside the code path and never
-                // instead of it.  §4's code is the REQUIRED path (2a) and
-                // stays the primary button; this one appears only where the
-                // platform can browse at all, because RV §3 is optional and
-                // 3.6b makes its absence silent (no DNS-SD client, no windows
-                // to find, and the user sees the code prompt as before).
-                PpButton {
-                    id: guidedPairButton
-                    objectName: "guidedPairButton"
-                    anchors { right: pairButton.left
-                              rightMargin: Theme.sp(8)
-                              verticalCenter: parent.verticalCenter }
-                    visible: (typeof ppcpHost !== "undefined") && ppcpHost !== null
-                             && ppcpHost.listening && ppcpHost.guidedAvailable
-                    label:   qsTr("Pair without a code")
-                    onClicked: guidedDialog.open()
-                }
+                // ⛔ H10's "Pair without a code" button was HERE and is
+                // withdrawn until RT-20c has run.  RV-6 is built and the
+                // dialog, the controller and `guidedAvailable` are all intact
+                // — what is missing is the one test that proves the path does
+                // what it exists to do, and 9g forbids claiming otherwise.
+                // RT-20c needs PinPointCapture's acceptor and a relay between
+                // the two, and neither exists yet, so until then this is the
+                // least-proven path in the product and does not belong on the
+                // home screen.  Restore this block and the PpcpGuidedPairDialog
+                // above to bring it back; nothing else was removed.
             }
             Item { width: 1; height: 12 }
 
