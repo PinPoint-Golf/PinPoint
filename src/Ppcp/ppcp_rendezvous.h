@@ -271,6 +271,40 @@ public:
     std::string resolveRid(const std::uint8_t rn[PPCP_RV_RN_BYTES],
                            const std::uint8_t rid[PPCP_RV_RID_BYTES]) const;
 
+    // ── The ADVERTISEMENT side of the same identifiers (3.4a) — H9 ─────────
+    //
+    // 3.5e makes this host the peer that advertises, because its counterpart
+    // is barred from doing so by 3.5d.  These two functions are the whole of
+    // what the advertiser needs from the ledger, and between them they are the
+    // reason `K_id` never leaves this class: the advertiser receives eight
+    // bytes of `rn` and eight of `rid`, both of which 3.4e publishes in the
+    // clear on purpose, and nothing else.
+    //
+    // 3.4d1 — "a peer holding several pairings advertises exactly one service
+    // instance at a time, and rotates which pairing it advertises", SHOULD
+    // "advertise a recently used pairing first".  This returns the candidates
+    // in exactly that order: most recently used first, and pairings never used
+    // this run last, in ledger order.
+    //
+    // ⚠ ONLY PERSISTED PAIRINGS (7.4a).  An outstanding CODE is dialled by the
+    // peer that scanned it, at the endpoint printed in the code itself (4.3d),
+    // so advertising its `rid` would offer a reconnection to a device that has
+    // never connected once.  §3 is "reconnection convenience", and a pairing
+    // that has not happened yet has nothing to reconnect to.
+    std::vector<std::string> advertisablePairings() const;
+
+    // Draws a fresh `rn` from the CSPRNG and computes `rid` with the `K_id` of
+    // one held pairing.  False if the pairing is not held, has been revoked or
+    // invalidated, or the CSPRNG failed — and a false is one rotation skipped,
+    // never an error state (3.6a).
+    //
+    // ⚠ THIS IS `ppcp_rv_rid()` AND NOTHING ELSE.  It re-derives no key: `K_id`
+    // came out of `ppcp_rv_derive()` when the pairing was made and is copied,
+    // never recomputed, here.
+    bool mintRid(const std::string &pairingId,
+                 std::uint8_t rn[PPCP_RV_RN_BYTES],
+                 std::uint8_t rid[PPCP_RV_RID_BYTES]) const;
+
     // ── The table ──────────────────────────────────────────────────────────
     std::vector<CodeStatus> codes() const;
     bool status(const std::string &pairingId, CodeStatus *out) const;

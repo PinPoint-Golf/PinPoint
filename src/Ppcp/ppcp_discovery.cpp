@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <utility>
 
 // ntohs() below is used only by BonjourBrowser, so arpa/inet.h — POSIX-only,
 // absent on Windows — travels with dns_sd.h under the same guard rather than
@@ -326,6 +327,348 @@ std::unique_ptr<RvBrowser> makePlatformBrowser()
     // No DNS-SD client on this platform yet.  3.6b: failure to discover falls
     // back to the pairing code, without user-visible failure — so returning
     // null is the whole of the handling.
+    return nullptr;
+#endif
+}
+
+// ── The advertisement half (RV 3.5e / CA5) — H9 ─────────────────────────────
+
+namespace {
+
+// Lowercase, which is what §10's own worked example uses for `rn` and `rid` in
+// a TXT record.  The instance name is uppercase (3.2a) and that asymmetry is
+// the document's, not ours; `hexToBytes()` above reads either, so a peer that
+// chose the other case still resolves.
+std::string bytesToHexLower(const std::uint8_t *b, std::size_t n)
+{
+    static const char *d = "0123456789abcdef";
+    std::string s;
+    s.reserve(n * 2);
+    for (std::size_t i = 0; i < n; ++i) {
+        s.push_back(d[(b[i] >> 4) & 0x0f]);
+        s.push_back(d[b[i] & 0x0f]);
+    }
+    return s;
+}
+
+// One length-prefixed "key=value".  DNS-SD gives each string a single length
+// byte, so 255 is the hard limit per entry; 3.3c's 200 bytes for the whole
+// record is far stricter and is checked by the caller.
+bool appendTxtEntry(std::vector<std::uint8_t> *out, const std::string &kv)
+{
+    if (kv.empty() || kv.size() > 255) return false;
+    out->push_back(static_cast<std::uint8_t>(kv.size()));
+    out->insert(out->end(), kv.begin(), kv.end());
+    return true;
+}
+
+}  // namespace
+
+bool registrationInstanceName(const std::uint8_t nonce[PPCP_RV_REG_NONCE_BYTES],
+                              std::string *out)
+{
+    if (!nonce || !out) return false;
+    static const char *d = "0123456789ABCDEF";
+    std::string s = "PPCP-";
+    for (std::size_t i = 0; i < PPCP_RV_REG_NONCE_BYTES; ++i) {
+        s.push_back(d[(nonce[i] >> 4) & 0x0f]);
+        s.push_back(d[nonce[i] & 0x0f]);
+    }
+    *out = s;
+    return true;
+}
+
+bool buildTxtRecord(const RvTxtFields &f, std::vector<std::uint8_t> *out)
+{
+    if (!out) return false;
+    if (f.pv.empty() || f.role.empty()) return false;
+    // 3.3a's `role` is a closed set.  A value outside it is a record no
+    // browser can act on, and refusing to build one is cheaper than shipping
+    // it and wondering why nothing dials.
+    if (f.role != "host" && f.role != "capture" && f.role != "observer") return false;
+
+    std::vector<std::uint8_t> txt;
+    // The order is the order of 3.3a's table.  Nothing depends on it — a TXT
+    // record is a set — but a record that reads like the specification is one
+    // a reader can check against it.
+    const bool ok =
+        appendTxtEntry(&txt, "txtvers=1") &&
+        appendTxtEntry(&txt, "pv=" + f.pv) &&
+        appendTxtEntry(&txt, "role=" + f.role) &&
+        appendTxtEntry(&txt, "rn=" + bytesToHexLower(f.rn, PPCP_RV_RN_BYTES)) &&
+        appendTxtEntry(&txt, "rid=" + bytesToHexLower(f.rid, PPCP_RV_RID_BYTES));
+    if (!ok) return false;
+    if (txt.size() > 200) return false;   // 3.3c
+    out->swap(txt);
+    return true;
+}
+
+unsigned rotationPeriodSeconds(std::size_t pairingsHeld)
+{
+    if (pairingsHeld == 0) return 0;              // nothing to advertise
+    if (pairingsHeld == 1) return kAdvertisementMaxPeriodS;   // 3.4a and no more
+
+    unsigned p = static_cast<unsigned>(kAdvertisementCycleTargetS / pairingsHeld);
+    if (p < kAdvertisementMinPeriodS) p = kAdvertisementMinPeriodS;
+    if (p > kAdvertisementMaxPeriodS) p = kAdvertisementMaxPeriodS;
+    return p;
+}
+
+// ── The rotation driver ─────────────────────────────────────────────────────
+
+RvReconnectionAdvertisement::RvReconnectionAdvertisement(RvAdvertiser *advertiser,
+                                                         RidMinter mint, RandomFn rng)
+    : m_adv(advertiser), m_mint(std::move(mint)), m_rng(std::move(rng))
+{
+}
+
+bool RvReconnectionAdvertisement::start(std::uint16_t port,
+                                        const std::vector<std::string> &pairings,
+                                        std::uint64_t nowS)
+{
+    stop();
+    if (!m_adv || !m_mint || !m_rng) return false;
+    if (pairings.empty() || port == 0) return false;
+
+    // 3.2d — four CSPRNG bytes, drawn fresh for THIS registration.  A failure
+    // to draw them advertises nothing: an instance name from a degraded source
+    // is not a privacy failure the way a key would be, but this application
+    // has one CSPRNG and no fallback anywhere, and inventing one here would be
+    // the first.
+    std::uint8_t nonce[PPCP_RV_REG_NONCE_BYTES]{};
+    if (!m_rng(nonce, sizeof nonce)) return false;
+    if (!registrationInstanceName(nonce, &m_instanceName)) return false;
+
+    m_pairings = pairings;
+    m_at = 0;
+    m_port = port;
+    m_rotations = 0;
+    return rotate(nowS, true);
+}
+
+void RvReconnectionAdvertisement::setPairings(const std::vector<std::string> &pairings,
+                                              std::uint64_t nowS)
+{
+    if (pairings.empty()) { stop(); return; }
+    if (!m_active) { start(m_port, pairings, nowS); return; }
+
+    // The registration survives.  3.2d draws a name per REGISTRATION, and a
+    // pairing arriving or being revoked is not one — re-drawing here would
+    // rename the service for a reason 3.2d does not recognise, which is the
+    // deregister/probe/announce cycle E49 says makes the rotation unaffordable.
+    const std::string wasOn = m_current;
+    m_pairings = pairings;
+
+    // Stay on the pairing already advertised where it is still held, so a
+    // device that is midway through resolving this instance is not moved out
+    // from under it by an unrelated change to the ledger.
+    m_at = 0;
+    for (std::size_t i = 0; i < m_pairings.size(); ++i) {
+        if (m_pairings[i] == wasOn) { m_at = i; break; }
+    }
+    if (m_current != m_pairings[m_at]) rotate(nowS, false);
+    else m_nextS = nowS + periodSeconds();
+}
+
+void RvReconnectionAdvertisement::stop()
+{
+    if (m_adv) m_adv->stop();
+    m_active = false;
+    m_pairings.clear();
+    m_current.clear();
+    m_instanceName.clear();
+    m_at = 0;
+    m_nextS = 0;
+}
+
+bool RvReconnectionAdvertisement::tick(std::uint64_t nowS)
+{
+    if (!m_active || m_pairings.empty()) return false;
+    if (nowS < m_nextS) return false;
+    // 3.4d1 — "selecting the next pairing in a stable order".  The order is
+    // the caller's, which is most-recently-used first, and it wraps.
+    m_at = (m_at + 1) % m_pairings.size();
+    return rotate(nowS, false);
+}
+
+bool RvReconnectionAdvertisement::rotate(std::uint64_t nowS, bool firstRegistration)
+{
+    if (m_pairings.empty()) return false;
+    const std::string &id = m_pairings[m_at];
+
+    // 3.4a — a fresh `rn` on every registration and on every rotation, and
+    // `rid` recomputed with it.  The minter is the only thing that touches
+    // `K_id`, and it lives in the rendezvous ledger.
+    RvTxtFields f;
+    if (!m_mint(id, f.rn, f.rid)) return false;
+
+    std::vector<std::uint8_t> txt;
+    if (!buildTxtRecord(f, &txt)) return false;
+
+    const bool ok = firstRegistration ? m_adv->start(m_instanceName, m_port, txt)
+                                      : m_adv->updateTxt(txt);
+    if (!ok) {
+        // 3.6a — a responder that will not publish is not an error state.  We
+        // simply are not discoverable, and 3.6b's fallback is the pairing code
+        // the user can already reach.
+        if (firstRegistration) m_active = false;
+        return false;
+    }
+
+    m_active = true;
+    m_current = id;
+    m_nextS = nowS + periodSeconds();
+    ++m_rotations;
+    return true;
+}
+
+bool          RvReconnectionAdvertisement::active() const { return m_active; }
+unsigned      RvReconnectionAdvertisement::periodSeconds() const
+{
+    return rotationPeriodSeconds(m_pairings.size());
+}
+std::uint64_t RvReconnectionAdvertisement::nextRotationAtS() const { return m_nextS; }
+std::string   RvReconnectionAdvertisement::instanceName() const { return m_instanceName; }
+std::string   RvReconnectionAdvertisement::currentPairingId() const { return m_current; }
+std::size_t   RvReconnectionAdvertisement::rotations() const { return m_rotations; }
+
+std::string RvReconnectionAdvertisement::describe() const
+{
+    // 7.2b — a count, a period and the service type.  No pairing id, because
+    // although a local handle is not key material, naming which pairing is on
+    // the wire in a diagnostic bundle is exactly the correlation 3.4e's
+    // unlinkability argument is about.
+    if (!m_active) return "not advertising";
+    std::string s = "advertising _ppcp._tcp as ";
+    s += m_instanceName;
+    s += " (role host), rotating ";
+    s += std::to_string(m_pairings.size());
+    s += " pairing(s) every ";
+    s += std::to_string(periodSeconds());
+    s += "s, ";
+    s += std::to_string(m_rotations);
+    s += " so far";
+    return s;
+}
+
+// ── The platform advertiser ─────────────────────────────────────────────────
+
+#if defined(__APPLE__)
+namespace {
+
+class BonjourAdvertiser final : public RvAdvertiser {
+public:
+    ~BonjourAdvertiser() override { stop(); }
+
+    bool start(const std::string &instanceName, std::uint16_t port,
+               const std::vector<std::uint8_t> &txt) override
+    {
+        stop();
+        if (instanceName.empty() || port == 0 || txt.empty()) return false;
+        if (txt.size() > 0xffff) return false;
+
+        // ⚠ NO `kDNSServiceFlagsNoAutoRename`.  If another instance on the
+        // link already holds this name, letting mDNSResponder rename ours
+        // keeps us discoverable; refusing would leave §7.4's persistence dead
+        // for the sake of eight hex characters that name nothing.  3.2b binds
+        // what the name may not CONTAIN, and a numeric suffix contains none of
+        // it.  The name we end up with is reported by onRegister below.
+        //
+        // ⚠ AND NO CALLBACK-FREE FORM.  Passing a null callback would make the
+        // registration fire-and-forget and leave `registeredName()` empty, so
+        // there would be no way to observe that the responder took it.
+        const DNSServiceErrorType e =
+            DNSServiceRegister(&m_reg, 0, kDNSServiceInterfaceIndexAny,
+                               instanceName.c_str(), "_ppcp._tcp",
+                               nullptr,   // default domain (.local)
+                               nullptr,   // this host
+                               htons(port),
+                               static_cast<uint16_t>(txt.size()), txt.data(),
+                               &BonjourAdvertiser::onRegister, this);
+        if (e != kDNSServiceErr_NoError) {
+            m_reg = nullptr;
+            return false;   // 3.6a — not an error state, just not discoverable
+        }
+        m_asked = instanceName;
+        return true;
+    }
+
+    bool updateTxt(const std::vector<std::uint8_t> &txt) override
+    {
+        if (!m_reg || txt.empty() || txt.size() > 0xffff) return false;
+        // A null DNSRecordRef means "the primary TXT record of this
+        // registration", and a TTL of 0 means the responder's default.  This
+        // is the one call 3.2d exists to make possible: the service keeps its
+        // name and one record changes, so a rotation is a single announcement
+        // rather than a deregister, probe and announce.
+        return DNSServiceUpdateRecord(m_reg, nullptr, 0,
+                                      static_cast<uint16_t>(txt.size()),
+                                      txt.data(), 0) == kDNSServiceErr_NoError;
+    }
+
+    void stop() override
+    {
+        if (m_reg) {
+            // Deallocating the ref is what sends the goodbye packet and
+            // withdraws the instance.
+            DNSServiceRefDeallocate(m_reg);
+            m_reg = nullptr;
+        }
+        m_asked.clear();
+        m_registered.clear();
+    }
+
+    int fd() const override { return m_reg ? DNSServiceRefSockFD(m_reg) : -1; }
+
+    bool process() override
+    {
+        if (!m_reg) return false;
+        return DNSServiceProcessResult(m_reg) == kDNSServiceErr_NoError;
+    }
+
+    std::string describe() const override
+    {
+        return "DNS-SD via mDNSResponder (register)";
+    }
+
+    std::string registeredName() const override { return m_registered; }
+
+private:
+    static void DNSSD_API onRegister(DNSServiceRef, DNSServiceFlags,
+                                     DNSServiceErrorType err, const char *name,
+                                     const char *, const char *, void *ctx)
+    {
+        auto *self = static_cast<BonjourAdvertiser *>(ctx);
+        if (!self) return;
+        if (err != kDNSServiceErr_NoError) {
+            // 3.6a.  A name conflict the responder could not resolve, or a
+            // responder that went away: we are not discoverable and there is
+            // nothing to report to a user about it.
+            self->m_registered.clear();
+            return;
+        }
+        if (name) self->m_registered = name;
+    }
+
+    DNSServiceRef m_reg = nullptr;
+    std::string   m_asked;
+    std::string   m_registered;
+};
+
+}  // namespace
+#endif  // __APPLE__
+
+std::unique_ptr<RvAdvertiser> makePlatformAdvertiser()
+{
+#if defined(__APPLE__)
+    return std::unique_ptr<RvAdvertiser>(new BonjourAdvertiser);
+#else
+    // CA5 — Windows is DEFERRED and this is where it is recorded.  There is no
+    // `dns_sd.h` outside Apple's Bonjour SDK, which is an installer and a
+    // system service rather than a header, and taking that dependency is a
+    // decision about what PinPointStudio ships rather than about the protocol.
+    // 3.6b makes the consequence silent: no advertisement, so a Windows host
+    // is reached by pairing code every session until somebody decides.
     return nullptr;
 #endif
 }

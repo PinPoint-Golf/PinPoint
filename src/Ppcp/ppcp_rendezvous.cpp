@@ -235,6 +235,12 @@ struct PpcpRendezvous::Impl {
         bool          invalidated = false;
         bool          persisted = false;
         bool          mayPersist = true;  // 7.4f, decided at publish time
+        // 3.4d1's SHOULD — "advertise a recently used pairing first, because
+        // the counterpart a user is standing in front of is usually the one
+        // they used last".  Set when a link actually establishes on this
+        // pairing, so it is a record of a device having been here rather than
+        // of a code having been printed.  0 = never, this run.
+        std::uint64_t lastUsedUnixS = 0;
         std::vector<RvEndpoint> endpoints;
 
         void wipeKeys()
@@ -481,6 +487,7 @@ void PpcpRendezvous::noteLinkEstablished(const std::string &pairingId)
     std::lock_guard<std::mutex> g(m_impl->mu);
     Impl::Entry *e = m_impl->find(pairingId);
     if (!e) return;
+    e->lastUsedUnixS = m_impl->now();   // 3.4d1 — recently used first
     if (e->usesRemaining > 0) e->usesRemaining--;
     if (e->usesRemaining == 0 && !e->persisted) {
         // The CODE is spent.  The key material stays until 7.3b or 7.4 disposes
@@ -613,6 +620,68 @@ std::string PpcpRendezvous::resolveRid(const std::uint8_t rn[PPCP_RV_RN_BYTES],
         return {};   // 3.4c — and the caller does not get to connect anyway
     if (idx >= map.size()) return {};
     return m_impl->entries[map[idx]].pairingId;
+}
+
+// ── 3.4a / 3.4d1 — the advertisement side of the same identifiers (H9) ──────
+
+std::vector<std::string> PpcpRendezvous::advertisablePairings() const
+{
+    std::lock_guard<std::mutex> g(m_impl->mu);
+
+    // Persisted and not revoked.  `revoke()` erases the key material and drops
+    // the row, so a revoked pairing cannot appear here at all; `invalidated`
+    // is the belt to that brace and costs one comparison.
+    std::vector<std::pair<std::uint64_t, std::size_t>> rows;
+    for (std::size_t i = 0; i < m_impl->entries.size(); ++i) {
+        const auto &e = m_impl->entries[i];
+        if (!e.persisted || e.invalidated) continue;
+        rows.push_back({e.lastUsedUnixS, i});
+    }
+
+    // Most recently used first; never-used last in ledger order.  `stable_sort`
+    // rather than `sort` so that the order of two pairings with the same stamp
+    // — every pairing that has not been used this run shares the stamp 0 — is
+    // the ledger's and does not vary between calls.  3.4d1 asks for "a stable
+    // order", and a comparator that ties arbitrarily would not give one.
+    std::stable_sort(rows.begin(), rows.end(),
+                     [](const std::pair<std::uint64_t, std::size_t> &a,
+                        const std::pair<std::uint64_t, std::size_t> &b) {
+                         return a.first > b.first;
+                     });
+
+    std::vector<std::string> out;
+    out.reserve(rows.size());
+    for (const auto &r : rows) out.push_back(m_impl->entries[r.second].pairingId);
+    return out;
+}
+
+bool PpcpRendezvous::mintRid(const std::string &pairingId,
+                             std::uint8_t rn[PPCP_RV_RN_BYTES],
+                             std::uint8_t rid[PPCP_RV_RID_BYTES]) const
+{
+    if (!rn || !rid) return false;
+
+    std::uint8_t kId[PPCP_RV_KEY_BYTES];
+    {
+        std::lock_guard<std::mutex> g(m_impl->mu);
+        const Impl::Entry *e = m_impl->find(pairingId);
+        if (!e || e->invalidated) return false;
+        std::memcpy(kId, e->kId, sizeof kId);
+    }
+
+    // 7.2a — the CSPRNG, at full width, with no fallback.  A failure here
+    // skips one rotation; the previous `rn` stays on the wire, which is
+    // conformant for up to 3.4a's fifteen minutes and is strictly better than
+    // publishing a nonce from a degraded source.
+    const bool drew = csprngBytes(rn, PPCP_RV_RN_BYTES);
+    const bool ok = drew && ppcp_rv_rid(kId, rn, rid) == PPCP_OK;
+    wipe(kId, sizeof kId);
+    if (!ok) {
+        wipe(rn, PPCP_RV_RN_BYTES);
+        wipe(rid, PPCP_RV_RID_BYTES);
+        return false;
+    }
+    return true;
 }
 
 // ── RV 5.3a1, erratum E21 — DRAWING AN IDENTITY FOR A LIVE CONNECTION ──────

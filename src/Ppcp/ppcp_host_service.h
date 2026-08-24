@@ -322,6 +322,12 @@ private:
     void notePeerName(const Phone *ph);
     void startDiscovery();
     void stopDiscovery();
+    // RV 3.5e / CA5 — the advertisement half.  `refreshAdvertisement()` is
+    // called wherever the set of persisted pairings can have changed, which is
+    // the only input it has.
+    void startAdvertising();
+    void stopAdvertising();
+    void refreshAdvertisement();
     static QString phoneNameFor(const QString &pairingId);
 
     Ppcp::PpcpRendezvous                   m_rv;
@@ -364,6 +370,28 @@ private:
     // back is a different name for the same phone — which is why the VALUE is
     // the stable local pairingId and the key is not.
     QHash<QString, QString> m_seenInstances;
+
+    // ── RV §3 discovery, the ADVERTISEMENT half (3.5e, CA5) ─────────────────
+    //
+    // ⚠ WITHOUT THIS, §7.4's PERSISTENCE BUYS NOTHING.  Our counterpart is
+    // barred from advertising by 3.5d — `Network.framework`'s listener has no
+    // server-side PSK resolver, so a phone that advertised would be
+    // discoverable and unable to complete the handshake it advertised for — and
+    // 3.5e then makes the peer that CAN advertise do so.  If neither did, both
+    // ends would hold valid key material with no path by which either finds the
+    // other, and the user would see a protocol that remembers them and still
+    // asks for a code every session.
+    //
+    // ⚠ IT ADVERTISES ONLY PERSISTED PAIRINGS, AND ONLY ONE AT A TIME (3.4d1).
+    // One instance is what keeps the COUNT of held pairings unobservable, which
+    // is the property 3.4e is about; the driver rotates which pairing is named.
+    //
+    // ⚠ AND IT IS AS SILENT AS THE BROWSER (3.6a).  `makePlatformAdvertiser()`
+    // returns null off macOS, the responder can refuse, and the registration
+    // can be renamed under us.  None of those reaches `status`.
+    std::unique_ptr<Ppcp::RvAdvertiser>                 m_advertiser;
+    std::unique_ptr<Ppcp::RvReconnectionAdvertisement>  m_advert;
+    std::unique_ptr<QSocketNotifier>                    m_advertWatch;
 
     // The accept loop.  Its ONLY job is to block in accept() and hand the link
     // to the GUI thread; it touches no PPCP state of its own.

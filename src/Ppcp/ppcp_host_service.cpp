@@ -201,6 +201,7 @@ bool PpcpHostService::start(quint16 port, QString *err)
     });
 
     startDiscovery();
+    startAdvertising();
 
     m_listening = true;
     m_timer.start();
@@ -213,6 +214,7 @@ void PpcpHostService::stop()
 {
     m_timer.stop();
     stopDiscovery();
+    stopAdvertising();
     m_stopping = true;
     if (m_acceptThread.joinable()) m_acceptThread.join();
     dropAllPhones("shutdown");
@@ -542,6 +544,103 @@ void PpcpHostService::stopDiscovery()
     }
 }
 
+// ── RV §3, the advertisement half (3.5e / CA5) — work package H9 ────────────
+//
+// ⚠ THE OBJECTION IN `ppcp_discovery.h` DOES NOT REACH THIS, AND THAT IS WHY
+// IT IS ADDITIVE.  What 3.5b calls "a responder, which a mobile platform
+// supplies and several desktop platforms do not" is the thing that owns UDP
+// 5353 for the whole machine.  On macOS that is mDNSResponder, it is already
+// running, and `DNSServiceRegister` asks it — over the same local IPC socket
+// `DNSServiceBrowse` already uses — to publish on our behalf.  This process
+// binds no multicast socket either way.
+//
+// ⚠ 3.5d IS SATISFIED HERE RATHER THAN ASSUMED.  It forbids advertising for
+// reconnection where the platform cannot resolve a PSK identity server-side,
+// because 5.3b needs the listener to recompute `tag` with the `K_id` of every
+// pairing held.  `m_listener.setIdentityResolver(m_rv.identityResolver())` at
+// start-up IS that hook; a host without it would be discoverable and unable to
+// complete the handshake it advertised for, which is the whole of the clause.
+//
+// ⚠ AND WHAT IS ADVERTISED IS PERSISTED PAIRINGS ONLY.  An outstanding CODE is
+// dialled by the peer that scanned it, at the endpoint printed in the code
+// (4.3d).  §3 is reconnection convenience; a pairing that has not happened yet
+// has nothing to reconnect to.
+void PpcpHostService::startAdvertising()
+{
+    m_advertiser = Ppcp::makePlatformAdvertiser();
+    if (!m_advertiser) return;   // CA5 — Windows deferred; 3.6b makes it silent
+
+    m_advert = std::make_unique<Ppcp::RvReconnectionAdvertisement>(
+        m_advertiser.get(),
+        // The `K_id` seam.  Eight bytes of `rn` and eight of `rid` cross it,
+        // both of which 3.4e publishes in the clear on purpose; the key stays
+        // in the rendezvous ledger and is never copied out.
+        [this](const std::string &pairingId, std::uint8_t rn[PPCP_RV_RN_BYTES],
+               std::uint8_t rid[PPCP_RV_RID_BYTES]) {
+            return m_rv.mintRid(pairingId, rn, rid);
+        },
+        [](void *out, std::size_t len) { return Ppcp::csprngBytes(out, len); });
+
+    // ⚠ AND THE WATCH IS INSTALLED BY `refreshAdvertisement()`, NOT HERE.  A
+    // host that holds no persisted pairing yet registers nothing at start-up,
+    // so there is no client socket to watch until the user remembers their
+    // first phone — and a watch installed once at start-up would never be
+    // installed at all on the run that matters.
+    refreshAdvertisement();
+}
+
+void PpcpHostService::stopAdvertising()
+{
+    m_advertWatch.reset();
+    if (m_advert) m_advert->stop();
+    m_advert.reset();
+    m_advertiser.reset();
+}
+
+// The set of persisted pairings is the ONLY input.  Called from start-up, from
+// `rememberPairing()` and from `forgetPairing()`, which between them are every
+// way it changes.
+void PpcpHostService::refreshAdvertisement()
+{
+    if (!m_advert || !m_advertiser) return;
+
+    const std::vector<std::string> held = m_rv.advertisablePairings();
+    if (held.empty()) {
+        // 3.4e's residual exposure is "anyone on the link can see that a
+        // PPCP-capable peer is present".  With nothing to reconnect to there is
+        // nothing to be found FOR, so the honest thing is to withdraw rather
+        // than advertise an instance no phone can resolve.
+        if (m_advert->active()) {
+            // The watch goes first: `stop()` deallocates the DNS-SD ref and
+            // closes the socket under it, and a QSocketNotifier left on a
+            // closed descriptor is a busy loop.
+            m_advertWatch.reset();
+            m_advert->stop();
+        }
+        return;
+    }
+    const std::uint64_t now = static_cast<std::uint64_t>(QDateTime::currentSecsSinceEpoch());
+    if (m_advert->active()) {
+        m_advert->setPairings(held, now);
+        return;
+    }
+    // 3.7f is about a bootstrap instance and does not reach this one: a
+    // reconnection instance names the PPCP listener, because the device dials
+    // it to reconnect and 5.2g then makes the device the TLS client.
+    if (!m_advert->start(m_port, held, now)) return;   // 3.6a — silent
+
+    const int fd = m_advertiser->fd();
+    if (fd < 0) return;
+    m_advertWatch = std::make_unique<QSocketNotifier>(fd, QSocketNotifier::Read);
+    connect(m_advertWatch.get(), &QSocketNotifier::activated, this, [this] {
+        if (m_advertiser && !m_advertiser->process()) {
+            // 3.6a — the registration died.  Stop watching; report nothing.
+            stopAdvertising();
+        }
+    });
+    ppWarn() << "[ppcp-rv] advertising:" << m_advert->describe().c_str();
+}
+
 // ── The phone's own name ────────────────────────────────────────────────────
 //
 // ⚠ NOT IN THE KEYCHAIN, AND THE DISTINCTION IS THE POINT.  The pairing store
@@ -671,6 +770,12 @@ void PpcpHostService::onTick()
     // 7.3b's periodic half, and 7.2d's: a code nobody used still holds a K_tls
     // until something removes it.
     if (m_rv.reap() > 0) emit codeChanged();
+
+    // 3.4a/3.4d1 — the `rn` rotation, driven off the timer that is already
+    // running rather than a second one.  `tick()` is an integer comparison
+    // until a rotation is actually due, so calling it at 50 Hz costs nothing;
+    // when one IS due it is a single TXT update (3.2d), not a re-registration.
+    if (m_advert) m_advert->tick(static_cast<std::uint64_t>(QDateTime::currentSecsSinceEpoch()));
 
     if (m_codeLive) {
         // ⚠ ONCE A SECOND, NOT ONCE A TICK.  m_timer is 20 ms, so emitting
@@ -886,6 +991,9 @@ bool PpcpHostService::rememberPairing(const QString &pairingId)
     std::string why;
     const bool ok = m_rv.persist(pairingId.toStdString(), &why);
     if (!ok) setStatus(tr("Cannot remember this device: %1").arg(QString::fromStdString(why)));
+    // 3.5e — a pairing only becomes worth advertising once it is persisted,
+    // because that is the moment it acquires something to reconnect to.
+    if (ok) refreshAdvertisement();
     emit codeChanged();
     emit phonesChanged();
     return ok;
@@ -896,6 +1004,9 @@ void PpcpHostService::forgetPairing(const QString &pairingId)
     // 7.4d — revocation is honoured immediately by this side, which means the
     // next handshake resolves nothing and fails like any stranger (7.7c).
     m_rv.revoke(pairingId.toStdString());
+    // 7.4d is "honoured immediately by this side", and an advertisement still
+    // naming the revoked pairing would be this side continuing to offer it.
+    refreshAdvertisement();
     // The nickname goes with the key.  7.4d is about the pairing, but a name
     // left behind is a record that this host has met that phone, and "forget"
     // must not leave one.
@@ -922,10 +1033,15 @@ QString PpcpHostService::diagnosticExport() const
     // description is a build fact ("DNS-SD via mDNSResponder (browse only)"),
     // and the count is of pairings this host already holds; no `rid`, no
     // instance name and no endpoint goes in, because those describe a peer.
+    // The advertisement's line names no pairing either, for the same reason:
+    // a local handle is not key material, but recording WHICH pairing was on
+    // the wire is the correlation 3.4e's unlinkability argument is about.
     return QString::fromStdString(m_rv.diagnosticExport())
-         + QStringLiteral("\ndiscovery: %1\ndiscovered-pairings: %2\n")
+         + QStringLiteral("\ndiscovery: %1\ndiscovered-pairings: %2\nadvertisement: %3\n")
                .arg(discoveryDescription())
-               .arg(m_seenInstances.size());
+               .arg(m_seenInstances.size())
+               .arg(m_advert ? QString::fromStdString(m_advert->describe())
+                             : tr("no service advertisement on this platform"));
 }
 
 // ── What a failed arrival is allowed to say ─────────────────────────────────

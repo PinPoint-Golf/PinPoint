@@ -344,6 +344,38 @@ pp_add_test(ppcp_rendezvous_test
     GTEST)
 
 
+# ── H9 — the advertisement half of RV §3 ───────────────────────────────────
+#
+# Split from `ppcp_rendezvous_test` rather than added to it because its last
+# test talks to the real mDNSResponder and takes up to ten seconds, and a suite
+# that is otherwise pure arithmetic should not acquire a timeout.  Same sources:
+# the driver is in ppcp_discovery.cpp and the `K_id` seam it mints through is in
+# ppcp_rendezvous.cpp, and the point of the pairing is that neither can be
+# tested against the other with a stub.
+#
+# ⚠ `-framework Security` and `CoreFoundation` are the keychain store's, not the
+# advertiser's: `DNSServiceRegister` lives in libSystem and needs no framework.
+pp_add_test(ppcp_advertise_test
+    SOURCES ppcp_advertise_test.cpp
+            ${PPCP}/ppcp_discovery.cpp
+            ${PPCP}/ppcp_rendezvous.cpp
+            ${PPCP}/ppcp_pairing_store.cpp
+            ${PPCP}/ppcp_transport.cpp
+    INCLUDE ${PPCP}
+    LINK    ${_rv_link}
+    STD 20
+    NO_QT
+    GTEST)
+set_tests_properties(ppcp_advertise_test PROPERTIES TIMEOUT 300)
+
+# The by-hand observation: holds a real advertisement up for as long as
+# PPCP_ADVERTISE_HOLD_S says so `dns-sd -B` / `dns-sd -L` can watch it.  Skips
+# in a second when the variable is unset, which is every CI run.
+add_test(NAME ppcp_advertise_hold
+         COMMAND ppcp_advertise_test --gtest_filter=PpcpAdvertiseHold.*)
+set_tests_properties(ppcp_advertise_hold PROPERTIES TIMEOUT 300)
+
+
 # ── H-compose (c) — the pairing code's clock ────────────────────────────────
 #
 # ⚠ THE FIRST TEST `PpcpHostService` HAS EVER HAD.  It was reachable only from

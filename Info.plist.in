@@ -41,5 +41,20 @@
     <string>PinPoint Studio uses speech recognition for hands-free control.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>PinPoint Studio needs microphone access for voice commands.</string>
+
+    <!-- PPCP-RV §3 service discovery, BOTH HALVES.  Without these two keys
+         macOS gates the local network and neither DNSServiceBrowse nor
+         DNSServiceRegister reaches the responder - and RV 3.6a MUST NOT treat
+         discovery failure as an error state, so it fails with NO SYMPTOM
+         WHATSOEVER: no dialog, no log line, no status.  A phone simply never
+         appears and the user is asked for a pairing code every session.
+         NSBonjourServices lists the service types this application may browse
+         for; an omitted type is not an error either, it is silence. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>PinPoint Studio finds your phone on this network so it can reconnect without a new pairing code.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_ppcp._tcp</string>
+    </array>
 </dict>
 </plist>
