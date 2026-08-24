@@ -1084,6 +1084,13 @@ if(TARGET ppcp)
         # block below: a file is not a socket, and needing TLS to read one would
         # be this application inventing a requirement the specification has not.
         src/Ppcp/ppcp_host_engine.h        src/Ppcp/ppcp_host_engine.cpp
+        # The engine's own dependency, moved here from the OpenSSL block for the
+        # same reason as ppcp_host_engine.cpp itself: evaluate() decides accept/
+        # reject on a peer_desc, touches no socket and no TLS, and ppcp_host_engine.cpp
+        # calls it unconditionally — leaving it OpenSSL-gated meant a box with no
+        # OpenSSL got ppcp_host_engine.cpp.obj with an unresolved external symbol
+        # rather than a build that simply excludes it (observed 24 Aug, Debug kit).
+        src/Ppcp/ppcp_ingest_policy.h      src/Ppcp/ppcp_ingest_policy.cpp
         # H3 — the bundle path. No OpenSSL and no socket: plan A10 says a file
         # transport feeds the SAME ingest path a socket does, and one that had
         # to link TLS to reach the sink would not be the same path.
@@ -3111,7 +3118,10 @@ pp_find_openssl()
 if(PP_OPENSSL_FOUND AND TARGET ppcp)
     target_sources(PinPointStudio PRIVATE
         src/Ppcp/ppcp_transport.h     src/Ppcp/ppcp_transport.cpp
-        src/Ppcp/ppcp_ingest_policy.h src/Ppcp/ppcp_ingest_policy.cpp
+        # ppcp_ingest_policy.{h,cpp} moved to the unconditional TARGET-ppcp block
+        # above — ppcp_host_engine.cpp (bundle path) calls evaluate() too and is
+        # itself unconditional, so gating the policy on OpenSSL left that call
+        # unresolved on a box with no OpenSSL.
         src/Ppcp/ppcp_host_peer.h     src/Ppcp/ppcp_host_peer.cpp
         # H6 — PPCP-RV, host side.  In the TRANSPORT block because the code's
         # whole purpose is to authenticate a TLS handshake: the resolver is
@@ -3137,6 +3147,22 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
         # ppcp_pairing_store.cpp.
         target_link_libraries(PinPointStudio PRIVATE
             "-framework Security" "-framework CoreFoundation")
+    elseif(WIN32)
+        # ppcp_rendezvous.cpp's Windows branch: GetAdaptersAddresses (RV 4.3d's
+        # endpoint enumeration) needs iphlpapi, BCryptGenRandom (RV 7.2a's
+        # CSPRNG) needs bcrypt. ws2_32 comes in transitively via Qt6::Network.
+        target_link_libraries(PinPointStudio PRIVATE iphlpapi bcrypt)
+
+        # OpenSSL is linked shared here (vcpkg's default triplet, and most
+        # system installs) but nothing above copies its DLLs next to the exe —
+        # unlike FFmpeg/ORT/CUDA, this dependency is new enough that no such
+        # step existed yet. Same trick as FFmpeg's: walk from the import
+        # library CMake actually found back to its sibling bin/.
+        get_filename_component(_openssl_libdir "${OPENSSL_SSL_LIBRARY}" DIRECTORY)
+        file(GLOB _openssl_dlls
+            "${_openssl_libdir}/../bin/libssl-*.dll"
+            "${_openssl_libdir}/../bin/libcrypto-*.dll")
+        pp_win_bundle_dll(core ${_openssl_dlls})
     endif()
     target_compile_definitions(PinPointStudio PRIVATE HAVE_PPCP_TRANSPORT)
     message(STATUS "PPCP transport: OpenSSL ${PP_OPENSSL_VERSION}, libppcp ${PP_LIBPPCP_VERSION}")

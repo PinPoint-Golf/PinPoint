@@ -18,6 +18,14 @@
 
 #include "ppcp_rendezvous.h"
 
+// Deliberately Qt-free (see the header), so both platform branches below reach
+// straight for the OS rather than QNetworkInterface/QRandomGenerator.
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#include <bcrypt.h>
+#else
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -26,6 +34,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -66,6 +75,18 @@ std::uint64_t wallClockNow()
 }  // namespace
 
 // ── RV 7.2a ─────────────────────────────────────────────────────────────────
+#if defined(_WIN32)
+bool csprngBytes(void *out, std::size_t len)
+{
+    // BCryptGenRandom with the system-preferred generator is Windows' analogue
+    // of getentropy(): CNG's own pool, no seeding, and it either fills the
+    // buffer or returns a non-zero NTSTATUS — no silent degrade, same as the
+    // POSIX branch below. No per-call cap to chunk against, unlike getentropy().
+    return BCryptGenRandom(nullptr, static_cast<PUCHAR>(out),
+                           static_cast<ULONG>(len),
+                           BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 /* STATUS_SUCCESS */;
+}
+#else
 bool csprngBytes(void *out, std::size_t len)
 {
     // getentropy() is capped at 256 bytes per call on both platforms that have
@@ -82,12 +103,66 @@ bool csprngBytes(void *out, std::size_t len)
     }
     return true;
 }
+#endif
 
 // ── RV 4.3d ─────────────────────────────────────────────────────────────────
 std::vector<RvEndpoint> reachableEndpoints(std::uint16_t port)
 {
     std::vector<RvEndpoint> routable, loopback;
 
+#if defined(_WIN32)
+    // GetAdaptersAddresses is this platform's getifaddrs: no /proc, no netlink,
+    // just a buffer Microsoft's own docs say to size at 15000 bytes and retry
+    // once on ERROR_BUFFER_OVERFLOW with the size it reports back.
+    ULONG bufLen = 15000;
+    std::vector<unsigned char> raw(bufLen);
+    auto *addrs = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(raw.data());
+    const ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                        GAA_FLAG_SKIP_DNS_SERVER;
+    ULONG ret = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, addrs, &bufLen);
+    if (ret == ERROR_BUFFER_OVERFLOW) {
+        raw.resize(bufLen);
+        addrs = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(raw.data());
+        ret = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, addrs, &bufLen);
+    }
+    if (ret != NO_ERROR) return {};
+
+    for (auto *a = addrs; a; a = a->Next) {
+        if (a->OperStatus != IfOperStatusUp) continue;
+        // A tunnel is not a bay — same intent as the POSIX branch's
+        // IFF_POINTOPOINT check, read here off the adapter's own type.
+        if (a->IfType == IF_TYPE_PPP || a->IfType == IF_TYPE_TUNNEL ||
+            a->IfType == IF_TYPE_SLIP) continue;
+        const bool lo = (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK);
+
+        for (auto *ua = a->FirstUnicastAddress; ua; ua = ua->Next) {
+            const SOCKADDR *sa = ua->Address.lpSockaddr;
+            char buf[INET6_ADDRSTRLEN] = {0};
+
+            if (sa->sa_family == AF_INET) {
+                auto *sin = reinterpret_cast<const sockaddr_in *>(sa);
+                if (!InetNtopA(AF_INET, &sin->sin_addr, buf, sizeof buf)) continue;
+            } else if (sa->sa_family == AF_INET6) {
+                auto *sin6 = reinterpret_cast<const sockaddr_in6 *>(sa);
+                // fe80::/10 by hand: the IN6_IS_ADDR_LINKLOCAL macro the POSIX
+                // branch gets from netinet/in.h isn't available here. Same
+                // reason to skip it — a link-local address needs a scope id
+                // the scanner cannot use (4.3c tries every entry in turn, so
+                // an unusable one is a wasted dial).
+                const unsigned char *b = sin6->sin6_addr.s6_addr;
+                if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) continue;
+                if (!InetNtopA(AF_INET6, &sin6->sin6_addr, buf, sizeof buf)) continue;
+            } else {
+                continue;
+            }
+
+            RvEndpoint e;
+            e.host = buf;
+            e.port = port;
+            (lo ? loopback : routable).push_back(e);
+        }
+    }
+#else
     struct ifaddrs *ifa = nullptr;
     if (::getifaddrs(&ifa) != 0) return {};
 
@@ -119,6 +194,7 @@ std::vector<RvEndpoint> reachableEndpoints(std::uint16_t port)
         (lo ? loopback : routable).push_back(e);
     }
     ::freeifaddrs(ifa);
+#endif
 
     // 4.3 "most preferred first".  IPv4 before IPv6 within each group, because
     // a range network that has IPv6 at all usually has IPv4 too and the

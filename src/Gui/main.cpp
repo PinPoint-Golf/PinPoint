@@ -650,7 +650,9 @@ int main(int argc, char *argv[])
     // no link, no live code, no thread — and takes none of those paths.
     // (`ppcpHost` is a static, so it is named directly rather than captured.)
     QObject::connect(&app, &QGuiApplication::aboutToQuit, [&eventBuffer, &updateController]() {
+#ifdef HAVE_PPCP_TRANSPORT
         ppcpHost.stop();
+#endif
         updateController.shutdownUpdater();
         eventBuffer.stop();
     });

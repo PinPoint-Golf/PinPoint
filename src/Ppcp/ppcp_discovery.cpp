@@ -18,15 +18,17 @@
 
 #include "ppcp_discovery.h"
 
-#include <arpa/inet.h>
-
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 
+// ntohs() below is used only by BonjourBrowser, so arpa/inet.h — POSIX-only,
+// absent on Windows — travels with dns_sd.h under the same guard rather than
+// sitting unconditionally at the top of a file every platform compiles.
 #if defined(__APPLE__)
+#include <arpa/inet.h>
 #include <dns_sd.h>
 #endif
 
