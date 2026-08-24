@@ -55,6 +55,14 @@ bool hexToBytes(const std::string &s, std::uint8_t *out, std::size_t n)
 
 }  // namespace
 
+// 3.3d — derived from libppcp's own version macros rather than written out.
+// See the note in the header: a literal here fails silently under 3.6a.
+std::string wirePvRange()
+{
+    return std::to_string(PPCP_WIRE_VERSION_MAJOR) + "." +
+           std::to_string(PPCP_WIRE_VERSION_MINOR);
+}
+
 bool parseTxtRecord(const std::uint8_t *txt, std::size_t len, RvAdvertisement *out)
 {
     if (!out) return false;
@@ -78,6 +86,14 @@ bool parseTxtRecord(const std::uint8_t *txt, std::size_t len, RvAdvertisement *o
         else if (key == "role") out->role = val;
         else if (key == "rn") out->hasRn = hexToBytes(val, out->rn, PPCP_RV_RN_BYTES);
         else if (key == "rid") out->hasRid = hexToBytes(val, out->rid, PPCP_RV_RID_BYTES);
+        // 3.3f (H10) — the bootstrap form.  `bs` is what identifies the
+        // instance as one, and `dl` is UNTRUSTED display text (3.3g -> 4.4d).
+        // Both are captured RAW here and sanitised at the point of display:
+        // this function's contract is to be unsurprised by the wire, and a
+        // parser that silently repaired a hostile `dl` would hide from
+        // `classifyInstance()` the fact that it was hostile.
+        else if (key == "bs") { out->hasBs = true; out->bs = val; }
+        else if (key == "dl") { out->hasDl = true; out->dl = val; }
     }
     return true;
 }

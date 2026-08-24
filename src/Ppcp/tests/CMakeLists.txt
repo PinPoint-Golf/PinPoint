@@ -376,6 +376,46 @@ add_test(NAME ppcp_advertise_hold
 set_tests_properties(ppcp_advertise_hold PROPERTIES TIMEOUT 300)
 
 
+# ── H10 — RV §11 guided pairing, the INITIATOR half ────────────────────────
+#
+# ⛔ THREE OF CR-01's NINE TRAPS LIVE IN THIS TARGET'S SUBJECT, and none of them
+# is discoverable from the wire.  Trap 3 (dialling several discovered windows
+# to show the operator a list of numbers) and trap 7 (a failed key agreement
+# reported as a transport error and retried) are asserted here, because their
+# defences are structural and a refusal and a call count are observable.  Trap 8
+# (comparing the digits in software) is NOT and cannot be: a peer that does it
+# passes every static test in the document.  The suite header records that.
+#
+# ⚠ IT NEEDS OpenSSL BECAUSE X25519 IS THIS APPLICATION'S TO SUPPLY.  CA1 and
+# RV 11.11: libppcp has no curve in it and never will (ground rule 13), so
+# `pk` and `Z` are computed here with `EVP_PKEY_X25519` and 32 octets are
+# passed in.  A suite that stubbed the agreement would test everything except
+# the boundary the whole seam exists for — and would not have caught E36's
+# measured behaviour, which is that OpenSSL FAILS the derive rather than
+# returning zeros.
+#
+# ⚠ AND IT DRIVES libppcp's OWN ACCEPTOR ENGINE OVER A SOCKETPAIR.  That is not
+# a second implementation of the acceptor and must not become one — CA4 puts
+# this application on the initiator side only.  It is `ppcp_bs_engine` in
+# PPCP_BS_ROLE_ACCEPTOR, the same object the relay drives, running in-process so
+# the exchange has a counterpart with no network.  The AUTHORITATIVE ordering
+# measurement is `ppcp-relay --probe order-initiator`, out of process, because
+# only the relay can withhold a reply the way an attacker would.
+#
+# The live rows — `PpcpGuidedRelay.*` — skip in a millisecond unless
+# PPCP_BS_RELAY names a running relay.  run-guided-relay.sh sets it.
+pp_add_test(ppcp_bootstrap_test
+    SOURCES ppcp_bootstrap_test.cpp
+            ${PPCP}/ppcp_bootstrap.cpp
+            ${PPCP}/ppcp_discovery.cpp
+    INCLUDE ${PPCP}
+    LINK    ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+    STD 20
+    NO_QT
+    GTEST)
+set_tests_properties(ppcp_bootstrap_test PROPERTIES TIMEOUT 120)
+
+
 # ── H-compose (c) — the pairing code's clock ────────────────────────────────
 #
 # ⚠ THE FIRST TEST `PpcpHostService` HAS EVER HAD.  It was reachable only from

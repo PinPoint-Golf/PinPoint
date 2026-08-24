@@ -61,6 +61,7 @@
 #include <vector>
 
 #include <ppcp/rv.h>
+#include <ppcp/version.h>
 
 namespace Ppcp {
 
@@ -79,6 +80,21 @@ struct RvAdvertisement {
     std::uint8_t  rn[PPCP_RV_RN_BYTES]{};
     bool          hasRid = false;
     std::uint8_t  rid[PPCP_RV_RID_BYTES]{};
+
+    // 3.3f — the BOOTSTRAP form of the record (H10).  The two forms are told
+    // apart by the presence of `bs`, and 3.3g makes an instance carrying both
+    // `bs` and `rid` malformed and ignored.  `Ppcp::classifyInstance()` in
+    // ppcp_bootstrap.h is the one function that decides which this is.
+    //
+    // ⛔ `dl` IS UNTRUSTED AND IS HELD RAW.  It is shown before anything has
+    // been authenticated, so it is whatever a stranger put on the wire.  4.4d
+    // binds it in full: escaped for display, truncated, and NEVER an
+    // identifier, a trust signal or a storage key.  `Ppcp::sanitiseLabel()` is
+    // the only thing that should reach a screen, and nothing keys on either.
+    bool          hasBs = false;
+    std::string   bs;              // "1" when a window is open
+    bool          hasDl = false;
+    std::string   dl;              // ⛔ RAW.  Sanitise before display.
 };
 
 // DNS-SD TXT is a sequence of length-prefixed "key=value" strings.  Returns
@@ -185,10 +201,23 @@ inline constexpr std::size_t PPCP_RV_REG_NONCE_BYTES = 4;
 bool registrationInstanceName(const std::uint8_t nonce[PPCP_RV_REG_NONCE_BYTES],
                               std::string *out);
 
+// 3.3d — the `pv` range THIS peer advertises, as a bare LOW.
+//
+// ⚠ CARRIED FORWARD FROM H9, WHERE IT WAS THE LITERAL `"1.0"`.  Two lines,
+// harmless today, and wrong the day the wire version moves — and it would fail
+// SILENTLY, because 3.6a forbids treating a discovery mismatch as an error
+// state.  A host advertising `pv=1.0` after moving to 1.1 is simply never
+// dialled, by a browser doing exactly what 3.3a tells it to.  So it is derived
+// from the one place the version lives, and the day someone bumps
+// PPCP_WIRE_VERSION_MINOR the advertisement follows without being asked.
+std::string wirePvRange();
+
 // The 3.3a TXT record of a RECONNECTION instance.  A bootstrap instance
-// (3.3f/3.7) is a different set of keys and is NOT built here — H10 owns it.
+// (3.3f/3.7) is a different set of keys and is built in ppcp_bootstrap.h —
+// this host does not open windows (CA4: PinPointStudio is initiator-only), so
+// nothing in this repository builds one at all.
 struct RvTxtFields {
-    std::string  pv = "1.0";      // 3.3d's range syntax; ours is a bare LOW
+    std::string  pv = wirePvRange();
     std::string  role = "host";   // 3.5e — this peer advertises as the host
     std::uint8_t rn[PPCP_RV_RN_BYTES]{};
     std::uint8_t rid[PPCP_RV_RID_BYTES]{};
