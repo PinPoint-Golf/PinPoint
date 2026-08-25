@@ -1042,8 +1042,29 @@ TlsCapabilities queryTlsCapabilities()
     // TLS 1.2 PSK suites, forward-secret ones first — 5.2b1 requires the
     // strongest the platform has to be offered, and 5.2d prefers ECDHE_PSK
     // (RFC 8442) over the plain floor (RFC 5487) wherever it is available.
-    // Whether any of these exist is OpenSSL's answer, not ours: a build that
-    // gains a suite begins offering it with no edit here.
+    // Whether any of these EXIST is OpenSSL's answer, not ours.
+    //
+    // ⚠ THE ACCEPTED LIMIT OF RT-17, AND THE COMMENT HERE USED TO OVERSTATE IT.
+    // It read "a build that gains a suite begins offering it with no edit here",
+    // which is true only of suites already on this list.  What is queried is the
+    // AVAILABILITY of a known set, not the set itself — so an OpenSSL that gains
+    // a PSK suite absent from these four would leave this peer offering less
+    // than its platform supports, which is the thing 5.2b1 forbids.
+    //
+    // No live defect: these four are every PSK suite the RFCs define (8442,
+    // 5489, 5487), so the list is complete against what exists today.  The
+    // exposure is forward-looking only, and it was accepted by the maintainer on
+    // 25 August 2026 with RT-17, on this reasoning: even if a new capability
+    // arrives later, this code is robust enough given the data at risk.  A suite
+    // arriving unoffered would cost this deployment a forward-secrecy
+    // improvement it does not have today and has already accepted doing without
+    // (RV §5.4.3, which made the same judgement on the same payload); it would
+    // not expose anything that is protected now.
+    //
+    // ⚠ So: worth a glance on an OpenSSL upgrade, as hygiene rather than an
+    // obligation.  If the list ever does fall behind, the known fix is a true
+    // enumeration — set_cipher_list(probe, "PSK") and read back
+    // SSL_CTX_get_ciphers().
     static const char *kTls12Candidates[] = {
         "ECDHE-PSK-CHACHA20-POLY1305",
         "ECDHE-PSK-AES128-GCM-SHA256",     // RFC 8442
