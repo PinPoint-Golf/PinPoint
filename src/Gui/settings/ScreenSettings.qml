@@ -26,6 +26,9 @@ Item {
 
     property int    cameraCount:    cameraManager.cameraList.length
     property int    imuCount:       imuManager.imuEnumeratedCount
+    // `ppcpHost` exists only where libppcp AND OpenSSL are both present (H0) —
+    // same guard PhonesPanel.qml uses for the same reason.
+    property int    phoneCount:     (typeof ppcpHost !== "undefined") ? ppcpHost.phones.length : 0
     property int    activeNavIndex: 0
     property string searchQuery:    ""
 
@@ -242,7 +245,7 @@ Item {
                                 // StackLayout, the `panels` lookup above and
                                 // SettingsIndex.entries — and all four were
                                 // changed together.
-                                { navIdx: 5, icon: "▣", label: qsTr("Phones"),         sectionHead: "",               hasBadge: false },
+                                { navIdx: 5, icon: "▣", label: qsTr("Phones"),         sectionHead: "",               hasBadge: true  },
                                 { navIdx: 6, icon: "♪", label: qsTr("Microphone"),     sectionHead: "",               hasBadge: false },
                                 { navIdx: 7, icon: "◎", label: qsTr("Launch Monitor"), sectionHead: "",               hasBadge: false },
                                 { navIdx: 8, icon: "▥", label: qsTr("Storage"),        sectionHead: qsTr("Data"),     hasBadge: false },
@@ -315,7 +318,8 @@ Item {
                                     readonly property bool hovered:  navArea.containsMouse
                                     readonly property int  actualBadge: !modelData.hasBadge ? -1
                                                                         : (modelData.navIdx === 3 ? root.cameraCount
-                                                                        : (modelData.navIdx === 4 ? root.imuCount : -1))
+                                                                        : (modelData.navIdx === 4 ? root.imuCount
+                                                                        : (modelData.navIdx === 5 ? root.phoneCount : -1)))
 
                                     opacity: root.searchQuery.length === 0
                                              || modelData.label.toLowerCase().indexOf(root.searchQuery) >= 0

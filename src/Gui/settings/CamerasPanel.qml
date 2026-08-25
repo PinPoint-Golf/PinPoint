@@ -881,9 +881,24 @@ Item {
 
                             // Persist ROI changes directly to AppSettings whenever the
                             // instance's cropRoi changes (drag, numeric field, preset).
+                            //
+                            // ⚠ GUARDED AGAINST A DESTROYED CONTEXT, NOT JUST A NULL
+                            // TARGET. `cropRoiChanged` can fire off the C++ side as
+                            // `destroyPreviewInstance()` (below) tears the instance
+                            // down — the same "setSelected() rebuilds every Repeater
+                            // delegate synchronously" hazard the crop button's own
+                            // onClicked works around by snapshotting locals first
+                            // (see its comment). This handler has no "before" to
+                            // snapshot from — it only runs REACTIVELY — so instead it
+                            // checks `appSettings` is still reachable with `typeof`,
+                            // which (unlike a bare reference) never throws even when
+                            // the root context chain has already been severed. Without
+                            // this, closing the crop editor logged
+                            // "ReferenceError: appSettings is not defined" here.
                             Connections {
                                 target: camRow.instance
                                 function onCropRoiChanged() {
+                                    if (typeof appSettings === "undefined") return
                                     if (!camData.cameraKey) return
                                     var roi = camRow.instance.cropRoi
                                     var map = appSettings.cameraRoi
