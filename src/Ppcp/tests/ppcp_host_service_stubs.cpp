@@ -19,21 +19,24 @@
 
 // Link stubs for ppcp_host_service_test.
 //
-// `PpcpHostService` reaches three symbols in `src/Video` — `registerPpcpPeer()`
-// on `declare`, and `applyTimebaseOffsets()` / `clearTimebaseMappings()` around
-// a link's timebase relations.  Linking the real ones would drag
+// `PpcpHostService` reaches five symbols in `src/Video` — `registerPpcpPeer()`
+// on `declare`, `applyTimebaseOffsets()` / `clearTimebaseMappings()` around a
+// link's timebase relations, and `dispatchEvent()` / `detachAll()` around a
+// VideoInputPpcp a caller may have attached for preview.  Linking the real ones
+// would drag
 // `video_input_factory.cpp` (Aravis, Spinnaker and Qt Multimedia backends) and
 // `VideoInputPpcp_inventory.cpp` (which reaches Bluetooth through
 // `device_enumerator.h` -> `imu_base.h`) into a suite whose whole subject is the
 // pairing code's clock.  `ppcp_video_input_test` refuses the same TU for the
 // same reason and says so.
 //
-// ⚠ EVERY ONE OF THEM IS UNREACHABLE IN THIS SUITE.  All three are called only
-// from `onDeclare()` and `dropLink()`, and this test never accepts a link — it
-// publishes a code and watches the clock.  So these definitions satisfy the
-// linker without standing in for behaviour anything here observes; if a future
-// test in this file did accept a link, it would be asserting against stubs and
-// these would have to go.
+// ⚠ EVERY ONE OF THEM IS UNREACHABLE IN THIS SUITE.  All five are called only
+// from `onDeclare()`, the event hook `configurePhonePeer()` installs, and
+// `dropPhone()`, and this test never accepts a link — it publishes a code and
+// watches the clock.  So these definitions satisfy the linker without standing
+// in for behaviour anything here observes; if a future test in this file did
+// accept a link, it would be asserting against stubs and these would have to
+// go.
 
 #include "../../Core/pp_debug.h"
 #include "../../Video/VideoInputPpcp.h"
@@ -52,6 +55,16 @@ int VideoInputPpcp::applyTimebaseOffsets(const QString & /*peerId*/,
 }
 
 int VideoInputPpcp::clearTimebaseMappings(const QString & /*peerId*/)
+{
+    return 0;
+}
+
+int VideoInputPpcp::dispatchEvent(const QString & /*peerId*/, const ppcp_event & /*ev*/)
+{
+    return 0;
+}
+
+int VideoInputPpcp::detachAll(const QString & /*peerId*/)
 {
     return 0;
 }

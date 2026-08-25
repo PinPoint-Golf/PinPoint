@@ -23,11 +23,13 @@
 #include <mutex>
 #include <vector>
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QImage>
 #include <QSize>
 #include <QVideoFrame>
 
+#include <ppcp/common.h>   // ppcp_result_str()
 #include <ppcp/transfer.h>
 
 #include "../Ppcp/ppcp_source_declaration.h"   // kHostTimebaseId, hostNowNs()
@@ -38,6 +40,35 @@ QString idStr(const ppcp_id &id)
 {
     return QString::fromUtf8(id.v);
 }
+
+// CORE 5.1 caps every Id at 64 bytes (PPCP_ID_MAX) — refused, not truncated,
+// by ppcp_id_set() below that. A real peer id carries a "peer:" prefix around
+// a UUID (~41 bytes) and a real source id can run "src:camera:ultra_wide"
+// (~21 bytes); "st:" + peerId + ":" + sourceId + ":video" adds up to 72 on
+// exactly that pairing — over the limit — where every existing test's
+// hand-picked short ids ("host-1"/"cam-0") never came close. This is the
+// first thing in this class to actually run against a real phone's real-
+// length ids, which is why it was never caught. A short, deterministic hash
+// keeps the stream id well inside 64 bytes regardless of how long a real
+// peer/source id turns out to be, while staying IDENTICAL every time for the
+// same (peerId, sourceId) pair — load-bearing for reclaimStream()'s dedup
+// and for a repeated start() naming the same Stream it closed last time.
+QString shortStreamKey(const QString &peerId, const QString &sourceId)
+{
+    const QByteArray h = QCryptographicHash::hash(
+        (peerId + QLatin1Char('\x1f') + sourceId).toUtf8(), QCryptographicHash::Sha1);
+    return QString::fromLatin1(h.toHex().left(16));
+}
+
+} // namespace
+
+QString VideoInputPpcp::streamIdFor(const QString &peerId, const QString &sourceId,
+                                     const QString &kind)
+{
+    return QStringLiteral("st:%1:%2").arg(shortStreamKey(peerId, sourceId), kind);
+}
+
+namespace {
 
 // CORE 5.7 `rate` is millihertz — "150 fps is 150000".  Everything in
 // CameraCapabilities is fps, so the conversion happens once, here.
@@ -185,6 +216,25 @@ int VideoInputPpcp::clearTimebaseMappings(const QString &peerId)
     }
     for (VideoInputPpcp *v : targets) v->clearTimebaseMapping();
     return static_cast<int>(targets.size());
+}
+
+void VideoInputPpcp::reclaimStream(const QString &peerId, const QString &sourceId,
+                                   ppcp_peer *peer, VideoInputPpcp *keep)
+{
+    if (peerId.isEmpty() || sourceId.isEmpty() || !peer) return;
+    std::vector<VideoInputPpcp *> stale;
+    {
+        std::lock_guard<std::mutex> g(ppcpLiveMutex());
+        for (VideoInputPpcp *v : ppcpLive())
+            if (v != keep && v->m_peerId == peerId && v->m_sourceId == sourceId
+                && v->m_peer == peer)
+                stale.push_back(v);
+    }
+    // stop() outside the lock: it closes Streams (queues wire messages) and
+    // may emit Qt signals — neither belongs inside a mutex guarding a plain
+    // registry list. A stale instance with nothing open (m_captureStreamId
+    // empty) simply no-ops here, same as any other stop() call.
+    for (VideoInputPpcp *v : stale) v->stop();
 }
 
 int VideoInputPpcp::liveInstanceCount(const QString &peerId)
@@ -501,8 +551,12 @@ void VideoInputPpcp::prepareDevice(const QString &deviceId)
 bool VideoInputPpcp::openStream(const QString &streamId, const char *kind,
                                 const char *profileId, ppcp_continuity continuity)
 {
+    m_lastStreamOpenError.clear();
     const ppcp_source *s = source();
-    if (!m_peer || !s || !profileId) return false;
+    if (!m_peer || !s || !profileId) {
+        m_lastStreamOpenError = QStringLiteral("no peer/source/profile");
+        return false;
+    }
 
     // 5.11 — `opened_at` is on the Stream's Timebase, which is the SOURCE's.
     // A consumer opening a Stream does not know the far side's clock, so it
@@ -510,15 +564,27 @@ bool VideoInputPpcp::openStream(const QString &streamId, const char *kind,
     // (MSG 6.1b).  It is emphatically not this host's clock wearing the
     // device's timebase id, which is the I1 defect one layer up.
     ppcp_instant openedAt{};
-    if (ppcp_instant_make_z(&openedAt, s->timebase_id.v, 0) != PPCP_OK) return false;
+    ppcp_result rc = ppcp_instant_make_z(&openedAt, s->timebase_id.v, 0);
+    if (rc != PPCP_OK) {
+        m_lastStreamOpenError = QStringLiteral("opened_at: %1").arg(ppcp_result_str(rc));
+        return false;
+    }
 
     ppcp_stream st{};
-    if (ppcp_stream_make(&st, streamId.toUtf8().constData(),
-                         m_sessionId.toUtf8().constData(),
-                         s->id.v, kind, profileId, s->timebase_id.v,
-                         continuity, &openedAt) != PPCP_OK)
+    rc = ppcp_stream_make(&st, streamId.toUtf8().constData(),
+                          m_sessionId.toUtf8().constData(),
+                          s->id.v, kind, profileId, s->timebase_id.v,
+                          continuity, &openedAt);
+    if (rc != PPCP_OK) {
+        m_lastStreamOpenError = QStringLiteral("stream_make: %1").arg(ppcp_result_str(rc));
         return false;
-    return ppcp_peer_stream_open(m_peer, &st) == PPCP_OK;
+    }
+    rc = ppcp_peer_stream_open(m_peer, &st);
+    if (rc != PPCP_OK) {
+        m_lastStreamOpenError = QStringLiteral("stream_open: %1").arg(ppcp_result_str(rc));
+        return false;
+    }
+    return true;
 }
 
 void VideoInputPpcp::closeStream(const QString &streamId, const char *reason)
@@ -550,6 +616,7 @@ void VideoInputPpcp::closeStream(const QString &streamId, const char *reason)
 bool VideoInputPpcp::start(const QString &deviceId)
 {
     if (!deviceId.isEmpty()) prepareDevice(deviceId);
+
     if (!m_peer) {
         emit errorOccurred(QStringLiteral("PPCP camera: no peer attached"));
         m_state = State::Error;
@@ -585,13 +652,34 @@ bool VideoInputPpcp::start(const QString &deviceId)
         return false;
     }
 
+    // ⚠ A STALE SIBLING FOR THE SAME SOURCE, ON THE SAME LIVE PEER, IS STOPPED
+    // FIRST RATHER THAN RACED WITH. Stream ids are deterministic per
+    // (peerId, sourceId) — "st:<peer>:<src>:video" — on purpose (5.1a: a
+    // Stream's identity is fixed), which means two live VideoInputPpcp
+    // instances bound to the SAME ppcp_peer for the same camera Source
+    // collide on peer_stream_add() rather than each getting their own. That
+    // is reachable in practice: a Settings -> Cameras Repeater rebuild (e.g.
+    // the cameraListChanged() a PPCP declare fires the moment its Sources
+    // are registered) can create a fresh preview instance for a row before
+    // the OLD delegate's Component.onDestruction has synchronously torn its
+    // own instance down. There is only one honest answer for "what is this
+    // camera's preview showing right now": whichever start() is running NOW
+    // — so a stale sibling is stopped first rather than left to lose the
+    // race and report a confusing "stream_open refused".  Matching on `m_peer`
+    // too (not just the id strings) matters: two DIFFERENT live peers can
+    // coincidentally share a peerId/sourceId — any test harness that
+    // hardcodes both ends' ids is exactly this — and those are not the race
+    // this exists to resolve.
+    reclaimStream(m_peerId, m_sourceId, m_peer, this);
+
     // The capture Stream.  `shot_windowed`: a host that arbitrates asks for
     // clips around a t0, and 5.14d then forbids `{stream: true}` on it, which
     // is the shape we want — a clip anchors to a Shot or a Candidate.
-    m_captureStreamId = QStringLiteral("st:%1:%2:video").arg(m_peerId, m_sourceId);
+    m_captureStreamId = streamIdFor(m_peerId, m_sourceId, QStringLiteral("video"));
     if (!openStream(m_captureStreamId, PPCP_STREAM_KIND_VIDEO, cap->id.v, PPCP_SHOT_WINDOWED)) {
         m_captureStreamId.clear();
-        emit errorOccurred(QStringLiteral("PPCP camera: stream_open refused for '%1'").arg(m_sourceId));
+        emit errorOccurred(QStringLiteral("PPCP camera: stream_open refused for '%1' (%2)")
+                               .arg(m_sourceId, m_lastStreamOpenError));
         m_state = State::Error;
         emit stateChanged(m_state);
         return false;
@@ -610,7 +698,7 @@ bool VideoInputPpcp::start(const QString &deviceId)
     // bulk channel of its own (5.11h) — the transport's channel 2, which
     // PeerConnection already carries as an optional third connection.
     if (const ppcp_capture_profile *pv = bestPreviewProfile()) {
-        m_previewStreamId = QStringLiteral("st:%1:%2:preview").arg(m_peerId, m_sourceId);
+        m_previewStreamId = streamIdFor(m_peerId, m_sourceId, QStringLiteral("preview"));
         if (!openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW, pv->id.v, PPCP_CONTINUOUS))
             m_previewStreamId.clear();
         else if (pv->format.present) {
@@ -653,7 +741,7 @@ void VideoInputPpcp::suspend()
 void VideoInputPpcp::resume()
 {
     if (const ppcp_capture_profile *pv = bestPreviewProfile()) {
-        m_previewStreamId = QStringLiteral("st:%1:%2:preview").arg(m_peerId, m_sourceId);
+        m_previewStreamId = streamIdFor(m_peerId, m_sourceId, QStringLiteral("preview"));
         if (!openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW, pv->id.v, PPCP_CONTINUOUS))
             m_previewStreamId.clear();
     }
@@ -708,29 +796,77 @@ void VideoInputPpcp::drainEvents()
 {
     if (!m_peer) return;
     ppcp_event ev{};
-    while (ppcp_peer_next_event(m_peer, &ev) == PPCP_OK) {
-        const ppcp_msg *m = ev.msg;
-        if (!m) continue;
-        switch (ev.kind) {
-        case PPCP_EVENT_CAPTURE:
-            if (m->type == PPCP_MT_CAPTURE_ANNOUNCE) onCaptureAnnounce(m);
-            break;
-        case PPCP_EVENT_PAYLOAD:
-            switch (m->type) {
-            case PPCP_MT_PAYLOAD_BEGIN: onPayloadBegin(m); break;
-            case PPCP_MT_PAYLOAD_CHUNK: onPayloadChunk(m); break;
-            case PPCP_MT_PAYLOAD_END:   onPayloadEnd(m);   break;
-            case PPCP_MT_PAYLOAD_ABORT: onPayloadAbort(m); break;
-            default: break;
-            }
-            break;
-        default:
-            // Every other event belongs to the session layer, which is not this
-            // class's business (F7).  C1: they are parsed and carried whatever
-            // this consumer does with them.
-            break;
+    while (ppcp_peer_next_event(m_peer, &ev) == PPCP_OK) processEvent(ev);
+}
+
+// The dispatch a drained event gets, factored out of drainEvents() so a peer
+// this class does NOT drain (one PpcpHostPeer is already pumping — see
+// dispatchEvent() below) can still hand it an event one at a time, in the
+// same shape drainEvents() always produced.
+void VideoInputPpcp::processEvent(const ppcp_event &ev)
+{
+    const ppcp_msg *m = ev.msg;
+    if (!m) return;
+    switch (ev.kind) {
+    case PPCP_EVENT_CAPTURE:
+        if (m->type == PPCP_MT_CAPTURE_ANNOUNCE) onCaptureAnnounce(m);
+        break;
+    case PPCP_EVENT_PAYLOAD:
+        switch (m->type) {
+        case PPCP_MT_PAYLOAD_BEGIN: onPayloadBegin(m); break;
+        case PPCP_MT_PAYLOAD_CHUNK: onPayloadChunk(m); break;
+        case PPCP_MT_PAYLOAD_END:   onPayloadEnd(m);   break;
+        case PPCP_MT_PAYLOAD_ABORT: onPayloadAbort(m); break;
+        default: break;
         }
+        break;
+    default:
+        // Every other event belongs to the session layer, which is not this
+        // class's business (F7).  C1: they are parsed and carried whatever
+        // this consumer does with them.
+        break;
     }
+}
+
+// ── A peer PpcpHostPeer already pumps — the second-consumer path ───────────
+//
+// ⚠ THE EVENT RING HAS EXACTLY ONE DRAINER (ppcp_host_peer.h).  A
+// `VideoInputPpcp` bound to a peer PpcpHostPeer is already pumping MUST NOT
+// call drainEvents() on it — a second `ppcp_peer_next_event()` caller would
+// each see roughly half the conversation.  `PpcpHostPeer::addEventHook()` is
+// the one drainer's way of handing the SAME event to a second consumer, once,
+// synchronously, while its bytes are still the ones the transport fed — so
+// this is a broadcast to every live instance bound to that peer, exactly the
+// way applyTimebaseOffsets()/clearTimebaseMappings() already broadcast a
+// per-peer update to this same registry.  Returns how many instances saw it.
+int VideoInputPpcp::dispatchEvent(const QString &peerId, const ppcp_event &ev)
+{
+    std::vector<VideoInputPpcp *> targets;
+    {
+        std::lock_guard<std::mutex> g(ppcpLiveMutex());
+        for (VideoInputPpcp *v : ppcpLive())
+            if (v->m_peerId == peerId) targets.push_back(v);
+    }
+    for (VideoInputPpcp *v : targets) v->processEvent(ev);
+    return static_cast<int>(targets.size());
+}
+
+// The peer went away (7.4d-adjacent, at the transport's own disconnect
+// rather than a pairing revocation) — every live instance bound to it must
+// stop pointing at it before the ppcp_peer itself is destroyed, or the next
+// start()/processEvent() call reads a dangling pointer.  Same filter as
+// applyTimebaseOffsets()/clearTimebaseMappings(); the action is detach()
+// rather than a re-feed.
+int VideoInputPpcp::detachAll(const QString &peerId)
+{
+    std::vector<VideoInputPpcp *> targets;
+    {
+        std::lock_guard<std::mutex> g(ppcpLiveMutex());
+        for (VideoInputPpcp *v : ppcpLive())
+            if (v->m_peerId == peerId) targets.push_back(v);
+    }
+    for (VideoInputPpcp *v : targets) v->detach();
+    return static_cast<int>(targets.size());
 }
 
 void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)

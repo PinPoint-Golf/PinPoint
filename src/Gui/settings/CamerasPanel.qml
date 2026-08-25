@@ -879,6 +879,33 @@ Item {
                                 anchors.fill: parent
                             }
 
+                            // A failed start is otherwise silent — the tile just stays
+                            // black forever.  Most common cause today: a PPCP camera
+                            // whose phone isn't connected right now ("PPCP camera: no
+                            // peer attached"), which is an ordinary state for that
+                            // backend, not a fault — same visual language as
+                            // ImusPanel.qml's "Not connected" placeholder.
+                            Rectangle {
+                                anchors.fill: parent
+                                color:        Theme.colorBg
+                                visible:      camRow.localPreviewInstance !== null
+                                              && camRow.localPreviewInstance.lastPreviewError !== ""
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    anchors.margins:  Theme.sp(16)
+                                    width:             parent.width - Theme.sp(32)
+                                    text:              camRow.localPreviewInstance
+                                                           ? camRow.localPreviewInstance.lastPreviewError
+                                                           : ""
+                                    font.family:       Theme.fontData
+                                    font.pixelSize:    Theme.fontSzMicro
+                                    color:              Theme.colorText3
+                                    wrapMode:           Text.WordWrap
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+                            }
+
                             // Persist ROI changes directly to AppSettings whenever the
                             // instance's cropRoi changes (drag, numeric field, preset).
                             //
@@ -889,24 +916,40 @@ Item {
                             // delegate synchronously" hazard the crop button's own
                             // onClicked works around by snapshotting locals first
                             // (see its comment). This handler has no "before" to
-                            // snapshot from — it only runs REACTIVELY — so instead it
-                            // checks `appSettings` is still reachable with `typeof`,
-                            // which (unlike a bare reference) never throws even when
-                            // the root context chain has already been severed. Without
-                            // this, closing the crop editor logged
-                            // "ReferenceError: appSettings is not defined" here.
+                            // snapshot from — it only runs REACTIVELY.
+                            //
+                            // ⚠ `typeof appSettings === "undefined"` is NOT a safe
+                            // guard here, and was tried first — it only protects
+                            // against an identifier that was never DECLARED. Once
+                            // the enclosing QML context itself is mid-destruction
+                            // (this row's Repeater delegate torn down while its
+                            // preview instance's last cropRoiChanged is still in
+                            // flight — see reclaimStream()'s note in
+                            // VideoInputPpcp.cpp for how that race arises), even a
+                            // `typeof` lookup throws, because the scope-chain
+                            // resolution itself is what's broken, not the identifier.
+                            // try/catch is the one thing that catches an exception
+                            // regardless of why the lookup failed — confirmed
+                            // necessary 25 Aug 2026: the typeof guard alone still
+                            // logged "ReferenceError: appSettings is not defined"
+                            // here on a real PPCP camera's crop editor.
                             Connections {
                                 target: camRow.instance
                                 function onCropRoiChanged() {
-                                    if (typeof appSettings === "undefined") return
-                                    if (!camData.cameraKey) return
-                                    var roi = camRow.instance.cropRoi
-                                    var map = appSettings.cameraRoi
-                                    if (roi.width > 0 && roi.height > 0)
-                                        map[camData.cameraKey] = { x: roi.x, y: roi.y, w: roi.width, h: roi.height }
-                                    else
-                                        delete map[camData.cameraKey]
-                                    appSettings.cameraRoi = map
+                                    try {
+                                        if (!camData.cameraKey) return
+                                        var roi = camRow.instance.cropRoi
+                                        var map = appSettings.cameraRoi
+                                        if (roi.width > 0 && roi.height > 0)
+                                            map[camData.cameraKey] = { x: roi.x, y: roi.y, w: roi.width, h: roi.height }
+                                        else
+                                            delete map[camData.cameraKey]
+                                        appSettings.cameraRoi = map
+                                    } catch (e) {
+                                        // The context this handler needed is gone —
+                                        // the row is being torn down and there is
+                                        // nothing left here to persist ROI for.
+                                    }
                                 }
                             }
 

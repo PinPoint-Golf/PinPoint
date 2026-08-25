@@ -32,6 +32,11 @@
 #include "video_preprocessor_base.h"
 #include "bayer_video_item.h"
 #include "frame_crop.h"
+#ifdef HAVE_PPCP_TRANSPORT
+#include "VideoInputPpcp.h"
+#include "../../Ppcp/ppcp_host_peer.h"
+#include "../../Ppcp/ppcp_host_service.h"
+#endif
 #ifdef HAVE_OPENCV
 #include "video_preprocessor_opencv.h"
 #include "frame_throttle.h"
@@ -291,6 +296,12 @@ CameraInstance::CameraInstance(const Device &device, pinpoint::EventBuffer *buff
         m_sourceId = m_eventBuffer->registerSource(desc);
     }
 
+#ifdef HAVE_PPCP
+    // Read before setupPipeline() — it decides there whether m_videoInput
+    // moves to m_captureThread at all.
+    m_isPpcpBackend = (device.backend == VideoInputFactory::Backend::Ppcp);
+#endif
+
     setupPipeline();
 }
 
@@ -310,7 +321,14 @@ void CameraInstance::setupPipeline()
     m_tingPlayer = new TingPlayer(this);
 
     m_captureThread->setObjectName(QStringLiteral("VideoCaptureThread"));
-    m_videoInput->moveToThread(m_captureThread);
+    // A PPCP-backed instance stays on THIS (the GUI) thread — see
+    // m_isPpcpBackend's header comment.  It owns no socket of its own and is
+    // fed entirely by PpcpHostService's already-running GUI-thread pump
+    // (VideoInputPpcp::dispatchEvent()/applyTimebaseOffsets()); moving it to
+    // m_captureThread would make those writes cross-thread with no
+    // synchronization.  m_captureThread itself is still constructed (cheap)
+    // but never started for this backend.
+    if (!m_isPpcpBackend) m_videoInput->moveToThread(m_captureThread);
 
 #ifdef HAVE_OPENCV
     if (kPoseEnabled && m_eventBuffer) {
@@ -439,6 +457,10 @@ void CameraInstance::setupPipeline()
             this, [this](VideoInputBase::State s) {
                 if (s == VideoInputBase::State::Active) {
                     setConnecting(false);   // device live — connect window over
+                    if (!m_lastPreviewError.isEmpty()) {
+                        m_lastPreviewError.clear();
+                        emit lastPreviewErrorChanged();
+                    }
                     updateBufferDescriptor();
                     emit needsDebayerChanged();
 
@@ -495,7 +517,11 @@ void CameraInstance::setupPipeline()
         pinpoint::osmetrics::unregisterThread();
     });
 
-    m_captureThread->start();
+    // Never started for a PPCP-backed instance (see the moveToThread guard
+    // above) — the registerThread/unregisterThread pair above simply never
+    // fires for it, which is correct: there is no dedicated capture thread to
+    // profile.
+    if (!m_isPpcpBackend) m_captureThread->start();
 
     // Sample the capture-thread frame counter every 500 ms to compute actual fps.
     m_fpsSampleTimer = new QTimer(this);
@@ -517,6 +543,16 @@ void CameraInstance::setupPipeline()
 
 void CameraInstance::stopCapture()
 {
+    if (m_isPpcpBackend) {
+        // Already on this thread — no invokeMethod/moveToThread needed, and
+        // m_captureThread was never started so isRunning() below would
+        // otherwise skip stop() entirely, leaving the preview Stream open.
+        if (m_videoInput) m_videoInput->stop();
+#ifdef HAVE_PPCP_TRANSPORT
+        if (auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput)) v->detach();
+#endif
+        return;
+    }
     if (m_captureThread->isRunning()) {
         QMetaObject::invokeMethod(m_videoInput, [this]() {
             m_videoInput->stop();
@@ -526,6 +562,25 @@ void CameraInstance::stopCapture()
         m_captureThread->wait();
     }
 }
+
+#ifdef HAVE_PPCP_TRANSPORT
+void CameraInstance::ppcpAttachIfNeeded()
+{
+    if (!m_isPpcpBackend || !m_ppcpHostService) return;
+    QString peerId, sourceId;
+    if (!VideoInputPpcp::parseDeviceId(m_deviceId, &peerId, &sourceId)) return;
+    Ppcp::PpcpHostPeer *hp = m_ppcpHostService->peerForId(peerId);
+    // Left unattached rather than guessed at — start()'s own "no peer
+    // attached" / "no session open" refusals are the honest report of
+    // exactly this: the phone isn't connected right now, or declared but the
+    // Session it needs failed to open (both logged where they happen, not
+    // here — this function has nothing more specific to say).
+    if (!hp || !hp->liveSession().isOpen()) return;
+    if (auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput))
+        v->attach(hp->liveSession().peer(),
+                 QString::fromStdString(hp->liveSession().config().sessionId));
+}
+#endif  // HAVE_PPCP_TRANSPORT
 
 CameraInstance::~CameraInstance()
 {
@@ -1068,10 +1123,16 @@ void CameraInstance::selectMoveNetModel(int variant)
 
 void CameraInstance::startPreview()
 {
-    if (m_previewing || !m_captureThread->isRunning()) return;
+    // m_captureThread is never started for a PPCP-backed instance (see
+    // m_isPpcpBackend) — its own "am I ready" signal is m_videoInput existing
+    // at all, not the thread that every other backend actually needs.
+    if (m_previewing || (!m_isPpcpBackend && !m_captureThread->isRunning())) return;
     m_previewing = true;
     if (m_recording) return; // camera already running; pipeline already active
     m_previewOnly.store(true, std::memory_order_relaxed);
+#ifdef HAVE_PPCP_TRANSPORT
+    ppcpAttachIfNeeded();
+#endif
     QMetaObject::invokeMethod(m_videoInput, [this]() {
         // Preview is always full sensor — the settings crop editor needs the
         // uncropped view to drag-select against. The crop applies on capture
@@ -1397,6 +1458,10 @@ void CameraInstance::onVideoError(const QString &message)
     ppWarn() << "[Video]" << message;
     // A device error during a connect attempt ends the in-flight window.
     setConnecting(false);
+    if (m_lastPreviewError != message) {
+        m_lastPreviewError = message;
+        emit lastPreviewErrorChanged();
+    }
 }
 
 void CameraInstance::onPreprocessStats(double avgMs)

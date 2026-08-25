@@ -607,6 +607,10 @@ int main(int argc, char *argv[])
     // and merges only on enumerate(), so it is the one that has to be asked.
     QObject::connect(&ppcpHost, &PpcpHostService::sourcesChanged,
                      &cameraManager, &CameraManager::enumerate);
+    // Settings -> Cameras' ROI preview is the one path wired to a live PPCP
+    // peer so far (CameraInstance::ppcpAttachIfNeeded()) — real capture stays
+    // exactly as unable to start a PPCP camera as it already was.
+    cameraManager.setPpcpHostService(&ppcpHost);
     if (!ppcpHost.start(7788)) ppcpHost.start(0);
     // A paired phone is a device, so it goes in the one device list beside the
     // cameras and the IMUs.  Handed over as a plain QObject: the monitor reads

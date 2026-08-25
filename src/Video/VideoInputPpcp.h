@@ -145,6 +145,15 @@ public:
     static QString deviceIdFor(const QString &peerId, const QString &sourceId);
     static bool    parseDeviceId(const QString &deviceId, QString *peerId, QString *sourceId);
 
+    // The PPCP-wire Stream id start()/resume() open under — "st:<hash of
+    // peerId+sourceId>:<kind>", kind being "video" or "preview". Exposed so a
+    // caller (a test correlating a Capture's `stream` field, chiefly) can
+    // compute the exact id this class will use, instead of hand-deriving it
+    // and drifting the moment the format changes — see the 64-byte
+    // PPCP_ID_MAX comment beside the implementation.
+    static QString streamIdFor(const QString &peerId, const QString &sourceId,
+                                const QString &kind);
+
     // ── The PPCP half ──────────────────────────────────────────────────────
     // Ground rule 7 applied to this class as it is to PpcpHostPeer: it owns no
     // socket, no engine and no thread.  The embedding hands it the peer whose
@@ -252,6 +261,20 @@ public:
     static int clearTimebaseMappings(const QString &peerId);
     static int liveInstanceCount(const QString &peerId);
 
+    // ── The second-consumer event path ──────────────────────────────────────
+    // For a peer a `PpcpHostPeer` already pumps: this class's own
+    // drainEvents() MUST NOT be called on it (exactly one drainer).  The
+    // embedding instead feeds each event here as its single drainer's
+    // `addEventHook` sees it, broadcast to every live instance bound to
+    // `peerId` — same registry and filter as applyTimebaseOffsets() above.
+    static int dispatchEvent(const QString &peerId, const ppcp_event &ev);
+
+    // The peer went away at the transport's own disconnect.  detach()es every
+    // live instance bound to `peerId` so none is left holding a pointer the
+    // caller is about to destroy.  Same registry and filter as
+    // clearTimebaseMappings() above.
+    static int detachAll(const QString &peerId);
+
     // CORE 5.6a — the Timebase this Source stamps in.  Empty until the
     // counterpart has declared, which is also when the offset seam can first
     // mean anything.
@@ -280,6 +303,27 @@ private:
     bool openStream(const QString &streamId, const char *kind, const char *profileId,
                     ppcp_continuity continuity);
     void closeStream(const QString &streamId, const char *reason);
+    // Which internal step openStream() refused at, and libppcp's own word for
+    // why — start()'s "stream_open refused" was otherwise a dead end to
+    // diagnose from outside this class.  Cleared at the top of every
+    // openStream() call, so it only ever reflects the most recent attempt.
+    QString m_lastStreamOpenError;
+
+    // Stops every OTHER live instance already active for this exact
+    // (peerId, sourceId) AND attached to the SAME live `peer` — see the note
+    // at its call site in start().  The peer check matters: two different
+    // ppcp_peer connections can coincidentally share a peerId/sourceId
+    // string (any test harness that hardcodes both ends' ids is exactly
+    // this), and those are not the race this exists to resolve — only two
+    // instances that would otherwise both be talking to the SAME phone are.
+    // A no-op when no such sibling exists (the ordinary case).
+    static void reclaimStream(const QString &peerId, const QString &sourceId,
+                              ppcp_peer *peer, VideoInputPpcp *keep);
+
+    // The dispatch one drained event gets — factored out of drainEvents() so
+    // dispatchEvent() (a second-consumer path, see below) can hand an event
+    // to a specific instance one at a time, in the same shape.
+    void processEvent(const ppcp_event &ev);
 
     void onCaptureAnnounce(const ppcp_msg *m);
     void onPayloadBegin(const ppcp_msg *m);

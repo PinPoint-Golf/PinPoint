@@ -698,6 +698,13 @@ QObject *CameraManager::createPreviewInstance(int index)
 
     // nullptr buffer → no ring-buffer registration, no pose/throttle pipeline
     auto *ctrl = new CameraInstance(m_cameras[index].device, nullptr, m_appSettings, this);
+#ifdef HAVE_PPCP_TRANSPORT
+    // Only this preview path is wired to a live PPCP peer for now — real
+    // capture (createController(), below) stays exactly as unable to start a
+    // PPCP camera as it already is; wider capture integration is separate,
+    // later work.
+    ctrl->setPpcpHostService(m_ppcpHostService);
+#endif
 
     const QString key = cameraKey(m_cameras[index]);
     AppSettings  rfallback;

@@ -49,6 +49,9 @@ class QVideoSink;
 class VideoInputBase;
 class VideoPreprocessorBase;
 class BayerVideoItem;
+#ifdef HAVE_PPCP_TRANSPORT
+class PpcpHostService;
+#endif
 
 #ifdef HAVE_OPENCV
 #include "pose_estimator_base.h"
@@ -106,6 +109,12 @@ class CameraInstance : public QObject
     Q_PROPERTY(int    frameHeight        READ frameHeight         NOTIFY frameSizeChanged)
     Q_PROPERTY(double configuredFps     READ configuredFps       NOTIFY frameSizeChanged)
     Q_PROPERTY(bool   isReplaying       READ isReplaying         NOTIFY isReplayingChanged)
+    // The message from the most recent failed start()/preview attempt — e.g.
+    // "PPCP camera: no peer attached" while the owning phone isn't connected,
+    // which is an ordinary state for that backend, not a fault.  Empty once a
+    // start has succeeded since.  Settings -> Cameras' ROI preview is the
+    // first consumer (a PPCP camera's video tile was silent otherwise).
+    Q_PROPERTY(QString lastPreviewError READ lastPreviewError NOTIFY lastPreviewErrorChanged)
 
 public:
     // Perspective values — matches the perspective badge in PpCameraFrame.qml.
@@ -184,7 +193,15 @@ public:
     int     frameHeight()         const;
     double  configuredFps()       const;
     bool    isReplaying()         const;
+    QString lastPreviewError()    const { return m_lastPreviewError; }
     pinpoint::SourceId sourceId() const;
+
+#ifdef HAVE_PPCP_TRANSPORT
+    // Set by CameraManager right after construction, forwarded from its own
+    // setPpcpHostService().  Only Backend::Ppcp instances ever consult it (see
+    // ppcpAttachIfNeeded()) — harmless to set on any other backend.
+    void setPpcpHostService(PpcpHostService *svc) { m_ppcpHostService = svc; }
+#endif
 
     // Called by CameraManager only — not Q_INVOKABLE so QML cannot bypass.
     void stopCapture();       // Synchronously stops the capture thread; call before deregisterFromBuffer()
@@ -259,6 +276,7 @@ signals:
     void frameSizeChanged();
     void isReplayingChanged();
     void deviceAliasChanged();
+    void lastPreviewErrorChanged();
 
 private slots:
     void onVideoFrame(const QVideoFrame &frame);
@@ -279,6 +297,16 @@ private slots:
 private:
     void setupPipeline();
     void connectVideoInput();
+#ifdef HAVE_PPCP_TRANSPORT
+    // Resolves this instance's owning phone from its device id
+    // ("ppcp:<peer_id>/<source_id>") and attaches VideoInputPpcp to its live
+    // peer + session, if both are available.  A no-op for every other
+    // backend, and safe to call whenever a start is about to be attempted:
+    // re-resolved each time rather than cached, since a reconnected phone's
+    // peer/session are a fresh ppcp_peer* and a fresh Session — the old ones
+    // are not merely stale, they may already be destroyed.
+    void ppcpAttachIfNeeded();
+#endif
     void updateBufferDescriptor();
     void stampBufferDescriptorFromRaw(const RawVideoFrame &raw);
     // Refresh only the exposure fields of the already-stamped descriptor when the
@@ -311,6 +339,20 @@ private:
     bool                   m_recording        = false;
     bool                   m_connecting       = false;
     bool                   m_previewing       = false;
+    QString                m_lastPreviewError;
+
+    // True for a Backend::Ppcp device — set once at construction, before
+    // setupPipeline() runs, from the Device the constructor was given.  Drives
+    // two things: setupPipeline() leaves m_videoInput on the GUI thread rather
+    // than moving it to m_captureThread (VideoInputPpcp owns no socket/thread
+    // of its own and is fed by whatever already-running PPCP pump drives it —
+    // the dedicated capture thread exists for backends that block on real
+    // I/O, which this one never does), and ppcpAttachIfNeeded() is only ever
+    // worth calling when this is true.
+    bool                   m_isPpcpBackend    = false;
+#ifdef HAVE_PPCP_TRANSPORT
+    PpcpHostService       *m_ppcpHostService  = nullptr;
+#endif
 
     // Guarded setter for m_connecting — emits isConnectingChanged only on change.
     void setConnecting(bool on);

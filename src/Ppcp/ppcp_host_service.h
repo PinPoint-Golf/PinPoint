@@ -353,6 +353,12 @@ public:
     // The first connected phone's peer, for callers that predate several.
     // Null when nothing is connected.
     Ppcp::PpcpHostPeer *hostPeer();
+    // A SPECIFIC phone's peer, by its declared `Peer.id` — `Phone::counterpartId`,
+    // the same id embedded in a PPCP camera's device id
+    // (`VideoInputPpcp::deviceIdFor()` — "ppcp:<peer_id>/<source_id>"), and NOT
+    // `Phone::pairingId` (local pairing bookkeeping, unrelated to the wire
+    // peer id).  Null when no phone with that id is connected.
+    Ppcp::PpcpHostPeer *peerForId(const QString &counterpartId);
     Ppcp::PpcpRendezvous &rendezvous() { return m_rv; }
 
 signals:

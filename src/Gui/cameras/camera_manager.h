@@ -32,6 +32,9 @@
 namespace pinpoint { class EventBuffer; }
 class CameraInstance;
 class ShotProcessor;
+#ifdef HAVE_PPCP_TRANSPORT
+class PpcpHostService;
+#endif
 
 class CameraManager : public QObject
 {
@@ -95,6 +98,14 @@ public:
     // finishNowBlocking() on it before any source deregistration (camera
     // deselect, destruction) — the teardown stop-barrier.
     void setShotProcessor(ShotProcessor *p) { m_shotProcessor = p; }
+
+#ifdef HAVE_PPCP_TRANSPORT
+    // A PPCP camera (Backend::Ppcp) is built with a peer never attached — see
+    // createPreviewInstance()/createController() — so every CameraInstance
+    // this manager builds needs a way to ask its owning phone's peer.  Set
+    // once from main.cpp, forwarded to each CameraInstance at construction.
+    void setPpcpHostService(PpcpHostService *svc) { m_ppcpHostService = svc; }
+#endif
 
     // Selected cameras with a live controller — the shot processor builds its
     // replay tracks and export job from these.
@@ -206,6 +217,9 @@ private:
     pinpoint::EventBuffer               *m_eventBuffer      = nullptr;
     AppSettings                         *m_appSettings      = nullptr;
     ShotProcessor                       *m_shotProcessor    = nullptr;
+#ifdef HAVE_PPCP_TRANSPORT
+    PpcpHostService                     *m_ppcpHostService  = nullptr;
+#endif
 
     CameraInstance *createController(const Device &device);
 };

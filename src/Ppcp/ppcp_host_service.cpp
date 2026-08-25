@@ -27,6 +27,7 @@
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QMetaObject>
+#include <QUuid>
 #include <QVariantMap>
 
 #include <chrono>
@@ -248,6 +249,10 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err)
         // particular `VideoInputPpcp::drainEvents()` MUST NOT be called on this
         // peer — it exists for the standalone paths where nothing else drains.
         if (m_offers) m_offers->observe(ph->counterpartId, ev);
+        // Any VideoInputPpcp a caller has attached to this peer (Settings ->
+        // Cameras' ROI preview, so far) — broadcast, not drained a second
+        // time, for the same reason the line above isn't a second drain.
+        VideoInputPpcp::dispatchEvent(ph->counterpartId, ev);
     });
 
     // The host's own readings.  Both answer false for "cannot tell", which is a
@@ -299,6 +304,14 @@ const PpcpHostService::Phone *PpcpHostService::phoneByPairing(const QString &pai
 Ppcp::PpcpHostPeer *PpcpHostService::hostPeer()
 {
     return m_phones.empty() ? nullptr : m_phones.front()->peer.get();
+}
+
+Ppcp::PpcpHostPeer *PpcpHostService::peerForId(const QString &counterpartId)
+{
+    if (counterpartId.isEmpty()) return nullptr;
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (p->counterpartId == counterpartId) return p->peer.get();
+    return nullptr;
 }
 
 QString PpcpHostService::peerName() const
@@ -419,8 +432,23 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
 
     // The offer list is attached PER PEER, so only this phone's offers go.
     if (m_offers && !ph->counterpartId.isEmpty()) m_offers->detach(ph->counterpartId);
-    if (!ph->counterpartId.isEmpty())
+    if (!ph->counterpartId.isEmpty()) {
         VideoInputPpcp::clearTimebaseMappings(ph->counterpartId);
+        // Every VideoInputPpcp bound to this peer stops pointing at it BEFORE
+        // the peer itself goes — see the header note on the same call in
+        // registerDevice()'s absence: there is no "unregister" for a camera
+        // row, so a preview instance can outlive the phone that owns it, and
+        // must not be left holding a pointer this function is about to
+        // invalidate.
+        VideoInputPpcp::detachAll(ph->counterpartId);
+    }
+    // MSG 4.4 — the Session closes with the link, whether or not it was ever
+    // used for anything.  Best-effort: a peer already gone cannot be told, and
+    // that is not a reason to skip the local half of closing it.
+    {
+        std::string cerr;
+        ph->peer->liveSession().close("disconnected", &cerr);
+    }
     ph->peer->attach(nullptr, nullptr);
     if (ph->link) ph->link->close();
 
@@ -456,6 +484,31 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
     // display text and are never an identifier or a trust signal.
     ph->name = QString::fromUtf8(desc->product.model.v,
                                    static_cast<int>(desc->product.model.len));
+
+    // MSG 4.1 — the live Session, opened the moment a phone declares rather
+    // than deferred to a later "start recording" action: it is a property of
+    // the WHOLE conversation (sync, liveness, and — once a caller attaches a
+    // VideoInputPpcp to it — a preview), not of a capture in particular.
+    // `PpcpHostPeer::attach()` has already bound `m_live` to this peer, and
+    // its pump (`tick()`) and event feed (`drainEvents()` -> `m_live.observe()`)
+    // already run unconditionally for every connected phone — this is only
+    // the one call that turns that machinery on.
+    //
+    // ⚠ NOT ARMED, AND NO ARBITRATION STARTED HERE.  Those are the capture
+    // path (PpcpShotBridge, PpcpLiveSession::arm()) and are out of scope for
+    // what opens a Session today — a live preview tile is independent of
+    // arming (5.11.2's preview Stream is unconditional and "always
+    // continuous"; arm() is a property of the capture path, not the preview
+    // one).  A refusal here is logged and the connection proceeds — a phone
+    // with no Session simply has no preview, the same as before this existed.
+    {
+        Ppcp::PpcpLiveSession::Config cfg;
+        cfg.sessionId = ("sess:" + QUuid::createUuid().toString(QUuid::WithoutBraces))
+                             .toStdString();
+        std::string serr;
+        if (!ph->peer->liveSession().open(cfg, &serr))
+            ppWarn() << "[ppcp] live session open refused for" << ph->name << "-" << serr.c_str();
+    }
 
     // MSG 9.1 — the offer list, which has been installed DETACHED since H5
     // because there was no live peer to give it.  There is now.

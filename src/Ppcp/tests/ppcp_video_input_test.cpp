@@ -59,8 +59,22 @@ constexpr const char *kDevPeer   = "dev-1";
 constexpr const char *kSourceId  = "src-1";
 constexpr const char *kSessionId = "sess-1";
 constexpr const char *kDevTb     = "tb:dev";
-constexpr const char *kVideoStream   = "st:dev-1:src-1:video";
-constexpr const char *kPreviewStream = "st:dev-1:src-1:preview";
+
+// Computed, not hand-picked: VideoInputPpcp::start() names its Streams via
+// streamIdFor() (a hash of peerId+sourceId, CORE 5.1's 64-byte PPCP_ID_MAX),
+// so the id this fixture uses to look a Stream up on the host peer must be
+// exactly that function's output, not a guess at its old plain-concatenation
+// format.
+const std::string kVideoStreamStorage =
+    VideoInputPpcp::streamIdFor(QLatin1String(kDevPeer), QLatin1String(kSourceId),
+                                QStringLiteral("video"))
+        .toStdString();
+const std::string kPreviewStreamStorage =
+    VideoInputPpcp::streamIdFor(QLatin1String(kDevPeer), QLatin1String(kSourceId),
+                                QStringLiteral("preview"))
+        .toStdString();
+const char *kVideoStream   = kVideoStreamStorage.c_str();
+const char *kPreviewStream = kPreviewStreamStorage.c_str();
 
 // A capture peer, built the way one really is: role `capture`, an AVFoundation-
 // shaped camera Source (CORE §5.6.1's table) and a preview profile beside it.
