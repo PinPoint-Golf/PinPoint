@@ -20,12 +20,20 @@
 // Settings -> Phones.  Where a remembered PPCP pairing is seen and revoked.
 //
 // ⚠ THIS IS A CONFORMANCE SURFACE AND NOT A CONVENIENCE.  RV 7.4b: persistence
-// is "opt-in, visible to the user, and individually revocable", and all three
-// of those are this panel.  A remembered pairing is a standing ability to
-// complete a handshake with this host, so it is shown rather than kept out of
-// the way.  It used to be a table at the foot of the home screen; deleting that
-// table without providing this would have been a regression against 7.4b, which
-// is why the two changes are one commit.
+// is "visible to the user, and individually revocable", and both of those are
+// this panel — its whole reason to exist.  A remembered pairing is a standing
+// ability to complete a handshake with this host, so it is shown rather than
+// kept out of the way.  It used to be a table at the foot of the home screen;
+// deleting that table without providing this would have been a regression
+// against 7.4b, which is why the two changes are one commit.
+//
+// ⚠ THERE IS NO "REMEMBER" BUTTON HERE, AND THAT IS NOT AN OMISSION.  7.4b's
+// third clause — persistence is opt-in — was itself downgraded to a SHOULD by
+// libppcp erratum E57 (25 August 2026): a user who has just paired a device
+// has already given the consent a separate opt-in step used to ask for twice,
+// so `PpcpRendezvous` now remembers a pairing the moment it completes.  What
+// this panel offers instead is the opt-OUT — "Forget" — which is what 7.4b's
+// surviving clauses actually require: visible, and individually revocable.
 //
 // ⚠ IT USED TO CARRY A WARNING FOR WINDOWS AND LINUX, AND NO LONGER NEEDS ONE.
 // makePlatformPairingStore() returned a keychain store on macOS and NULL
@@ -40,7 +48,19 @@
 // section and the resource monitor draw from, because a paired phone is a
 // device and there should be one answer to what phones this host knows about.
 // What is extra here is the pair of controls 7.4b requires.
-
+//
+// ⚠ REBUILT 25 Aug 2026 TO MATCH CamerasPanel.qml / ImusPanel.qml.  A phone is
+// a device the same way a camera or an IMU is one, so its row wears the same
+// frame: a status dot, an editable alias, a connection indicator and a strip
+// of read-only facts.  The alias is new — `PpcpHostService::setPhoneAlias()`
+// — and sits beside `cameraAlias`/`imuAlias` in the settings file rather than
+// through `AppSettings`, since `Ppcp` has no dependency on `Gui/app` and this
+// keeps it that way.  There is deliberately no expandable "test" panel the way
+// IMUs have one: a phone has no host-driven live view to show, and a fake one
+// would be worse than none.  What IS deliberately here, empty of content for
+// now, is room for more: the facts strip and the row's structure both exist so
+// a future preference (a placement, a rate, anything RT-20/RV-6 add) has a
+// slot to land in without another redesign.
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
@@ -56,11 +76,274 @@ Item {
 
     readonly property bool havePpcp: controller !== null
 
+    // `cameraManager` is the same global context property CamerasPanel.qml
+    // reads directly — but the offscreen QML suite that stands this panel up
+    // for its H0 (no-ppcp) test installs only `appSettings`, so a bare
+    // reference would throw ReferenceError there. Guarded for the same reason
+    // `controller` above is.
+    readonly property bool haveCameraManager: typeof cameraManager !== "undefined"
+
     // The same rows the DEVICES list and the resource monitor show — one list,
     // built once in PpcpHostService::phones(), rather than this panel deciding
     // for itself what counts as a phone.  A live, unscanned code is not in it:
     // that is a QR on screen and belongs to the pairing dialog.
     readonly property var rows: root.controller ? root.controller.phones : []
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Inline component — one phone's row, the same frame CameraDeviceRow and
+    // ImuDeviceRow use: background surface, coloured border, status dot,
+    // editable alias, a strip of read-only facts underneath.
+    // ─────────────────────────────────────────────────────────────────────────
+    component PhoneDeviceRow: Item {
+        id: phoneRow
+
+        property var phoneData: ({})   // one entry from ppcpHost.phones
+
+        readonly property bool isConnected: phoneRow.phoneData.status === "connected"
+        readonly property bool isAvailable: phoneRow.phoneData.status === "available"
+        readonly property bool isRevoked:   phoneRow.phoneData.invalidated === true
+        readonly property bool isRemembered: phoneRow.phoneData.persisted === true
+
+        // Cameras this phone is currently contributing, cross-referenced
+        // against `cameraManager.cameraList` by peer id — `VideoInputPpcp`'s
+        // `serialNumber` IS the PPCP peer id (see ResourceMonitorController) —
+        // rather than a second count of the same Sources invented here.
+        readonly property int cameraCount: {
+            if (!root.haveCameraManager) return 0
+            var pid = phoneRow.phoneData.counterpartId
+            if (!pid) return 0
+            var list = cameraManager.cameraList
+            var n = 0
+            for (var i = 0; i < list.length; i++)
+                if (list[i].serialNumber === pid) n++
+            return n
+        }
+
+        // ⚠ ONE ColumnLayout OWNS THE HEIGHT, RATHER THAN header+facts ANCHORED
+        // SEPARATELY WITH A HAND-SUMMED implicitHeight.  That was the first cut
+        // here and it under-reported: a bare RowLayout anchored straight to an
+        // Item (not itself inside a managing Layout) does not reliably resolve
+        // its own implicitHeight from a Repeater's delegates before the card's
+        // height binding reads it, so the facts strip's VALUE line rendered
+        // half-clipped with no bottom margin — exactly Mark's report, confirmed
+        // by grabToImage() rather than trusted from source. `mainCol` below is
+        // what CameraDeviceRow/ImuDeviceRow actually do: header and facts are
+        // both children of one ColumnLayout, which sizes its RowLayout children
+        // itself and reports a correct sum — the same mechanism `bodyWrap` in
+        // ImusPanel.qml relies on for its own capabilities strip.
+        implicitHeight: mainCol.implicitHeight
+
+        opacity: phoneRow.isRevoked ? 0.5 : 1.0
+        Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+
+        // Background fill
+        Rectangle {
+            anchors.fill: parent
+            color:        Theme.colorSurface
+            radius:       Theme.radius
+        }
+
+        clip: true
+
+        // Border overlay — z:100 so content never occludes it
+        Rectangle {
+            anchors.fill: parent
+            color:        "transparent"
+            border.width: 1
+            border.color: phoneRow.isConnected ? Theme.colorGood
+                        : phoneRow.isRevoked    ? Theme.colorBorderMid
+                        :                          Theme.colorBorderStrong
+            radius:       Theme.radius
+            z:            100
+            Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
+        }
+
+        ColumnLayout {
+            id: mainCol
+            anchors.left:  parent.left
+            anchors.right: parent.right
+            anchors.top:   parent.top
+            spacing: 0
+
+            // ── Header row ───────────────────────────────────────────────────
+            RowLayout {
+                id: headerRow
+                Layout.fillWidth:       true
+                Layout.topMargin:       Theme.sp(14)
+                Layout.leftMargin:      Theme.sp(14)
+                Layout.rightMargin:     Theme.sp(14)
+                Layout.preferredHeight: Theme.sp(54)
+                spacing: Theme.sp(10)
+
+                // Status dot — green connected, accent while merely discovered
+                // on this network, warn while remembered but neither, grey
+                // once forgotten.  Same three-state vocabulary Cameras/IMUs
+                // use for "is this thing actually usable right now".
+                Rectangle {
+                    width:  Theme.sp(6)
+                    height: Theme.sp(6)
+                    radius: Theme.sp(3)
+                    color: phoneRow.isConnected ? Theme.colorGood
+                         : phoneRow.isRevoked    ? Theme.colorText3
+                         : phoneRow.isAvailable  ? Theme.colorAccent
+                         :                          Theme.colorWarn
+                    Layout.alignment: Qt.AlignVCenter
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                }
+
+                // Alias (editable) + meta
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.sp(2)
+
+                    PpTextField {
+                        Layout.fillWidth: true
+                        placeholderText:   qsTr("Device alias…")
+                        text:              phoneRow.phoneData.alias || ""
+                        enabled:           !phoneRow.isRevoked
+                        onEditingFinished: if (root.controller)
+                                               root.controller.setPhoneAlias(phoneRow.phoneData.pairingId, text)
+                    }
+
+                    Row {
+                        spacing: Theme.sp(10)
+                        // What the phone called itself in its MSG `declare`
+                        // (or the shortened handle, for one that never has) —
+                        // kept visible under the alias rather than replaced
+                        // by it, the same way a camera's alias field sits
+                        // above its hardware description.
+                        Text {
+                            text:           phoneRow.phoneData.declaredName || ""
+                            font.family:    Theme.fontData
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                        }
+                        Text {
+                            text:           qsTr("PPCP")
+                            font.family:    Theme.fontData
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                        }
+                        Text {
+                            text:           phoneRow.phoneData.pairingId || ""
+                            font.family:    Theme.fontData
+                            font.pixelSize: Theme.fontSzMicro
+                            color:          Theme.colorText3
+                            elide:          Text.ElideRight
+                        }
+                    }
+                }
+
+                // Connection indicator — the same role the
+                // "connected"/"available" wording used to play buried in the
+                // meta line, promoted to its own slot so it reads at a glance
+                // the way a camera's status dot label or an IMU's state text
+                // does.
+                Text {
+                    text: phoneRow.isRevoked    ? qsTr("Revoked")
+                        : phoneRow.isConnected  ? qsTr("Connected")
+                        : phoneRow.isAvailable  ? qsTr("On this network")
+                        :                          qsTr("Disconnected")
+                    font.family:    Theme.fontData
+                    font.pixelSize: Theme.fontSzMicro
+                    color: phoneRow.isConnected ? Theme.colorGood
+                         : phoneRow.isRevoked    ? Theme.colorText3
+                         : phoneRow.isAvailable  ? Theme.colorAccent
+                         :                          Theme.colorText3
+                    Layout.alignment: Qt.AlignVCenter
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                }
+
+                // 7.4d — honoured immediately by this side, which means the
+                // next handshake from that phone resolves nothing and fails
+                // like any stranger's (7.7c).  Shown only for a row that IS
+                // remembered: a row that is not (a `mu`>1 code's pairing,
+                // 7.4f — this application never publishes one itself) has
+                // nothing stored to forget, and it goes on its own when the
+                // session that produced it closes (7.3b).
+                PpButton {
+                    label:            qsTr("Forget")
+                    destructive:      true
+                    visible:          phoneRow.isRemembered
+                    Layout.alignment: Qt.AlignVCenter
+                    onClicked: if (root.controller)
+                                   root.controller.forgetPairing(phoneRow.phoneData.pairingId)
+                }
+            }
+
+            // ── Facts strip ──────────────────────────────────────────────────
+            RowLayout {
+                id: capsRow
+                Layout.fillWidth:    true
+                // The card's bottom breathing room — the "no margin" half of
+                // Mark's report — the same role `bodyWrap`'s trailing
+                // `Theme.sp(20)` plays under ImusPanel's capabilities strip.
+                Layout.bottomMargin: Theme.sp(14)
+                spacing: 0
+
+                Repeater {
+                    model: [
+                        { key: qsTr("Status"),     val: phoneRow.isRemembered ? qsTr("Remembered")
+                                                       : phoneRow.isRevoked    ? qsTr("Forgotten")
+                                                       :                          qsTr("Session only") },
+                        { key: qsTr("Pairing ID"), val: (phoneRow.phoneData.pairingId || "—") },
+                        { key: qsTr("Cameras"),    val: phoneRow.cameraCount > 0 ? String(phoneRow.cameraCount) : "—" },
+                        { key: qsTr("Transport"),  val: qsTr("PPCP") }
+                    ]
+
+                    delegate: Rectangle {
+                        required property var modelData
+                        required property int index
+
+                        Layout.fillWidth: true
+                        implicitHeight: capCol.implicitHeight + Theme.sp(18)
+                        color: Theme.colorBg2
+
+                        // Vertical separator (except last)
+                        Rectangle {
+                            anchors.right:  parent.right
+                            anchors.top:    parent.top
+                            anchors.bottom: parent.bottom
+                            width: 1
+                            color: Theme.colorBorderMid
+                            opacity: Theme.borderOpacityNormal
+                            visible: index < 3
+                        }
+
+                        ColumnLayout {
+                            id: capCol
+                            anchors {
+                                left:   parent.left
+                                right:  parent.right
+                                top:    parent.top
+                                leftMargin:  Theme.sp(14)
+                                rightMargin: Theme.sp(14)
+                                topMargin:   Theme.sp(9)
+                            }
+                            spacing: Theme.sp(3)
+
+                            Text {
+                                text:            modelData.key
+                                font.family:     Theme.fontData
+                                font.pixelSize:  Theme.fontSzMicro
+                                font.letterSpacing: Theme.trackingMicro
+                                font.capitalization: Font.AllUppercase
+                                color:           Theme.colorText3
+                            }
+                            Text {
+                                text:            modelData.val
+                                font.family:     Theme.fontData
+                                font.pixelSize:  Theme.fontSzBody2
+                                color:           Theme.colorText
+                                elide:           Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+                }
+            }
+        }   // mainCol
+    }
 
     // ── Settings search support (mirrors the other Hardware panels) ───────────
     property string lastHighlightId: ""
@@ -125,7 +408,7 @@ Item {
                 text: qsTr("Phones")
             }
             Text {
-                text: qsTr("A phone running PinPoint Capture pairs by scanning a code from the home screen, and its cameras then join the devices list. A pairing works once unless you choose to remember it; a remembered phone can reconnect without a new code until you forget it here.")
+                text: qsTr("A phone running PinPoint Capture pairs by scanning a code from the home screen, and its cameras then join the devices list. Once paired, a phone is remembered and can reconnect without a new code — until you forget it here.")
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzBody2
                 font.weight:    Theme.fontBodyWeight
@@ -146,124 +429,93 @@ Item {
                 Layout.fillWidth: true
             }
 
+            // ── Enumerated devices header ──────────────────────────────────
+            RowLayout {
+                visible: root.havePpcp
+                Layout.fillWidth: true
+
+                Text {
+                    text:                qsTr("REMEMBERED PHONES")
+                    font.family:         Theme.fontBody
+                    font.pixelSize:      Theme.fontSzMicro
+                    font.letterSpacing:  Theme.trackingMicro
+                    font.capitalization: Font.AllUppercase
+                    color:               Theme.colorText3
+                    Layout.fillWidth:    true
+                }
+            }
+
             // ── Nothing paired yet ─────────────────────────────────────────
             Text {
                 visible: root.havePpcp && root.rows.length === 0
-                text:    qsTr("No phone has paired with this computer yet.")
+                text:    qsTr("No phone has paired with this computer yet. Use “Pair a device” on the home screen to scan a code.")
                 font.family:    Theme.fontBody
                 font.pixelSize: Theme.fontSzBody2
                 font.weight:    Theme.fontBodyWeight
+                font.italic:    true
                 color:          Theme.colorText3
                 wrapMode:       Text.WordWrap
                 Layout.fillWidth: true
             }
 
             // ── One row per held pairing ───────────────────────────────────
-            Repeater {
-                model: root.rows
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.sp(26)
+                spacing: Theme.sp(8)
+                visible: root.rows.length > 0
 
-                // ⚠ A COLUMN AROUND THE ROW, AND THE SEPARATOR IS A LAYOUT ITEM.
-                // The rule under each row used to be a Rectangle inside the
-                // RowLayout using `anchors` — which a layout manages, so Qt
-                // warned "Detected anchors on an item that is managed by a
-                // layout. This is undefined behavior" once per row, every time
-                // this panel was built.  It was also occupying a horizontal
-                // slot in the row it was trying to underline.
-                ColumnLayout {
-                    id: pairingRow
-                    objectName: "setting_pairedPhones"
-                    required property var modelData
-                    property bool searchHighlight: false
+                Repeater {
+                    model: root.rows
 
-                    Layout.fillWidth: true
-                    spacing: Theme.sp(8)
+                    delegate: PhoneDeviceRow {
+                        id: pairingRow
+                        objectName: "setting_pairedPhones"
+                        required property var modelData
+                        property bool searchHighlight: false
 
-                    RowLayout {
+                        phoneData:        modelData
                         Layout.fillWidth: true
-                        spacing: Theme.sp(16)
+                    }
+                }
+            }
 
-                        // Green only while the pairing is actually usable.  A
-                        // revoked one is a tombstone until reap() takes it (7.3b),
-                        // and showing it as live would be a lie about what a
-                        // handshake from that device would do now (7.7c).
-                        Rectangle {
-                            Layout.preferredWidth:  Theme.sp(6)
-                            Layout.preferredHeight: Theme.sp(6)
-                            radius: Theme.sp(3)
-                            color: pairingRow.modelData.status === "connected" ? Theme.colorGood
-                                 : pairingRow.modelData.status === "available"  ? Theme.colorAccent
-                                 : pairingRow.modelData.invalidated             ? Theme.colorBorderStrong
-                                 : pairingRow.modelData.persisted               ? Theme.colorAccent
-                                                                                : Theme.colorBorderStrong
-                        }
+            // ── Status summary ─────────────────────────────────────────────
+            Rectangle {
+                id: summaryRect
+                visible: root.rows.length > 0
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.sp(26)
+                height:  Theme.sp(40)
+                color:   Theme.colorBg2
+                radius:  Theme.radius
+                border.width: 1
+                border.color: Theme.colorBorderMid
 
-                        ColumnLayout {
+                readonly property int rememberedCount: root.rows.filter(function(r) { return r.persisted }).length
+                readonly property int connectedCount:  root.rows.filter(function(r) { return r.status === "connected" }).length
 
-                            Text {
-                                // What the phone called itself in its MSG `declare`,
-                                // remembered against its pairing; the shortened
-                                // handle for one that has never declared.
-                                text:           pairingRow.modelData.name
-                                font.family:    Theme.fontBody
-                                font.pixelSize: Theme.fontSzBody
-                                color:          Theme.colorText
-                            }
-                            Text {
-                                text: {
-                                    var bits = [pairingRow.modelData.persisted
-                                                    ? qsTr("Remembered")
-                                                    : qsTr("Paired this session")]
-                                    if (pairingRow.modelData.status === "connected")
-                                        bits.push(qsTr("connected now"))
-                                    // RV §3 saw it advertising. There is no
-                                    // "Connect" control beside this yet and that is
-                                    // deliberate: Ppcp::Connector exists and 5.2g
-                                    // makes the host the TLS client on the discovery
-                                    // path, but auto-dialling has never been run
-                                    // against a live responder, so reconnecting
-                                    // still means showing a code.
-                                    else if (pairingRow.modelData.status === "available")
-                                        bits.push(qsTr("on this network"))
-                                    if (pairingRow.modelData.invalidated) bits.push(qsTr("revoked"))
-                                    bits.push(pairingRow.modelData.pairingId)
-                                    return bits.join("  ·  ")
-                                }
-                                font.family:    Theme.fontData
-                                font.pixelSize: Theme.fontSzMicro
-                                color:          Theme.colorText3
-                                elide:          Text.ElideRight
-                            }
-                        }
+                RowLayout {
+                    anchors.fill:    parent
+                    anchors.margins: Theme.sp(12)
+                    spacing:         Theme.sp(16)
 
-                        // 7.4a/7.4b — opt-in, and it stores PRK in the platform
-                        // keychain and nothing else (5.1c).  Refused for a code
-                        // whose `mu` exceeded 1: that pairing's key material is held
-                        // by every peer that scanned it (7.4f).
-                        PpButton {
-                            label:   qsTr("Remember")
-                            visible: !pairingRow.modelData.persisted
-                                     && !pairingRow.modelData.invalidated
-                            onClicked: if (root.controller)
-                                           root.controller.rememberPairing(pairingRow.modelData.pairingId)
-                        }
-
-                        // 7.4d — honoured immediately by this side, which means the
-                        // next handshake from that phone resolves nothing and fails
-                        // like any stranger's (7.7c).
-                        PpButton {
-                            label:       qsTr("Forget")
-                            destructive: true
-                            visible:     pairingRow.modelData.persisted
-                            onClicked: if (root.controller)
-                                           root.controller.forgetPairing(pairingRow.modelData.pairingId)
-                        }
+                    Text {
+                        text:  summaryRect.connectedCount + qsTr(" connected")
+                        color: summaryRect.connectedCount > 0 ? Theme.colorGood : Theme.colorText2
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                     }
 
-                    // The hairline between rows, now sized by the column.
-                    Rectangle {
+                    Rectangle { width: 1; height: Theme.sp(14); color: Theme.colorBorderStrong; opacity: 0.4 }
+
+                    Text {
+                        text:  summaryRect.rememberedCount + qsTr(" remembered")
+                        color: Theme.colorText2
+                        font.family:    Theme.fontData
+                        font.pixelSize: Theme.fontSzMicro
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: Theme.colorBorder
                     }
                 }
             }

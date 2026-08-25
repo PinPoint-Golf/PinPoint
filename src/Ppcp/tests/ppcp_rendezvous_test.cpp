@@ -349,7 +349,13 @@ TEST(PpcpRendezvous, ClosingTheSessionInvalidatesItsCodeWhetherOrNotItWasUsed)
     EXPECT_EQ(after.resolved, before.resolved);
 }
 
-// ── 7.4b / 7.4d — persistence is opt-in and individually revocable ─────────
+// ── 7.4d — persist() is still the explicit, low-level entry point ──────────
+// E57 (25 August 2026) downgraded 7.4b's opt-in clause to a SHOULD, and the
+// ordinary path is now automatic — see the tests below this one.  persist()
+// itself is unchanged: it is what noteLinkEstablished() and
+// adoptGuidedPairing() call under the hood, and it stays reachable directly
+// for a caller (this suite) that wants to persist a pairing with no
+// handshake involved.
 TEST(PpcpRendezvous, PersistenceIsOptInAndRevocationIsHonouredImmediately)
 {
     PpcpRendezvous rv;
@@ -378,6 +384,75 @@ TEST(PpcpRendezvous, PersistenceIsOptInAndRevocationIsHonouredImmediately)
     EXPECT_TRUE(rv.secretStore()->list().empty());
 }
 
+// ── E57, 25 August 2026 — RV 7.4b downgraded to a SHOULD ────────────────────
+// This application's answer: a pairing is remembered automatically the moment
+// it completes, and Settings -> Phones' "Forget" (7.4d) is the opt-out.  The
+// two producers of a COMPLETE pairing are exercised here — a scanned code via
+// noteLinkEstablished(), and a guided pairing via adoptGuidedPairing() — plus
+// the two conditions that still leave a pairing unremembered: no store, and a
+// `mu`>1 code (7.4f, unchanged by the erratum).
+TEST(PpcpRendezvous, ACompletedPairingIsRememberedAutomaticallyOnceItsLinkEstablishes)
+{
+    Bay bay;
+    bay.rv.setSecretStore(makeEphemeralPairingStore());
+    ASSERT_TRUE(bay.open());
+    Scanner s(bay.code.uri);
+    ASSERT_TRUE(s.ok);
+
+    Bay::Arrival a = bay.dial(s, 0x51);
+    ASSERT_TRUE(a.linked);
+    EXPECT_FALSE(bay.rv.isPersisted(a.pairingId))
+        << "the transport does not call noteLinkEstablished() — the application does";
+
+    bay.rv.noteLinkEstablished(a.pairingId);
+    EXPECT_TRUE(bay.rv.isPersisted(a.pairingId))
+        << "E57 — no separate opt-in action was taken, and none was needed";
+    ASSERT_TRUE(bay.rv.secretStore());
+    EXPECT_EQ(bay.rv.secretStore()->list().size(), 1u);
+
+    // Still individually revocable (7.4d) — the opt-out, and now the only one.
+    bay.rv.revoke(a.pairingId);
+    EXPECT_FALSE(bay.rv.isPersisted(a.pairingId));
+    EXPECT_TRUE(bay.rv.secretStore()->list().empty());
+}
+
+TEST(PpcpRendezvous, ACompletedPairingIsNotRememberedWithNoStoreInstalled)
+{
+    Bay bay;
+    ASSERT_TRUE(bay.open());   // no setSecretStore() — this run declined persistence
+    Scanner s(bay.code.uri);
+    ASSERT_TRUE(s.ok);
+    Bay::Arrival a = bay.dial(s, 0x52);
+    ASSERT_TRUE(a.linked);
+
+    bay.rv.noteLinkEstablished(a.pairingId);
+    EXPECT_FALSE(bay.rv.isPersisted(a.pairingId));
+}
+
+// 11.1a — "indistinguishable from one established by a scanned code", and E57
+// makes that true of remembering too: adoptGuidedPairing() never builds this
+// entry until 11.5g's affirm-and-verify has both happened, so there is
+// nothing left to ask permission for.
+TEST(PpcpRendezvous, AGuidedPairingIsRememberedAutomaticallyByTheSameRule)
+{
+    PpcpRendezvous rv;
+    rv.setSecretStore(makeEphemeralPairingStore());
+
+    std::uint8_t sid[PPCP_RV_SID_BYTES];
+    std::uint8_t psk[PPCP_RV_PSK_MAX];
+    ASSERT_TRUE(csprngBytes(sid, sizeof sid));
+    ASSERT_TRUE(csprngBytes(psk, sizeof psk));
+    ppcp_rv_keys keys;
+    ASSERT_EQ(ppcp_rv_derive(sid, sizeof sid, psk, sizeof psk, &keys), PPCP_OK);
+
+    std::string id, err;
+    ASSERT_TRUE(rv.adoptGuidedPairing(sid, keys, "Guided phone", &id, &err)) << err;
+
+    EXPECT_TRUE(rv.isPersisted(id));
+    ASSERT_TRUE(rv.secretStore());
+    EXPECT_EQ(rv.secretStore()->list().size(), 1u);
+}
+
 // ── RT-16 — no PRK from a `mu > 1` code is persisted (7.4f) ────────────────
 TEST(PpcpRendezvous, RT16_APairingFromAMultiUseCodeIsSessionScopedAndCannotBePersisted)
 {
@@ -400,6 +475,12 @@ TEST(PpcpRendezvous, RT16_APairingFromAMultiUseCodeIsSessionScopedAndCannotBePer
     EXPECT_NE(why.find("7.4f"), std::string::npos) << why;
     EXPECT_TRUE(rv.secretStore()->list().empty());
 
+    // E57's automatic remembering is the same predicate, so it refuses too —
+    // a link established on this pairing must not silently persist it.
+    rv.noteLinkEstablished(multi.pairingId);
+    EXPECT_FALSE(rv.isPersisted(multi.pairingId));
+    EXPECT_TRUE(rv.secretStore()->list().empty());
+
     // The single-use case in the same run, so the refusal is shown to be about
     // `mu` and not about the store.
     PublishedCode single;
@@ -407,12 +488,14 @@ TEST(PpcpRendezvous, RT16_APairingFromAMultiUseCodeIsSessionScopedAndCannotBePer
     EXPECT_TRUE(rv.persist(single.pairingId, &why)) << why;
     EXPECT_EQ(rv.secretStore()->list().size(), 1u);
 
-    // And a `mu: 3` code really does admit three pairings, so the refusal
-    // above is not the feature being quietly removed.
+    // And a `mu: 3` code really does still admit three pairings — one of
+    // which noteLinkEstablished() above already spent — so the refusal above
+    // is about persistence and not about the code being quietly narrowed to
+    // `mu: 1` in all but name.
     CodeStatus st;
     ASSERT_TRUE(rv.status(multi.pairingId, &st));
     EXPECT_EQ(st.maxUses, 3u);
-    EXPECT_EQ(st.usesRemaining, 3u);
+    EXPECT_EQ(st.usesRemaining, 2u);
 }
 
 TEST(PpcpRendezvous, APersistedPairingIsReloadedFromPrkAndNeverFromThePairingSecret)

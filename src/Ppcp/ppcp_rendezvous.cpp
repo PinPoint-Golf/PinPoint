@@ -249,6 +249,34 @@ struct PpcpRendezvous::Impl {
             wipe(kId, sizeof kId);
             wipe(kTls, sizeof kTls);
         }
+
+        // E57, 25 August 2026 — RV 7.4b was downgraded to a SHOULD, and this
+        // application's answer is to remember a pairing automatically rather
+        // than wait for a separate opt-in: a user who has just paired a device
+        // has already given the consent 7.4b used to ask for twice.  One
+        // function for every path that produces a COMPLETE pairing —
+        // `noteLinkEstablished()` (a scanned code) and `adoptGuidedPairing()`
+        // (§11) — and for `persist()`, which the explicit-API callers (the
+        // test suite) still reach directly.  Callers hold `mu` already and
+        // decide for themselves whether "no store installed" is even worth
+        // telling apart from "this pairing may not persist" — this function
+        // assumes `store` is non-null.
+        //
+        // Idempotent: an already-remembered pairing returns true without
+        // touching the store again.  Refuses for a revoked entry or a `mu`>1
+        // code (7.4f, unchanged by E57) or when the store itself refuses the
+        // write.
+        bool remember(PairingSecretStore *store, std::string *whyNot)
+        {
+            auto no = [&](const char *m) { if (whyNot) *whyNot = m; return false; };
+            if (persisted) return true;
+            if (invalidated) return no("that pairing has been revoked");
+            if (!mayPersist)
+                return no("the code was multi-use, so the pairing is session-scoped (RV 7.4f)");
+            if (!store->put(pairingId, prk)) return no("the platform store refused the key");
+            persisted = true;
+            return true;
+        }
     };
 
     mutable std::mutex mu;
@@ -489,15 +517,20 @@ void PpcpRendezvous::noteLinkEstablished(const std::string &pairingId)
     if (!e) return;
     e->lastUsedUnixS = m_impl->now();   // 3.4d1 — recently used first
     if (e->usesRemaining > 0) e->usesRemaining--;
-    if (e->usesRemaining == 0 && !e->persisted) {
-        // The CODE is spent.  The key material stays until 7.3b or 7.4 disposes
-        // of it, because the link this handshake produced is still carrying a
-        // session and RV 7.5a reconnects it on the same K_tls.
-        //
-        // ⚠ THE ROW IS NOT MARKED INVALIDATED HERE.  7.3a is "invalidate the
-        // CODE"; 7.3b is "invalidate the pairing when the session closes".
-        // Conflating them would end the session at its first reconnection.
-    }
+    // The CODE is spent (once `usesRemaining` reaches zero).  The key material
+    // stays until 7.3b or 7.4 disposes of it, because the link this handshake
+    // produced is still carrying a session and RV 7.5a reconnects it on the
+    // same K_tls.
+    //
+    // ⚠ THE ROW IS NOT MARKED INVALIDATED HERE.  7.3a is "invalidate the
+    // CODE"; 7.3b is "invalidate the pairing when the session closes".
+    // Conflating them would end the session at its first reconnection.
+
+    // E57 — a pairing that has just completed a handshake is remembered
+    // automatically (7.4b, now a SHOULD); Settings -> Phones' "Forget" is the
+    // opt-out.  No-ops for a `mu`>1 code (7.4f, unchanged) and for a run with
+    // no store installed at all.
+    if (m_store) e->remember(m_store.get(), nullptr);
 }
 
 void PpcpRendezvous::closeSession(const std::string &sessionId)
@@ -568,10 +601,16 @@ bool PpcpRendezvous::adoptGuidedPairing(const std::uint8_t sid[PPCP_RV_SID_BYTES
     e.maxUses = 0;
     e.usesRemaining = UINT64_MAX;
     e.expUnixS = 0;
-    e.persisted = false;         // 7.4b — the user's action, not this one
+    e.persisted = false;
     e.mayPersist = true;
 
     *out = e.pairingId;
+    // E57 — 11.5g means this entry is never built until the pairing is
+    // COMPLETE and mutually verified, so it is remembered the moment it
+    // exists, by the same rule and the same function `noteLinkEstablished()`
+    // applies to a scanned code's pairing.  `e` is still a local here, so no
+    // lock is needed to touch it.
+    if (m_store) e.remember(m_store.get(), nullptr);
     {
         std::lock_guard<std::mutex> g(m_impl->mu);
         m_impl->entries.push_back(std::move(e));
@@ -596,14 +635,7 @@ bool PpcpRendezvous::persist(const std::string &pairingId, std::string *whyNot)
     std::lock_guard<std::mutex> g(m_impl->mu);
     Impl::Entry *e = m_impl->find(pairingId);
     if (!e) return no("no such pairing");
-    if (e->invalidated) return no("that pairing has been revoked");
-    if (!e->mayPersist)
-        // 7.4f — the key material is held by every peer that scanned the code.
-        return no("the code was multi-use, so the pairing is session-scoped (RV 7.4f)");
-
-    if (!m_store->put(pairingId, e->prk)) return no("the platform store refused the key");
-    e->persisted = true;
-    return true;
+    return e->remember(m_store.get(), whyNot);
 }
 
 bool PpcpRendezvous::isPersisted(const std::string &pairingId) const

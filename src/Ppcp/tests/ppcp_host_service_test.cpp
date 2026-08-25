@@ -43,6 +43,9 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 
 #include <ppcp/rv.h>
 
@@ -168,8 +171,33 @@ private:
 class HostServiceClock : public ::testing::Test
 {
 protected:
+    // ⚠ DECLARED BEFORE `m_svc`, AND THAT ORDERING IS LOAD-BEARING.  Data
+    // members construct in declaration order, and `PpcpHostService`'s
+    // constructor calls `loadPersisted()` immediately — before `SetUp()` ever
+    // runs.  `ppSettings()` is UserScope, so without this redirect already
+    // active by then, every fixture in this file would read the developer's
+    // real PinPointStudio.ini at construction, and — since erratum E57 made a
+    // completed pairing remembered automatically — any test below that
+    // actually connects a phone (`Phone::dial()`) would WRITE a real PRK into
+    // it too.  Same pattern as `SettingsPairingStore` in
+    // ppcp_rendezvous_test.cpp, just fixture-ordered so it also covers the
+    // read at construction.
+    struct SettingsRedirect {
+        QTemporaryDir dir;
+        SettingsRedirect()
+        {
+            QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        }
+        ~SettingsRedirect()
+        {
+            QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                               QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation));
+        }
+    } m_settingsRedirect;
+
     void SetUp() override
     {
+        ASSERT_TRUE(m_settingsRedirect.dir.isValid());
         QString err;
         ASSERT_TRUE(m_svc.start(0, &err)) << err.toStdString();
         ASSERT_TRUE(m_svc.listening());
@@ -460,13 +488,11 @@ TEST_F(HostServiceClock, PublishingAgainReplacesTheCodeRatherThanAddingOne)
 
 // ── The device rows ─────────────────────────────────────────────────────────
 //
-// ⚠ ONLY THE NEGATIVE CASE IS REACHABLE HERE, AND THAT IS SAID RATHER THAN
-// LEFT TO LOOK LIKE COVERAGE.  A row appears for a pairing that is persisted or
-// spent; persisting needs protected storage (the login keychain, which cannot
-// be unlocked from a non-Aqua session — the same reason RT-12 is a review row),
-// and spending one needs a phone to dial in.  What IS reachable is the rule
-// that most wants guarding, because it is the one a future edit will get wrong:
-// a live code is not a phone.
+// The rule that most wants guarding, because it is the one a future edit will
+// get wrong: a live code is not a phone.  The positive case — a row DOES
+// appear once a phone actually dials in, and it is remembered automatically
+// (E57) — is `APhoneThatDialsInBecomesARememberedDeviceRow` below; this test
+// is the negative control for it, run before any phone exists at all.
 TEST_F(HostServiceClock, ALiveCodeIsNotAPhone)
 {
     EXPECT_TRUE(m_svc.phones().isEmpty()) << "a host that has paired with nothing has no phones";
@@ -484,6 +510,39 @@ TEST_F(HostServiceClock, ALiveCodeIsNotAPhone)
     // session, so the entry goes rather than becoming a spent pairing.
     m_svc.closePairingCode();
     EXPECT_TRUE(m_svc.phones().isEmpty());
+}
+
+// The positive case this file could not exercise before erratum E57: a phone
+// that actually dials in is remembered with no separate action taken, and
+// "Forget" (7.4d) is what is left to opt out with.
+TEST_F(HostServiceClock, APhoneThatDialsInBecomesARememberedDeviceRow)
+{
+    Phone p(&m_svc);
+    ASSERT_TRUE(p.ok());
+    ASSERT_TRUE(p.dial(m_svc.port(), 0x61));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+
+    const QString pairingId = QString::fromStdString(p.pairingId());
+    QVariantList rows = m_svc.phones();
+    ASSERT_EQ(rows.size(), 1);
+    QVariantMap row = rows.first().toMap();
+    EXPECT_EQ(row.value(QStringLiteral("pairingId")).toString(), pairingId);
+    EXPECT_TRUE(row.value(QStringLiteral("persisted")).toBool())
+        << "E57 — a completed pairing is remembered automatically, with no "
+           "'Remember' action taken";
+    EXPECT_FALSE(row.value(QStringLiteral("invalidated")).toBool());
+    EXPECT_TRUE(m_svc.rendezvous().isPersisted(p.pairingId()));
+
+    // "Forget" is still the individual opt-out 7.4b requires (7.4d) — E57
+    // removed the opt-IN, not this.
+    m_svc.forgetPairing(pairingId);
+    EXPECT_FALSE(m_svc.rendezvous().isPersisted(p.pairingId()));
+    rows = m_svc.phones();
+    ASSERT_EQ(rows.size(), 1);
+    row = rows.first().toMap();
+    EXPECT_TRUE(row.value(QStringLiteral("invalidated")).toBool())
+        << "a forgotten phone is shown as revoked, not silently dropped from the list";
 }
 
 // ── RV §3 discovery ─────────────────────────────────────────────────────────

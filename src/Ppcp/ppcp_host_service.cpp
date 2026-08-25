@@ -84,10 +84,12 @@ const char *kPairingService = "golf.pinpoint.studio.ppcp.pairings";
 PpcpHostService::PpcpHostService(QObject *parent)
     : QObject(parent)
 {
-    // 7.4b — persistence is opt-in.  Installing the store does not persist
-    // anything; rememberPairing() is the only path that writes a key, and it is
-    // a user action.  On a platform with no protected storage this is null and
-    // persist() refuses rather than writing to a file (7.2c).
+    // Installing the store does not itself persist anything — a completed
+    // pairing writes its own key, inside PpcpRendezvous, the moment it exists
+    // (erratum E57: 7.4b is now a SHOULD, and this application remembers by
+    // default rather than asking first).  On a platform with no store this
+    // stays null and every persistence attempt refuses rather than writing to
+    // a file (7.2c) — not reachable in practice since erratum E56.
     m_rv.setSecretStore(makePlatformPairingStore(kPairingService));
     m_rv.loadPersisted();
 
@@ -330,6 +332,11 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     if (!pairing.empty()) m_rv.noteLinkEstablished(pairing);
     const QString pairingId = QString::fromStdString(pairing);
     if (!pairingId.isEmpty()) m_pairedThisRun.insert(pairingId);
+    // E57 — noteLinkEstablished() just remembered this pairing automatically
+    // (a `mu: 1` code, which is the only kind this host publishes), so the
+    // advertised set (3.5e) may have grown right here rather than only when a
+    // user pressed "Remember".
+    refreshAdvertisement();
 
     // ⚠ DO NOT DEDUPLICATE BY PAIRING HERE.  It is the obvious next thought —
     // "the same pairing dialling again is that phone reconnecting, so replace
@@ -619,8 +626,9 @@ void PpcpHostService::stopAdvertising()
 }
 
 // The set of persisted pairings is the ONLY input.  Called from start-up, from
-// `rememberPairing()` and from `forgetPairing()`, which between them are every
-// way it changes.
+// `adoptLink()` and `pumpGuided()` (a pairing completing is now the moment it
+// is remembered, erratum E57) and from `forgetPairing()` — between them every
+// way the set changes.
 void PpcpHostService::refreshAdvertisement()
 {
     if (!m_advert || !m_advertiser) return;
@@ -697,6 +705,39 @@ QString PpcpHostService::phoneNameFor(const QString &pairingId)
     return names.value(pairingId).toMap().value(QStringLiteral("name")).toString();
 }
 
+// ── The user's own name for it ──────────────────────────────────────────────
+//
+// A flat pairingId -> alias map, deliberately shaped like `cameraAlias` and
+// `imuAlias` rather than nested like `ppcp/phoneNames` above: those two are
+// both "the settings panel's editable label for a device", and `phoneNames`
+// is not that — it is what the phone SAID, refreshed on every `declare` and
+// never typed by a person. Kept as a separate key rather than folded into
+// that row so the two can be cleared independently if that's ever wanted;
+// today `forgetPairing()` drops both together, since a `pairingId` is a fresh
+// CSPRNG handle every time (7.3d) and an alias keyed by a dead one could never
+// be found again regardless.
+QString PpcpHostService::phoneAliasFor(const QString &pairingId)
+{
+    return ppSettings().value(QStringLiteral("ppcp/phoneAlias")).toMap()
+        .value(pairingId).toString();
+}
+
+void PpcpHostService::setPhoneAlias(const QString &pairingId, const QString &alias)
+{
+    if (pairingId.isEmpty()) return;
+    QSettings s = ppSettings();
+    QVariantMap aliases = s.value(QStringLiteral("ppcp/phoneAlias")).toMap();
+    const QString trimmed = alias.trimmed();
+    const QString current = aliases.value(pairingId).toString();
+    const bool changed = trimmed.isEmpty() ? aliases.contains(pairingId) : (current != trimmed);
+    if (!changed) return;
+
+    if (trimmed.isEmpty()) aliases.remove(pairingId);
+    else                   aliases[pairingId] = trimmed;
+    s.setValue(QStringLiteral("ppcp/phoneAlias"), aliases);
+    emit phonesChanged();
+}
+
 // ── Every phone this host knows about, as a device row ──────────────────────
 //
 // Built from the rendezvous ledger, which after `loadPersisted()` holds one
@@ -719,21 +760,41 @@ QVariantList PpcpHostService::phones() const
         const Phone *live = phoneByPairing(pid);
         const bool isLive = live != nullptr;
         const QString stored = phoneNameFor(pid);
+        const QString alias  = phoneAliasFor(pid);
+
+        // The phone's own name where it has ever declared one; otherwise the
+        // handle, shortened.  Inventing a friendlier name would assert a fact
+        // about the device, and nothing here knows one.  This is what Settings
+        // -> Phones shows as the row's META line, and what `name` below falls
+        // back to when there is no alias.
+        const QString declaredName = isLive && !live->name.isEmpty() ? live->name
+                                    : !stored.isEmpty()              ? stored
+                                    : tr("Phone %1").arg(pid.left(6));
 
         QVariantMap dev;
         dev[QStringLiteral("kind")]       = QStringLiteral("Phone");
-        // The phone's own name where it has ever declared one; otherwise the
-        // handle, shortened.  Inventing a friendlier name would assert a fact
-        // about the device, and nothing here knows one.
-        dev[QStringLiteral("name")] = isLive && !live->name.isEmpty() ? live->name
-                                    : !stored.isEmpty()              ? stored
-                                    : tr("Phone %1").arg(pid.left(6));
+        // A user-set alias wins everywhere a phone's name is shown — the
+        // DEVICES list, the resource monitor, this row's own header — the same
+        // priority `cameraAlias`/`imuAlias` have over a device's own reported
+        // name.  `alias` and `declaredName` are exposed separately so Settings
+        // -> Phones can offer the alias as an editable field while still
+        // showing what the phone itself declared underneath it.
+        dev[QStringLiteral("alias")]        = alias;
+        dev[QStringLiteral("declaredName")] = declaredName;
+        dev[QStringLiteral("name")] = !alias.isEmpty() ? alias : declaredName;
         dev[QStringLiteral("model")]      = stored;
         dev[QStringLiteral("backend")]    = QStringLiteral("PPCP");
         dev[QStringLiteral("identifier")] = pid;
         dev[QStringLiteral("pairingId")]  = pid;
         dev[QStringLiteral("persisted")]  = st.persisted;
         dev[QStringLiteral("invalidated")] = st.invalidated;
+        // Joins a phone's row to its cameras' rows in `cameraManager.cameraList`
+        // — `VideoInputPpcp`'s `serialNumber` is this same peer id (see
+        // ResourceMonitorController) — so Settings -> Phones can show how many
+        // cameras this phone is currently contributing without inventing a
+        // second count of the same Sources.  Empty while not connected: a
+        // remembered-but-disconnected phone has no live cameras to count.
+        dev[QStringLiteral("counterpartId")] = isLive ? live->counterpartId : QString();
 
         // The same status vocabulary the camera and IMU rows use, so the home
         // screen's dot and the resource monitor need no new cases.  `available`
@@ -1012,35 +1073,30 @@ QVariantList PpcpHostService::outstandingCodes() const
     return out;
 }
 
-bool PpcpHostService::rememberPairing(const QString &pairingId)
-{
-    std::string why;
-    const bool ok = m_rv.persist(pairingId.toStdString(), &why);
-    if (!ok) setStatus(tr("Cannot remember this device: %1").arg(QString::fromStdString(why)));
-    // 3.5e — a pairing only becomes worth advertising once it is persisted,
-    // because that is the moment it acquires something to reconnect to.
-    if (ok) refreshAdvertisement();
-    emit codeChanged();
-    emit phonesChanged();
-    return ok;
-}
-
 void PpcpHostService::forgetPairing(const QString &pairingId)
 {
     // 7.4d — revocation is honoured immediately by this side, which means the
-    // next handshake resolves nothing and fails like any stranger (7.7c).
+    // next handshake resolves nothing and fails like any stranger (7.7c).  A
+    // remembered pairing's only way to stop being remembered, now that E57
+    // has made 7.4b a SHOULD and this host remembers a completed pairing on
+    // its own: there is no opt-in step left to simply not take.
     m_rv.revoke(pairingId.toStdString());
     // 7.4d is "honoured immediately by this side", and an advertisement still
     // naming the revoked pairing would be this side continuing to offer it.
     refreshAdvertisement();
-    // The nickname goes with the key.  7.4d is about the pairing, but a name
-    // left behind is a record that this host has met that phone, and "forget"
-    // must not leave one.
+    // The nickname goes with the key — both halves of it.  7.4d is about the
+    // pairing, but a name (what the phone said) or an alias (what the user
+    // called it) left behind is a record that this host has met that phone,
+    // and "forget" must not leave one; neither could be found again anyway,
+    // since the next pairing with this device draws a fresh pairingId (7.3d).
     {
         QSettings st = ppSettings();
         QVariantMap names = st.value(QStringLiteral("ppcp/phoneNames")).toMap();
         if (names.remove(pairingId) > 0)
             st.setValue(QStringLiteral("ppcp/phoneNames"), names);
+        QVariantMap aliases = st.value(QStringLiteral("ppcp/phoneAlias")).toMap();
+        if (aliases.remove(pairingId) > 0)
+            st.setValue(QStringLiteral("ppcp/phoneAlias"), aliases);
     }
     emit codeChanged();
     emit phonesChanged();
@@ -1342,6 +1398,9 @@ void PpcpHostService::pumpGuided()
             if (m_rv.adoptGuidedPairing(p.sid, p.keys, label, &id, &err)) {
                 m_guidedPairingId = QString::fromStdString(id);
                 ppWarn() << "[ppcp-rv6] guided pairing established";
+                // E57 — adoptGuidedPairing() remembered this pairing
+                // automatically, so it is worth advertising already (3.5e).
+                refreshAdvertisement();
                 emit phonesChanged();
             } else {
                 ppWarn() << "[ppcp-rv6] the pairing could not be recorded:"

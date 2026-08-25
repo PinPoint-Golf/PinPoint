@@ -851,6 +851,22 @@ zeroes `usesRemaining` together, so a code the user merely dismissed is indistin
 the ledger from one a phone spent, and the older rule listed a device for a QR nobody had
 scanned.
 
+**Updated 25 Aug 2026 — libppcp erratum E57 downgraded 7.4b's opt-in clause to a SHOULD, and
+this application's default flipped with it: remember by default, forget as the opt-out.**
+`PpcpRendezvous::noteLinkEstablished()` (a scanned code) and `adoptGuidedPairing()` (§11) now
+remember a pairing the moment it completes — the same `PairingSecretStore::put()` call
+`persist()` always made, just made automatically rather than gated on a separate action. There
+is no `rememberPairing()` any more: nothing called it once persistence stopped being something
+a user had to ask for, so it was removed rather than left dead. Settings → Phones lost its
+"Remember" button for the same reason and kept "Forget", which is what 7.4b's surviving
+clauses — visible, individually revocable — actually require. `PpcpRendezvous::persist()`
+itself is unchanged and still reachable directly; it is what the automatic paths call under
+the hood, and the test suite still exercises it as the explicit, low-level entry point. A
+`mu`>1 code's pairing is still refused (7.4f, unchanged by the erratum) and still shows with
+neither button, going only when its session closes (7.3b) — this application's own code is
+always `mu: 1`, so that row shape is reachable only from a future multi-use workflow or from
+the conformance harness.
+
 ### 9.4 What is still not claimed
 
 - **`clipReady()` is still not connected**, and for the reason §7.2 gives: a `PpcpClip` carries

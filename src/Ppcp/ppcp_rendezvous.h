@@ -176,10 +176,15 @@ public:
     PpcpRendezvous(const PpcpRendezvous &) = delete;
     PpcpRendezvous &operator=(const PpcpRendezvous &) = delete;
 
-    // Persistence is OFF until an owner installs a store: 7.4b makes it opt-in
-    // and individually revocable, and a default-on protected store would be
-    // neither.  Passing null returns to no persistence and erases nothing —
-    // revoke() is how a stored pairing goes away.
+    // Persistence needs a store, full stop: with none installed, a completed
+    // pairing lives only as long as its session (7.3b).  Where one IS
+    // installed, a completed pairing is remembered automatically — 7.4b was
+    // downgraded to a SHOULD by erratum E57 (25 August 2026), and the opt-in
+    // step it used to require is judged not worth the friction now that a
+    // user has already deliberately paired the device.  `revoke()` (7.4d,
+    // unchanged) is how a remembered pairing goes away — see the Phones
+    // panel's "Forget".  Passing null here returns to no persistence at all
+    // and erases nothing already stored.
     void setSecretStore(std::unique_ptr<PairingSecretStore> s);
     const PairingSecretStore *secretStore() const { return m_store.get(); }
 
@@ -258,11 +263,14 @@ public:
     // properties of a CODE (7.4a) and a guided pairing is not one: there is no
     // `exp` to honour and no `mu` to count down, because nothing was printed.
     // 7.4f does not bite either — the material was never held by anyone who
-    // scanned anything — so `mayPersist` is true and 7.4b's opt-in is the only
-    // gate on persistence, exactly as it is for a `mu: 1` code.
+    // scanned anything — so `mayPersist` is true and this pairing is
+    // remembered exactly as a `mu: 1` code's is (below).
     //
-    // ⚠ AND IT IS NOT PERSISTED HERE.  7.4b makes persistence opt-in, visible
-    // and individually revocable; `persist()` is still the user's action.
+    // ⚠ AND IT IS PERSISTED HERE, not left for a later action.  11.5g means
+    // this entry is never built until the pairing is COMPLETE and mutually
+    // verified, so by erratum E57 (7.4b, now a SHOULD) there is nothing left
+    // to opt into — the same rule `noteLinkEstablished()` applies to a
+    // scanned code's pairing.  `revoke()` is how it stops being remembered.
     //
     // False if the CSPRNG cannot draw a handle.  `out` receives the pairingId.
     bool adoptGuidedPairing(const std::uint8_t sid[PPCP_RV_SID_BYTES],
@@ -271,6 +279,15 @@ public:
                             std::string *out, std::string *err = nullptr);
 
     // 7.4a — persist this pairing so a later session needs no new code.
+    //
+    // ⚠ NO LONGER THE ONLY PATH IN, SINCE ERRATUM E57.  `noteLinkEstablished()`
+    // and `adoptGuidedPairing()` call the same logic automatically the moment
+    // a pairing completes, which is the ordinary case now that 7.4b is a
+    // SHOULD.  This function stays as the explicit, low-level entry point —
+    // idempotent against an already-remembered pairing — for a caller (the
+    // test suite, chiefly) that wants to persist one directly without going
+    // through a handshake.
+    //
     // Refuses, returning false, when the code's `mu` exceeded 1 (7.4f: the key
     // material is held by every peer that scanned it) or when no protected
     // store is installed (7.2c).  ppcp_rv_may_persist() is the predicate and

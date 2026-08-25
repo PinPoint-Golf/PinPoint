@@ -248,10 +248,18 @@ public:
     Q_INVOKABLE bool publishPairingCode() { return publishCode(/*userAsked=*/true); }
     // 7.3b — invalidate the displayed code, used or not.
     Q_INVOKABLE void closePairingCode();
-    // 7.4b — persistence is opt-in, visible and individually revocable, so all
-    // three are user actions and none of them happens on its own.
-    Q_INVOKABLE bool rememberPairing(const QString &pairingId);
+    // 7.4b — a completed pairing is remembered automatically (erratum E57,
+    // 25 August 2026, downgraded 7.4b's opt-in clause to a SHOULD) and stays
+    // visible and individually revocable, which this is the revoking half of.
     Q_INVOKABLE void forgetPairing(const QString &pairingId);
+
+    // A user-given label, independent of what the phone calls itself in MSG
+    // 3.3's `declare` (untrusted, 4.4d) — the same relationship `cameraAlias`
+    // and `imuAlias` have to a device's own reported name.  Empty clears it,
+    // falling back to the declared name.  Stored beside `ppcp/phoneNames`
+    // rather than through `AppSettings`: `Ppcp` has no dependency on `Gui/app`
+    // and this keeps it that way.
+    Q_INVOKABLE void setPhoneAlias(const QString &pairingId, const QString &alias);
 
     // ── RV-6 guided pairing (H10) ───────────────────────────────────────────
     bool         guidedAvailable() const;
@@ -451,6 +459,10 @@ private:
     void stopAdvertising();
     void refreshAdvertisement();
     static QString phoneNameFor(const QString &pairingId);
+    // The user-editable half of a phone's label, in `ppcp/phoneAlias` — a flat
+    // pairingId -> alias map, same shape as `phoneNameFor`'s but never written
+    // from a `declare`.  Empty when the user has not set one.
+    static QString phoneAliasFor(const QString &pairingId);
 
     Ppcp::PpcpRendezvous                   m_rv;
     Ppcp::Listener                         m_listener;

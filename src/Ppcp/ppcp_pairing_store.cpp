@@ -17,8 +17,10 @@
  */
 
 // RV 7.2c — "secrets at rest are held in the platform's protected storage where
-// one exists", and 7.4b — persistence is opt-in, visible, individually
-// revocable.
+// one exists", and 7.4b — visible and individually revocable.  (7.4b's third
+// clause, "opt-in", was itself downgraded by erratum E57, 25 August 2026: see
+// ppcp_rendezvous.cpp's `Impl::Entry::remember()` for what this application
+// does instead — remember by default, forget as the opt-out.)
 //
 // ⚠ 7.2c IS A **SHOULD**, NOT A MUST — libppcp erratum E56, 25 August 2026.
 // This file used to be the "where one exists" half, and it reached
@@ -53,9 +55,10 @@
 //   • Possession of the file is a standing ability to complete a handshake as a
 //     paired peer.  RV §7.4's own "possession of the device's storage is
 //     possession of continuing access" was written when this was a keychain and
-//     should now be read at its stronger meaning.  7.4b's opt-in, visible,
-//     individually revocable persistence is what remains, and it does more for
-//     the user than the storage mechanism did.
+//     should now be read at its stronger meaning.  7.4b's visible, individually
+//     revocable persistence is what remains — remembered by default since
+//     erratum E57, forgettable at will — and it does more for the user than
+//     the storage mechanism did.
 //   • §5.4 leaves forward secrecy best-effort and there is none at the TLS 1.2
 //     PSK floor, so someone who captured LAN traffic at the time and *later*
 //     reads this file decrypts those sessions retrospectively (Annex B12).
