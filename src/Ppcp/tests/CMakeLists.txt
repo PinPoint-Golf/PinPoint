@@ -319,17 +319,14 @@ pp_add_test(ppcp_host_peer_test
 # built entirely out of libppcp's ppcp_rv_* functions — the same four calls
 # PinPointCapture will make.
 #
-# ⚠ AND Security.framework, because RV 7.2c is "protected storage where one
-# exists" and this application's existing secrets subsystem (QSettings, a plain
-# plist) is not one.  The keychain store is compiled here so the suite fails at
-# the link line if it ever stops building; it is NOT exercised at runtime,
-# because the login keychain cannot be unlocked from a non-Aqua session and a
-# test that needed it would be red on every headless box.  RT-12 is a review
-# row and that is where the keychain path is read.
-set(_rv_link ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
-if(APPLE)
-    list(APPEND _rv_link "-framework Security" "-framework CoreFoundation")
-endif()
+# ⚠ AND Qt6::Core, for the pairing store's QSettings.  This used to be
+# `-framework Security` for the macOS keychain store, which was compiled here so
+# the suite failed at the link line if it stopped building and was NOT exercised
+# at runtime — the login keychain cannot be unlocked from a non-Aqua session.
+# ⛔ RV 7.2c became a SHOULD (libppcp erratum E56) and the store is now the
+# application's settings on every platform, so it IS exercised at runtime and on
+# every box.  `NO_QT` stays: these want Qt6::Core, not Qt6::Gui and not AUTOMOC.
+set(_rv_link ppcp OpenSSL::SSL OpenSSL::Crypto Threads::Threads Qt6::Core)
 
 pp_add_test(ppcp_rendezvous_test
     SOURCES ppcp_rendezvous_test.cpp
@@ -353,8 +350,8 @@ pp_add_test(ppcp_rendezvous_test
 # ppcp_rendezvous.cpp, and the point of the pairing is that neither can be
 # tested against the other with a stub.
 #
-# ⚠ `-framework Security` and `CoreFoundation` are the keychain store's, not the
-# advertiser's: `DNSServiceRegister` lives in libSystem and needs no framework.
+# ⚠ `Qt6::Core` in `_rv_link` is the pairing store's, not the advertiser's:
+# `DNSServiceRegister` lives in libSystem and needs no framework.
 pp_add_test(ppcp_advertise_test
     SOURCES ppcp_advertise_test.cpp
             ${PPCP}/ppcp_discovery.cpp
@@ -465,10 +462,9 @@ set_tests_properties(ppcp_bootstrap_test PROPERTIES TIMEOUT 120)
 # `QDateTime::currentSecsSinceEpoch()`, so there is nothing to fake: the suite
 # runs an event loop for ~2.5 s per timing row.  That is the cost of asserting a
 # clock rather than asserting that a function was called.
+# ⚠ Security.framework is gone with the keychain pairing store (erratum E56);
+# Qt6::Multimedia already brings Qt6::Core, which the settings store needs.
 set(_hs_link ppcp Qt6::Multimedia OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
-if(APPLE)
-    list(APPEND _hs_link "-framework Security" "-framework CoreFoundation")
-endif()
 
 pp_add_test(ppcp_host_service_test
     SOURCES ppcp_host_service_test.cpp

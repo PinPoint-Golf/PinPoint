@@ -267,10 +267,6 @@ QtObject {
           label: qsTr("Paired phones"),                  subtitle: qsTr("Phones this computer has paired with, and how to forget one"),
           actions: "ppcp pair pairing qr code remember forget revoke capture phone iphone android",
           itemId: "setting_pairedPhones" },
-        { panelIndex: 5, panelLabel: qsTr("Phones"),     groupLabel: qsTr("Paired phones"),
-          label: qsTr("Remembering phones"),             subtitle: qsTr("Whether this computer can keep a pairing between launches"),
-          actions: "keychain protected storage persist remember windows linux macos",
-          itemId: "setting_phonesNoProtectedStorage" },
 
         // ── Microphone (panelIndex: 6) ────────────────────────────────────────
 

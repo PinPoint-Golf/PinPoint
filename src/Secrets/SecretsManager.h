@@ -22,11 +22,16 @@
 // Reads/writes application secrets from (priority order):
 //   1. Environment variable: UPPER_SNAKE_CASE form of the key name
 //      e.g. key "assemblyaiApiKey" → env var "ASSEMBLYAI_API_KEY"
-//   2. QSettings under "secrets/<key>"
-//      stored in the platform-native config location (no extra dependencies):
-//        Linux  : ~/.config/<OrgName>/<AppName>.conf
-//        macOS  : ~/Library/Preferences/<bundle-id>.plist
-//        Windows: HKCU\Software\<OrgName>\<AppName>
+//   2. QSettings under "secrets/<key>", via ppSettings()
+//      ⚠ CORRECTED 25 Aug 2026.  This said the values land in the
+//      platform-native location — a plist on macOS, HKCU on Windows.  They do
+//      not: ppSettings() pins QSettings::IniFormat, so it is ONE INI file on
+//      every platform, ~/.config/PinPointStudio/PinPointStudio.ini on macOS and
+//      Linux alike.  The stale note mattered: ppcp_pairing_store.cpp cited the
+//      "plain plist" as its reason not to reuse this, and the reason was wrong
+//      even though the conclusion (do not put a PRK behind an env-var override)
+//      was right.
+//      ⛔ The file is plain text and holds these keys unencrypted.
 //
 // Call initializeDefaults() once at startup to seed QSettings from any
 // compile-time defaults (set via -DASSEMBLYAI_API_KEY=<value> at cmake time).

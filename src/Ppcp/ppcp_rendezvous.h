@@ -121,10 +121,13 @@ struct CodeStatus {
 };
 
 // ── RV 7.2c / 7.4 — where a persisted PRK lives ─────────────────────────────
-// "Secrets at rest are held in the platform's protected storage where one
-// exists."  On macOS that is the keychain; the interface is here so the
-// rendezvous logic never sees a platform API and so a test can substitute a
-// store that holds nothing at all.
+// 7.2c is a SHOULD (libppcp erratum E56, 25 August 2026), and this application
+// does not use protected storage: the PRK lives in the app's own settings, on
+// every platform.  The interface is here so the rendezvous logic never sees a
+// storage API and so a test can substitute a store that holds nothing at all.
+// See ppcp_pairing_store.cpp for what that trades away and why it was judged
+// worth it — the short version is that the keychain path existed on macOS only,
+// so Windows and Linux persisted nothing and could never reconnect.
 //
 // The unit of storage is PRK and only PRK (5.1c): a peer that persists a
 // pairing persists PRK and derives from it, never the original psk.  psk never
@@ -143,10 +146,9 @@ public:
     virtual std::string describe() const = 0;
 };
 
-// The macOS keychain, through Security.framework.  Returns null on a platform
-// with no protected storage, and the caller then has nowhere conformant to
-// persist — 7.2c says "where one exists", so the honest behaviour is to offer
-// no persistence rather than to write a key to a file.
+// The application's own settings store, on every platform.  ⚠ Never null: it
+// returned null off Apple until erratum E56, which is precisely why Windows and
+// Linux could persist no pairing and reconnection could never work there.
 std::unique_ptr<PairingSecretStore> makePlatformPairingStore(const std::string &service);
 
 // An in-memory store for tests and for a run that declines persistence.  It is

@@ -586,9 +586,12 @@ bool PpcpRendezvous::persist(const std::string &pairingId, std::string *whyNot)
         return false;
     };
     if (!m_store)
-        // 7.2c — "where one exists".  With no protected storage the conformant
-        // answer is no persistence, not a key in a preferences file.
-        return no("no protected storage on this platform");
+        // ⚠ Reachable only where a caller deliberately installed no store — the
+        // tests do, and a run that declines persistence does.  It is NOT a
+        // platform condition any more: `makePlatformPairingStore()` returns a
+        // store on every platform since erratum E56, which is what gave Windows
+        // and Linux any persistence at all.
+        return no("this host is not configured to remember pairings");
 
     std::lock_guard<std::mutex> g(m_impl->mu);
     Impl::Entry *e = m_impl->find(pairingId);

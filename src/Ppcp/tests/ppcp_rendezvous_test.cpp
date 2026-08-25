@@ -46,6 +46,12 @@
 
 #include <ppcp/rv.h>
 
+#include <QDir>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QString>
+#include <QTemporaryDir>
+
 #include "ppcp_discovery.h"
 #include "ppcp_rendezvous.h"
 #include "ppcp_transport.h"
@@ -352,8 +358,10 @@ TEST(PpcpRendezvous, PersistenceIsOptInAndRevocationIsHonouredImmediately)
     std::string err;
     ASSERT_TRUE(rv.publish({}, eps, nullptr, &c, &err)) << err;
 
-    // 7.2c — with no protected store there is nowhere conformant to put a key,
-    // so the answer is no persistence rather than a key in a preferences file.
+    // ⚠ With no store installed at all there is nowhere to put a key.  This
+    // used to be the platform condition — 7.2c "where one exists" — and since
+    // erratum E56 it is only ever a deliberate choice by the caller, because
+    // makePlatformPairingStore() now returns a store everywhere.
     std::string why;
     EXPECT_FALSE(rv.persist(c.pairingId, &why));
     EXPECT_FALSE(why.empty());
@@ -776,4 +784,131 @@ TEST(PpcpRendezvous, ADrawnPskIdentityCarriesNoZeroOctet)
     // 5.3d — an unknown pairing is refused, and says nothing about which.
     PskIdentity none;
     EXPECT_FALSE(bay.rv.drawPskIdentity("pairing:never-issued", &none));
+}
+
+// ── E56 — the settings pairing store, exercised for the first time ──────────
+//
+// ⛔ This store had NO runtime coverage before erratum E56.  It was the macOS
+// keychain, compiled here only so the suite failed at the link line if it
+// stopped building, and never executed — the login keychain cannot be unlocked
+// from a non-Aqua session.  On Windows and Linux there was no store at all.
+// So the one thing §7.4 rests on was, on every platform, either unrun or
+// absent.  It is now an ordinary INI file and runs everywhere.
+//
+// ⚠ EVERY TEST HERE REDIRECTS QSettings TO A TEMPORARY DIRECTORY.  ppSettings()
+// is UserScope, so without this the suite would read and WRITE THE DEVELOPER'S
+// REAL PinPointStudio.ini — including revoking pairings they actually hold.
+class SettingsPairingStore : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        ASSERT_TRUE(m_dir.isValid());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_dir.path());
+    }
+    void TearDown() override
+    {
+        // Put it back, so a later test in this binary is not still redirected.
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                           QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation));
+    }
+    QTemporaryDir m_dir;
+};
+
+// The round trip the keychain never let us assert: a PRK goes in, the same 32
+// bytes come out, and `list()` names it.
+TEST_F(SettingsPairingStore, APrkSurvivesTheRoundTripAndIsListed)
+{
+    auto store = makePlatformPairingStore("test.pairings");
+    // ⛔ Never null since E56 — this is the assertion that Windows and Linux
+    // now get persistence at all.
+    ASSERT_TRUE(store);
+
+    std::uint8_t in[PPCP_RV_KEY_BYTES];
+    for (std::size_t i = 0; i < PPCP_RV_KEY_BYTES; ++i)
+        in[i] = static_cast<std::uint8_t>(i * 7 + 1);
+
+    ASSERT_TRUE(store->put("pairing:abc", in));
+
+    std::uint8_t out[PPCP_RV_KEY_BYTES];
+    std::memset(out, 0, sizeof out);
+    ASSERT_TRUE(store->get("pairing:abc", out));
+    EXPECT_EQ(0, std::memcmp(in, out, PPCP_RV_KEY_BYTES));
+
+    const auto ids = store->list();
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(ids[0], "pairing:abc");
+}
+
+// 7.4d — revocation is honoured immediately by this side.  ⛔ No soft delete.
+TEST_F(SettingsPairingStore, EraseRemovesItAndASecondEraseSaysSo)
+{
+    auto store = makePlatformPairingStore("test.pairings");
+    ASSERT_TRUE(store);
+    std::uint8_t prk[PPCP_RV_KEY_BYTES];
+    std::memset(prk, 0xAB, sizeof prk);
+    ASSERT_TRUE(store->put("pairing:abc", prk));
+
+    EXPECT_TRUE(store->erase("pairing:abc"));
+    EXPECT_TRUE(store->list().empty());
+
+    std::uint8_t out[PPCP_RV_KEY_BYTES];
+    EXPECT_FALSE(store->get("pairing:abc", out));
+    // Erasing what is not there is false, not a crash and not a lie.
+    EXPECT_FALSE(store->erase("pairing:abc"));
+}
+
+// A persisted pairing survives the process that wrote it — which is the whole
+// point of §7.4, and what Windows and Linux could not do before E56.
+TEST_F(SettingsPairingStore, APairingSurvivesAFreshStoreInstance)
+{
+    std::uint8_t prk[PPCP_RV_KEY_BYTES];
+    std::memset(prk, 0x5A, sizeof prk);
+    {
+        auto writer = makePlatformPairingStore("test.pairings");
+        ASSERT_TRUE(writer);
+        ASSERT_TRUE(writer->put("pairing:persist", prk));
+    }
+    auto reader = makePlatformPairingStore("test.pairings");
+    ASSERT_TRUE(reader);
+    std::uint8_t out[PPCP_RV_KEY_BYTES];
+    ASSERT_TRUE(reader->get("pairing:persist", out));
+    EXPECT_EQ(0, std::memcmp(prk, out, PPCP_RV_KEY_BYTES));
+}
+
+// ⛔ A corrupt or short row is a FAILURE, never a zero key.  A silently zeroed
+// PRK would complete a handshake with nobody and read as a revocation at the
+// far end, which is the hardest kind of bug to trace from the other side.
+TEST_F(SettingsPairingStore, AShortRowFailsRatherThanYieldingAZeroKey)
+{
+    {
+        QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                    QStringLiteral("PinPointStudio"), QStringLiteral("PinPointStudio"));
+        s.setValue(QStringLiteral("ppcp/pairings/pairing:short"), QStringLiteral("aabbcc"));
+        s.sync();
+    }
+    auto store = makePlatformPairingStore("test.pairings");
+    ASSERT_TRUE(store);
+    std::uint8_t out[PPCP_RV_KEY_BYTES];
+    std::memset(out, 0xEE, sizeof out);
+    EXPECT_FALSE(store->get("pairing:short", out));
+    // Untouched: the caller's buffer is not half-filled on failure.
+    for (std::size_t i = 0; i < PPCP_RV_KEY_BYTES; ++i) EXPECT_EQ(out[i], 0xEE);
+}
+
+// RT-9 — the diagnostic export gets a name and a count, never a byte of a key.
+// ⛔ And it says "NOT protected storage" out loud, so an export never implies a
+// guarantee the run did not have.
+TEST_F(SettingsPairingStore, DescribeCarriesNoKeyMaterialAndAdmitsWhatItIs)
+{
+    auto store = makePlatformPairingStore("test.pairings");
+    ASSERT_TRUE(store);
+    std::uint8_t prk[PPCP_RV_KEY_BYTES];
+    std::memset(prk, 0x11, sizeof prk);
+    ASSERT_TRUE(store->put("pairing:abc", prk));
+
+    const std::string d = store->describe();
+    EXPECT_NE(d.find("NOT protected storage"), std::string::npos);
+    EXPECT_NE(d.find("1 pairing"), std::string::npos);
+    // The key is 0x11 repeated; its hex must not appear anywhere in the text.
+    EXPECT_EQ(d.find("1111111111"), std::string::npos);
 }

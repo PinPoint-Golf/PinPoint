@@ -3177,15 +3177,11 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
 
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)
     target_link_libraries(PinPointStudio PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-    if(APPLE)
-        # RV 7.2c — "secrets at rest are held in the platform's protected
-        # storage where one exists".  On macOS that is the keychain, and this
-        # application's existing secrets subsystem (QSettings, i.e. a plain
-        # plist) is not it.  Security.framework is reached only by
-        # ppcp_pairing_store.cpp.
-        target_link_libraries(PinPointStudio PRIVATE
-            "-framework Security" "-framework CoreFoundation")
-    elseif(WIN32)
+    # ⚠ Security.framework and CoreFoundation were linked here for the macOS
+    # keychain pairing store.  RV 7.2c became a SHOULD (libppcp erratum E56,
+    # 25 August 2026) and the PRK moved into the application's own settings on
+    # every platform, so nothing reaches Security.framework any more.
+    if(WIN32)
         # ppcp_rendezvous.cpp's Windows branch: GetAdaptersAddresses (RV 4.3d's
         # endpoint enumeration) needs iphlpapi, BCryptGenRandom (RV 7.2a's
         # CSPRNG) needs bcrypt. ws2_32 comes in transitively via Qt6::Network.

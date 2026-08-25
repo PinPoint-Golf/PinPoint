@@ -27,11 +27,14 @@
 // table without providing this would have been a regression against 7.4b, which
 // is why the two changes are one commit.
 //
-// ⚠ AND IT TELLS THE TRUTH ABOUT WINDOWS AND LINUX.  makePlatformPairingStore()
-// returns a keychain store on macOS and NULL everywhere else, so persist()
-// refuses and no phone is remembered across a launch at all.  An empty list on
-// such a machine would read as "you have never paired one", which is a
-// different and untrue statement — so the state is said out loud.
+// ⚠ IT USED TO CARRY A WARNING FOR WINDOWS AND LINUX, AND NO LONGER NEEDS ONE.
+// makePlatformPairingStore() returned a keychain store on macOS and NULL
+// everywhere else, so persist() refused and no phone was remembered across a
+// launch at all — an empty list on such a machine would have read as "you have
+// never paired one", which is a different and untrue statement, so it was said
+// out loud.  libppcp erratum E56 (25 August 2026) made RV 7.2c a SHOULD and the
+// PRK moved into the app's own settings on EVERY platform, so the condition the
+// banner described no longer exists and the banner has gone with it.
 //
 // Rows come from `ppcpHost.phones` — the SAME list the home screen's DEVICES
 // section and the resource monitor draw from, because a paired phone is a
@@ -139,23 +142,6 @@ Item {
                 font.pixelSize: Theme.fontSzBody2
                 font.weight:    Theme.fontBodyWeight
                 color:          Theme.colorText3
-                wrapMode:       Text.WordWrap
-                Layout.fillWidth: true
-            }
-
-            // ── This machine cannot keep a pairing ─────────────────────────
-            // Said plainly, because the alternative is an empty list that looks
-            // like "nothing has ever paired" on a machine where remembering has
-            // never been possible.
-            Text {
-                objectName: "setting_phonesNoProtectedStorage"
-                property bool searchHighlight: false
-                visible: root.havePpcp && Qt.platform.os !== "osx"
-                text:    qsTr("This computer has no protected key storage, so phones cannot be remembered between launches. Pairing still works — you will be asked to scan a code each time.")
-                font.family:    Theme.fontBody
-                font.pixelSize: Theme.fontSzBody2
-                font.weight:    Theme.fontBodyWeight
-                color:          Theme.colorWarn
                 wrapMode:       Text.WordWrap
                 Layout.fillWidth: true
             }
