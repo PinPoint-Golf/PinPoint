@@ -50,15 +50,55 @@
 
 #include "pp_debug.h"
 
+#ifdef Q_OS_MACOS
+// Mirrors PpcpIngestPolicy::Limits::minCameraRateMhz (ppcp_ingest_policy.h)
+// for the same reason and at the same number: below 120 fps the impact frame
+// is too far from the true impact for this analysis to recover club-face
+// measurements from. That policy rejects a PAIRED PHONE's declared camera
+// rate; this is the same floor applied to what macOS lists LOCALLY, because
+// nothing about a camera being local makes a 60 fps sensor more useful.
+//
+// The concrete trigger: macOS lists a tethered/nearby iPhone as an ordinary
+// AVFoundation camera the moment Continuity Camera sees it — wired, over
+// Wi-Fi, or just unlocked nearby — with no flag distinguishing it from a
+// real UVC webcam. There is no reliable way to ask "is this a phone" up
+// front (name/id matching is exactly the fragile, easily-renamed check this
+// avoids); asking what it can DO is the same question the product already
+// answers for a phone paired over PPCP, so this asks it here too. A phone
+// capable of more than 60 fps belongs paired over PPCP, where its actual
+// rate is declared and can be trusted, not masquerading as a webcam whose
+// ceiling this host can never raise.
+static constexpr double kMinUsefulCameraFps = 120.0;
+#endif
+
 void VideoInputFactory::enumerateDevices()
 {
 #ifdef Q_OS_MACOS
     // macOS: capabilities come from QCameraDevice — no connection needed.
     for (const QCameraDevice &dev : QMediaDevices::videoInputs()) {
+        const CameraCapabilities caps = VideoInput::capabilitiesFor(dev);
+
+        // ⚠ ONLY A CONFIRMED-LOW ceiling is filtered — `> 0.0` first.
+        // `frameRate.range.max` reads 0 whenever `videoFormats()` came back
+        // empty (capabilitiesFor() never sets CapabilityKind::Range in that
+        // case), which is a real state for an UNPROBED camera, not a slow
+        // one: format LISTING doesn't need camera permission on macOS, but a
+        // camera can still legitimately report nothing the instant it
+        // appears. registerDevice() dedupes by id, so a device filtered here
+        // gets no second look without an app restart — treating "unknown" as
+        // "low" would risk permanently hiding a real, useful camera rather
+        // than a Continuity Camera nuisance, which is a worse failure than
+        // showing one extra row.
+        if (caps.frameRate.range.max > 0.0 && caps.frameRate.range.max < kMinUsefulCameraFps) {
+            ppWarn() << "[VideoInputFactory] Filtering" << dev.description()
+                     << "— max" << caps.frameRate.range.max << "fps is below the"
+                     << kMinUsefulCameraFps << "fps floor this analysis needs";
+            continue;
+        }
+
         DeviceEnumerator::instance()->registerDevice(
             DeviceType::VideoInput, Backend::AppleAVFoundation,
-            dev.id(), dev.description(),
-            VideoInput::capabilitiesFor(dev));
+            dev.id(), dev.description(), caps);
     }
 #else
     // Qt Multimedia: VideoInput::availableDevices() now passes capabilities.
