@@ -287,6 +287,11 @@ Item {
                 // facts already use, not a claim that the battery is dead.
                 readonly property int    batteryPct: phoneRow.isConnected ? (phoneRow.phoneData.batteryPct === undefined ? -1 : phoneRow.phoneData.batteryPct) : -1
                 readonly property string thermal:    phoneRow.isConnected ? (phoneRow.phoneData.thermal || "") : ""
+                // 6.1f's clock agreement — THIS phone's own worst related-
+                // timebase sigma (PpcpHostService::worstSyncSigmaMsFor()), not
+                // the toolbar's cross-phone aggregate. -1 while unconnected or
+                // while no relation has arrived yet (§6.3a not satisfied).
+                readonly property real   syncSigmaMs: phoneRow.isConnected ? (phoneRow.phoneData.syncSigmaMs === undefined ? -1 : phoneRow.phoneData.syncSigmaMs) : -1
 
                 Repeater {
                     id: factsRepeater
@@ -305,7 +310,13 @@ Item {
                                                         : capsRow.batteryPct < 50 ? "warn" : "" },
                         { key: qsTr("Thermal"),    val: capsRow.thermal || "—",
                                                     tint: capsRow.thermal === "critical" ? "error"
-                                                        : (capsRow.thermal === "serious" || capsRow.thermal === "elevated") ? "warn" : "" }
+                                                        : (capsRow.thermal === "serious" || capsRow.thermal === "elevated") ? "warn" : "" },
+                        // Same 5ms line the session toolbar's Cameras pill
+                        // warns at — comfortably inside PPS's 50ms default
+                        // coincidence window, but a plain visual "is this
+                        // phone actually synced" check independent of it.
+                        { key: qsTr("Clock agreement"), val: capsRow.syncSigmaMs >= 0 ? qsTr("± %1 ms").arg(capsRow.syncSigmaMs.toFixed(1)) : "—",
+                                                    tint: capsRow.syncSigmaMs >= 0 && capsRow.syncSigmaMs > 5.0 ? "warn" : "" }
                     ]
 
                     delegate: Rectangle {

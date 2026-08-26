@@ -80,6 +80,27 @@ constexpr std::uint64_t kCodeLifetimeS = 300;
 // The keychain service the persisted pairings live under (RV 7.2c).
 const char *kPairingService = "golf.pinpoint.studio.ppcp.pairings";
 
+// The worst (largest) 6.1f sigma across every related timebase ONE phone's
+// live session currently holds, in milliseconds. -1 when it holds none yet.
+// Shared by the per-phone Settings -> Phones row and the
+// phoneWorstSyncSigmaMs() aggregate, so the domain-correct evaluation point —
+// `observedAtNs()`, never `hostNowNs()` (see that method's comment) — exists
+// in exactly one place.
+double worstSyncSigmaMsFor(const PpcpLiveSession &live)
+{
+    double worst = -1.0;
+    for (const std::string &tb : live.relatedTimebases()) {
+        std::int64_t atNs = 0;
+        if (!live.observedAtNs(tb, &atNs)) continue;
+        std::int64_t off = 0;
+        double sigmaNs = 0.0;
+        if (!live.offsetToRefNs(tb, atNs, &off, &sigmaNs)) continue;
+        const double ms = sigmaNs / 1.0e6;
+        if (ms > worst) worst = ms;
+    }
+    return worst;
+}
+
 }  // namespace
 
 PpcpHostService::PpcpHostService(QObject *parent)
@@ -888,6 +909,12 @@ QVariantList PpcpHostService::phones() const
             ? QString::fromStdString(ppcp_thermal_level_str(health.thermal))
             : QString();
 
+        // 6.1f's clock agreement, THIS phone's own worst related-timebase
+        // sigma — not the toolbar's cross-phone aggregate. -1 while nothing
+        // has a relation yet, the same sentinel every other reading above uses.
+        dev[QStringLiteral("syncSigmaMs")] = isLive
+            ? worstSyncSigmaMsFor(live->peer->liveSession()) : -1.0;
+
         dev[QStringLiteral("hasWarning")]  = false;
         out.append(dev);
     }
@@ -936,16 +963,8 @@ double PpcpHostService::phoneWorstSyncSigmaMs() const
     // phone, found live 27 Aug.
     double worst = -1.0;
     for (const std::unique_ptr<Phone> &p : m_phones) {
-        const PpcpLiveSession &live = p->peer->liveSession();
-        for (const std::string &tb : live.relatedTimebases()) {
-            std::int64_t atNs = 0;
-            if (!live.observedAtNs(tb, &atNs)) continue;
-            std::int64_t off = 0;
-            double sigmaNs = 0.0;
-            if (!live.offsetToRefNs(tb, atNs, &off, &sigmaNs)) continue;
-            const double ms = sigmaNs / 1.0e6;
-            if (ms > worst) worst = ms;
-        }
+        const double ms = worstSyncSigmaMsFor(p->peer->liveSession());
+        if (ms > worst) worst = ms;
     }
     return worst;
 }
