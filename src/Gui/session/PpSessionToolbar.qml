@@ -90,6 +90,18 @@ Item {
     readonly property int  imuLowestBattery: imuManager.lowBatteryPercent
     readonly property bool imuBatteryLow:    imuLowestBattery >= 0 && imuLowestBattery < 50
 
+    // ── Phone (PPCP) health, folded into the Cameras pill ──────────────────
+    // There is no separate Phones pill — a phone's only reason to be on this
+    // bar is that it is carrying a camera, so its battery/thermal reads as a
+    // CAMERAS-pill warning, the same slot camNeedsAttention already owns.
+    // `ppcpHost` exists only in a `HAVE_PPCP_TRANSPORT` build (main.cpp), so
+    // this guards the same way PhonesPanel.qml's `controller` does.
+    readonly property bool   havePpcp:          typeof ppcpHost !== "undefined"
+    readonly property int    phoneLowestBattery: root.havePpcp ? ppcpHost.phoneLowestBatteryPct : -1
+    readonly property bool   phoneBatteryLow:    phoneLowestBattery >= 0 && phoneLowestBattery < 50
+    readonly property string phoneWorstThermal:  root.havePpcp ? ppcpHost.phoneWorstThermal : ""
+    readonly property bool   phoneThermalWarn:   phoneWorstThermal === "serious" || phoneWorstThermal === "critical"
+
     // ── Motion pill label ────────────────────────────────────────────────────
     // "Off" wins outright (master switch dominates); otherwise the active
     // preset's label, or "Custom" once the user hand-edits an element away
@@ -536,6 +548,10 @@ Item {
         }
 
         // ── Cameras pill ────────────────────────────────────────────────────
+        // Phone battery/thermal takes priority over the calibrate hint, the
+        // same precedence the IMUs pill gives its own low-battery warning
+        // below — a phone running out of charge (or throttling) is
+        // time-critical for whatever camera it is carrying, calibration is not.
         DevicePill {
             id: camPill
             glyph: "◫"                 // ◫
@@ -543,11 +559,18 @@ Item {
             active: camPopup.opened
             count: root.camConnected
             valueText: root.camTotal === 0 ? qsTr("none")
+                        : root.phoneBatteryLow ? qsTr("phone battery %1%").arg(root.phoneLowestBattery)
+                        : root.phoneThermalWarn ? qsTr("phone %1").arg(root.phoneWorstThermal)
                         : root.camNeedsAttention ? qsTr("calibrate")
                         : qsTr("%1 of %2").arg(root.camConnected).arg(root.camTotal)
-            ledColor: root.camNeedsAttention ? Theme.colorAttention
+            ledColor: root.phoneBatteryLow ? (root.phoneLowestBattery <= 20 ? Theme.colorError : Theme.colorWarn)
+                       : root.phoneThermalWarn ? (root.phoneWorstThermal === "critical" ? Theme.colorError : Theme.colorWarn)
+                       : root.camNeedsAttention ? Theme.colorAttention
                        : root.camConnected > 0 ? Theme.colorGood : Theme.colorText3
-            attention: root.camNeedsAttention
+            attention: root.camNeedsAttention && !root.phoneBatteryLow && !root.phoneThermalWarn
+            warn: root.phoneBatteryLow || root.phoneThermalWarn
+            warnColor: root.phoneBatteryLow ? (root.phoneLowestBattery <= 20 ? Theme.colorError : Theme.colorWarn)
+                        : (root.phoneWorstThermal === "critical" ? Theme.colorError : Theme.colorWarn)
             onClicked: {
                 imuPopup.close(); viewPopup.close(); motionPopup.close(); clubPopup.close()
                 camPopup.opened ? camPopup.close() : camPopup.open()

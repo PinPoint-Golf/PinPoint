@@ -152,6 +152,17 @@ class PpcpHostService : public QObject
     // that is switched off, not a device that does not exist.
     Q_PROPERTY(QVariantList phones READ phones NOTIFY phonesChanged)
 
+    // ── Aggregates over CONNECTED phones, for the session toolbar ───────────
+    // The same shape `ImuManager::lowBatteryPercent` has: -1 means "no
+    // connected phone has reported a level yet", not "0%". Sourced from
+    // `phonesChanged` — the health hook in `configurePhonePeer()` fires it on
+    // every `heartbeat_ack` — rather than a poll, because there is nothing to
+    // poll; the reading already arrived.
+    Q_PROPERTY(int phoneLowestBatteryPct READ phoneLowestBatteryPct NOTIFY phonesChanged)
+    // "" when no connected phone has a reading yet; otherwise the most severe
+    // `ThermalLevel` any connected phone has reported ("nominal".."critical").
+    Q_PROPERTY(QString phoneWorstThermal READ phoneWorstThermal NOTIFY phonesChanged)
+
     // ── RV-6 guided pairing, the INITIATOR half (H10) ───────────────────────
     //
     // A first pairing with no code carried between two screens: this host
@@ -225,6 +236,8 @@ public:
     QStringList  codeEndpoints() const { return m_codeEndpoints; }
     QVariantList outstandingCodes() const;
     QVariantList phones() const;
+    int          phoneLowestBatteryPct() const;
+    QString      phoneWorstThermal() const;
 
     // RV 7.3c leaves the exact expiry to the publisher and this host chose 300
     // seconds.  Settable ONLY so `ppcp_host_service_test` can watch a code run

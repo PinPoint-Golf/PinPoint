@@ -243,6 +243,12 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err)
 {
     ph->peer->setDeclarationHook([this, ph](const ppcp_peer_desc *d) { onDeclare(ph, d); });
     ph->peer->setRelationsHook([this, ph](const PpcpLiveSession &) { onRelations(ph); });
+    // 7.4b — every `heartbeat_ack` moves this phone's battery/thermal/storage
+    // reading. `phones()` reads `peerHealth()` straight off the live session
+    // rather than a copy kept here, so all this hook has to do is tell
+    // Settings -> Phones (and the toolbar's aggregate) that it moved.
+    ph->peer->liveSession().setHealthCallback(
+        [this](const PpcpLiveSession::PeerHealth &) { emit phonesChanged(); });
     ph->peer->addEventHook([this, ph](const ppcp_event &ev) {
         // ⚠ THE EVENT RING HAS EXACTLY ONE DRAINER AND IT IS PpcpHostPeer.
         // Everything else that needs to see events registers here.  In
@@ -866,11 +872,51 @@ QVariantList PpcpHostService::phones() const
         // inventing a second number for the same bytes.
         dev[QStringLiteral("dataRateHz")]  = 0.0;
         dev[QStringLiteral("dataRateStr")] = QStringLiteral("—");
-        dev[QStringLiteral("batteryPct")]  = -1;
+
+        // 7.4b's `heartbeat_ack` battery/thermal, read straight off the live
+        // session — there is nothing to poll, it is already the latest one
+        // `PpcpLiveSession::observe()` parsed. `valid` is false until the
+        // first ack arrives, which is a different answer from "0%"/"nominal"
+        // and is kept distinct: -1 and an empty string, the same "no reading
+        // yet" sentinel `imu_instance`'s `batteryPercent` uses.
+        static const PpcpLiveSession::PeerHealth kNoHealth{};
+        const PpcpLiveSession::PeerHealth &health =
+            isLive ? live->peer->liveSession().peerHealth() : kNoHealth;
+        dev[QStringLiteral("batteryPct")] = (health.valid && health.hasBatteryPct)
+                                           ? static_cast<int>(health.batteryPct) : -1;
+        dev[QStringLiteral("thermal")] = health.valid
+            ? QString::fromStdString(ppcp_thermal_level_str(health.thermal))
+            : QString();
+
         dev[QStringLiteral("hasWarning")]  = false;
         out.append(dev);
     }
     return out;
+}
+
+int PpcpHostService::phoneLowestBatteryPct() const
+{
+    int lowest = -1;
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        const PpcpLiveSession::PeerHealth &health = p->peer->liveSession().peerHealth();
+        if (!health.valid || !health.hasBatteryPct) continue;
+        const int pct = static_cast<int>(health.batteryPct);
+        if (lowest < 0 || pct < lowest) lowest = pct;
+    }
+    return lowest;
+}
+
+QString PpcpHostService::phoneWorstThermal() const
+{
+    bool have = false;
+    ppcp_thermal_level worst = PPCP_THERMAL_NOMINAL;
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        const PpcpLiveSession::PeerHealth &health = p->peer->liveSession().peerHealth();
+        if (!health.valid) continue;
+        if (!have || health.thermal > worst) worst = health.thermal;
+        have = true;
+    }
+    return have ? QString::fromStdString(ppcp_thermal_level_str(worst)) : QString();
 }
 
 void PpcpHostService::onRelations(Phone *ph)

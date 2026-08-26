@@ -281,14 +281,31 @@ Item {
                 Layout.bottomMargin: Theme.sp(14)
                 spacing: 0
 
+                // Battery/thermal are 7.4b's `heartbeat_ack` readings — only a
+                // CONNECTED phone has one; the "—" a remembered-but-absent
+                // phone shows is the same "no reading" sentinel the other
+                // facts already use, not a claim that the battery is dead.
+                readonly property int    batteryPct: phoneRow.isConnected ? (phoneRow.phoneData.batteryPct === undefined ? -1 : phoneRow.phoneData.batteryPct) : -1
+                readonly property string thermal:    phoneRow.isConnected ? (phoneRow.phoneData.thermal || "") : ""
+
                 Repeater {
+                    id: factsRepeater
                     model: [
                         { key: qsTr("Status"),     val: phoneRow.isRemembered ? qsTr("Remembered")
                                                        : phoneRow.isRevoked    ? qsTr("Forgotten")
                                                        :                          qsTr("Session only") },
                         { key: qsTr("Pairing ID"), val: (phoneRow.phoneData.pairingId || "—") },
                         { key: qsTr("Cameras"),    val: phoneRow.cameraCount > 0 ? String(phoneRow.cameraCount) : "—" },
-                        { key: qsTr("Transport"),  val: qsTr("PPCP") }
+                        { key: qsTr("Transport"),  val: qsTr("PPCP") },
+                        // Colour-coded the same way ImusPanel's battery chip is:
+                        // ≤20% / thermal critical reads red, <50% / elevated-or-
+                        // serious reads amber, otherwise the ordinary text colour.
+                        { key: qsTr("Battery"),    val: capsRow.batteryPct >= 0 ? (capsRow.batteryPct + "%") : "—",
+                                                    tint: capsRow.batteryPct < 0 ? "" : capsRow.batteryPct <= 20 ? "error"
+                                                        : capsRow.batteryPct < 50 ? "warn" : "" },
+                        { key: qsTr("Thermal"),    val: capsRow.thermal || "—",
+                                                    tint: capsRow.thermal === "critical" ? "error"
+                                                        : (capsRow.thermal === "serious" || capsRow.thermal === "elevated") ? "warn" : "" }
                     ]
 
                     delegate: Rectangle {
@@ -307,7 +324,7 @@ Item {
                             width: 1
                             color: Theme.colorBorderMid
                             opacity: Theme.borderOpacityNormal
-                            visible: index < 3
+                            visible: index < factsRepeater.count - 1
                         }
 
                         ColumnLayout {
@@ -334,7 +351,9 @@ Item {
                                 text:            modelData.val
                                 font.family:     Theme.fontData
                                 font.pixelSize:  Theme.fontSzBody2
-                                color:           Theme.colorText
+                                color:           modelData.tint === "error" ? Theme.colorError
+                                                : modelData.tint === "warn"  ? Theme.colorWarn
+                                                :                              Theme.colorText
                                 elide:           Text.ElideRight
                                 Layout.fillWidth: true
                             }
