@@ -102,6 +102,18 @@ Item {
     readonly property string phoneWorstThermal:  root.havePpcp ? ppcpHost.phoneWorstThermal : ""
     readonly property bool   phoneThermalWarn:   phoneWorstThermal === "serious" || phoneWorstThermal === "critical"
 
+    // Clock-sync uncertainty (6.1f's sigma), the same number PPC's own screen
+    // shows while it is still converging. -1 means no relation has an
+    // estimate yet — a fresh connection reads this way for its first ~2
+    // minutes (the burst-then-maintenance cadence settling), which is
+    // EXPECTED and not a fault, unlike the battery/thermal warnings above —
+    // so it gets its own (lower) priority and always reads amber, never red.
+    // 5ms is comfortably under the 50ms default coincidence window and well
+    // under one frame period even at 200fps+, so it reads as "converged"
+    // once under that, not merely "connected".
+    readonly property real    phoneSyncSigmaMs: root.havePpcp ? ppcpHost.phoneWorstSyncSigmaMs : -1
+    readonly property bool    phoneSyncWarn:    phoneSyncSigmaMs >= 0 && phoneSyncSigmaMs > 5.0
+
     // ── Motion pill label ────────────────────────────────────────────────────
     // "Off" wins outright (master switch dominates); otherwise the active
     // preset's label, or "Custom" once the user hand-edits an element away
@@ -548,10 +560,11 @@ Item {
         }
 
         // ── Cameras pill ────────────────────────────────────────────────────
-        // Phone battery/thermal takes priority over the calibrate hint, the
-        // same precedence the IMUs pill gives its own low-battery warning
-        // below — a phone running out of charge (or throttling) is
-        // time-critical for whatever camera it is carrying, calibration is not.
+        // Phone battery/thermal takes priority over the sync warning, which in
+        // turn takes priority over the calibrate hint. Sync is ranked below
+        // battery/thermal deliberately: an unconverged clock during the first
+        // ~2 minutes after connecting is EXPECTED, not a fault, so it reads
+        // amber and never displaces a genuine battery/thermal problem.
         DevicePill {
             id: camPill
             glyph: "◫"                 // ◫
@@ -561,16 +574,19 @@ Item {
             valueText: root.camTotal === 0 ? qsTr("none")
                         : root.phoneBatteryLow ? qsTr("phone battery %1%").arg(root.phoneLowestBattery)
                         : root.phoneThermalWarn ? qsTr("phone %1").arg(root.phoneWorstThermal)
+                        : root.phoneSyncWarn ? qsTr("sync ±%1ms").arg(root.phoneSyncSigmaMs.toFixed(1))
                         : root.camNeedsAttention ? qsTr("calibrate")
                         : qsTr("%1 of %2").arg(root.camConnected).arg(root.camTotal)
             ledColor: root.phoneBatteryLow ? (root.phoneLowestBattery <= 20 ? Theme.colorError : Theme.colorWarn)
                        : root.phoneThermalWarn ? (root.phoneWorstThermal === "critical" ? Theme.colorError : Theme.colorWarn)
+                       : root.phoneSyncWarn ? Theme.colorWarn
                        : root.camNeedsAttention ? Theme.colorAttention
                        : root.camConnected > 0 ? Theme.colorGood : Theme.colorText3
-            attention: root.camNeedsAttention && !root.phoneBatteryLow && !root.phoneThermalWarn
-            warn: root.phoneBatteryLow || root.phoneThermalWarn
+            attention: root.camNeedsAttention && !root.phoneBatteryLow && !root.phoneThermalWarn && !root.phoneSyncWarn
+            warn: root.phoneBatteryLow || root.phoneThermalWarn || root.phoneSyncWarn
             warnColor: root.phoneBatteryLow ? (root.phoneLowestBattery <= 20 ? Theme.colorError : Theme.colorWarn)
-                        : (root.phoneWorstThermal === "critical" ? Theme.colorError : Theme.colorWarn)
+                        : root.phoneThermalWarn ? (root.phoneWorstThermal === "critical" ? Theme.colorError : Theme.colorWarn)
+                        : Theme.colorWarn
             onClicked: {
                 imuPopup.close(); viewPopup.close(); motionPopup.close(); clubPopup.close()
                 camPopup.opened ? camPopup.close() : camPopup.open()

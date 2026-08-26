@@ -162,6 +162,12 @@ class PpcpHostService : public QObject
     // "" when no connected phone has a reading yet; otherwise the most severe
     // `ThermalLevel` any connected phone has reported ("nominal".."critical").
     Q_PROPERTY(QString phoneWorstThermal READ phoneWorstThermal NOTIFY phonesChanged)
+    // 6.1f's `outSigmaNs`, worst-case across every related timebase on every
+    // connected phone, in milliseconds. -1 while no relation has an estimate
+    // yet (fresh connection, still in the ~2-minute burst-then-maintenance
+    // convergence window) — never 0, which would claim a perfect sync nobody
+    // has measured.
+    Q_PROPERTY(double phoneWorstSyncSigmaMs READ phoneWorstSyncSigmaMs NOTIFY phonesChanged)
 
     // ── RV-6 guided pairing, the INITIATOR half (H10) ───────────────────────
     //
@@ -238,6 +244,7 @@ public:
     QVariantList phones() const;
     int          phoneLowestBatteryPct() const;
     QString      phoneWorstThermal() const;
+    double       phoneWorstSyncSigmaMs() const;
 
     // RV 7.3c leaves the exact expiry to the publisher and this host chose 300
     // seconds.  Settable ONLY so `ppcp_host_service_test` can watch a code run

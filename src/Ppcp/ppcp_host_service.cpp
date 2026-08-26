@@ -919,6 +919,29 @@ QString PpcpHostService::phoneWorstThermal() const
     return have ? QString::fromStdString(ppcp_thermal_level_str(worst)) : QString();
 }
 
+double PpcpHostService::phoneWorstSyncSigmaMs() const
+{
+    // 6.1f's uncertainty, worst-case across every related timebase on every
+    // connected phone — the same number PPC's own screen shows while its
+    // clock relation is still converging. -1 means "no relation yet", not
+    // "perfectly synced": `offsetToRefNs()` writes nothing until §6.3a has an
+    // estimate, so a fresh connection reads -1 for the ~2 minutes it takes
+    // the burst-then-maintenance cadence to settle, not 0ms.
+    double worst = -1.0;
+    const std::int64_t now = hostNowNs();
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        const PpcpLiveSession &live = p->peer->liveSession();
+        for (const std::string &tb : live.relatedTimebases()) {
+            std::int64_t off = 0;
+            double sigmaNs = 0.0;
+            if (!live.offsetToRefNs(tb, now, &off, &sigmaNs)) continue;
+            const double ms = sigmaNs / 1.0e6;
+            if (ms > worst) worst = ms;
+        }
+    }
+    return worst;
+}
+
 void PpcpHostService::onRelations(Phone *ph)
 {
     if (!ph || ph->counterpartId.isEmpty()) return;
@@ -937,6 +960,11 @@ void PpcpHostService::onRelations(Phone *ph)
             return true;
         });
     (void)mapped;
+
+    // Every relation_update moves `phoneWorstSyncSigmaMs`, so the toolbar's
+    // warning pill tracks convergence the same way it tracks battery/thermal —
+    // off `phonesChanged` rather than a poll.
+    emit phonesChanged();
 }
 
 void PpcpHostService::onTick()
