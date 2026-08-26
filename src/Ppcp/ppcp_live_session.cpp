@@ -396,6 +396,26 @@ bool PpcpLiveSession::offsetToRefNs(const std::string &sourceTimebase, std::int6
     return true;
 }
 
+bool PpcpLiveSession::observedAtNs(const std::string &sourceTimebase,
+                                   std::int64_t *outObservedAtNs) const
+{
+    if (!m_peer || !outObservedAtNs) return false;
+    const ppcp_relation_set *rs = relations();
+    if (!rs) return false;
+
+    ppcp_id from{};
+    if (ppcp_id_set(&from, sourceTimebase.c_str(), sourceTimebase.size()) != PPCP_OK)
+        return false;
+    ppcp_id to{};
+    if (ppcp_id_set(&to, m_cfg.timebaseRef.c_str(), m_cfg.timebaseRef.size()) != PPCP_OK)
+        return false;
+
+    const ppcp_timebase_relation *r = ppcp_relations_find(rs, &from, &to);
+    if (!r || r->cls != PPCP_REL_AFFINE) return false;
+    *outObservedAtNs = r->observed_at.ns;
+    return true;
+}
+
 std::vector<std::string> PpcpLiveSession::relatedTimebases() const
 {
     std::vector<std::string> out;

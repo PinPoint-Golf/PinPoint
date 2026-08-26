@@ -211,6 +211,31 @@ public:
     bool offsetToRefNs(const std::string &sourceTimebase, std::int64_t atNs,
                        std::int64_t *outOffsetNs, double *outSigmaNs = nullptr) const;
 
+    // ⚠ FOUND LIVE 27 AUG AGAINST A REAL PHONE, NOT A SYNTHETIC PEER.  A
+    // relation's `observed_at` (5.4) is stamped in the SOURCE's own since-boot
+    // clock — CORE 5.4: "expressed in `from`" — and this host's `hostNowNs()`
+    // is a reading of ITS OWN since-boot clock. The two counters share no
+    // epoch; PPC's own code found this exact mismatch worth a comment ("can
+    // read minus several million milliseconds"). Every existing caller of
+    // `offsetToRefNs()` was passing `hostNowNs()` as `atNs` — mixing the two —
+    // which `ppcp_relations_sigma_ns()`/`ppcp_relation_apply()` then subtract
+    // straight from `observed_at.ns` (`elapsed = atNs - observed_at.ns`,
+    // `ppcp_sync.c:420`, `ppcp_time.c:308`) to grow the skew term. A bogus
+    // multi-year `elapsed` turns a real ~17ms sigma into a fabricated ~460ms
+    // one, and the exact same corruption reaches the OFFSET this feeds
+    // `VideoInputPpcp::setTimebaseOffsetNs()`, not merely a diagnostic number.
+    //
+    // The fix is to evaluate a relation only at an instant genuinely IN its
+    // own domain, and the one such instant this host can ALWAYS name without
+    // guessing is the relation's own `observed_at` — elapsed 0 by
+    // construction, so `outSigmaNs` reads exactly `offset_sigma_ns`, no
+    // projection, no domain mixing. PPC now republishes every ~5s (27 Aug),
+    // so a caller re-fetching this on every `relation_update` stays within
+    // seconds of fresh regardless — the growth term `offsetToRefNs()` exists
+    // to add was only ever going to be sub-millisecond at that cadence.
+    // Returns false under the same conditions `offsetToRefNs()` does.
+    bool observedAtNs(const std::string &sourceTimebase, std::int64_t *outObservedAtNs) const;
+
     // Every timebase for which a direct relation into `timebase_ref` exists.
     std::vector<std::string> relatedTimebases() const;
 

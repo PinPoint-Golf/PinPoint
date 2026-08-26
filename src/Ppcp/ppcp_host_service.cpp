@@ -927,14 +927,22 @@ double PpcpHostService::phoneWorstSyncSigmaMs() const
     // "perfectly synced": `offsetToRefNs()` writes nothing until §6.3a has an
     // estimate, so a fresh connection reads -1 for the ~2 minutes it takes
     // the burst-then-maintenance cadence to settle, not 0ms.
+    //
+    // ⚠ EVALUATED AT `observedAtNs()`, NOT `hostNowNs()` — see the comment on
+    // `PpcpLiveSession::observedAtNs()` for why: `hostNowNs()` is this HOST's
+    // own since-boot clock, and mixing it into a relation stamped in the
+    // PHONE's since-boot clock fabricates an elapsed interval libppcp then
+    // grows the sigma by — a real ~17ms turned into ~460ms against a real
+    // phone, found live 27 Aug.
     double worst = -1.0;
-    const std::int64_t now = hostNowNs();
     for (const std::unique_ptr<Phone> &p : m_phones) {
         const PpcpLiveSession &live = p->peer->liveSession();
         for (const std::string &tb : live.relatedTimebases()) {
+            std::int64_t atNs = 0;
+            if (!live.observedAtNs(tb, &atNs)) continue;
             std::int64_t off = 0;
             double sigmaNs = 0.0;
-            if (!live.offsetToRefNs(tb, now, &off, &sigmaNs)) continue;
+            if (!live.offsetToRefNs(tb, atNs, &off, &sigmaNs)) continue;
             const double ms = sigmaNs / 1.0e6;
             if (ms > worst) worst = ms;
         }
@@ -950,12 +958,24 @@ void PpcpHostService::onRelations(Phone *ph)
     // to this peer is re-fed its offset.  Per SOURCE timebase and not per peer:
     // a phone with a camera clock and an audio clock has one relation per clock
     // and a single scalar would fabricate one of them.
-    const std::int64_t now = hostNowNs();
+    //
+    // ⚠ EVALUATED AT `observedAtNs()`, NOT `hostNowNs()` — this used to pass
+    // the host's own clock reading as if it were an instant in the PHONE's own
+    // since-boot clock (the domain `offsetToRefNs()`'s `sourceTimebase` names).
+    // The two counters share no epoch, so the offset this fed into
+    // `VideoInputPpcp::setTimebaseOffsetNs()` was corrupted by a fabricated
+    // elapsed interval the same way `phoneWorstSyncSigmaMs()`'s sigma was —
+    // found live 27 Aug via the toolbar pill showing ~460ms against a real
+    // ~17ms. `observedAtNs()` is always a genuine instant in the relation's
+    // own domain, so this is correct rather than merely closer.
     const PpcpLiveSession &live = ph->peer->liveSession();
     const int mapped = VideoInputPpcp::applyTimebaseOffsets(
         ph->counterpartId, [&](const QString &tb, qint64 *outNs) {
+            const std::string stb = tb.toStdString();
+            std::int64_t atNs = 0;
+            if (!live.observedAtNs(stb, &atNs)) return false;
             std::int64_t off = 0;
-            if (!live.offsetToRefNs(tb.toStdString(), now, &off)) return false;
+            if (!live.offsetToRefNs(stb, atNs, &off)) return false;
             *outNs = static_cast<qint64>(off);
             return true;
         });
