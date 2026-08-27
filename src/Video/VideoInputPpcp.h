@@ -210,6 +210,12 @@ public:
         // opens them" are two different deployments and this is the only place
         // that can tell them apart.
         std::size_t foreignStreamCaptures = 0;
+        // MSG 5.1 — the owner's verdict on a Stream this host REQUESTED.  A
+        // refusal is a conformant answer (5.11l makes one mandatory for a
+        // consumer selecting a preview profile for capture), so it is counted
+        // rather than treated as a fault.
+        std::size_t streamsOpened  = 0;
+        std::size_t streamsRefused = 0;
         // I11 — `gaps` mean LOSS.  A preview peer that records a shed frame as
         // a gap is reporting a dropout it did not have (5.11c3); counted so the
         // conflation is visible rather than absorbed.
@@ -354,6 +360,7 @@ private:
     // to a specific instance one at a time, in the same shape.
     void processEvent(const ppcp_event &ev);
 
+    void onStreamOpenAck(const ppcp_msg *m);
     void onCaptureAnnounce(const ppcp_msg *m);
     void onPayloadBegin(const ppcp_msg *m);
     void onPayloadChunk(const ppcp_msg *m);
@@ -372,6 +379,10 @@ private:
     // Empty means "the fastest declared", which is what every instance did
     // before an operator could say otherwise.
     QString m_preferredProfileId;
+    // The OWNER's `opened_at`, on the Stream's own timebase — theirs, not ours.
+    // -1 until the ack arrives, which is a different answer from 0.
+    qint64  m_captureOpenedAtNs = -1;
+    qint64  m_previewOpenedAtNs = -1;
 
     // capture id -> the Stream it named, from `capture_announce`.  A
     // `payload_begin` carries only a capture id (ENC §6), so the Stream — and

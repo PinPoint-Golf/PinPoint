@@ -893,6 +893,9 @@ void VideoInputPpcp::processEvent(const ppcp_event &ev)
     const ppcp_msg *m = ev.msg;
     if (!m) return;
     switch (ev.kind) {
+    case PPCP_EVENT_STREAM_OPEN_ACK:
+        onStreamOpenAck(m);
+        break;
     case PPCP_EVENT_CAPTURE:
         if (m->type == PPCP_MT_CAPTURE_ANNOUNCE) onCaptureAnnounce(m);
         break;
@@ -952,6 +955,57 @@ int VideoInputPpcp::detachAll(const QString &peerId)
     }
     for (VideoInputPpcp *v : targets) v->detach();
     return static_cast<int>(targets.size());
+}
+
+// ── MSG 5.1 / E18's clause 1c — the answer we asked for and never read ──────
+//
+// ⚠ `stream_open` IS A REQUEST, `any -> owner`, AND THE OWNER MAY REFUSE.  That
+// is the message table's own direction, and it is what makes a host asking a
+// phone for a particular CaptureProfile legal — the host requests, the device
+// that owns the camera answers `opened` or `refused`.
+//
+// ⛔ AND WE HAD THE COMMENT WITHOUT THE CODE.  `openStream()` says, and has
+// always said, "a consumer opening a Stream does not know the far side's clock,
+// so it proposes the origin and takes the owner's answer from
+// `stream_open_ack`".  Nothing took it.  `openStream()` returned true when the
+// request was QUEUED and every caller read that as "the Stream is open" — the
+// same "I sent it" mistaken for "it happened" that arming had, and now
+// load-bearing: 5.11l REQUIRES an owner to refuse a consumer that selects a
+// preview profile for capture, so a refusal is an expected answer and not an
+// error path.  Without this, an operator's chosen capture format could be
+// refused by the phone and the picker would go on showing their choice.
+void VideoInputPpcp::onStreamOpenAck(const ppcp_msg *m)
+{
+    const ppcp_body_stream_open_ack &a = m->body.stream_open_ack;
+    const QString streamId = idStr(a.stream_id);
+    const bool isCapture = (streamId == m_captureStreamId && !streamId.isEmpty());
+    const bool isPreview = (streamId == m_previewStreamId && !streamId.isEmpty());
+    if (!isCapture && !isPreview) return;   // some other consumer's Stream
+
+    if (a.verdict == PPCP_STREAM_REFUSED) {
+        const QString why = a.has_reason ? idStr(a.reason) : QStringLiteral("no reason given");
+        ++m_counters.streamsRefused;
+        // Forgotten rather than remembered as open: the id must stop matching,
+        // or `onCaptureAnnounce()` would accept Captures on a Stream the owner
+        // told us it never opened.
+        if (isCapture) m_captureStreamId.clear();
+        else           m_previewStreamId.clear();
+        m_lastStreamOpenError = why;
+        const QString what = isPreview ? QStringLiteral("preview") : QStringLiteral("capture");
+        emit errorOccurred(QStringLiteral("PPCP camera: the device refused the %1 stream (%2)")
+                               .arg(what, why));
+        return;
+    }
+
+    // 5.11 / MSG 6.1b — `opened_at` is the OWNER's reading on the Stream's own
+    // timebase, which is why the request proposed an origin rather than this
+    // host's clock wearing the device's timebase id.  Kept as the owner sent it
+    // and never re-stamped here (I1).
+    if (a.has_opened_at) {
+        if (isCapture) m_captureOpenedAtNs = static_cast<qint64>(a.opened_at.ns);
+        else           m_previewOpenedAtNs = static_cast<qint64>(a.opened_at.ns);
+    }
+    ++m_counters.streamsOpened;
 }
 
 void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
