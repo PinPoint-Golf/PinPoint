@@ -21,6 +21,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QSet>
+#include <QVariantMap>
 #include <QTimer>
 #include <QVector>
 
@@ -166,6 +167,34 @@ public:
     // instant it did not observe.
     void setDetectorAvailable(Source source, bool available);
 
+    // ── Automated testing: a detection this host did not actually make ──────
+    //
+    // ⚠ WHY THIS EXISTS.  A capture device driven in a simulator produces no
+    // ball strike and no sound, so a host with a working microphone hears
+    // nothing and the corroboration rule above refuses every Shot it is sent.
+    // The rule is then untestable by exactly the automation that most needs to
+    // test it.  `PPCP-CONF` §2a already blesses **injected** as a conformance
+    // method — "requires the injectable clock, a simulated offset/skew, or a
+    // synthetic declaration the implementation would not otherwise meet" — and
+    // several CT rows are only reachable that way.  This is that method,
+    // applied to the one input a simulator cannot supply.
+    //
+    // ⛔ IT INJECTS EVIDENCE THIS HOST HOLDS, AND NEVER A CANDIDATE ON THE WIRE.
+    // A fabricated `candidate` would attribute a detection to a declared
+    // microphone Source that heard nothing, which is 8.1e — a peer synthesising
+    // a record for something it did not observe.  So this reaches the local
+    // detection ring and stops there: it can make a corroborated Shot pass, and
+    // it cannot make this host lie to a counterpart.
+    //
+    // ⛔ DEV BUILDS ONLY.  Compiled out entirely under PP_SHIPPING_BUILD, and
+    // every call says so in the log.
+    Q_INVOKABLE void injectDetection(Source source, qint64 tUs);
+
+    // What an automated run needs in order to ASSERT rather than scrape a log.
+    // The corroboration verdict is otherwise a `ppDebug()` line that a release
+    // build does not even emit.
+    Q_INVOKABLE QVariantMap shotStats() const;
+
     // 5.10's coincidence window, and deliberately the same number the Session
     // is opened with — one rule stated once.  CORE §5.10's own proposal, not a
     // measurement (CORE B8 says so too).
@@ -247,6 +276,17 @@ private:
     // makes the first shot of a session subject to the rule rather than exempt
     // from it.
     QSet<int>              m_availableDetectors;
+    // Counters an automated run reads back; see shotStats().
+    struct Counters {
+        int detections       = 0;
+        int injected         = 0;
+        int arbitratedSeen   = 0;
+        int corroboratePass  = 0;
+        int corroborateFail  = 0;
+        int droppedBusy      = 0;
+        int committed        = 0;
+    } m_counters;
+    QString                m_lastVerdict;
 
     void   noteDetection(Source source, qint64 tUs);
     // The rule of §setDetectorAvailable, evaluated.  Fills `outWhy` with the

@@ -366,6 +366,15 @@ public:
     // afterwards.  Q_INVOKABLE so the diagnostics screen can offer it.
     Q_INVOKABLE QString diagnosticExport() const;
 
+    // ── What an automated run reads back to ASSERT ─────────────────────────
+    //
+    // The arbitration counters are otherwise printed once, when a phone
+    // disconnects, and the import ledger's only surface is a file.  A test
+    // driving a capture device against this host needs them WHILE the session
+    // is live and as data rather than as a log line.  Machine-readable, no
+    // secret and no payload — the same discipline `diagnosticExport()` follows.
+    Q_INVOKABLE QVariantMap ppcpStats() const;
+
     // What this build's service discovery is, in the words RvBrowser::describe()
     // uses, or why there is none.  Part of the diagnostic export because 3.6a
     // gives discovery no error channel at all: when a remembered phone does not

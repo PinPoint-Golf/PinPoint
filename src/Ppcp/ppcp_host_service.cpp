@@ -1219,6 +1219,64 @@ void PpcpHostService::setPhoneAlias(const QString &pairingId, const QString &ali
 // entry per remembered pairing and one per code minted this run.  A LIVE code
 // is not a phone — it is a QR on screen that nobody has scanned — so it is
 // skipped here; it belongs to the pairing dialog.
+QVariantMap PpcpHostService::ppcpStats() const
+{
+    QVariantMap m;
+    m[QStringLiteral("listening")]  = m_listening;
+    m[QStringLiteral("port")]       = m_port;
+    m[QStringLiteral("phones")]     = static_cast<int>(m_phones.size());
+    m[QStringLiteral("armState")]   = armState();
+
+    // Summed across phones: a test asserting "the shot crossed" does not care
+    // which link carried it, and with one phone the sum IS that phone's.
+    int nominated = 0, observed = 0, issued = 0, adopted = 0, excluded = 0;
+    int unarbitrated = 0, uncorroborated = 0, reconsidered = 0, refused = 0;
+    QVariantList perPhone;
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        if (!p->peer) continue;
+        const Ppcp::PpcpShotBridge::Stats &b = p->peer->shotBridge().stats();
+        nominated      += static_cast<int>(b.nominated);
+        observed       += static_cast<int>(b.observedForeign);
+        issued         += static_cast<int>(b.issued);
+        adopted        += static_cast<int>(b.adopted);
+        excluded       += static_cast<int>(b.excluded);
+        unarbitrated   += static_cast<int>(b.unarbitrated);
+        uncorroborated += static_cast<int>(b.uncorroborated);
+        reconsidered   += static_cast<int>(b.reconsidered);
+        refused        += static_cast<int>(b.nominationsRefused);
+
+        QVariantMap one;
+        one[QStringLiteral("name")]        = p->name;
+        one[QStringLiteral("peerId")]      = p->counterpartId;
+        one[QStringLiteral("arbiter")]     = p->peer->shotBridge().active();
+        one[QStringLiteral("retained")]    =
+            static_cast<int>(p->peer->shotBridge().retainedCount());
+        one[QStringLiteral("groups")]      =
+            static_cast<int>(p->peer->shotBridge().groupCount());
+        one[QStringLiteral("channels")]    =
+            p->link ? static_cast<int>(p->link->channels().size()) : 0;
+        one[QStringLiteral("sessionOpen")] = p->peer->liveSession().isOpen();
+        perPhone.append(one);
+    }
+    m[QStringLiteral("nominated")]      = nominated;
+    m[QStringLiteral("observedForeign")]= observed;
+    m[QStringLiteral("issued")]         = issued;
+    m[QStringLiteral("adopted")]        = adopted;
+    m[QStringLiteral("excluded")]       = excluded;
+    // ⚠ The one that says "a device nominated and we were not listening".
+    m[QStringLiteral("unarbitrated")]   = unarbitrated;
+    m[QStringLiteral("uncorroborated")] = uncorroborated;
+    m[QStringLiteral("reconsidered")]   = reconsidered;
+    m[QStringLiteral("nominationsRefused")] = refused;
+    m[QStringLiteral("perPhone")]       = perPhone;
+
+    // MSG 9.1 — what we have taken in and what we still owe for it.
+    m[QStringLiteral("importCaptures")] = static_cast<int>(m_importLedger.captureCount());
+    m[QStringLiteral("importSessions")] = static_cast<int>(m_importLedger.sessionCount());
+    m[QStringLiteral("commitsOwed")]    = static_cast<int>(m_importLedger.pendingCommitCount());
+    return m;
+}
+
 QVariantList PpcpHostService::phones() const
 {
     QVariantList out;

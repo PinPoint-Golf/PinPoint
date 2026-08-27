@@ -356,8 +356,57 @@ void ShotController::setDetectorAvailable(Source source, bool available)
     else           m_availableDetectors.remove(static_cast<int>(source));
 }
 
+void ShotController::injectDetection(Source source, qint64 tUs)
+{
+#ifdef PP_SHIPPING_BUILD
+    Q_UNUSED(source); Q_UNUSED(tUs);
+#else
+    // -1 means "now", which is what a test driving a phone alongside this host
+    // usually wants: both instants land inside the 50 ms window by construction.
+    const qint64 t = tUs >= 0 ? tUs : static_cast<qint64>(pinpoint::EventBuffer::nowMicros());
+    ++m_counters.injected;
+    noteDetection(source, t);
+    // ⚠ SAID OUT LOUD, EVERY TIME, AT ppWarn.  An injected detection is
+    // indistinguishable downstream from one a detector made, which is the whole
+    // point and also the danger: a log that did not name it would let a test
+    // rig's evidence be read later as a measurement.
+    ppWarn() << "[ppcp] INJECTED detection —" << sourceName(source) << "at t_us" << t
+             << "(test only; no Candidate is put on the wire)";
+    // 8.2d1 — the same reconsideration a real detection triggers, or the
+    // injection would corroborate nothing already excluded.
+    if (m_ppcpBridge && m_ppcpBridge->active()) m_ppcpBridge->reconsider();
+#endif
+}
+
+QVariantMap ShotController::shotStats() const
+{
+    QVariantMap m;
+    m[QStringLiteral("detections")]      = m_counters.detections;
+    m[QStringLiteral("injected")]        = m_counters.injected;
+    m[QStringLiteral("arbitratedSeen")]  = m_counters.arbitratedSeen;
+    m[QStringLiteral("corroboratePass")] = m_counters.corroboratePass;
+    m[QStringLiteral("corroborateFail")] = m_counters.corroborateFail;
+    m[QStringLiteral("droppedBusy")]     = m_counters.droppedBusy;
+    m[QStringLiteral("committed")]       = m_counters.committed;
+    // The per-detector deltas behind the last decision — the thing the debug
+    // log carries and a release build does not.
+    m[QStringLiteral("lastVerdict")]     = m_lastVerdict;
+    m[QStringLiteral("armed")]           = armed();
+    QStringList avail;
+    for (int raw : m_availableDetectors) avail << QLatin1String(sourceName(static_cast<Source>(raw)));
+    avail.sort();
+    m[QStringLiteral("availableDetectors")] = avail;
+#ifdef HAVE_PPCP
+    m[QStringLiteral("bridgeActive")] = (m_ppcpBridge && m_ppcpBridge->active());
+#else
+    m[QStringLiteral("bridgeActive")] = false;
+#endif
+    return m;
+}
+
 void ShotController::noteDetection(Source source, qint64 tUs)
 {
+    ++m_counters.detections;
     m_detections.append({source, tUs});
     if (m_detections.size() > kDetectionRing)
         m_detections.remove(0, m_detections.size() - kDetectionRing);
@@ -425,8 +474,13 @@ void ShotController::commitArbitratedShot(qint64 t0HostNs, const QString &shotId
     const qint64 tUs = t0HostNs / 1000;
 
     // ── The corroboration rule ─────────────────────────────────────────────
+    ++m_counters.arbitratedSeen;
     QString why;
     const bool ok = corroborated(tUs, &why);
+    m_lastVerdict = QStringLiteral("%1 shot=%2 t0_us=%3 — %4")
+                        .arg(ok ? QStringLiteral("PASS") : QStringLiteral("FAIL"),
+                             shotId, QString::number(tUs), why);
+    if (ok) ++m_counters.corroboratePass; else ++m_counters.corroborateFail;
     // ⚠ ppDebug, AND THAT IS THE POINT.  It is compiled away below log level 3,
     // so the full decision — every available detector and its delta — is there
     // while we are testing and absent from a release build.
@@ -471,6 +525,7 @@ void ShotController::commitShot(Source source, qint64 timestampUs)
         // unavailable for 15-40 s per shot, which a golfer hitting a bucket
         // will outrun.  Deliberately not attempted here.
         if (source == Source::Ppcp) {
+            ++m_counters.droppedBusy;
             ppWarn() << "[ppcp] arbitrated shot DROPPED — still processing the previous shot"
                      << "— t0_us" << timestampUs;
             emit shotRefused(
@@ -491,6 +546,7 @@ void ShotController::commitShot(Source source, qint64 timestampUs)
 
     // Marker must be in the ring before the signal — the shot processor will
     // pause/freeze the buffer from shotDetected.
+    ++m_counters.committed;
     writeShotMarker(source, impactUs, sessionType);
 
     ppInfo() << "[ShotController] shot detected — source" << sourceName(source)
