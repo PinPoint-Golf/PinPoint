@@ -1379,6 +1379,15 @@ struct Listener::Impl {
     Options options;
     LogFn log;
     int channelsPerPeer = 2;   // CORE T2's minimum; a third arrives under 2.1d
+    // ⚠ LINKS THAT COMPLETED WHILE SOMEBODY WAS WAITING FOR A DIFFERENT ONE.
+    // `acceptChannelFor()` polls for ONE named link's next channel; a second
+    // peer dialling during that poll assembles its two channels here and must
+    // not be lost.  Before this existed the completion branch was gated on
+    // `!want`, so such a link stayed in `links` with nothing left to bind to it,
+    // was never returned by a later accept(), and was not reaped either — it
+    // HAS a control channel, so `expireLinks()` leaves it alone.  The peer
+    // completed its handshake and bind and was then simply never adopted.
+    std::vector<std::unique_ptr<PeerConnection>> ready;
 #if defined(PP_PPCP_PLAINTEXT_HARNESS)
     // ⚠ HARNESS ONLY.  See Listener::setPlaintextHarness() in the header.
     bool plaintext = false;
@@ -1702,6 +1711,16 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
     }
 
     Impl *impl = m_impl.get();
+
+    // A link that completed while a previous acceptChannelFor() was polling.
+    // Handed over before anything else, so the peer's wait is as short as it
+    // would have been had nobody been collecting a channel at the time.
+    if (want == nullptr && out_one == nullptr && !impl->ready.empty()) {
+        std::unique_ptr<PeerConnection> peer = std::move(impl->ready.front());
+        impl->ready.erase(impl->ready.begin());
+        return peer;
+    }
+
     const double deadline = nowMs() + timeoutMs;
 
     while (nowMs() < deadline) {
@@ -1836,15 +1855,20 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                             if (link.channels.empty()) impl->links.erase(id);
                             return nullptr;   // the caller reads *out_one
                         }
-                        if (!want && static_cast<int>(link.channels.size())
-                                     >= impl->channelsPerPeer) {
+                        if (static_cast<int>(link.channels.size())
+                                >= impl->channelsPerPeer) {
                             std::vector<std::unique_ptr<TransportChannel>> done =
                                 std::move(link.channels);
                             impl->links.erase(id);
                             std::unique_ptr<PeerConnection> peer =
                                 detail::ChannelFactory::makePeer(std::move(done));
                             detail::ChannelFactory::setLinkId(*peer, id);
-                            return peer;
+                            // A plain accept() takes it now; a caller waiting on
+                            // a NAMED link parks it for the next accept() rather
+                            // than dropping it on the floor.
+                            if (!want) return peer;
+                            impl->ready.push_back(std::move(peer));
+                            continue;
                         }
                         continue;   // `it` was advanced by erase
                     }

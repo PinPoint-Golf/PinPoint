@@ -323,6 +323,98 @@ TEST(PpcpLinkBind, APreviewChannelCanBeBoundAfterTheLinkIsUp)
                                               Channel::Preview, &dup));
 }
 
+// ── ENC 2.1d, the way the APPLICATION actually takes a third channel ───────
+//
+// ⚠ `acceptInto()` above is not the call the app can make, and until 27 Aug the
+// app made no call at all — a phone's preview channel bound and expired after
+// `bindTimeoutMs`, silently, while a comment in `PpcpHostService::start()`
+// claimed it was "taken through acceptInto()".  The reason is threading: this
+// application hands an accepted link to the GUI thread and everything PPCP is
+// single-threaded from that moment, so the accept thread cannot call a method
+// that MUTATES a live PeerConnection.
+//
+// `acceptChannelFor()` is the seam that solves it — it returns the CHANNEL,
+// which is self-contained and safe to hand across a thread, and the link's owner
+// adopts it on its own.  This test is that path, and it exists because the
+// preview channel is the one piece of today's work with no coverage and the same
+// shape as the six defects that had none.
+TEST(PpcpLinkBind, AThirdChannelIsCollectedWithoutTouchingTheLink)
+{
+    Harness h;
+    ASSERT_TRUE(h.ok());
+    auto accepted = h.acceptAsync(10000);
+
+    HandshakeFailure f;
+    std::unique_ptr<PeerConnection> client = Connector::connect(clientConfig(h.port()), &f);
+    ASSERT_NE(client, nullptr) << f.message;
+    std::unique_ptr<PeerConnection> server = accepted.get();
+    ASSERT_NE(server, nullptr);
+    ASSERT_EQ(server->channels().size(), 2u);
+
+    // The link id is a value, so the collector needs nothing but a copy of it —
+    // which is the whole point: the accept thread never sees the PeerConnection.
+    const LinkId want = server->linkId();
+    auto collected = std::async(std::launch::async, [&] {
+        HandshakeFailure lf;
+        return h.listener().acceptChannelFor(want, 10000, &lf);
+    });
+
+    HandshakeFailure cf;
+    ASSERT_TRUE(Connector::connectAdditional(clientConfig(h.port()), *client,
+                                             Channel::Preview, &cf))
+        << cf.message;
+
+    std::unique_ptr<TransportChannel> ch = collected.get();
+    ASSERT_NE(ch, nullptr) << "the channel was not collected";
+    // ⚠ NOT ADOPTED YET, AND THAT IS THE PROPERTY UNDER TEST.  Collecting must
+    // leave the link untouched, or the accept thread would be mutating an
+    // object the GUI thread owns — the race this seam exists to avoid.
+    EXPECT_EQ(server->channels().size(), 2u);
+
+    // The owner adopts it, on its own thread, whenever it likes.
+    EXPECT_TRUE(server->adopt(std::move(ch)));
+    EXPECT_EQ(server->channels().size(), 3u);
+    EXPECT_NE(server->channel(Channel::Preview), nullptr);
+    EXPECT_EQ(server->linkId(), client->linkId());
+}
+
+// A link nobody is collecting for is left alone: a stream binding some OTHER
+// link must not be consumed by a wait for this one, or a second phone's
+// connection would be eaten by the first phone's preview poll.
+TEST(PpcpLinkBind, CollectingForOneLinkDoesNotSwallowAnother)
+{
+    Harness h;
+    ASSERT_TRUE(h.ok());
+    auto accepted = h.acceptAsync(10000);
+
+    HandshakeFailure f;
+    std::unique_ptr<PeerConnection> a = Connector::connect(clientConfig(h.port()), &f);
+    ASSERT_NE(a, nullptr) << f.message;
+    std::unique_ptr<PeerConnection> serverA = accepted.get();
+    ASSERT_NE(serverA, nullptr);
+
+    // Ask for a third channel on link A that nobody will ever dial...
+    LinkId want = serverA->linkId();
+    auto collecting = std::async(std::launch::async, [&] {
+        HandshakeFailure lf;
+        return h.listener().acceptChannelFor(want, 1500, &lf);
+    });
+
+    // ...while a SECOND phone connects.  Its two channels belong to a different
+    // link and must survive the poll above rather than being drained by it.
+    HandshakeFailure bf;
+    std::unique_ptr<PeerConnection> b = Connector::connect(clientConfig(h.port()), &bf);
+    ASSERT_NE(b, nullptr) << bf.message;
+
+    EXPECT_EQ(collecting.get(), nullptr) << "nothing bound link A's id, so nothing is returned";
+
+    HandshakeFailure af;
+    std::unique_ptr<PeerConnection> serverB = h.listener().accept(10000, &af);
+    ASSERT_NE(serverB, nullptr) << "the second phone's link was consumed by the poll";
+    EXPECT_EQ(serverB->channels().size(), 2u);
+    EXPECT_NE(serverB->linkId(), serverA->linkId());
+}
+
 // ── A foreign dialler, so 2.1c's refusals are reachable at all ─────────────
 // Ppcp::Connector always sends a correct link_bind, which is the point of it —
 // so the refusals of 2.1c cannot be provoked through it and have to come from a
