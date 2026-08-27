@@ -283,9 +283,46 @@ void VideoInputPpcp::attach(ppcp_peer *peer, const QString &sessionId)
 
 void VideoInputPpcp::detach()
 {
+    // ⚠ REMEMBERED, BECAUSE A PHONE COMING BACK IS THE ORDINARY CASE AND NOT AN
+    // EXCEPTION.  A link drops and returns constantly on a range, and until
+    // this flag existed a preview that had been running simply stayed dead: the
+    // only call to `ppcpAttachIfNeeded()` is in `CameraInstance::startPreview()`,
+    // which returns early when it is already previewing, so nothing re-attached
+    // and the operator had to close and reopen the panel to get a picture back.
+    m_resumeOnReattach = (m_state == State::Active || m_state == State::Suspended);
     m_peer = nullptr;
     m_state = State::Stopped;
     emit stateChanged(m_state);
+}
+
+// The counterpart declared again — a reconnection, or a second declaration
+// (MSG 3.3a) — so every instance this file detached gets its Streams back.
+// Mirrors detachAll(), and is deliberately keyed the same way: on the peer id,
+// which is what a camera row is named by and what survives the link that
+// carried it.
+//
+// ⚠ ONLY WHAT WAS RUNNING.  An instance the operator had not started is left
+// alone: a phone reconnecting must not turn previews on by itself.
+int VideoInputPpcp::reattachAll(const QString &peerId, ppcp_peer *peer,
+                                const QString &sessionId)
+{
+    std::vector<VideoInputPpcp *> targets;
+    {
+        std::lock_guard<std::mutex> g(ppcpLiveMutex());
+        for (VideoInputPpcp *v : ppcpLive())
+            if (v->m_peerId == peerId && !v->m_peer && v->m_resumeOnReattach)
+                targets.push_back(v);
+    }
+    int resumed = 0;
+    for (VideoInputPpcp *v : targets) {
+        v->attach(peer, sessionId);
+        v->m_resumeOnReattach = false;
+        // Empty device id: the peer and source are already parsed and must not
+        // be re-derived.  start() re-opens both Streams against the new peer,
+        // which is required — the old ids named Streams on a link that is gone.
+        if (v->start(QString())) ++resumed;
+    }
+    return resumed;
 }
 
 void VideoInputPpcp::setTimebaseOffsetNs(qint64 offsetNs)
@@ -896,6 +933,9 @@ void VideoInputPpcp::processEvent(const ppcp_event &ev)
     case PPCP_EVENT_STREAM_OPEN_ACK:
         onStreamOpenAck(m);
         break;
+    case PPCP_EVENT_STREAM_CLOSE:
+        onStreamClose(m);
+        break;
     case PPCP_EVENT_CAPTURE:
         if (m->type == PPCP_MT_CAPTURE_ANNOUNCE) onCaptureAnnounce(m);
         break;
@@ -1006,6 +1046,40 @@ void VideoInputPpcp::onStreamOpenAck(const ppcp_msg *m)
         else           m_previewOpenedAtNs = static_cast<qint64>(a.opened_at.ns);
     }
     ++m_counters.streamsOpened;
+}
+
+// ── MSG 5.1d / CORE 5.11i — the OWNER closing a Stream we are reading ───────
+//
+// ⚠ 5.1d MAKES A CLOSE LEGAL IN EITHER DIRECTION, AND WE WERE ONLY EVER THE
+// ONE DOING IT.  `PPCP_EVENT_STREAM_CLOSE` had no handler here at all, so a
+// device closing a Stream left this consumer believing it was open — showing a
+// frozen tile, or waiting for Captures that were never coming, and saying
+// nothing.
+//
+// 5.11i names the case exactly, and it is the one a range session produces:
+// "a peer under sustained thermal load closes a `preview` rather than keeping
+// it nominally open and announcing absence for the rest of the session."  A hot
+// phone mid-round is the expected path, not the unhappy one.
+void VideoInputPpcp::onStreamClose(const ppcp_msg *m)
+{
+    const ppcp_body_stream_close &b = m->body.stream_close;
+    const QString streamId = idStr(b.stream_id);
+    const bool isCapture = (streamId == m_captureStreamId && !streamId.isEmpty());
+    const bool isPreview = (streamId == m_previewStreamId && !streamId.isEmpty());
+    if (!isCapture && !isPreview) return;
+
+    // 5.1d's vocabulary is an open registry — `thermal_limit`, `storage_full`,
+    // `not_needed`, `calibration_changed` and whatever a peer adds — so it is
+    // carried as the owner worded it and never mapped onto one we knew (10.3a).
+    const QString why = idStr(b.reason);
+    if (isCapture) m_captureStreamId.clear();
+    else           m_previewStreamId.clear();
+    ++m_counters.streamsClosedByOwner;
+
+    const QString what = isPreview ? QStringLiteral("preview") : QStringLiteral("capture");
+    m_lastStreamOpenError = why;
+    emit errorOccurred(QStringLiteral("PPCP camera: the device closed the %1 stream (%2)")
+                           .arg(what, why.isEmpty() ? QStringLiteral("no reason given") : why));
 }
 
 void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)

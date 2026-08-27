@@ -19,9 +19,10 @@
 
 // Link stubs for ppcp_host_service_test.
 //
-// `PpcpHostService` reaches five symbols in `src/Video` — `registerPpcpPeer()`
+// `PpcpHostService` reaches six symbols in `src/Video` — `registerPpcpPeer()`
 // on `declare`, `applyTimebaseOffsets()` / `clearTimebaseMappings()` around a
-// link's timebase relations, and `dispatchEvent()` / `detachAll()` around a
+// link's timebase relations, and `dispatchEvent()` / `detachAll()` /
+// `reattachAll()` around a
 // VideoInputPpcp a caller may have attached for preview.  Linking the real ones
 // would drag
 // `video_input_factory.cpp` (Aravis, Spinnaker and Qt Multimedia backends) and
@@ -65,6 +66,12 @@ int VideoInputPpcp::dispatchEvent(const QString & /*peerId*/, const ppcp_event &
 }
 
 int VideoInputPpcp::detachAll(const QString & /*peerId*/)
+{
+    return 0;
+}
+
+int VideoInputPpcp::reattachAll(const QString & /*peerId*/, ppcp_peer * /*peer*/,
+                                const QString & /*sessionId*/)
 {
     return 0;
 }

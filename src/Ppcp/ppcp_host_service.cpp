@@ -909,6 +909,23 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
         emit shotBridgeChanged();
     }
 
+    // ⚠ A RECONNECTION IS A DECLARE, AND A PREVIEW THAT WAS RUNNING MUST COME
+    // BACK BY ITSELF.  `dropPhone()` detaches every VideoInputPpcp bound to the
+    // peer; nothing re-attached them, because the only call to
+    // `CameraInstance::ppcpAttachIfNeeded()` is inside `startPreview()`, which
+    // returns early when it is already previewing.  So an operator with the ROI
+    // editor open watched the tile die on a link drop and stay dead — and a
+    // phone dropping and returning is the ordinary case on a range, not the
+    // exception.  A no-op on a first connect, when nothing has been detached.
+    {
+        const int back = VideoInputPpcp::reattachAll(
+            ph->counterpartId, ph->peer->liveSession().peer(),
+            QString::fromStdString(ph->peer->liveSession().config().sessionId));
+        if (back > 0)
+            ppWarn() << "[ppcp]" << back << "preview(s) resumed after" << ph->name
+                     << "reconnected";
+    }
+
     // MSG 9.1 — the offer list, which has been installed DETACHED since H5
     // because there was no live peer to give it.  There is now.
     if (m_offers && ph->engine && ph->engine->peer())

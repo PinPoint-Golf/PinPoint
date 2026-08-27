@@ -216,6 +216,10 @@ public:
         // rather than treated as a fault.
         std::size_t streamsOpened  = 0;
         std::size_t streamsRefused = 0;
+        // 5.1d / 5.11i — the OWNER closed a Stream we were reading.  Conformant
+        // behaviour (a hot phone drops its preview first), so counted rather
+        // than treated as a fault.
+        std::size_t streamsClosedByOwner = 0;
         // I11 — `gaps` mean LOSS.  A preview peer that records a shed frame as
         // a gap is reporting a dropout it did not have (5.11c3); counted so the
         // conflation is visible rather than absorbed.
@@ -287,6 +291,13 @@ public:
     // caller is about to destroy.  Same registry and filter as
     // clearTimebaseMappings() above.
     static int detachAll(const QString &peerId);
+    // The counterpart declared again — a reconnection.  Re-attaches and
+    // re-opens the Streams of every instance detachAll() stopped that was
+    // RUNNING at the time, and leaves the rest alone.  Returns how many came
+    // back.  See the note beside the implementation for why nothing else in
+    // this application could do it.
+    static int reattachAll(const QString &peerId, ppcp_peer *peer,
+                           const QString &sessionId);
 
     // CORE 5.6a — the Timebase this Source stamps in.  Empty until the
     // counterpart has declared, which is also when the offset seam can first
@@ -361,6 +372,7 @@ private:
     void processEvent(const ppcp_event &ev);
 
     void onStreamOpenAck(const ppcp_msg *m);
+    void onStreamClose(const ppcp_msg *m);
     void onCaptureAnnounce(const ppcp_msg *m);
     void onPayloadBegin(const ppcp_msg *m);
     void onPayloadChunk(const ppcp_msg *m);
@@ -383,6 +395,9 @@ private:
     // -1 until the ack arrives, which is a different answer from 0.
     qint64  m_captureOpenedAtNs = -1;
     qint64  m_previewOpenedAtNs = -1;
+    // Set by detach() when a RUNNING instance lost its peer, so a reconnection
+    // resumes exactly what was running and nothing else.
+    bool    m_resumeOnReattach = false;
 
     // capture id -> the Stream it named, from `capture_announce`.  A
     // `payload_begin` carries only a capture id (ENC §6), so the Stream — and
