@@ -18,7 +18,10 @@
 
 #include "ppcp_host_service.h"
 
+#include <algorithm>
+
 #include <QDateTime>
+#include <QDir>
 #include <QSocketNotifier>
 
 // 11.6f — the erasure below is not `memset`, which the optimiser is entitled to
@@ -133,6 +136,27 @@ PpcpHostService::PpcpHostService(QObject *parent)
     // and landed them under `PPCP Imports/<peer>/<session>/` instead; the live
     // path has no equivalent yet and inventing one here would settle host review
     // item 2 by accident.  The seam is left open on purpose.
+
+    // ── The import ledger (MSG §9.1, I34) ──────────────────────────────────
+    //
+    // Loaded once, here, and shared by every phone: what this host already
+    // holds is a property of the host, not of the link it came in on.  The root
+    // is the same one the file-import path uses, read out of the shared INI
+    // rather than through AppSettings, because nothing in src/Ppcp may depend
+    // on src/Gui.
+    {
+        QString root = ppSettings().value(QStringLiteral("General/athleteLibraryPath"))
+                           .toString();
+        if (root.isEmpty())
+            root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        const QString importRoot = QDir(root).filePath(QStringLiteral("PPCP Imports"));
+        QDir().mkpath(importRoot);
+        m_importLedger.load(
+            QDir(importRoot).filePath(QStringLiteral("ppcp-import.json")).toStdString());
+        ppWarn() << "[ppcp] import ledger:" << m_importLedger.captureCount()
+                 << "capture(s)," << m_importLedger.sessionCount() << "session(s),"
+                 << m_importLedger.pendingCommitCount() << "commit(s) owed";
+    }
 }
 
 PpcpHostService::~PpcpHostService()
@@ -164,6 +188,12 @@ PpcpHostService::~PpcpHostService()
 void PpcpHostService::setOfferController(PpcpOfferController *c)
 {
     m_offers = c;
+    // MSG 9.1a — `session_accept.have_digests` is what this host ALREADY HOLDS,
+    // and a device does not replay the payload for one of those.  Until this
+    // line the controller had no ledger, so the list was always empty and every
+    // accepted offer re-sent every byte we already had.  `setLedger()` had no
+    // production caller at all.
+    if (m_offers) m_offers->setLedger(&m_importLedger);
 }
 
 bool PpcpHostService::start(quint16 port, QString *err)
@@ -183,7 +213,18 @@ bool PpcpHostService::start(quint16 port, QString *err)
     // whole of the authentication decision and it is libppcp's arithmetic.
     m_listener.setIdentityResolver(m_rv.identityResolver());
     // CORE T2's minimum is two channels; a third (preview) arrives later under
-    // ENC 2.1d and is taken through acceptInto(), not counted here.
+    // ENC 2.1d and is collected by the accept thread's `acceptChannelFor()`
+    // poll, not counted here.
+    //
+    // ⚠ THIS COMMENT USED TO SAY "taken through acceptInto()", AND NOTHING TOOK
+    // IT.  `acceptInto()` had no caller outside the conformance harness, so a
+    // phone opening a preview channel bound it and then watched it expire: the
+    // link_id leaves the listener's table when its first two channels complete,
+    // so the third arrived as a new half-built link with no control channel and
+    // `expireLinks()` tore it down after `bindTimeoutMs`.  Silent at both ends.
+    // Raised by the PinPointCapture team asking whether we accept a third bind
+    // before they dialled one — which is the cheapest way this was ever going
+    // to be found.
     m_listener.setChannelsPerPeer(2);
     // RV 5.4k wants the negotiated mode recorded; 7.2b forbids a key or a
     // payload reaching a log, and nothing handed to this callback is either.
@@ -201,6 +242,32 @@ bool PpcpHostService::start(quint16 port, QString *err)
         while (!m_stopping) {
             // A short timeout rather than a long one so stop() is prompt; the
             // listener is not doing anything expensive while it waits.
+            // ENC 2.1d — before the plain accept, give any live link that is
+            // still short of its third channel a chance to collect one.  A
+            // short poll each: this is the same listener, and a long wait here
+            // would starve the accept below.
+            //
+            // ⚠ THE CHANNEL CROSSES THREADS, THE LINK NEVER DOES.  A
+            // TransportChannel is self-contained; the PeerConnection it will
+            // join belongs to the GUI thread and is adopted there.
+            {
+                std::vector<Ppcp::LinkId> want;
+                {
+                    std::lock_guard<std::mutex> lk(m_wantChannelMutex);
+                    want = m_wantChannel;
+                }
+                for (const Ppcp::LinkId &id : want) {
+                    std::unique_ptr<TransportChannel> ch =
+                        m_listener.acceptChannelFor(id, 1, nullptr);
+                    if (!ch) continue;
+                    auto *rawCh = ch.release();
+                    const Ppcp::LinkId copy = id;
+                    QMetaObject::invokeMethod(this, [this, copy, rawCh] {
+                        adoptChannel(copy, rawCh);
+                    }, Qt::QueuedConnection);
+                }
+            }
+
             HandshakeFailure fail;
             std::unique_ptr<PeerConnection> link = m_listener.accept(250, &fail);
             if (!link) {
@@ -270,12 +337,45 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err)
     // Settings -> Phones (and the toolbar's aggregate) that it moved.
     ph->peer->liveSession().setHealthCallback(
         [this](const PpcpLiveSession::PeerHealth &) { emit phonesChanged(); });
+    // 5.2a — the device answered `arm`.  This is the half that turns "we sent a
+    // message" into "the device says it is ready", and until it existed nothing
+    // consumed `readiness` at all.
+    ph->peer->liveSession().setReadinessCallback(
+        [this, ph](const PpcpLiveSession::PeerReadiness &r) {
+            if (!r.blockedReason.empty())
+                ppWarn() << "[ppcp]" << ph->name << "cannot arm —"
+                         << r.blockedReason.c_str();
+            else if (!r.settled && r.hasEstimate)
+                ppWarn() << "[ppcp]" << ph->name << "arming — ready in about"
+                         << r.estimatedReadyMs << "ms";
+            emit armStateChanged();
+            emit phonesChanged();
+        });
+    // 8.2h — a Shot this host issued or adopted.  Handed on as a Qt signal so
+    // that the shot pipeline's lifetime is Qt's problem and not ours; see the
+    // note on `shotBridgeChanged` for why a stored callback into main()'s stack
+    // would be a use-after-free waiting for `exit()`.
+    ph->peer->shotBridge().setShotCallback([this](const ppcp_shot &s) {
+        emit arbitratedShot(static_cast<qint64>(s.t0.ns),
+                            QString::fromUtf8(s.id.v, static_cast<int>(s.id.len)));
+    });
+
     ph->peer->addEventHook([this, ph](const ppcp_event &ev) {
         // ⚠ THE EVENT RING HAS EXACTLY ONE DRAINER AND IT IS PpcpHostPeer.
         // Everything else that needs to see events registers here.  In
         // particular `VideoInputPpcp::drainEvents()` MUST NOT be called on this
         // peer — it exists for the standalone paths where nothing else drains.
         if (m_offers) m_offers->observe(ph->counterpartId, ev);
+        // MSG 9.1 — a Session this phone is REPLAYING onto the live link.
+        //
+        // ⚠ `ev.imported` IS THE WHOLE FILTER, AND IT IS LOAD-BEARING IN BOTH
+        // DIRECTIONS.  True means the frame belongs to a stored Session being
+        // replayed, which is this sink's business and must be kept away from
+        // the live arbiter (E28, and `PpcpShotBridge::observe()` drops exactly
+        // the same frames for the opposite reason).  False means the running
+        // Session's own capture, which belongs to `VideoInputPpcp` and must NOT
+        // be filed as an import of somebody's archive.
+        if (ph->importSink && ev.imported) ph->importSink->observeEvent(ev);
         // Any VideoInputPpcp a caller has attached to this peer (Settings ->
         // Cameras' ROI preview, so far) — broadcast, not drained a second
         // time, for the same reason the line above isn't a second drain.
@@ -312,6 +412,22 @@ bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err)
         if (err) *err = derr;
         return false;
     }
+
+    // MSG 9.1's landing place, one per phone, sharing the host's single ledger.
+    // Built here rather than lazily on the first offer, because the sink seeds
+    // its I34 index from the ledger at construction and a Capture arriving
+    // against an unseeded index would look new when we already hold it.
+    {
+        QString root = ppSettings().value(QStringLiteral("General/athleteLibraryPath"))
+                           .toString();
+        if (root.isEmpty())
+            root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        Ppcp::PpcpImportSink::Config icfg;
+        icfg.importRoot =
+            QDir(root).filePath(QStringLiteral("PPCP Imports")).toStdString();
+        ph->importSink = std::make_unique<Ppcp::PpcpImportSink>(
+            m_importLedger, ph->engine->peer(), icfg);
+    }
     return true;
 }
 
@@ -339,6 +455,139 @@ Ppcp::PpcpHostPeer *PpcpHostService::peerForId(const QString &counterpartId)
     for (const std::unique_ptr<Phone> &p : m_phones)
         if (p->counterpartId == counterpartId) return p->peer.get();
     return nullptr;
+}
+
+// ── CORE 5.14h / MSG 8.4a — the receiver says it holds the bytes ────────────
+//
+// ⚠ THIS IS THE HALF THAT HAD NEVER BEEN BUILT, AND ITS ABSENCE WAS THE DEVICE'S
+// PROBLEM RATHER THAN OURS.  `PpcpImportSink` has always queued a commit when a
+// payload landed durably, and nothing ever sent one.  8.4b forbids an owner
+// setting `confirmed` on its own authority, so `capture_committed` is the ONLY
+// route to it — and without it a phone can never release the storage for
+// anything it has given us.  It shows up at the far end as a device that fills
+// up and cannot explain why.
+void PpcpHostService::flushOwedCommits(Phone *ph)
+{
+    if (!ph || !ph->engine || !ph->engine->peer() || ph->counterpartId.isEmpty()) return;
+
+    // Owed to the MINTING peer (I34's second scope), which is not necessarily
+    // whoever handed us the bytes: a phone may replay a Session another peer
+    // recorded.  We can only pay a debt to the peer that is actually here, and
+    // 5.14h is content for the rest to wait — a commit may go days later.
+    const std::vector<Ppcp::PpcpImportLedger::PendingCommit> owed =
+        m_importLedger.pendingCommits(ph->counterpartId.toStdString());
+    if (owed.empty()) return;
+
+    std::size_t sent = 0;
+    for (const Ppcp::PpcpImportLedger::PendingCommit &pc : owed) {
+        ppcp_digest d{};
+        const bool haveDigest = Ppcp::digestFromHex(pc.digestHex, &d);
+        if (ppcp_peer_capture_committed(ph->engine->peer(), pc.key.captureId.c_str(),
+                                        haveDigest ? &d : nullptr) != PPCP_OK)
+            break;   // queue full or link down — the debt stands, and we retry
+        // ⚠ CLEARED ON QUEUE, WHICH IS EARLIER THAN THE LEDGER'S OWN COMMENT
+        // ASKS FOR ("once the owner has had it").  There is no acknowledgement
+        // for `capture_committed` in the protocol to wait on, so "the engine
+        // accepted it for sending" is the strongest fact available here.  The
+        // failure this leaves open — a link dying between queue and flush — is
+        // recoverable, because a device that never saw the commit simply keeps
+        // the bytes and offers the Session again.
+        m_importLedger.clearCommitted(pc.key);
+        ++sent;
+    }
+    if (sent) {
+        m_importLedger.save();
+        ppWarn() << "[ppcp] capture_committed x" << sent << "->" << ph->name
+                 << "(" << m_importLedger.pendingCommitCount() << "still owed)";
+    }
+}
+
+// ── CORE 7.3a / MSG 5.2 — arming, from the host ─────────────────────────────
+
+bool PpcpHostService::armAll()
+{
+    bool all = true;
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        if (!p->peer) continue;
+        std::string err;
+        // MSG 5.2's empty list — every open capture Stream.
+        if (!p->peer->liveSession().arm({}, &err)) {
+            all = false;
+            ppWarn() << "[ppcp] arm refused by" << p->name << "-" << err.c_str();
+        }
+    }
+    // The device's answer is a `readiness` that has not arrived yet, so the
+    // state now is `Arming` for everything asked, and the screen says so rather
+    // than going green on the strength of a queued message.
+    emit armStateChanged();
+    emit phonesChanged();
+    if (all) setStatus(tr("Arming %n device(s)…", "", static_cast<int>(m_phones.size())));
+    return all;
+}
+
+bool PpcpHostService::disarmAll()
+{
+    bool all = true;
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        if (!p->peer) continue;
+        std::string err;
+        if (!p->peer->liveSession().disarm({}, &err)) {
+            all = false;
+            ppWarn() << "[ppcp] disarm refused by" << p->name << "-" << err.c_str();
+        }
+    }
+    emit armStateChanged();
+    emit phonesChanged();
+    setStatus(tr("Disarmed."));
+    return all;
+}
+
+QString PpcpHostService::armState() const
+{
+    // The LEAST ready wins, so a bay with one blocked phone does not read as
+    // ready because the other one is.  Blocked outranks arming outranks armed.
+    using AS = Ppcp::PpcpLiveSession::ArmState;
+    bool any = false, anyBlocked = false, anyArming = false, anyDisarmed = false;
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        if (!p->peer) continue;
+        any = true;
+        switch (p->peer->liveSession().armState()) {
+        case AS::Blocked:  anyBlocked = true;  break;
+        case AS::Arming:   anyArming = true;   break;
+        case AS::Disarmed: anyDisarmed = true; break;
+        case AS::Armed:    break;
+        }
+    }
+    if (!any) return {};
+    if (anyBlocked)  return QStringLiteral("blocked");
+    if (anyArming)   return QStringLiteral("arming");
+    if (anyDisarmed) return QStringLiteral("disarmed");
+    return QStringLiteral("armed");
+}
+
+Ppcp::PpcpShotBridge *PpcpHostService::activeShotBridge()
+{
+    // First one with a running arbiter — see the header for why "first" and not
+    // "the" is a limitation this code cannot fix on its own.
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        if (p->peer && p->peer->shotBridge().active()) return &p->peer->shotBridge();
+    }
+    return nullptr;
+}
+
+QString PpcpHostService::hostMicrophoneSourceId() const
+{
+    // Every phone holds its own copy of this host's declaration (MSG 3.3c makes
+    // declaring a per-conversation obligation), so any connected phone answers.
+    // They can differ — two phones that connected either side of a microphone
+    // being plugged in hold different declarations — and the FIRST is the right
+    // answer because it is the one whose bridge `activeShotBridge()` returns.
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        if (!p->peer) continue;
+        const std::string id = p->peer->declaration().sourceIdOfKind("microphone");
+        if (!id.empty()) return QString::fromStdString(id);
+    }
+    return {};
 }
 
 QString PpcpHostService::peerName() const
@@ -423,6 +672,10 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
 
     ph->link = std::move(link);
     ph->peer->attach(ph->link.get(), ph->engine.get());
+    // ENC 2.1d — this link has its two required channels; a `preview` one may
+    // follow at any later point in the session, and until this call nothing in
+    // the application was listening for it.
+    noteWantsChannel(ph->link->linkId(), true);
     m_phones.push_back(std::move(phone));
 
     // ⚠ THE CODE ON SCREEN IS NOW SPENT, SO REPLACE IT.  `mu` is 1 (7.3a), so
@@ -469,6 +722,40 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
         // invalidate.
         VideoInputPpcp::detachAll(ph->counterpartId);
     }
+    // MSG 9.1 — whatever this phone replayed is closed out and the ledger put
+    // on disk, BEFORE the peer the sink points at goes.  A replay cut short by
+    // a dying link leaves its Session open in the ledger rather than being
+    // recorded as truncated, which is the honest reading: we did not observe an
+    // end, and ENC 7d only ever permits a downgrade on evidence.
+    if (ph->importSink) {
+        const Ppcp::PpcpImportSink::Stats &is = ph->importSink->stats();
+        if (is.captures || is.clipsWritten)
+            ppWarn() << "[ppcp] import from" << ph->name << "— captures" << is.captures
+                     << "new" << is.capturesNew << "already held" << is.capturesAlreadyHeld
+                     << "clips" << is.clipsWritten << "bytes" << is.clipBytes
+                     << "commits queued" << is.commitsQueued;
+        ph->importSink->finishLive();
+        ph->importSink.reset();
+        m_importLedger.save();
+    }
+
+    // The arbiter goes before the Session it arbitrates, and its numbers are
+    // read BEFORE it goes — stop() frees the arbiter, and `attach(nullptr, ...)`
+    // below stops it a second time.  A Session that saw nothing arbitrated is a
+    // different fact from one that was never listening, and this is the only
+    // place either can still be told.
+    {
+        const Ppcp::PpcpShotBridge::Stats &st = ph->peer->shotBridge().stats();
+        if (st.nominated || st.observedForeign || st.issued || st.unarbitrated)
+            ppWarn() << "[ppcp] arbitration for" << ph->name
+                     << "— nominated" << st.nominated
+                     << "observed" << st.observedForeign
+                     << "issued" << st.issued
+                     << "adopted" << st.adopted
+                     << "excluded" << st.excluded
+                     << "unarbitrated" << st.unarbitrated;
+        ph->peer->shotBridge().stop();
+    }
     // MSG 4.4 — the Session closes with the link, whether or not it was ever
     // used for anything.  Best-effort: a peer already gone cannot be told, and
     // that is not a reason to skip the local half of closing it.
@@ -477,6 +764,9 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
         ph->peer->liveSession().close("disconnected", &cerr);
     }
     ph->peer->attach(nullptr, nullptr);
+    // Stop the accept thread polling for a third channel on a link that is
+    // about to stop existing.
+    if (ph->link) noteWantsChannel(ph->link->linkId(), false);
     if (ph->link) ph->link->close();
 
     const QString name = ph->name;
@@ -489,6 +779,43 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
     // The phone did not stop existing, it stopped being here — its row stays
     // and changes state, the way a switched-off IMU's does.
     emit phonesChanged();
+    // ⚠ AND THE SHOT PIPELINE MUST LET GO OF THE BRIDGE THAT JUST DIED.  The
+    // same hazard `VideoInputPpcp::detachAll()` above exists for: a raw pointer
+    // handed out while the phone was alive, into storage that outlives it.  The
+    // erase above destroyed the Phone, its PpcpHostPeer and the bridge inside
+    // it; whoever holds the pointer re-reads `activeShotBridge()` here and gets
+    // null, or the next phone's.
+    emit shotBridgeChanged();
+}
+
+void PpcpHostService::noteWantsChannel(const Ppcp::LinkId &id, bool wants)
+{
+    std::lock_guard<std::mutex> lk(m_wantChannelMutex);
+    auto it = std::find(m_wantChannel.begin(), m_wantChannel.end(), id);
+    if (wants) {
+        if (it == m_wantChannel.end()) m_wantChannel.push_back(id);
+    } else if (it != m_wantChannel.end()) {
+        m_wantChannel.erase(it);
+    }
+}
+
+void PpcpHostService::adoptChannel(const Ppcp::LinkId &id, Ppcp::TransportChannel *raw)
+{
+    std::unique_ptr<TransportChannel> ch(raw);
+    // The phone may have gone between the accept thread collecting this and the
+    // GUI thread getting here.  Dropping the channel is then correct and is not
+    // an error: the link it wanted to join no longer exists.
+    for (const std::unique_ptr<Phone> &p : m_phones) {
+        if (!p->link || p->link->linkId() != id) continue;
+        if (p->link->adopt(std::move(ch))) {
+            ppWarn() << "[ppcp] ENC 2.1d — a third channel joined" << p->name
+                     << "(" << static_cast<int>(p->link->channels().size()) << "channels)";
+            // One extra channel is all 2.1d's preview case wants; asking for
+            // more would keep a poll running on the accept thread for ever.
+            noteWantsChannel(id, false);
+        }
+        return;
+    }
 }
 
 void PpcpHostService::dropAllPhones(const char *why)
@@ -521,20 +848,62 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
     // already run unconditionally for every connected phone — this is only
     // the one call that turns that machinery on.
     //
-    // ⚠ NOT ARMED, AND NO ARBITRATION STARTED HERE.  Those are the capture
-    // path (PpcpShotBridge, PpcpLiveSession::arm()) and are out of scope for
-    // what opens a Session today — a live preview tile is independent of
-    // arming (5.11.2's preview Stream is unconditional and "always
-    // continuous"; arm() is a property of the capture path, not the preview
-    // one).  A refusal here is logged and the connection proceeds — a phone
-    // with no Session simply has no preview, the same as before this existed.
+    // ⚠ STILL NOT ARMED.  arm() is a property of the capture path and remains
+    // uncalled — a live preview tile is independent of arming (5.11.2's preview
+    // Stream is unconditional and "always continuous"), and the device arms
+    // itself in the shipping product.  A refusal here is logged and the
+    // connection proceeds — a phone with no Session simply has no preview, the
+    // same as before this existed.
     {
         Ppcp::PpcpLiveSession::Config cfg;
         cfg.sessionId = ("sess:" + QUuid::createUuid().toString(QUuid::WithoutBraces))
                              .toStdString();
+        // 8.2c — DECLARED, and named here rather than left to the default so
+        // that the one number the host's own corroboration rule is stated in
+        // lives in one place.  It is CORE §5.10's proposal and not a
+        // measurement; CORE B8 says the same, and B8 also says the floor must
+        // eventually be measured per nominator class.
+        cfg.coincidenceWindowNs = PPCP_DEFAULT_COINCIDENCE_WINDOW_NS;
         std::string serr;
         if (!ph->peer->liveSession().open(cfg, &serr))
             ppWarn() << "[ppcp] live session open refused for" << ph->name << "-" << serr.c_str();
+    }
+
+    // ── CORE §8.2 — the arbiter, and it starts HERE for a reason ────────────
+    //
+    // ⚠ AFTER open(), NEVER BEFORE.  `ppcp_arbiter_new()` will happily build an
+    // arbiter for a peer with no Session, and `active()` then answers true
+    // while every entry point inside it bails on a null `timebase_ref` and a
+    // null `session_id`.  `observe()` counts only on PPCP_OK, so the whole
+    // failure reads as zero candidates, zero groups, zero retained and zero
+    // errors — indistinguishable from a quiet range.  The conformance harness
+    // opens the Session first for exactly this reason.
+    //
+    // 8.3e — the library has no random source (ground rule 8), so the embedding
+    // mints Shot and Candidate ids.  Returning false would refuse rather than
+    // issue a Shot with a made-up id; QUuid cannot fail, so this never does.
+    {
+        Ppcp::PpcpShotBridge::Config bc;
+        std::string aerr;
+        const bool ok = ph->peer->shotBridge().start(
+            bc,
+            [](std::string *out) {
+                *out = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+                return true;
+            },
+            &aerr);
+        if (!ok) {
+            // I20 — libppcp refuses an arbiter for a peer that is not
+            // `role: host` or does not declare Arbitrate.  Neither is reachable
+            // for this host's own engine, so a refusal here means something
+            // structural changed; say so rather than falling back to something
+            // that is not arbitration.
+            ppWarn() << "[ppcp] the arbiter would not start for" << ph->name << "-"
+                     << aerr.c_str();
+        } else {
+            ppWarn() << "[ppcp] arbitration active for" << ph->name;
+        }
+        emit shotBridgeChanged();
     }
 
     // MSG 9.1 — the offer list, which has been installed DETACHED since H5
@@ -915,6 +1284,30 @@ QVariantList PpcpHostService::phones() const
         dev[QStringLiteral("syncSigmaMs")] = isLive
             ? worstSyncSigmaMsFor(live->peer->liveSession()) : -1.0;
 
+        // 5.2a / 7.3c — this phone's own arm state, which is THE DEVICE'S
+        // answer and not our sent flag.  Empty for a phone that is not here:
+        // a remembered pairing has no arm state, the same way it has no
+        // battery reading.
+        using AS = Ppcp::PpcpLiveSession::ArmState;
+        QString armStr;
+        QString armBlocked;
+        int     armReadyMs = -1;
+        if (isLive) {
+            const PpcpLiveSession &ls = live->peer->liveSession();
+            switch (ls.armState()) {
+            case AS::Disarmed: armStr = QStringLiteral("disarmed"); break;
+            case AS::Arming:   armStr = QStringLiteral("arming");   break;
+            case AS::Armed:    armStr = QStringLiteral("armed");    break;
+            case AS::Blocked:  armStr = QStringLiteral("blocked");  break;
+            }
+            armBlocked = QString::fromStdString(ls.blockedReason());
+            const PpcpLiveSession::PeerReadiness &rd = ls.peerReadiness();
+            if (rd.valid && rd.hasEstimate) armReadyMs = static_cast<int>(rd.estimatedReadyMs);
+        }
+        dev[QStringLiteral("armState")]        = armStr;
+        dev[QStringLiteral("armBlockedReason")] = armBlocked;
+        dev[QStringLiteral("armReadyMs")]      = armReadyMs;
+
         dev[QStringLiteral("hasWarning")]  = false;
         out.append(dev);
     }
@@ -1077,6 +1470,13 @@ void PpcpHostService::onTick()
     std::vector<Phone *> dead;
     for (const std::unique_ptr<Phone> &p : m_phones)
         if (!p->peer->tick(now)) dead.push_back(p.get());
+    // 5.14h — pay what we owe, to whichever phone is here to receive it.  After
+    // the tick, so a commit queued by a payload that landed during this very
+    // tick goes out on the next one rather than waiting for another event; and
+    // only for phones that survived it.
+    for (const std::unique_ptr<Phone> &p : m_phones)
+        if (std::find(dead.begin(), dead.end(), p.get()) == dead.end())
+            flushOwedCommits(p.get());
     for (Phone *p : dead) dropPhone(p, "link closed");
 }
 

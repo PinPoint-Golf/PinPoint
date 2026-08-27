@@ -340,6 +340,35 @@ const ppcp_capture_profile *VideoInputPpcp::bestCaptureProfile() const
 {
     const ppcp_source *s = source();
     if (!s) return nullptr;
+
+    // ── "Config from PPS", and this is the whole of it ─────────────────────
+    //
+    // A preferred profile, chosen by the operator and persisted, wins over the
+    // automatic pick.  This is the one thing PPCP's config question turned out
+    // to mean: WHICH declared CaptureProfile a phone camera uses.  The protocol
+    // has carried it all along — `stream_open` names any declared `profile_id`
+    // — and every profile a peer declares is already parsed into
+    // CameraCapabilities here, so nothing but the choosing was missing.
+    //
+    // ⚠ A PREFERENCE THAT NO LONGER MATCHES A DECLARED PROFILE IS IGNORED, NOT
+    // AN ERROR.  A phone may declare a different set after an OS update, and
+    // I26's discipline applies to profiles as much as to Sources: naming one
+    // the peer did not declare is refused at the wire, so falling back to the
+    // automatic pick is the only honest response.
+    if (!m_preferredProfileId.isEmpty()) {
+        const QByteArray want = m_preferredProfileId.toUtf8();
+        for (std::size_t i = 0; i < s->profile_count; ++i) {
+            const ppcp_capture_profile &p = s->profiles[i];
+            if (isPreviewProfile(p)) continue;
+            if (idStr(p.id) == m_preferredProfileId) return &p;
+        }
+        // Fell through to the automatic pick.  ⚠ NOT LOGGED HERE: this class
+        // reports through `errorOccurred` and counters and holds no logger, and
+        // a fallback is not an error.  `CameraInstance::applyStoredPpcpProfile()`
+        // checks the stored id against the declaration and says so there, where
+        // the operator's choice is what is being restored.
+    }
+
     const ppcp_capture_profile *best = nullptr;
     for (std::size_t i = 0; i < s->profile_count; ++i) {
         const ppcp_capture_profile &p = s->profiles[i];
@@ -351,6 +380,62 @@ const ppcp_capture_profile *VideoInputPpcp::bestCaptureProfile() const
         if (a > b) best = &p;
     }
     return best;
+}
+
+QStringList VideoInputPpcp::declaredCaptureProfiles(double *outRatesHz, int maxRates) const
+{
+    QStringList ids;
+    const ppcp_source *s = source();
+    if (!s) return ids;
+    int n = 0;
+    for (std::size_t i = 0; i < s->profile_count; ++i) {
+        const ppcp_capture_profile &p = s->profiles[i];
+        if (isPreviewProfile(p)) continue;
+        ids.append(idStr(p.id));
+        if (outRatesHz && n < maxRates)
+            outRatesHz[n] = p.rate.present ? static_cast<double>(p.rate.nominal_mhz) / 1000.0
+                                           : 0.0;
+        ++n;
+    }
+    return ids;
+}
+
+QString VideoInputPpcp::profileForRate(double fps) const
+{
+    // The nearest declared rate at or below what was asked, so "120" on a phone
+    // that offers 60 and 240 selects 60 rather than silently giving four times
+    // the data the operator chose.  Exact matches win outright.
+    const ppcp_source *s = source();
+    if (!s || fps <= 0.0) return {};
+    const ppcp_capture_profile *best = nullptr;
+    double bestHz = 0.0;
+    for (std::size_t i = 0; i < s->profile_count; ++i) {
+        const ppcp_capture_profile &p = s->profiles[i];
+        if (isPreviewProfile(p) || !p.rate.present) continue;
+        const double hz = static_cast<double>(p.rate.nominal_mhz) / 1000.0;
+        if (hz <= fps + 0.5 && hz > bestHz) { bestHz = hz; best = &p; }
+    }
+    // Nothing at or below: take the slowest declared rather than refusing, so a
+    // request for 30 on a phone whose floor is 60 still selects something.
+    if (!best) {
+        for (std::size_t i = 0; i < s->profile_count; ++i) {
+            const ppcp_capture_profile &p = s->profiles[i];
+            if (isPreviewProfile(p) || !p.rate.present) continue;
+            const double hz = static_cast<double>(p.rate.nominal_mhz) / 1000.0;
+            if (!best || hz < bestHz) { bestHz = hz; best = &p; }
+        }
+    }
+    return best ? idStr(best->id) : QString();
+}
+
+void VideoInputPpcp::setPreferredCaptureProfile(const QString &profileId)
+{
+    if (m_preferredProfileId == profileId) return;
+    m_preferredProfileId = profileId;
+    // ⚠ APPLIED AT THE NEXT stream_open, NOT TO THE ONE THAT IS RUNNING.  A
+    // Stream's identity is fixed for its life (5.1a) and its profile with it;
+    // changing what a live Stream is would be a different Stream wearing the
+    // same id.  The caller restarts the input if it wants the change now.
 }
 
 const ppcp_capture_profile *VideoInputPpcp::bestPreviewProfile() const

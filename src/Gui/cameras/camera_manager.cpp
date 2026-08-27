@@ -23,6 +23,7 @@
 #include "video_input_factory.h"
 #include "event_buffer.h"
 #include "../Core/pp_debug.h"
+#include "../Core/pp_settings.h"
 #include "../Video/camera_capabilities.h"
 #include "../Video/frame_crop.h"
 #include <algorithm>
@@ -584,7 +585,43 @@ void CameraManager::setTargetFps(int index, double fps)
 {
     if (index < 0 || index >= m_cameras.size()) return;
     m_cameras[index].targetFps = fps;
-    // TODO: apply to live CameraInstance when setFps() is implemented
+
+    // ── "Config from PPS": for a PPCP camera this now DOES something ────────
+    //
+    // ⚠ AND FOR EVERY OTHER BACKEND IT STILL DOES NOT.  `VideoInputBase` has no
+    // frame-rate setter for any local camera, so the chips in Settings ->
+    // Cameras have always written a number nothing read.  That is unchanged and
+    // is a separate piece of work; what is closed here is the PHONE case, which
+    // is the one the protocol always carried and the one "config from PPS"
+    // turned out to mean.
+    //
+    // A phone's rate is not a knob — it is a choice among the CaptureProfiles
+    // that peer DECLARED (5.11), so the request is resolved to a declared
+    // profile and refused to nothing if none matches.  Persisted per camera so
+    // the choice survives the phone reconnecting, which it will do constantly.
+#ifdef HAVE_PPCP
+    CameraEntry &cam = m_cameras[index];
+    if (cam.device.backend != VideoInputFactory::Backend::Ppcp) return;
+
+    // Only a LIVE instance can resolve a rate to a profile, because the
+    // profiles are the counterpart's declaration and nothing else holds them.
+    // With no instance running there is nothing to resolve against and the
+    // request is refused rather than guessed at.
+    const QString profileId =
+        cam.controller ? cam.controller->ppcpProfileForRate(fps) : QString();
+    if (profileId.isEmpty()) {
+        ppWarn() << "[ppcp] no declared capture profile near" << fps
+                 << "fps for" << cam.device.description
+                 << (cam.controller ? "" : "(no live instance to ask)");
+        return;
+    }
+    // Keyed on the PPCP device id, which is what CameraInstance reads back.
+    QSettings s = ppSettings();
+    s.setValue(QStringLiteral("ppcp/captureProfile/") + cam.device.id, profileId);
+    cam.controller->setPpcpCaptureProfile(profileId);
+    ppWarn() << "[ppcp] capture profile for" << cam.device.description << "->" << profileId
+             << "(" << fps << "fps requested)";
+#endif
 }
 
 void CameraManager::setTriggerMode(int index, const QString &mode)

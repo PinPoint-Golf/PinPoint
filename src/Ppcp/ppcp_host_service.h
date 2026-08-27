@@ -55,6 +55,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <thread>
@@ -73,6 +74,8 @@
 #include "ppcp_discovery.h"
 #include "ppcp_engine.h"
 #include "ppcp_host_peer.h"
+#include "ppcp_import_ledger.h"
+#include "ppcp_import_sink.h"
 #include "ppcp_qr.h"
 #include "ppcp_rendezvous.h"
 #include "ppcp_transport.h"
@@ -381,6 +384,57 @@ public:
     Ppcp::PpcpHostPeer *peerForId(const QString &counterpartId);
     Ppcp::PpcpRendezvous &rendezvous() { return m_rv; }
 
+    // ── CORE §8.2 arbitration, as the shot pipeline needs to reach it ───────
+    //
+    // The bridge of the first connected phone whose arbiter actually started,
+    // or null.  `ShotController` branches on this: while it is non-null the
+    // host's local `ShotArbiter` is not consulted at all.
+    //
+    // ⛔ "FIRST", AND THAT IS A KNOWN LIMITATION, NOT A CHOICE.  A
+    // `PpcpShotBridge` belongs to a `PpcpHostPeer`, one per LINK, and libppcp's
+    // arbiter is bound to a single peer at construction — session id,
+    // `timebase_ref`, relation set, `issued_by` and the channel the Shot leaves
+    // on are all read back off that one peer.  So two phones are two arbiters
+    // that cannot see each other's Candidates, and one strike yields two Shots
+    // in two Sessions with no `shot_link` between them (8.2l).  A host-wide
+    // arbiter wants to live HERE, fed by every peer, with one Session id across
+    // phones and the issued Shot fanned out to the other links — none of which
+    // libppcp provides today.  Until it does, this returns one bridge and the
+    // second phone's arbitration is not consulted.  Recorded rather than
+    // papered over, because the failure is otherwise silent.
+    Ppcp::PpcpShotBridge *activeShotBridge();
+
+    // ── CORE 7.3a / MSG 5.2 — arming, from the host ────────────────────────
+    //
+    // ⚠ NOT PART OF THE MVP, AND DELIBERATELY SO.  A capture device arms itself
+    // in the shipping product; this is a capability beside that, not a
+    // replacement for it.
+    //
+    // Sent to EVERY connected phone with an empty stream list, which MSG 5.2
+    // makes "every open capture Stream": this application's `armed` is a
+    // property of the whole capture path, not of one camera.  Returns false if
+    // any phone refused, having still asked the others — a half-armed bay is a
+    // state somebody has to see, not one to hide by failing early.
+    Q_INVOKABLE bool armAll();
+    Q_INVOKABLE bool disarmAll();
+
+    // The aggregate a screen reads: the LEAST ready of the connected phones, so
+    // one phone that is blocked or still coming up cannot be hidden behind
+    // another that is ready.  Empty string with nothing connected.
+    //
+    // ⚠ IT IS NOT `ppcp_peer_is_armed()`.  That answers "arm was queued" — see
+    // `PpcpLiveSession::isArmed()` — and showing it to a person would be a green
+    // light with no evidence behind it.
+    Q_PROPERTY(QString armState READ armState NOTIFY armStateChanged)
+    QString armState() const;
+
+    // The id of the Source this host declared for its own microphone, or empty
+    // where it declared none (a machine with no audio input — MSG 3.3d makes
+    // that a normal declaration, not a broken one).  What `ShotController` must
+    // name when it nominates an acoustic Candidate: I26 refuses any Source this
+    // host does not own, and 8.1e forbids inventing one.
+    QString hostMicrophoneSourceId() const;
+
 signals:
     void stateChanged();
     void statusChanged();
@@ -395,6 +449,29 @@ signals:
     // home screen's DEVICES list reads the registry directly, but CameraManager
     // snapshots at construction and needs asking.
     void sourcesChanged();
+
+    // The set of live arbiters moved — a phone's arbiter started, or the phone
+    // holding the one we handed out went away.  `main.cpp` re-reads
+    // `activeShotBridge()` and `hostMicrophoneSourceId()` on this and hands
+    // both to `ShotController`.
+    //
+    // ⚠ THE JOIN IS A SIGNAL AND NOT A STORED std::function ON PURPOSE.
+    // `ShotController` is a stack object in main(); this service is a
+    // function-local static and outlives it.  A callback capturing
+    // `&shotController` would dangle between main() returning and exit() — the
+    // exact shape of the 23 Aug crash the destructor note above describes.  A
+    // QObject connection is severed when either end dies.
+    void shotBridgeChanged();
+
+    // CORE 8.2h — the arbiter issued a Shot.  `t0HostNs` is on `tb:host`, which
+    // is this Session's `timebase_ref`, and is never revised (I7).  `shotId` is
+    // carried for the log only: it is the wire's identity for an event the
+    // swing library knows by an ordinal.
+    void arbitratedShot(qint64 t0HostNs, const QString &shotId);
+
+    // 5.2a — a phone answered `arm`, or this host asked.  Drives the aggregate
+    // above and the per-phone row in Settings -> Phones.
+    void armStateChanged();
 
 private:
     // ── One of these per connected phone ────────────────────────────────────
@@ -428,6 +505,11 @@ private:
         // What it called itself in MSG 3.3.  Display text from an untrusted
         // counterpart (4.4d): it names a row and is never an identifier.
         QString name;
+
+        // MSG 9.1 — where a Session this phone REPLAYS onto the live link
+        // lands.  Declared after `peer` so it dies first: it holds the peer
+        // pointer.  Null until the engine exists.
+        std::unique_ptr<Ppcp::PpcpImportSink> importSink;
     };
 
 
@@ -494,6 +576,48 @@ private:
     Ppcp::Listener                         m_listener;
     std::vector<std::unique_ptr<Phone>>    m_phones;
     PpcpOfferController                   *m_offers = nullptr;
+
+    // ── MSG §9.1 — what this host has taken in, and what it owes for it ─────
+    //
+    // ONE ledger for every phone, because I34's identity is
+    // (minting peer, session, capture) and is deliberately NOT scoped by which
+    // link the bytes arrived on: the same Session offered by two phones, or by
+    // one phone twice, must be recognised as already held.  The per-phone
+    // `importSink` above is the walker; this is the memory.
+    //
+    // ⚠ AND UNTIL 27 AUG THIS WAS NOT HERE AT ALL, WHICH COST THE DEVICE ITS
+    // STORAGE.  Accepting a `session_offer` made a phone replay its whole
+    // bundle onto the link, and PinPointStudio wrote nothing, recorded nothing,
+    // and returned no `capture_committed` — so under 5.14h no Capture could
+    // ever reach `confirmed` and the phone could never evict anything it had
+    // sent us.  `have_digests` was likewise always empty, so it re-sent bytes
+    // we already had.  The whole machinery existed and had no caller.
+    Ppcp::PpcpImportLedger                 m_importLedger;
+
+    // 5.14h — every `capture_committed` this host owes, sent to whichever phone
+    // is the OWNER, once it is here to receive it.  Called from the tick.
+    void flushOwedCommits(Phone *ph);
+
+    // ── ENC 2.1d — the third channel, and the thread it has to cross ────────
+    //
+    // ⚠ NOTHING IN THIS APPLICATION USED TO ACCEPT ONE, THOUGH A COMMENT IN
+    // start() SAID IT DID.  `Listener::acceptInto()` had no caller outside the
+    // conformance harness, so a phone opening a `preview` channel after the
+    // session was established bound it, waited out `bindTimeoutMs`, and had it
+    // torn down — the link_id had already been erased from the listener's table
+    // when its first two channels completed, so the third arrived as a NEW
+    // half-built link with no control channel and expired as one.  Silent at
+    // both ends, and exactly the shape ENC 2.1d calls "the expected case".
+    //
+    // The accept thread owns nothing but the accept call and a live link
+    // belongs to the GUI thread, so the channel is collected on one and adopted
+    // on the other.  This is the list of link ids still short of a third
+    // channel, written by the GUI thread and read by the accept thread.
+    std::mutex                          m_wantChannelMutex;
+    std::vector<Ppcp::LinkId>           m_wantChannel;
+    void noteWantsChannel(const Ppcp::LinkId &id, bool wants);
+    // Runs on the GUI thread: the accept thread found a stream binding `id`.
+    void adoptChannel(const Ppcp::LinkId &id, Ppcp::TransportChannel *raw);
 
     QTimer  m_timer;
     bool    m_listening = false;

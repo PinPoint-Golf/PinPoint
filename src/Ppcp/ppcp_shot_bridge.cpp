@@ -65,14 +65,50 @@ bool PpcpShotBridge::policyTrampoline(void *ctx, const ppcp_candidate *c,
     // a missing or `unrelated` one is decided by the specification, not by
     // policy, and libppcp never asks about those.
     PpcpShotBridge *self = static_cast<PpcpShotBridge *>(ctx);
-    (void)c;
     (void)rel;
     if (!self) return true;
     if (sigmaNs > self->m_cfg.maxConversionSigmaNs) {
         ++self->m_stats.excluded;
         return false;   // excluded from setting `t0`; STILL in Shot.candidates (I8)
     }
+
+    // ── 8.2d, second application: corroboration ────────────────────────────
+    //
+    // Still "this Candidate may not set `t0`", and still exclude-and-retain —
+    // but the question is now whether this HOST saw anything, not how uncertain
+    // the conversion was.  A group in which every Candidate is excluded issues
+    // no Shot at all (libppcp: "every Candidate excluded: no Shot (8.2d)"),
+    // which is exactly the outcome wanted: a device detection this host cannot
+    // corroborate produces silence rather than a Shot the host then declines to
+    // record.  The device's own 8.2i deadline then mints on its own authority,
+    // which is the honest ending — it saw the strike and we did not.
+    if (self->m_judgingForeign && self->m_onCorroborate && c) {
+        std::int64_t atRefNs = 0;
+        const ppcp_id *ref = ppcp_peer_timebase_ref(self->m_peer);
+        ppcp_instant   at_ref{};
+        if (ref
+            && ppcp_relations_convert(ppcp_peer_relations(self->m_peer), &c->at, ref,
+                                      &at_ref) == PPCP_OK)
+            atRefNs = at_ref.ns;
+        else
+            return true;   // no relation: 8.2d's FIRST case decides, not policy
+
+        if (!self->m_onCorroborate(atRefNs)) {
+            ++self->m_stats.uncorroborated;
+            return false;
+        }
+    }
     return true;
+}
+
+bool PpcpShotBridge::isOwnCandidate(const ppcp_candidate &c) const
+{
+    // 5.1a — a Candidate carries the id of the peer that nominated it.  Read
+    // off the live peer rather than off `Config::peerId`, so there is one
+    // answer and it cannot drift from what the engine actually declares.
+    const ppcp_id *self = m_peer ? ppcp_peer_id(m_peer) : nullptr;
+    if (!self) return false;
+    return idStr(*self) == idStr(c.peer_id);
 }
 
 bool PpcpShotBridge::start(const Config &cfg, IdFn idFn, std::string *err)
@@ -188,7 +224,16 @@ bool PpcpShotBridge::nominate(const std::string &sourceId, const char *basis,
 
 void PpcpShotBridge::observe(const ppcp_event &ev)
 {
-    if (!m_arbiter || !ev.msg) return;
+    if (!m_arbiter || !ev.msg) {
+        // Count only what arbitration would have acted on.  Every other event
+        // kind reaches here in the ordinary course of a Session and saying so
+        // would bury the one case worth seeing.
+        if (!m_arbiter && ev.msg
+            && (ev.kind == PPCP_EVENT_CANDIDATE || ev.kind == PPCP_EVENT_SHOT
+                || ev.kind == PPCP_EVENT_CAPTURE_REQUEST))
+            ++m_stats.unarbitrated;
+        return;
+    }
 
     // ⚠ E28 / F-S5-3 — BEFORE THE SWITCH, AND BEFORE collectIssued().  A frame
     // of a replayed Session is scoped to that Session by the envelope's
@@ -204,10 +249,17 @@ void PpcpShotBridge::observe(const ppcp_event &ev)
 
     switch (ev.kind) {
     case PPCP_EVENT_CANDIDATE: {
+        const ppcp_candidate &c = ev.msg->body.candidate.candidate;
+        // The corroboration policy applies to a Candidate this host did not
+        // nominate, and to no other.  Excluded here is not excluded for ever:
+        // a Candidate that creates no group is RETAINED, and reconsider() —
+        // which `ShotController` calls the moment one of this host's own
+        // detectors fires — puts it back to the same question.
         bool excluded = false;
-        if (ppcp_arbiter_observe(m_arbiter, &ev.msg->body.candidate.candidate, &excluded)
-            == PPCP_OK)
+        m_judgingForeign = !isOwnCandidate(c);
+        if (ppcp_arbiter_observe(m_arbiter, &c, &excluded) == PPCP_OK)
             ++m_stats.observedForeign;
+        m_judgingForeign = false;
         break;
     }
     case PPCP_EVENT_SHOT:

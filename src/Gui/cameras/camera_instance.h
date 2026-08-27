@@ -201,6 +201,20 @@ public:
     // setPpcpHostService().  Only Backend::Ppcp instances ever consult it (see
     // ppcpAttachIfNeeded()) — harmless to set on any other backend.
     void setPpcpHostService(PpcpHostService *svc) { m_ppcpHostService = svc; }
+
+    // ── "Config from PPS" — which declared CaptureProfile a phone camera uses ─
+    //
+    // The knowledge lives here rather than in CameraManager because the
+    // profiles belong to the counterpart's declaration and only the live
+    // VideoInputPpcp holds them; reaching past this object for its input would
+    // put that knowledge in two places.  A non-PPCP instance answers empty and
+    // ignores the setter, so a caller needs no backend test of its own.
+    //
+    // ⚠ The setter takes effect at the next `stream_open` — 5.1a fixes a
+    // Stream's profile for its life.
+    void        setPpcpCaptureProfile(const QString &profileId);
+    QStringList ppcpCaptureProfiles() const;
+    QString     ppcpProfileForRate(double fps) const;
 #endif
 
     // Called by CameraManager only — not Q_INVOKABLE so QML cannot bypass.
@@ -306,6 +320,9 @@ private:
     // peer/session are a fresh ppcp_peer* and a fresh Session — the old ones
     // are not merely stale, they may already be destroyed.
     void ppcpAttachIfNeeded();
+    // Restores the operator's chosen CaptureProfile once the counterpart has
+    // declared — before that this Source has no profiles to prefer among.
+    void applyStoredPpcpProfile();
 #endif
     void updateBufferDescriptor();
     void stampBufferDescriptorFromRaw(const RawVideoFrame &raw);

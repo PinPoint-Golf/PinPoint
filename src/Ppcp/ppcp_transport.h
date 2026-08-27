@@ -460,6 +460,24 @@ public:
     // for a later accept() rather than dropped.  Returns false on timeout.
     bool acceptInto(PeerConnection &link, int timeoutMs, HandshakeFailure *fail = nullptr);
 
+    // ⚠ THE SAME THING, WITHOUT TOUCHING THE PeerConnection — WHICH IS WHAT AN
+    // EMBEDDING WITH AN ACCEPT THREAD ACTUALLY NEEDS.
+    //
+    // `acceptInto()` above mutates the link, and in this application a link
+    // belongs to the GUI thread the moment `accept()` hands it over: everything
+    // PPCP is single-threaded from that point, deliberately.  So the accept
+    // thread cannot call `acceptInto()` on a live phone's link, and the GUI
+    // thread cannot call it either without driving this listener's sockets from
+    // a second thread.  Both roads lead to a data race for want of a way to
+    // collect the channel and adopt it somewhere else.
+    //
+    // This is that way: the accept thread waits for a stream binding `want` and
+    // returns the CHANNEL, which is a self-contained object safe to hand across
+    // threads; the owner of the link then calls `PeerConnection::adopt()` on
+    // its own thread.  Null on timeout, which is the ordinary quiet case.
+    std::unique_ptr<TransportChannel> acceptChannelFor(const LinkId &want, int timeoutMs,
+                                                       HandshakeFailure *fail = nullptr);
+
     // 2.1c diagnostics.  Not an authentication outcome (see BindRejection), so
     // naming it breaches nothing and a test can assert on it.
     BindRejection lastBindRejection() const;

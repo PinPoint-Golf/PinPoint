@@ -1945,10 +1945,17 @@ bool Listener::acceptInto(PeerConnection &link, int timeoutMs, HandshakeFailure 
     // DIFFERENT link stays in this listener's link table and is handed out by a
     // later accept(); it is not dropped, because the dialler behind it did
     // nothing wrong.
-    std::unique_ptr<TransportChannel> one;
-    acceptImpl(timeoutMs, fail, &link.linkId(), &one);
+    std::unique_ptr<TransportChannel> one = acceptChannelFor(link.linkId(), timeoutMs, fail);
     if (!one) return false;
     return link.adopt(std::move(one));
+}
+
+std::unique_ptr<TransportChannel> Listener::acceptChannelFor(const LinkId &want, int timeoutMs,
+                                                             HandshakeFailure *fail)
+{
+    std::unique_ptr<TransportChannel> one;
+    acceptImpl(timeoutMs, fail, &want, &one);
+    return one;
 }
 
 }  // namespace Ppcp

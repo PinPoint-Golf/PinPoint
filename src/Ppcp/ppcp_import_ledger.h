@@ -85,6 +85,14 @@ struct CaptureKey {
 enum class Completeness { Complete, Partial, Absent };
 const char *completenessStr(Completeness c);
 
+// The ledger stores a digest as hex because it round-trips through JSON; the
+// wire wants bytes.  Exposed rather than left inline in `heldDigests()` because
+// `capture_committed` needs the same conversion, and two hand-rolled hex
+// decoders in one subsystem is one too many.  False for a string that is not
+// exactly PPCP_SHA256_BYTES*2 hex digits — which includes the legitimate empty
+// case, an owner that had not computed one.
+bool digestFromHex(const std::string &hex, ppcp_digest *out);
+
 class PpcpImportLedger {
 public:
     struct CaptureRecord {

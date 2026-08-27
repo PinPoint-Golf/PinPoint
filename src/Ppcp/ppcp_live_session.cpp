@@ -41,6 +41,10 @@ void PpcpLiveSession::attach(ppcp_peer *peer, const PpcpSourceDeclaration *decla
     m_open = false;
     m_localTimebases.clear();
     m_peerHealth = PeerHealth{};
+    // A new conversation is disarmed and has told us nothing about its
+    // readiness, whatever the last one had said.
+    m_readiness = PeerReadiness{};
+    m_armRequested = false;
     m_lastLinkState = PPCP_LINK_LIVE;
     m_publishedWith = 0;
 }
@@ -281,6 +285,24 @@ void PpcpLiveSession::observe(const ppcp_event &ev)
             if (m_onLinkState) m_onLinkState(PPCP_LINK_LIVE);
         }
         break;
+    case PPCP_EVENT_READINESS: {
+        // 5.2a — the device's answer to `arm`, and 7.3c's blocked case.  Until
+        // this arm existed nothing consumed `readiness`, so `armed` on this
+        // host meant only that a message had been queued.
+        if (!ev.msg) break;
+        const ppcp_body_readiness &b = ev.msg->body.readiness;
+        m_readiness.valid = true;
+        m_readiness.settled = b.readiness.settled;
+        m_readiness.hasEstimate = b.readiness.has_estimated_ready_ms;
+        m_readiness.estimatedReadyMs = b.readiness.estimated_ready_ms;
+        // 7.3c — an open registry (`storage_full`, `thermal_limit`, …), carried
+        // and never interpreted: a value this host has not heard of is shown as
+        // it arrived rather than mapped onto one it knows (10.3a / I13).
+        m_readiness.blockedReason =
+            b.readiness.has_blocked_reason ? idStr(b.readiness.blocked_reason) : std::string();
+        if (m_onReadiness) m_onReadiness(m_readiness);
+        break;
+    }
     case PPCP_EVENT_RELATION_UPDATE:
         // The engine has already folded it into ppcp_peer_relations(); the
         // callback exists so the camera seam can be re-evaluated at the new
@@ -312,6 +334,12 @@ bool PpcpLiveSession::arm(const std::vector<std::string> &streamIds, std::string
         if (err) *err = std::string("ppcp_peer_arm: ") + ppcp_result_str(r);
         return false;
     }
+    // ⚠ THE PREVIOUS ANSWER IS DISCARDED, NOT KEPT AS A HEAD START.  A
+    // `readiness` describes the arm it answered; carrying one across a new arm
+    // would show a device as settled on the strength of a reply to a different
+    // question, which is the whole failure this pair of fields exists to stop.
+    m_armRequested = true;
+    m_readiness = PeerReadiness{};
     return true;
 }
 
@@ -334,12 +362,27 @@ bool PpcpLiveSession::disarm(const std::vector<std::string> &streamIds, std::str
         if (err) *err = std::string("ppcp_peer_disarm: ") + ppcp_result_str(r);
         return false;
     }
+    m_armRequested = false;
+    m_readiness = PeerReadiness{};
     return true;
 }
 
 bool PpcpLiveSession::isArmed() const
 {
     return m_peer && ppcp_peer_is_armed(m_peer);
+}
+
+PpcpLiveSession::ArmState PpcpLiveSession::armState() const
+{
+    if (!m_armRequested) return ArmState::Disarmed;
+    // 7.3c — a blocked device is not an arming device that is slow.  It is
+    // reported first because it is the only one a person can act on.
+    if (m_readiness.valid && !m_readiness.blockedReason.empty()) return ArmState::Blocked;
+    if (m_readiness.valid && m_readiness.settled) return ArmState::Armed;
+    // Asked, and either not answered yet or answered `settled: false`.  Both
+    // are honestly "arming": 5.2a makes `estimated_ready_ms` mandatory for the
+    // second, so a caller that wants to say how long has it.
+    return ArmState::Arming;
 }
 
 ppcp_link_state PpcpLiveSession::linkState() const

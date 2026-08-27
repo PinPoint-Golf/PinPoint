@@ -27,6 +27,7 @@
 #include "ppcp_source_declaration.h"
 
 #include "../Core/device_enumerator.h"
+#include "../Core/pp_settings.h"
 
 namespace Ppcp {
 
@@ -47,12 +48,34 @@ PpcpSourceDeclaration::Inventory PpcpSourceDeclaration::hostInventory()
 
     // One microphone Source, because one is what the host nominates from: the
     // acoustic detector of src/Audio runs on the active input, not on all of
-    // them.  The first registered input is the one the app opens by default.
+    // them.
+    //
+    // ⚠ IT MUST BE THE INPUT THE APPLICATION ACTUALLY OPENS, AND FOR A WHILE IT
+    // WAS NOT.  This took `audio.front()` — first-REGISTERED order — while
+    // `AudioInput::start()` opens the device whose id matches the persisted
+    // `General/audioInputDevice`, falling back to the system default.  With one
+    // input those agree and nothing showed; with two they need not, and the
+    // declared Source then names a microphone that is not listening.  That id
+    // rides on every Candidate this host nominates (5.12a), so the error is not
+    // cosmetic: it attributes an acoustic detection to the wrong instrument,
+    // which is the one thing I19/I26 exist to prevent.
+    //
+    // The setting is read straight out of the shared INI rather than through
+    // AppSettings, because nothing in src/Ppcp may depend on src/Gui — the same
+    // reason the phone alias below is read this way.
     const QList<Device> audio = e->devices(DeviceType::AudioInput);
     if (!audio.isEmpty()) {
+        const QString preferred =
+            ppSettings().value(QStringLiteral("General/audioInputDevice")).toString();
+        const Device *chosen = &audio.front();
+        if (!preferred.isEmpty()) {
+            for (const Device &d : audio) {
+                if (d.id == preferred) { chosen = &d; break; }
+            }
+        }
         inv.hasMicrophone = true;
-        inv.microphone.id = audio.front().id.toStdString();
-        inv.microphone.label = audio.front().description.toStdString();
+        inv.microphone.id = chosen->id.toStdString();
+        inv.microphone.label = chosen->description.toStdString();
     }
     return inv;
 }

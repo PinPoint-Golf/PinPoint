@@ -115,7 +115,35 @@ public:
         // number in one place so a measurement replaces it here and nowhere
         // else.
         double maxConversionSigmaNs = 5.0e6;
+
     };
+
+    // ── 8.2d as a CORROBORATION policy ─────────────────────────────────────
+    //
+    // Does this host have evidence of its own for an event at `atRefNs`, a
+    // reading of `Session.timebase_ref`?  True admits the Candidate; false
+    // excludes it under 8.2d's third case, which takes it out of arbitration —
+    // and since arbitration is what issues, a device detection this host cannot
+    // corroborate produces NO SHOT rather than a Shot the host then declines to
+    // record.  The device's own 8.2i deadline then mints on its own authority,
+    // which is the honest ending to "it saw the strike and we did not".
+    //
+    // ⚠ IT IS ASKED ONLY ABOUT A FOREIGN CANDIDATE.  This host's own Candidate
+    // IS the corroboration, and putting it to the same test would be asking the
+    // witness to corroborate itself.
+    //
+    // ⚠ AND THE ORDER OF ARRIVAL DOES NOT DECIDE THE OUTCOME, THOUGH WE SPENT
+    // A BUILD BELIEVING IT DID.  The worry was that a device Candidate beating
+    // this host's own detector by a few milliseconds would be excluded and
+    // never recoverable, since `ppcp_arbiter_reconsider()` (8.2d1 / E29) walks
+    // only the RETAINED list.  It is recoverable, because a policy-excluded
+    // Candidate that creates no group IS retained — libppcp: "An excluded
+    // Candidate never CREATES a Shot ... It is retained, and a Shot issued near
+    // it later will pick it up."  So the whole remedy is to call reconsider()
+    // when this host's own detector fires, which `ShotController` does.  A
+    // deferral queue built here first was deleted once a test asked the library
+    // instead of the specification.
+    using CorroborationFn = std::function<bool(std::int64_t atRefNs)>;
 
     // 8.3e — Shot and Candidate ids SHOULD be UUIDs and a peer MUST NOT mint in
     // another peer's namespace.  The library has no random source (ground rule
@@ -157,6 +185,9 @@ public:
 
     void setShotCallback(ShotFn f) { m_onShot = std::move(f); }
     void setCaptureRequestCallback(CaptureRequestFn f) { m_onCaptureRequest = std::move(f); }
+    // Null disables the corroboration policy; conversion-uncertainty exclusion
+    // (the original 8.2d third case) is unaffected either way.
+    void setCorroborationCallback(CorroborationFn f) { m_onCorroborate = std::move(f); }
 
     // ── Nomination (CORE 5.12, 8.1) ────────────────────────────────────────
     //
@@ -255,6 +286,19 @@ public:
         std::size_t importedIgnored = 0;
         // E29 — Candidates re-admitted to arbitration when a relation arrived.
         std::size_t reconsidered = 0;
+        // ⚠ EVENTS THAT REACHED observe() WITH NO ARBITER, AND THE REASON THIS
+        // COUNTER EXISTS.  Until the application started the bridge, a phone's
+        // `candidate` or `shot` was decoded, validated, queued, dequeued and
+        // dropped at the first line of observe() — no counter moved, nothing
+        // was logged, and a phone that nominated was indistinguishable from one
+        // that never did.  A number here is the difference between "no device
+        // nominated" and "one did and we were not listening", and the second is
+        // the failure that took a day to see.
+        std::size_t unarbitrated = 0;
+        // The corroboration policy's own number, kept apart from `excluded`
+        // (conversion uncertainty) because they answer different questions: one
+        // says "too uncertain to place", the other "we saw nothing".
+        std::size_t uncorroborated      = 0;
     };
     const Stats &stats() const;
 
@@ -281,6 +325,15 @@ private:
     IdFn                         m_idFn;
     ShotFn                       m_onShot;
     CaptureRequestFn             m_onCaptureRequest;
+    CorroborationFn              m_onCorroborate;
+
+    // Set for the duration of one ppcp_arbiter_observe() call on a foreign
+    // Candidate, so the policy trampoline — which libppcp calls back into with
+    // no context of its own beyond the Candidate — knows the corroboration
+    // question applies at all.
+    bool                         m_judgingForeign = false;
+
+    bool isOwnCandidate(const ppcp_candidate &c) const;
 
     std::vector<std::uint8_t>    m_storage;
     ppcp_arbiter                *m_arbiter = nullptr;

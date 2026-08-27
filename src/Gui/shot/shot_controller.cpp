@@ -25,9 +25,12 @@
 #include "pp_debug.h"
 
 #include <QMetaEnum>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 
 namespace {
@@ -46,7 +49,12 @@ bool toArbSource(ShotController::Source s, pinpoint::ArbSource &out)
     case ShotController::Source::Imu:      out = pinpoint::ArbSource::Imu;      return true;
     case ShotController::Source::Ball:
     case ShotController::Source::Pose:     out = pinpoint::ArbSource::Ball;     return true;
-    case ShotController::Source::Manual:   break;
+    // Neither has a local modality: Manual commits directly, and a PPCP Shot
+    // has ALREADY been arbitrated by the time it is seen here — feeding it to
+    // the local arbiter would be the second arbiter this design exists to
+    // prevent.
+    case ShotController::Source::Manual:
+    case ShotController::Source::Ppcp:     break;
     }
     return false;
 }
@@ -98,6 +106,13 @@ ShotController::ShotController(pinpoint::EventBuffer *buffer,
     connect(&m_arbTimer, &QTimer::timeout, this, &ShotController::onArbHoldExpired);
 
     m_lastArmed = armed();
+}
+
+ShotController::~ShotController()
+{
+#ifdef HAVE_PPCP
+    if (m_ppcpBridge) m_ppcpBridge->setCorroborationCallback(nullptr);
+#endif
 }
 
 bool ShotController::armed() const
@@ -162,6 +177,24 @@ void ShotController::reportCandidate(Source source, qint64 estImpactUs, float co
     }
 
 #ifdef HAVE_PPCP
+    // Recorded BEFORE any gate, and before the nomination that may be refused:
+    // what this host's own detectors saw is evidence for the corroboration rule
+    // whether or not it can be put on the wire.  See the note on m_detections.
+    noteDetection(source, estImpactUs);
+
+    // ⚠ 8.2d1 / E29 — AND THIS IS WHAT MAKES THE CORROBORATION POLICY WORK.
+    // A device Candidate that arrived before this detector fired was excluded
+    // for want of evidence and RETAINED; the evidence has just arrived, so ask
+    // again.  Without this line the policy would be decided purely by which
+    // packet won a race, and a phone that detects a millisecond faster than our
+    // microphone — which it will, routinely — would never be believed.
+    if (m_ppcpBridge && m_ppcpBridge->active()) {
+        const std::size_t back = m_ppcpBridge->reconsider();
+        if (back)
+            ppDebug() << "[ppcp] reconsidered" << back
+                      << "candidate(s) after a" << sourceName(source) << "detection";
+    }
+
     // ⚠ THE REPLACEMENT, AND IT RETURNS.  See the note on setPpcpBridge() for
     // why running both arbiters would be worse than running either.
     if (m_ppcpBridge && m_ppcpBridge->active()) {
@@ -258,8 +291,38 @@ void ShotController::onArbHoldExpired()
 #ifdef HAVE_PPCP
 void ShotController::setPpcpBridge(Ppcp::PpcpShotBridge *bridge)
 {
+    // The outgoing bridge stops pointing at this object before we forget it.
+    // The lambda below captures `this`, and it lives inside a phone that
+    // outlives main()'s stack; `PpcpHostService::stop()` on aboutToQuit drops
+    // every phone first, but a bridge handed back here is one this object is no
+    // longer responsible for and must not still be answering for.
+    if (m_ppcpBridge && m_ppcpBridge != bridge)
+        m_ppcpBridge->setCorroborationCallback(nullptr);
+
     m_ppcpBridge = bridge;
     if (bridge) {
+        // ── 8.2d as corroboration, decided BEFORE a Shot exists ────────────
+        //
+        // The same rule `commitArbitratedShot()` applies, moved to the only
+        // place where refusing costs nothing: a Candidate excluded here never
+        // sets `t0`, and a group in which every Candidate is excluded issues NO
+        // SHOT.  So an uncorroborated device detection produces silence on the
+        // wire instead of a Shot we then decline to record — and the device's
+        // own 8.2i deadline lets it mint on its own authority, which is the
+        // honest ending to "it saw the strike and we did not".
+        //
+        // ⚠ THE GATE IN commitArbitratedShot() STAYS, AND IS NOW A MEASUREMENT.
+        // If it ever refuses a Shot on corroboration grounds, this policy
+        // failed to catch it first — which is precisely the number the change
+        // request against 8.2d needs, so it is worth more running than removed.
+        bridge->setCorroborationCallback([this](std::int64_t atRefNs) {
+            QString      why;
+            const bool   ok = corroborated(atRefNs / 1000, &why);
+            if (!ok)
+                ppDebug() << "[ppcp] candidate EXCLUDED (8.2d, uncorroborated) — t0_us"
+                          << (atRefNs / 1000) << "—" << why;
+            return ok;
+        });
         // Any hold window the local arbiter had open belongs to an arbitration
         // that is no longer running.  Cancelling rather than letting it expire
         // stops a stale decide() committing a shot the PPCP arbiter is about to
@@ -277,7 +340,72 @@ void ShotController::setPpcpSourceIds(const QString &acoustic, const QString &mo
     m_ppcpVisionSourceId   = vision;
 }
 
-void ShotController::commitArbitratedShot(qint64 t0HostNs)
+void ShotController::setDetectorAvailable(Source source, bool available)
+{
+    if (available) m_availableDetectors.insert(static_cast<int>(source));
+    else           m_availableDetectors.remove(static_cast<int>(source));
+}
+
+void ShotController::noteDetection(Source source, qint64 tUs)
+{
+    m_detections.append({source, tUs});
+    if (m_detections.size() > kDetectionRing)
+        m_detections.remove(0, m_detections.size() - kDetectionRing);
+}
+
+bool ShotController::corroborated(qint64 t0Us, QString *outWhy) const
+{
+    // "No detector available" is the honest exemption, not a loophole: with
+    // nothing listening there is no evidence to weigh, and refusing on none
+    // would be an assertion this host cannot make.
+    if (m_availableDetectors.isEmpty()) {
+        if (outWhy) *outWhy = QStringLiteral("no host detector available — accepted unweighed");
+        return true;
+    }
+
+    // ⚠ AVAILABILITY DECIDES WHETHER THE RULE APPLIES; IT DOES NOT DECIDE WHAT
+    // COUNTS AS AGREEMENT.  Any detection this host actually made corroborates,
+    // including from a modality never listed as available — ball-launch is
+    // exactly that case, corroboration-grade by construction and so never
+    // required, but perfectly good evidence on the occasions it fires.
+    bool    agreed = false;
+    QString verdicts;
+
+    const auto bestDeltaFor = [&](Source s) {
+        qint64 best = std::numeric_limits<qint64>::max();
+        for (const Detection &d : m_detections) {
+            if (d.source != s) continue;
+            best = std::min<qint64>(best, std::llabs(d.tUs - t0Us));
+        }
+        return best;
+    };
+    const auto record = [&](Source s, qint64 best, bool required) {
+        const QLatin1String name(sourceName(s));
+        if (best == std::numeric_limits<qint64>::max()) {
+            // Only worth saying for a detector that was supposed to be
+            // listening; a modality that never fired and was never required is
+            // not news.
+            if (required) verdicts += QStringLiteral(" %1=none").arg(name);
+            return;
+        }
+        // Recorded whether it agreed or not, because "would the stricter
+        // all-must-agree rule have been better here" is answerable only from
+        // the misses.
+        verdicts += QStringLiteral(" %1=%2ms%3")
+                        .arg(name)
+                        .arg(static_cast<double>(best) / 1000.0, 0, 'f', 1)
+                        .arg(required ? QString() : QStringLiteral("(unlisted)"));
+        if (best <= kCorroborationWindowUs) agreed = true;
+    };
+
+    for (const Source s : {Source::Acoustic, Source::Imu, Source::Ball, Source::Pose})
+        record(s, bestDeltaFor(s), m_availableDetectors.contains(static_cast<int>(s)));
+
+    if (outWhy) *outWhy = verdicts.trimmed();
+    return agreed;
+}
+
+void ShotController::commitArbitratedShot(qint64 t0HostNs, const QString &shotId)
 {
     // I7 — `t0` is what the arbiter decided and is never revised, so this
     // converts units and does nothing else.  The rounding is to the nearest
@@ -285,19 +413,61 @@ void ShotController::commitArbitratedShot(qint64 t0HostNs)
     // truncation of PRECISION at the local store, not a correction of the
     // instant, and the Shot on the wire keeps its nanoseconds.
     const qint64 tUs = t0HostNs / 1000;
-    ppInfo() << "[ppcp] arbitrated shot — t0_us" << tUs;
-    // Reported as Acoustic because commitShot's `Source` is a LOCAL label for
-    // which of this application's detectors fired, and a PPCP Shot may have
-    // been decided by a Candidate from another peer entirely.  It is a display
-    // and marker label, not an authority claim; the authority is `Shot.issued_by`
-    // and lives on the wire.
-    commitShot(Source::Acoustic, tUs);
+
+    // ── The corroboration rule ─────────────────────────────────────────────
+    QString why;
+    const bool ok = corroborated(tUs, &why);
+    // ⚠ ppDebug, AND THAT IS THE POINT.  It is compiled away below log level 3,
+    // so the full decision — every available detector and its delta — is there
+    // while we are testing and absent from a release build.
+    ppDebug() << "[ppcp] corroboration" << (ok ? "PASS" : "FAIL") << "shot" << shotId
+              << "t0_us" << tUs << "—" << why;
+    if (!ok) {
+        ppWarn() << "[ppcp] shot REFUSED — no host detector agreed within"
+                 << (kCorroborationWindowUs / 1000) << "ms of t0_us" << tUs
+                 << "— shot" << shotId << "—" << why;
+        // ⚠ THIS IS NOT A RETRACTION, AND CANNOT BE.  `arb_issue` put the Shot
+        // on the wire before any line of this function ran, and I7 makes an
+        // issued Shot a fact.  What is refused is the LOCAL consequence — this
+        // host does not record a swing for it.  The device is not told, because
+        // PPCP has no way to say it; that is an open request to the PPC team.
+        emit shotRefused(
+            tr("Shot from the phone was not recorded — nothing here confirmed it."));
+        return;
+    }
+
+    ppInfo() << "[ppcp] arbitrated shot — t0_us" << tUs << "shot" << shotId;
+    // `Source::Ppcp`, not `Acoustic`: commitShot's `Source` is a LOCAL label for
+    // what produced the shot, a PPCP Shot may have been decided by a Candidate
+    // from another peer entirely, and the ordinal is persisted — see the note on
+    // the enum.  It is a display and marker label, not an authority claim; the
+    // authority is `Shot.issued_by` and lives on the wire.
+    commitShot(Source::Ppcp, tUs);
 }
 #endif
 
 void ShotController::commitShot(Source source, qint64 timestampUs)
 {
     if (!armed()) {
+#ifdef HAVE_PPCP
+        // ⚠ A PPCP SHOT DROPPED HERE IS A DIVERGENCE, NOT A NON-EVENT.  The
+        // arbiter already issued it on the wire and told the device so; if this
+        // host then records nothing, the two ends disagree about how many shots
+        // happened and nothing anywhere is red.  A local detector dropped while
+        // the processor is busy is an ordinary miss and stays quiet; this is
+        // not that, so it is said out loud.
+        //
+        // The real fix is overlapping shot processing — the pipeline is
+        // unavailable for 15-40 s per shot, which a golfer hitting a bucket
+        // will outrun.  Deliberately not attempted here.
+        if (source == Source::Ppcp) {
+            ppWarn() << "[ppcp] arbitrated shot DROPPED — still processing the previous shot"
+                     << "— t0_us" << timestampUs;
+            emit shotRefused(
+                tr("Shot from the phone was missed — still working on the previous one."));
+            return;
+        }
+#endif
         ppDebug() << "[ShotController] commit ignored (not capturing or busy) — source"
                   << sourceName(source);
         return;

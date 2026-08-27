@@ -425,6 +425,29 @@ int main(int argc, char *argv[])
             shotController.reportCandidate(ShotController::Source::Imu,
                                            estImpactUs, conf);
     });
+#ifdef HAVE_PPCP
+    // Whether the IMU counts as a corroborating detector for a phone's Shot,
+    // and it has to be BOTH switched on and actually attached.  `autoDetectSwing`
+    // alone would mark it available on a machine with no IMU in the room, and
+    // the rule would then refuse every phone shot for want of an instrument that
+    // was never there.
+    const auto applyImuAvailability = [&shotController, &imuManager, &appSettings] {
+        shotController.setDetectorAvailable(
+            ShotController::Source::Imu,
+            appSettings.autoDetectSwing() && imuManager.imuConnected());
+    };
+    applyImuAvailability();
+    QObject::connect(&imuManager, &ImuManager::instancesChanged,
+                     &shotController, applyImuAvailability);
+    QObject::connect(&appSettings, &AppSettings::autoDetectSwingChanged,
+                     &shotController, applyImuAvailability);
+    // ⛔ BALL-LAUNCH IS NEVER MARKED AVAILABLE, AND THAT IS DELIBERATE.  Its
+    // candidates are corroboration-grade by construction — conf 0.6, below the
+    // local arbiter's 0.8 lone-candidate floor — so it misses often and by
+    // design.  Requiring it would refuse real shots; a detection from it still
+    // counts when it fires, because `corroborated()` weighs any detector that
+    // agreed, not only the ones listed as available.
+#endif
 
     // Acoustic onset auto-detection (shot detection P2, re-pointed at the P3
     // arbiter like the IMU path). TranscriptionController::impactDetected is
@@ -472,10 +495,17 @@ int main(int argc, char *argv[])
     // applied during real sessions. captureIntent is session-stable (doesn't
     // toggle per-shot). Gated by the acoustic enable + autoDetectSwing so the mic
     // stays off whenever acoustic can't contribute a candidate.
-    const auto applyShotAudio = [&controller, &cameraManager, &appSettings] {
-        controller.setShotDetectionActive(cameraManager.captureIntent()
-                                          && appSettings.acousticShotDetectionEnabled()
-                                          && appSettings.autoDetectSwing());
+    const auto applyShotAudio = [&controller, &cameraManager, &appSettings, &shotController] {
+        const bool acoustic = cameraManager.captureIntent()
+                              && appSettings.acousticShotDetectionEnabled()
+                              && appSettings.autoDetectSwing();
+        controller.setShotDetectionActive(acoustic);
+#ifdef HAVE_PPCP
+        // The same predicate, told to the corroboration rule: a microphone that
+        // is not listening is not evidence, and a Shot from a phone must not be
+        // refused for failing to agree with a detector that was switched off.
+        shotController.setDetectorAvailable(ShotController::Source::Acoustic, acoustic);
+#endif
     };
     applyShotAudio();
     QObject::connect(&cameraManager, &CameraManager::captureIntentChanged,
@@ -616,6 +646,42 @@ int main(int argc, char *argv[])
     // cameras and the IMUs.  Handed over as a plain QObject: the monitor reads
     // its `phones` property and knows nothing about PPCP (see setPhoneSource).
     resourceMonitor.setPhoneSource(&ppcpHost);
+
+    // ── CORE §8.2 — the shot pipeline joins the arbiter here ────────────────
+    //
+    // ⚠ AS SIGNALS AND NOT AS STORED POINTERS INTO main()'s STACK.
+    // `ppcpHost` is a function-local static and outlives `shotController`,
+    // which dies when main() returns; a callback held inside the service would
+    // dangle between then and exit().  A QObject connection is severed when
+    // either end goes, which is the whole reason the seam is shaped this way.
+    //
+    // The bridge pointer is re-read on every change rather than held: it
+    // belongs to a phone, and `dropPhone()` destroys it.
+    // (`ppcpHost` is a static, so it is named directly rather than captured —
+    // the same reason the aboutToQuit lambda below names it.)
+    const auto applyPpcpBridge = [&shotController] {
+        shotController.setPpcpBridge(ppcpHost.activeShotBridge());
+        // I26 / 5.12a — a Candidate names a Source THIS host declared.  The
+        // microphone is the only nominator this host has: no motion Source and
+        // no vision Source is declared yet, so IMU and ball candidates are not
+        // nominated at all.  They still corroborate (see setDetectorAvailable),
+        // but they do not reach the wire, so an issued Shot will not reference
+        // them (8.2f).  Declaring a motion Source is the proper fix and is
+        // deliberately a separate change.
+        shotController.setPpcpSourceIds(ppcpHost.hostMicrophoneSourceId(),
+                                        /*motion=*/QString(), /*vision=*/QString());
+    };
+    applyPpcpBridge();
+    QObject::connect(&ppcpHost, &PpcpHostService::shotBridgeChanged,
+                     &shotController, applyPpcpBridge);
+    // 8.2h — the arbiter issued a Shot.  Subject to the corroboration rule
+    // inside commitArbitratedShot(), this is where a phone's shot becomes a
+    // swing.
+    QObject::connect(&ppcpHost, &PpcpHostService::arbitratedShot, &shotController,
+                     [&shotController](qint64 t0HostNs, const QString &shotId) {
+        shotController.commitArbitratedShot(t0HostNs, shotId);
+    });
+
     engine.rootContext()->setContextProperty(QStringLiteral("ppcpHost"), &ppcpHost);
 #endif
     engine.rootContext()->setContextProperty(QStringLiteral("motionCaptureProbe"), &motionCaptureProbe);

@@ -108,6 +108,16 @@ int postRollMsFor(ShotController::Source s)
     case ShotController::Source::Pose:     return kPostRollPoseMs;
     case ShotController::Source::Ball:     return kPostRollBallMs;
     case ShotController::Source::Acoustic: return kPostRollAcousticMs;
+    // ⚠ MANUAL'S VALUE, AND ON PURPOSE.  The post-roll exists to let a
+    // back-dated estimate settle before the ring is frozen; a PPCP `t0` has
+    // already waited out the arbiter's whole `issue_hold_ns` on the wire, plus
+    // link latency and up to one pump tick, before it ever reaches this
+    // process.  Adding the acoustic detector's 1250 ms on top of that would
+    // push impact further from the window's trailing edge and eat the
+    // pre-impact reach the analyzer needs, for no settling that has not already
+    // happened.  Manual is the short value for exactly the same reason: it is
+    // the one other Source whose instant is fully back-dated on arrival.
+    case ShotController::Source::Ppcp:     return kPostRollManualMs;
     }
     return kPostRollManualMs;
 }

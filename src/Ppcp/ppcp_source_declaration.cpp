@@ -269,6 +269,16 @@ const std::vector<std::string> &PpcpSourceDeclaration::studioProfiles()
     return p;
 }
 
+std::string PpcpSourceDeclaration::sourceIdOfKind(const char *kind) const
+{
+    if (!kind || !m_built) return {};
+    for (const ppcp_source &s : m_sources) {
+        if (std::string(s.kind.v, s.kind.len) == kind)
+            return std::string(s.id.v, s.id.len);
+    }
+    return {};
+}
+
 const char *PpcpSourceDeclaration::intern(const std::string &s)
 {
     m_strings.push_back(s);

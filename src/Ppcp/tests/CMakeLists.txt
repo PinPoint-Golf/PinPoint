@@ -486,6 +486,12 @@ pp_add_test(ppcp_host_service_test
             ${PPCP}/ppcp_source_declaration.cpp
             ${PPCP}/ppcp_offer_controller.cpp
             ${PPCP}/ppcp_import_ledger.cpp
+            # MSG 9.1 — the host service now lands a REPLAYED Session on the
+            # live link and returns the `capture_committed` it owes for it, so
+            # the sink and the transport its Result type comes from are part of
+            # this translation unit's world.
+            ${PPCP}/ppcp_import_sink.cpp
+            ${PPCP}/ppcp_bundle_transport.cpp
             ${PPCP}/ppcp_qr.cpp
     INCLUDE ${PPCP} ${PP_SRC}/Video ${PP_SRC}/Core
     LINK    ${_hs_link}

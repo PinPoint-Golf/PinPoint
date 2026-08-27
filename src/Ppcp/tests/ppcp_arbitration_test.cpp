@@ -564,3 +564,101 @@ TEST(PpcpArbitration, AnImportedCandidateIsCountedAndNeverArbitrated)
     F.bridge.observe(ev);
     EXPECT_EQ(F.bridge.stats().observedForeign, liveForeign + 1);
 }
+
+// ── 8.2d as a CORROBORATION policy (PinPointStudio, 27 Aug 2026) ───────────
+//
+// This host does not record a swing for a device detection it saw no evidence
+// of.  Expressed as 8.2d exclusion rather than as a refusal after the fact,
+// because a Shot is a fact the moment it is issued (I7) and there is no way to
+// take one back — so the only place refusing costs nothing is before it exists.
+
+TEST(PpcpArbitration, AnUncorroboratedDeviceCandidateIssuesNoShot)
+{
+    Fixture F;
+    ASSERT_NO_FATAL_FAILURE(F.build());
+    ASSERT_NO_FATAL_FAILURE(F.declare());
+    ASSERT_NO_FATAL_FAILURE(F.openSession());
+    ASSERT_NO_FATAL_FAILURE(F.declareRelation(0, 1000.0));
+    ASSERT_NO_FATAL_FAILURE(F.startBridge());
+    // The host saw nothing.
+    F.bridge.setCorroborationCallback([](std::int64_t) { return false; });
+
+    F.deviceNominates(F.nowNs(), 0.9, kBasisAcoustic);
+    EXPECT_EQ(F.bridge.stats().uncorroborated, 1u);
+
+    ppcp_sim_clock_advance(&F.hostClk, 300 * kMs);
+    F.bridge.pump(F.nowNs());
+
+    EXPECT_TRUE(F.shots.empty())
+        << "8.2d takes the Candidate out of arbitration, and arbitration is what issues";
+    EXPECT_EQ(F.bridge.retainedCount(), 1u)
+        << "exclusion is a conclusion, not a discard: the Candidate remains evidence (I8)";
+}
+
+TEST(PpcpArbitration, ACorroboratedDeviceCandidateStillIssues)
+{
+    Fixture F;
+    ASSERT_NO_FATAL_FAILURE(F.build());
+    ASSERT_NO_FATAL_FAILURE(F.declare());
+    ASSERT_NO_FATAL_FAILURE(F.openSession());
+    ASSERT_NO_FATAL_FAILURE(F.declareRelation(0, 1000.0));
+    ASSERT_NO_FATAL_FAILURE(F.startBridge());
+    F.bridge.setCorroborationCallback([](std::int64_t) { return true; });
+
+    F.deviceNominates(F.nowNs(), 0.9, kBasisAcoustic);
+    ppcp_sim_clock_advance(&F.hostClk, 300 * kMs);
+    F.bridge.pump(F.nowNs());
+
+    EXPECT_EQ(F.bridge.stats().uncorroborated, 0u);
+    EXPECT_EQ(F.shots.size(), 1u)
+        << "the policy is a corroboration rule, not a way of refusing every device";
+}
+
+// ⚠ THE ONE THAT SETTLED A DESIGN ARGUMENT, AND IS KEPT FOR THAT REASON.
+//
+// Reading 8.2d1 / E29 — "reconsider what was RETAINED for want of a relation" —
+// alongside `ppcp_arbiter_reconsider()`, which walks only the retained list, it
+// looks as though a policy exclusion must be permanent: the Candidate is marked
+// inside its group and the retained list never sees it.  That would have made
+// this whole policy unusable, because a phone detects a millisecond or two
+// before a host microphone as a matter of course, and every such Candidate
+// would have been refused for ever on arrival order alone.  A deferral queue
+// was built here to work around it.
+//
+// It is not permanent, and the deferral was deleted.  libppcp retains an
+// excluded Candidate that creates no group — "An excluded Candidate never
+// CREATES a Shot ... It is retained, and a Shot issued near it later will pick
+// it up" — so reconsider() reaches it after all.  This test is the evidence,
+// and it is what `ShotController` relies on when it calls reconsider() as each
+// of this host's own detectors fires.
+TEST(PpcpArbitration, APolicyExclusionIsRetainedAndReconsiderTakesItBack)
+{
+    Fixture F;
+    ASSERT_NO_FATAL_FAILURE(F.build());
+    ASSERT_NO_FATAL_FAILURE(F.declare());
+    ASSERT_NO_FATAL_FAILURE(F.openSession());
+    ASSERT_NO_FATAL_FAILURE(F.declareRelation(0, 1000.0));
+    ASSERT_NO_FATAL_FAILURE(F.startBridge());
+
+    bool corroborates = false;
+    F.bridge.setCorroborationCallback([&corroborates](std::int64_t) { return corroborates; });
+
+    // The device beats this host's detector to the punch.
+    F.deviceNominates(F.nowNs(), 0.9, kBasisAcoustic);
+    EXPECT_EQ(F.bridge.stats().uncorroborated, 1u);
+    EXPECT_EQ(F.bridge.retainedCount(), 1u)
+        << "a policy exclusion that creates no group is RETAINED, which is what makes it "
+           "reachable again";
+
+    // This host's own detector fires a moment later.
+    corroborates = true;
+    EXPECT_EQ(F.bridge.reconsider(), 1u)
+        << "8.2d1/E29 re-admits it: the exclusion was a conclusion about the evidence then, "
+           "not a permanent verdict";
+    EXPECT_EQ(F.bridge.retainedCount(), 0u);
+
+    ppcp_sim_clock_advance(&F.hostClk, 300 * kMs);
+    F.bridge.pump(F.nowNs());
+    EXPECT_EQ(F.shots.size(), 1u)
+        << "and the Shot issues, so arrival order does not decide the outcome";
+}

@@ -136,6 +136,20 @@ public:
     // names the entity that failed, so a red test says which.
     ppcp_result validate(std::string *where = nullptr) const;
 
+    // The id of the first Source of a given `kind` ("microphone", "camera"),
+    // or empty where this host declared none.  Empty is a NORMAL answer: a Mac
+    // with no audio input declares no microphone Source at all (MSG 3.3d), and
+    // a caller must treat that as "we have none" rather than as a failure.
+    //
+    // ⚠ MATCH ON `kind`, NEVER ON THE ID CONVENTION.  A caller that rebuilt the
+    // id as `"mic:" + deviceId` would be wrong for a long device id: `clampId()`
+    // keeps the LAST PPCP_ID_MAX bytes of the whole string, so a CoreAudio UID
+    // over 60 bytes silently loses the `mic:` prefix.  The conformance harness
+    // made exactly that mistake and was refused by I26, which is the check
+    // doing its job.  This exists so nobody makes it a third time — the loop
+    // was already written twice in the test tree before it was written here.
+    std::string sourceIdOfKind(const char *kind) const;
+
     std::size_t sourceCount() const { return m_sources.size(); }
     std::size_t profileCount() const { return m_profiles.size(); }
     const std::vector<ppcp_source> &sources() const { return m_sources; }

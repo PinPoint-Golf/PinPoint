@@ -102,12 +102,32 @@ public:
     // whether a Capture is new (I34).
     ppcp_capture_index *index() { return &m_index; }
 
-    // Everything the engine has queued since the last call.
+    // Everything the engine has queued since the last call.  THE OFFLINE PATH:
+    // this class is the only drainer of a bundle's own engine.
     void drainEvents();
+
+    // ⚠ THE LIVE PATH.  A socket's event ring has one drainer (`PpcpHostPeer`),
+    // so the embedding registers a hook and feeds each event here instead.
+    // Consumes nothing.
+    //
+    // ⚠ AND THE CALLER MUST FILTER ON `ev.imported`.  A live link carries BOTH
+    // the running Session's own captures — which belong to `VideoInputPpcp` —
+    // and the frames of a stored Session being REPLAYED under MSG §9.1, which
+    // are what this class is for.  Feeding it the live ones would file a
+    // capture the user is making right now as an import of somebody's archive.
+    void observeEvent(const ppcp_event &ev);
 
     // CORE 4.4a / ENC 7d — the Session's completeness, and the close.  Called
     // once the walk is over, with what the reader decided.
     void finish(const PpcpBundleTransport::Result &r);
+
+    // The same, for a Session replayed onto a live link, where there is no
+    // bundle and therefore no bundle-level completeness assertion to resolve
+    // against (ENC 7d has nothing to say here).  A replay cut short by a dying
+    // link simply never delivers `session_close`, so the Session stays open in
+    // the ledger — which is the honest record, and is what lets a later
+    // reconnection finish it.
+    void finishLive();
 
     const Stats &stats() const { return m_stats; }
 

@@ -874,9 +874,32 @@ the conformance harness.
   its `Shot.id` an `int` ordinal, and CORE 8.5c keys idempotent re-import on opaque ids.
   Wiring it today would either duplicate the clip on re-arrival or throw the identity away.
   That is host review item 2 and H-compose does not settle it by accident.
-- **`ShotController::setPpcpBridge()` is still not called.** It is a live behaviour change for
-  every shot — `reportCandidate()` stops touching `m_arbiter` once a bridge is set — and this
-  work cannot run the application to see it. Deliberately left for a wave that can.
+- ~~**`ShotController::setPpcpBridge()` is still not called.**~~ **Closed 27 August 2026.** It
+  read: it is a live behaviour change for every shot — `reportCandidate()` stops touching
+  `m_arbiter` once a bridge is set — and that work could not run the application to see it, so
+  it was deliberately left for a wave that can. This is that wave.
+  `PpcpHostService::onDeclare()` now starts the arbiter immediately after `session_open`
+  (⚠ after, never before: `ppcp_arbiter_new()` builds happily for a peer with no Session, and
+  every entry point inside then bails on a null `timebase_ref` while `active()` answers true —
+  a failure that reads as zero of everything), installs a shot callback, and publishes the
+  bridge and the host's declared microphone Source id to `ShotController` **as Qt signals
+  rather than stored callbacks**, because the service is a function-local static that outlives
+  `main()`'s stack. `PpcpShotBridge::Stats` gained `unarbitrated`, which counts what the old
+  state discarded in silence.
+
+  Three things this deliberately does **not** claim:
+  - **An arbitrated Shot is not committed unconditionally.** A host-side corroboration rule
+    (`ShotController::corroborated()`) accepts a device's Shot outright where this host has no
+    detector available, and otherwise requires one host detection within CORE §5.10's 50 ms
+    coincidence window. That is application policy, not conformance: 8.2 issued the Shot, and
+    what is refused is only the local consequence. It cannot be a retraction — `arb_issue`
+    puts the Shot on the wire before any host code runs and I7 makes it a fact — and PPCP has
+    no way to tell the device, which is an open request raised with the PPC team.
+  - **The host still declares no motion or vision Source**, so IMU and ball candidates are
+    refused under I26 and reach neither arbiter. They are kept as local corroboration
+    evidence, which means an issued Shot does **not** reference them (8.2f). Declaring a
+    motion Source is the proper fix and is a separate change.
+  - **`arm()` is still not called**, and clips still do not land — see the item above.
 - ~~**The macOS keychain path is compiled but not exercised at runtime.**~~ **Closed by
   erratum E56, 25 August 2026.** It read: the login keychain cannot be unlocked from a
   non-Aqua session, so a test that needed it would be red on every headless box, and RT-12 is

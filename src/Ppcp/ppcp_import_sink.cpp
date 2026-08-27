@@ -278,9 +278,21 @@ void PpcpImportSink::drainEvents()
 {
     if (!m_peer) return;
     ppcp_event ev{};
-    while (ppcp_peer_next_event(m_peer, &ev) == PPCP_OK) {
+    while (ppcp_peer_next_event(m_peer, &ev) == PPCP_OK)
+        observeEvent(ev);
+}
+
+// ⚠ THE LIVE PATH CANNOT DRAIN, AND THAT IS WHY THIS IS SEPARATE.  On a socket
+// the event ring has exactly ONE drainer — `PpcpHostPeer` — and a second
+// consumer calling `ppcp_peer_next_event()` would steal frames from the first.
+// So the live embedding registers an event hook and hands each event here,
+// exactly as `PpcpAnnotationStore::observeEvent()` is fed.  `drainEvents()`
+// above remains the offline bundle path, where this class IS the only drainer.
+void PpcpImportSink::observeEvent(const ppcp_event &ev)
+{
+    {
         const ppcp_msg *m = ev.msg;
-        if (!m) continue;
+        if (!m) return;
         switch (ev.kind) {
         case PPCP_EVENT_DECLARE:
             // The bundle's MINTING peer (I34's second scope).  The first
@@ -349,6 +361,28 @@ void PpcpImportSink::finish(const PpcpBundleTransport::Result &r)
     // withhold a `capture_committed` that is owed: the commit may go days after
     // the import, and releasing the owner's storage stays legitimate after a
     // Session closes.
+    if (m_sawClose) m_ledger.closeSession(m_stats.ownerPeerId, m_stats.sessionId);
+}
+
+void PpcpImportSink::finishLive()
+{
+    if (m_open.file) {
+        // Same rule as finish(): the bytes that arrived are kept, and nothing
+        // is owed back for a payload that never completed (5.14h is about a
+        // payload DURABLY committed, and half a clip is not).
+        std::fclose(static_cast<std::FILE *>(m_open.file));
+        m_open = OpenPayload{};
+    }
+    if (m_stats.sessionId.empty()) return;
+
+    // `asserted = false`, `truncated = false`: a live replay makes no
+    // bundle-level completeness claim, and a link that died mid-replay is not
+    // an assertion of truncation — it is an absence of `session_close`, which
+    // the line below then declines to act on.  Inventing `truncated` here would
+    // be exactly the fabrication ENC 7d's one-directional rule exists to stop.
+    m_ledger.noteSession(m_stats.ownerPeerId, m_stats.sessionId,
+                         /*asserted=*/false, Completeness::Partial,
+                         /*bundleTruncated=*/false, m_stats.sessionDir);
     if (m_sawClose) m_ledger.closeSession(m_stats.ownerPeerId, m_stats.sessionId);
 }
 

@@ -280,6 +280,28 @@ public:
     // mean anything.
     QString timebaseId() const;
 
+    // ── "Config from PPS" — which declared CaptureProfile this camera uses ──
+    //
+    // The one thing that question turned out to mean, and the protocol has
+    // carried it all along: `stream_open` names any declared `profile_id`, and
+    // every profile a peer declares is already parsed into `CameraCapabilities`
+    // above.  Only the choosing was missing.
+    //
+    // Empty restores the automatic pick (the fastest non-preview profile).
+    // ⚠ Applied at the next `stream_open`, never to a Stream that is running:
+    // 5.1a fixes a Stream's identity for its life, and its profile with it.
+    void setPreferredCaptureProfile(const QString &profileId);
+    const QString &preferredCaptureProfile() const { return m_preferredProfileId; }
+
+    // Every non-preview profile this peer declared, in declaration order, with
+    // their nominal rates in Hz where `outRatesHz` is given (0.0 for a profile
+    // that declared no rate — which is legal, and different from "0 fps").
+    QStringList declaredCaptureProfiles(double *outRatesHz = nullptr,
+                                        int maxRates = 0) const;
+    // The declared profile nearest `fps` from below, for a caller whose control
+    // is a frame rate rather than a profile id.  Empty where none is declared.
+    QString profileForRate(double fps) const;
+
 signals:
     // A Capture that is NOT a preview frame, with its canonical instants
     // intact.  Deliberately not videoFrameReady() — see the header note.
@@ -340,6 +362,9 @@ private:
 
     QString m_captureStreamId;
     QString m_previewStreamId;
+    // Empty means "the fastest declared", which is what every instance did
+    // before an operator could say otherwise.
+    QString m_preferredProfileId;
 
     // capture id -> the Stream it named, from `capture_announce`.  A
     // `payload_begin` carries only a capture id (ENC §6), so the Stream — and

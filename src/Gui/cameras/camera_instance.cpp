@@ -576,9 +576,66 @@ void CameraInstance::ppcpAttachIfNeeded()
     // Session it needs failed to open (both logged where they happen, not
     // here — this function has nothing more specific to say).
     if (!hp || !hp->liveSession().isOpen()) return;
-    if (auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput))
+    if (auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput)) {
         v->attach(hp->liveSession().peer(),
                  QString::fromStdString(hp->liveSession().config().sessionId));
+        // "Config from PPS" — the operator's chosen CaptureProfile, restored
+        // before the Stream is opened.  Applied HERE rather than at
+        // construction because it is only meaningful once the counterpart has
+        // declared: until then this Source has no profiles to prefer among.
+        applyStoredPpcpProfile();
+    }
+}
+
+void CameraInstance::applyStoredPpcpProfile()
+{
+    auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput);
+    if (!v) return;
+    // Keyed on the PPCP device id — "ppcp:<peer_id>/<source_id>" — which names
+    // one camera on one phone and is what both ends of this setting agree on.
+    // Not CameraManager's model|serial key: a phone's declared product strings
+    // are display text from an untrusted counterpart (4.4d) and have no
+    // business being an identifier.
+    const QString id =
+        ppSettings().value(QStringLiteral("ppcp/captureProfile/") + m_deviceId).toString();
+    if (id.isEmpty()) return;
+    // ⚠ CHECKED AGAINST WHAT THE PEER ACTUALLY DECLARED, AND SAID OUT LOUD WHEN
+    // IT NO LONGER MATCHES.  A phone may declare a different profile set after
+    // an OS update, and an operator's chosen 240 fps silently becoming whatever
+    // is fastest is the kind of quiet substitution that gets noticed a week
+    // later in the data.
+    if (!v->declaredCaptureProfiles().contains(id)) {
+        ppWarn() << "[ppcp] chosen capture profile" << id << "is no longer declared by"
+                 << m_deviceId << "— falling back to the fastest";
+        return;
+    }
+    v->setPreferredCaptureProfile(id);
+    ppInfo() << "[ppcp] capture profile" << id << "restored for" << m_deviceId;
+}
+
+void CameraInstance::setPpcpCaptureProfile(const QString &profileId)
+{
+    // ⚠ NOT APPLIED TO A RUNNING STREAM.  5.1a fixes a Stream's identity, and
+    // its profile with it, for the Stream's life; the change takes effect the
+    // next time this input opens one.  Restarting a live preview under an
+    // operator who has just clicked a chip is a judgement for the caller, not
+    // for this setter.
+    if (auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput))
+        v->setPreferredCaptureProfile(profileId);
+}
+
+QStringList CameraInstance::ppcpCaptureProfiles() const
+{
+    if (auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput))
+        return v->declaredCaptureProfiles();
+    return {};
+}
+
+QString CameraInstance::ppcpProfileForRate(double fps) const
+{
+    if (auto *v = dynamic_cast<VideoInputPpcp *>(m_videoInput))
+        return v->profileForRate(fps);
+    return {};
 }
 #endif  // HAVE_PPCP_TRANSPORT
 

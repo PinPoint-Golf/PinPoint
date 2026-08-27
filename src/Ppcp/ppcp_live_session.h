@@ -155,7 +155,43 @@ public:
     // property of the whole capture path, not of one camera.
     bool arm(const std::vector<std::string> &streamIds = {}, std::string *err = nullptr);
     bool disarm(const std::vector<std::string> &streamIds = {}, std::string *err = nullptr);
+
+    // ⚠ WHAT THIS ANSWERS, AND WHAT IT DOES NOT.  `ppcp_peer_arm()` sets the
+    // peer's `armed` flag when the message is successfully QUEUED — before any
+    // byte leaves, and with nothing acknowledging it.  So this is "I sent arm",
+    // not "the device is armed", and it must never be shown to a person as the
+    // second.  `armState()` below is the one a screen may read.
     bool isArmed() const;
+
+    // ── 5.2a — the other half of arming, which is the device's ─────────────
+    //
+    // MSG 5.2a makes the answer to `arm` a `readiness`, and libppcp does not
+    // send one for the device: the embedding must.  Until this existed nothing
+    // in this application consumed `readiness` at all, so arming was a message
+    // leaving the machine and a green light with no evidence behind it.
+    enum class ArmState {
+        Disarmed,   // nothing sent, or `disarm` sent
+        Arming,     // `arm` queued; no readiness yet, or `settled: false`
+        Armed,      // readiness said `settled: true`
+        Blocked,    // readiness carried a `blocked_reason` (7.3c)
+    };
+    ArmState armState() const;
+    // Why, where the device said.  Empty unless `armState() == Blocked`.
+    const std::string &blockedReason() const { return m_readiness.blockedReason; }
+    // 5.2a's `estimated_ready_ms`, MANDATORY when not settled.  Zero and
+    // `hasEstimate == false` are different answers and the second is a device
+    // that owes one.
+    struct PeerReadiness {
+        bool          valid = false;      // one has arrived at all
+        bool          settled = false;
+        bool          hasEstimate = false;
+        std::uint32_t estimatedReadyMs = 0;
+        std::string   blockedReason;      // empty where none
+    };
+    const PeerReadiness &peerReadiness() const { return m_readiness; }
+    // Raised when a `readiness` moved any of the above.
+    using ReadinessFn = std::function<void(const PeerReadiness &)>;
+    void setReadinessCallback(ReadinessFn f) { m_onReadiness = std::move(f); }
 
     // ── Liveness, as the UI needs to see it ────────────────────────────────
     ppcp_link_state linkState() const;
@@ -269,6 +305,13 @@ private:
     // so that a test can assert I21 by count rather than by inspection.
     std::vector<std::string>     m_localTimebases;
     PeerHealth                   m_peerHealth;
+    PeerReadiness                m_readiness;
+    ReadinessFn                  m_onReadiness;
+    // Whether THIS host has asked.  Kept beside the device's answer because the
+    // two together are the state, and either alone is a half-truth: an `arm`
+    // nobody answered and a stale `settled` from before a `disarm` look
+    // identical if only one of them is remembered.
+    bool                         m_armRequested = false;
     ppcp_link_state              m_lastLinkState = PPCP_LINK_LIVE;
     LinkStateFn                  m_onLinkState;
     HealthFn                     m_onHealth;

@@ -261,6 +261,55 @@ Item {
                 // 7.4f — this application never publishes one itself) has
                 // nothing stored to forget, and it goes on its own when the
                 // session that produced it closes (7.3b).
+                // ── CORE 7.3a / MSG 5.2 — arming, from the host ─────────────
+                //
+                // ⚠ WHAT THIS SHOWS IS THE DEVICE'S ANSWER, NOT OUR MESSAGE.
+                // `arm` sets a flag here the moment it is queued, so a control
+                // that went green on click would be reporting that a packet
+                // left the building.  5.2a makes the answer a `readiness`, and
+                // this reads that: "Arming" until one arrives, "Armed" only
+                // when the phone said `settled`, and the reason where 7.3c says
+                // it cannot.
+                //
+                // ⛔ NOT part of the MVP — a capture device arms itself in the
+                // shipping product, and this sits beside that.
+                Text {
+                    readonly property string st: phoneRow.isConnected
+                                                 ? (phoneRow.phoneData.armState || "") : ""
+                    readonly property string why: phoneRow.phoneData.armBlockedReason || ""
+                    readonly property int    ms: phoneRow.phoneData.armReadyMs === undefined
+                                                 ? -1 : phoneRow.phoneData.armReadyMs
+                    visible: st !== "" && st !== "disarmed"
+                    text: st === "armed"   ? qsTr("Armed")
+                        : st === "blocked" ? (why !== "" ? qsTr("Cannot arm — %1").arg(why)
+                                                         : qsTr("Cannot arm"))
+                        : ms >= 0          ? qsTr("Arming — %1 ms").arg(ms)
+                        :                    qsTr("Arming…")
+                    font.family:    Theme.fontData
+                    font.pixelSize: Theme.fontSzMicro
+                    color: st === "armed"   ? Theme.colorGood
+                         : st === "blocked" ? Theme.colorError
+                         :                     Theme.colorAccent
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                PpButton {
+                    readonly property bool isArmed:
+                        (phoneRow.phoneData.armState || "") === "armed"
+                        || (phoneRow.phoneData.armState || "") === "arming"
+                    label:            isArmed ? qsTr("Disarm") : qsTr("Arm")
+                    visible:          phoneRow.isConnected
+                    Layout.alignment: Qt.AlignVCenter
+                    // Host arming is all-or-nothing across the bay: MSG 5.2's
+                    // empty stream list means every open capture Stream, and
+                    // this application's armed is a property of the whole
+                    // capture path rather than of one phone's camera.
+                    onClicked: if (root.controller) {
+                                   if (isArmed) root.controller.disarmAll()
+                                   else         root.controller.armAll()
+                               }
+                }
+
                 PpButton {
                     label:            qsTr("Forget")
                     destructive:      true

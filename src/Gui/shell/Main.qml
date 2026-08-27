@@ -859,6 +859,30 @@ ApplicationWindow {
         }
     }
 
+    // ── A phone's shot this host declined to record ──────────────────────────
+    // The golfer hit a ball and nothing came of it, so something has to say so:
+    // the shot chime's opposite number, two octaves and a half below it, and a
+    // toast carrying the sentence the controller already phrased. The detail of
+    // WHY — every detector and its delta — is on the app log and only in a
+    // testing build; this is the act-now half.
+    TingPlayer { id: refusedTing; frequency: 220.0; volume: 0.7 }
+    PpToast {
+        id: shotRefusedToast
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: saveErrorToast.y - (saveErrorToast.visible ? height + Theme.sp(10) : 0)
+        z: 101
+        glyph: "⊘"
+        severity: "warn"
+        showUndo: false
+    }
+    Connections {
+        target: shotController
+        function onShotRefused(reason) {
+            refusedTing.play()
+            shotRefusedToast.show(reason)
+        }
+    }
+
     // ── The probe hook — the standing verify-by-probing tool, dark by default ────────────────
     //
     // `--probe-qml /abs/path/probe.qml` loads that file over the whole window with the FULL app
