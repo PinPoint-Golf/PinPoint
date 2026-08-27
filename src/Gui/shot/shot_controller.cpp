@@ -110,9 +110,11 @@ ShotController::ShotController(pinpoint::EventBuffer *buffer,
 
 ShotController::~ShotController()
 {
-#ifdef HAVE_PPCP
-    if (m_ppcpBridge) m_ppcpBridge->setCorroborationCallback(nullptr);
-#endif
+    // ⚠ NOTHING TO UNDO, AND THAT IS THE FIX.  This used to clear the
+    // corroboration callback off the live bridge, which meant dereferencing a
+    // raw pointer at a moment when nothing guaranteed it was still valid.  The
+    // callback now holds a QPointer to this object and answers harmlessly once
+    // it is gone, so there is no teardown obligation left to get wrong.
 }
 
 bool ShotController::armed() const
@@ -291,14 +293,15 @@ void ShotController::onArbHoldExpired()
 #ifdef HAVE_PPCP
 void ShotController::setPpcpBridge(Ppcp::PpcpShotBridge *bridge)
 {
-    // The outgoing bridge stops pointing at this object before we forget it.
-    // The lambda below captures `this`, and it lives inside a phone that
-    // outlives main()'s stack; `PpcpHostService::stop()` on aboutToQuit drops
-    // every phone first, but a bridge handed back here is one this object is no
-    // longer responsible for and must not still be answering for.
-    if (m_ppcpBridge && m_ppcpBridge != bridge)
-        m_ppcpBridge->setCorroborationCallback(nullptr);
-
+    // ⚠ THE OUTGOING BRIDGE IS NOT TOUCHED, AND THAT IS DELIBERATE.  This
+    // function used to clear the old bridge's callback here, "belt and braces".
+    // It crashed on a range on 27 Aug: `dropPhone()` destroyed the Phone — and
+    // the bridge inside it — before announcing the change, so the pointer this
+    // object still held was already freed and clearing through it read reused
+    // memory.  Two things now make that impossible rather than unlikely: the
+    // service announces the change BEFORE it erases the phone, and the callback
+    // below holds a QPointer rather than a bare `this`.  Reaching for the
+    // outgoing pointer at all is what the crash was, so nothing here does.
     m_ppcpBridge = bridge;
     if (bridge) {
         // ── 8.2d as corroboration, decided BEFORE a Shot exists ────────────
@@ -315,9 +318,16 @@ void ShotController::setPpcpBridge(Ppcp::PpcpShotBridge *bridge)
         // If it ever refuses a Shot on corroboration grounds, this policy
         // failed to catch it first — which is precisely the number the change
         // request against 8.2d needs, so it is worth more running than removed.
-        bridge->setCorroborationCallback([this](std::int64_t atRefNs) {
+        // ⚠ A QPointer, NOT `this`.  The bridge lives inside a phone owned by a
+        // service that outlives main()'s stack, so a captured raw `this` is a
+        // dangling call waiting for a shutdown ordering to change.  A destroyed
+        // ShotController answers `true` — no host left to weigh the Candidate,
+        // which is §2.1's "no detector available" case and the honest answer.
+        QPointer<ShotController> self(this);
+        bridge->setCorroborationCallback([self](std::int64_t atRefNs) {
+            if (!self) return true;
             QString      why;
-            const bool   ok = corroborated(atRefNs / 1000, &why);
+            const bool   ok = self->corroborated(atRefNs / 1000, &why);
             if (!ok)
                 ppDebug() << "[ppcp] candidate EXCLUDED (8.2d, uncorroborated) — t0_us"
                           << (atRefNs / 1000) << "—" << why;

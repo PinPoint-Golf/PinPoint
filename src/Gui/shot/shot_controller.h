@@ -19,6 +19,7 @@
 #pragma once
 
 #include <QObject>
+#include <QPointer>
 #include <QSet>
 #include <QTimer>
 #include <QVector>
@@ -75,10 +76,9 @@ public:
     explicit ShotController(pinpoint::EventBuffer *buffer,
                             SessionController     *session,
                             QObject               *parent = nullptr);
-    // Exists only to hand back the corroboration callback a live PPCP bridge
-    // holds, which captures `this`.  In the ordinary shutdown the bridges are
-    // already gone — `aboutToQuit` drops every phone before main() returns —
-    // but this object must not depend on that ordering to be safe.
+    // Declared only because the class needs an out-of-line one; there is
+    // nothing to undo.  See the note beside the definition — an earlier version
+    // reached for the PPCP bridge here and that was the 27 Aug crash.
     ~ShotController() override;
 
     // True while the buffer is capturing AND the shot processor is idle — the

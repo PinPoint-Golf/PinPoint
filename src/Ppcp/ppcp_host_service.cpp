@@ -759,6 +759,19 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
                      << "unarbitrated" << st.unarbitrated;
         ph->peer->shotBridge().stop();
     }
+    // ⚠ THE SHOT PIPELINE LETS GO HERE — BEFORE THE ERASE, AND THAT ORDERING IS
+    // THE WHOLE POINT.  This emit used to sit at the end of the function, after
+    // `m_phones.erase()` had destroyed the Phone, its PpcpHostPeer and the
+    // bridge inside it.  `ShotController` holds that bridge as a RAW POINTER, so
+    // by the time the slot ran to replace it, the pointer it still held was
+    // dangling — and a slot that so much as READ the outgoing bridge crashed on
+    // freed memory.  It did, on a range, on 27 Aug.
+    //
+    // Emitted here instead, the handover happens while every object involved is
+    // still alive: `stop()` above has already cleared this bridge's arbiter, so
+    // `activeShotBridge()` skips it and answers with another phone's bridge or
+    // null.  Nobody is ever handed a pointer to something that has gone.
+    emit shotBridgeChanged();
     // MSG 4.4 — the Session closes with the link, whether or not it was ever
     // used for anything.  Best-effort: a peer already gone cannot be told, and
     // that is not a reason to skip the local half of closing it.
@@ -782,13 +795,6 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
     // The phone did not stop existing, it stopped being here — its row stays
     // and changes state, the way a switched-off IMU's does.
     emit phonesChanged();
-    // ⚠ AND THE SHOT PIPELINE MUST LET GO OF THE BRIDGE THAT JUST DIED.  The
-    // same hazard `VideoInputPpcp::detachAll()` above exists for: a raw pointer
-    // handed out while the phone was alive, into storage that outlives it.  The
-    // erase above destroyed the Phone, its PpcpHostPeer and the bridge inside
-    // it; whoever holds the pointer re-reads `activeShotBridge()` here and gets
-    // null, or the next phone's.
-    emit shotBridgeChanged();
 }
 
 void PpcpHostService::noteWantsChannel(const Ppcp::LinkId &id, bool wants)
