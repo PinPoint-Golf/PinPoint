@@ -41,6 +41,7 @@
 #include <chrono>
 #include <cstring>
 #include <map>
+#include <set>
 #include <mutex>
 #include <string>
 
@@ -1388,6 +1389,24 @@ struct Listener::Impl {
     // HAS a control channel, so `expireLinks()` leaves it alone.  The peer
     // completed its handshake and bind and was then simply never adopted.
     std::vector<std::unique_ptr<PeerConnection>> ready;
+
+    // ── ENC 2.1d, and the reason the first attempt at it did not work ───────
+    //
+    // ⛔ A LATER CHANNEL ALMOST NEVER BINDS DURING THE CALL THAT WANTS IT.  The
+    // hand-over to `acceptChannelFor()` fires at the MOMENT a stream binds, and
+    // an embedding with an accept thread spends nearly all of its time inside
+    // `accept()` instead — a 1 ms poll against a 250 ms accept is a window the
+    // dial will essentially never land in.  Binding during `accept()`, a third
+    // channel made a FRESH entry in `links` holding one non-control channel,
+    // which `expireLinks()` then reaped after `bindTimeoutMs` because a link
+    // with no control channel is exactly what that sweep is for.
+    //
+    // So: an id already handed out as a PeerConnection is remembered, and a
+    // stream binding one of those is parked here rather than mistaken for the
+    // start of a new link.  `acceptChannelFor()` collects it whenever it asks,
+    // which no longer has to be the instant it arrives.
+    std::set<LinkId> handedOut;
+    std::map<LinkId, std::vector<std::unique_ptr<TransportChannel>>> extra;
 #if defined(PP_PPCP_PLAINTEXT_HARNESS)
     // ⚠ HARNESS ONLY.  See Listener::setPlaintextHarness() in the header.
     bool plaintext = false;
@@ -1712,6 +1731,19 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
 
     Impl *impl = m_impl.get();
 
+    // A later channel for a link already handed over, parked when it bound
+    // during some other call.  This is the ordinary case for ENC 2.1d, not the
+    // exception — see Impl::extra.
+    if (want != nullptr && out_one != nullptr) {
+        auto e = impl->extra.find(*want);
+        if (e != impl->extra.end() && !e->second.empty()) {
+            *out_one = std::move(e->second.front());
+            e->second.erase(e->second.begin());
+            if (e->second.empty()) impl->extra.erase(e);
+            return nullptr;   // the caller reads *out_one
+        }
+    }
+
     // A link that completed while a previous acceptChannelFor() was polling.
     // Handed over before anything else, so the peer's wait is as short as it
     // would have been had nobody been collecting a channel at the time.
@@ -1855,6 +1887,16 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                             if (link.channels.empty()) impl->links.erase(id);
                             return nullptr;   // the caller reads *out_one
                         }
+                        // ENC 2.1d — a further stream on a link this listener
+                        // has already handed over.  Parked for whoever asks,
+                        // rather than left to look like a new link with no
+                        // control channel and be swept away as one.
+                        if (impl->handedOut.count(id) > 0) {
+                            impl->extra[id].push_back(std::move(link.channels.back()));
+                            link.channels.pop_back();
+                            if (link.channels.empty()) impl->links.erase(id);
+                            continue;
+                        }
                         if (static_cast<int>(link.channels.size())
                                 >= impl->channelsPerPeer) {
                             std::vector<std::unique_ptr<TransportChannel>> done =
@@ -1863,6 +1905,10 @@ std::unique_ptr<PeerConnection> Listener::acceptImpl(int timeoutMs, HandshakeFai
                             std::unique_ptr<PeerConnection> peer =
                                 detail::ChannelFactory::makePeer(std::move(done));
                             detail::ChannelFactory::setLinkId(*peer, id);
+                            // Remembered from the moment it EXISTS, not from the
+                            // moment it is returned: a third channel can arrive
+                            // while this one is still parked in `ready`.
+                            impl->handedOut.insert(id);
                             // A plain accept() takes it now; a caller waiting on
                             // a NAMED link parks it for the next accept() rather
                             // than dropping it on the floor.

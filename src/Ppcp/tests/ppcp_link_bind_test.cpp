@@ -378,6 +378,67 @@ TEST(PpcpLinkBind, AThirdChannelIsCollectedWithoutTouchingTheLink)
     EXPECT_EQ(server->linkId(), client->linkId());
 }
 
+// ⛔ THE CASE THAT ACTUALLY HAPPENS, and the one the first fix missed.
+//
+// An embedding with an accept thread is inside `accept()` almost all of the
+// time — a 1 ms `acceptChannelFor()` poll against a 250 ms accept is a window a
+// dial will essentially never land in.  So the third channel binds during a
+// PLAIN accept, and before the parking below it made a fresh link entry holding
+// one non-control channel, which `expireLinks()` then reaped after
+// `bindTimeoutMs`.  The preview channel was accepted, held for ten seconds, and
+// torn down — which is exactly the symptom Mark saw: no preview frame, ever, and
+// nothing said why.
+TEST(PpcpLinkBind, AThirdChannelThatBoundDuringAPlainAcceptIsStillCollectable)
+{
+    Harness h;
+    ASSERT_TRUE(h.ok());
+    auto accepted = h.acceptAsync(10000);
+
+    HandshakeFailure f;
+    std::unique_ptr<PeerConnection> client = Connector::connect(clientConfig(h.port()), &f);
+    ASSERT_NE(client, nullptr) << f.message;
+    std::unique_ptr<PeerConnection> server = accepted.get();
+    ASSERT_NE(server, nullptr);
+    ASSERT_EQ(server->channels().size(), 2u);
+
+    // ⚠ THE ACCEPT THREAD IS ALWAYS RUNNING, AND THAT IS THE WHOLE POINT.  It
+    // is what services the third channel's handshake, and it is also what
+    // consumes the bind before anybody asks for the channel.  Reproduced here
+    // rather than idealised away: a plain accept() loop, exactly as
+    // `PpcpHostService` runs one.
+    std::atomic<bool> stop{false};
+    std::atomic<int>  spurious{0};
+    auto accepting = std::async(std::launch::async, [&] {
+        while (!stop.load()) {
+            HandshakeFailure ignored;
+            if (h.listener().accept(100, &ignored)) ++spurious;
+        }
+    });
+
+    HandshakeFailure cf;
+    ASSERT_TRUE(Connector::connectAdditional(clientConfig(h.port()), *client,
+                                             Channel::Preview, &cf))
+        << cf.message;
+
+    // Give the accept loop time to take the bind — which is the failure mode.
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    stop.store(true);
+    accepting.get();
+    EXPECT_EQ(spurious.load(), 0)
+        << "a later channel on an existing link was returned as a NEW link";
+
+    // And only NOW does anybody ask for it.  Before the parking this returned
+    // null and the channel was already on its way to being swept.
+    HandshakeFailure lf;
+    std::unique_ptr<TransportChannel> ch =
+        h.listener().acceptChannelFor(server->linkId(), 2000, &lf);
+    ASSERT_NE(ch, nullptr)
+        << "the third channel bound during accept() and was lost";
+    EXPECT_TRUE(server->adopt(std::move(ch)));
+    EXPECT_EQ(server->channels().size(), 3u);
+    EXPECT_NE(server->channel(Channel::Preview), nullptr);
+}
+
 // A link nobody is collecting for is left alone: a stream binding some OTHER
 // link must not be consumed by a wait for this one, or a second phone's
 // connection would be eaten by the first phone's preview poll.
