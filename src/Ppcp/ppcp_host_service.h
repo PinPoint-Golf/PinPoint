@@ -593,6 +593,9 @@ private:
     // sent us.  `have_digests` was likewise always empty, so it re-sent bytes
     // we already had.  The whole machinery existed and had no caller.
     Ppcp::PpcpImportLedger                 m_importLedger;
+    // Last aggregate arm state seen by the tick, so a change driven by TIME —
+    // the stall deadline — is noticed as well as one driven by a message.
+    QString                                m_lastArmState;
 
     // 5.14h — every `capture_committed` this host owes, sent to whichever phone
     // is the OWNER, once it is here to receive it.  Called from the tick.

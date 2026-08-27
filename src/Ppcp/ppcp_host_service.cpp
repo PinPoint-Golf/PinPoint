@@ -547,12 +547,14 @@ QString PpcpHostService::armState() const
     // The LEAST ready wins, so a bay with one blocked phone does not read as
     // ready because the other one is.  Blocked outranks arming outranks armed.
     using AS = Ppcp::PpcpLiveSession::ArmState;
-    bool any = false, anyBlocked = false, anyArming = false, anyDisarmed = false;
+    bool any = false, anyBlocked = false, anyStalled = false, anyArming = false,
+         anyDisarmed = false;
     for (const std::unique_ptr<Phone> &p : m_phones) {
         if (!p->peer) continue;
         any = true;
         switch (p->peer->liveSession().armState()) {
         case AS::Blocked:  anyBlocked = true;  break;
+        case AS::Stalled:  anyStalled = true;  break;
         case AS::Arming:   anyArming = true;   break;
         case AS::Disarmed: anyDisarmed = true; break;
         case AS::Armed:    break;
@@ -560,6 +562,7 @@ QString PpcpHostService::armState() const
     }
     if (!any) return {};
     if (anyBlocked)  return QStringLiteral("blocked");
+    if (anyStalled)  return QStringLiteral("stalled");
     if (anyArming)   return QStringLiteral("arming");
     if (anyDisarmed) return QStringLiteral("disarmed");
     return QStringLiteral("armed");
@@ -1299,6 +1302,7 @@ QVariantList PpcpHostService::phones() const
             case AS::Arming:   armStr = QStringLiteral("arming");   break;
             case AS::Armed:    armStr = QStringLiteral("armed");    break;
             case AS::Blocked:  armStr = QStringLiteral("blocked");  break;
+            case AS::Stalled:  armStr = QStringLiteral("stalled");  break;
             }
             armBlocked = QString::fromStdString(ls.blockedReason());
             const PpcpLiveSession::PeerReadiness &rd = ls.peerReadiness();
@@ -1477,6 +1481,17 @@ void PpcpHostService::onTick()
     for (const std::unique_ptr<Phone> &p : m_phones)
         if (std::find(dead.begin(), dead.end(), p.get()) == dead.end())
             flushOwedCommits(p.get());
+    // The arm state can move with nothing arriving — the stall deadline above is
+    // a conclusion drawn from time passing — so the transition is noticed here
+    // rather than only on a `readiness`.
+    {
+        const QString now = armState();
+        if (now != m_lastArmState) {
+            m_lastArmState = now;
+            emit armStateChanged();
+            emit phonesChanged();
+        }
+    }
     for (Phone *p : dead) dropPhone(p, "link closed");
 }
 

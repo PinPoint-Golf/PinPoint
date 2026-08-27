@@ -45,6 +45,8 @@ void PpcpLiveSession::attach(ppcp_peer *peer, const PpcpSourceDeclaration *decla
     // readiness, whatever the last one had said.
     m_readiness = PeerReadiness{};
     m_armRequested = false;
+    m_armAskedAtNs = 0;
+    m_armStalled = false;
     m_lastLinkState = PPCP_LINK_LIVE;
     m_publishedWith = 0;
 }
@@ -196,6 +198,24 @@ void PpcpLiveSession::pump(std::int64_t nowNs)
         if (m_onLinkState) m_onLinkState(now);
     }
 
+    // 5.2a has no deadline of its own, so this one is the embedding's: an arm
+    // that never terminates is a spinner, and a spinner is a lie told slowly.
+    // ⚠ It is a HOST-SIDE conclusion and is reported as one — see ArmState.
+    if (m_armRequested && !m_armStalled) {
+        if (m_armAskedAtNs == 0) m_armAskedAtNs = nowNs;
+        const bool terminal = m_readiness.valid
+                              && (m_readiness.settled || !m_readiness.blockedReason.empty());
+        if (!terminal) {
+            std::int64_t limit = kArmStallFloorNs;
+            if (m_readiness.valid && m_readiness.hasEstimate) {
+                const std::int64_t twice =
+                    2LL * static_cast<std::int64_t>(m_readiness.estimatedReadyMs) * 1000000LL;
+                if (twice > limit) limit = twice;
+            }
+            if (nowNs - m_armAskedAtNs > limit) m_armStalled = true;
+        }
+    }
+
     publishRelations();
 }
 
@@ -339,6 +359,8 @@ bool PpcpLiveSession::arm(const std::vector<std::string> &streamIds, std::string
     // would show a device as settled on the strength of a reply to a different
     // question, which is the whole failure this pair of fields exists to stop.
     m_armRequested = true;
+    m_armAskedAtNs = 0;      // stamped by the next pump()
+    m_armStalled = false;
     m_readiness = PeerReadiness{};
     return true;
 }
@@ -363,6 +385,8 @@ bool PpcpLiveSession::disarm(const std::vector<std::string> &streamIds, std::str
         return false;
     }
     m_armRequested = false;
+    m_armAskedAtNs = 0;
+    m_armStalled = false;
     m_readiness = PeerReadiness{};
     return true;
 }
@@ -375,6 +399,11 @@ bool PpcpLiveSession::isArmed() const
 PpcpLiveSession::ArmState PpcpLiveSession::armState() const
 {
     if (!m_armRequested) return ArmState::Disarmed;
+    // Ours before theirs only where theirs never came: a device that answered
+    // is described by its answer, however late it was.
+    if (m_armStalled && !(m_readiness.valid && (m_readiness.settled
+                                                || !m_readiness.blockedReason.empty())))
+        return ArmState::Stalled;
     // 7.3c — a blocked device is not an arming device that is slow.  It is
     // reported first because it is the only one a person can act on.
     if (m_readiness.valid && !m_readiness.blockedReason.empty()) return ArmState::Blocked;

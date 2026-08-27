@@ -203,6 +203,13 @@ public:
         // assumed away, because the engine does NOT catch it on the receiving
         // side — see the note in the .cpp.
         std::size_t previewPendingRefused = 0;
+        // Captures announced on a Stream the DEVICE opened for this Source
+        // rather than one this host opened.  MSG 5.1c is silent on who opens a
+        // Stream in a hosted Session, so this is a legal shape and not an
+        // anomaly — counted because "the device opens its own" and "the host
+        // opens them" are two different deployments and this is the only place
+        // that can tell them apart.
+        std::size_t foreignStreamCaptures = 0;
         // I11 — `gaps` mean LOSS.  A preview peer that records a shed frame as
         // a gap is reporting a dropout it did not have (5.11c3); counted so the
         // conflation is visible rather than absorbed.

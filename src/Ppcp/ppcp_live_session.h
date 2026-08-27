@@ -174,8 +174,21 @@ public:
         Arming,     // `arm` queued; no readiness yet, or `settled: false`
         Armed,      // readiness said `settled: true`
         Blocked,    // readiness carried a `blocked_reason` (7.3c)
+        // ⚠ THIS HOST'S CONCLUSION, NOT THE DEVICE'S STATEMENT.  Asked, and
+        // nothing terminal came back inside the time the device itself
+        // predicted.  Kept apart from `Blocked` on purpose: a `blocked_reason`
+        // is a word the DEVICE chose and this application renders verbatim, and
+        // manufacturing one here to describe our own silence would be putting
+        // our conclusion in the counterpart's mouth.
+        Stalled,
     };
     ArmState armState() const;
+    // How long this host waits for a terminal answer before concluding the arm
+    // has stalled.  Generous on purpose: a device's own estimate has been
+    // measured at ~8.85 s where a format change was needed, and a false
+    // "stalled" is a worse lie than a slow spinner.  The device's
+    // `estimated_ready_ms`, doubled, wins where it is larger.
+    static constexpr std::int64_t kArmStallFloorNs = 20LL * 1000 * 1000 * 1000;
     // Why, where the device said.  Empty unless `armState() == Blocked`.
     const std::string &blockedReason() const { return m_readiness.blockedReason; }
     // 5.2a's `estimated_ready_ms`, MANDATORY when not settled.  Zero and
@@ -312,6 +325,10 @@ private:
     // nobody answered and a stale `settled` from before a `disarm` look
     // identical if only one of them is remembered.
     bool                         m_armRequested = false;
+    // Stamped by pump() on the first tick after an `arm`, because this class
+    // owns no clock (ground rule 7) and arm() has no reading to hand it.
+    std::int64_t                 m_armAskedAtNs = 0;
+    bool                         m_armStalled = false;
     ppcp_link_state              m_lastLinkState = PPCP_LINK_LIVE;
     LinkStateFn                  m_onLinkState;
     HealthFn                     m_onHealth;

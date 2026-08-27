@@ -280,23 +280,31 @@ Item {
                     readonly property int    ms: phoneRow.phoneData.armReadyMs === undefined
                                                  ? -1 : phoneRow.phoneData.armReadyMs
                     visible: st !== "" && st !== "disarmed"
+                    // ⚠ "stalled" is OUR conclusion and is worded as one. The
+                    // phone did not say it; we waited past its own estimate and
+                    // nothing terminal arrived. A device that is disarmed at the
+                    // handset has no way to tell a host so, so this is also what
+                    // that looks like from here — which is why it does not claim
+                    // a fault.
                     text: st === "armed"   ? qsTr("Armed")
                         : st === "blocked" ? (why !== "" ? qsTr("Cannot arm — %1").arg(why)
                                                          : qsTr("Cannot arm"))
+                        : st === "stalled" ? qsTr("No answer to arm")
                         : ms >= 0          ? qsTr("Arming — %1 ms").arg(ms)
                         :                    qsTr("Arming…")
                     font.family:    Theme.fontData
                     font.pixelSize: Theme.fontSzMicro
                     color: st === "armed"   ? Theme.colorGood
                          : st === "blocked" ? Theme.colorError
+                         : st === "stalled" ? Theme.colorWarn
                          :                     Theme.colorAccent
                     Layout.alignment: Qt.AlignVCenter
                 }
 
                 PpButton {
                     readonly property bool isArmed:
-                        (phoneRow.phoneData.armState || "") === "armed"
-                        || (phoneRow.phoneData.armState || "") === "arming"
+                        ["armed", "arming", "stalled"].indexOf(
+                            phoneRow.phoneData.armState || "") >= 0
                     label:            isArmed ? qsTr("Disarm") : qsTr("Arm")
                     visible:          phoneRow.isConnected
                     Layout.alignment: Qt.AlignVCenter

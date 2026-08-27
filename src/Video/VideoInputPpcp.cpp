@@ -959,9 +959,43 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
     const ppcp_capture &c = m->body.capture_announce.capture;
     const QString capId = idStr(c.id);
     const QString streamId = idStr(c.stream_id);
-    if (streamId != m_captureStreamId && streamId != m_previewStreamId) return;
 
-    const bool preview = (streamId == m_previewStreamId) && !streamId.isEmpty();
+    // ── WHOSE STREAM MAY CARRY A CAPTURE FOR THIS SOURCE ───────────────────
+    //
+    // ⚠ THIS USED TO FILTER ON "STREAMS I OPENED", AND THAT WAS THIS HOST
+    // ASSUMING A RULE THE SPECIFICATION DOES NOT STATE.  MSG 5.1c is a MUST
+    // about the ZERO-HOST case — "the capturing peer originates `stream_open`
+    // for its own Streams" — and says nothing about who opens one when a host
+    // is present.  5.11a1 settles who may CLOSE and not who may open.  So a
+    // device opening its own capture Stream in a hosted Session is legal, and
+    // this filter dropped every Capture announced on it with no error at either
+    // end: the id was simply one we had never seen.
+    //
+    // The PinPointCapture team's argument for why the device must be the one to
+    // open it is the decisive half, and it is about the FILE rather than the
+    // wire: ENC 7a/7b make a bundle the owner's OUTBOUND frames, so a
+    // host-originated `stream_open` can never appear in the device's own
+    // bundle.  Under a host-opens rule that bundle carries Captures with no
+    // Stream record behind them — no `profile_id`, no `timebase_id`, no
+    // `continuity` — and a device announcing against OUR id instead just moves
+    // the same hole into its own file.
+    //
+    // So resolution is by SOURCE, which is the identity both ends agree on.
+    const ppcp_stream *st =
+        m_peer ? ppcp_peer_stream_find(m_peer, streamId.toUtf8().constData()) : nullptr;
+    const bool ours = !streamId.isEmpty()
+                      && (streamId == m_captureStreamId || streamId == m_previewStreamId);
+    if (!ours) {
+        if (!st || idStr(st->source_id) != m_sourceId) return;
+        ++m_counters.foreignStreamCaptures;
+    }
+
+    // 5.11m — a preview Stream is `kind: preview`.  For a Stream we opened the
+    // id already says which it is; for one the device opened, the Stream's own
+    // `kind` is the only honest answer and is read rather than guessed from a
+    // profile or a name.
+    const bool preview = ours ? (streamId == m_previewStreamId && !streamId.isEmpty())
+                              : (st && idStr(st->kind) == QLatin1String("preview"));
 
     // ⚠ CT-I36a, HOST AS CONSUMER, AND IT HAS TO BE DONE HERE.
     // ppcp_capture_validate_in_stream() is the function that carries 5.11j —
@@ -972,8 +1006,7 @@ void VideoInputPpcp::onCaptureAnnounce(const ppcp_msg *m)
     // resolve the Stream from the Capture's own `stream_id`.  So the refusal is
     // the embedding's to make, and this is where the host makes it.  Reported
     // to libppcp as finding F-H4-1.
-    if (const ppcp_stream *st = m_peer ? ppcp_peer_stream_find(m_peer, streamId.toUtf8().constData())
-                                       : nullptr) {
+    if (st) {
         if (ppcp_capture_validate_in_stream(&c, st) != PPCP_OK) {
             if (preview) ++m_counters.previewPendingRefused;
             return;
