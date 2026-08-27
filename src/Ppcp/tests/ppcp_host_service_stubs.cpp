@@ -19,7 +19,7 @@
 
 // Link stubs for ppcp_host_service_test.
 //
-// `PpcpHostService` reaches six symbols in `src/Video` — `registerPpcpPeer()`
+// `PpcpHostService` reaches seven symbols in `src/Video` — `registerPpcpPeer()`
 // on `declare`, `applyTimebaseOffsets()` / `clearTimebaseMappings()` around a
 // link's timebase relations, and `dispatchEvent()` / `detachAll()` /
 // `reattachAll()` around a
@@ -72,6 +72,13 @@ int VideoInputPpcp::detachAll(const QString & /*peerId*/)
 
 int VideoInputPpcp::reattachAll(const QString & /*peerId*/, ppcp_peer * /*peer*/,
                                 const QString & /*sessionId*/)
+{
+    return 0;
+}
+
+int VideoInputPpcp::openPreviewStreams(ppcp_peer * /*peer*/, const QString & /*peerId*/,
+                                       const QString & /*sessionId*/,
+                                       const ppcp_peer_desc * /*desc*/)
 {
     return 0;
 }

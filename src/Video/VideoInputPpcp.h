@@ -291,6 +291,29 @@ public:
     // caller is about to destroy.  Same registry and filter as
     // clearTimebaseMappings() above.
     static int detachAll(const QString &peerId);
+
+    // ── CORE 5.11.2 — preview from the moment the link is up ────────────────
+    //
+    // Requests a `kind: preview` Stream for every camera Source `desc` declares
+    // that offers a preview profile (`intrinsics: none`, 5.11m).  Returns how
+    // many were asked for.
+    //
+    // ⚠ CALLED WHEN THE PHONE DECLARES, NOT WHEN A TILE OPENS.  5.11.2 says
+    // "opening one is an ordinary `stream_open` from the consumer that wants
+    // it", and names preview-alone "during setup and framing" as its MAIN USE.
+    // A preview that appears only once capture has started cannot do the job it
+    // exists for: by then the framing decision has been made blind.
+    //
+    // ⛔ AND THE CONSUMER MAY OWN THIS ONE.  The argument that a device must
+    // originate `stream_open` — ENC 7a/7b, a host-opened Stream cannot appear
+    // in the device's bundle — does not reach preview: 5.11j makes a preview
+    // Capture live-only and never written to a bundle, so there is no file to
+    // keep consistent.
+    //
+    // Ids are `streamIdFor(peer, source, "preview")`, so whichever object opens
+    // one, every other names the same Stream rather than opening a second.
+    static int openPreviewStreams(ppcp_peer *peer, const QString &peerId,
+                                  const QString &sessionId, const ppcp_peer_desc *desc);
     // The counterpart declared again — a reconnection.  Re-attaches and
     // re-opens the Streams of every instance detachAll() stopped that was
     // RUNNING at the time, and leaves the rest alone.  Returns how many came

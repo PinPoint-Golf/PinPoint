@@ -821,7 +821,17 @@ bool VideoInputPpcp::start(const QString &deviceId)
     // PeerConnection already carries as an optional third connection.
     if (const ppcp_capture_profile *pv = bestPreviewProfile()) {
         m_previewStreamId = streamIdFor(m_peerId, m_sourceId, QStringLiteral("preview"));
-        if (!openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW, pv->id.v, PPCP_CONTINUOUS))
+        // ⚠ ADOPTED WHERE IT IS ALREADY OPEN, NOT OPENED TWICE.  The host asks
+        // for preview when the phone DECLARES (openPreviewStreams()), so by the
+        // time a tile starts, the Stream usually exists — and 5.1a fixes a
+        // Stream's identity for its life, so asking again is a duplicate the
+        // owner must refuse.  Captures reach this instance either way, because
+        // onCaptureAnnounce() resolves by `source_id` rather than by which
+        // Streams this object opened.
+        if (ppcp_peer_stream_find(m_peer, m_previewStreamId.toUtf8().constData())) {
+            // nothing to do — it is open and we already answer for this Source
+        } else if (!openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW,
+                               pv->id.v, PPCP_CONTINUOUS))
             m_previewStreamId.clear();
         else if (pv->format.present) {
             m_frameWidth  = static_cast<int>(pv->format.width);
@@ -985,6 +995,50 @@ int VideoInputPpcp::dispatchEvent(const QString &peerId, const ppcp_event &ev)
 // start()/processEvent() call reads a dangling pointer.  Same filter as
 // applyTimebaseOffsets()/clearTimebaseMappings(); the action is detach()
 // rather than a re-feed.
+int VideoInputPpcp::openPreviewStreams(ppcp_peer *peer, const QString &peerId,
+                                       const QString &sessionId,
+                                       const ppcp_peer_desc *desc)
+{
+    if (!peer || !desc || sessionId.isEmpty()) return 0;
+    int asked = 0;
+    for (std::size_t i = 0; i < desc->source_count; ++i) {
+        const ppcp_source &src = desc->sources[i];
+        if (!ppcp_source_kind_is_camera(&src)) continue;
+
+        // 5.11m — `intrinsics: none` is the ONLY thing that marks a profile as
+        // preview, and a peer offering none is declining preview entirely,
+        // which 5.11.2 makes a conformant answer and not a fault.
+        const ppcp_capture_profile *pv = nullptr;
+        for (std::size_t j = 0; j < src.profile_count; ++j) {
+            if (isPreviewProfile(src.profiles[j])) { pv = &src.profiles[j]; break; }
+        }
+        if (!pv) continue;
+
+        const QString sourceId = idStr(src.id);
+        const QString streamId = streamIdFor(peerId, sourceId, QStringLiteral("preview"));
+        // Already open — a tile got here first, or this ran twice.  5.1a fixes a
+        // Stream's identity for its life, so asking again would be a duplicate.
+        if (ppcp_peer_stream_find(peer, streamId.toUtf8().constData())) continue;
+
+        // 5.11 — `opened_at` is on the Stream's Timebase, which is the OWNER's.
+        // A consumer proposes the origin and takes the owner's answer from
+        // `stream_open_ack`; it is emphatically not this host's clock wearing
+        // the device's timebase id (I1).
+        ppcp_instant openedAt{};
+        if (ppcp_instant_make_z(&openedAt, src.timebase_id.v, 0) != PPCP_OK) continue;
+
+        ppcp_stream st{};
+        if (ppcp_stream_make(&st, streamId.toUtf8().constData(),
+                             sessionId.toUtf8().constData(), src.id.v,
+                             PPCP_STREAM_KIND_PREVIEW, pv->id.v, src.timebase_id.v,
+                             PPCP_CONTINUOUS, &openedAt) != PPCP_OK)
+            continue;
+        if (ppcp_peer_stream_open(peer, &st) != PPCP_OK) continue;
+        ++asked;
+    }
+    return asked;
+}
+
 int VideoInputPpcp::detachAll(const QString &peerId)
 {
     std::vector<VideoInputPpcp *> targets;

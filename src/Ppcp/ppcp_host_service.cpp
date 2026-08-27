@@ -915,6 +915,30 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
         emit shotBridgeChanged();
     }
 
+    // ── CORE 5.11.2 — preview from the moment the link is up ───────────────
+    //
+    // ⚠ NOT WHEN A TILE OPENS, WHICH IS WHERE IT USED TO START.  A preview is
+    // how an operator confirms the camera works and frames the shot BEFORE
+    // anything is captured; one that appears only once capture has begun cannot
+    // do the job it exists for.  5.11.2 says "opening one is an ordinary
+    // `stream_open` from the consumer that wants it" and names preview-alone
+    // "during setup and framing" as its MAIN USE — so the request goes out here,
+    // beside `session_open`, and the phone produces from then on (5.11c/I36).
+    //
+    // ⛔ AND THE CONSUMER MAY OWN THIS ONE.  ENC 7a/7b makes a device originate
+    // its own capture Streams so its bundle is self-describing; preview never
+    // reaches a bundle at all (5.11j), so that argument does not apply and the
+    // Stream belongs with whoever wants to look.
+    //
+    // A peer that declares no preview profile is declining preview, which 5.11.2
+    // makes conformant — nothing is asked for and nothing is wrong.
+    {
+        const int asked = VideoInputPpcp::openPreviewStreams(
+            ph->peer->liveSession().peer(), ph->counterpartId,
+            QString::fromStdString(ph->peer->liveSession().config().sessionId), desc);
+        ppWarn() << "[ppcp] preview requested for" << asked << "camera Source(s) on" << ph->name;
+    }
+
     // ⚠ A RECONNECTION IS A DECLARE, AND A PREVIEW THAT WAS RUNNING MUST COME
     // BACK BY ITSELF.  `dropPhone()` detaches every VideoInputPpcp bound to the
     // peer; nothing re-attached them, because the only call to
