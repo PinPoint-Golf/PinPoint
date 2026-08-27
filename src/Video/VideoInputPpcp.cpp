@@ -1039,6 +1039,34 @@ int VideoInputPpcp::openPreviewStreams(ppcp_peer *peer, const QString &peerId,
     return asked;
 }
 
+QVariantList VideoInputPpcp::countersFor(const QString &peerId)
+{
+    QVariantList out;
+    std::lock_guard<std::mutex> g(ppcpLiveMutex());
+    for (VideoInputPpcp *v : ppcpLive()) {
+        if (v->m_peerId != peerId) continue;
+        QVariantMap m;
+        m[QStringLiteral("sourceId")]      = v->m_sourceId;
+        m[QStringLiteral("attached")]      = (v->m_peer != nullptr);
+        m[QStringLiteral("captureStream")] = v->m_captureStreamId;
+        m[QStringLiteral("previewStream")] = v->m_previewStreamId;
+        m[QStringLiteral("lastStreamError")] = v->m_lastStreamOpenError;
+        const Counters &c = v->m_counters;
+        m[QStringLiteral("previewCaptures")]   = static_cast<int>(c.previewCaptures);
+        m[QStringLiteral("previewFrames")]     = static_cast<int>(c.previewFrames);
+        m[QStringLiteral("foreignStream")]     = static_cast<int>(c.foreignStreamCaptures);
+        m[QStringLiteral("streamsOpened")]     = static_cast<int>(c.streamsOpened);
+        m[QStringLiteral("streamsRefused")]    = static_cast<int>(c.streamsRefused);
+        m[QStringLiteral("closedByOwner")]     = static_cast<int>(c.streamsClosedByOwner);
+        m[QStringLiteral("decodeFailures")]    = static_cast<int>(c.decodeFailures);
+        m[QStringLiteral("previewRefusedPending")] =
+            static_cast<int>(c.previewPendingRefused);
+        m[QStringLiteral("absentSegments")]    = static_cast<int>(c.absentSegments);
+        out.append(m);
+    }
+    return out;
+}
+
 int VideoInputPpcp::detachAll(const QString &peerId)
 {
     std::vector<VideoInputPpcp *> targets;

@@ -1280,6 +1280,8 @@ QVariantMap PpcpHostService::ppcpStats() const
         one[QStringLiteral("channels")]    =
             p->link ? static_cast<int>(p->link->channels().size()) : 0;
         one[QStringLiteral("sessionOpen")] = p->peer->liveSession().isOpen();
+        // The camera side of the same link — where a preview actually stops.
+        one[QStringLiteral("inputs")] = VideoInputPpcp::countersFor(p->counterpartId);
         perPhone.append(one);
     }
     m[QStringLiteral("nominated")]      = nominated;

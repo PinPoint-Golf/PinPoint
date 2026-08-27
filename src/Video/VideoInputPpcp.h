@@ -73,6 +73,8 @@
 
 #include <QByteArray>
 #include <QMetaType>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QString>
 #include <QVector>
 
@@ -291,6 +293,13 @@ public:
     // caller is about to destroy.  Same registry and filter as
     // clearTimebaseMappings() above.
     static int detachAll(const QString &peerId);
+
+    // Every live instance's counters for one peer, as data.  The question this
+    // answers is "where does the preview stop?", and it answers it in order:
+    // no instance, no Capture, no frame, or a frame that would not decode.
+    // Machine-readable because a log line a release build does not emit is no
+    // use to somebody standing in a bay with a phone.
+    static QVariantList countersFor(const QString &peerId);
 
     // ── CORE 5.11.2 — preview from the moment the link is up ────────────────
     //
