@@ -664,6 +664,71 @@ TEST(VideoInputPpcpStreams, APeerOfferingNoPreviewProfileOpensOnlyTheCaptureStre
     EXPECT_EQ(ppcp_peer_stream_find(L.host->peer(), kPreviewStream), nullptr);
 }
 
+// ⛔ **THE CONSUMER THAT EXISTS BEFORE ANYBODY OPENS A PANEL.**
+//
+// We ask a phone for preview at `declare` — 5.11.2 calls setup and framing
+// preview's main use — but until 27 Aug 2026 nothing on this side received the
+// answer: dispatchEvent() broadcasts to LIVE instances and the only code that
+// ever constructed one was the Settings crop editor.  A phone therefore
+// announced segments at ~10 fps into a host with nowhere to put them, and its
+// `stream_close` was dropped too, so we could not even see that preview had
+// stopped.  Diagnosed on hardware after an operator saw no preview at all.
+TEST(VideoInputPpcpStreams, APreviewOnlyConsumerOpensPreviewAndNoCaptureStream)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+
+    ASSERT_TRUE(L.in.startPreviewOnly());
+    L.toDevice(0);
+    L.toHost(0);
+
+    EXPECT_TRUE(L.in.isPreviewOnly());
+    EXPECT_TRUE(L.in.isActive());
+    ASSERT_NE(ppcp_peer_stream_find(L.host->peer(), kPreviewStream), nullptr);
+    EXPECT_EQ(ppcp_peer_stream_find(L.host->peer(), kPreviewStream)->continuity,
+              PPCP_CONTINUOUS);
+    // ⛔ THE POINT: a pair of eyes is not a recorder.  start() would open a
+    // `shot_windowed` capture Stream, which for every camera on every phone the
+    // moment it connects is a claim we have no business making.
+    EXPECT_EQ(ppcp_peer_stream_find(L.host->peer(), kVideoStream), nullptr);
+}
+
+// ⚠ And a tile opened later does NOT evict it.  reclaimStream() stops a stale
+// sibling because two instances collide on the deterministic *capture* Stream
+// id — a preview-only consumer owns no capture Stream, so it collides with
+// nothing.  Left in, this would have closed the host's preview the instant an
+// operator opened Settings, with nothing to reopen it when they closed it.
+TEST(VideoInputPpcpStreams, ATileStartingDoesNotReclaimThePreviewOnlyConsumer)
+{
+    Link L;
+    ASSERT_NO_FATAL_FAILURE(L.build(120000));
+    ASSERT_NO_FATAL_FAILURE(L.declare());
+    ASSERT_TRUE(L.in.startPreviewOnly());
+    L.toDevice(0);
+    L.toHost(0);
+    ASSERT_TRUE(L.in.isActive());
+
+    // The Settings crop editor, on the SAME peer and the SAME Source.
+    VideoInputPpcp tile;
+    tile.attach(L.host->peer(), kSessionId);
+    tile.prepareDevice(VideoInputPpcp::deviceIdFor(kDevPeer, kSourceId));
+    ASSERT_TRUE(tile.start());
+    L.toDevice(0);
+    L.toHost(0);
+
+    // Both alive, and both fed: onCaptureAnnounce() resolves a Capture by
+    // `source_id`, not by which Streams an instance opened.
+    EXPECT_TRUE(L.in.isActive());
+    EXPECT_TRUE(tile.isActive());
+    EXPECT_FALSE(tile.isPreviewOnly());
+    // The tile adopted the preview Stream rather than opening a duplicate
+    // (5.1a — a Stream's identity is fixed for its life) and added the capture
+    // Stream that is genuinely its own.
+    EXPECT_NE(ppcp_peer_stream_find(L.host->peer(), kPreviewStream), nullptr);
+    EXPECT_NE(ppcp_peer_stream_find(L.host->peer(), kVideoStream), nullptr);
+}
+
 // ── The device id ──────────────────────────────────────────────────────────
 
 TEST(VideoInputPpcp, ADeviceIdCarriesBothHalvesOfAPpcpIdentity)

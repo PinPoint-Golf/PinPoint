@@ -94,8 +94,18 @@ Item {
             return null
         }
 
-        // Lightweight preview-only instance created on-demand by the crop panel.
+        // The preview-only instance behind BOTH the row tile and the crop
+        // editor.  ⚠ One instance, not two: they name the same PPCP Source, and
+        // two would collide on the deterministic capture Stream id and stop
+        // each other (VideoInputPpcp::reclaimStream).  syncPreview() moves the
+        // sink between the two VideoOutputs instead.
         property var localPreviewInstance: null
+
+        // Is the row tile actually showing something?
+        readonly property bool rowPreviewLive:
+            localPreviewInstance !== null
+            && localPreviewInstance.lastPreviewError === ""
+            && localPreviewInstance.cameraFps > 0
 
         // Effective instance. While the crop editor is open the camera is
         // guaranteed disconnected (the open flow stops capture and deselects
@@ -170,6 +180,55 @@ Item {
                             : (camData.enabled ? Theme.colorWarn : Theme.colorText3)
                 Layout.alignment: Qt.AlignVCenter
                 Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+            }
+
+            // ── The live tile, for a phone, from the moment it connects ──────
+            //
+            // CORE 5.11.2 calls setup and framing preview's MAIN use, and a
+            // preview that only appears once someone opens the crop editor is
+            // useless for it — by then the framing decision has been made
+            // blind.  We ask the phone for preview at `declare` and
+            // PpcpHostService holds a consumer per Source from then on, so by
+            // the time this row exists the pictures are already arriving.
+            //
+            // ⚠ PPCP ONLY (`camData.isPpcp`).  An industrial camera is not
+            // started to fill a thumbnail — see camera_manager.cpp beside the
+            // flag.
+            Rectangle {
+                id: rowPreviewTile
+                visible: camData.isPpcp
+                Layout.preferredWidth:  Theme.sp(64)
+                Layout.preferredHeight: Theme.sp(36)
+                Layout.alignment: Qt.AlignVCenter
+                color:        Theme.colorBg
+                radius:       Theme.sp(3)
+                border.width: 1
+                border.color: Theme.colorBorder
+                clip:         true
+
+                VideoOutput {
+                    id: rowVideoOutput
+                    anchors.fill:    parent
+                    anchors.margins: 1
+                    fillMode:        VideoOutput.PreserveAspectFit
+                }
+
+                // ⚠ Says WHY there is no picture rather than showing black.
+                // "no peer attached" is the ordinary state for this backend
+                // when the phone has gone, not a fault.
+                Text {
+                    anchors.centerIn: parent
+                    width:            parent.width - Theme.sp(4)
+                    visible:          !camRow.rowPreviewLive
+                    text:             camRow.localPreviewInstance
+                                      && camRow.localPreviewInstance.lastPreviewError !== ""
+                                          ? qsTr("no signal") : qsTr("waiting…")
+                    font.family:      Theme.fontData
+                    font.pixelSize:   Theme.fontSzMicro
+                    color:            Theme.colorText3
+                    horizontalAlignment: Text.AlignHCenter
+                    elide:            Text.ElideRight
+                }
             }
 
             // Alias (editable) + meta
@@ -960,17 +1019,32 @@ Item {
                             // every Repeater delegate: the rebuilt row is created with
                             // roiOpen already true, so onRoiOpenChanged never fires and
                             // Component.onCompleted must run the same wiring.
-                            function syncRoiPreview() {
-                                if (camRow.roiOpen) {
+                            // ⚠ ONE INSTANCE, TWO PLACES TO DRAW IT.  A phone's
+                            // row keeps a preview alive whenever the panel is
+                            // open, so the tile in the header is never blank
+                            // waiting for a round trip; opening the crop editor
+                            // moves the SAME instance's sink to the big
+                            // VideoOutput rather than making a second one,
+                            // which would collide on the Stream id and stop the
+                            // first.  An industrial camera keeps the old
+                            // behaviour exactly: nothing runs until the editor
+                            // opens.
+                            function syncPreview() {
+                                var want = camRow.roiOpen || camData.isPpcp
+                                if (want) {
                                     if (!camRow.localPreviewInstance)
                                         camRow.localPreviewInstance = cameraManager.createPreviewInstance(camData.index)
                                     var inst = camRow.localPreviewInstance
                                     if (!inst) return
-                                    // Seed a default crop the first time the editor opens
-                                    var r = inst.cropRoi
-                                    if (r.width <= 0 || r.height <= 0)
-                                        inst.setCropRoi(Qt.rect(0.3, 0.0, 0.4, 1.0))
-                                    inst.setSettingsSink(settingsVideoOutput.videoSink)
+                                    if (camRow.roiOpen) {
+                                        // Seed a default crop the first time the editor opens
+                                        var r = inst.cropRoi
+                                        if (r.width <= 0 || r.height <= 0)
+                                            inst.setCropRoi(Qt.rect(0.3, 0.0, 0.4, 1.0))
+                                        inst.setSettingsSink(settingsVideoOutput.videoSink)
+                                    } else {
+                                        inst.setSettingsSink(rowVideoOutput.videoSink)
+                                    }
                                     inst.startPreview()
                                 } else if (camRow.localPreviewInstance) {
                                     camRow.localPreviewInstance.setSettingsSink(null)
@@ -980,7 +1054,7 @@ Item {
                                 }
                             }
 
-                            Component.onCompleted: syncRoiPreview()
+                            Component.onCompleted: syncPreview()
                             Component.onDestruction: {
                                 if (camRow.localPreviewInstance) {
                                     camRow.localPreviewInstance.setSettingsSink(null)
@@ -992,7 +1066,7 @@ Item {
 
                             Connections {
                                 target: camRow
-                                function onRoiOpenChanged() { previewRect.syncRoiPreview() }
+                                function onRoiOpenChanged() { previewRect.syncPreview() }
                             }
 
                             // ── Overlay shades around the ROI ─────────────────

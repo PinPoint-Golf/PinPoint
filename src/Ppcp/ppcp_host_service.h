@@ -81,6 +81,8 @@
 #include "ppcp_transport.h"
 
 class PpcpOfferController;
+// The preview consumer each connected phone's camera Sources get (see Phone).
+class VideoInputPpcp;
 
 class PpcpHostService : public QObject
 {
@@ -519,6 +521,24 @@ private:
         // lands.  Declared after `peer` so it dies first: it holds the peer
         // pointer.  Null until the engine exists.
         std::unique_ptr<Ppcp::PpcpImportSink> importSink;
+
+        // ⛔ **THE PREVIEW CONSUMERS, ONE PER CAMERA SOURCE, ALIVE FROM
+        // `declare`.**  Owned here and QObject-parented to the service.
+        //
+        // ⚠ Without these nothing was listening.  We request preview at
+        // `declare` (5.11.2 calls setup and framing its main use), but
+        // `VideoInputPpcp::dispatchEvent()` broadcasts only to LIVE instances
+        // and the sole thing that ever constructed one was the Settings crop
+        // editor.  So a phone announced pictures at 10 fps into a host with
+        // nowhere to put them — and its `stream_close` was dropped too, so we
+        // could not even tell that preview had stopped.  Diagnosed on hardware
+        // 27 Aug 2026 after an operator saw no preview at all.
+        //
+        // ⚠ Raw pointers, deleted explicitly in dropPhone() BEFORE the peer
+        // they point at goes.  Deliberately not unique_ptr: `Phone` would then
+        // need a complete `VideoInputPpcp` in this header, which is a Video
+        // dependency the Ppcp layer does not otherwise carry.
+        std::vector<VideoInputPpcp *> previews;
     };
 
 

@@ -715,6 +715,15 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
 
     // The offer list is attached PER PEER, so only this phone's offers go.
     if (m_offers && !ph->counterpartId.isEmpty()) m_offers->detach(ph->counterpartId);
+
+    // ⛔ **OUR OWN PREVIEW CONSUMERS GO FIRST, WHILE THE PEER IS STILL ALIVE.**
+    // stop() closes the preview Stream, which is a wire message and needs a
+    // live peer to carry it (5.1a1: say why).  Deleted rather than detached
+    // because unlike a Settings tile — which outlives the phone and is
+    // re-attached by reattachAll() on reconnect — these are owned here and a
+    // fresh `declare` builds a fresh set.
+    VideoInputPpcp::stopPreviewConsumers(&ph->previews);
+
     if (!ph->counterpartId.isEmpty()) {
         VideoInputPpcp::clearTimebaseMappings(ph->counterpartId);
         // Every VideoInputPpcp bound to this peer stops pointing at it BEFORE
@@ -933,10 +942,38 @@ void PpcpHostService::onDeclare(Phone *ph, const ppcp_peer_desc *desc)
     // A peer that declares no preview profile is declining preview, which 5.11.2
     // makes conformant — nothing is asked for and nothing is wrong.
     {
+        const QString sessionId =
+            QString::fromStdString(ph->peer->liveSession().config().sessionId);
+        ppcp_peer *const peer = ph->peer->liveSession().peer();
+
         const int asked = VideoInputPpcp::openPreviewStreams(
-            ph->peer->liveSession().peer(), ph->counterpartId,
-            QString::fromStdString(ph->peer->liveSession().config().sessionId), desc);
+            peer, ph->counterpartId, sessionId, desc);
         ppWarn() << "[ppcp] preview requested for" << asked << "camera Source(s) on" << ph->name;
+
+        // ⛔ **AND SOMETHING HAS TO BE LISTENING WHEN THE PICTURES ARRIVE.**
+        // Asking is half of it.  `VideoInputPpcp::dispatchEvent()` hands an
+        // inbound event to every LIVE instance for the peer, and until 27 Aug
+        // 2026 the only code that ever constructed one was the Settings crop
+        // editor — so between connect and an operator opening that panel, every
+        // preview Capture was dropped before any counter moved, and so was the
+        // `stream_close` that would have told us preview had ended.
+        //
+        // One consumer per camera Source, alive for the connection.  A tile the
+        // operator opens later is a SECOND consumer of the same Stream and both
+        // are fed: onCaptureAnnounce() resolves by `source_id`, not by which
+        // Streams an instance opened, and reclaimStream() leaves preview-only
+        // instances alone (they own no capture Stream to collide on).
+        //
+        // ⚠ Empty on a first connect only.  A reconnect keeps whatever survived
+        // — reattachAll() below re-attaches and restarts it — so this must not
+        // build a second set on top.
+        if (ph->previews.empty()) {
+            const int live = VideoInputPpcp::startPreviewConsumers(
+                this, peer, ph->counterpartId, sessionId, desc, &ph->previews);
+            if (live > 0)
+                ppWarn() << "[ppcp] preview consumer live for" << live
+                         << "camera Source(s) on" << ph->name;
+        }
     }
 
     // ⚠ A RECONNECTION IS A DECLARE, AND A PREVIEW THAT WAS RUNNING MUST COME

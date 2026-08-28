@@ -134,6 +134,45 @@ public:
     QVideoFrameFormat  frameFormat() const override;
     CameraCapabilities queryCapabilities() const override;
     void               prepareDevice(const QString &deviceId) override;
+
+    // ⛔ **A PREVIEW CONSUMER THAT DOES NOT WAIT FOR A PANEL TO OPEN.**
+    // start() is a *tile*: it opens the capture Stream too and refuses outright
+    // if the Source declares no capture profile.  This opens the `preview`
+    // Stream and nothing else, so PpcpHostService can hold one per camera
+    // Source from `declare` until the phone goes — which is what makes a
+    // picture available "the instant you connect" rather than the instant
+    // somebody opens Settings.
+    //
+    // ⚠ It exists because nothing was listening.  dispatchEvent() broadcasts to
+    // LIVE instances, and until 27 Aug the only thing that ever constructed one
+    // was the crop editor: every preview Capture announced before an operator
+    // opened that panel was dropped on the floor, and so was the `stream_close`
+    // that said preview had stopped.  Returns false, quietly and without an
+    // error state, for a Source that declares no preview profile — 5.11.2 makes
+    // that a conformant answer and not a fault.
+    bool               startPreviewOnly();
+    bool               isPreviewOnly() const { return m_previewOnly; }
+
+    // The two calls PpcpHostService makes to keep one preview consumer per
+    // camera Source alive for a phone's connection.
+    //
+    // ⚠ **Static, like every other seam this class offers the Ppcp layer.**
+    // `ppcp_host_service.cpp` reaches `src/Video` through free/static functions
+    // only, so `ppcp_host_service_test` can stub the lot without linking the
+    // camera backends (see ppcp_host_service_stubs.cpp).  Constructing an
+    // instance there would drag a QObject vtable and its moc output into a
+    // suite whose whole subject is the pairing code's clock.
+    //
+    // startPreviewConsumers() appends one live instance per camera Source that
+    // declares a preview profile and returns how many; it skips Sources that
+    // decline preview, which 5.11.2 makes conformant.
+    static int  startPreviewConsumers(QObject *parent, ppcp_peer *peer,
+                                      const QString &peerId, const QString &sessionId,
+                                      const ppcp_peer_desc *desc,
+                                      std::vector<VideoInputPpcp *> *out);
+    // ⛔ Call while the peer is still alive: stop() closes the preview Stream,
+    // which is a wire message (5.1a1 — say why).
+    static void stopPreviewConsumers(std::vector<VideoInputPpcp *> *consumers);
     // The per-frame instant side channel.  It exists for the same reason
     // lastMeasuredExposureUs() does — a fact about the frame that cannot travel
     // ON the frame — and answers 0 while there is no timebase mapping.
@@ -418,6 +457,10 @@ private:
     QString    m_peerId;
     QString    m_sourceId;
 
+    // Set by startPreviewOnly().  ⚠ Read by reclaimStream(): a preview-only
+    // instance owns no capture Stream, so it collides with nobody and must
+    // neither evict a tile nor be evicted by one.
+    bool    m_previewOnly = false;
     QString m_captureStreamId;
     QString m_previewStreamId;
     // Empty means "the fastest declared", which is what every instance did

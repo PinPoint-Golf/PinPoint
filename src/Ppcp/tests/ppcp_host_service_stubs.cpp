@@ -109,3 +109,22 @@ Ppcp::PpcpSourceDeclaration::Inventory Ppcp::PpcpSourceDeclaration::hostInventor
 {
     return {};
 }
+
+// ── The preview consumers (27 Aug 2026) ─────────────────────────────────────
+// ⚠ Same reasoning as the block above and the same unreachability: both are
+// called only from `onDeclare()` and `dropPhone()`, and this suite never
+// accepts a link.  Static for exactly this reason — constructing a real
+// `VideoInputPpcp` here would need its vtable and moc output, and with them the
+// camera backends this file exists to keep out.
+int VideoInputPpcp::startPreviewConsumers(QObject * /*parent*/, ppcp_peer * /*peer*/,
+                                          const QString & /*peerId*/,
+                                          const QString & /*sessionId*/,
+                                          const ppcp_peer_desc * /*desc*/,
+                                          std::vector<VideoInputPpcp *> * /*out*/)
+{
+    return 0;
+}
+
+void VideoInputPpcp::stopPreviewConsumers(std::vector<VideoInputPpcp *> * /*consumers*/)
+{
+}

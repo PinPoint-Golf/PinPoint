@@ -144,6 +144,15 @@ QVariantList CameraManager::cameraList() const
         entry[QStringLiteral("serialNumber")] = cap.serialNumber;
         entry[QStringLiteral("cameraKey")]   = key;
         entry[QStringLiteral("interface")]   = interfaceString(cap.connectionInterface);
+        // ⚠ The backend, for the ONE thing that must branch on it: a phone's
+        // camera shows a live tile on its row from the moment it connects
+        // (5.11.2 — "setup and framing" is preview's main use), and an
+        // industrial camera does not.  Starting every Aravis/Spinnaker device
+        // continuously just to fill a thumbnail would cost bandwidth and heat
+        // for a picture nobody asked for; a phone is already producing preview
+        // because we requested it at `declare`.
+        entry[QStringLiteral("isPpcp")]      =
+            cam.device.id.startsWith(QStringLiteral("ppcp:"));
         // Full-sensor dims: GenICam cameras report a Range whose
         // defaultResolution is the CURRENT region (possibly a stale crop) —
         // the crop editor's pixel fields must reference the range maximum.

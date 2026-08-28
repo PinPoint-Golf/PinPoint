@@ -226,8 +226,15 @@ void VideoInputPpcp::reclaimStream(const QString &peerId, const QString &sourceI
     {
         std::lock_guard<std::mutex> g(ppcpLiveMutex());
         for (VideoInputPpcp *v : ppcpLive())
-            if (v != keep && v->m_peerId == peerId && v->m_sourceId == sourceId
-                && v->m_peer == peer)
+            // ⚠ A PREVIEW-ONLY INSTANCE IS NOT A STALE SIBLING.  This exists to
+            // resolve a collision on the deterministic *capture* Stream id, and
+            // a preview-only consumer (PpcpHostService's, alive from `declare`)
+            // never opens one — it collides with nothing.  Stopping it would
+            // close the preview Stream out from under the host the moment an
+            // operator opened a tile, and nothing would reopen it when they
+            // closed the panel again.
+            if (v != keep && !v->m_previewOnly && v->m_peerId == peerId
+                && v->m_sourceId == sourceId && v->m_peer == peer)
                 stale.push_back(v);
     }
     // stop() outside the lock: it closes Streams (queues wire messages) and
@@ -320,7 +327,12 @@ int VideoInputPpcp::reattachAll(const QString &peerId, ppcp_peer *peer,
         // Empty device id: the peer and source are already parsed and must not
         // be re-derived.  start() re-opens both Streams against the new peer,
         // which is required — the old ids named Streams on a link that is gone.
-        if (v->start(QString())) ++resumed;
+        //
+        // ⚠ A preview-only consumer comes back as a preview-only consumer.
+        // start() would open a capture Stream this instance never had and never
+        // wanted, and would reclaim the tile that legitimately owns one.
+        const bool up = v->m_previewOnly ? v->startPreviewOnly() : v->start(QString());
+        if (up) ++resumed;
     }
     return resumed;
 }
@@ -733,6 +745,77 @@ void VideoInputPpcp::closeStream(const QString &streamId, const char *reason)
     if (ppcp_instant_make_z(&closedAt, Ppcp::kHostTimebaseId, Ppcp::hostNowNs()) != PPCP_OK)
         return;
     (void)ppcp_peer_stream_close(m_peer, streamId.toUtf8().constData(), &closedAt, reason);
+}
+
+int VideoInputPpcp::startPreviewConsumers(QObject *parent, ppcp_peer *peer,
+                                          const QString &peerId,
+                                          const QString &sessionId,
+                                          const ppcp_peer_desc *desc,
+                                          std::vector<VideoInputPpcp *> *out)
+{
+    if (!peer || !desc || !out || peerId.isEmpty() || sessionId.isEmpty()) return 0;
+    int live = 0;
+    for (std::size_t i = 0; i < desc->source_count; ++i) {
+        if (!ppcp_source_kind_is_camera(&desc->sources[i])) continue;
+        const QString sourceId = idStr(desc->sources[i].id);
+        auto *v = new VideoInputPpcp(parent);
+        v->prepareDevice(deviceIdFor(peerId, sourceId));
+        v->attach(peer, sessionId);
+        if (v->startPreviewOnly()) { out->push_back(v); ++live; }
+        else                       { delete v; }
+    }
+    return live;
+}
+
+void VideoInputPpcp::stopPreviewConsumers(std::vector<VideoInputPpcp *> *consumers)
+{
+    if (!consumers) return;
+    for (VideoInputPpcp *v : *consumers) { v->stop(); delete v; }
+    consumers->clear();
+}
+
+bool VideoInputPpcp::startPreviewOnly()
+{
+    // ⚠ Quiet refusals throughout.  This runs for every camera Source a phone
+    // declares, unasked, at `declare` — a Source with no preview profile is
+    // "declining preview entirely, which 5.11.2 makes a conformant answer and
+    // not a fault" (see isPreviewProfile()), and an error state here would put
+    // a red row in front of an operator for something that is not wrong.
+    if (!m_peer || m_sessionId.isEmpty()) return false;
+
+    const ppcp_source *s = source();
+    if (!s || !ppcp_source_kind_is_camera(s)) return false;
+
+    const ppcp_capture_profile *pv = bestPreviewProfile();
+    if (!pv) return false;
+
+    m_previewOnly = true;
+
+    // ⛔ No reclaimStream() and no capture Stream.  Both belong to start(),
+    // which is a tile that will record; this is a pair of eyes.
+    m_previewStreamId = streamIdFor(m_peerId, m_sourceId, QStringLiteral("preview"));
+    // Adopted where openPreviewStreams() has already opened it at `declare` —
+    // 5.1a fixes a Stream's identity for its life, so asking twice is a
+    // duplicate the owner must refuse.  Captures reach this instance either
+    // way: onCaptureAnnounce() resolves by `source_id`, not by which Streams
+    // this object opened.
+    if (!ppcp_peer_stream_find(m_peer, m_previewStreamId.toUtf8().constData())
+        && !openStream(m_previewStreamId, PPCP_STREAM_KIND_PREVIEW,
+                       pv->id.v, PPCP_CONTINUOUS)) {
+        m_previewStreamId.clear();
+        m_previewOnly = false;
+        return false;
+    }
+
+    if (pv->format.present) {
+        m_frameWidth  = static_cast<int>(pv->format.width);
+        m_frameHeight = static_cast<int>(pv->format.height);
+        m_previewPixelFormat = idStr(pv->format.pixel_format);
+    }
+
+    m_state = State::Active;
+    emit stateChanged(m_state);
+    return true;
 }
 
 bool VideoInputPpcp::start(const QString &deviceId)
