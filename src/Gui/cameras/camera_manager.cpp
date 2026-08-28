@@ -745,10 +745,6 @@ QObject *CameraManager::createPreviewInstance(int index)
     // nullptr buffer → no ring-buffer registration, no pose/throttle pipeline
     auto *ctrl = new CameraInstance(m_cameras[index].device, nullptr, m_appSettings, this);
 #ifdef HAVE_PPCP_TRANSPORT
-    // Only this preview path is wired to a live PPCP peer for now — real
-    // capture (createController(), below) stays exactly as unable to start a
-    // PPCP camera as it already is; wider capture integration is separate,
-    // later work.
     ctrl->setPpcpHostService(m_ppcpHostService);
 #endif
 
@@ -788,6 +784,18 @@ void CameraManager::destroyPreviewInstance(QObject *ctrl)
 CameraInstance *CameraManager::createController(const Device &device)
 {
     auto *ctrl = new CameraInstance(device, m_eventBuffer, m_appSettings, this);
+#ifdef HAVE_PPCP_TRANSPORT
+    // ⛔ **THE SESSION'S TILES BIND TO THESE, NOT TO A PREVIEW INSTANCE.**  Until
+    // 28 Aug 2026 only `createPreviewInstance()` was given the host service, so
+    // a phone's real controller had no route to its peer at all
+    // (`ppcpAttachIfNeeded()` returns immediately on a null service) and every
+    // session screen showed a correctly-bound tile with nothing in it.  Preview
+    // worked in Settings and nowhere an operator would actually stand.
+    //
+    // ⚠ This does NOT make clip capture work for a phone; see the note in
+    // `CameraInstance::startRecording()` for exactly what it does make work.
+    ctrl->setPpcpHostService(m_ppcpHostService);
+#endif
     // Ball presence is signal-only: CameraInstance::ballPresentChanged feeds the
     // QML overlays (and future shot detection) but never touches buffer state.
 

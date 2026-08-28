@@ -738,8 +738,22 @@ void CameraInstance::connectVideoInput()
                 }
 
                 // EventBuffer publish (zero-copy into pre-allocated ring slot)
+                //
+                // ⛔ **NOT IN PREVIEW-ONLY MODE.**  A preview frame is a picture
+                // for a person to look at, not a measurement: on a PPCP phone it
+                // is 640x360 at ~10 fps against a capture Stream's 1080p240, and
+                // `lastFrameInstantUs()` answers 0 without a timebase relation,
+                // so it would land stamped with its ARRIVAL time.  Writing that
+                // into the ring puts frames in the swing library that claim to be
+                // capture and are not.
+                //
+                // ⚠ Latent until now only because the sole preview-only path
+                // (`CameraManager::createPreviewInstance`) is built with a null
+                // buffer, so `m_sourceId` was never valid.  A session's real
+                // controller has one.
                 if (m_eventBuffer && m_sourceId != pinpoint::kInvalidSourceId
-                        && m_eventBuffer->isCapturing()) {
+                        && m_eventBuffer->isCapturing()
+                        && !m_previewOnly.load(std::memory_order_relaxed)) {
                     publishFrameToBuffer(f, frameTUs);
                 }
 
@@ -779,9 +793,13 @@ void CameraInstance::connectVideoInput()
                     f = pp_crop::cropRawFrame(frame, m_activeCropRoi);
                 }
 
-                // EventBuffer publish for raw Bayer frames
+                // EventBuffer publish for raw Bayer frames.  ⛔ Preview-only is
+                // refused for the reason given on the QVideoFrame path above: a
+                // preview frame is not a capture frame and must never reach the
+                // ring.
                 if (m_eventBuffer && m_sourceId != pinpoint::kInvalidSourceId
-                        && m_eventBuffer->isCapturing()) {
+                        && m_eventBuffer->isCapturing()
+                        && !m_previewOnly.load(std::memory_order_relaxed)) {
                     publishRawFrameToBuffer(f, frameTUs);
                 }
 
@@ -1217,6 +1235,31 @@ void CameraInstance::stopPreview()
 
 void CameraInstance::startRecording()
 {
+#ifdef HAVE_PPCP_TRANSPORT
+    // ⛔ **A PHONE HAS NO LOCAL CAPTURE THREAD, AND THE GUARD BELOW REFUSED IT
+    // FOREVER.**  `m_captureThread` is deliberately never started for this
+    // backend (see `m_isPpcpBackend` in `setupPipeline`), so this returned
+    // immediately and a session's camera tile bound an instance that produced
+    // nothing.  Preview therefore worked in Settings and a phone was blank in a
+    // session — which is the surface that matters, because framing a shot is
+    // done in the session, not in a settings panel.
+    //
+    // ⚠ **What "recording" means for this backend is narrower, and saying so is
+    // the point.**  It means: attached to the peer, and showing what the camera
+    // sees.  The frames are the phone's `preview` Stream (5.11.2).  Its shot
+    // footage arrives as PPCP Captures on a `shot_windowed` Stream rather than
+    // as frames off a device, and landing those in the library is separate work
+    // that this does NOT start.  The ring publish above refuses these frames on
+    // purpose.
+    if (m_isPpcpBackend) {
+        startPreview();                    // attaches the peer and starts frames
+        if (!m_recording) {
+            m_recording = true;
+            emit isRecordingChanged();
+        }
+        return;
+    }
+#endif
     if (m_recording || !m_captureThread->isRunning())
         return;
 

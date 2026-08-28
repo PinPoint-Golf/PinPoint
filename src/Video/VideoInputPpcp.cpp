@@ -1131,6 +1131,12 @@ QVariantList VideoInputPpcp::countersFor(const QString &peerId)
         QVariantMap m;
         m[QStringLiteral("sourceId")]      = v->m_sourceId;
         m[QStringLiteral("attached")]      = (v->m_peer != nullptr);
+        // ⚠ Which KIND of consumer this is.  A host-owned preview consumer
+        // (alive from `declare`) and a session's real controller both answer for
+        // the same Source, and "is anything reading this camera" is a different
+        // question from "is the SESSION reading it" — which is exactly the gap
+        // that left a phone blank in a session while Settings showed a picture.
+        m[QStringLiteral("previewOnly")]   = v->m_previewOnly;
         m[QStringLiteral("captureStream")] = v->m_captureStreamId;
         m[QStringLiteral("previewStream")] = v->m_previewStreamId;
         m[QStringLiteral("lastStreamError")] = v->m_lastStreamOpenError;

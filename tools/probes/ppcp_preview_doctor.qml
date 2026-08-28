@@ -20,9 +20,21 @@ import QtQuick
 Item {
     anchors.fill: parent
 
+    // ⚠ BOTTOM-LEFT, AND DISMISSIBLE.  Anchored top-right it sat squarely over
+    // the toolbar and made the application it is diagnosing unusable — which is
+    // a poor trade for a panel whose whole job is to let you work underneath it.
+    // Ctrl+Shift+D hides it; the readings carry on regardless.
+    Shortcut {
+        sequence: "Ctrl+Shift+D"
+        context: Qt.ApplicationShortcut
+        onActivated: panel.visible = !panel.visible
+    }
+
     Rectangle {
-        anchors { right: parent.right; top: parent.top; margins: 8 }
+        id: panel
+        anchors { left: parent.left; bottom: parent.bottom; margins: 8 }
         width: 520; height: txt.implicitHeight + 18
+        opacity: 0.92
         color: "#ee0f1216"; border.color: "#3aa0ff"; radius: 6
         Text {
             id: txt; anchors.centerIn: parent; width: 500
@@ -51,6 +63,7 @@ Item {
         for (var i = 0; i < p.inputs.length; ++i) {
             var v = p.inputs[i]
             body += "\n" + v.sourceId
+                 + (v.previewOnly ? "  [host]" : "  [SESSION/tile]")
                  + (v.attached ? "" : "  ⛔ DETACHED")
                  + "\n  preview=" + (v.previewStream === "" ? "⛔ none" : "open")
                  + "  capt=" + v.previewCaptures
