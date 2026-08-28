@@ -1203,6 +1203,7 @@ void CameraInstance::startPreview()
     // at all, not the thread that every other backend actually needs.
     if (m_previewing || (!m_isPpcpBackend && !m_captureThread->isRunning())) return;
     m_previewing = true;
+    emit isPreviewFeedChanged();
     if (m_recording) return; // camera already running; pipeline already active
     m_previewOnly.store(true, std::memory_order_relaxed);
 #ifdef HAVE_PPCP_TRANSPORT
@@ -1216,6 +1217,7 @@ void CameraInstance::startPreview()
         if (!m_videoInput->start(m_deviceId)) {
             QMetaObject::invokeMethod(this, [this]() {
                 m_previewing = false;
+                emit isPreviewFeedChanged();
                 m_previewOnly.store(false, std::memory_order_relaxed);
             }, Qt::QueuedConnection);
         }
@@ -1226,6 +1228,7 @@ void CameraInstance::stopPreview()
 {
     if (!m_previewing) return;
     m_previewing = false;
+    emit isPreviewFeedChanged();
     m_previewOnly.store(false, std::memory_order_relaxed);
     if (m_recording) return; // recording keeps camera alive
     QMetaObject::invokeMethod(m_videoInput, [this]() {

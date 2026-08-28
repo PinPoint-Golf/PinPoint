@@ -70,6 +70,13 @@ class CameraInstance : public QObject
     // confirmed Active). Cleared on first Active frame, start failure, video
     // error, or stop. Drives the Connect-button "connecting" animation.
     Q_PROPERTY(bool isConnecting READ isConnecting NOTIFY isConnectingChanged)
+    // ⚠ Is what this tile is showing a PREVIEW Stream rather than capture?
+    // True for a PPCP phone that is producing 5.11.2 preview frames — which is
+    // every phone today, because its shot footage arrives as PPCP Captures and
+    // never as frames off a device. An operator framing against this tile is
+    // looking at 640x360@30, not at what a swing will be recorded at, and the
+    // tile says so rather than letting the difference be discovered later.
+    Q_PROPERTY(bool isPreviewFeed READ isPreviewFeed NOTIFY isPreviewFeedChanged)
     Q_PROPERTY(bool isAravis READ isAravis NOTIFY isAravisChanged)
     Q_PROPERTY(bool isSpinnaker READ isSpinnaker NOTIFY isSpinnakerChanged)
     Q_PROPERTY(bool needsDebayer READ needsDebayer NOTIFY needsDebayerChanged)
@@ -132,6 +139,7 @@ public:
 
     bool   isRecording() const;
     bool   isConnecting() const;
+    bool   isPreviewFeed() const { return m_isPpcpBackend && m_previewing; }
     bool   isAravis() const;
     bool   isSpinnaker() const;
     bool   needsDebayer() const;
@@ -263,6 +271,7 @@ public:
 signals:
     void isRecordingChanged();
     void isConnectingChanged();
+    void isPreviewFeedChanged();
     void isAravisChanged();
     void isSpinnakerChanged();
     void needsDebayerChanged();

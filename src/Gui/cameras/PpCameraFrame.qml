@@ -740,6 +740,42 @@ Item {
             visible: root._isReplay || (root.instance !== null && !root.instance.needsDebayer)
         }
 
+        // ── "Preview" pill ────────────────────────────────────────────────
+        //
+        // ⚠ **Says what this picture IS, because it is not what a swing will be
+        // recorded at.** A phone's tile carries its 5.11.2 `preview` Stream —
+        // 640x360@30, a derived view (5.11l) — while its shot footage arrives
+        // separately as PPCP Captures and never as frames off a device. An
+        // operator framing against this must not discover that difference from
+        // the first swing they review.
+        //
+        // ⛔ Driven by what is TRUE of the feed (`isPreviewFeed`), never by the
+        // session type: the same tile serves every session screen, and a phone
+        // is a phone in all of them.
+        Rectangle {
+            visible: root.instance !== null && root.instance.isPreviewFeed
+            anchors.top:        parent.top
+            anchors.left:       parent.left
+            anchors.topMargin:  Theme.sp(8)
+            anchors.leftMargin: Theme.sp(8)
+            implicitWidth:  previewBadgeText.implicitWidth + Theme.sp(16)
+            implicitHeight: Theme.sp(18)
+            color:  Qt.rgba(74/255, 58/255, 26/255, 0.9)
+            border.width: 1
+            border.color: Theme.colorWarn
+            radius: 2
+            z: 25
+
+            Text {
+                id: previewBadgeText
+                anchors.centerIn: parent
+                text:           qsTr("Preview")
+                font.family:    Theme.fontData
+                font.pixelSize: Theme.fontSzMicro
+                color:          Theme.colorWarn
+            }
+        }
+
         BayerVideoItem {
             id: bayerView
             anchors.fill: parent
