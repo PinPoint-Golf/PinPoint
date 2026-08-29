@@ -52,6 +52,15 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked ·
 Update the status boxes and the **Log** at the bottom as work lands. A new session
 should read: this file, then the design doc, then the Log.
 
+**Porting to another platform?** Read **§Phase 2W (Windows)** or **§Phase 2L
+(Linux)** — each is a self-contained brief — then *"What is shared, and must not
+be re-litigated per platform"* immediately after them. ⛔ **The single most
+important thing either brief says:** on Windows and Linux there is **no WiFi
+reconnection at all today** (`ppcp_discovery.cpp` is `__APPLE__` throughout), so
+wired is the *only* reconnection path there — and the whole WiFi-versus-wired
+takeover is **inert until mDNS is ported**. Porting mDNS is a precursor to that
+behaviour, not to wired itself.
+
 ---
 
 ## Phase 0 — make `pump()` prompt, and measure it on WiFi · ✅ COMPLETE 29 Aug 2026
@@ -414,7 +423,7 @@ through `ppcp_usbmux.h` rather than copying it.
 
 ---
 
-## Phase 1 — the tunnel, macOS only · IN PROGRESS
+## Phase 1 — the tunnel, macOS only · ✅ COMPLETE 29 Aug 2026
 
 Gated on Phase 0. Also gated on **M10 (thermal)**, which is a Phase 1 item, not a
 Phase 2 one. Waves 1–2 above; measurements are mine, not an agent's.
@@ -632,7 +641,7 @@ before anything ships.
 
 | | Repo | Item |
 |---|---|---|
-| `[ ]` | PPS | *(wave 3 agent)* Windows provider (`AF_INET 127.0.0.1:27015`, Apple Mobile Device Service); Linux provider (`AF_UNIX`). Detect-and-explain per the design doc §6.2 diagnostics table — seven distinguishable causes, and that table is the acceptance criterion. |
+| `[ ]` | PPS | **Windows and Linux — now their own briefs: see §Phase 2W and §Phase 2L below.** ⚠ Linux is likely a *prerequisites* problem rather than a code one (the `AF_UNIX` client already compiles and runs there); Windows needs a real provider. ⛔ And §6.2's table asks for seven distinguishable causes when the transport can only see **six** — measured. |
 | `[x]` | PPS | ✅ **DONE. The race is resolved by TAKEOVER, and the `onDeclare()` backstop now closes the residual hole.** Per-pairing advertisement suppression was **dropped as the mechanism** — it could never win the race. Open only as a question: whether suppression is still wanted for anything. ~~§6.1 arbitration: per-pairing mDNS advertisement suppression~~, **suppressed before dialling**, restored on **any** ending. Plus the `onDeclare()` backstop keyed on `counterpartId` (not `pairingId`) via the existing `peerForId()` `:453`. |
 | `[~]` | PPS+PPC | ✅ **Transport is now VISIBLE IN BOTH APPS** (`99c9f0a`, `ac151c8`): a pill beside the connection state in Settings→Phones plus the `Transport` fact, which used to read a constant "PPCP"; and a `Connection` row on the device's B3 telemetry, sourced from the session's `listener` flag because the phone cannot see a cable but can see that the host dialled *it*. ⛔ In both, an absent value **hides rather than defaulting to Wi-Fi** — "we do not know" and "on the radio" are different facts. Verified headless via `--probe-qml`. **Residual: the "Use cable" action.** ~~Settings→Phones shows the transport; **"Use cable"** offered when wired is available and unused. ⛔ Never switch automatically — a switch discards the sync fit. |
 | `[x]` | PPS | ✅ **Gate REMOVED 29 Aug — wired is ON by default.** `PINPOINT_PPCP_WIRED=0` forces it off and is an escape hatch, not a feature flag; ⚠ **only** the exact value `0` closes it, so a mistyped variable cannot silently disable a transport an operator is relying on. Verified on hardware with **no environment variable set at all**: `wired path armed`, then `transport=usb` one second after the phone app was activated. |
@@ -644,10 +653,204 @@ before anything ships.
 
 ---
 
-## Phase 3 — split-transport link · gated on M3/M4
+## Phase 2W — the Windows port
+
+**Brief for a Claude Code session on the Windows box.** Read this section, then
+design doc §4.3, §6.2 and §2. Update the status boxes and add to the **Log** as
+you go — this file is the handover between platforms.
+
+### ⛔ Read this first: on Windows there is no WiFi reconnection AT ALL
+
+`src/Ppcp/ppcp_discovery.cpp` guards its browser *and* its advertiser with
+`#if defined(__APPLE__)` (`:31`, `:226`, `:572`), and both `makePlatformBrowser()`
+and `makePlatformAdvertiser()` return **null** everywhere else. `dns_sd.h` and
+`arpa/inet.h` travel under the same guard.
+
+What that means, and it changes the shape of the whole port:
+
+| | macOS today | Windows today |
+|---|---|---|
+| First pairing by QR code | ✅ works | ✅ **works** — the code carries the endpoint (`RV` 4.3d), so no discovery is involved |
+| Reconnection over WiFi | ✅ the host advertises, the phone dials | ⛔ **impossible** — nothing advertises, so the phone has nothing to find |
+| Reconnection over the cable | ✅ works | ⛔ this port |
+
+✅ **So wired is worth more on Windows than on macOS**, and the argument needs no
+measurement: it is the difference between "a persisted pairing reconnects" and
+"the operator scans a QR code every single session".
+
+⚠ **And the WiFi-versus-wired question we spent a day on does not arise here.**
+The cable-takes-over-from-WiFi logic, the 2 s retry racing the phone's dial,
+`PeerLinkState::WifiIdle` — all of it is **inert on Windows until mDNS is
+ported**, because there is never a WiFi link to take over from. Do not spend time
+testing it. ⛔ **The `onDeclare()` backstop is NOT inert and still matters**: a
+phone can dial from a scanned pairing code while already on the cable, and that
+is the case the backstop exists for.
+
+**This is the dependency to state plainly in any plan:** *porting mDNS is a
+precursor to the WiFi-before-wired behaviour, not to wired itself.* Wired can
+ship on Windows with no mDNS at all; the takeover only becomes reachable — and
+only then needs testing — once a Windows host can advertise.
+
+### W1 — the usbmux provider · `[ ]`
+
+**One function.** `openProvider()` in `src/Ppcp/ppcp_usbmux.cpp:397` currently
+answers `Kind::Tcp` with `Status::NoProvider` and a comment saying Phase 2. Make
+it connect to **`127.0.0.1:27015`** — Apple Mobile Device Service. Everything
+above that socket byte is already shared and already tested: the header layout,
+the plist emit/scan, the `PortNumber` byte-swap, the `ConnectionType` filter, the
+`Listen` watch and the result-code mapping do not change.
+
+- `Provider::platformDefault()` (`:630`) **already returns the Windows shape** —
+  `Kind::Tcp`, `127.0.0.1`, `27015`. Nothing to add there.
+- `ensureSockets()` already does the Winsock startup.
+- ⚠ **`SOCK_STREAM` on loopback needs no firewall rule.** The Windows firewall
+  item already tracked in memory is about the *inbound PPCP listener*, which is a
+  different socket and a different problem — do not conflate them.
+
+### W2 — Apple Mobile Device Service is a prerequisite we cannot ship · `[ ]`
+
+AMDS arrives with iTunes or the Microsoft Store "Apple Devices" app. **We may not
+redistribute it.** Its absence is an ordinary state and must be reported as one
+(`RV` 3.6a): one `ppWarn()` line, no banner, nothing on screen. The §6.2
+diagnostics table is the acceptance criterion — each row distinguishable, or the
+row is wrong.
+
+⛔ **With one correction already measured on macOS: the table asks for seven
+causes and the transport can only see six.** A closed presence port and a
+refused-at-the-mux-layer dial are the same `Number=3`. Do not print "trust not
+granted" as a diagnosis; M5 has not run.
+
+### W3 — the tests are currently excluded on Windows · `[ ]`
+
+`src/Ppcp/tests/CMakeLists.txt:284` wraps the `ppcp_usbmux_test` target in
+`if(NOT WIN32)`, and the dial-seam rows in `ppcp_transport_test.cpp` are
+`#ifndef _WIN32`. The reason is the **stub usbmuxd is an `AF_UNIX` server** and
+there was nothing to impersonate on Windows.
+
+Porting W1 removes that reason. Give `usbmuxd_stub.h` a **TCP mode** (listen on
+`127.0.0.1:0`, hand the port to the `Provider`), then drop both guards. ⛔ Do not
+ship the Windows provider with its tests still excluded — the wire format is
+identical, so an untested Windows provider is untested for no reason.
+
+### W4 — mDNS, and it is a separate piece of work · `[ ]`
+
+Only needed for **WiFi reconnection**, per the box above. Two candidate routes:
+
+- **Bonjour SDK for Windows** — the same `dns_sd.h` API the Apple path already
+  uses, so `ppcp_discovery.cpp`'s guard widens rather than a second backend being
+  written. ⚠ It needs Apple's Bonjour service present, which is the **same
+  dependency class as AMDS** and arrives by the same route.
+- **A native responder.** No Apple dependency, but a second implementation of
+  §3's browse/advertise semantics — `rid` rotation (3.4d), TXT keys, the 3.4c
+  rule that a host never dials an `rid` it cannot resolve.
+
+⚠ **Whichever is chosen, `RV` 3.5d is a hard gate, not a detail**: a host may
+advertise for reconnection only if it can resolve a PSK identity server-side.
+This host can — `m_listener.setIdentityResolver(m_rv.identityResolver())` — so
+the clause is satisfied, but say so in the code the way the macOS path does.
+
+### Windows — done when
+
+A phone with a persisted pairing, plugged in, reaches `session_open` with **no QR
+code scanned**, and the §6.2 table's rows are distinguishable in the log. Record
+`min_rtt` and `offset_sigma` here for comparison with macOS's 0.795 ms / 0.341 ms
+— ⚠ **expect them to differ**: AMDS is a different multiplexer from Apple's own
+`usbmuxd`, and that is worth knowing rather than assuming.
+
+---
+
+## Phase 2L — the Linux port
+
+**Brief for a Claude Code session on the Linux box.**
+
+### ✅ Start here: the client code is very likely already done
+
+Unlike Windows, **nothing in the usbmux client is Apple-specific**.
+`Provider::platformDefault()` returns `Kind::Unix` with `/var/run/usbmuxd`, which
+is exactly where the open-source `usbmuxd` daemon listens, and the `AF_UNIX`
+branch of `openProvider()` compiles and runs on Linux as written.
+
+⚠ **So treat Linux as a PREREQUISITES problem first and a code problem second.**
+Install the daemon, plug a phone in, run the host — it may simply work. Establish
+that before writing anything.
+
+### L1 — prerequisites, and somebody has to own them · `[ ]`
+
+- `usbmuxd` (plus `libimobiledevice`'s udev rules in most distributions).
+- ⚠ **Socket permissions.** `/var/run/usbmuxd` is typically owned by a `usbmux`
+  user; a desktop user may need a group. Document the one-liner.
+- ⚠ **Decide and write down whether this is a SUPPORTED configuration or
+  best-effort.** It is a support burden either way, and it must not be discovered
+  by a user at a range. This is the open tracker item "name an owner for the
+  Linux `usbmuxd` + udev prerequisite" — close it here.
+
+### L2 — ⛔ SIGPIPE will kill the process on Linux · `[ ]`
+
+`setNoSigPipe()` (`ppcp_usbmux.cpp:369`) is `#ifdef SO_NOSIGPIPE` — an Apple/BSD
+socket option that **does not exist on Linux**, where the function compiles to
+`(void)s`. A write to a usbmux socket the daemon has closed then raises `SIGPIPE`
+and terminates the process by default.
+
+The transport has a considered answer to the same problem (*"where it does not
+[have the option], the listener never writes to a stream it is refusing"*), but
+the usbmux client **does** write — every plist request is a write.
+
+✅ Options, in order of preference: `MSG_NOSIGNAL` on the sends; or ignore
+`SIGPIPE` process-wide at startup. ⚠ **Verify rather than assume Qt has already
+done it** — check with a phone unplugged mid-request, which is the exact case.
+
+### L3 — mDNS on Linux · `[ ]`
+
+Same `__APPLE__` gate as Windows, same consequence: **no WiFi reconnection
+today**, so the same "wired is the only reconnection path" argument applies and
+the same takeover logic is inert until it is ported. Avahi is the obvious
+backend; it also offers a `dns_sd` compatibility shim, which would widen the
+existing guard rather than adding a backend.
+
+### Linux — done when
+
+Same bar as Windows: a persisted pairing reconnects over the cable with no QR
+code, the §6.2 rows are distinguishable, and the prerequisite question has a
+written answer. Record `min_rtt`/`offset_sigma` here too — Linux runs the
+**open-source** `usbmuxd` rather than Apple's, so a difference from macOS is
+plausible and worth capturing.
+
+---
+
+## What is shared, and must not be re-litigated per platform
+
+⛔ These were decided and in several cases **measured**; a platform port is not
+the place to reopen them.
+
+| | |
+|---|---|
+| `PortNumber` is byte-swapped | Measured twice on macOS. The wrong order **connects to a different port** rather than erroring |
+| Filter `ConnectionType == "USB"` | usbmuxd reports WiFi-paired devices too; treating one as wired invalidates every timing claim |
+| `DeviceID` is per-attachment | Measured 306 → 308 on one phone, one cable, one day. The **UDID** is the identity |
+| A blocking fd from `cfg.dial` **hangs for ever** | `handshakeTimeoutMs` never fires — the transport drives OpenSSL through `poll()` |
+| The dial runs on its own thread, never the accept thread | `ppcp_host_service.cpp:242-296` |
+| Destroy a `QSocketNotifier` before closing its fd | `:1205` |
+| The retry is **flat 2 s**, not exponential | A ramp loses the race to the phone's own dial — measured |
+| Never migrate a live link between transports | §7.3; a transport change is a NEW link with a fresh estimator |
+| Bulk does not poison control | M3: 1750 MB moved, `min_rtt` unchanged. **Phase 3 is not justified** |
+
+---
+
+## Phase 3 — split-transport link · `[-]` NOT JUSTIFIED — M3 answered it
+
+⛔ **M3 says it does not, so this phase is dropped rather than deferred.** 1750 MB
+was pushed over the same USB pipe in 58.5 s while the sync trace ran and
+`min_rtt` did not move by one part in ten thousand — 0.7645 ms before, during and
+after, with no probe lost. §8 hoped min-RTT filtering would be *"robust to some
+of this"* and said *"'some' is a measurement, not an assertion"*; measured, it is
+robust to all of it.
+
+⚠ **What would reopen it** — and only these: a device whose bulk demand is far
+above the 6.25 MB/s the encoder sustains, or a backlog drain that measurably
+lifts `min_rtt` on channel 0. Neither is speculation worth building against now.
 
 Control on the cable, bulk on the radio; one link, two transports — legal under
-`ENC` 2.1b. Only if M3 shows the single USB pipe starves the control channel.
+`ENC` 2.1b. Kept for the record only.
 ✅ `ConnectionSpeed` is readable before dialling (measured `480000000` on the
 iPhone 16), so the decision is per device, not global policy.
 
