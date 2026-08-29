@@ -269,6 +269,28 @@ pp_add_test(ppcp_transport_test
     NO_QT
     GTEST)
 
+# ── The usbmux tunnel of the wired transport (Phase 1) ───────────────────────
+# Driven entirely against a stub usbmuxd (usbmuxd_stub.h) — no phone, no cable
+# and no daemon — because design §12 names "both halves of the wired path are
+# unreached code" as the largest single estimate risk in Phase 1.
+#
+# ⚠ POSIX only.  The client compiles everywhere (the Windows provider of Phase 2
+# is a stub that returns Status::NoProvider), but the stub daemon is an AF_UNIX
+# server and the Windows provider it would have to impersonate is AF_INET; the
+# row comes back when that provider does.
+#
+# Qt-free (NO_QT), and it does NOT link OpenSSL: ppcp_usbmux.cpp includes
+# ppcp_transport.h only for Ppcp::pp_socket_t, which is a typedef.
+if(NOT WIN32)
+    pp_add_test(ppcp_usbmux_test
+        SOURCES ppcp_usbmux_test.cpp ${PPCP}/ppcp_usbmux.cpp
+        INCLUDE ${PPCP}
+        LINK    Threads::Threads
+        STD 20
+        NO_QT
+        GTEST)
+endif()
+
 # ── ENC §2.1 link binding (erratum E1) ───────────────────────────────────────
 # Concurrent dials, an abandoned dial, a late third channel and a bad first
 # frame — the four cases the implicit rules of session 1 got wrong.
@@ -477,6 +499,11 @@ pp_add_test(ppcp_host_service_test
             # PpcpHostService, so the initiator comes with it.
             ${PPCP}/ppcp_bootstrap.cpp
             ${PPCP}/ppcp_transport.cpp
+            # Phase 1 of the wired transport.  The host service owns the wired
+            # path's composition (contracts C2 and C6), so its suite compiles
+            # the orchestrator and the usbmux client it consumes.
+            ${PPCP}/ppcp_wired_link.cpp
+            ${PPCP}/ppcp_usbmux.cpp
             ${PPCP}/ppcp_host_peer.cpp
             ${PPCP}/ppcp_live_session.cpp
             ${PPCP}/ppcp_shot_bridge.cpp

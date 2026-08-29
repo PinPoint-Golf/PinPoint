@@ -3148,6 +3148,11 @@ pp_find_openssl()
 if(PP_OPENSSL_FOUND AND TARGET ppcp)
     target_sources(PinPointStudio PRIVATE
         src/Ppcp/ppcp_transport.h     src/Ppcp/ppcp_transport.cpp
+        # The USB tunnel of the wired transport (docs/design/wired_transport_design.md
+        # §4).  Beside the transport because it exists to fill exactly one field of
+        # ConnectorConfig — `dial` — and has no other purpose.  Qt-free and
+        # OpenSSL-free; it is in this block because the thing it feeds is.
+        src/Ppcp/ppcp_usbmux.h        src/Ppcp/ppcp_usbmux.cpp
         # ppcp_ingest_policy.{h,cpp} moved to the unconditional TARGET-ppcp block
         # above — ppcp_host_engine.cpp (bundle path) calls evaluate() too and is
         # itself unconditional, so gating the policy on OpenSSL left that call
@@ -3173,6 +3178,11 @@ if(PP_OPENSSL_FOUND AND TARGET ppcp)
         # constructed a PpcpHostPeer and three joins named in the code had no
         # caller.  It is its own translation unit and not lines in main.cpp so
         # that ppcp-tests can compile it (see the ppcp_app_tu_syntax row).
+        # Phase 1 of the wired transport — the orchestration above the tunnel:
+        # the usbmux device watch, the presence-record reader (contract C3) and
+        # the dial thread.  Its own translation unit rather than more lines in
+        # ppcp_host_service.cpp, which is already the largest file here.
+        src/Ppcp/ppcp_wired_link.h    src/Ppcp/ppcp_wired_link.cpp
         src/Ppcp/ppcp_host_service.h  src/Ppcp/ppcp_host_service.cpp)
 
     target_include_directories(PinPointStudio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Ppcp)

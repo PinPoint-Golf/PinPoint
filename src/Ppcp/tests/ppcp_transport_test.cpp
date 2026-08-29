@@ -742,3 +742,177 @@ TEST(PpcpTransportTls12, IdentityWithAnEmbeddedNulCannotSurviveTheTls12Path)
 // the property it guarded ("a stale half-built group must not renumber the next
 // peer's channels") is now guarded by `link_id` instead of by a deadline, and
 // the test that proves it belongs with the rest of the ENC §2.1 evidence.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── ConnectorConfig::dial — the wired transport's ONE seam (contract C1) ────
+//
+// docs/design/wired_transport_design.md §4.4: `dialTcp()` becomes the default
+// and `Connector` calls `cfg.dial` when it is set.  That is the entire change to
+// this 2114-line transport, and these rows are what say so.
+//
+// What the contract promises a dialler, and what it demands of one:
+//
+//   * called ONCE PER CHANNEL, so it must be re-entrant and return a DISTINCT fd
+//   * the fd must be non-blocking and already connected
+//   * ⛔ OWNERSHIP TRANSFERS ON RETURN — the Connector closes it on any later
+//     failure, which is the half a leak would hide
+//   * kInvalidSocket means "could not dial", and is a clean failure
+//
+// The dialler here is a plain loopback connect rather than a usbmux tunnel: the
+// seam is transport-agnostic on purpose, and ppcp_usbmux_test.cpp is where the
+// tunnel itself is proved.
+//
+// ⚠ POSIX-only, as Phase 1 is (design §4.3 — macOS first).  The seam itself is
+// portable; socketpair() and fcntl() are what these rows use to observe it, and
+// re-expressing them for Winsock buys nothing until the Windows provider of
+// Phase 2 exists to be tested.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#ifndef _WIN32
+
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/socket.h>
+
+namespace {
+
+// A connected, non-blocking loopback fd — the shape contract C1 requires.
+pp_socket_t dialLoopbackNonBlocking(std::uint16_t port)
+{
+    const pp_socket_t s = static_cast<pp_socket_t>(socket(AF_INET, SOCK_STREAM, 0));
+    if (s == kInvalidSocket) return kInvalidSocket;
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons(port);
+    if (::connect(s, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0) {
+        ::close(s);
+        return kInvalidSocket;
+    }
+    const int fl = ::fcntl(s, F_GETFL, 0);
+    ::fcntl(s, F_SETFL, fl | O_NONBLOCK);
+    return s;
+}
+
+}  // namespace
+
+TEST(PpcpTransportDialSeam, ASuppliedDiallerReplacesDialTcpEntirely)
+{
+    Harness h(oneKnownPairing(kTlsVector()), 2);
+    ASSERT_TRUE(h.ok());
+    auto accepted = h.acceptAsync(8000);
+
+    std::mutex m;
+    std::vector<pp_socket_t> handedOut;
+
+    ConnectorConfig cfg = clientConfig(h.port(), kTlsVector());
+    // ⛔ Deliberately unreachable: if anything still went through dialTcp() this
+    // test would fail rather than quietly succeed on the real address.
+    cfg.host = "no-such-host.invalid";
+    cfg.port = 1;
+    const std::uint16_t real = h.port();
+    cfg.dial = [&, real](double) {
+        const pp_socket_t s = dialLoopbackNonBlocking(real);
+        std::lock_guard<std::mutex> g(m);
+        handedOut.push_back(s);
+        return s;
+    };
+
+    HandshakeFailure fail;
+    std::unique_ptr<PeerConnection> client = Connector::connect(cfg, &fail);
+    ASSERT_NE(client, nullptr) << fail.message;
+    std::unique_ptr<PeerConnection> server = accepted.get();
+    ASSERT_NE(server, nullptr);
+
+    // Two channels of one link, so the dialler ran twice and handed back two
+    // DIFFERENT descriptors (C1: "must be re-entrant and must return a DISTINCT
+    // fd on each call").
+    ASSERT_EQ(handedOut.size(), 2u);
+    EXPECT_NE(handedOut[0], handedOut[1]);
+    for (pp_socket_t s : handedOut) EXPECT_NE(s, kInvalidSocket);
+
+    EXPECT_NE(client->channel(Channel::Control), nullptr);
+    EXPECT_NE(client->channel(Channel::Bulk), nullptr);
+    EXPECT_NE(server->channel(Channel::Control), nullptr);
+    EXPECT_NE(server->channel(Channel::Bulk), nullptr);
+
+    // ENC 2.1b — the listener still bound both streams by link_id, which is the
+    // property that has to survive a change of transport.
+    EXPECT_EQ(client->linkId(), server->linkId());
+    EXPECT_EQ(server->pairingId(), "vector-pairing");
+}
+
+TEST(PpcpTransportDialSeam, AnInvalidSocketIsACleanCouldNotDial)
+{
+    Harness h(oneKnownPairing(kTlsVector()), 2);
+    ASSERT_TRUE(h.ok());
+
+    int calls = 0;
+    ConnectorConfig cfg = clientConfig(h.port(), kTlsVector());
+    cfg.dial = [&](double) { ++calls; return kInvalidSocket; };
+
+    HandshakeFailure fail;
+    std::unique_ptr<PeerConnection> client = Connector::connect(cfg, &fail);
+    EXPECT_EQ(client, nullptr);
+    EXPECT_EQ(calls, 1) << "a dial that cannot start must not be retried per channel";
+
+    // Not an authentication outcome, so RV 7.7c's uniform rejection does not
+    // reach it and it may say what it is.
+    EXPECT_EQ(fail.kind, FailureKind::Handshake);
+    EXPECT_EQ(fail.message, "no endpoint reachable");
+}
+
+// ⛔ The half that a leak would hide.  "OWNERSHIP TRANSFERS ON RETURN" is only
+// worth writing down if something checks it, and the observable is that the far
+// end of a socketpair sees EOF once the Connector has given up.
+TEST(PpcpTransportDialSeam, OwnershipTransfersOnReturnAndTheConnectorClosesIt)
+{
+    int sp[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sp), 0);
+
+    // ⛔ BOTH ends non-blocking, and the second one is not tidiness.  C1 says the
+    // fd handed back "MUST be non-blocking", and this transport takes it at its
+    // word: OpenSSL is driven through waitFor()/poll() with a deadline, so a
+    // BLOCKING fd parks in read() inside SSL_do_handshake and the handshake
+    // timeout never runs.  Measured here — the first draft of this test handed
+    // over a blocking socketpair end and hung indefinitely.
+    for (int fd : sp) {
+        const int fl = ::fcntl(fd, F_GETFL, 0);
+        ::fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    }
+
+    ConnectorConfig cfg;
+    cfg.host = "127.0.0.1";
+    cfg.port = 1;
+    cfg.kTls = kTlsVector();
+    cfg.identity = identityVector();
+    cfg.channels = {Channel::Control};
+    cfg.options.handshakeTimeoutMs = 400;   // nothing answers a socketpair
+    bool dialled = false;
+    cfg.dial = [&](double) {
+        dialled = true;
+        return static_cast<pp_socket_t>(sp[1]);   // the Connector's end, and its problem now
+    };
+
+    HandshakeFailure fail;
+    std::unique_ptr<PeerConnection> client = Connector::connect(cfg, &fail);
+    EXPECT_EQ(client, nullptr);
+    EXPECT_TRUE(dialled);
+
+    // The ClientHello reached us, so the fd really was live when it was handed
+    // over — and then the far end went away, which is the Connector closing it.
+    bool sawEof = false;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!sawEof && std::chrono::steady_clock::now() < until) {
+        char buf[512];
+        const ssize_t n = ::recv(sp[0], buf, sizeof buf, 0);
+        if (n == 0) { sawEof = true; break; }
+        if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(sawEof) << "the Connector did not close a socket it had taken ownership of — "
+                           "contract C1, and on the wired path that fd is a usbmux tunnel";
+    ::close(sp[0]);
+}
+
+#endif  // !_WIN32

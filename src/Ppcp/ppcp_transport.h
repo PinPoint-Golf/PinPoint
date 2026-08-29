@@ -59,6 +59,24 @@ namespace Ppcp {
 
 namespace detail { struct ChannelFactory; }
 
+// ── The socket handle this transport deals in ───────────────────────────────
+// Named in the HEADER, and not only in the .cpp as it was until the wired
+// transport, because ConnectorConfig::dial now hands one across the seam
+// (docs/design/wired_transport_design.md §4.4, Phase 1 contract C1).
+//
+// Deliberately a plain integral type rather than <winsock2.h>'s SOCKET: this
+// header is included by Qt code and by the Qt-free usbmux client alike, and
+// neither should have to pull a socket API in merely to name a descriptor.  On
+// Windows SOCKET is UINT_PTR, which is exactly std::uintptr_t, so the two spell
+// the same type.
+#ifdef _WIN32
+using pp_socket_t = std::uintptr_t;
+constexpr pp_socket_t kInvalidSocket = static_cast<pp_socket_t>(-1);   // == INVALID_SOCKET
+#else
+using pp_socket_t = int;
+constexpr pp_socket_t kInvalidSocket = static_cast<pp_socket_t>(-1);
+#endif
+
 // ── Channels ────────────────────────────────────────────────────────────────
 // ENC 2a: channel 0 is control, 1 and above are bulk, 255 is reserved.  Channel
 // 2 carries preview where a device offers one (plan A6).  The numbering is the
@@ -335,6 +353,26 @@ struct Options {
 // not K_tls, and on failure not the reason (7.7c).
 using LogFn = std::function<void(const std::string &line)>;
 
+// ── The dialler seam (wired transport, Phase 1 contract C1) ─────────────────
+//
+// Supplies a CONNECTED socket for ONE channel.  Called once per channel of a
+// link (twice today, three times under ENC 2.1d), so it must be re-entrant and
+// must return a DISTINCT fd on each call.  Null = dialTcp(cfg, deadline), which
+// is every caller today; a wired dial returns the usbmux tunnel fd instead.
+//
+//  * `deadline` is an absolute value in the same units as this transport's
+//    internal nowMs(), i.e. the same deadline dialTcp() already takes.
+//  * The returned fd MUST be non-blocking and MUST be connected (or have its
+//    connect completed) by the time it is returned.
+//  * ⛔ OWNERSHIP TRANSFERS ON RETURN.  From the moment a valid fd is returned
+//    the Connector owns it and closes it on any later failure.  Returning
+//    kInvalidSocket means "could not dial", and the dialler must already have
+//    closed anything it opened.
+//  * ⛔ It MUST NOT throw; a failure is kInvalidSocket.
+//  * ⚠ It may BLOCK, and a usbmux dial does.  It must therefore never be
+//    invoked from PpcpHostService's accept thread (design §6.3).
+using DialFn = std::function<pp_socket_t(double deadline)>;
+
 // ── Dialling ────────────────────────────────────────────────────────────────
 // RV 5.2g: the peer that dialled is the TLS client.  On the pairing-code path
 // the scanner dials, so the host is the client only on the discovery path (RV
@@ -346,6 +384,11 @@ struct ConnectorConfig {
     PskIdentity identity;                       // the raw 17 octets of RV 5.3a
     std::vector<Channel> channels{Channel::Control, Channel::Bulk};
     Options options;
+
+    // Null on every WiFi path — see DialFn above.  When set, `host` and `port`
+    // are unused: the dialler already knows where it is going.
+    DialFn dial;
+
     LogFn log;
 };
 

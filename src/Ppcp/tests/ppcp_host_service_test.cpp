@@ -51,9 +51,15 @@
 
 #include <cstring>
 
+#include <ppcp/cbor.h>
+
+#include <mutex>
+#include <thread>
+
 #include "ppcp_host_service.h"
 #include "ppcp_rendezvous.h"
 #include "ppcp_transport.h"
+#include "ppcp_wired_link.h"
 
 namespace {
 
@@ -657,6 +663,565 @@ TEST_F(HostServiceClock, AskingForANewCodeClearsTheLastFailure)
     ASSERT_TRUE(m_svc.publishPairingCode());
     EXPECT_TRUE(m_svc.lastFailureText().isEmpty())
         << "a new code still carried the old code's failure";
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+//  THE WIRED PATH — Phase 1 contracts C2, C3 and C6
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠ WHAT THIS SUITE CAN AND CANNOT REACH.  The stub usbmuxd's tunnel is a byte
+// echo, not a PPCP listener, so a whole-path wired dial (usbmux Connect →
+// presence read → resolve → TLS) is not assertable here and is M1's job on
+// hardware.  What IS assertable is every decision the host makes on its own:
+// the C3 reader against each of its refusal rules, first-match-wins resolution,
+// and — the one that would be silent and expensive in production — C2's rule
+// that a link WE dialled must not spend a pairing code.
+
+// ── A record builder, written independently of the reader ──────────────────
+//
+// ⚠ It uses PPCP_CBOR_ORDER_LITERAL rather than the writer's default, and that
+// is not incidental: C3 emits `pv, role, dl, peers`, which is NOT deterministic
+// key order (that would be `dl, pv, role, peers` — length first, then bytes).
+// A test that could only build canonically ordered maps could not build the
+// record the contract actually specifies.
+struct PresenceSpec {
+    std::string pv   = "1.0";
+    std::string role = "capture";
+    bool        hasDl = true;
+    std::string dl   = "Mark's iPhone";
+    bool        hasPeers = true;
+    int         peers = 1;
+    std::size_t identityBytes = 17;
+    bool        unknownTopKey  = false;
+    bool        unknownPeerKey = false;
+    bool        reorder = false;   // peers, dl, role, pv — C3: "any order"
+};
+
+std::vector<unsigned char> buildPresence(const PresenceSpec &sp)
+{
+    std::vector<std::uint8_t> buf(16384);
+    ppcp_cbor_writer w{};
+    ppcp_cbor_writer_init_order(&w, buf.data(), buf.size(), PPCP_CBOR_ORDER_LITERAL);
+
+    std::size_t fields = 2;                       // pv, role
+    if (sp.hasDl)         ++fields;
+    if (sp.hasPeers)      ++fields;
+    if (sp.unknownTopKey) ++fields;
+    ppcp_cbor_write_map(&w, fields);
+
+    auto writePv   = [&] { ppcp_cbor_write_text_z(&w, "pv");
+                           ppcp_cbor_write_text(&w, sp.pv.data(), sp.pv.size()); };
+    auto writeRole = [&] { ppcp_cbor_write_text_z(&w, "role");
+                           ppcp_cbor_write_text(&w, sp.role.data(), sp.role.size()); };
+    auto writeDl   = [&] { if (!sp.hasDl) return;
+                           ppcp_cbor_write_text_z(&w, "dl");
+                           ppcp_cbor_write_text(&w, sp.dl.data(), sp.dl.size()); };
+    auto writePeers = [&] {
+        if (!sp.hasPeers) return;
+        ppcp_cbor_write_text_z(&w, "peers");
+        ppcp_cbor_write_array(&w, static_cast<std::size_t>(sp.peers));
+        for (int i = 0; i < sp.peers; ++i) {
+            ppcp_cbor_write_map(&w, sp.unknownPeerKey ? 3u : 2u);
+            ppcp_cbor_write_text_z(&w, "port");
+            ppcp_cbor_write_uint(&w, static_cast<std::uint64_t>(51000 + i));
+            ppcp_cbor_write_text_z(&w, "psk_identity");
+            std::vector<std::uint8_t> id(sp.identityBytes);
+            for (std::size_t b = 0; b < id.size(); ++b)
+                id[b] = static_cast<std::uint8_t>(b == 0 ? 0x01 : (i + 1) * 16 + b);
+            ppcp_cbor_write_bytes(&w, id.data(), id.size());
+            if (sp.unknownPeerKey) {
+                ppcp_cbor_write_text_z(&w, "future");
+                ppcp_cbor_write_uint(&w, 7);
+            }
+        }
+    };
+    auto writeUnknown = [&] {
+        if (!sp.unknownTopKey) return;
+        ppcp_cbor_write_text_z(&w, "zz_future");
+        ppcp_cbor_write_array(&w, 2);
+        ppcp_cbor_write_uint(&w, 1);
+        ppcp_cbor_write_text_z(&w, "whatever");
+    };
+
+    if (sp.reorder) { writePeers(); writeUnknown(); writeDl(); writeRole(); writePv(); }
+    else            { writePv(); writeRole(); writeDl(); writeUnknown(); writePeers(); }
+
+    std::size_t n = 0;
+    if (ppcp_cbor_writer_finish(&w, &n) != PPCP_OK) return {};
+    return std::vector<unsigned char>(buf.begin(), buf.begin() + n);
+}
+
+bool parses(const std::vector<unsigned char> &b, Ppcp::WiredPresence *out = nullptr,
+            std::string *why = nullptr)
+{
+    Ppcp::WiredPresence scratch;
+    std::string scratchWhy;
+    return Ppcp::parseWiredPresence(b.data(), b.size(), out ? out : &scratch,
+                                    why ? why : &scratchWhy);
+}
+
+std::vector<unsigned char> fromHex(const std::string &hex)
+{
+    std::vector<unsigned char> out;
+    auto nib = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (std::size_t i = 0; i + 1 < hex.size(); i += 2)
+        out.push_back(static_cast<unsigned char>(nib(hex[i]) * 16 + nib(hex[i + 1])));
+    return out;
+}
+
+// ── The cross-repo fixtures: what PinPointCapture's encoder actually emits ─
+//
+// Handed over by the PPC agent on 29 Aug 2026 and independently decoded before
+// being handed over — not reconstructed here from the schema, which is the only
+// kind of fixture that can catch two implementations agreeing with the document
+// and not with each other.
+//
+// ⚠ C3's key order was AMENDED on 29 Aug from `pv, role, dl, peers` to
+// `dl, pv, role, peers`, because the original does not sort under ENC 4e
+// (bytewise over the ENCODED key: `62 64 6c` < `62 70 76` < `64 …` < `65 …`)
+// and libppcp's writer enforces 4e.  ✅ It cost this reader nothing, because
+// C3 always required keys to be accepted in ANY order — and fixtures 1 and 3
+// below are what turns "required" into "tested".
+//
+// ⚠ AND FIXTURE 2 CANNOT STAND IN FOR THEM.  An unlabelled record encodes
+// identically under either rule, which is precisely how the ordering bug
+// survived on the device side; only 1 and 3 together exercise the requirement.
+
+// Fixture 1 — two pairings, `dl` present, the AMENDED (ENC 4e) order.  125 bytes.
+const char *kPpcFixtureDeterministic =
+    "a462646c6d4d61726b2773206950686f6e6562707663312e3064726f6c6567636170747572"
+    "6565706565727382a264706f727419c3506c70736b5f6964656e7469747951010f1e2d3c4b"
+    "5a6978b355ada60b4b5aa8a264706f727419c0006c70736b5f6964656e746974795101ffee"
+    "ddccbbaa99887766554433221100";
+
+// Fixture 2 — the same device with no label.  68 bytes, and the map header is
+// `a3`: `dl` is ABSENT, never `null` (C3, and ENC 4c would refuse a null).
+const char *kPpcFixtureNoLabel =
+    "a362707663312e3064726f6c65676361707475726565706565727381a264706f727419c350"
+    "6c70736b5f6964656e7469747951010f1e2d3c4b5a6978b355ada60b4b5aa8";
+
+// Fixture 3 — the OLD key order (`pv, role, dl, peers`), which this reader must
+// ALSO parse.  Free proof of the order-agnostic rule, at no cost.
+const char *kPpcFixtureLegacyOrder =
+    "a462707663312e3064726f6c65676361707475726562646c6d4d61726b2773206950686f6e65"
+    "65706565727382a264706f727419c3506c70736b5f6964656e7469747951010f1e2d3c4b5a69"
+    "78b355ada60b4b5aa8a264706f727419c0006c70736b5f6964656e746974795101ffeeddccbb"
+    "aa99887766554433221100";
+
+// ⛔ RV 5.3f — the identity is 17 raw octets and is NOT text.  The first of
+// these is not valid UTF-8 and the second ENDS IN A ZERO BYTE; anything that
+// transcoded, validated as text or ran strlen over them would lose the last
+// byte of one and refuse the other.  A hand-written all-ASCII fixture would
+// never catch it, which is why these bytes are the device's and not ours.
+const char *kPpcIdentityA = "010f1e2d3c4b5a6978b355ada60b4b5aa8";
+const char *kPpcIdentityB = "01ffeeddccbbaa99887766554433221100";
+
+void expectTwoPairingFixture(const char *hex, const char *which)
+{
+    Ppcp::WiredPresence rec;
+    std::string why;
+    const std::vector<unsigned char> bytes = fromHex(hex);
+    ASSERT_EQ(bytes.size(), 125u) << which;
+    ASSERT_TRUE(parses(bytes, &rec, &why)) << which << ": " << why;
+
+    EXPECT_EQ(rec.pv, "1.0") << which;
+    EXPECT_EQ(rec.role, "capture") << which;
+    EXPECT_EQ(rec.displayLabel, "Mark's iPhone") << which;
+    ASSERT_EQ(rec.peers.size(), 2u) << which;
+
+    EXPECT_EQ(rec.peers[0].port, 50000) << which;
+    EXPECT_EQ(rec.peers[1].port, 49152) << which;
+    EXPECT_EQ(rec.peers[0].identity, fromHex(kPpcIdentityA)) << which;
+    EXPECT_EQ(rec.peers[1].identity, fromHex(kPpcIdentityB)) << which;
+    EXPECT_EQ(rec.peers[1].identity.back(), 0x00) << which;
+    EXPECT_EQ(rec.peers[0].identity.front(), 0x01) << which;   // RV 5.3a
+}
+
+TEST(WiredPresenceRecord, ThePinPointCaptureFixtureParsesInEitherKeyOrder)
+{
+    expectTwoPairingFixture(kPpcFixtureDeterministic, "fixture 1 (ENC 4e order)");
+    expectTwoPairingFixture(kPpcFixtureLegacyOrder,   "fixture 3 (C3's original order)");
+
+    // ⚠ Deliberately NOT a substitute for the pair above — see the note on the
+    // fixtures.  What it does prove is the absent-`dl` shape: a three-key map,
+    // no label, and a record that is complete without one.
+    const std::vector<unsigned char> plain = fromHex(kPpcFixtureNoLabel);
+    ASSERT_EQ(plain.size(), 68u);
+    EXPECT_EQ(plain[0], 0xa3) << "dl is absent, so the map has three keys";
+    Ppcp::WiredPresence rec;
+    std::string why;
+    ASSERT_TRUE(parses(plain, &rec, &why)) << why;
+    EXPECT_TRUE(rec.displayLabel.empty());
+    ASSERT_EQ(rec.peers.size(), 1u);
+    EXPECT_EQ(rec.peers[0].port, 50000);
+    EXPECT_EQ(rec.peers[0].identity, fromHex(kPpcIdentityA));
+}
+
+// ── C3, the accepting cases ────────────────────────────────────────────────
+TEST(WiredPresenceRecord, AGoodRecordIsRead)
+{
+    Ppcp::WiredPresence rec;
+    ASSERT_TRUE(parses(buildPresence({}), &rec));
+    EXPECT_EQ(rec.pv, "1.0");
+    EXPECT_EQ(rec.role, "capture");
+    ASSERT_EQ(rec.peers.size(), 1u);
+    EXPECT_EQ(rec.peers[0].port, 51000);
+    EXPECT_EQ(rec.peers[0].identity.size(), 17u);
+    // RV 4.4d — the label is display text from an untrusted counterpart and is
+    // sanitised at the boundary, never used as a key.
+    EXPECT_FALSE(rec.displayLabel.empty());
+}
+
+// Forward compatibility, which is the whole reason C3 says "any order" and
+// "ignore unknown": a capture app that adds a field must not stop working with
+// a host that has not been rebuilt.
+TEST(WiredPresenceRecord, KeysInAnUnexpectedOrderWithAnUnknownKeyAreStillRead)
+{
+    PresenceSpec sp;
+    sp.reorder = true;
+    sp.unknownTopKey = true;
+    sp.unknownPeerKey = true;
+    Ppcp::WiredPresence rec;
+    std::string why;
+    ASSERT_TRUE(parses(buildPresence(sp), &rec, &why)) << why;
+    EXPECT_EQ(rec.pv, "1.0");
+    ASSERT_EQ(rec.peers.size(), 1u);
+    EXPECT_EQ(rec.peers[0].identity.size(), 17u);
+}
+
+// C3: `dl` is OMITTED ENTIRELY when absent — never `null`.  (A `null` would be
+// refused by ENC 4c before this reader saw it, which is the belt to this brace.)
+TEST(WiredPresenceRecord, ARecordWithNoLabelIsOrdinary)
+{
+    PresenceSpec sp;
+    sp.hasDl = false;
+    const std::vector<unsigned char> bytes = buildPresence(sp);
+    ASSERT_FALSE(bytes.empty());
+    EXPECT_EQ(bytes[0], 0xa3) << "three keys, so a three-entry map";
+    Ppcp::WiredPresence rec;
+    std::string why;
+    ASSERT_TRUE(parses(bytes, &rec, &why)) << why;
+    EXPECT_TRUE(rec.displayLabel.empty());
+    EXPECT_EQ(rec.peers.size(), 1u);
+}
+
+// RV 3.3a is about MAJOR, so a device on a newer MINOR is still ours.
+TEST(WiredPresenceRecord, ANewerMinorIsAcceptedAndANewerMajorIsNot)
+{
+    PresenceSpec ok;   ok.pv = "1.7";
+    EXPECT_TRUE(parses(buildPresence(ok)));
+
+    PresenceSpec no;   no.pv = "2.0";
+    std::string why;
+    EXPECT_FALSE(parses(buildPresence(no), nullptr, &why));
+    EXPECT_FALSE(why.empty());
+}
+
+// ── C3, the refusals.  Every one of them is SILENCE plus one log line: the
+// device is treated as not wired, which is the state a charge-only cable is in
+// anyway (design §6.2, RV 3.6a).
+TEST(WiredPresenceRecord, PeersAbsentOrEmptyIsRefused)
+{
+    PresenceSpec absent; absent.hasPeers = false;
+    EXPECT_FALSE(parses(buildPresence(absent)));
+
+    PresenceSpec empty;  empty.peers = 0;
+    EXPECT_FALSE(parses(buildPresence(empty)));
+}
+
+// The cap is 16 and it is checked BEFORE the entries are read, so a hostile
+// record cannot make this host do the work of refusing it.
+TEST(WiredPresenceRecord, SeventeenListenersIsRefusedAndSixteenIsNot)
+{
+    PresenceSpec sixteen;   sixteen.peers = 16;
+    EXPECT_TRUE(parses(buildPresence(sixteen)));
+
+    PresenceSpec seventeen; seventeen.peers = 17;
+    EXPECT_FALSE(parses(buildPresence(seventeen)));
+}
+
+// RV 5.3f forbids transcoding or truncating an identity, so a wrong length is a
+// refusal and never something to pad or cut.
+TEST(WiredPresenceRecord, AnIdentityThatIsNotSeventeenBytesIsRefused)
+{
+    PresenceSpec shortId; shortId.identityBytes = 16;
+    EXPECT_FALSE(parses(buildPresence(shortId)));
+
+    PresenceSpec longId;  longId.identityBytes = 18;
+    EXPECT_FALSE(parses(buildPresence(longId)));
+}
+
+TEST(WiredPresenceRecord, ARecordOverTheCapIsRefused)
+{
+    PresenceSpec big;
+    big.dl = std::string(5000, 'a');
+    const std::vector<unsigned char> bytes = buildPresence(big);
+    ASSERT_GT(bytes.size(), Ppcp::kWiredPresenceMaxBytes);
+    std::string why;
+    EXPECT_FALSE(parses(bytes, nullptr, &why));
+    EXPECT_FALSE(why.empty());
+}
+
+// ⛔ THERE IS NO FRAMING, so a short read is indistinguishable from a record
+// and must be refused as one.  This is the case a reader that trusted its own
+// buffer length would get wrong.
+TEST(WiredPresenceRecord, ATruncatedReadIsRefusedAsAParseFailure)
+{
+    const std::vector<unsigned char> whole = buildPresence({});
+    ASSERT_GT(whole.size(), 8u);
+    for (std::size_t cut : {whole.size() / 2, whole.size() - 1, std::size_t(0)}) {
+        std::vector<unsigned char> part(whole.begin(), whole.begin() + cut);
+        EXPECT_FALSE(parses(part)) << "a " << cut << "-byte prefix was accepted";
+    }
+}
+
+// ── RV 5.3b, run client-side: FIRST MATCH WINS ─────────────────────────────
+TEST(WiredPresenceRecord, ResolutionTakesTheFirstEntryThatResolves)
+{
+    PresenceSpec sp; sp.peers = 4;
+    Ppcp::WiredPresence rec;
+    ASSERT_TRUE(parses(buildPresence(sp), &rec));
+    ASSERT_EQ(rec.peers.size(), 4u);
+
+    int calls = 0;
+    // Entries 2 and 3 both resolve; the contract says the FIRST of them wins,
+    // and that nothing after it is even offered.
+    Ppcp::IdentityResolver r = [&](const unsigned char *id, std::size_t len,
+                                   Ppcp::ResolvedPairing &out) {
+        ++calls;
+        if (len != 17) return false;
+        // buildPresence() stamps byte 1 of entry i as (i + 1) * 16 + 1.
+        if (id[1] != 0x31 && id[1] != 0x41) return false;   // entries 2 and 3
+        out.pairingId = (id[1] == 0x31) ? "pair-two" : "pair-three";
+        return true;
+    };
+
+    std::size_t which = 99;
+    Ppcp::ResolvedPairing got;
+    ASSERT_TRUE(Ppcp::resolveFirstWiredPeer(rec, r, &which, &got));
+    EXPECT_EQ(which, 2u);
+    EXPECT_EQ(got.pairingId, "pair-two");
+    EXPECT_EQ(calls, 3) << "the resolver kept going after the first match";
+}
+
+// ⛔ RV 3.4c — a phone this host is not paired with is not a failure.  It is a
+// phone that belongs to somebody else, and the answer is silence.
+TEST(WiredPresenceRecord, NothingResolvingIsSilenceAndNotAnError)
+{
+    PresenceSpec sp; sp.peers = 3;
+    Ppcp::WiredPresence rec;
+    ASSERT_TRUE(parses(buildPresence(sp), &rec));
+
+    Ppcp::IdentityResolver never = [](const unsigned char *, std::size_t,
+                                      Ppcp::ResolvedPairing &) { return false; };
+    std::size_t which = 99;
+    Ppcp::ResolvedPairing got;
+    EXPECT_FALSE(Ppcp::resolveFirstWiredPeer(rec, never, &which, &got));
+    EXPECT_TRUE(got.pairingId.empty());
+}
+
+// The gate is off unless somebody asks for it, and the code says so out loud.
+TEST(WiredPresenceRecord, TheWiredPathIsOffUnlessTheEnvironmentAsksForIt)
+{
+    const bool on = Ppcp::PpcpWiredLink::enabled();
+    const char *v = std::getenv("PINPOINT_PPCP_WIRED");
+    EXPECT_EQ(on, v != nullptr && std::string(v) == "1");
+}
+
+// ── Contract C2 — a device the host DIALS, without a cable ─────────────────
+//
+// A `Ppcp::Listener` standing in for the phone's per-pairing PpcpListener
+// (contract C5).  What matters is not that it is a phone but that THIS HOST is
+// the client: the link that comes back is a dialled one, and a dialled link's
+// `pairingId()` is empty — which is the entire reason C2 exists.
+class FakeCabledDevice
+{
+public:
+    FakeCabledDevice()
+    {
+        for (std::size_t i = 0; i < m_kTls.size(); ++i)
+            m_kTls[i] = static_cast<unsigned char>(0xA0 + i);
+        m_identity.resize(17);
+        m_identity[0] = 0x01;
+        for (std::size_t i = 1; i < m_identity.size(); ++i)
+            m_identity[i] = static_cast<unsigned char>(i * 7 + 3);
+
+        const Ppcp::Key k = m_kTls;
+        m_listener.setIdentityResolver(
+            [k](const unsigned char *, std::size_t, Ppcp::ResolvedPairing &out) {
+                out.kTls = k;
+                // The DEVICE's own handle on the pairing.  ⚠ It never reaches
+                // the host: a dialling host learns nothing from the handshake,
+                // which is why it has to resolve the pairing itself first.
+                out.pairingId = "device-side-handle";
+                return true;
+            });
+        m_listener.setChannelsPerPeer(2);
+        m_ok = m_listener.listen(0, nullptr);
+        if (!m_ok) return;
+        m_thread = std::thread([this] {
+            while (!m_stop) {
+                std::unique_ptr<Ppcp::PeerConnection> l = m_listener.accept(50, nullptr);
+                if (!l) continue;
+                std::lock_guard<std::mutex> g(m_m);
+                m_accepted.push_back(std::move(l));
+            }
+        });
+    }
+
+    ~FakeCabledDevice()
+    {
+        m_stop = true;
+        if (m_thread.joinable()) m_thread.join();
+        m_listener.stop();
+    }
+
+    bool ok() const { return m_ok; }
+
+    // What `PpcpWiredLink` does after it has resolved a pairing: dial, with the
+    // identity the presence record published.
+    std::unique_ptr<Ppcp::PeerConnection> hostDials()
+    {
+        Ppcp::ConnectorConfig c;
+        c.host = "127.0.0.1";
+        c.port = m_listener.port();
+        c.kTls = m_kTls;
+        c.identity = m_identity;
+        return Ppcp::Connector::connect(c, nullptr);
+    }
+
+private:
+    Ppcp::Listener m_listener;
+    Ppcp::Key      m_kTls{};
+    Ppcp::PskIdentity m_identity;
+    bool m_ok = false;
+    std::atomic<bool> m_stop{false};
+    std::thread m_thread;
+    std::mutex  m_m;
+    std::vector<std::unique_ptr<Ppcp::PeerConnection>> m_accepted;
+};
+
+// ⛔ THE ASSERTION THIS WHOLE CONTRACT EXISTS FOR.  RV 7.3a's single-use
+// accounting spends a PAIRING CODE; a wired reconnection resolves against a
+// pairing the host already holds and spends nothing.  Calling
+// noteLinkEstablished() on the wired path would burn a code no phone ever
+// scanned — and, under erratum E57, silently persist a pairing as well.
+//
+// ⚠ The pairing used here is a fresh, unspent code rather than a persisted one,
+// which a real wired reconnection would never be.  That is deliberate: an
+// already-persisted pairing has nothing left to spend, so the defect would be
+// invisible.  This is the shape that can still see it.
+TEST_F(HostServiceClock, AWiredAdoptSpendsNothingAndStillJoinsTheLedger)
+{
+    FakeCabledDevice device;
+    ASSERT_TRUE(device.ok());
+
+    Ppcp::PpcpRendezvous::Config cfg;
+    cfg.displayName = "wired";
+    Ppcp::PublishedCode code;
+    std::string err;
+    ASSERT_TRUE(m_svc.rendezvous().publish(cfg, Ppcp::reachableEndpoints(m_svc.port()),
+                                           nullptr, &code, &err)) << err;
+    const QString pairingId = QString::fromStdString(code.pairingId);
+
+    std::unique_ptr<Ppcp::PeerConnection> link = device.hostDials();
+    ASSERT_TRUE(link) << "the host could not dial the stand-in device";
+    // ⛔ The premise of C2, asserted rather than assumed: a link WE dialled
+    // carries no pairing.  If this ever becomes non-empty the parameter is
+    // redundant — and until it does, adopting without it is invisible to
+    // phoneByPairing(), notePeerName() and m_pairedThisRun.
+    EXPECT_TRUE(link->pairingId().empty());
+
+    m_svc.adoptLinkForTest(std::move(link), pairingId);
+
+    EXPECT_EQ(m_svc.connectedCount(), 1);
+
+    // Rule 2 — nothing was spent, and nothing was remembered on its behalf.
+    bool found = false;
+    for (const QVariant &v : m_svc.outstandingCodes()) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("pairingId")).toString() != pairingId) continue;
+        found = true;
+        EXPECT_EQ(m.value(QStringLiteral("usesRemaining")).toULongLong(), 1u)
+            << "RV 7.3a — a wired reconnection spent a pairing code";
+        EXPECT_FALSE(m.value(QStringLiteral("persisted")).toBool())
+            << "noteLinkEstablished() ran on the wired path and persisted the pairing";
+    }
+    EXPECT_TRUE(found);
+
+    // Rule 3 — and the row is there anyway, which is the half that must NOT
+    // differ by transport.  `m_pairedThisRun` is the only thing putting it in
+    // the list, since the pairing is not persisted.
+    bool row = false;
+    for (const QVariant &v : m_svc.phones()) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("pairingId")).toString() != pairingId) continue;
+        row = true;
+        EXPECT_EQ(m.value(QStringLiteral("status")).toString(), QStringLiteral("connected"))
+            << "the home screen says connected and Settings->Phones says otherwise — "
+               "the empty-Phones-list bug, one transport along";
+    }
+    EXPECT_TRUE(row) << "a wired link was adopted and no device row appeared";
+}
+
+// The other arm, and the control for the one above: the WiFi path DOES spend
+// the code, because there the phone dialled a code somebody scanned.
+TEST_F(HostServiceClock, AnAcceptedLinkStillSpendsItsCodeAndIsRemembered)
+{
+    Phone p(&m_svc);
+    ASSERT_TRUE(p.ok());
+    ASSERT_TRUE(p.dial(m_svc.port(), 0x51));
+    for (int i = 0; i < 200 && m_svc.connectedCount() < 1; ++i) spin(10);
+    ASSERT_EQ(m_svc.connectedCount(), 1);
+
+    const QString pairingId = QString::fromStdString(p.pairingId());
+    bool found = false;
+    for (const QVariant &v : m_svc.outstandingCodes()) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("pairingId")).toString() != pairingId) continue;
+        found = true;
+        EXPECT_EQ(m.value(QStringLiteral("usesRemaining")).toULongLong(), 0u)
+            << "RV 7.3a — the code the phone used was not spent";
+        EXPECT_TRUE(m.value(QStringLiteral("persisted")).toBool())
+            << "E57 — a completed pairing is remembered automatically";
+    }
+    EXPECT_TRUE(found);
+}
+
+// ⚠ AND A DIALLED LINK WITH NO PAIRING PASSED IN IS THE BUG, KEPT AS A
+// NEGATIVE CONTROL.  Without C2's parameter this is what the wired path would
+// have produced: a live link carrying video that no device row can see.  If
+// this test ever goes green on the row assertion, somebody has taught
+// adoptLink() to find the pairing another way and C2 can be simplified.
+TEST_F(HostServiceClock, ADialledLinkAdoptedWithNoPairingIsLiveAndInvisible)
+{
+    FakeCabledDevice device;
+    ASSERT_TRUE(device.ok());
+
+    Ppcp::PpcpRendezvous::Config cfg;
+    cfg.displayName = "wired";
+    Ppcp::PublishedCode code;
+    std::string err;
+    ASSERT_TRUE(m_svc.rendezvous().publish(cfg, Ppcp::reachableEndpoints(m_svc.port()),
+                                           nullptr, &code, &err)) << err;
+
+    std::unique_ptr<Ppcp::PeerConnection> link = device.hostDials();
+    ASSERT_TRUE(link);
+    m_svc.adoptLinkForTest(std::move(link), QString());
+
+    EXPECT_EQ(m_svc.connectedCount(), 1) << "the link is up";
+    for (const QVariant &v : m_svc.phones()) {
+        const QVariantMap m = v.toMap();
+        EXPECT_NE(m.value(QStringLiteral("pairingId")).toString(),
+                  QString::fromStdString(code.pairingId))
+            << "a link with no pairing found its way into the ledger";
+    }
 }
 
 }  // namespace

@@ -234,23 +234,204 @@ results; take a green claim as a claim until the integration run agrees.
 
 ---
 
-## Phase 1 — the tunnel, macOS only · NEXT SESSION
+## Phase 1 contracts — fixed 29 Aug 2026, before any agent started
+
+Agents implement against these verbatim. They are not negotiable between agents,
+and an agent that finds one wrong reports it rather than changing it.
+
+### C1 — `ConnectorConfig::dial` (PPS transport agent owns)
+
+```cpp
+// Supplies a CONNECTED socket for ONE channel.  Called once per channel of a
+// link (twice today, three times under ENC 2.1d), so it must be re-entrant and
+// must return a DISTINCT fd on each call.  Null = dialTcp(cfg, deadline), which
+// is every caller today.
+//
+//  * `deadline` is an absolute value in the same units as nowMs(), i.e. the
+//    same deadline dialTcp() already takes.
+//  * The returned fd MUST be non-blocking and MUST be connected (or have its
+//    connect completed) by the time it is returned.
+//  * OWNERSHIP TRANSFERS ON RETURN.  From the moment a valid fd is returned the
+//    Connector owns it and closes it on any later failure.  Returning
+//    PP_INVALID_SOCKET means "could not dial", and the dialler must already
+//    have closed anything it opened.
+//  * It MUST NOT throw; a failure is PP_INVALID_SOCKET.
+using DialFn = std::function<pp_socket_t(double deadline)>;
+DialFn dial;
+```
+
+Placement: a new field in `ConnectorConfig` after `options`, before `log`.
+Call site: exactly one — inside `dialLink()`, currently
+`const pp_socket_t s = dialTcp(cfg, deadline);` — becomes
+`const pp_socket_t s = cfg.dial ? cfg.dial(deadline) : dialTcp(cfg, deadline);`
+Nothing else in the 2114-line transport changes.
+
+⛔ `applyOptions()` gains a family guard in the same change: read the family with
+`getsockname()` and apply `IPPROTO_TCP`/`TCP_NODELAY` only for `AF_INET`/`AF_INET6`.
+`SO_NOSIGPIPE`, `SO_SNDBUF` and `SO_RCVBUF` are `SOL_SOCKET` and stay unguarded.
+The guard is defensive — the wired dialler sets its own options on its own fd —
+but it is the thing that stops a future caller getting `ENOPROTOOPT` on `AF_UNIX`.
+
+### C2 — `adoptLink()` (PPS host-service agent owns)
+
+```cpp
+// Empty = "read it off the link", which is every caller today.  A DIALLING
+// caller resolved the pairing under RV 5.3b before it dialled (§5.2), and
+// link->pairingId() has nothing to say on this side.
+void adoptLink(std::unique_ptr<Ppcp::PeerConnection> link,
+               const QString &resolvedPairingId = {});
+```
+
+Body rules, in order:
+
+1. `pairingId` = `resolvedPairingId` when non-empty, else
+   `QString::fromStdString(link->pairingId())`.
+2. ⛔ `noteLinkEstablished()` is called **only** when `resolvedPairingId` is
+   empty. RV 7.3a spends a *pairing code*; a wired reconnection uses a persisted
+   pairing and spends nothing.
+3. `m_pairedThisRun.insert(pairingId)` and `refreshAdvertisement()` still run in
+   both cases — a wired link resolves against a persisted pairing, so the
+   Settings→Phones row must be identical either way.
+4. Everything below that is unchanged, including the "DO NOT DEDUPLICATE BY
+   PAIRING" comment, which stays true.
+
+### C3 — `WiredPresence` CBOR schema (PPC agent writes it, PPS host-service agent reads it)
+
+A CBOR **definite-length map**, four keys, emitted in **`ENC` 4e deterministic
+order** — which is the order below. `dl` is **omitted entirely** when absent —
+never `null`.
+
+| key | type | notes |
+|---|---|---|
+| `"dl"` | tstr, optional | display label. ⛔ UNTRUSTED (RV 4.4d) — `sanitiseLabel()` before display, never used as a key |
+| `"pv"` | tstr | `"1.0"`. RV 3.3a — the host filters on MAJOR before dialling |
+| `"role"` | tstr | `"capture"` |
+| `"peers"` | array of definite maps | each `{"port": uint, "psk_identity": bstr}`, in that key order |
+
+⛔ **AMENDED 29 Aug, and the first version of this contract was wrong.** It
+specified `pv, role, dl, peers`, which does **not** sort under `ENC` 4e — bytewise
+over the *encoded* key puts `dl`(`62 64 6c`) before `pv`(`62 70 76`) before
+`role`(`64 …`) before `peers`(`65 …`). libppcp's writer *enforces* 4e and sets
+its sticky error on the offending key, so a record carrying a label could not be
+emitted in the original order at all without
+`ppcp_cbor_writer_init_order(…, PPCP_CBOR_ORDER_LITERAL)` — and `cbor.h` says
+that escape hatch **"exists for two reasons and no others"**, neither of which is
+this. The order above needs no escape hatch. ✅ Costs the host nothing: the reader
+was already required to accept any key order. ⚠ Note `pv, role, peers` — the
+no-label case — was deterministic all along, so only the labelled record was
+affected, which is exactly how this would have survived a casual test.
+
+- `port` — the actual bound port of that pairing's `PpcpListener`, 1..65535.
+- `psk_identity` — exactly **17** bytes, `0x01 ‖ rn2(8) ‖ tag(8)`, as registered.
+- **No `rid`.** `PpcpRendezvous::identityResolver()` already returns both `kTls`
+  and `pairingId` from the 17 octets; a second resolution path would be a second
+  place to get expiry, exhaustion and invalidation wrong (§5.3).
+
+Reader rules (host):
+
+- Accept keys in **any** order and **ignore unknown** ones (forward compat).
+- Refuse: `pv` MAJOR ≠ 1; `peers` absent, empty, or more than **16** entries;
+  any `psk_identity` whose length ≠ 17; a record longer than **4096** bytes.
+- A refusal is **silence** — the device is treated as not wired, one `ppWarn()`
+  line, no banner (§6.2, RV 3.6a).
+
+**Framing: there is none.** The device writes the record and closes the
+connection. The host reads to EOF with a 4096-byte cap and a **2 s** deadline.
+A short read, a timeout or a cap breach is the same refusal as a parse failure.
+
+### C4 — the presence port, and the loopback bind
+
+```
+PPCP_WIRED_PRESENCE_PORT = 50915
+```
+
+Private range, no IANA assignment. A collision is survivable by design: the host
+gets a record it cannot parse and treats the device as not wired (§5.3).
+Declared once per repo — `ppcp_usbmux.h` in PPS, `WiredPresenceListener.swift`
+in PPC — with the constant's value written in both and this contract cited.
+
+⛔ **Both wired listeners bind `127.0.0.1` and nothing else** — the presence
+listener and every per-pairing `PpcpListener` on the wired path — via
+`NWParameters.requiredLocalEndpoint`. An all-interfaces bind publishes the
+device's whole pairing list to the LAN (§5.3, §5.4) and pulls the iOS
+local-network permission into a path that does not need it.
+
+### C5 — one `PpcpListener` per held pairing
+
+`PpcpCredentials` carries **one** `tlsKey` and **one** `nextPskIdentity()`, and
+`NWListener` registers exactly one (key, identity) pair. So the device runs **one
+listener per held pairing**, each on its own ephemeral port (`port: 0`, read the
+bound port back), and `peers[]` has one entry per listener. That is what the
+array in C3 is for; it is not a list of hosts.
+
+### C6 — wired sequencing on the host, and why there is no second `link_bind`
+
+The host is the initiator on the cable (RV 2d inverts). Sequence, exactly:
+
+1. `Connector::connect()` with `cfg.dial` set. **The transport mints the
+   `link_id` and writes `link_bind` itself** — it already does, on every dial.
+2. `adoptLink(link, resolvedPairingId)` → `configurePhonePeer()` builds the
+   engine with **`HostEngineConfig::listener = false`**.
+3. ⛔ **Never call `ppcp_peer_set_link_id()` on the host.** `has_link_id` stays
+   false, so `ppcp_peer_hello()`'s auto-open at `ppcp_peer.c:929`
+   (`!listener && has_link_id && …`) does not fire and libppcp emits **no second
+   `link_bind`**. This is the trap: `listener=false` alone is safe *only*
+   because the link id is never handed to the library.
+4. Call `ppcp_peer_hello()` once, after `attach()`, on the wired path only.
+5. The device auto-replies `hello_accept` (`ppcp_peer.c:2324`), which raises
+   `PPCP_EVENT_CONNECTED` on the host — **the same event the WiFi path already
+   declares on** (`ppcp_host_peer.cpp:204`). ✅ Nothing downstream changes.
+
+`HostEngineConfig::listener` becomes a parameter of `configurePhonePeer()` /
+`PpcpHostPeer::Config`, defaulting to `true`. `ppcp_host_peer.cpp:487`'s
+`cfg.listener = true` becomes `cfg.listener = m_cfg.listener`.
+
+⛔ **C6 ADDENDUM, found on the device side and it applies to BOTH ends: `declare`
+moves too, not just `hello`.** On the wired path the peer that used to dial no
+longer originates first, so at `open()` time **there is no agreed wire version
+yet**. `declare`, the sync timebase registration and the connect-trigger burst
+must all wait for the `connected` event alongside `hello`.
+
+⚠ **And this fails silently rather than loudly, which is why it is written here.**
+`ppcp_peer_declare()` does **not** refuse a declaration sent from
+`PPCP_PEER_INIT` — `ppcp_peer.c:978` reads
+`if (p->state == PPCP_PEER_CONNECTED || p->state == PPCP_PEER_INIT) p->state = PPCP_PEER_DECLARED;`
+— so a premature declare is accepted, skips version agreement, and everything
+downstream looks fine. ✅ The host side already happens to be correct here
+(`ppcp_host_peer.cpp:204` declares on `PPCP_EVENT_CONNECTED`), but do not
+"simplify" it to declare at attach time.
+
+### C7 — test ownership, so two agents never write the same fixture
+
+| Agent | Owns (creates/edits) | ⛔ must not touch |
+|---|---|---|
+| PPS transport | `src/Ppcp/ppcp_usbmux.{h,cpp}`, `tests/ppcp_usbmux_test.cpp` (+ its stub usbmuxd), the `dial` seam rows of `tests/ppcp_transport_test.cpp` | `ppcp_host_service*`, `ppcp_host_peer*` |
+| PPS host-service | `ppcp_host_service.{h,cpp}`, `ppcp_host_peer.{h,cpp}`, `ppcp_host_engine.h`, `tests/ppcp_host_service_test.cpp` | `ppcp_transport.*`, `ppcp_usbmux.*`, `ppcp_transport_test.cpp` |
+| PPC | `Sources/Platform/Network/WiredPresenceListener.swift`, `Packages/Core/Tests/CaptureCoreTests/WiredPresenceTests.swift`, `HostLinkSession.swift` | nothing in PPS |
+
+The stub usbmuxd is the transport agent's, and the host-service agent consumes it
+through `ppcp_usbmux.h` rather than copying it.
+
+---
+
+## Phase 1 — the tunnel, macOS only · IN PROGRESS
 
 Gated on Phase 0. Also gated on **M10 (thermal)**, which is a Phase 1 item, not a
 Phase 2 one. Waves 1–2 above; measurements are mine, not an agent's.
 
 | | Repo | Item |
 |---|---|---|
-| `[ ]` | PPS | `src/Ppcp/ppcp_usbmux.{h,cpp}` — first-party usbmux client, Qt-free. `listDevices()`, `watch()`, `dial(udid, port)`. Minimal XML-plist emit/scan; no `libusbmuxd`, no `libplist`. Wire format is **verified** in design doc §4.2 — header `<IIII` LE, `version=1`, `message=8`, tag echoed; ⛔ `PortNumber` byte-swapped (`htons`), and the wrong order *connects to a different port* rather than erroring; results 0 ok / 3 refused; filter `ConnectionType == "USB"`. |
-| `[ ]` | PPS | `ConnectorConfig::dial` seam — a `DialFn` returning a connected non-blocking fd. `dialTcp()` (`ppcp_transport.cpp:1148`) becomes the default; it has exactly **one** call site (`:1244`). ⚠ Guard `applyOptions()` against `TCP_NODELAY`/`SO_*BUF` on an `AF_UNIX` fd. |
-| `[ ]` | PPS | ⛔ `adoptLink()` takes the resolved pairing as a parameter. `link->pairingId()` is **empty when we dialled** (`ppcp_transport.h`), so `ppcp_host_service.cpp:623` would give no device row, no `noteLinkEstablished()`, wrong advertisement set. Same class as the fixed empty-Phones-list bug. |
-| `[ ]` | PPS | `cfg.listener` becomes a parameter, not the constant at `ppcp_host_peer.cpp:487`; call `ppcp_peer_hello()` on the wired path (`RV` 2d inverts — the host is the initiator here). |
-| `[ ]` | PPS | ⛔ The dial runs on **its own thread**, never the accept thread (`:242-296` polls `acceptChannelFor()` then blocks 250 ms in `accept()`). ✅ The *watch* needs no thread — usbmux `Listen` is a readable fd, so a `QSocketNotifier` as at `:1109`. |
-| `[ ]` | PPS | Stub usbmuxd for tests — plist protocol over `AF_UNIX`, scripted attach/detach and `Connect` results. Makes the path testable with no phone and no cable. |
-| `[ ]` | PPC | `WiredPresenceListener` — fixed port, plaintext, serves the CBOR record. ⛔ Bound to `127.0.0.1` via `requiredLocalEndpoint`, **not** all interfaces. `ppcp_cbor_writer` is already used from Swift (`Candidate.swift:245`). |
-| `[ ]` | PPC | Start `PpcpListener` on the wired path with `listener: true` in `DevicePeer`; publish `psk_identity` and the actual port. Record lists persisted pairings **plus any scanned, not-yet-connected code**, mirroring the host's resolver. |
-| `[ ]` | PPC | `isIdleTimerDisabled` while a session is live — one line, owed to capture regardless, and load-bearing for USB Restricted Mode. |
-| `[ ]` | — | **M1** (`min_rtt` wired vs WiFi, Phase 0 fix in place), **M10** (sustained capture before thermal throttle, cabled vs not — ⚠ screen for issue #101's ~8.8 s gap signature first), **M3** (does bulk poison control), **M5** (does `Connect` need device trust — needs an *untrusted* device). |
+| `[x]` | PPS | *(wave 1, transport agent)* `src/Ppcp/ppcp_usbmux.{h,cpp}` — first-party usbmux client, Qt-free. `listDevices()`, `watch()`, **`dial(deviceId, port)`** (⛔ not `udid` — see the Log). Minimal XML-plist emit/scan; no `libusbmuxd`, no `libplist`. Wire format is **verified** in design doc §4.2 — header `<IIII` LE, `version=1`, `message=8`, tag echoed; ⛔ `PortNumber` byte-swapped (`htons`), and the wrong order *connects to a different port* rather than erroring; results 0 ok / 3 refused; filter `ConnectionType == "USB"`. |
+| `[x]` | PPS | *(wave 1, transport agent — contract C1)* `ConnectorConfig::dial` seam — a `DialFn` returning a connected non-blocking fd. `dialTcp()` (`ppcp_transport.cpp:1148`) becomes the default; it has exactly **one** call site (`:1244`). ⚠ Guard `applyOptions()` against `TCP_NODELAY`/`SO_*BUF` on an `AF_UNIX` fd. |
+| `[x]` | PPS | *(wave 2, host-service agent — contract C2)* ⛔ `adoptLink()` takes the resolved pairing as a parameter. `link->pairingId()` is **empty when we dialled** (`ppcp_transport.h`), so `ppcp_host_service.cpp:623` would give no device row, no `noteLinkEstablished()`, wrong advertisement set. Same class as the fixed empty-Phones-list bug. |
+| `[x]` | PPS | *(wave 2, host-service agent — contract C6)* `cfg.listener` becomes a parameter, not the constant at `ppcp_host_peer.cpp:487`; call `ppcp_peer_hello()` on the wired path (`RV` 2d inverts — the host is the initiator here). |
+| `[x]` | PPS | *(wave 2, host-service agent)* ⛔ The dial runs on **its own thread**, never the accept thread (`:242-296` polls `acceptChannelFor()` then blocks 250 ms in `accept()`). ✅ The *watch* needs no thread — usbmux `Listen` is a readable fd, so a `QSocketNotifier` as at `:1109`. |
+| `[x]` | PPS | *(wave 1, transport agent — contract C7)* Stub usbmuxd for tests — plist protocol over `AF_UNIX`, scripted attach/detach and `Connect` results. Makes the path testable with no phone and no cable. |
+| `[x]` | PPC | *(wave 1, PPC agent — contracts C3, C4)* `WiredPresenceListener` — fixed port, plaintext, serves the CBOR record. ⛔ Bound to `127.0.0.1` via `requiredLocalEndpoint`, **not** all interfaces. `ppcp_cbor_writer` is already used from Swift (`Candidate.swift:245`). |
+| `[x]` | PPC | *(wave 1, PPC agent — contract C5)* Start `PpcpListener` on the wired path with `listener: true` in `DevicePeer`; publish `psk_identity` and the actual port. Record lists persisted pairings **plus any scanned, not-yet-connected code**, mirroring the host's resolver. |
+| `[x]` | PPC | *(wave 1, PPC agent)* `isIdleTimerDisabled` while a session is live — one line, owed to capture regardless, and load-bearing for USB Restricted Mode. |
+| `[ ]` | — | ⛔ **M12 — does the device-side mux connect to `127.0.0.1` or `::1`?** `NWParameters.requiredLocalEndpoint` **pins the address family**, so the presence listener is IPv4-loopback only. If usbmuxd on the device dials `::1`, the presence read fails and the phone simply looks un-wired — an indistinguishable, silent failure. ✅ Fallback if it bites: `requiredInterfaceType = .loopback`, which covers both families and keeps the LAN exclusion §5.3 needs. ⚠ Needs the cable; unanswerable in a simulator. **Check this FIRST if M1 cannot read a presence record.** |
+| `[ ]` | — | **Mine, not an agent's.** **M1a/M1b** (`min_rtt` wired vs WiFi, Phase 0 fix in place), **M10** (sustained capture before thermal throttle, cabled vs not — ⚠ screen for issue #101's ~8.8 s gap signature first), **M3** (does bulk poison control), **M5** (does `Connect` need device trust — needs an *untrusted* device). |
 
 **Phase 1 done:** a phone on a cable reaches `session_open` with a published
 `TimebaseRelation`, and M1/M3/M10 are numbers in this tracker.
@@ -306,4 +487,30 @@ iPhone 16), so the decision is per device, not global policy.
 | 2026-08-29 | — | Plan agreed. Phase 0 by hand this session; Phases 1+ orchestrated with Opus agents, waves shaped by repo because PPS has one warm build directory. |
 | 2026-08-29 | 0 | ✅ **Complete.** `QSocketNotifier` per channel; `min_rtt` and `own_sigma` added to the trace. `min_rtt` 12.95 → 1.64 ms, `offset_sigma` 2.50 → 1.16 ms, gate margin 2.0× → 4.3×. 4/4 affected tests pass. Three findings above; two are corrections to the design doc, and one weakens the case for the cable. |
 | 2026-08-29 | — | Framing corrected after review: the Phase 0 run was an idle link on a quiet network, i.e. WiFi's best case. M1 split into idle (M1a) and **contended (M1b)** arms; M11 added for reliability; M10 now measures battery as well as thermal. Design doc gains §1.1 — contention, reliability, power and cross-platform reconnection, none of which Phase 0 touched. |
+| 2026-08-29 | 1 | Contracts C1–C7 fixed and written above **before any agent started** — the dial seam and its fd ownership, `adoptLink`'s resolved pairing, the `WiredPresence` CBOR schema and its framing (there is none), the presence port `50915` and the loopback bind, one listener per held pairing, the wired hello sequencing, and test ownership. |
+| 2026-08-29 | 1 | ⛔ **C6 is the contract that took tracing to find.** `ppcp_peer_hello()` auto-emits `link_bind` at `ppcp_peer.c:929` when `!listener && has_link_id`. The PPS transport already writes `link_bind` itself on every dial, so `listener=false` is safe **only** because `ppcp_peer_set_link_id()` is never called on the host. Set both and the host sends two bindings on channel 0. |
+| 2026-08-29 | 1 | ✅ Checked and **no change needed**: a responder raises `HELLO` *and* `CONNECTED` (`ppcp_peer.c:2867`), so `ppcp_host_peer.cpp:204`'s declare-on-`CONNECTED` fires identically whichever end dialled. The wired inversion is invisible downstream of `hello`. |
+| 2026-08-29 | 1 | ✅ **Re-verified the `PortNumber` byte-swap myself** against `/var/run/usbmuxd`, phone attached, before reviewing any agent code. Plist value **32498** (`= htons(62078)`) → `Number=0`; plist value **62078** native → `Number=3`. usbmuxd reads the field as already network-order and applies `ntohs`, so the native value dials 32498 and finds nothing. Design §4.2's table is correct as written. |
+| 2026-08-29 | 1 | ⛔ **New trap: `DeviceID` is per-attachment and NOT stable.** The 29 Aug probe saw `DeviceID=306` for Mark's iPhone; the same phone, same cable, is `DeviceID=308` today (`SerialNumber` unchanged at `00008140-000864E426EB001C`, `ConnectionType=USB`, `ConnectionSpeed=480000000`). ⚠ So a `DeviceID` may only be used inside the lifetime of one `Attached`→`Detached` span — never persisted, never cached across a watch restart, never a map key that outlives the attachment. This sits beside design §10's existing "no `udid → pairingId` cache" rule and is a different trap from it. |
+| 2026-08-29 | 1 | ✅ **Wave 1, PPS transport agent — landed and VERIFIED BY ME, not taken on report.** `ppcp_usbmux.{h,cpp}` (946+336 lines, Qt-free), the C1 `dial` seam, a stub usbmuxd and `ppcp_usbmux_test`. My own runs: `ctest -R 'ppcp_usbmux_test|ppcp_transport_test|ppcp_link_bind_test'` → **3/3 pass**, and the **app target links clean** with `ppcp_usbmux.cpp` compiled into it — the integration build the agent did not run. Diff stayed inside its owned files. |
+| 2026-08-29 | 1 | ⚠ **One accepted deviation from C1, and it is better than the contract.** The `applyOptions()` family guard is `AF_INET \|\| AF_INET6 \|\| AF_UNSPEC`, not the two families I wrote. On Windows `getsockname()` fails with `WSAEINVAL` on an **unbound** socket, and `applyOptions()` runs immediately after `socket()` on both the dial and listen paths — so my literal contract would have silently disabled `TCP_NODELAY` on every Windows TCP socket. Treating "family unreadable" as "apply as before" means the guard can only ever remove a call that was guaranteed to fail. Contract C1 above is left as written with this noted; the code is right. |
+| 2026-08-29 | 1 | ⛔ **Design §6.2 corrected: the diagnostics table asked for seven distinguishable causes and the transport can see six.** "`Connect` to the presence port → `Number=3`" and "`Connect` refused at the mux layer (trust not granted)" are **the same wire event**. I measured it: 62078 (lockdown, listening) → `Number=0`; **50915 (the presence port, nothing serving it) → `Number=3`**; port 1 → `Number=3`. Until **M5** runs on an *untrusted* device, "trust not granted" is not a diagnosis this host can honestly print. ✅ Incidentally: **50915 was free on the device**, so C4's port collides with nothing on a stock iPhone 16. |
+| 2026-08-29 | 1 | ⛔ **A blocking fd from `cfg.dial` HANGS FOREVER — it is not a slow failure.** Found by the agent when a test handed over a blocking socketpair end: `Connector::connect()` parked in `read()` inside `SSL_do_handshake` and **`handshakeTimeoutMs` never fired**, because this transport drives OpenSSL through `waitFor()`/`poll()` and a blocking fd never returns to it. C1 states the requirement; nothing stated the consequence. `Usbmux::Client::dial()` therefore sets `O_NONBLOCK` itself rather than trusting its caller. |
+| 2026-08-29 | 1 | ⚠ **A trap the design never mentioned, avoided by construction:** usbmuxd sends `Attached` for every already-present device *immediately* after the `Listen` result, on the same socket. A reader that recv's into a scratch buffer swallows them. `Watch::start()` reads exactly the 16-byte header plus exactly `length-16` bytes and never more, so the initial attaches survive into the first `poll()`. Pinned by a test. |
+| 2026-08-29 | 1 | ⚠ **API note for the host-service agent:** `listDevices()` returns `Result::ok() == false` for both `NoDevices` and `NoWiredDevices` but **fills the vector in either case** — a `Network` device is still reported, because "a phone is here but it is on WiFi" must be sayable in the log. Do not read `!ok()` as "the vector is empty". |
+| 2026-08-29 | 1 | Wave 1 launched: PPC agent (presence listener, per-pairing listeners, idle timer) ‖ PPS transport agent (`ppcp_usbmux`, the `dial` seam, stub usbmuxd). Different repos, different builds. |
+| 2026-08-29 | 1 | ✅ **Wave 1, PPC agent — landed.** `WiredPresence` encoder in `Packages/Core` (testable with no app, no socket, no simulator), `WiredPresenceListener` on 50915, one `PpcpListener` per held pairing on ephemeral loopback ports, `isIdleTimerDisabled`. Reported: `swift test --filter WiredPresence` 12/12, `make test-core` 321/321, `make test-app` 134/134 (10 pre-existing known issues). ⚠ Four builds, not the 2–3 the economy rule asks — one was a cold build that tripped the Makefile's 600 s guard. Not yet verified by me; PPC has no cable-side integration I can run until both halves exist. |
+| 2026-08-29 | 1 | ⛔ **Contract C3 was WRONG and is amended — my error, found by the device agent.** See C3 above: `pv, role, dl, peers` does not sort under `ENC` 4e, and emitting it needed `PPCP_CBOR_ORDER_LITERAL`, which `cbor.h` says "exists for two reasons and no others". Verified in `libppcp/include/ppcp/cbor.h` before accepting. New order `dl, pv, role, peers` needs no escape hatch and costs the host nothing. ⚠ The unlabelled record was deterministic all along, so **only the labelled case was affected — which is exactly how this would have survived a casual test.** |
+| 2026-08-29 | 1 | ⛔ **C6 addendum: `declare` moves to `connected` too, and it fails SILENTLY.** On the wired path the former dialler no longer originates first, so there is no agreed wire version at `open()` — `declare`, the sync timebase registration and the connect burst all wait for `connected` alongside `hello`. Verified: `ppcp_peer.c:978` promotes `INIT→DECLARED`, so a premature `declare` is **accepted**, skips version agreement, and looks fine. ✅ The host is already correct (`ppcp_host_peer.cpp:204`); the instruction is *don't "simplify" it*. |
+| 2026-08-29 | 1 | ⛔ **`NWListener.cancel()` returns BEFORE the port is free — a real defect on a FIXED port.** Phase 2's "refresh on foreground entry and on pairing-set change" would `stop()` then `start()` and get `EADDRINUSE`, which is **indistinguishable from the port collision §5.3 says to treat as "not wired"** — so the device would silently stop being reachable on the cable after its first background trip. `stop()` now waits for `.cancelled` with a 2 s backstop plus `allowLocalEndpointReuse`. Found because two tests hit it, not by reading. |
+| 2026-08-29 | 1 | ✅ **§5.3's loopback bind measured, with a negative control.** The record reads back on `127.0.0.1:50915` and every non-loopback IPv4 refuses — paired against a deliberately `0.0.0.0`-bound control listener that *must* be reachable, so "a firewall ate it" cannot masquerade as a correct bind. Same for every per-pairing listener. ⚠ Simulator only (the Mac's own stack, so the test is real) — **not yet on a cable**. And it raised **M12**, above. |
+| 2026-08-29 | 1 | ⚠ **Two seams had to be opened in `PpcpListener` and both were unavoidable.** `registeredIdentity()` — §5.2's whole argument is "publish what you registered", and it was unimplementable without a read-back — and a `loopbackOnly` flag. Recording it because the design assumed both already existed. |
+| 2026-08-29 | 1 | ⛔ **§6.5 (a first pairing born on the cable) is NOT reachable from the app as written.** C3 says the record lists persisted pairings *plus any scanned, not-yet-connected code*, but nothing in PinPointCapture holds such a code: `RendezvousCoordinator.scan()` derives keys and dials immediately, so nothing survives to be published. The `HeldPairing` API supports it; the scan flow would have to publish-then-wait. **Left undone — it changes a user-facing path and is out of proportion to Phase 1.** §6.5 should be re-scoped or moved to Phase 2. |
+| 2026-08-29 | 1 | ✅ **C3 reorder landed on the device and VERIFIED BY ME with an independent CBOR decoder**, not taken on report. Both fixtures fully consume with no trailing bytes; keys are in `ENC` 4e order; the unlabelled record is `a3`/map(3) with `dl` genuinely **absent**, not null; both identities are exactly 17 bytes and start `0x01`. `PPCP_CBOR_ORDER_LITERAL` no longer appears on this path. Canonical fixtures, now held by both repos: labelled 125 B `a462646c6d4d61726b…`, unlabelled 68 B `a362707663312e30…`. |
+| 2026-08-29 | 1 | ⚠ **A fixture property worth keeping deliberately: neither test identity is valid UTF-8, and one ends in `0x00`.** That is what catches a reader that transcodes, validates as text, or treats the 17 octets as a NUL-terminated string (`RV` 5.3f) — an all-ASCII fixture never would. Both orderings were handed to the host agent so the order-agnostic rule is actually exercised; ⛔ the **unlabelled record alone proves nothing about ordering**, since it encodes identically under either rule. That is precisely how the ordering defect survived on the device side, and it is why the two fixtures are a pair. |
+| 2026-08-29 | 1 | ✅ **Wave 2, PPS host-service agent — landed and VERIFIED BY ME.** New `ppcp_wired_link.{h,cpp}` holds the whole wired orchestration; `adoptLink()` takes C2's resolved pairing; `listener` threaded to `ppcp_peer_hello()` per C6. My own runs, not its report: `ppcp_host_service_test` **isolated** (per the advertise-suite poisoning note) → pass, 34 tests; `ppcp_host_peer_test`, `ppcp_app_tu_syntax`, `ppcp_link_bind_test`, `ppcp_transport_test`, `ppcp_usbmux_test`, `ppcp_rendezvous_test` → **6/6 pass**; app target links. All three PPC fixtures are parsed verbatim by the host reader — **the two halves now agree at the byte level without a cable**, which retires part of design §12's largest estimate risk. |
+| 2026-08-29 | 1 | ✅ **Checked the two claims that would have failed silently.** (1) `m_wired` is declared *after* `m_rv` (`:760` vs `:666`), so it destructs **first** and the worker joins before the rendezvous whose `Impl *` its `identityResolver()` captured. (2) `identityResolver()` is genuinely thread-safe — it takes `impl->mu` for its whole body and **is already called off the GUI thread today**, on the accept thread via `setIdentityResolver()`. The wired path is the second caller of a callback that was designed for one. |
+| 2026-08-29 | 1 | ⛔ **I fixed the one defect the agent flagged and ran out of build budget for: a ~10 s hang on quit.** `stop()` joins the worker, which could be inside `Connector::connect()` at the default `handshakeTimeoutMs` of 10 s — quitting mid-dial froze the GUI thread with no window and no explanation, the classic "it hung on exit". Two changes: `kWiredHandshakeMs = 3000` on the wired path only (min_rtt over usbmux is ~1 ms, so a handshake still unfinished after 3 s is broken, not busy), and a `stopping()` check before **each** of the two phases that can block — the presence dial-and-read, and the TLS connect. Re-verified: `ppcp_host_service_test` passes, app links. |
+| 2026-08-29 | 1 | ⚠ **A coupling to watch, reported by the agent rather than hidden.** "We dialled" is derived from `!resolvedPairingId.isEmpty()`, because C2 fixes the signature and that is the only in-band signal. It decides **three** things at once: 7.3a spend accounting, the `listener` flag, and whether `hello` is sent. Documented at `ppcp_host_service.h:594`. ⛔ If a future non-dialling caller ever passes a resolved pairing, all three break together and none of them loudly. Worth a real `enum class Origin { Accepted, Dialled }` if a third caller ever appears. |
+| 2026-08-29 | 1 | ⚠ **Phase 1 is code-complete on both hosts and NOTHING HAS CROSSED A CABLE.** The stub usbmuxd's tunnel is a byte echo, not a PPCP listener, so `runJob()`'s dial→handshake steps are reached only on hardware. **M12 runs first** — if the device-side mux dials `::1` the presence read fails silently and every later measurement chases the wrong fault. Then M1a/M1b, M3, M10. Closing the last gap in the suite would need a "forward the tunnel to this local port" mode in the stub. |
 | | | ⚠ **Next session starts here.** Read design doc §1, §1.1 and §7.1, then Findings above. Phase 1 proceeds; the accuracy argument alone no longer carries it, and **M1b is the measurement that matters**. |

@@ -82,6 +82,7 @@
 #include "ppcp_transport.h"
 
 class PpcpOfferController;
+namespace Ppcp { class PpcpWiredLink; }
 // The preview consumer each connected phone's camera Sources get (see Phone).
 class VideoInputPpcp;
 
@@ -267,6 +268,18 @@ public:
     // `noteFailure()` from that suite is to call it.  Nothing in the
     // application does; the accept thread is the sole real caller.
     void noteHandshakeFailureForTest(const Ppcp::HandshakeFailure &f);
+
+    // ── Contract C2's two arms, without a cable ────────────────────────────
+    //
+    // ⚠ FOR THE TESTS ONLY, and it exists because the wired path's hardware is
+    // the one thing a suite cannot have.  The stub usbmuxd's tunnel is a byte
+    // echo, not a PPCP listener, so an end-to-end wired dial is not reachable
+    // from `ppcp_host_service_test`; what IS reachable — and what the whole of
+    // C2 turns on — is adoptLink() with and without a resolved pairing.  This
+    // is the only door to the second of those, since nothing else in the
+    // application dials.
+    void adoptLinkForTest(std::unique_ptr<Ppcp::PeerConnection> link,
+                          const QString &resolvedPairingId);
 
     // RV §4 — publish a code.  Fresh psk and sid per code (7.3d), every
     // reachable address in `ep` (4.3d), `mu: 1` (7.3a) and a short `exp`
@@ -570,14 +583,41 @@ private slots:
     void pumpGuided();
 
 private:
-    void adoptLink(std::unique_ptr<Ppcp::PeerConnection> link);
+    // ── Phase 1 contract C2 — the pairing may have to be TOLD to us ────────
+    //
+    // Empty = "read it off the link", which is every WiFi caller: the LISTENER
+    // resolved the identity, so `link->pairingId()` has the answer.
+    //
+    // ⛔ NON-EMPTY MEANS THIS HOST DIALLED, and on that side `link->pairingId()`
+    // has nothing to say — which is the whole reason this parameter exists.  A
+    // dialling caller resolved the pairing under RV 5.3b BEFORE it dialled
+    // (design §5.2) and hands the answer in.  Everything the rendezvous ledger
+    // drives is keyed on the pairing id — `phoneByPairing()` (so the
+    // Settings→Phones row's status), `notePeerName()`, `m_pairedThisRun` — so a
+    // link adopted without one would be live, carry video, and be invisible to
+    // all of them.  Same class as the empty-Phones-list bug of 26 Aug.
+    //
+    // ⚠ AND IT IS ALSO THE ONLY SIGNAL "WE DIALLED" HAS, deliberately: the
+    // contract fixes this signature, and "a caller passed a resolved pairing"
+    // and "a caller dialled" are the same statement today.  It decides three
+    // things — whether RV 7.3a's single-use accounting runs, whether the engine
+    // is built `listener = false`, and whether this host sends `hello` — so if a
+    // future non-dialling caller ever passes a resolved pairing, all three go
+    // wrong together and this comment is where to start.
+    void adoptLink(std::unique_ptr<Ppcp::PeerConnection> link,
+                   const QString &resolvedPairingId = {});
     // Closes ONE phone's link and forgets it.  `why` is for the status line.
     void dropPhone(Phone *ph, const char *why);
     void dropAllPhones(const char *why);
     // Everything a freshly constructed peer needs before it is attached: the
     // hooks, the health sources and this host's own declaration.  One place, so
     // the second phone cannot quietly get a different setup from the first.
-    bool configurePhonePeer(Phone *ph, std::string *err);
+    // `listener` is ENC 2.1a's "which end dialled", defaulting to true so every
+    // WiFi caller is unchanged; the wired path passes false (contract C6).  It
+    // is a parameter of this function because this is where the peer is built,
+    // and one place is what stops the second phone quietly getting a different
+    // setup from the first.
+    bool configurePhonePeer(Phone *ph, std::string *err, bool listener = true);
     void onDeclare(Phone *ph, const ppcp_peer_desc *desc);
     void onRelations(Phone *ph);
     // Is any connected phone paired on this pairing id?
@@ -705,6 +745,22 @@ private:
     // `decideDial()` has no branch that dials anyway; the resolver is our own
     // pairing ledger.  A stranger's phone advertising on the same network
     // resolves to nothing and never becomes a row.
+    // ── The wired path (design §6; Phase 1) ────────────────────────────────
+    //
+    // ⚠ DECLARED AFTER `m_rv` ON PURPOSE.  It holds the resolver
+    // `m_rv.identityResolver()` returns, and that closure captures the
+    // rendezvous's `Impl *`.  Members die in reverse declaration order, so this
+    // one — and the worker thread `stop()` joins in its destructor — go before
+    // the object the closure points at.
+    //
+    // ⚠ OFF UNLESS `PINPOINT_PPCP_WIRED=1`, and the gate is temporary: design
+    // §6.1's advertisement arbitration is Phase 2, and until it exists a phone
+    // that is both plugged in and on WiFi connects twice.  See
+    // `PpcpWiredLink::enabled()`.
+    std::unique_ptr<Ppcp::PpcpWiredLink> m_wired;
+    void startWired();
+    void stopWired();
+
     std::unique_ptr<Ppcp::RvBrowser>  m_browser;
     std::unique_ptr<QSocketNotifier>  m_browseWatch;
     // `LostFn` hands back only the instance name, so the map from that to the

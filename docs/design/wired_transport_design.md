@@ -670,13 +670,36 @@ unfixable, and the usbmux client can tell these apart cheaply:
 | Cannot open `/var/run/usbmuxd` (or `127.0.0.1:27015`) | No usbmux provider — Apple Devices not installed (Windows), `usbmuxd` not running (Linux) |
 | `ListDevices` empty | Nothing plugged in, **or** a charge-only cable with no data pairs |
 | Device present, `ConnectionType == "Network"` | WiFi-paired, not wired. ⛔ Never treat as wired (§4.2) |
-| USB device, `Connect` to the presence port → `Number=3` | App not running or not in the foreground |
+| USB device, `Connect` to the presence port → `Number=3` | App not running or not in the foreground — ⛔ **or trust not granted; see below** |
 | Presence read, no entry resolves | A phone this host is not paired with — stay silent (3.4c) |
 | Device vanishes from `ListDevices` while attached | USB Restricted Mode, most likely (§9.5) — confirm with M8 |
-| `Connect` refused at the mux layer | Trust not granted — pending M5 |
+| ~~`Connect` refused at the mux layer~~ | ~~Trust not granted — pending M5~~ ⛔ **This row is wrong. See below.** |
 
 That table is also the acceptance criterion for the diagnostics work: each row is
 distinguishable, or the row is wrong.
+
+⛔ **And by that criterion one row IS wrong — found in implementation, 29 Aug
+2026.** "`Connect` to the presence port → `Number=3`" and "`Connect` refused at
+the mux layer" are **the same wire event**. usbmux answers `Number=3` and there
+is nothing else to read: the table asked for seven distinguishable causes and
+the transport can see six.
+
+Measured on the build Mac against Apple's daemon, phone attached and **trusted**:
+
+| `Connect` to | Result |
+|---|---|
+| 62078 (lockdown, listening) | `Number=0` |
+| **50915 (the presence port, nothing serving it yet)** | **`Number=3`** |
+| 1 (nothing ever listens) | `Number=3` |
+
+So a closed port and a refused-at-the-mux-layer dial are one observation. The
+host reports it as one diagnosis naming both possibilities. ⚠ **M5 is what
+decides whether the row splits again** — it needs an *untrusted* device, and
+every probe run so far has used Mark's dev phone, which is trusted. Until M5,
+"trust not granted" is not a diagnosis this host can honestly print.
+
+✅ One incidental result worth keeping: **port 50915 was free on the device**,
+so §5.3's fixed presence port collides with nothing on a stock iPhone 16.
 
 ### 6.3 Two host-side integration hazards, found by tracing rather than reading
 
@@ -809,6 +832,17 @@ assuming if either store grows a new key.
   no-op rather than a prompt.
 
 ### 6.5 A phone's *first* connection over the cable
+
+⛔ **NOT REACHABLE FROM `PinPointCapture` AS THE APP IS WRITTEN — found 29 Aug 2026
+on implementation, and this section was written assuming otherwise.** The presence
+record is specified to list persisted pairings *plus any scanned, not-yet-connected
+code*, but nothing on the device ever holds such a code:
+`RendezvousCoordinator.scan()` derives the keys and dials **immediately**, so there
+is no interval during which a scanned-but-unused pairing exists to be published.
+The `HeldPairing` API added in Phase 1 supports it; the scan flow would have to
+publish-then-wait, which changes a user-facing path. **Deferred out of Phase 1 —
+re-scope this section or move it to Phase 2 before anyone relies on it.**
+
 
 **What the user does: exactly what they do today.** The host displays a pairing
 code, the operator scans it with the phone. ⛔ **The cable is not a credential.**
@@ -1236,7 +1270,7 @@ would produce a false positive against the cable.
 
 | Repo | Work |
 |---|---|
-| PPS | `src/Ppcp/ppcp_usbmux.{h,cpp}` — Qt-free usbmux client: `listDevices()`, `watch()`, `dial(udid, port)`. Minimal XML-plist emit/scan. macOS `AF_UNIX` first. |
+| PPS | `src/Ppcp/ppcp_usbmux.{h,cpp}` — Qt-free usbmux client: `listDevices()`, `watch()`, **`dial(deviceId, port)`**. Minimal XML-plist emit/scan. macOS `AF_UNIX` first. ⛔ **Corrected 29 Aug: it cannot be `dial(udid, …)`** — usbmux `Connect` takes a `DeviceID` and the UDID never goes on the wire. And `DeviceID` is **per-attachment**: the same phone on the same cable was 306 on one probe and 308 on the next, `SerialNumber` unchanged. The UDID is the stable *identity*; the `DeviceID` is a *handle* valid only within one `Attached`→`Detached` span, and must never be persisted, cached across a watch restart, or used as a key that outlives the attachment. |
 | PPS | `ConnectorConfig::dial` seam in `ppcp_transport.{h,cpp}`; `applyOptions()` guarded for `AF_UNIX`. |
 | PPS | `cfg.listener` becomes a parameter, not a constant, at `ppcp_host_peer.cpp:487`; call `ppcp_peer_hello()` on the wired path. |
 | PPS | `adoptLink()` takes the resolved pairing as a parameter (§6.3), and `noteLinkEstablished()` is not called for a wired reconnection. |
@@ -1294,6 +1328,7 @@ runs on this project are non-deterministic and network conditions are worse.
 | M4 | usbmux bulk throughput on a USB 2 phone | MB/s for a 25 MB capture, wired vs 5 GHz | Whether wired is a bulk regression, and Phase 3 again |
 | M5 | Does `Connect` need device trust? | **Fresh, untrusted** device | Onboarding copy, and the only wired-only user step (§6.6). ⚠ Still open: the 29 Aug probe used Mark's dev phone, which is already trusted, so a successful `Connect` there proves the mechanism and **not** the trust question |
 | M6 | Concurrent tunnels | 2 and 3 channels at once through usbmux | That `CORE` T2/T5 survives the multiplexer at all |
+| ⛔ M12 | **Does the device-side mux dial `127.0.0.1` or `::1`?** | Read the presence record over a real cable | `NWParameters.requiredLocalEndpoint` **pins the address family**, so the listener is IPv4-loopback only. If the mux dials `::1` the read fails and the phone silently looks un-wired. ✅ Fallback: `requiredInterfaceType = .loopback` — both families, same LAN exclusion. ⚠ Unanswerable in a simulator. **Check this first if M1 cannot read a record** |
 | M7 | Does a loopback-bound `NWListener` avoid the local-network prompt? | Fresh install, permission never granted, then declined | §5.3's second reason. Verify the exemption; do not trust it |
 | M10 | **Sustained capture cabled vs not — thermal AND battery** | Longest supported capture on the oldest supported device, `thermalState` **and battery level** logged throughout, both arms | §9.6. ⚠ Both directions: charging is a thermal cost and the reason a session outlasts a battery. Report time-to-throttle **and** time-to-flat. ⛔ Phase 1. Screen for issue #101's ~8.8 s gap signature before attributing anything to heat |
 | M8 | USB Restricted Mode | Phone locked > 1 hour with the cable attached, then a dial | §9.5 — whether the idle-timer fix is sufficient or the path dies between sessions |

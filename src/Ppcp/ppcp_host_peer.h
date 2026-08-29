@@ -75,6 +75,23 @@ public:
         // says nothing about it and must not — and 5.15's `blocked_reason` is
         // where the decision surfaces on the wire.
         std::uint64_t storageFloorBytes = 2ull * 1024 * 1024 * 1024;   // 2 GiB
+
+        // ── ENC 2.1a / RV 2d — WHICH END DIALLED ───────────────────────────
+        //
+        // True on every WiFi path, which is every caller today: under PPCP-RV
+        // this host publishes the code and is the TLS server, so it LISTENS and
+        // the phone dials.  On the cable that inverts — usbmux is host→device
+        // only — and the host is the initiator, so the wired path passes false
+        // (Phase 1 contract C6).
+        //
+        // ⛔ AND `ppcp_peer_set_link_id()` MUST NEVER BE CALLED ON THIS HOST.
+        // `ppcp_peer_hello()` auto-emits `link_bind` at `ppcp_peer.c:929` when
+        // `!listener && has_link_id`, and this application's transport ALREADY
+        // writes `link_bind` itself on every dial.  So `listener = false` is
+        // safe ONLY because the link id is never handed to the library; set
+        // both and the host sends two bindings on channel 0.  Traced, not
+        // readable — nothing in libppcp's headers says it.
+        bool listener = true;
     };
 
     // The host's own readings, supplied by the embedding because the library

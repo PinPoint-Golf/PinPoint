@@ -484,7 +484,12 @@ std::unique_ptr<PpcpEngine> PpcpHostPeer::makeLibppcpEngine(std::string *whyNot)
     // never measure its relation to the host and §6.3 only ever worked in the
     // direction this repository happened to test.
     cfg.syncTimebase = kHostTimebaseId;
-    cfg.listener = true;
+    // ⚠ WAS A CONSTANT `true` UNTIL 29 AUG 2026.  RV 2d inverts on the cable —
+    // usbmux is host→device only, so on a wired path THIS HOST dials and is not
+    // the listener (Phase 1 contract C6).  The default is still true, so every
+    // WiFi caller is unchanged.  See PpcpHostPeer::Config::listener for the trap
+    // that makes `false` safe here.
+    cfg.listener = m_cfg.listener;
     return makeHostEngine(std::move(cfg), whyNot);
 }
 

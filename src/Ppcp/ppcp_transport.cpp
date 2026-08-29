@@ -50,7 +50,9 @@
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
 #  pragma comment(lib, "ws2_32.lib")
-   using pp_socket_t = SOCKET;
+   // pp_socket_t now lives in ppcp_transport.h (Ppcp::pp_socket_t) — the
+   // ConnectorConfig::dial seam hands one across the header.  It is uintptr_t
+   // there, which is exactly what SOCKET is.
 #  define PP_INVALID_SOCKET INVALID_SOCKET
 #  define pp_close_socket closesocket
 #  define pp_poll WSAPoll
@@ -63,7 +65,7 @@
 #  include <poll.h>
 #  include <sys/socket.h>
 #  include <unistd.h>
-   using pp_socket_t = int;
+   // pp_socket_t now lives in ppcp_transport.h (Ppcp::pp_socket_t).
 #  define PP_INVALID_SOCKET (-1)
 #  define pp_close_socket ::close
 #  define pp_poll ::poll
@@ -141,8 +143,35 @@ void setNonBlocking(pp_socket_t s)
 #endif
 }
 
+// Reads the socket's address family, or AF_UNSPEC when it cannot.  ⚠ macOS and
+// Linux answer correctly for an UNBOUND socket (measured: AF_INET 2, AF_INET6
+// 30, AF_UNIX 1, all with getsockname() returning 0), which matters because
+// applyOptions() runs immediately after socket() on the dial and listen paths.
+// Windows fails with WSAEINVAL until the socket is bound, hence the AF_UNSPEC
+// fallback below meaning "carry on as before" rather than "skip".
+int socketFamily(pp_socket_t s)
+{
+    sockaddr_storage ss{};
+    socklen_t len = sizeof ss;
+    if (getsockname(s, reinterpret_cast<sockaddr *>(&ss), &len) != 0) return AF_UNSPEC;
+    return ss.ss_family;
+}
+
 void applyOptions(pp_socket_t s, const Options &o)
 {
+    // ⛔ The wired transport (design §4.4) hands this transport an AF_UNIX fd
+    // from the usbmux tunnel, and setsockopt(IPPROTO_TCP, ...) on one returns
+    // ENOPROTOOPT.  The failure is non-fatal either way — every setsockopt here
+    // ignores its return value on purpose — but a socket option that can only
+    // ever fail should not be attempted.  SO_NOSIGPIPE, SO_SNDBUF and SO_RCVBUF
+    // are SOL_SOCKET and remain unguarded: they are meaningful on AF_UNIX too.
+    //
+    // AF_UNSPEC (the family could not be read) applies the TCP options exactly
+    // as before the guard existed, so this can only ever remove a call that was
+    // guaranteed to fail — never one that was working.
+    const int family = socketFamily(s);
+    const bool tcpOptsApply = (family == AF_INET || family == AF_INET6 || family == AF_UNSPEC);
+
 #ifdef SO_NOSIGPIPE
     // A peer that walks away mid-session is ordinary here — ENC 2.1c makes an
     // abandoned dial an expected event, not an error — and writing to the
@@ -156,7 +185,7 @@ void applyOptions(pp_socket_t s, const Options &o)
     setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, reinterpret_cast<const char *>(&nosig),
                sizeof nosig);
 #endif
-    if (o.tcpNoDelay) {
+    if (o.tcpNoDelay && tcpOptsApply) {
         int on = 1;
         setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
     }
@@ -1241,7 +1270,11 @@ std::vector<std::unique_ptr<TransportChannel>> dialLink(const ConnectorConfig &c
             return {};
         }
 
-        const pp_socket_t s = dialTcp(cfg, deadline);
+        // Phase 1 contract C1 — the ONE call site of dialTcp().  A wired link
+        // supplies cfg.dial and gets a usbmux tunnel fd here instead of a TCP
+        // connection; everything below this line is identical either way, which
+        // is the whole point of putting the seam at exactly this depth.
+        const pp_socket_t s = cfg.dial ? cfg.dial(deadline) : dialTcp(cfg, deadline);
         if (s == PP_INVALID_SOCKET) {
             // Not an authentication outcome, so it may say what it is — RV 7.7c
             // constrains the uniformity of a REJECTION, not of a dead socket.

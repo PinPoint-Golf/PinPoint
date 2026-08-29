@@ -47,6 +47,7 @@
 #include "../Video/video_input_factory.h"
 #include "ppcp_offer_controller.h"
 #include "ppcp_source_declaration.h"
+#include "ppcp_wired_link.h"
 
 using namespace Ppcp;
 
@@ -335,6 +336,7 @@ bool PpcpHostService::start(quint16 port, QString *err)
 
     startDiscovery();
     startAdvertising();
+    startWired();
 
     m_listening = true;
     m_timer.start();
@@ -346,6 +348,7 @@ bool PpcpHostService::start(quint16 port, QString *err)
 void PpcpHostService::stop()
 {
     m_timer.stop();
+    stopWired();
     stopDiscovery();
     stopAdvertising();
     m_stopping = true;
@@ -365,8 +368,23 @@ void PpcpHostService::stop()
 // service-wide peer.  It is a function now for one reason: the SECOND phone
 // must get exactly the setup the first got, and a second copy of this block
 // would drift from the first the day somebody edits one of them.
-bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err)
+bool PpcpHostService::configurePhonePeer(Phone *ph, std::string *err, bool listener)
 {
+    // ⚠ THE PEER IS BUILT HERE, NOT IN adoptLink(), SINCE 29 AUG 2026.  It moved
+    // for one reason: `listener` (ENC 2.1a — which end dialled) is now a
+    // parameter, and a flag that has to be set in one function and read in
+    // another is a flag two callers will eventually disagree about.  `Config` is
+    // fixed at construction, so the construction belongs where the flag arrives.
+    PpcpHostPeer::Config pcfg;
+    // The HOST's own id, identical on every conversation: it is this
+    // application's identity, not this link's.
+    pcfg.peerId = hostPeerId().toStdString();
+    // ⛔ false ONLY on the wired path, and safe there ONLY because
+    // `ppcp_peer_set_link_id()` is never called on this host — see
+    // PpcpHostPeer::Config::listener.
+    pcfg.listener = listener;
+    ph->peer = std::make_unique<PpcpHostPeer>(pcfg);
+
     ph->peer->setDeclarationHook([this, ph](const ppcp_peer_desc *d) { onDeclare(ph, d); });
     ph->peer->setRelationsHook([this, ph](const PpcpLiveSession &) { onRelations(ph); });
     // 7.4b — every `heartbeat_ack` moves this phone's battery/thermal/storage
@@ -646,7 +664,8 @@ QStringList PpcpHostService::connectedNames() const
     return out;
 }
 
-void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
+void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link,
+                                const QString &resolvedPairingId)
 {
     if (!link) return;
 
@@ -654,13 +673,35 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     // not carry a refusal underneath a live connection.
     clearFailure();
 
+    // ── Contract C2, rule 1 — where the pairing comes from ─────────────────
+    //
+    // ⛔ `link->pairingId()` IS EMPTY WHENEVER THIS HOST DIALLED.  It is read
+    // off the control channel's resolution, and only a LISTENER resolves.  On
+    // the cable RV 2d inverts and we are the client, so the pairing is the one
+    // we resolved from the presence record before dialling (design §5.2) and it
+    // arrives as a parameter.
+    const bool weDialled = !resolvedPairingId.isEmpty();
+    const QString pairingId =
+        weDialled ? resolvedPairingId : QString::fromStdString(link->pairingId());
+
+    // ── Contract C2, rule 2 — and this is the one that is easy to get wrong ─
+    //
     // RV 7.3a — the code is spent by the PAIRING, not by the handshake.  This
     // link is two TLS handshakes (three with preview) over one K_tls; counting
     // handshakes would invalidate a `mu: 1` code on the control channel and
     // refuse the bulk channel of the SAME link.  See F-H6-1.
-    const std::string pairing = link->pairingId();
-    if (!pairing.empty()) m_rv.noteLinkEstablished(pairing);
-    const QString pairingId = QString::fromStdString(pairing);
+    //
+    // ⛔ AND IT RUNS ONLY WHEN WE DID NOT DIAL.  7.3a's single-use accounting is
+    // about spending a PAIRING CODE.  A wired reconnection resolves against a
+    // pairing this host already holds and persisted; it spends nothing, and
+    // decrementing here would burn a code a phone never used.
+    if (!weDialled && !pairingId.isEmpty())
+        m_rv.noteLinkEstablished(pairingId.toStdString());
+
+    // ── Contract C2, rule 3 — identical on both paths, on purpose ──────────
+    //
+    // The Settings→Phones row must look the same whichever way the link was
+    // made, so `m_pairedThisRun` and the advertised set are updated either way.
     if (!pairingId.isEmpty()) m_pairedThisRun.insert(pairingId);
     // E57 — noteLinkEstablished() just remembered this pairing automatically
     // (a `mu: 1` code, which is the only kind this host publishes), so the
@@ -685,11 +726,6 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     auto phone = std::make_unique<Phone>();
     Phone *ph = phone.get();
     ph->pairingId = pairingId;
-    PpcpHostPeer::Config cfg;
-    // The HOST's own id, identical on every conversation: it is this
-    // application's identity, not this link's.
-    cfg.peerId = hostPeerId().toStdString();
-    ph->peer = std::make_unique<PpcpHostPeer>(cfg);
 
     // ⚠ F-H8-5 — A `ppcp_peer` IS THE CONVERSATION, NOT THE APPLICATION.
     //
@@ -701,7 +737,8 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     // phone, and it is also the whole reason several phones work at all: two
     // conversations are two peers, and always were.
     std::string derr;
-    if (!configurePhonePeer(ph, &derr)) {
+    // ⛔ Contract C6 — the engine is a LISTENER on every path but the cable.
+    if (!configurePhonePeer(ph, &derr, /*listener=*/!weDialled)) {
         ppWarn() << "[ppcp] could not build an engine for this link:" << derr.c_str();
         // A phone that handshook correctly and is then dropped by OUR failure
         // is exactly the invisible refusal the failure line exists for.
@@ -713,6 +750,30 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
 
     ph->link = std::move(link);
     ph->peer->attach(ph->link.get(), ph->engine.get());
+
+    // ── Contract C6, step 4 — the wired path says hello ────────────────────
+    //
+    // RV 2d inverts on the cable: the host dialled, so the host greets.  On the
+    // WiFi path the phone dialled and sent `hello`, and this host answers it —
+    // calling it here too would be a second greeting on a conversation that has
+    // already started, which is why this is gated and not unconditional.
+    //
+    // ⛔ AND NOTHING CALLS `ppcp_peer_set_link_id()`.  `ppcp_peer_hello()`
+    // auto-emits `link_bind` at `ppcp_peer.c:929` when `!listener &&
+    // has_link_id`, and `Connector::connect()` has ALREADY written `link_bind`
+    // on every stream of this link.  `listener = false` is safe only because
+    // `has_link_id` stays false; set both and this host sends two bindings on
+    // channel 0.
+    //
+    // ✅ Nothing downstream of this changes.  A responder raises HELLO *and*
+    // CONNECTED (`ppcp_peer.c:2867`), so the declare-on-CONNECTED at
+    // `ppcp_host_peer.cpp:204` fires identically whichever end dialled.
+    if (weDialled && ph->engine && ph->engine->peer()) {
+        const ppcp_result hr = ppcp_peer_hello(ph->engine->peer());
+        if (hr != PPCP_OK)
+            ppWarn() << "[ppcp-usb] hello was refused on the wired link (rc" << int(hr) << ")";
+    }
+
     // ENC 2.1d — this link has its two required channels; a `preview` one may
     // follow at any later point in the session, and until this call nothing in
     // the application was listening for it.
@@ -743,6 +804,10 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     // screen says connected while Settings -> Phones says disconnected, which
     // is precisely the report this line exists to stop being a mystery.
     ppWarn() << "[ppcp-rv] link up:" << tls.describe().c_str()
+             // Design §6.1 — "surface which path a phone is on ... an operator
+             // who cannot see that the cable did nothing cannot act on it".
+             // The log half of that; the Settings→Phones half is Phase 2.
+             << (weDialled ? "transport=usb" : "transport=wifi")
              << (pairingId.isEmpty()
                      ? QStringLiteral("pairing=NONE — not joined to the ledger, so no row "
                                       "will show it connected and nothing will be remembered")
@@ -754,6 +819,12 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     watchChannels(ph);
     emit stateChanged();
     emit phonesChanged();
+}
+
+void PpcpHostService::adoptLinkForTest(std::unique_ptr<PeerConnection> link,
+                                      const QString &resolvedPairingId)
+{
+    adoptLink(std::move(link), resolvedPairingId);
 }
 
 void PpcpHostService::dropPhone(Phone *ph, const char *why)
@@ -1194,6 +1265,56 @@ void PpcpHostService::startDiscovery()
         }
     });
     ppWarn() << "[ppcp-rv] discovery:" << m_browser->describe().c_str();
+}
+
+// ── The wired path (design §6), behind a temporary gate ────────────────────
+//
+// ⚠ EVERYTHING IT DOES IS SILENT WHEN THERE IS NOTHING TO DO.  No usbmux
+// provider, nothing plugged in, a charge-only cable, a phone this host has
+// never paired with — RV 3.6a and design §6.2 make every one of those an
+// ordinary state, so none of it reaches `status`, `noteFailure()` or a banner.
+// One `ppWarn()` line each, for somebody who went looking.
+//
+// ⛔ THE GATE IS TEMPORARY AND ITS REPLACEMENT IS NAMED.  `PINPOINT_PPCP_WIRED`
+// is off by default because design §6.1's advertisement arbitration is Phase 2:
+// until a pairing's mDNS advertisement is suppressed before the wired dial, a
+// phone that is both plugged in and on WiFi produces TWO dials that both
+// succeed — two `Phone` rows, duplicated preview consumers, and one phone's
+// Candidates entering the arbiter twice, because `adoptLink()` deliberately
+// does not deduplicate by pairing.  The gate is what keeps Phase 1's M1
+// measurable; §6.1 is what removes it.
+void PpcpHostService::startWired()
+{
+    if (m_wired) return;
+    if (!Ppcp::PpcpWiredLink::enabled()) return;
+
+    // ⚠ NOT QObject-parented: this unique_ptr is the ownership, and a QObject
+    // parent as well would be a second one.  It is constructed on the GUI
+    // thread, which is the affinity its queued hand-offs need.
+    m_wired = std::make_unique<Ppcp::PpcpWiredLink>();
+    // RV 5.3b, run client-side and BEFORE the dial (design §5.2).  The host's
+    // own resolver, unchanged — a second one would be a second place for expiry
+    // (7.3e), exhaustion (7.3a) and invalidation (7.3b) to be got wrong.
+    m_wired->setIdentityResolver(m_rv.identityResolver());
+    // §6.1 rule 1 — never a second link for a peer that already has one.
+    m_wired->setHasLivePairing([this](const QString &pairingId) {
+        return phoneByPairing(pairingId) != nullptr;
+    });
+    // ⛔ Contract C2 — the pairing the wired path resolved travels with the link.
+    m_wired->setAdoptHandler(
+        [this](std::unique_ptr<Ppcp::PeerConnection> link, const QString &pairingId) {
+            adoptLink(std::move(link), pairingId);
+        });
+    m_wired->start();
+}
+
+void PpcpHostService::stopWired()
+{
+    // ⛔ Before the listener and before the accept thread join: its own stop()
+    // drops the QSocketNotifier before closing the watch fd and joins its dial
+    // thread, so nothing of it is still running when the phones are dropped.
+    if (m_wired) m_wired->stop();
+    m_wired.reset();
 }
 
 void PpcpHostService::stopDiscovery()
@@ -2030,12 +2151,17 @@ QString PpcpHostService::diagnosticExport() const
     // The advertisement's line names no pairing either, for the same reason:
     // a local handle is not key material, but recording WHICH pairing was on
     // the wire is the correlation 3.4e's unlinkability argument is about.
+    //
+    // The wired line joins them for the same reason 5.4k puts the negotiated
+    // TLS mode here: a counted state, no UDID, no identity, no key (RV 7.2b).
     return QString::fromStdString(m_rv.diagnosticExport())
-         + QStringLiteral("\ndiscovery: %1\ndiscovered-pairings: %2\nadvertisement: %3\n")
+         + QStringLiteral("\ndiscovery: %1\ndiscovered-pairings: %2\nadvertisement: %3\n%4\n")
                .arg(discoveryDescription())
                .arg(m_seenInstances.size())
                .arg(m_advert ? QString::fromStdString(m_advert->describe())
-                             : tr("no service advertisement on this platform"));
+                             : tr("no service advertisement on this platform"))
+               .arg(m_wired ? m_wired->describe()
+                            : QStringLiteral("wired: off (PINPOINT_PPCP_WIRED unset)"));
 }
 
 // ── What a failed arrival is allowed to say ─────────────────────────────────
