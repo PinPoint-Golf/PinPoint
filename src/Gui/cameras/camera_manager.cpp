@@ -608,7 +608,13 @@ void CameraManager::setTargetFps(int index, double fps)
     // that peer DECLARED (5.11), so the request is resolved to a declared
     // profile and refused to nothing if none matches.  Persisted per camera so
     // the choice survives the phone reconnecting, which it will do constantly.
-#ifdef HAVE_PPCP
+// ⚠ _TRANSPORT, NOT BARE HAVE_PPCP.  The two are not the same gate: HAVE_PPCP
+// says only that libppcp is linked, while the CameraInstance accessors below
+// exist only under HAVE_PPCP_TRANSPORT, because a declared CaptureProfile comes
+// off the live VideoInputPpcp and there is no such thing without the transport.
+// On a box with libppcp but no OpenSSL the bare macro is defined and these
+// members are not — which does not fail until someone builds exactly that.
+#ifdef HAVE_PPCP_TRANSPORT
     CameraEntry &cam = m_cameras[index];
     if (cam.device.backend != VideoInputFactory::Backend::Ppcp) return;
 
