@@ -743,9 +743,16 @@ void ShotProcessor::finishGatherAndLaunch()
                     return nullptr;
                 return reinterpret_cast<const pinpoint::ImuSample *>(h.data);
             };
-            in.deferredTUs     = hist.tUs;
+            // ⚠ ELEMENT-WISE, NOT ASSIGNMENT, AND THE PLAIN `=` COMPILES ON TWO
+            // OF THE THREE PLATFORMS. The Buffer layer is deliberately Qt-free
+            // and spells these int64_t; HistoryResult is Qt-side and spells them
+            // qint64. Identical width and representation everywhere, but on LP64
+            // Linux int64_t is `long` and qint64 is `long long` — distinct types,
+            // so the vectors do not convert. macOS and MSVC make both `long long`
+            // and never see it. Do not "simplify" this back to `=`.
+            in.deferredTUs.assign(hist.tUs.begin(), hist.tUs.end());
             in.deferredSamples = (u == 0) ? hist.lowerArm : hist.palm;
-            in.delivered       = hist.delivered;
+            in.delivered.assign(hist.delivered.begin(), hist.delivered.end());
 
             const pinpoint::DeferredStitchResult st =
                 pinpoint::stitchDeferredLane(in);
