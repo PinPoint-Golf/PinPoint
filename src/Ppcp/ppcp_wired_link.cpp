@@ -278,21 +278,21 @@ void PpcpWiredLink::start(Usbmux::Provider provider)
 
     m_provider = std::move(provider);
 
-    const Usbmux::Result r = m_watch.start(m_provider, 2000);
-    if (!r.ok()) {
-        // Absence is not an error (design §6.2, RV 3.6a).  One line, specific
-        // enough to act on, and nothing on the screen.
-        ppWarn() << "[ppcp-usb] wired path unavailable —" << r.message().c_str();
-        return;
-    }
-
-    const pp_socket_t fd = m_watch.fd();
-    if (fd == kInvalidSocket) {
-        m_watch.stop();
-        ppWarn() << "[ppcp-usb] wired path unavailable — the device watch gave no descriptor";
-        return;
-    }
-
+    // ⛔ A MISSING DAEMON MUST NOT KILL THE WIRED PATH FOR THE LIFE OF THE
+    // PROCESS, AND IT USED TO.  This returned early when `m_watch.start()`
+    // failed — before `m_running`, before the worker and before the retry timer
+    // — so a Studio started while `usbmuxd` was down never looked again.
+    //
+    // ⚠ On Linux that is the ORDINARY sequence rather than an edge: the
+    // open-source daemon exits when the last device detaches, so "start the app,
+    // then plug the phone in" found no daemon and silently had no cable for ever
+    // (measured 29 Aug 2026 — daemon down 19:59, app up 20:02, daemon back
+    // 20:06, and the wired path never noticed).  Apple's usbmuxd runs
+    // permanently, which is why macOS did not show this.
+    //
+    // The retry that already exists for DEVICES now has a sibling for the
+    // DAEMON: everything below starts regardless, and onRetryTick() re-opens
+    // the watch until it succeeds.
     m_running = true;
     {
         std::lock_guard<std::mutex> g(m_jobMutex);
@@ -310,6 +310,39 @@ void PpcpWiredLink::start(Usbmux::Provider provider)
 
     // ✅ No thread for the watch: usbmux `Listen` is a long-lived readable fd,
     // the same shape the DNS-SD browser has at ppcp_host_service.cpp:1187.
+    tryOpenWatch();
+}
+
+// Opens the device watch and arms its notifier.  Absence of a daemon is an
+// ordinary outcome (design §6.2, RV 3.6a) and returns false without a fuss.
+bool PpcpWiredLink::tryOpenWatch()
+{
+    if (m_watchUp) return true;
+
+    const Usbmux::Result r = m_watch.start(m_provider, 2000);
+    if (!r.ok()) {
+        // ⚠ ONE LINE, AND ONLY WHEN THE OUTCOME CHANGES.  A phone left on
+        // charge overnight would otherwise print this every few seconds for the
+        // life of the session — the same discipline the device retry keeps.
+        if (!m_watchAnnouncedDown) {
+            m_watchAnnouncedDown = true;
+            ppWarn() << "[ppcp-usb] wired path unavailable —" << r.message().c_str();
+        }
+        return false;
+    }
+
+    const pp_socket_t fd = m_watch.fd();
+    if (fd == kInvalidSocket) {
+        m_watch.stop();
+        if (!m_watchAnnouncedDown) {
+            m_watchAnnouncedDown = true;
+            ppWarn() << "[ppcp-usb] wired path unavailable — the device watch gave no descriptor";
+        }
+        return false;
+    }
+
+    // ✅ No thread for the watch: usbmux `Listen` is a long-lived readable fd,
+    // the same shape the DNS-SD browser has at ppcp_host_service.cpp:1187.
     m_notifier = std::make_unique<QSocketNotifier>(static_cast<int>(fd), QSocketNotifier::Read);
     connect(m_notifier.get(), &QSocketNotifier::activated,
             this, &PpcpWiredLink::onWatchReadable);
@@ -323,8 +356,10 @@ void PpcpWiredLink::start(Usbmux::Provider provider)
     }
     m_jobCv.notify_one();
 
-    ppWarn() << "[ppcp-usb] wired path armed —"
-             << m_provider.path.c_str();
+    m_watchUp = true;
+    m_watchAnnouncedDown = false;
+    ppWarn() << "[ppcp-usb] wired path armed —" << m_provider.path.c_str();
+    return true;
 }
 
 void PpcpWiredLink::stop()
@@ -349,6 +384,9 @@ void PpcpWiredLink::stop()
     m_dialling.clear();
     m_attached.clear();
     m_running = false;
+    m_watchUp = false;
+    m_watchDueInSecs = 0;
+    m_watchAnnouncedDown = false;
 }
 
 QString PpcpWiredLink::describe() const
@@ -451,6 +489,14 @@ PpcpWiredLink::Retry *PpcpWiredLink::retryFor(const std::string &udid)
 void PpcpWiredLink::onRetryTick()
 {
     if (!m_running) return;
+
+    // ⛔ The daemon first: with no watch there are no devices to retry, and
+    // this is the only thing that recovers a Studio started before usbmuxd.
+    if (!m_watchUp) {
+        if (--m_watchDueInSecs > 0) return;
+        m_watchDueInSecs = kWiredWatchRetrySecs;
+        if (!tryOpenWatch()) return;
+    }
 
     for (Retry &r : m_retry) {
         if (r.linked) continue;   // this cable already carries a link

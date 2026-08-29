@@ -166,6 +166,18 @@ constexpr int         kWiredHandshakeMs       = 3000;
 // the app is up, by which time the phone has already dialled.
 constexpr int         kWiredRetrySecs         = 2;
 
+// ⛔ HOW OFTEN TO RE-OPEN A USBMUX DAEMON THAT WAS NOT THERE AT STARTUP.
+// Slower than kWiredRetrySecs on purpose: that one is racing the phone's own
+// WiFi dial and must win it, whereas this races nothing — the daemon either
+// exists or it does not, and re-opening a socket that is not there costs a
+// connect() and an error every time.
+//
+// ⚠ ON LINUX THIS IS THE NORMAL CASE, NOT AN EDGE.  The open-source `usbmuxd`
+// EXITS when the last device detaches, so a Studio started before a phone is
+// plugged in finds no daemon at all — measured 29 Aug 2026.  Apple's runs
+// permanently, which is why macOS almost never reaches this path.
+constexpr int         kWiredWatchRetrySecs    = 5;
+
 struct WiredPresence {
     // One entry per listener the device holds — contract C5 makes that one per
     // held pairing, each on its own ephemeral port.  ⚠ It is NOT a list of
@@ -319,6 +331,9 @@ private slots:
     void onWatchReadable();
     // One tick a second; enqueues whichever attached devices are due.
     void onRetryTick();
+    // Opens the usbmux device watch and arms its notifier.  Returns false when
+    // there is no daemon, which is an ordinary outcome and not an error.
+    bool tryOpenWatch();
 
 private:
     // ── The GUI thread half ────────────────────────────────────────────────
@@ -413,6 +428,12 @@ private:
     // is what a queued hand-off arriving after stop() checks before adopting a
     // link into a service that has torn down.
     bool                       m_running = false;
+    // ⚠ `m_running` means "this object is live"; `m_watchUp` means "we have a
+    // usbmux daemon".  They were one thing and that WAS THE BUG: a missing
+    // daemon at startup left the whole object dead for the life of the process.
+    bool                       m_watchUp = false;
+    bool                       m_watchAnnouncedDown = false;
+    int                        m_watchDueInSecs = 0;
 
     // Counters for describe() — a diagnosis, never a secret.
     int m_attachedSeen = 0;
