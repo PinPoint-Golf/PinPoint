@@ -58,7 +58,8 @@ be re-litigated per platform"* immediately after them. ⛔ **The single most
 important thing either brief says:** on Windows and Linux there is **no WiFi
 reconnection at all today** (`ppcp_discovery.cpp` is `__APPLE__` throughout), so
 wired is the *only* reconnection path there — and the whole WiFi-versus-wired
-takeover is **inert until mDNS is ported**. Porting mDNS is a precursor to that
+takeover is **inert until mDNS is ported on BOTH**. ⚠ It is not a Windows-only
+gap: the guard excludes every non-Apple platform, Linux included. Porting mDNS is a precursor to that
 behaviour, not to wired itself.
 
 ---
@@ -801,11 +802,41 @@ done it** — check with a phone unplugged mid-request, which is the exact case.
 
 ### L3 — mDNS on Linux · `[ ]`
 
-Same `__APPLE__` gate as Windows, same consequence: **no WiFi reconnection
-today**, so the same "wired is the only reconnection path" argument applies and
-the same takeover logic is inert until it is ported. Avahi is the obvious
-backend; it also offers a `dns_sd` compatibility shim, which would widen the
-existing guard rather than adding a backend.
+⛔ **Yes, Linux needs this too** — the `__APPLE__` gate is not Windows-specific,
+and `makePlatformBrowser()` / `makePlatformAdvertiser()` return null on **any**
+non-Apple platform. Same consequence as Windows: no WiFi reconnection today, so
+wired is the only reconnection path, and the takeover logic is inert until this
+lands.
+
+✅ **But Linux is probably the cheaper of the two ports.** Avahi ships
+`avahi-compat-libdns_sd`, which exposes the *same* `dns_sd.h` API the Apple path
+already uses — so this may be widening the existing `#if` and linking a library
+rather than writing a second backend, which is what Windows would need if it
+does not use Apple's Bonjour.
+
+**The whole API surface this file uses**, so the shim can be checked against it
+before anybody commits to the approach:
+
+| call | needed for | in the compat shim? |
+|---|---|---|
+| `DNSServiceBrowse` | finding hosts | ✅ standard |
+| `DNSServiceResolve` | turning an instance into an endpoint | ✅ standard |
+| `DNSServiceRegister` | advertising | ✅ standard |
+| `DNSServiceRefSockFD` | the fd the `QSocketNotifier` watches | ✅ standard |
+| `DNSServiceProcessResult` | draining that fd | ✅ standard |
+| `DNSServiceRefDeallocate` | teardown | ✅ standard |
+| **`DNSServiceUpdateRecord`** | ⚠ **rotating the `rid` IN PLACE** (3.2d/3.4d) | ⛔ **VERIFY — believed to be a gap** |
+
+⚠ **`DNSServiceUpdateRecord` is the one to check first, and it is not a detail.**
+`ppcp_discovery.cpp:612` uses it so *"the service keeps its name and one record
+changes, so a rotation is a single announcement rather than a deregister, probe
+and announce"*. If the shim does not implement it, rotation still works but must
+become deregister-and-re-register — a noisier announcement, and a behaviour
+difference from macOS worth stating rather than discovering.
+
+⛔ **This was NOT verified from the build Mac** — Avahi is not installed here and
+its behaviour cannot be tested from macOS. Treat the table's last row as a
+question to answer on the Linux box, not as a finding.
 
 ### Linux — done when
 
