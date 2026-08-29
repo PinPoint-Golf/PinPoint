@@ -310,6 +310,17 @@ void PinPointDebug::install()
 {
     qInstallMessageHandler(ppMessageHandler);
 
+    // ⚠ THE GUI'S LOG IS OTHERWISE ONLY READABLE BY HAND.  Everything routed
+    // here lands in PpMessageLog's ring buffer, which surfaces in Resource
+    // Monitor -> Message Log and its Export button — fine for a person, useless
+    // for anything driving the application from a terminal, which sees a silent
+    // process.  `swinglab_run` was the only caller that ever turned the echo on.
+    //
+    // Opt-in and off by default, because the echo is unconditional once set and
+    // a shipped app should not be writing to a stream nobody reads.
+    if (!qEnvironmentVariableIsEmpty("PINPOINT_LOG_STDERR"))
+        PpMessageLog::instance()->setEchoToStderr(true);
+
     // Capture iostream stderr writers (OpenCV's logger) into PpMessageLog.
     installCerrCapture();
 

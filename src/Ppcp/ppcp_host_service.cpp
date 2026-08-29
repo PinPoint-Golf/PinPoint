@@ -695,7 +695,20 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
     // the application layer and recorded.  Forward secrecy is a per-connection
     // outcome since the 5.4.3 relaxation, so a peer that cannot say which it
     // got cannot honestly tell a user what "encrypted" means here.
-    ppWarn() << "[ppcp-rv] link up:" << tls.describe().c_str();
+    // ⚠ THE PAIRING IS NAMED HERE, AND ITS ABSENCE IS NAMED LOUDLY.  A link is
+    // adopted on the strength of its handshake; the pairing id is what joins it
+    // to the rendezvous ledger, and EVERYTHING that ledger drives is keyed on
+    // it — `phoneByPairing()` (so the Settings -> Phones row's status),
+    // `noteLinkEstablished()` (so remembering, 7.4b), `notePeerName()` (so the
+    // device's name) and `m_pairedThisRun`.  A link adopted without one is
+    // live, carries video, and is invisible to every one of those: the home
+    // screen says connected while Settings -> Phones says disconnected, which
+    // is precisely the report this line exists to stop being a mystery.
+    ppWarn() << "[ppcp-rv] link up:" << tls.describe().c_str()
+             << (pairingId.isEmpty()
+                     ? QStringLiteral("pairing=NONE — not joined to the ledger, so no row "
+                                      "will show it connected and nothing will be remembered")
+                     : QStringLiteral("pairing=%1").arg(pairingId));
     setStatus(m_phones.size() == 1
                   ? tr("Device connected — %1.").arg(QString::fromStdString(tls.describe()))
                   : tr("%1 devices connected.").arg(m_phones.size()));
@@ -795,7 +808,18 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
     if (ph->link) ph->link->close();
 
     const QString name = ph->name;
+    const QString droppedPairing = ph->pairingId;
     m_phones.erase(it);
+
+    // The other half of "link up": a reconnect is a DROP and an adopt, and
+    // without both in the log a phone that reconnects twice reads as a phone
+    // that connected three times — which is how a stale link left in `m_phones`
+    // would hide.  `adoptLink()` deliberately does not deduplicate by pairing
+    // (a pairing is not a phone; a LINK is), so the count is worth stating.
+    ppWarn() << "[ppcp-rv] link down:" << why
+             << (droppedPairing.isEmpty() ? QStringLiteral("pairing=NONE")
+                                          : QStringLiteral("pairing=%1").arg(droppedPairing))
+             << "-" << m_phones.size() << "link(s) still up";
 
     setStatus(name.isEmpty()
                   ? tr("Device disconnected (%1).").arg(QString::fromLatin1(why))
