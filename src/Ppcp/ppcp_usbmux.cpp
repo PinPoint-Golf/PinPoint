@@ -457,15 +457,36 @@ pp_socket_t openProvider(const Provider &prov, double deadlineMs, Result &r)
 #endif
 }
 
+// ⛔ MSG_NOSIGNAL IS LOAD-BEARING ON LINUX, AND setNoSigPipe() DOES NOT COVER IT.
+// `SO_NOSIGPIPE` is an Apple/BSD socket option; where it is absent
+// `setNoSigPipe()` above compiles to `(void)s` and the socket has NO protection
+// at all.  Every plist request here is a write, and usbmuxd closing the socket
+// under us — a phone unplugged mid-request, which §6.2 calls an ordinary
+// outcome — then raises SIGPIPE, whose default disposition TERMINATES THE
+// PROCESS.  A transport must not do that to its embedding, and must not fix it
+// by changing the process's signal disposition either.
+//
+// So: the per-socket option where it exists, the per-call flag where it does
+// not.  Same reasoning and the same pairing as `ppcp_transport.cpp:752` and
+// `ppcp_bootstrap.cpp:461`, which have always had this and are why the WiFi and
+// bootstrap paths were never exposed.  ⚠ Not `#else` on `SO_NOSIGPIPE` — the two
+// are independent, a platform may define both, and passing the flag when the
+// option is already set is harmless.
+#ifdef MSG_NOSIGNAL
+#define PP_SEND_FLAGS MSG_NOSIGNAL
+#else
+#define PP_SEND_FLAGS 0
+#endif
+
 bool sendAll(pp_socket_t s, const unsigned char *p, std::size_t n, double deadlineMs)
 {
     std::size_t sent = 0;
     while (sent < n) {
 #ifdef _WIN32
         const int w = ::send(static_cast<SOCKET>(s), reinterpret_cast<const char *>(p + sent),
-                             static_cast<int>(n - sent), 0);
+                             static_cast<int>(n - sent), PP_SEND_FLAGS);
 #else
-        const ssize_t w = ::send(s, p + sent, n - sent, 0);
+        const ssize_t w = ::send(s, p + sent, n - sent, PP_SEND_FLAGS);
 #endif
         if (w > 0) { sent += static_cast<std::size_t>(w); continue; }
         const int e = pp_last_error();
