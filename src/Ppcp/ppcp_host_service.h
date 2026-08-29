@@ -540,6 +540,27 @@ private:
         // need a complete `VideoInputPpcp` in this header, which is a Video
         // dependency the Ppcp layer does not otherwise carry.
         std::vector<VideoInputPpcp *> previews;
+
+        // ⛔ **ONE PER CHANNEL, AND THEY MUST DIE BEFORE `link` DOES.**  A
+        // QSocketNotifier outlives its fd badly — the same trap
+        // `startAdvertising()` records for the DNS-SD socket — so dropPhone()
+        // clears this vector explicitly before the link closes, and it is
+        // declared AFTER `link` so even an accidental default destruction runs
+        // in the right order (members die in reverse declaration order).
+        //
+        // ⚠ WHY THEY EXIST.  pump() reads bytes; tick() runs the schedules that
+        // need a clock.  Until 29 Aug 2026 BOTH ran only from the 20 ms QTimer,
+        // so a reply sat in the socket for up to a tick before anything read
+        // it — and `libppcp` stamps `t4` inside ppcp_peer_feed()
+        // (`ppcp_peer.c:2675`), which pump() is what calls.  The measured cost
+        // was a `min_rtt` of ~18 ms on a link whose real round trip is a few:
+        // the poll, not the network.  These notifiers make the comment in
+        // start() true.
+        std::vector<std::unique_ptr<QSocketNotifier>> reads;
+        // Re-entrancy guard: pump() -> drainEvents() -> a preview consumer can
+        // spin the event loop, and a nested pump on the same peer would feed
+        // the engine from a buffer the outer call still holds.
+        bool pumping = false;
     };
 
 
@@ -651,6 +672,11 @@ private:
     void noteWantsChannel(const Ppcp::LinkId &id, bool wants);
     // Runs on the GUI thread: the accept thread found a stream binding `id`.
     void adoptChannel(const Ppcp::LinkId &id, Ppcp::TransportChannel *raw);
+
+    // Arms one read notifier per open channel of `ph`'s link, so pump() runs
+    // when bytes arrive rather than up to a tick later.  Idempotent: it rebuilds
+    // the set, which is what a channel arriving under ENC 2.1d needs.
+    void watchChannels(Phone *ph);
 
     QTimer  m_timer;
     bool    m_listening = false;

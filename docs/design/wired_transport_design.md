@@ -75,11 +75,25 @@ reverted because **cadence is not in the equation**. Raising traffic raises
 
 Worked, with the numbers we actually see:
 
-| Transport | plausible `min_rtt` | offset sigma floor | skew sigma at 90 s span |
+| Transport | `min_rtt` | offset sigma floor | notes |
 |---|---|---|---|
-| 5 GHz WiFi, shared infra | 4 ms | 2 ms | ≈ 31 ppm |
-| 5 GHz WiFi, host hotspot | 2 ms | 1 ms | ≈ 16 ppm |
-| USB via usbmux | 0.5 ms | 0.25 ms | ≈ 3.9 ppm |
+| WiFi, **as shipped before 29 Aug** | **12.95 ms** *(measured)* | 6.47 ms | 87% of it was this host's own 20 ms poll, not the network — §7 |
+| **WiFi, measured 29 Aug 2026** | **1.64 ms** *(measured)* | **0.82 ms** | iPhone 16, idle link, converged at 350 s. `offset_sigma` **1.16 ms**, `skew_sigma` 10.5 ppm |
+| USB via usbmux | ~0.5 ms *(predicted)* | ~0.25 ms | **unmeasured — M1** |
+
+⛔ **The measured baseline is far better than this document originally assumed, and
+it changes the size of the prize.** The table above once read "5 GHz WiFi, shared
+infra: 4 ms" as its comparison point. The real number, once the host stops polling
+(§7, shipped), is **1.64 ms** — and `offset_sigma` sits at **1.16 ms against the
+5 ms gate below, a 4.3× margin**.
+
+So the cable is arguing for roughly a **3× improvement on a number already 4×
+inside the gate**, not an 8× improvement on a marginal one. The arithmetic in this
+section is unchanged and still correct; what changed is that most of the available
+win turned out to be a poll in this host and has already been taken **with no
+cable at all**. ⚠ M1 is now the question *"what does the remaining 3× buy?"*, and
+§1's second argument — that Windows and Linux have no reconnection path at all —
+carries more of the weight for Phase 1 than the accuracy case does.
 
 `CORE` §3.2's own transport table says the same thing qualitatively — *"USB tunnel
 | very tight, stable | Fastest convergence, lowest sigma. **Best available.**"* —
@@ -868,11 +882,17 @@ the sync method was chosen for exactly this: `sync.h` says the admit fraction is
 2.4 GHz WiFi have nothing in common except that their left tails are the honest
 part."* Nothing in the protocol needs a wired variant.
 
-⛔ **But one thing does change, and it is not in the protocol: as RTT falls, the
-dominant error moves off the network and onto the host's own I/O — and this host
-is not ready for it.**
+⛔ **But one thing did change, and it was not in the protocol: the dominant error
+was this host's own I/O.** ✅ **Fixed and measured 29 August 2026** — §7.1 is kept
+as the record of what was wrong and what it cost.
 
-### 7.1 The host stamps `t4` on a 20 ms timer
+### 7.1 The host stamped `t4` on a 20 ms timer · ✅ FIXED 29 Aug 2026
+
+**Result: `min_rtt` 12.95 → 1.64 ms, `offset_sigma` 2.50 → 1.16 ms, and what this
+host publishes to the phone ≳ 6.5 → 0.86 ms.** One `QSocketNotifier` per channel
+(`Phone::reads`, `watchChannels()`); `tick()` still runs on the 20 ms timer because
+it is the time-passing half. The table below records the state that was measured.
+
 
 `CORE` 6.1c anticipates precisely this and libppcp offers both paths
 (`peer.h:630`): the automatic one, where `t4` is read *"as [the reply] is
@@ -887,30 +907,34 @@ closer to the socket … the convenient one; this is the accurate one."*
 So the host — which is the prober — stamps `t4` when a 20 ms tick gets round to
 the reply, not when the bytes land.
 
-**What that actually costs, worked rather than asserted.** Minimum-RTT filtering
-rescues most of it: with a poll delay roughly uniform on [0, 20 ms] and a
-32-sample window, the window's smallest delay is about `20/33 ≈ 0.6 ms`, and that
-is what reaches `min_rtt`.
+⛔ **This document predicted the poll cost ~0.6 ms. Measured, it cost 11.3 ms.**
+The prediction reasoned that min-RTT filtering would rescue it: a delay uniform on
+[0, 20 ms], minimum over a 32-sample window, is `20/33 ≈ 0.6 ms`.
 
-| | true `min_rtt` | observed | `offset_sigma` floor | poll's share |
-|---|---|---|---|---|
-| WiFi | ~4 ms | ~4.6 ms | 2.3 ms | ~15% |
-| **USB** | ~0.5 ms | ~1.1 ms | **0.55 ms** — not the 0.25 ms of §1 | **more than half** |
+**The delay is not random — it is a phase.** The probe is queued and written on a
+tick and the reply is read on the *next* tick, so the wait is very nearly a whole
+period every time, and the filter had no spread to filter. A polled loop does not
+add a random delay to a round trip; it quantises it. ⚠ Worth carrying forward: any
+future "the filter will absorb it" argument needs the same check.
 
-⚠ So the poll does not destroy the wired case; it **halves it**, and on the wired
-path it becomes the largest single error term. There is also a *bias*, not merely
-noise: a late `t4` makes `offset = ((t2−t1) + (t3−t4))/2` too small by δ/2, so
-≈0.3 ms of systematic offset survives the filter — about 6% of the 5 ms gate in
-§7.3.
+⛔ **And the relation the 5 ms gate reads was never this host's.** Both peers call
+`ppcp_peer_publish_relations()`, and libppcp puts a published relation into the
+*same* `p->relations` that an arriving `relation_update` writes to
+(`ppcp_peer.c:1978` and `:2835`). This host's estimator produces
+`tb:host -> tb:hosttime`; `offsetToRefNs()` and `PpcpShotBridge` convert the other
+way, so they read **the phone's** published relation.
 
-⛔ **Do this before M1, or the measurement will understate wired and §1's table
-will read as wrong.** It is two changes and both are small: call
-`ppcp_peer_sync_observe()` with `t4` taken at the read, and drive PPCP channel
-reads from a notifier (or the dial thread) rather than the 20 ms tick. The tick
-must still fire on time passing — `tick()` is what makes heartbeats due with no
-traffic — but it should not be what discovers that bytes arrived. ⚠ The same 20 ms
-also caps how promptly a **shot event** is delivered, which is a separate latency
-worth having.
+It improved regardless — 2.50 → 1.16 ms — because **this host is also the responder
+to the phone's probes**, and a reply that waited for a tick inflated the phone's
+measured RTT too. The poll degraded both directions, and the notifier fixed both.
+
+✅ **`ppcp_peer_sync_observe()` was not needed.** libppcp reads `t4` with
+`ppcp_clock_read()` at `ppcp_peer.c:2675`, *inside* `ppcp_peer_feed()` — which
+`pump()` is what calls. Making `pump()` prompt was sufficient, and the second half
+of this section's original recommendation was redundant.
+
+⚠ The same 20 ms also capped how promptly a **shot event** was delivered. That is a
+separate latency, and it is now gone too.
 
 ### 7.2 The rest of the audit
 
@@ -1226,8 +1250,8 @@ runs on this project are non-deterministic and network conditions are worse.
 
 | # | Question | Measurement | Decides |
 |---|---|---|---|
-| M0 | How much of today's `min_rtt` is the 20 ms poll? | Sync trace on **WiFi only**, before and after the §7.1 stamping fix | Separates the embedding's contribution from the transport's. ⛔ **Run first**, or every later number is a mixture of the two |
-| M1 | What is `min_rtt` over usbmux? | Sync trace, 5 min idle link, wired vs WiFi control, §7.1 fixed | Whether §1's arithmetic holds. **If `min_rtt` is not materially lower, stop — nothing else in this document is worth building.** |
+| ~~M0~~ | ~~How much of today's `min_rtt` is the 20 ms poll?~~ | **✅ DISCHARGED 29 Aug**: 12.95 → 1.64 ms, i.e. **87% of the round trip was the poll**. `offset_sigma` 2.50 → 1.16 ms | Done. ⚠ It also moved the goalposts — see §1 |
+| M1 | What is `min_rtt` over usbmux? | Sync trace, 5 min idle link, wired vs the **new 1.64 ms** WiFi control | ⚠ The bar moved. Not *"is it lower"* but *"what does ~3× lower buy on a number already 4.3× inside the 5 ms gate"*. **If the answer is little, the accuracy case is spent and only the Windows/Linux reconnection case remains.** |
 | M2a | Does the phone hold `zero_residence` off, and what is its residence time? | `ppcp_peer_sync_zero_residence()`, and `t3−t2` distribution | §7.2 — responder residence is a small share of a WiFi round trip and a large share of a USB one |
 | M2 | What is time-to-skew-target? | Span at which `skew_sigma_ppm` crosses the WiFi 90 s value | The headline claim, in the units an operator cares about |
 | M3 | Does bulk poison control? | `min_rtt` and `offset_sigma` on channel 0 during a 25 MB channel-1 transfer, wired vs WiFi | Whether Phase 3 is needed |
@@ -1278,8 +1302,8 @@ against a known-good reference instead of discovered by trial.
 | ⚠ | Linux `usbmuxd` socket permissions | Document the group; detect and explain |
 | ? | Does a raw usbmux `Connect` need "Trust This Computer"? | M5 — believed no, not measured |
 | ⛔ | **A cable always charges and iOS cannot decline it**, so wired adds a thermal load on top of sustained HEVC encode and iOS throttles the camera silently. Unmeasured | §9.6, M10. The one cost that offsets §1's benefit, and it is Phase 1 |
-| ⚠ | Today's measured WiFi `offset_sigma` is **not in this document**, so "what does wired have to beat" is stated only as the 5 ms gate | M0's real output. ⛔ The doc is incomplete until that number is in §1's table |
-| ⛔ | The host stamps `t4` on a 20 ms timer and never calls `ppcp_peer_sync_observe()`, so the poll becomes the largest error term on a wired link — halving the gain and adding ~0.3 ms of bias | §7.1. Fix and measure on WiFi **before** M1, so the improvement is attributed to the right cause |
+| ✅ | ~~Today's measured WiFi `offset_sigma` is not in this document~~ | **CLOSED 29 Aug** — 1.16 ms, in §1. ⚠ And it is good enough that it weakens the case this document argues |
+| ✅ | ~~The host stamps `t4` on a 20 ms timer~~ | **CLOSED 29 Aug** — notifier per channel. It cost 11.3 ms of the 12.95 ms round trip, ~19× the 0.6 ms this document predicted (§7.1) |
 | ⛔ | usbmux is undocumented, unversioned and unsupported by Apple; it could change or close in any iOS release | §0 — wired is an optimisation, never a requirement. Losing it must cost a transport, not the product |
 | ⚠ | No `PrivacyInfo.xcprivacy` exists in `PinPointCapture` | §9.3. Pre-existing hard blocker on the same submission; `mach_absolute_time` needs reason 35F9.1 |
 | ⚠ | USB Restricted Mode kills the cable after an hour locked | §9.5. Disable the idle timer while a session is live; M8 confirms it is enough |

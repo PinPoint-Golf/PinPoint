@@ -36,6 +36,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 
 #include <ppcp/version.h>
@@ -105,6 +106,33 @@ double worstSyncSigmaMsFor(const PpcpLiveSession &live)
     return worst;
 }
 
+// The estimator behind ONE source timebase, for the convergence trace.
+//
+// ⚠ NOT `ppcp_peer_sync_estimator_at(peer, 0)`, which is what the trace used to
+// ask for while iterating relatedTimebases(): index 0 is whichever estimator was
+// registered first, so on a phone declaring a camera clock AND an audio clock the
+// trace attributed one estimator's sample count to every timebase it printed.
+// I21 gives a multi-clock peer one estimator per timebase and there is no
+// composition between them, so the lookup has to be by name.
+//
+// Matched on the REMOTE id because relatedTimebases() yields source timebases —
+// `offsetToRefNs(sourceTimebase, ...)` names it in the parameter.
+const ppcp_sync_estimator *estimatorForSource(ppcp_peer *peer, const std::string &sourceTb)
+{
+    if (!peer) return nullptr;
+    const std::size_t n = ppcp_peer_sync_count(peer);
+    for (std::size_t i = 0; i < n; ++i) {
+        const ppcp_sync_estimator *e = ppcp_peer_sync_estimator_at(peer, i);
+        if (!e) continue;
+        const ppcp_id *remote = ppcp_sync_estimator_remote_tb(e);
+        if (!remote) continue;
+        if (sourceTb.size() == remote->len &&
+            std::memcmp(sourceTb.data(), remote->v, remote->len) == 0)
+            return e;
+    }
+    return nullptr;
+}
+
 }  // namespace
 
 PpcpHostService::PpcpHostService(QObject *parent)
@@ -119,11 +147,20 @@ PpcpHostService::PpcpHostService(QObject *parent)
     m_rv.setSecretStore(makePlatformPairingStore(kPairingService));
     m_rv.loadPersisted();
 
-    // ⚠ pump() AND tick() ARE DIFFERENT SCHEDULES AND BOTH RUN HERE.  pump() is
-    // driven by bytes being ready; tick() by TIME PASSING — §6.3's sync cadence,
-    // §7.4's heartbeats and 8.2h's issue hold.  A loop that ran only when bytes
-    // arrived would never notice a dead peer, which is the one thing §7.4
-    // exists to notice.
+    // ⚠ pump() AND tick() ARE DIFFERENT SCHEDULES.  tick() is TIME PASSING —
+    // §6.3's sync cadence, §7.4's heartbeats and 8.2h's issue hold — and runs
+    // here, on this timer, because a loop that ran only when bytes arrived would
+    // never notice a dead peer, which is the one thing §7.4 exists to notice.
+    //
+    // ⛔ pump() IS DRIVEN BY BYTES BEING READY, AND UNTIL 29 AUG 2026 IT WAS NOT.
+    // This comment claimed the split above while both halves ran off this one
+    // 20 ms timer, so a reply waited up to a tick to be read — and `libppcp`
+    // stamps sync `t4` inside ppcp_peer_feed() (`ppcp_peer.c:2675`), which pump()
+    // is what calls.  Measured on hardware: `min_rtt` ~18 ms on a link whose real
+    // round trip is a few, i.e. the poll rather than the network.  Phone::reads
+    // now carries a QSocketNotifier per channel (see watchChannels()); tick()
+    // still pumps as well, which costs nothing and covers the case where TLS has
+    // buffered plaintext that the socket has no readability left to announce.
     m_timer.setInterval(20);
     connect(&m_timer, &QTimer::timeout, this, &PpcpHostService::onTick);
 
@@ -714,6 +751,7 @@ void PpcpHostService::adoptLink(std::unique_ptr<PeerConnection> link)
                   ? tr("Device connected — %1.").arg(QString::fromStdString(tls.describe()))
                   : tr("%1 devices connected.").arg(m_phones.size()));
     refreshCode();
+    watchChannels(ph);
     emit stateChanged();
     emit phonesChanged();
 }
@@ -736,6 +774,11 @@ void PpcpHostService::dropPhone(Phone *ph, const char *why)
     // because unlike a Settings tile — which outlives the phone and is
     // re-attached by reattachAll() on reconnect — these are owned here and a
     // fresh `declare` builds a fresh set.
+    // ⛔ **THE NOTIFIERS GO BEFORE ANYTHING CAN CLOSE AN fd.**  Same trap as the
+    // DNS-SD socket in startAdvertising(): a QSocketNotifier left watching a
+    // closed descriptor fires forever on some platforms and asserts on others.
+    ph->reads.clear();
+
     VideoInputPpcp::stopPreviewConsumers(&ph->previews);
 
     if (!ph->counterpartId.isEmpty()) {
@@ -842,6 +885,41 @@ void PpcpHostService::noteWantsChannel(const Ppcp::LinkId &id, bool wants)
     }
 }
 
+// ⛔ ONE READ NOTIFIER PER CHANNEL — see Phone::reads.  Rebuilt wholesale rather
+// than appended to, because ENC 2.1d lets a channel arrive at any later point and
+// a set that is only ever added to has no answer for a channel that closed.
+//
+// ⚠ `pump()`, NOT `tick()`.  tick() is the schedule half — 6.3's sync cadence,
+// 7.4's heartbeats, 8.2h's issue hold — and it is driven by TIME PASSING, so it
+// must keep running on the timer whether or not bytes arrive.  Calling it from a
+// readable socket would run those schedules at the rate of the traffic.
+void PpcpHostService::watchChannels(Phone *ph)
+{
+    if (!ph || !ph->link || !ph->peer) return;
+    ph->reads.clear();
+    for (const Channel c : ph->link->channels()) {
+        TransportChannel *tc = ph->link->channel(c);
+        if (!tc || !tc->isOpen()) continue;
+        const int fd = tc->fd();
+        if (fd < 0) continue;
+        auto n = std::make_unique<QSocketNotifier>(fd, QSocketNotifier::Read);
+        connect(n.get(), &QSocketNotifier::activated, this, [this, ph] {
+            // Re-entrancy: a preview consumer downstream of drainEvents() can
+            // spin the event loop, and a nested pump would feed the engine from
+            // a buffer the outer call still owns.
+            if (ph->pumping) return;
+            ph->pumping = true;
+            const bool alive = ph->peer->pump();
+            ph->pumping = false;
+            // ⚠ Drop on the same rule tick() uses.  A dead link discovered here
+            // must not be left for the timer: its notifiers are still armed on
+            // a closed fd, which is the trap dropPhone() exists to avoid.
+            if (!alive) dropPhone(ph, "link closed");
+        });
+        ph->reads.push_back(std::move(n));
+    }
+}
+
 void PpcpHostService::adoptChannel(const Ppcp::LinkId &id, Ppcp::TransportChannel *raw)
 {
     std::unique_ptr<TransportChannel> ch(raw);
@@ -856,6 +934,7 @@ void PpcpHostService::adoptChannel(const Ppcp::LinkId &id, Ppcp::TransportChanne
             // One extra channel is all 2.1d's preview case wants; asking for
             // more would keep a poll running on the accept thread for ever.
             noteWantsChannel(id, false);
+            watchChannels(p.get());   // the new channel needs its own notifier
         }
         return;
     }
@@ -1614,20 +1693,52 @@ void PpcpHostService::onTick()
                     // s5^2 = s0^2 + (5 s * skew)^2, so the skew term falls out.
                     const double drift5 = (s5 > s0) ? std::sqrt(s5 * s5 - s0 * s0) : 0.0;
                     const double skewPpm = drift5 / 5.0e9 * 1.0e6;
+                    // Exchanges actually FOLDED IN (against probes sent), and the
+                    // minimum RTT the fit retained.  The gap between probes and
+                    // observed is one diagnosis — a probe nobody answers costs the
+                    // same as one that lands and teaches nothing.
+                    //
+                    // ⚠ `min_rtt` IS THE ONE THAT SAYS WHETHER A SCHEDULE COULD
+                    // EVER HELP.  6.3f's estimator floors `offset_sigma` at half
+                    // of it (`ppcp_sync.c`: `asym = min_rtt_ns * 0.5`, combined in
+                    // quadrature with the fit's residual), so an offset sigma
+                    // sitting on that floor is a TRANSPORT result and no cadence
+                    // reaches it — which is what seven scheduling experiments
+                    // established the expensive way.  Printing the floor beside
+                    // the value is what tells the two apart at a glance.
+                    const ppcp_sync_estimator *est = estimatorForSource(live.peer(), tb);
+                    const double minRttMs =
+                        est ? ppcp_sync_estimator_min_rtt_ns(est) / 1.0e6 : 0.0;
+                    // ⚠ THE RELATION SET IS NOT NECESSARILY OURS.  Both peers call
+                    // ppcp_peer_publish_relations(), and libppcp puts a published
+                    // relation into the SAME p->relations that an arriving
+                    // `relation_update` writes to (ppcp_peer.c:1978 and :2835).  So
+                    // `offset_sigma` above is whichever peer wrote that key last,
+                    // and it can be the phone's estimate of us rather than ours of
+                    // it.  Printing OUR estimator's own sigma beside it is the only
+                    // way to tell — and if the two disagree, the number the shot
+                    // bridge gates on was never this host's to improve.
+                    double ownSigmaMs = 0.0;
+                    std::string ownDir;
+                    if (est) {
+                        ppcp_timebase_relation own{};
+                        if (ppcp_sync_estimator_relation(est, &own) == PPCP_OK) {
+                            ownSigmaMs = own.offset_sigma_ns / 1.0e6;
+                            ownDir = std::string(own.from.v, own.from.len) + "->" +
+                                     std::string(own.to.v, own.to.len);
+                        }
+                    }
                     ppWarn()
                         << "[ppcp-sync] t+" << (nowMono - m_syncTraceStartMs) / 1000 << "s "
                         << "probes=" << live.stats().probesQueued
-                        << "observed=" << [&]() -> qulonglong {
-                               // Exchanges actually FOLDED IN, against probes
-                               // sent.  The gap between the two is the whole
-                               // diagnosis: a probe nobody answers costs the
-                               // same as one that lands and teaches nothing.
-                               const ppcp_sync_estimator *e =
-                                   ppcp_peer_sync_estimator_at(live.peer(), 0);
-                               return e ? (qulonglong)ppcp_sync_estimator_count(e) : 0;
-                           }()
+                        << "observed="
+                        << (est ? (qulonglong)ppcp_sync_estimator_count(est) : 0)
                         << tb.c_str()
+                        << " min_rtt=" << minRttMs << "ms"
+                        << " (floor=" << minRttMs / 2.0 << "ms)"
                         << " offset_sigma=" << s0 / 1.0e6 << "ms"
+                        << " own_sigma=" << ownSigmaMs << "ms"
+                        << " own_dir=" << ownDir.c_str()
                         << " skew_sigma=" << skewPpm << "ppm"
                         << " sigma@5s=" << s5 / 1.0e6 << "ms"
                         << (s5 < 5.0e6 ? "  <-- UNDER THE 5ms GATE" : "");
