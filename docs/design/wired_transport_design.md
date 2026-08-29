@@ -79,7 +79,7 @@ Worked, with the numbers we actually see:
 |---|---|---|---|
 | WiFi, **as shipped before 29 Aug** | **12.95 ms** *(measured)* | 6.47 ms | 87% of it was this host's own 20 ms poll, not the network — §7 |
 | **WiFi, measured 29 Aug 2026** | **1.64 ms** *(measured)* | **0.82 ms** | iPhone 16, idle link, converged at 350 s. `offset_sigma` **1.16 ms**, `skew_sigma` 10.5 ppm |
-| USB via usbmux | ~0.5 ms *(predicted)* | ~0.25 ms | **unmeasured — M1** |
+| **USB via usbmux, measured 29 Aug 2026** | **0.795 ms** *(measured)* | **0.398 ms** | iPhone 16 on a cable, idle, t+350 s. `offset_sigma` **0.341 ms**, `skew_sigma` **3.31 ppm**, gate margin **14.6×**. ⚠ Predicted ~0.5 ms — right order, modestly worse |
 
 ⛔ **The measured baseline is far better than this document originally assumed, and
 it changes the size of the prize.** The table above once read "5 GHz WiFi, shared
@@ -102,8 +102,14 @@ whether a Candidate is arbitrated is the sigma **at the moment of the shot**, no
 the sigma after five quiet minutes.
 
 ⚠ **So the accuracy case is not spent; it was measured in the wrong conditions.**
-M1 must run a contended arm as well as an idle one (§11), and what the cable is
-really selling there is not a better floor but a **floor that does not move**.
+✅ **Resolved 29 Aug 2026 by M1a, and NOT by the contended arm this paragraph
+originally demanded.** Wired measured **`min_rtt` 0.795 ms, `offset_sigma`
+0.341 ms** against the idle-WiFi control's 2.234 ms / 1.128 ms — a **3.2-3.4×
+steady-state gain** and a gate margin of **14.2× against WiFi's 4.4×**. ⛔ The
+contended arm (M1b) was **dismissed as circular**: the cable does not traverse
+the radio, so contention on it cannot reach the cable, and the answer was fixed
+before the experiment ran. What the cable sells here is a floor that does not
+move, and that follows from the transport rather than from a measurement.
 
 ### 1.1 And clock alignment was never the whole of it
 
@@ -112,7 +118,7 @@ all of which survive Phase 0 untouched:
 
 | | Why the cable wins |
 |---|---|
-| **Contention** | Wired latency does not degrade because the room filled up. WiFi's does, and unpredictably — see above |
+| **Contention** | Wired latency does not degrade because the room filled up. WiFi's does, and unpredictably — see above. ✅ **Accepted as an argument, not carried as a measurement**: M1b was dismissed 29 Aug 2026 as circular, since the cable does not traverse the radio and cannot be reached by contention on it |
 | **Reliability** | A cable does not drop, roam, hit client isolation, or lose multicast. `RV` 3.6a exists because *"it will not work at a range"*; the cable is the path with no such clause |
 | **Power** | A phone on a cable is charging. A long range session on 5 GHz with the camera running is a battery problem, and the cable removes it |
 | **Cross-platform reconnection** | `ppcp_discovery.cpp` is `#if defined(__APPLE__)` throughout, so Windows and Linux have no reconnection path at all today |
@@ -1320,7 +1326,7 @@ runs on this project are non-deterministic and network conditions are worse.
 |---|---|---|---|
 | ~~M0~~ | ~~How much of today's `min_rtt` is the 20 ms poll?~~ | **✅ DISCHARGED 29 Aug**: 12.95 → 1.64 ms, i.e. **87% of the round trip was the poll**. `offset_sigma` 2.50 → 1.16 ms | Done. ⚠ It also moved the goalposts — see §1 |
 | M1a | `min_rtt` over usbmux, **idle** | 5 min idle link, wired vs the 1.64 ms WiFi control | The floor. ⚠ Expect ~3× — real, but not on its own the reason to build this |
-| M1b | ⛔ **`min_rtt` and sigma under CONTENTION** | Both arms with the WiFi loaded — other clients, 2.4 GHz, distance, a body in the path. Report the **95th percentile and the worst 5 s window**, not the converged floor | **This is the real M1.** The cable is selling a floor that does not move, and §1's idle measurement cannot see that. A shot happens at one instant, not after five quiet minutes |
+| ~~M1b~~ | ~~`min_rtt` and sigma under CONTENTION~~ ⛔ **DISMISSED 29 Aug 2026 — the test is circular** | — | The cable does not traverse the radio, so radio contention cannot reach it: the result is fixed by construction before the experiment runs. ⚠ The non-circular half — *how badly does WiFi degrade at a real range?* — sizes whether the cable is **needed**, never whether it works, and is field observation rather than a lab test. ⛔ **Do not re-run.** Measured instead: on an idle link both arms are degenerate, p95 ≈ median ≈ max and `min_rtt` spread 0.000 ms on **both**, so a quiet room cannot distinguish "the floor does not move" from "nothing moved today" |
 | M11 | Does WiFi ever *fail* where wired does not? | Drop/roam/reconnect counts over a long session, both arms | The reliability half of §1.1, which no sigma number captures |
 | M2a | Does the phone hold `zero_residence` off, and what is its residence time? | `ppcp_peer_sync_zero_residence()`, and `t3−t2` distribution | §7.2 — responder residence is a small share of a WiFi round trip and a large share of a USB one |
 | M2 | What is time-to-skew-target? | Span at which `skew_sigma_ppm` crosses the WiFi 90 s value | The headline claim, in the units an operator cares about |

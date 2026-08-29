@@ -430,11 +430,148 @@ Phase 2 one. Waves 1–2 above; measurements are mine, not an agent's.
 | `[x]` | PPC | *(wave 1, PPC agent — contracts C3, C4)* `WiredPresenceListener` — fixed port, plaintext, serves the CBOR record. ⛔ Bound to `127.0.0.1` via `requiredLocalEndpoint`, **not** all interfaces. `ppcp_cbor_writer` is already used from Swift (`Candidate.swift:245`). |
 | `[x]` | PPC | *(wave 1, PPC agent — contract C5)* Start `PpcpListener` on the wired path with `listener: true` in `DevicePeer`; publish `psk_identity` and the actual port. Record lists persisted pairings **plus any scanned, not-yet-connected code**, mirroring the host's resolver. |
 | `[x]` | PPC | *(wave 1, PPC agent)* `isIdleTimerDisabled` while a session is live — one line, owed to capture regardless, and load-bearing for USB Restricted Mode. |
-| `[ ]` | — | ⛔ **M12 — does the device-side mux connect to `127.0.0.1` or `::1`?** `NWParameters.requiredLocalEndpoint` **pins the address family**, so the presence listener is IPv4-loopback only. If usbmuxd on the device dials `::1`, the presence read fails and the phone simply looks un-wired — an indistinguishable, silent failure. ✅ Fallback if it bites: `requiredInterfaceType = .loopback`, which covers both families and keeps the LAN exclusion §5.3 needs. ⚠ Needs the cable; unanswerable in a simulator. **Check this FIRST if M1 cannot read a presence record.** |
-| `[ ]` | — | **Mine, not an agent's.** **M1a/M1b** (`min_rtt` wired vs WiFi, Phase 0 fix in place), **M10** (sustained capture before thermal throttle, cabled vs not — ⚠ screen for issue #101's ~8.8 s gap signature first), **M3** (does bulk poison control), **M5** (does `Connect` need device trust — needs an *untrusted* device). |
+| `[x]` | — | ✅ **M12 — DISCHARGED 29 Aug, over a real cable. The device-side mux dials IPv4 loopback; no fallback needed.** `Connect(device, 50915)` → `Number=0`, and the presence record came back: **118 bytes, fully consumed, no framing**, `ENC` 4e key order (`dl, pv, role, peers`) in the *live* record and not merely the fixture, `dl` = "iPhone", **two held pairings → two listeners on ephemeral ports 57131/57132** exactly as contract C5 predicts, both identities 17 bytes starting `0x01` and neither valid UTF-8. `requiredInterfaceType = .loopback` is NOT required. ~~⛔ M12 — does the device-side mux connect to `127.0.0.1` or `::1`?~~ `NWParameters.requiredLocalEndpoint` **pins the address family**, so the presence listener is IPv4-loopback only. If usbmuxd on the device dials `::1`, the presence read fails and the phone simply looks un-wired — an indistinguishable, silent failure. ✅ Fallback if it bites: `requiredInterfaceType = .loopback`, which covers both families and keeps the LAN exclusion §5.3 needs. ⚠ Needs the cable; unanswerable in a simulator. **Check this FIRST if M1 cannot read a presence record.** |
+| `[~]` | — | **Mine, not an agent's.** ✅ M1a, M2, M12 done; ⛔ **M1b DISMISSED as circular (Mark, 29 Aug) — do not re-run.** **M1a/M1b** (`min_rtt` wired vs WiFi, Phase 0 fix in place), **M10** (sustained capture before thermal throttle, cabled vs not — ⚠ screen for issue #101's ~8.8 s gap signature first), **M3** (does bulk poison control), **M5** (does `Connect` need device trust — needs an *untrusted* device). |
 
 **Phase 1 done:** a phone on a cable reaches `session_open` with a published
 `TimebaseRelation`, and M1/M3/M10 are numbers in this tracker.
+
+### ✅ Phase 1 definition of done — MET 29 Aug 2026, on hardware
+
+```
+[ppcp-usb] wired path armed (PINPOINT_PPCP_WIRED=1) — /var/run/usbmuxd
+[ppcp-usb] 1 device(s) attached, 1 on a cable — usbmux: ok
+[ppcp-rv]  link up: TLSv1.2 TLS_PSK_WITH_AES_128_GCM_SHA256 psk … transport=usb "pairing=023e26a759228c15"
+[ppcp]     peer declared: "iPhone 16" - 2 camera Source(s)
+```
+
+Zero `live session open refused` lines, and the Session opens **on declare**
+(`ppcp_host_service.cpp:1035`) rather than on a UI action, so nothing was waiting
+on an operator. One link, **zero drops** across the whole 350 s run.
+
+### Measurement — M1a (idle) · ✅ DISCHARGED
+
+Wired vs the Phase 0 WiFi arm, **both at t+350 s**, same phone, same room, gate
+on/off back to back.
+
+| | WiFi (Phase 0, 350 s) | **Wired (350 s)** | change |
+|---|---|---|---|
+| `min_rtt` | 1.64 ms | **0.795 ms** | 2.1× |
+| floor = ½·`min_rtt` | 0.82 ms | 0.398 ms | 2.1× |
+| `offset_sigma` — **gates arbitration** | 1.16 ms | **0.341 ms** | **3.4×** |
+| `own_sigma` | 0.86 ms | 0.401 ms | 2.1× |
+| `skew_sigma` | 10.50 ppm | **3.31 ppm** | 3.2× |
+| `sigma@5s` | 1.16 ms | 0.342 ms | 3.4× |
+| margin under the 5 ms gate | 4.3× | **14.6×** | |
+
+✅ **The design's prediction held this time, and that is worth recording after
+Phase 0's did not.** §1 said *"on this measurement USB argues for roughly a 3×
+improvement on a number already 4× inside the gate."* Measured: **3.4×** on
+`offset_sigma`, gate margin 4.3× → 14.6×. ⚠ `min_rtt` was predicted at ~0.5 ms
+and came in at 0.795 ms — the right order, modestly worse than hoped.
+
+### Measurement — M1b (contended) · `[-]` DISMISSED 29 Aug 2026 — the test is circular
+
+⛔ **M1b CANNOT be answered on a quiet network, and this run demonstrates that
+rather than assuming it.** A WiFi control arm was taken back to back with the
+wired arm — same phone, same room, same session, gate off so the phone dialled
+over WiFi (`transport=wifi`, the tag added in this phase earning its keep). It
+converged to `offset_sigma` **1.118 ms** and `skew_sigma` **10.46 ppm**, against
+Phase 0's 1.16 ms / 10.50 ppm — **the rig reproduces itself**, which is what
+makes the rest of this credible.
+
+Both arms, **identical converged window t+250..360 s, 109 samples each**:
+
+| | WIRED | WiFi | |
+|---|---|---|---|
+| `min_rtt` median | 0.795 ms | 2.234 ms | 2.8× |
+| **`min_rtt` spread (max−min)** | **0.000 ms** | **0.000 ms** | — |
+| `offset_sigma` median | 0.341 ms | 1.128 ms | 3.3× |
+| `offset_sigma` **p95** | 0.351 ms | 1.132 ms | 3.2× |
+| `offset_sigma` max | 0.352 ms | 1.133 ms | 3.2× |
+| worst 5 s window | 0.352 ms | 1.133 ms | 3.2× |
+| gate margin on the worst window | **14.2×** | 4.4× | |
+
+⛔ **The distributions are degenerate: p95 ≈ median ≈ max on BOTH arms, and
+`min_rtt` spread is exactly 0.000 ms on both.** There is no tail to take a 95th
+percentile of. §11 asks M1b for *"the 95th percentile and the worst 5 s window"*
+precisely because the cable's claim is about the tail — and **on an idle,
+uncontended link WiFi has no tail either.** So this measurement cannot
+distinguish "the cable's floor does not move" from "nothing moved today". It
+confirms the 3.2× steady-state gain and says **nothing whatever about
+contention**, which is the claim that actually matters.
+
+⛔ **DISMISSED BY MARK, 29 Aug 2026, and the reasoning is better than the
+measurement would have been.** *"Evidence that a wired connection is better than
+WiFi when WiFi performance is degraded is pretty much not required — it's almost
+a circular argument. If performance was unaffected when WiFi performance is
+degraded then you wouldn't say that WiFi performance is degraded."*
+
+✅ **Correct, and the circularity is sharper than "almost".** The cable does not
+traverse the radio, so radio contention **cannot** reach it — true by
+construction, the same way §7.3 argues a transport change cannot carry a stale
+clock bias *"by construction rather than by care"*. The number was fixed before
+the experiment ran.
+
+⚠ **One distinction kept for the record, because it does not change the
+decision but does change what is still unknown.** M1b had two halves and only
+one is circular:
+
+- **The cable half is circular.** USB latency does not depend on WiFi occupancy.
+  Nothing to learn.
+- **The WiFi half is not** — but it asks a question about *WiFi*, not about the
+  cable: how badly does WiFi actually degrade at a real range? That sizes
+  **whether the cable is needed**, never whether it works, and it was never
+  gating this build. It also cannot be answered in a quiet room: it is field
+  observation at a range, not a lab test.
+
+✅ **So nothing was lost by dismissing it**, and §1.1's other three arguments
+never depended on it: reliability, power, and — the strongest, needing no
+measurement at all — **cross-platform reconnection, since `ppcp_discovery.cpp`
+is `#if defined(__APPLE__)` throughout and Windows and Linux have no
+reconnection path today.**
+
+⚠ **The Phase 0 review's framing — "M1b is the measurement that matters" — was
+mine and is now withdrawn.** It was right that an idle measurement oversells the
+cable; it was wrong that a contended one would settle anything.
+
+⚠ **Kept only as a note on method**, since it is why the run was attempted and
+abandoned rather than never tried. §11 specifies contention as *"other clients,
+2.4 GHz, distance, a body in the path"* — physical conditions. From this Mac
+they are not reachable:
+
+- **The Mac is on Ethernet (`en0`), not WiFi.** It cannot compete for airtime
+  with the phone by generating traffic of its own; its path to the AP is wired.
+- **Every synthetic load needs root.** `ping` intervals under 1 s, and
+  `dnctl`/`pfctl` shaping, all require privilege — and a `pf` rule left behind
+  is a way to break this machine's networking after the measurement ends.
+- ⛔ **A radio flood could disrupt the operator's own access to this machine.**
+  The Mac is administered over VNC; if that client sits on the same AP,
+  saturating the air to measure the phone would degrade the session being used
+  to run the measurement.
+
+**M1b would have needed a human in the room.** It is dismissed rather than
+deferred, so no later session should re-open it: ⛔ **do not re-run this test.**
+M1a/M2 stand on their own, and §1.1's contention argument is accepted as an
+argument rather than carried as an open measurement.
+
+### Measurement — M2 (time-to-target) · ✅ DISCHARGED, and it is the operator's number
+
+How long the cable takes to reach what WiFi needed **350 s** to reach:
+
+| target (WiFi's converged value) | wired reaches it at | |
+|---|---|---|
+| `offset_sigma` ≤ 1.16 ms | **35 s** | **10× faster** |
+| `skew_sigma` ≤ 10.50 ppm | **65 s** | **5.4× faster** |
+
+⚠ Genuine crossings, not first samples — the trace opens at t+5 s with
+`offset_sigma` at 8.35 ms and `skew_sigma` at 44588 ppm.
+
+⛔ **And the single most telling number is not in either table: `min_rtt` was
+0.795 ms on the FIRST sample and never moved for 350 s.** Not once. That is the
+"floor that does not move" §1.1 says the cable is actually selling, and it is
+visible from the first probe rather than after convergence — which is precisely
+what an idle *sigma* comparison cannot show.
 
 ⛔ **Stop conditions.** M1 flat → the accuracy case is gone; only the Windows/Linux
 reconnection case survives, which is a much smaller reason to build a much smaller
@@ -513,4 +650,4 @@ iPhone 16), so the decision is per device, not global policy.
 | 2026-08-29 | 1 | ⛔ **I fixed the one defect the agent flagged and ran out of build budget for: a ~10 s hang on quit.** `stop()` joins the worker, which could be inside `Connector::connect()` at the default `handshakeTimeoutMs` of 10 s — quitting mid-dial froze the GUI thread with no window and no explanation, the classic "it hung on exit". Two changes: `kWiredHandshakeMs = 3000` on the wired path only (min_rtt over usbmux is ~1 ms, so a handshake still unfinished after 3 s is broken, not busy), and a `stopping()` check before **each** of the two phases that can block — the presence dial-and-read, and the TLS connect. Re-verified: `ppcp_host_service_test` passes, app links. |
 | 2026-08-29 | 1 | ⚠ **A coupling to watch, reported by the agent rather than hidden.** "We dialled" is derived from `!resolvedPairingId.isEmpty()`, because C2 fixes the signature and that is the only in-band signal. It decides **three** things at once: 7.3a spend accounting, the `listener` flag, and whether `hello` is sent. Documented at `ppcp_host_service.h:594`. ⛔ If a future non-dialling caller ever passes a resolved pairing, all three break together and none of them loudly. Worth a real `enum class Origin { Accepted, Dialled }` if a third caller ever appears. |
 | 2026-08-29 | 1 | ⚠ **Phase 1 is code-complete on both hosts and NOTHING HAS CROSSED A CABLE.** The stub usbmuxd's tunnel is a byte echo, not a PPCP listener, so `runJob()`'s dial→handshake steps are reached only on hardware. **M12 runs first** — if the device-side mux dials `::1` the presence read fails silently and every later measurement chases the wrong fault. Then M1a/M1b, M3, M10. Closing the last gap in the suite would need a "forward the tunnel to this local port" mode in the stub. |
-| | | ⚠ **Next session starts here.** Read design doc §1, §1.1 and §7.1, then Findings above. Phase 1 proceeds; the accuracy argument alone no longer carries it, and **M1b is the measurement that matters**. |
+| | | ⚠ **Next session starts here.** Read design doc §1, §1.1 and §7.1, then Findings above. Phase 1 proceeds; the accuracy argument alone no longer carries it, and ~~M1b is the measurement that matters~~ — **withdrawn; M1b was dismissed as circular**. |
