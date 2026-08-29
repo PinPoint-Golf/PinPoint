@@ -775,7 +775,7 @@ branch of `openProvider()` compiles and runs on Linux as written.
 Install the daemon, plug a phone in, run the host — it may simply work. Establish
 that before writing anything.
 
-### L1 — prerequisites, and somebody has to own them · `[ ]`
+### L1 — prerequisites, and somebody has to own them · `[x]`
 
 - `usbmuxd` (plus `libimobiledevice`'s udev rules in most distributions).
 - ⚠ **Socket permissions.** `/var/run/usbmuxd` is typically owned by a `usbmux`
@@ -785,7 +785,7 @@ that before writing anything.
   by a user at a range. This is the open tracker item "name an owner for the
   Linux `usbmuxd` + udev prerequisite" — close it here.
 
-### L2 — ⛔ SIGPIPE will kill the process on Linux · `[ ]`
+### L2 — ⛔ SIGPIPE will kill the process on Linux · `[~]` code complete, UNVERIFIED on hardware
 
 `setNoSigPipe()` (`ppcp_usbmux.cpp:369`) is `#ifdef SO_NOSIGPIPE` — an Apple/BSD
 socket option that **does not exist on Linux**, where the function compiles to
@@ -800,7 +800,7 @@ the usbmux client **does** write — every plist request is a write.
 `SIGPIPE` process-wide at startup. ⚠ **Verify rather than assume Qt has already
 done it** — check with a phone unplugged mid-request, which is the exact case.
 
-### L3 — mDNS on Linux · `[ ]`
+### L3 — mDNS on Linux · `[~]` code complete + unit-proven, UNVERIFIED with a phone
 
 ⛔ **Yes, Linux needs this too** — the `__APPLE__` gate is not Windows-specific,
 and `makePlatformBrowser()` / `makePlatformAdvertiser()` return null on **any**
@@ -825,18 +825,41 @@ before anybody commits to the approach:
 | `DNSServiceRefSockFD` | the fd the `QSocketNotifier` watches | ✅ standard |
 | `DNSServiceProcessResult` | draining that fd | ✅ standard |
 | `DNSServiceRefDeallocate` | teardown | ✅ standard |
-| **`DNSServiceUpdateRecord`** | ⚠ **rotating the `rid` IN PLACE** (3.2d/3.4d) | ⛔ **VERIFY — believed to be a gap** |
+| **`DNSServiceUpdateRecord`** | ⚠ **rotating the `rid` IN PLACE** (3.2d/3.4d) | ✅ **PRESENT AND CORRECT — measured 29 Aug 2026, see below** |
 
 ⚠ **`DNSServiceUpdateRecord` is the one to check first, and it is not a detail.**
-`ppcp_discovery.cpp:612` uses it so *"the service keeps its name and one record
+`ppcp_discovery.cpp:620` uses it so *"the service keeps its name and one record
 changes, so a rotation is a single announcement rather than a deregister, probe
 and announce"*. If the shim does not implement it, rotation still works but must
 become deregister-and-re-register — a noisier announcement, and a behaviour
 difference from macOS worth stating rather than discovering.
 
-⛔ **This was NOT verified from the build Mac** — Avahi is not installed here and
-its behaviour cannot be tested from macOS. Treat the table's last row as a
-question to answer on the Linux box, not as a finding.
+✅ **ANSWERED ON THE LINUX BOX, 29 Aug 2026 — the gap does not exist.** Measured
+with a standalone C probe against `libavahi-compat-libdnssd1 0.8-18ubuntu1.1` and a
+live `avahi-daemon`, observed from outside with `avahi-browse -rpt _ppcp._tcp`:
+
+```
+DNSServiceRegister      -> 0 ok
+DNSServiceRefSockFD     -> 4
+  [register callback] err=0 name='PPCP-PROBE0001'
+DNSServiceUpdateRecord  -> 0 ok
+t=4s   PPCP-PROBE0001 ; "k=AAAA" "txtvers=1"
+t=12s  PPCP-PROBE0001 ; "k=BBBB" "txtvers=1"
+```
+
+The TXT changed and **the instance name did not move**, which is exactly what 3.2d
+requires. So no re-register fallback is needed and `ppcp_discovery.h:302-308`'s
+degradation clause stays unused on Linux. `DNSServiceRefSockFD` also returns a real
+pollable fd, which `RvBrowser::fd()` / `RvAdvertiser::fd()` depend on for their
+`QSocketNotifier`.
+
+⚠ **Two things the probe taught that the port must respect.** (1) `DNSServiceProcessResult`
+**blocks** when nothing is pending — the first probe hung in it. The production code is
+already correct (poll the fd, then process), but any new call site must not assume
+otherwise. (2) avahi-compat prints a three-line `*** WARNING *** … use the native API of
+Avahi!` banner **to stderr on every process that links it**. Harmless, unsuppressable
+from our side, and it will appear in PPS's stderr on Linux — worth expecting rather than
+investigating later.
 
 ### Linux — done when
 
@@ -845,6 +868,23 @@ code, the §6.2 rows are distinguishable, and the prerequisite question has a
 written answer. Record `min_rtt`/`offset_sigma` here too — Linux runs the
 **open-source** `usbmuxd` rather than Apple's, so a difference from macOS is
 plausible and worth capturing.
+
+⛔ **STATUS 29 Aug 2026 — ONE OF FOUR MET.  THE PHASE IS NOT DONE.**
+
+| Clause | |
+|---|---|
+| A persisted pairing reconnects over the cable, no QR | ❌ **not met** |
+| §6.2 rows distinguishable | ❌ **not met** — they print to the in-app message log, which needs the GUI |
+| The prerequisite question has a written answer | ✅ met — `docs/developer/ppcp_prerequisites_developer_guide.md` |
+| `min_rtt` / `offset_sigma` recorded for Linux | ❌ **not met** |
+
+⚠ **Every unmet clause has the same single blocker and it is not code:** this box
+holds no PPCP pairing, and one cannot be created without a person physically
+scanning a QR on the phone.  Add to the list the L2 unplug-mid-request test,
+which needs a hand on the cable.  All the code is written and everything
+testable without a person passes — 89 tests, one intentional skip — but
+**nothing here should be read as "reconnection works on Linux" until a phone has
+actually reconnected.**
 
 ---
 
@@ -952,4 +992,23 @@ iPhone 16), so the decision is per device, not global policy.
 | 2026-08-29 | 2 | ✅ **Transport is visible in BOTH apps, verified on the device screen and not merely in code.** ⛔ The device-side bug Mark found is the one that mattered: `CaptureScreenStyle.symbol(for:)` returned `"wifi"` for **every** live state, so a cabled phone drew a Wi-Fi glyph — not uninformative but *wrong*, in the one place a golfer looks. Now `cable.connector` (already an approved glyph) when the link is wired. A/B on the same phone a minute apart, screenshotted via `devicectl capture screenshot`: cable → plug, WiFi (forced with `PINPOINT_PPCP_WIRED=0`) → arcs. ✅ That run also confirms **the escape hatch works**. |
 | 2026-08-29 | 2 | ⚠ **And the PPS home screen said "0 Hz" for a phone**, because `phones()` sets `dataRateHz` to zero on purpose — *"a phone is not a Source; its CAMERAS carry the bytes, and claiming a rate here would be inventing a second number for the same bytes"* — so the cell was rendering a measurement that does not exist. It now shows the transport, in accent for the cable. The data was already in that list and simply never drawn. |
 | 2026-08-29 | 2 | ⛔ **PROCESS LESSON, and Mark had to ask twice.** I reported the transport as "shown in both apps" having only added a text row in a sheet and a pill in a settings panel — neither of which is where an operator actually looks — and I had **not looked at the phone's screen at all**. `xcrun devicectl device capture screenshot --device <id> --destination <png>` works and is the way to verify a device UI. ⚠ **A UI claim is not verified until the pixels have been seen.** Reading the QML/Swift and watching the tests pass proves the binding compiles, not that anybody can see it. |
+| 2026-08-29 | 2L | ✅ **Linux port opened. Two build breaks fixed FIRST — main did not compile on Linux at all.** (1) `shot_processor.cpp:746,748` assigned `std::vector<qint64>` to `std::vector<int64_t>`: same width everywhere, but on LP64 Linux that is `long` vs `long long`, two distinct types. macOS and MSVC make both `long long` and never see it, which is how it reached main from `0c7d128`. Fixed at the Qt/Buffer boundary with element-wise `assign()`, because `deferred_stitch.h` is deliberately Qt-free and is compiled by the standalone Buffer suite. (2) `camera_manager.cpp:611` guarded a block with `HAVE_PPCP` whose `CameraInstance` members exist only under `HAVE_PPCP_TRANSPORT` — every other guard in that file was already `_TRANSPORT`. Only bites on a libppcp-without-OpenSSL box, which is what this one was. Commits `9e483ad`, `a1ef796`. |
+| 2026-08-29 | 2L | ⚠ **This box had no OpenSSL, so the PPCP transport had never been built here at all.** `PP_OPENSSL_FOUND` was false and `HAVE_PPCP_TRANSPORT` undefined; CMake's designed warning (*"PPCP transport NOT built … no capture-device link"*) had been firing unread. After `libssl-dev`: `PPCP transport: OpenSSL 3.5.5, libppcp 0.1.0 (a9785bb, local)`, and all **22** `src/Ppcp/` sources compile, `ppcp_usbmux.cpp` and `ppcp_wired_link.cpp` included. Full app build **≈8 min** at `--parallel 4` (the box OOMs above ~4 jobs). Both sibling libs resolved locally and were already current — no `libwrist`/`libppcp` update was needed. |
+| 2026-08-29 | 2L | ⛔ **THE BRIEF'S HEADLINE IS EASILY MISREAD AND COST TIME: "no WiFi reconnection at all" DOES NOT MEAN WiFi IS BROKEN ON LINUX.** Pairing works on Linux today and always has. The QR carries the host's endpoints — `publishCode()` calls `reachableEndpoints(m_port)`, whose comment says it outright: *"This is what makes the code work when discovery does not"* — and `reachableEndpoints()` has a POSIX `getifaddrs` branch. The phone dials that endpoint; the host is the listener; no mDNS is involved. What is missing is **reconnection**, i.e. doing it again without a fresh QR (`maxUses = 1`). Stated here because §3.6b already says *"the pairing code path is unaffected"* and the Phase 2L summary reads as though it contradicts it. |
+| 2026-08-29 | 2L | ✅ **Scope narrowed by reading the DEVICE side: only the ADVERTISER is on the WiFi-reconnect critical path.** `ReconnectCoordinator.swift:5` — *"PinPointStudio advertises and this device dials. Always"* (3.5d), and there is deliberately no listener on the phone for WiFi. PPS's browser **dials nothing**: `decideDial`'s result only populates `m_seenInstances` → `phonesChanged()`, and `noteAdvertisement` collects guided-pairing candidates that *"NOTHING dials"*. ✅ Mark chose advertiser **+** browser anyway, for parity and because both come from the same link — which also dodges a landmine: `ppcp_advertise_test.cpp:601` has an **unguarded** `ASSERT_TRUE(br)` on `makePlatformBrowser()`, so a half-port turns that test from a skip into a hard failure. |
+| 2026-08-29 | 2L | ✅ **Port surface is smaller than the brief feared: the two FACTORIES only.** `ppcp_discovery.cpp` is the sole file in `src/Ppcp/` containing `__APPLE__` (7 occurrences, 5 guarded regions, ~236 lines of which ~215 are the two backend classes). `ppcp_transport.cpp`, `ppcp_rendezvous.cpp` and `ppcp_usbmux.cpp` contain **zero**. `startDiscovery()`/`startAdvertising()` are already called unconditionally (`ppcp_host_service.cpp:337-338`) and return early on a null factory, so nothing above the factories changes. ⚠ **There is currently no dns_sd/Bonjour/Avahi linkage anywhere in the CMake tree** — on macOS the symbols come free from libSystem — so this adds the **first** discovery-library dependency. Windows (W4) faces the same question without Avahi's shim. |
+| 2026-08-29 | 2L | ✅ **L2 scoped correctly and it is NARROWER than the brief implies.** `ppcp_transport.cpp:752` and `ppcp_bootstrap.cpp:461` already pass `MSG_NOSIGNAL`, so the WiFi and bootstrap paths are SIGPIPE-safe on Linux today. **Only `ppcp_usbmux.cpp` is exposed**: `setNoSigPipe()` (:369) compiles to `(void)s` off Apple and the two sends at **:465, :468** pass flags `0`. ⚠ I first reported "no SIGPIPE handling anywhere in `src/`" — wrong, because `grep SIGPIPE` does not match `MSG_NOSIGNAL`. |
+| 2026-08-29 | 2L | ✅ **L1 largely already satisfied on this box, and Mark's answer is SUPPORTED CONFIGURATION.** `usbmuxd` active; `/var/run/usbmuxd` is `srw-rw-rw-` root:root — **0666, so the brief's `usbmux`-group warning does not apply on Ubuntu**, though distro variation is real and that is the caveat to document. A lockdown trust record already exists for UDID `00008140-000864E426EB001C` (per-host, and independent of the phone's separate pairing with the M4 mac mini). ⚠ **New BUILD prerequisite to document alongside the runtime one:** `libavahi-compat-libdnssd-dev` for mDNS, distinct from `usbmuxd` which is runtime. |
+| 2026-08-29 | 2L | ✅ **L2 FIXED AND THE MECHANISM PROVEN, though not yet on a cable.** `sendAll()` (`ppcp_usbmux.cpp`) now passes `MSG_NOSIGNAL` via a `PP_SEND_FLAGS` macro — the same pairing `ppcp_transport.cpp:752` and `ppcp_bootstrap.cpp:461` have always had, which is exactly why those two paths were never exposed. ⛔ **Deliberately NOT `#else` on `SO_NOSIGPIPE`:** the two are independent, a platform may have both, and passing the flag when the option is already set is harmless. Standalone probe, socketpair with the peer closed: `SO_NOSIGPIPE: NOT AVAILABLE` · `send(...,0) -> KILLED BY SIGPIPE` · `send(...,MSG_NOSIGNAL) -> survived`. ⚠ **Existing coverage was Apple-only** — `ppcp_usbmux_test.cpp:323` is inside `#ifdef SO_NOSIGPIPE`, so it compiles away on the one platform that needed it, and there is still no repo test. A deterministic one is hard (the kernel buffers the first write; SIGPIPE fires on the second, after the RST), so no flaky test was added. |
+| 2026-08-29 | 2L | ✅ **L3 mDNS PORTED — five preprocessor guards and a CMake probe, no second backend.** `ppcp_discovery.cpp` derives one macro, `PP_DNS_SD_AVAILABLE = __APPLE__ \|\| PP_HAVE_DNS_SD`, and the five `#if defined(__APPLE__)` sites key off it; `BonjourBrowser` and `BonjourAdvertiser` are compiled **verbatim** on Linux against Avahi's compat shim. ⚠ One derived macro rather than the disjunction repeated five times — the two backends are either both compiled or both absent and there is no configuration where that is untrue. Verified in the linked binary: **33 `Bonjour*` symbols** and all **seven** `DNSService*` calls resolving to `libdns_sd.so.1`. Build clean, `--parallel 4`, zero errors. |
+| 2026-08-29 | 2L | ⚠ **The CMake probe is the first DNS-SD dependency in the tree and it is a CAPABILITY, not a prerequisite.** `pkg_check_modules(DNSSD avahi-compat-libdns_sd)` with a `find_path`/`find_library` fallback, inside the existing `if(PP_OPENSSL_FOUND AND TARGET ppcp)` block and guarded `if(NOT APPLE)` since libSystem supplies it there. Absent ⇒ no define, both factories keep returning null, and it prints a **STATUS line and never a warning** — 3.6b makes the consequence silent, and the pairing code carries its own endpoints. New configure lines: `PPCP discovery: DNS-SD via dns_sd`. |
+| 2026-08-29 | 2L | ⛔ **A GAP THAT WOULD HAVE MADE THE PORT LOOK TESTED WHEN IT WAS NOT.** `src/Ppcp/tests/` is a standalone build that inherits nothing from the app's CMake, and **four** of its targets compile `ppcp_discovery.cpp`. Without its own probe it would have compiled both backends out, the factories would have returned null, and the two real-responder tests would have gone on skipping — a green suite proving nothing. The same detection is now in `src/Ppcp/tests/CMakeLists.txt` at directory scope, and `${DNSSD_LIBRARIES}` was added to `_rv_link` (empty on Apple, so that file's *"DNSServiceRegister lives in libSystem and needs no framework"* comment stays true where it was written). |
+| 2026-08-29 | 2L | ⛔⛔ **THE PORT WAS NOT FIVE GUARDS. `ppcp_discovery.cpp` HELD A DEADLOCK THAT macOS CANNOT EXPRESS.** `onBrowse()` resolved each instance inline with a blocking `DNSServiceProcessResult`, justified by a comment reading *"off the main thread by construction because process() is called from wherever the owner watches fd()"*. ⚠ **The owner is the GUI thread** — `startDiscovery()` puts a `QSocketNotifier` on it — so that sentence was wrong on every platform and merely harmless on one. Under Avahi it never returns: `ppcp_advertise_test` hung for its full 300 s with the main thread in `unix_stream_data_wait` (`/proc/<pid>/wchan`; gdb could not attach, `ptrace_scope=1`). ✅ Isolated with a standalone probe: the identical resolve **deferred out of the callback succeeds** (`err=0 host=MarksMBP.local. port=47788`), so the shim will not service a resolve re-entrantly. Shipped on macOS this would have frozen the app the first time a phone was discovered. |
+| 2026-08-29 | 2L | ⛔ **AND A DEFERRED RESOLVE IS NOT ENOUGH — IT TAKES 650 ms, MEASURED.** Far too long to hold the GUI thread, so off Apple the resolves are now genuinely asynchronous. ✅ The `RvBrowser` interface is unchanged: `fd()` returns an **epoll set** holding the browse socket plus every pending resolve socket, so the owner's single `QSocketNotifier` drives both — N fds in, one fd out. macOS keeps the inline path verbatim (mDNSResponder answers sub-millisecond), so the working platform carries no risk from this. |
+| 2026-08-29 | 2L | ⛔ **A SECOND TRAP INSIDE THE FIRST: A RESOLVE IS NOT DONE AFTER ONE `ProcessResult`.** Avahi wakes the resolve socket several times before it delivers, so retiring the ref on the first wakeup destroys the resolve before it answers — and the symptom is the honest-looking one: a browse that finds instances and resolves none of them. Found only by instrumenting the chain (`onBrowse` fired, `onResolve` never did, and the fd number was being reused). `Pending::done` is now set by `onResolve` and nothing is retired until it is, with a 10 s sweep so an instance that never answers cannot accumulate. |
+| 2026-08-29 | 2L | ✅ **L3 DONE, AND THE PROOF IS THE TEST THAT COULD NEVER RUN BEFORE.** `PpcpAdvertise.RegisteringWithTheRealResponderIsVisibleToARealBrowse` registers with the real responder and browses for its own advertisement; it skipped on Linux for want of a backend, then hung, then skipped again on a 10 s deadline, and now **passes**. Suite time fell 10031 ms → **950 ms** because it resolves instead of timing out. Final: `ppcp_advertise_test` 14 passed / 1 skipped (env-gated hold), `ppcp_rendezvous_test` **24/24**, `ppcp_usbmux_test` **15/15**, `ppcp_host_service_test` **36/36** — 89 passed, one intentional skip. ⚠ Run individually with gaps; advertise→host_service back-to-back was NOT attempted, so the recorded flake is neither reproduced nor refuted here. |
+| 2026-08-29 | 2L | ⚠ **Test-side `__APPLE__` guards had to be widened too, or the new capability would have been unasserted.** `ppcp_rendezvous_test.cpp:678` and `ppcp_host_service_test.cpp:624` gated their `ASSERT_TRUE(browser)` / `"browse only"` checks on Apple. ✅ Also note `ppcp_rendezvous_test.cpp:694`'s `if (!b) return;` — a **false green** that passed while asserting nothing on Linux, and is now real coverage. `describe()` returns "DNS-SD via Avahi compat (browse only)" off Apple; the "browse only" substring is load-bearing and preserved. |
+| 2026-08-29 | 2L | ✅ **The wired path IS live on Linux, proven from OUTSIDE the app.** With PPS running and the phone attached, `journalctl -u usbmuxd` shows `device_control_input` every **2.0 s** — the flat 2 s retry cadence exactly, arriving from an independent observer rather than from our own log. PPS ran 50+ s of continuously-refused presence probes without dying, which is the `sendAll` path exercised hundreds of times. ⚠ **This is not the L2 hardware test**: the probes are refused cleanly (`Number=3`, the capture app is not running), and SIGPIPE needs the socket to close *mid-write*. |
+| 2026-08-29 | 2L | ⚠ **L1 CLOSED: SUPPORTED CONFIGURATION (Mark's call).** Written up in the new `docs/developer/ppcp_prerequisites_developer_guide.md` — build deps (OpenSSL, `libavahi-compat-libdnssd-dev`), runtime deps (`usbmuxd`, `avahi-daemon`), diagnostic tools, what each configure line means, the stale-CMake-cache trap, and a capability matrix for what still works with each piece missing. ⛔ **The distro caveat is the real content**: Ubuntu's `/var/run/usbmuxd` is `0666` so no group is needed, and that is packaging rather than a guarantee. |
+| 2026-08-29 | 2L | ⛔ **WHAT IS STILL UNVERIFIED, AND IT IS THE HALF THAT NEEDS A HUMAN.** No PPCP pairing exists on this box and one cannot be made without physically scanning a QR, so **neither reconnect path has been end-to-end tested**: (1) WiFi reconnect — the advertiser is proven by unit test against the live responder, but `startAdvertising()` publishes **persisted pairings only** (`ppcp_discovery.h:252`, *"0 pairings — nothing to advertise"*), so `avahi-browse` correctly shows nothing and the loop was never closed with a real phone. (2) Wired reconnect — same blocker. (3) L2's unplug-mid-request. (4) `min_rtt`/`offset_sigma` for Linux, still owed. ⚠ **Do not read the green suite as "reconnection works on Linux"** — read it as "every part we can test without a person passes". |
 | | | ⚠ **Next session starts here.** Read design doc §1, §1.1 and §7.1, then Findings above. Phase 1 proceeds; the accuracy argument alone no longer carries it, and ~~M1b is the measurement that matters~~ — **withdrawn; M1b was dismissed as circular**. |
